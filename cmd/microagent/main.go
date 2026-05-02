@@ -1159,6 +1159,9 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 }
 
 func runWorkspaceForeground(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
+	if opts.Backend == vmkit.BackendFirecracker {
+		return runFirecrackerForeground(ctx, opts, req)
+	}
 	if err := writeWorkspaceProcessState(opts, req, vmkit.StateStarting, 0, ""); err != nil {
 		return vmkit.Response{}, err
 	}
@@ -1179,6 +1182,9 @@ func runWorkspaceForeground(ctx context.Context, opts workspaceOptions, req vmki
 }
 
 func startWorkspaceDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
+	if opts.Backend == vmkit.BackendFirecracker {
+		return startFirecrackerDetached(opts, req)
+	}
 	path := opts.HelperPath
 	if path == "" {
 		path = "microagent-applevf-helper"
@@ -1216,6 +1222,182 @@ func startWorkspaceDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Res
 		ObservedAt: time.Now().UTC(),
 	}
 	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
+}
+
+type firecrackerConfig struct {
+	BootSource firecrackerBootSource    `json:"boot-source"`
+	Drives     []firecrackerDrive       `json:"drives"`
+	Machine    firecrackerMachineConfig `json:"machine-config"`
+}
+
+type firecrackerBootSource struct {
+	KernelImagePath string `json:"kernel_image_path"`
+	BootArgs        string `json:"boot_args"`
+}
+
+type firecrackerDrive struct {
+	DriveID      string `json:"drive_id"`
+	PathOnHost   string `json:"path_on_host"`
+	IsRootDevice bool   `json:"is_root_device"`
+	IsReadOnly   bool   `json:"is_read_only"`
+}
+
+type firecrackerMachineConfig struct {
+	VCPUCount  int  `json:"vcpu_count"`
+	MemSizeMiB int  `json:"mem_size_mib"`
+	SMT        bool `json:"smt"`
+}
+
+func runFirecrackerForeground(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
+	return startFirecrackerProcess(ctx, opts, req, false)
+}
+
+func startFirecrackerDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
+	return startFirecrackerProcess(context.Background(), opts, req, true)
+}
+
+func startFirecrackerProcess(ctx context.Context, opts workspaceOptions, req vmkit.Request, detached bool) (vmkit.Response, error) {
+	if err := vmkit.ValidateRequest(req); err != nil {
+		return vmkit.Response{}, err
+	}
+	firecrackerPath, err := resolveFirecrackerPath()
+	if err != nil {
+		_ = writeWorkspaceProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+		return failedFirecrackerResponse(req, err.Error()), err
+	}
+	if err := writeFirecrackerConfig(opts, req); err != nil {
+		_ = writeWorkspaceProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+		return failedFirecrackerResponse(req, err.Error()), err
+	}
+	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o755); err != nil {
+		return vmkit.Response{}, err
+	}
+	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	cmd := exec.CommandContext(ctx, firecrackerPath, "--no-api", "--config-file", firecrackerConfigPath(opts))
+	cmd.Stdout = serialLog
+	cmd.Stderr = serialLog
+	if detached {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+	if err := cmd.Start(); err != nil {
+		_ = serialLog.Close()
+		_ = writeWorkspaceProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+		return failedFirecrackerResponse(req, err.Error()), err
+	}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateRunning, cmd.Process.Pid, ""); err != nil {
+		_ = cmd.Process.Kill()
+		_ = serialLog.Close()
+		return vmkit.Response{}, err
+	}
+	if detached {
+		_ = serialLog.Close()
+		_ = cmd.Process.Release()
+		return runningFirecrackerResponse(req), nil
+	}
+	waitErr := cmd.Wait()
+	closeErr := serialLog.Close()
+	state := vmkit.StateStopped
+	errorText := ""
+	if waitErr != nil {
+		state = vmkit.StateFailed
+		errorText = waitErr.Error()
+	}
+	if closeErr != nil && errorText == "" {
+		state = vmkit.StateFailed
+		errorText = closeErr.Error()
+	}
+	if err := writeWorkspaceProcessState(opts, req, state, 0, errorText); err != nil && waitErr == nil && closeErr == nil {
+		return vmkit.Response{}, err
+	}
+	if errorText != "" {
+		return failedFirecrackerResponse(req, errorText), fmt.Errorf("%s", errorText)
+	}
+	return stoppedFirecrackerResponse(req), nil
+}
+
+func writeFirecrackerConfig(opts workspaceOptions, req vmkit.Request) error {
+	cfg := firecrackerConfig{
+		BootSource: firecrackerBootSource{
+			KernelImagePath: req.Config.KernelPath,
+			BootArgs:        "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/sbin/microagent-init",
+		},
+		Drives: []firecrackerDrive{
+			{
+				DriveID:      "rootfs",
+				PathOnHost:   req.Config.RootfsPath,
+				IsRootDevice: true,
+				IsReadOnly:   false,
+			},
+		},
+		Machine: firecrackerMachineConfig{
+			VCPUCount:  req.Config.CPUCount,
+			MemSizeMiB: req.Config.MemoryMiB,
+			SMT:        false,
+		},
+	}
+	if err := os.MkdirAll(filepath.Dir(firecrackerConfigPath(opts)), 0o755); err != nil {
+		return err
+	}
+	return writeJSONFile(firecrackerConfigPath(opts), cfg)
+}
+
+func inspectFirecrackerWorkspace(opts workspaceOptions) (vmkit.Response, error) {
+	data, err := os.ReadFile(filepath.Join(opts.StateDir, opts.Name, "runtime.json"))
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	var state workspaceRuntimeState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return vmkit.Response{}, err
+	}
+	event := vmkit.Event{
+		Identity:   state.Event.Identity,
+		State:      state.Event.State,
+		Detail:     state.Event.Detail,
+		ObservedAt: time.Now().UTC(),
+	}
+	if parsed, err := time.Parse(time.RFC3339, state.Event.ObservedAt); err == nil {
+		event.ObservedAt = parsed
+	}
+	resp := vmkit.Response{OK: state.Event.State != vmkit.StateFailed, Backend: opts.Backend, Event: &event}
+	if state.Error != "" {
+		resp.Error = state.Error
+	}
+	return resp, nil
+}
+
+func runningFirecrackerResponse(req vmkit.Request) vmkit.Response {
+	return firecrackerEventResponse(req, vmkit.StateRunning, "")
+}
+
+func stoppedFirecrackerResponse(req vmkit.Request) vmkit.Response {
+	return firecrackerEventResponse(req, vmkit.StateStopped, "")
+}
+
+func failedFirecrackerResponse(req vmkit.Request, errorText string) vmkit.Response {
+	return firecrackerEventResponse(req, vmkit.StateFailed, errorText)
+}
+
+func firecrackerEventResponse(req vmkit.Request, state vmkit.VMState, errorText string) vmkit.Response {
+	event := &vmkit.Event{State: state, ObservedAt: time.Now().UTC()}
+	if req.Identity != nil {
+		event.Identity = *req.Identity
+	}
+	if req.Config != nil && req.Identity != nil {
+		event.Detail = "serial=" + filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "serial.log")
+	}
+	resp := vmkit.Response{OK: state != vmkit.StateFailed, Backend: vmkit.BackendFirecracker, Event: event}
+	if errorText != "" {
+		resp.Error = errorText
+	}
+	return resp
+}
+
+func firecrackerConfigPath(opts workspaceOptions) string {
+	return filepath.Join(opts.StateDir, opts.Name, "firecracker.json")
 }
 
 func writeWorkspaceProcessState(opts workspaceOptions, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {
@@ -1285,6 +1467,9 @@ func writeJSONFile(path string, value any) error {
 }
 
 func inspectWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Response, error) {
+	if opts.Backend == vmkit.BackendFirecracker {
+		return inspectFirecrackerWorkspace(opts)
+	}
 	req := workspaceRequest(opts, "inspect", filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4"))
 	req.Config.RootfsPath = ""
 	return vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
@@ -1292,10 +1477,8 @@ func inspectWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Respons
 
 func waitForWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Response, error) {
 	deadline := time.Now().Add(opts.Timeout)
-	req := workspaceRequest(opts, "inspect", filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4"))
-	req.Config.RootfsPath = ""
 	for {
-		resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
+		resp, err := inspectWorkspace(ctx, opts)
 		if err != nil {
 			if resp.Error == "" {
 				return resp, err

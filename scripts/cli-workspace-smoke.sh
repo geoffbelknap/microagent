@@ -70,6 +70,7 @@ touch "$KERNEL"
 )
 
 "$CLI" run \
+  --backend apple-vf \
   --image "$IMAGE" \
   --arch "$ARCH" \
   --exec "echo workspace-smoke" \
