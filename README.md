@@ -68,6 +68,8 @@ Check the host:
 microagent doctor
 ```
 
+The output includes host support and default kernel status.
+
 Run a command from an image:
 
 ```bash

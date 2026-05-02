@@ -70,12 +70,22 @@ type HostSupport struct {
 	VirtualizationSupported bool   `json:"virtualizationSupported"`
 }
 
+type KernelSupport struct {
+	Backend      string `json:"backend"`
+	Architecture string `json:"architecture"`
+	Path         string `json:"path,omitempty"`
+	Status       string `json:"status"`
+	SHA256       string `json:"sha256,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
+
 type Response struct {
-	OK      bool         `json:"ok"`
-	Backend string       `json:"backend,omitempty"`
-	Event   *Event       `json:"event,omitempty"`
-	Host    *HostSupport `json:"host,omitempty"`
-	Error   string       `json:"error,omitempty"`
+	OK      bool           `json:"ok"`
+	Backend string         `json:"backend,omitempty"`
+	Event   *Event         `json:"event,omitempty"`
+	Host    *HostSupport   `json:"host,omitempty"`
+	Kernel  *KernelSupport `json:"kernel,omitempty"`
+	Error   string         `json:"error,omitempty"`
 }
 
 func NormalizeConfig(config *Config) {

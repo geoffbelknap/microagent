@@ -65,6 +65,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 			return err
 		}
 	}
+	if args[0] == "doctor" {
+		resp.Kernel = defaultKernelSupport(defaultBackend(), defaultGuestArch())
+	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if encodeErr := enc.Encode(resp); encodeErr != nil {
@@ -198,6 +201,35 @@ func defaultKernel(backend, arch string) (kernelManifestEntry, bool) {
 		}
 	}
 	return kernelManifestEntry{}, false
+}
+
+func defaultKernelSupport(backend, arch string) *vmkit.KernelSupport {
+	return defaultKernelSupportForPath(backend, arch, defaultKernelPath(backend, arch))
+}
+
+func defaultKernelSupportForPath(backend, arch, path string) *vmkit.KernelSupport {
+	support := &vmkit.KernelSupport{
+		Backend:      backend,
+		Architecture: arch,
+		Path:         path,
+		Status:       "unavailable",
+	}
+	if support.Path != "" {
+		if _, err := os.Stat(support.Path); err == nil {
+			support.Status = "present"
+		} else if !os.IsNotExist(err) {
+			support.Status = "error"
+			support.Error = err.Error()
+			return support
+		}
+	}
+	if kernel, ok := defaultKernel(backend, arch); ok {
+		support.SHA256 = kernel.SHA256
+		if support.Status == "unavailable" {
+			support.Status = "downloadable"
+		}
+	}
+	return support
 }
 
 func installKernel(ctx context.Context, opts kernelOptions) error {

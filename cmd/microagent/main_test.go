@@ -319,6 +319,31 @@ func TestDefaultKernelManifestHasAppleVFArm64(t *testing.T) {
 	}
 }
 
+func TestDefaultKernelSupportReportsDownloadable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "Image")
+	originalDefaults := defaultKernels
+	defaultKernels = []kernelManifestEntry{
+		{
+			Backend:      vmkit.BackendAppleVF,
+			Architecture: "arm64",
+			URL:          "https://example.com/kernel",
+			SHA256:       "abc123",
+		},
+	}
+	t.Cleanup(func() {
+		defaultKernels = originalDefaults
+	})
+
+	support := defaultKernelSupportForPath(vmkit.BackendAppleVF, "arm64", path)
+	if support.Status != "downloadable" {
+		t.Fatalf("status = %q, want downloadable", support.Status)
+	}
+	if support.SHA256 != "abc123" {
+		t.Fatalf("sha256 = %q, want abc123", support.SHA256)
+	}
+}
+
 func TestEnsureWorkspaceKernelSkipsExplicitKernel(t *testing.T) {
 	opts := workspaceOptions{
 		Backend:        vmkit.BackendAppleVF,
