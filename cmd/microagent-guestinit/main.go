@@ -16,6 +16,7 @@ import (
 )
 
 const configPath = "/etc/microagent/run.json"
+const resultConnectTimeout = 5 * time.Second
 
 type config struct {
 	Command []string `json:"command"`
@@ -84,15 +85,25 @@ func sendResult(port uint32, res result) error {
 	if port == 0 {
 		return nil
 	}
-	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
-	if err != nil {
-		return fmt.Errorf("open vsock: %w", err)
+	addr := &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port}
+	deadline := time.Now().Add(resultConnectTimeout)
+	var fd int
+	var err error
+	for {
+		fd, err = unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+		if err != nil {
+			return fmt.Errorf("open vsock: %w", err)
+		}
+		if err = unix.Connect(fd, addr); err == nil {
+			break
+		}
+		_ = unix.Close(fd)
+		if time.Now().After(deadline) {
+			return fmt.Errorf("connect vsock port %d: %w", port, err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	defer unix.Close(fd)
-	addr := &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port}
-	if err := unix.Connect(fd, addr); err != nil {
-		return fmt.Errorf("connect vsock port %d: %w", port, err)
-	}
 	data, err := json.Marshal(res)
 	if err != nil {
 		return err
