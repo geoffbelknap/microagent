@@ -625,6 +625,7 @@ type workspaceOptions struct {
 	SizeMiB         int64
 	Timeout         time.Duration
 	ResultPort      uint32
+	VsockListeners  []vmkit.VsockListener
 	KernelExplicit  bool
 	Keep            bool
 	PrepareForStart bool
@@ -913,6 +914,8 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
+	var vsocks multiFlag
+	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -927,6 +930,11 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if !opts.KernelExplicit {
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
+	listeners, err := parseVsockMappings(vsocks)
+	if err != nil {
+		return err
+	}
+	opts.VsockListeners = listeners
 	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
 		return err
 	}
@@ -1150,6 +1158,7 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 	if opts.ResultPort != 0 {
 		listeners = []vmkit.VsockListener{{Port: opts.ResultPort, Target: resultPath(opts)}}
 	}
+	listeners = append(listeners, opts.VsockListeners...)
 	return vmkit.Request{
 		Command: command,
 		Identity: &vmkit.Identity{
@@ -2246,14 +2255,11 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 	if identity.RequestID == "" {
 		identity.RequestID = newRequestID()
 	}
-	config.VsockListeners = nil
-	for _, raw := range vsocks {
-		listener, err := parseVsock(raw)
-		if err != nil {
-			return vmkit.Request{}, err
-		}
-		config.VsockListeners = append(config.VsockListeners, listener)
+	listeners, err := parseVsockMappings(vsocks)
+	if err != nil {
+		return vmkit.Request{}, err
 	}
+	config.VsockListeners = listeners
 	return vmkit.Request{Identity: &identity, Config: &config}, nil
 }
 
@@ -2367,6 +2373,21 @@ func parseVsock(raw string) (vmkit.VsockListener, error) {
 		return vmkit.VsockListener{}, fmt.Errorf("vsock target is required")
 	}
 	return vmkit.VsockListener{Port: uint32(port), Target: right}, nil
+}
+
+func parseVsockMappings(raw []string) ([]vmkit.VsockListener, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	listeners := make([]vmkit.VsockListener, 0, len(raw))
+	for _, entry := range raw {
+		listener, err := parseVsock(entry)
+		if err != nil {
+			return nil, err
+		}
+		listeners = append(listeners, listener)
+	}
+	return listeners, nil
 }
 
 func newRequestID() string {

@@ -350,6 +350,24 @@ func TestRequestForCommandParsesVsock(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
+	req := workspaceRequest(workspaceOptions{
+		Name:           "agent-1",
+		Backend:        "apple-vf",
+		KernelPath:     "/tmp/kernel",
+		MemoryMiB:      512,
+		CPUCount:       2,
+		ResultPort:     1024,
+		VsockListeners: []vmkit.VsockListener{{Port: 3128, Target: "127.0.0.1:19000"}},
+	}, "run", "/tmp/rootfs.ext4")
+	if len(req.Config.VsockListeners) != 2 {
+		t.Fatalf("VsockListeners len = %d, want 2", len(req.Config.VsockListeners))
+	}
+	if req.Config.VsockListeners[1].Port != 3128 || req.Config.VsockListeners[1].Target != "127.0.0.1:19000" {
+		t.Fatalf("enforcer listener = %#v", req.Config.VsockListeners[1])
+	}
+}
+
 func TestRunUsesHelperOverride(t *testing.T) {
 	dir := t.TempDir()
 	helper := filepath.Join(dir, "helper")
