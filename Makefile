@@ -1,4 +1,4 @@
-.PHONY: test smoke smoke-rootfs
+.PHONY: test smoke smoke-rootfs signed-helper smoke-boot
 
 test:
 	go test ./...
@@ -10,3 +10,9 @@ smoke: test
 
 smoke-rootfs:
 	scripts/rootfs-oci-smoke.sh
+
+signed-helper:
+	scripts/applevf-helper-build.sh
+
+smoke-boot: signed-helper
+	scripts/applevf-boot-smoke.sh

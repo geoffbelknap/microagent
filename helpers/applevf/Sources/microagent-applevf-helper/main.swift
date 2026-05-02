@@ -19,6 +19,7 @@ enum VMState: String, Codable {
     case starting
     case running
     case stopped
+    case failed
 }
 
 struct Identity: Codable {
@@ -72,11 +73,25 @@ struct Response: Codable {
 }
 
 let backendName = "apple-vf"
+let eventFileName = "event.json"
+let configFileName = "config.json"
+let runtimeFileName = "runtime.json"
+let serialLogFileName = "serial.log"
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
 let encoder = JSONEncoder()
 encoder.dateEncodingStrategy = .iso8601
 encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+struct RuntimeState: Codable {
+    var event: Event
+    var config: Config
+    var pid: Int32?
+    var serialLogPath: String
+    var startedAt: Date?
+    var updatedAt: Date
+    var error: String?
+}
 
 func main() -> Int32 {
     do {
@@ -95,6 +110,9 @@ func readRequest() throws -> Request {
     if args.count == 2 && args[0] == "--request" {
         return try decoder.decode(Request.self, from: Data(contentsOf: URL(fileURLWithPath: args[1])))
     }
+    if args.count == 2 && args[0] == "--request-json" {
+        return try decoder.decode(Request.self, from: Data(args[1].utf8))
+    }
     let data = FileHandle.standardInput.readDataToEndOfFile()
     if data.isEmpty {
         throw ProtocolError.invalid("request JSON is required on stdin or with --request")
@@ -104,6 +122,9 @@ func readRequest() throws -> Request {
 
 func handle(_ request: Request) throws -> Response {
     switch request.command {
+    case "run":
+        try runVM(request)
+        return Response(ok: true, backend: backendName)
     case "host":
         return Response(ok: true, backend: backendName, host: hostSupport())
     case "check":
@@ -123,13 +144,27 @@ func handle(_ request: Request) throws -> Response {
         guard support.frameworkAvailable && support.virtualizationSupported else {
             return Response(ok: false, backend: backendName, error: "Apple Virtualization is not available on this host")
         }
-        let event = Event(identity: identity, state: .starting, detail: nil, observedAt: Date())
+        try validateVirtualMachine(identity: identity, config: config)
+        let event = Event(identity: identity, state: .starting, detail: "serial=\(serialLogPath(identity: identity, stateDir: config.stateDir).path)", observedAt: Date())
         try writeState(event: event, config: config)
-        return Response(ok: false, backend: backendName, event: event, error: "Apple VF start is not implemented")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        process.arguments = ["--request-json", try requestJSON(request.withCommand("run"))]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        try writeRuntimeState(event: event, config: config, pid: process.processIdentifier, error: nil)
+        return Response(ok: true, backend: backendName, event: event)
     case "inspect":
         let identity = try validatedIdentity(request.identity)
         let config = try stateConfig(request.config)
-        let event = try readEvent(identity: identity, stateDir: config.stateDir) ?? Event(identity: identity, state: .unknown, detail: nil, observedAt: Date())
+        var event = try readEvent(identity: identity, stateDir: config.stateDir) ?? Event(identity: identity, state: .unknown, detail: nil, observedAt: Date())
+        if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), !processAlive(runtime.pid), event.state == .starting || event.state == .running {
+            event = Event(identity: event.identity, state: .stopped, detail: event.detail, observedAt: Date())
+            try writeState(event: event, config: runtime.config)
+            try writeRuntimeState(event: event, config: runtime.config, pid: runtime.pid, error: runtime.error)
+        }
         return Response(ok: true, backend: backendName, event: event)
     case "stop":
         return try stateOnly(request, state: .stopped, detail: nil)
@@ -152,7 +187,16 @@ func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Re
     let identity = try validatedIdentity(request.identity)
     let config = try stateConfig(request.config)
     let event = Event(identity: identity, state: state, detail: detail, observedAt: Date())
-    try writeState(event: event, config: config)
+    if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), processAlive(runtime.pid), let pid = runtime.pid {
+        let signal = detail == "forced" ? SIGKILL : SIGTERM
+        if kill(pid, signal) != 0 && errno != ESRCH {
+            throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
+        }
+        try writeState(event: event, config: runtime.config)
+        try writeRuntimeState(event: event, config: runtime.config, pid: runtime.pid, error: nil)
+    } else {
+        try writeState(event: event, config: config)
+    }
     return Response(ok: true, backend: backendName, event: event)
 }
 
@@ -203,7 +247,10 @@ func validatedConfig(_ config: Config?) throws -> Config {
         if listener.target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw ProtocolError.invalid("vsock listener \(listener.port) target is required")
         }
+        _ = try parseTCPHostPort(listener.target)
     }
+    try readableFile(config.kernelPath, name: "config.kernelPath")
+    try readableFile(config.rootfsPath, name: "config.rootfsPath")
     return config
 }
 
@@ -243,11 +290,19 @@ func runtimeDirectory(identity: Identity, stateDir: String) -> URL {
 }
 
 func eventPath(identity: Identity, stateDir: String) -> URL {
-    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("event.json")
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(eventFileName)
 }
 
 func configPath(identity: Identity, stateDir: String) -> URL {
-    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("config.json")
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(configFileName)
+}
+
+func runtimePath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(runtimeFileName)
+}
+
+func serialLogPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(serialLogFileName)
 }
 
 func writeState(event: Event, config: Config) throws {
@@ -257,6 +312,19 @@ func writeState(event: Event, config: Config) throws {
     try encoder.encode(config).write(to: configPath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
 }
 
+func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?) throws {
+    let runtime = RuntimeState(
+        event: event,
+        config: config,
+        pid: pid,
+        serialLogPath: serialLogPath(identity: event.identity, stateDir: config.stateDir).path,
+        startedAt: event.state == .starting || event.state == .running ? Date() : nil,
+        updatedAt: Date(),
+        error: error
+    )
+    try encoder.encode(runtime).write(to: runtimePath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
+}
+
 func readEvent(identity: Identity, stateDir: String) throws -> Event? {
     let path = eventPath(identity: identity, stateDir: stateDir)
     guard FileManager.default.fileExists(atPath: path.path) else {
@@ -264,6 +332,176 @@ func readEvent(identity: Identity, stateDir: String) throws -> Event? {
     }
     return try decoder.decode(Event.self, from: Data(contentsOf: path))
 }
+
+func readRuntimeState(identity: Identity, stateDir: String) throws -> RuntimeState? {
+    let path = runtimePath(identity: identity, stateDir: stateDir)
+    guard FileManager.default.fileExists(atPath: path.path) else {
+        return nil
+    }
+    return try decoder.decode(RuntimeState.self, from: Data(contentsOf: path))
+}
+
+func requestJSON(_ request: Request) throws -> String {
+    let data = try encoder.encode(request)
+    return String(data: data, encoding: .utf8) ?? "{}"
+}
+
+extension Request {
+    func withCommand(_ command: String) -> Request {
+        Request(command: command, identity: identity, config: config)
+    }
+}
+
+func readableFile(_ path: String, name: String) throws {
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue, FileManager.default.isReadableFile(atPath: path) else {
+        throw ProtocolError.invalid("\(name) is not readable at \(path)")
+    }
+}
+
+func processAlive(_ pid: Int32?) -> Bool {
+    guard let pid, pid > 0 else {
+        return false
+    }
+    if kill(pid, 0) == 0 {
+        return true
+    }
+    return errno == EPERM
+}
+
+struct TCPHostPort {
+    let host: String
+    let port: UInt16
+}
+
+func parseTCPHostPort(_ raw: String) throws -> TCPHostPort {
+    let parts = raw.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":", omittingEmptySubsequences: false)
+    if parts.count != 2 || parts[0].isEmpty || parts[1].isEmpty {
+        throw ProtocolError.invalid("target must be host:port, got \(raw)")
+    }
+    guard let port = UInt16(parts[1]) else {
+        throw ProtocolError.invalid("target port is invalid in \(raw)")
+    }
+    return TCPHostPort(host: String(parts[0]), port: port)
+}
+
+#if canImport(Virtualization)
+@available(macOS 13.0, *)
+final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
+    let identity: Identity
+    let config: Config
+
+    init(identity: Identity, config: Config) {
+        self.identity = identity
+        self.config = config
+    }
+
+    func guestDidStop(_ virtualMachine: VZVirtualMachine) {
+        updateRuntime(identity: identity, config: config, state: .stopped, error: nil)
+        CFRunLoopStop(CFRunLoopGetMain())
+    }
+
+    func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
+        updateRuntime(identity: identity, config: config, state: .failed, error: error.localizedDescription)
+        CFRunLoopStop(CFRunLoopGetMain())
+    }
+}
+#endif
+
+func updateRuntime(identity: Identity, config: Config, state: VMState, error: String?) {
+    let event = Event(identity: identity, state: state, detail: "serial=\(serialLogPath(identity: identity, stateDir: config.stateDir).path)", observedAt: Date())
+    do {
+        let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir)
+        try writeState(event: event, config: config)
+        try writeRuntimeState(event: event, config: config, pid: runtime?.pid, error: error)
+    } catch {
+        // Background VM state updates cannot safely change the stdout protocol.
+    }
+}
+
+func validateVirtualMachine(identity: Identity, config: Config) throws {
+    #if canImport(Virtualization)
+    if #available(macOS 13.0, *) {
+        let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, attachSerial: false)
+        try vmConfig.validate()
+    } else {
+        throw ProtocolError.invalid("Apple Virtualization requires macOS 13 or newer")
+    }
+    #else
+    throw ProtocolError.invalid("Virtualization.framework is not available in this build")
+    #endif
+}
+
+func runVM(_ request: Request) throws {
+    let identity = try validatedIdentity(request.identity)
+    let config = try validatedConfig(request.config)
+    #if canImport(Virtualization)
+    guard hostSupport().virtualizationSupported else {
+        throw ProtocolError.invalid("Apple Virtualization is not available on this host")
+    }
+    if #available(macOS 13.0, *) {
+        let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, attachSerial: true)
+        try vmConfig.validate()
+
+        let vm = VZVirtualMachine(configuration: vmConfig)
+        let delegate = VMRunDelegate(identity: identity, config: config)
+        vm.delegate = delegate
+        let semaphore = DispatchSemaphore(value: 0)
+        var startError: Error?
+        vm.start { result in
+            switch result {
+            case .success:
+                updateRuntime(identity: identity, config: config, state: .running, error: nil)
+            case .failure(let error):
+                startError = error
+                updateRuntime(identity: identity, config: config, state: .failed, error: error.localizedDescription)
+            }
+            semaphore.signal()
+        }
+        while semaphore.wait(timeout: .now()) == .timedOut {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+        }
+        if let startError {
+            throw startError
+        }
+        withExtendedLifetime(delegate) {
+            CFRunLoopRun()
+        }
+    } else {
+        throw ProtocolError.invalid("Apple Virtualization requires macOS 13 or newer")
+    }
+    #else
+    throw ProtocolError.invalid("Virtualization.framework is not available in this build")
+    #endif
+}
+
+#if canImport(Virtualization)
+@available(macOS 13.0, *)
+func virtualMachineConfiguration(identity: Identity, config: Config, attachSerial: Bool) throws -> VZVirtualMachineConfiguration {
+    let vmConfig = VZVirtualMachineConfiguration()
+    vmConfig.platform = VZGenericPlatformConfiguration()
+    let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: config.kernelPath))
+    bootLoader.commandLine = "console=hvc0 root=/dev/vda rw init=/sbin/microagent-init"
+    vmConfig.bootLoader = bootLoader
+    vmConfig.cpuCount = config.cpuCount ?? 2
+    vmConfig.memorySize = UInt64(config.memoryMiB ?? 512) * 1024 * 1024
+    let attachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: config.rootfsPath), readOnly: false)
+    vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
+    vmConfig.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+    let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
+    if attachSerial {
+        FileManager.default.createFile(atPath: serialLogPath(identity: identity, stateDir: config.stateDir).path, contents: nil)
+        let serialHandle = try FileHandle(forWritingTo: serialLogPath(identity: identity, stateDir: config.stateDir))
+        try serialHandle.seekToEnd()
+        serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: nil, fileHandleForWriting: serialHandle)
+    }
+    vmConfig.serialPorts = [serial]
+    if !(config.vsockListeners ?? []).isEmpty {
+        vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
+    }
+    return vmConfig
+}
+#endif
 
 func write(_ response: Response) {
     do {

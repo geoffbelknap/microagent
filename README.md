@@ -31,6 +31,21 @@ available:
 make smoke-rootfs
 ```
 
+Build and ad-hoc sign the Apple VF helper for VM boot work:
+
+```bash
+make signed-helper
+```
+
+Boot a Linux VM when you have a Linux ARM64 kernel image:
+
+```bash
+make smoke-boot
+```
+
+The boot smoke looks for the kernel at
+`~/.microagent/kernels/apple-vf/Image`.
+
 ## CLI
 
 Check whether the host can use Apple Virtualization.framework:

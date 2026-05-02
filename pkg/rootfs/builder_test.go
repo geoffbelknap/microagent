@@ -32,6 +32,9 @@ func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	if !strings.Contains(text, "set -- '/bin/echo' 'hello world'") {
 		t.Fatalf("init missing command: %s", text)
 	}
+	if !strings.Contains(text, "mkdir -p /proc /sys /dev") {
+		t.Fatalf("init missing mount point setup: %s", text)
+	}
 }
 
 func TestExtractLayerRejectsTraversal(t *testing.T) {

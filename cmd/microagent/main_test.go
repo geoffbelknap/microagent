@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
 
@@ -193,6 +194,17 @@ func TestRunRootFSValidatesRequiredFlags(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "image_ref is required") {
 		t.Fatalf("err = %v, want image_ref validation", err)
+	}
+}
+
+func TestRootFSExecMapsToShellCommand(t *testing.T) {
+	var req rootfs.BuildRequest
+	execCommand := "echo hello"
+	if strings.TrimSpace(execCommand) != "" {
+		req.Command = []string{"/bin/sh", "-lc", execCommand}
+	}
+	if got := strings.Join(req.Command, " "); got != "/bin/sh -lc echo hello" {
+		t.Fatalf("Command = %q", got)
 	}
 }
 

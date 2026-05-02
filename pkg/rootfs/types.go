@@ -21,6 +21,7 @@ type BuildRequest struct {
 	Platform      Platform          `json:"platform"`
 	OutputPath    string            `json:"output_path"`
 	InitPath      string            `json:"init_path,omitempty"`
+	Command       []string          `json:"command,omitempty"`
 	StateDir      string            `json:"state_dir,omitempty"`
 	Mke2fsPath    string            `json:"mke2fs_path,omitempty"`
 	SizeMiB       int64             `json:"size_mib,omitempty"`

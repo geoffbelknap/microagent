@@ -80,11 +80,16 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	fs.BoolVar(&req.KeepStage, "keep-stage", false, "keep temporary unpacked stage directory")
 	fs.StringVar(&req.StageSnapshot, "stage-snapshot", "", "copy unpacked stage directory to this path before ext4 creation")
 	fs.BoolVar(&req.AllowMutable, "allow-mutable", false, "allow mutable image references")
+	var execCommand string
+	fs.StringVar(&execCommand, "exec", "", "shell command to run as guest init")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected rootfs argument: %s", fs.Arg(0))
+	}
+	if strings.TrimSpace(execCommand) != "" {
+		req.Command = []string{"/bin/sh", "-lc", execCommand}
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	if provenance.ImageRef != "" {
@@ -329,6 +334,7 @@ Build options:
   -arch <arch>         Target architecture
   -size-mib <MiB>      Rootfs image size
   -mke2fs <path>       mke2fs binary path
+  -exec <command>      Shell command to run as guest init
   -allow-mutable       Allow tag references
 `)
 }

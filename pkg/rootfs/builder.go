@@ -132,8 +132,11 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	}
 
 	provenance.BuilderPhase = "write-init"
-	command := append([]string{}, imageConfig.Config.Entrypoint...)
-	command = append(command, imageConfig.Config.Cmd...)
+	command := append([]string{}, req.Command...)
+	if len(command) == 0 {
+		command = append([]string{}, imageConfig.Config.Entrypoint...)
+		command = append(command, imageConfig.Config.Cmd...)
+	}
 	if err := writeInit(stageDir, req.InitPath, command, req.Env); err != nil {
 		return provenance, err
 	}
@@ -404,7 +407,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		}
 		commandLine = "set -- " + strings.Join(quoted, " ") + "\n"
 	}
-	script := "#!/bin/sh\nset -eu\nmount -t proc proc /proc || true\nmount -t sysfs sysfs /sys || true\n" +
+	script := "#!/bin/sh\nset -eu\nmkdir -p /proc /sys /dev\nmount -t proc proc /proc || true\nmount -t sysfs sysfs /sys || true\n" +
 		envLines(env) +
 		commandLine +
 		"if [ \"$#\" -gt 0 ]; then\n  exec \"$@\"\nfi\nexec /bin/sh\n"
