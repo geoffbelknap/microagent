@@ -18,12 +18,12 @@ public struct NullRuntimeDriver: RuntimeDriver {
     public init() {}
 
     public func prepare(identity: RuntimeIdentity, config: VMConfig) async throws -> RuntimeEvent {
-        try validate(config)
+        try validateRuntimeConfig(config)
         return RuntimeEvent(identity: identity, state: .prepared)
     }
 
     public func start(identity: RuntimeIdentity, config: VMConfig) async throws -> RuntimeEvent {
-        try validate(config)
+        try validateRuntimeConfig(config)
         throw RuntimeDriverError.notImplemented("start is not implemented for NullRuntimeDriver")
     }
 
@@ -43,21 +43,22 @@ public struct NullRuntimeDriver: RuntimeDriver {
         RuntimeEvent(identity: identity, state: .stopped, detail: "deleted")
     }
 
-    private func validate(_ config: VMConfig) throws {
-        if config.kernelPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw RuntimeDriverError.invalidConfiguration("kernelPath is required")
-        }
-        if config.rootfsPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw RuntimeDriverError.invalidConfiguration("rootfsPath is required")
-        }
-        if config.stateDir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw RuntimeDriverError.invalidConfiguration("stateDir is required")
-        }
-        if config.memoryMiB <= 0 {
-            throw RuntimeDriverError.invalidConfiguration("memoryMiB must be positive")
-        }
-        if config.cpuCount <= 0 {
-            throw RuntimeDriverError.invalidConfiguration("cpuCount must be positive")
-        }
+}
+
+public func validateRuntimeConfig(_ config: VMConfig) throws {
+    if config.kernelPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        throw RuntimeDriverError.invalidConfiguration("kernelPath is required")
+    }
+    if config.rootfsPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        throw RuntimeDriverError.invalidConfiguration("rootfsPath is required")
+    }
+    if config.stateDir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        throw RuntimeDriverError.invalidConfiguration("stateDir is required")
+    }
+    if config.memoryMiB <= 0 {
+        throw RuntimeDriverError.invalidConfiguration("memoryMiB must be positive")
+    }
+    if config.cpuCount <= 0 {
+        throw RuntimeDriverError.invalidConfiguration("cpuCount must be positive")
     }
 }

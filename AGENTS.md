@@ -17,8 +17,8 @@ workloads:
 
 - Do not implement agent orchestration, planning, LLM calls, tool semantics, or
   memory.
-- Do not implement ASK policy, audit semantics, credential mediation, or
-  enforcement decisions. Consumers such as Agency own those.
+- Do not implement policy, audit semantics, credential mediation, or
+  enforcement decisions. Consumers own those.
 - Do not become a general-purpose Mac VM manager. Lima, Tart, vfkit, and Lume
   already serve that space.
 - Do not own OCI image unpacking or ext4 rootfs construction. Use
@@ -33,9 +33,7 @@ workloads:
 - Fail closed on invalid runtime configuration.
 - Prefer narrow protocols over shell-string execution.
 
-## Agency Boundary
+## Consumer Boundary
 
-Agency is expected to consume this project, but this project must not import or
-depend on Agency internals. Agency supplies policy, audit, identity, enforcer
-topology, rootfs artifacts, and operator intent. This project realizes VM
-lifecycle and reports state.
+Consumers supply policy, audit meaning, identity, rootfs artifacts, and
+operator intent. This project realizes VM lifecycle and reports state.

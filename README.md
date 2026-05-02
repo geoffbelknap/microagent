@@ -3,33 +3,65 @@
 `microagent-vmkit` is a toolkit and CLI for running AI agents inside
 inspectable microVMs.
 
-It is not a general-purpose Mac VM manager and it is not an agent framework.
-The project sits between those layers: it gives agent runtimes a small,
-structured host-side API for preparing, starting, inspecting, stopping, and
-cleaning up microVM-backed agent workloads.
+It gives agent runtimes a host-side API for preparing, starting, inspecting,
+stopping, and cleaning up microVM-backed workloads. VM policy, model calls,
+tool mediation, credentials, and operator UX stay with the caller.
 
 Apple Virtualization.framework on Apple silicon is the first backend. The API
-is intentionally shaped so other microVM backends can follow without changing
-consumer code.
+keeps backend details out of the caller's lifecycle contract.
 
-## Initial Goals
+## Goals
 
-- Provide a Swift library for microVM lifecycle operations.
-- Provide a `microagent-vmkit` CLI for local validation and scripting.
-- Emit structured lifecycle events.
-- Preserve runtime identity and metadata in every request and event.
-- Support vsock-first host/guest control paths.
-- Keep policy, audit, credentials, and agent semantics outside this repo.
+- Swift library for microVM lifecycle operations
+- CLI for local validation and scripting
+- structured lifecycle events
+- runtime identity and metadata on every request and event
+- vsock-first host/guest control paths
+- policy, audit, credentials, and agent semantics left to the caller
 
-## Relationship To Agency
+## Build
 
-Agency is the first reference consumer. Agency owns ASK enforcement, audit,
-credentials, enforcer topology, runtime manifests, and operator UX.
+```bash
+swift build
+swift test
+```
 
-`microagent-vmkit` owns only the generic VM lifecycle substrate:
+## CLI
+
+Validate a lifecycle request:
+
+```bash
+microagent-vmkit validate-config request.json
+```
+
+Input:
+
+```json
+{
+  "identity": {
+    "requestID": "req-1",
+    "runtimeID": "agent-1",
+    "role": "workload",
+    "backend": "apple-vf"
+  },
+  "config": {
+    "kernelPath": "/tmp/kernel",
+    "rootfsPath": "/tmp/rootfs.ext4",
+    "stateDir": "/tmp/microagent-vmkit",
+    "memoryMiB": 512,
+    "cpuCount": 2
+  }
+}
+```
+
+The command prints a JSON lifecycle event if the request is valid.
+
+## Boundary
+
+`microagent-vmkit` handles VM lifecycle work:
 
 ```text
-agency
+agent runtime
   -> microagent-vmkit
        -> Apple Virtualization.framework backend
   -> microvm-rootfs
@@ -38,9 +70,5 @@ agency
 
 ## Companion Project
 
-Use `microvm-rootfs` to turn OCI images into bootable rootfs artifacts for this
-project or other microVM runtimes.
-
-## Status
-
-Private bootstrap repo. APIs are not stable.
+Use `microvm-rootfs` to turn OCI images into rootfs artifacts for this project
+or other microVM runtimes.

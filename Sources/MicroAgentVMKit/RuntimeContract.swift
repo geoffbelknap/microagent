@@ -60,6 +60,25 @@ public struct VMConfig: Codable, Equatable, Sendable {
         self.cpuCount = cpuCount
         self.vsockListeners = vsockListeners
     }
+
+    enum CodingKeys: String, CodingKey {
+        case kernelPath
+        case rootfsPath
+        case stateDir
+        case memoryMiB
+        case cpuCount
+        case vsockListeners
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.kernelPath = try container.decode(String.self, forKey: .kernelPath)
+        self.rootfsPath = try container.decode(String.self, forKey: .rootfsPath)
+        self.stateDir = try container.decode(String.self, forKey: .stateDir)
+        self.memoryMiB = try container.decodeIfPresent(Int.self, forKey: .memoryMiB) ?? 512
+        self.cpuCount = try container.decodeIfPresent(Int.self, forKey: .cpuCount) ?? 2
+        self.vsockListeners = try container.decodeIfPresent([VsockListener].self, forKey: .vsockListeners) ?? []
+    }
 }
 
 public struct VsockListener: Codable, Equatable, Sendable {

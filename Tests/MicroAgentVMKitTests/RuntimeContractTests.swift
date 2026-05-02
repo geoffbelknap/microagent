@@ -31,3 +31,32 @@ import Testing
         _ = try await driver.prepare(identity: identity, config: config)
     }
 }
+
+@Test func sharedConfigValidationRejectsInvalidSizing() throws {
+    let config = VMConfig(
+        kernelPath: "/tmp/kernel",
+        rootfsPath: "/tmp/rootfs.ext4",
+        stateDir: "/tmp/state",
+        memoryMiB: 0
+    )
+
+    #expect(throws: RuntimeDriverError.invalidConfiguration("memoryMiB must be positive")) {
+        try validateRuntimeConfig(config)
+    }
+}
+
+@Test func vmConfigDecodingUsesDocumentedDefaults() throws {
+    let data = Data("""
+    {
+      "kernelPath": "/tmp/kernel",
+      "rootfsPath": "/tmp/rootfs.ext4",
+      "stateDir": "/tmp/state"
+    }
+    """.utf8)
+
+    let config = try JSONDecoder().decode(VMConfig.self, from: data)
+
+    #expect(config.memoryMiB == 512)
+    #expect(config.cpuCount == 2)
+    #expect(config.vsockListeners.isEmpty)
+}
