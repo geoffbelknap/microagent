@@ -144,7 +144,6 @@ func handle(_ request: Request) throws -> Response {
         guard support.frameworkAvailable && support.virtualizationSupported else {
             return Response(ok: false, backend: backendName, error: "Apple Virtualization is not available on this host")
         }
-        try validateVirtualMachine(identity: identity, config: config)
         let event = Event(identity: identity, state: .starting, detail: "serial=\(serialLogPath(identity: identity, stateDir: config.stateDir).path)", observedAt: Date())
         try writeState(event: event, config: config)
         let process = Process()
@@ -460,19 +459,6 @@ func updateRuntime(identity: Identity, config: Config, state: VMState, error: St
     } catch {
         // Background VM state updates cannot safely change the stdout protocol.
     }
-}
-
-func validateVirtualMachine(identity: Identity, config: Config) throws {
-    #if canImport(Virtualization)
-    if #available(macOS 13.0, *) {
-        let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, attachSerial: false)
-        try vmConfig.validate()
-    } else {
-        throw ProtocolError.invalid("Apple Virtualization requires macOS 13 or newer")
-    }
-    #else
-    throw ProtocolError.invalid("Virtualization.framework is not available in this build")
-    #endif
 }
 
 func runVM(_ request: Request) throws {
