@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -47,6 +48,12 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
+	}
+	if args[0] == "ps" {
+		return runPS(args[1:], stdout)
+	}
+	if args[0] == "logs" || args[0] == "log" {
+		return runLogs(args[1:], stdout)
 	}
 	if args[0] == "create" && hasFlagValue(args[1:], "image") {
 		return runHighLevelCreate(ctx, args[1:], stdout)
@@ -476,6 +483,15 @@ type guestResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
+type workspaceListEntry struct {
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	Backend    string `json:"backend,omitempty"`
+	ObservedAt string `json:"observed_at,omitempty"`
+	RootfsPath string `json:"rootfs_path,omitempty"`
+	SerialPath string `json:"serial_path,omitempty"`
+}
+
 func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printRunHelp(stdout)
@@ -490,6 +506,9 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if opts.Name == "" {
 		opts.Name = fmt.Sprintf("run-%d", time.Now().UnixNano())
+	}
+	if err := validateWorkspaceName(opts.Name); err != nil {
+		return err
 	}
 	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
 		return err
@@ -535,6 +554,49 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	return err
 }
 
+func runPS(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected ps argument: %s", fs.Arg(0))
+	}
+	entries, err := listWorkspaces(opts.StateDir)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(map[string]any{"workspaces": entries})
+}
+
+func runLogs(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent logs <name> [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(filepath.Join(opts.StateDir, name, "serial.log"))
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(data)
+	return err
+}
+
 func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) error {
 	opts, err := parseWorkspaceOptions("create", args)
 	if err != nil {
@@ -542,6 +604,9 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	}
 	if opts.Name == "" {
 		return fmt.Errorf("create requires --name")
+	}
+	if err := validateWorkspaceName(opts.Name); err != nil {
+		return err
 	}
 	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
 		return err
@@ -558,12 +623,42 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		}
 	}
 	result.Response = resp
+	if err == nil && resp.OK && workspaceHasGuestCommand(opts) {
+		startReq := workspaceRequest(opts, "start", result.RootfsPath)
+		startResp, startErr := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, startReq)
+		result.Response = startResp
+		result.SerialPath = serialLogPath(opts)
+		if startErr != nil {
+			if startResp.Error == "" {
+				return startErr
+			}
+			return startErr
+		}
+		finalResp, waitErr := waitForWorkspace(ctx, opts)
+		if finalResp.Event != nil {
+			result.FinalState = string(finalResp.Event.State)
+			result.Response = finalResp
+		}
+		if serial, readErr := os.ReadFile(result.SerialPath); readErr == nil {
+			result.SerialLog = string(serial)
+		}
+		if guest, readErr := readGuestResult(opts); readErr == nil {
+			result.Result = &guest
+		}
+		if waitErr != nil {
+			return waitErr
+		}
+	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if encodeErr := enc.Encode(result); encodeErr != nil {
 		return encodeErr
 	}
 	return err
+}
+
+type stateCommandOptions struct {
+	StateDir string
 }
 
 func parseWorkspaceOptions(command string, args []string) (workspaceOptions, error) {
@@ -781,6 +876,76 @@ func cleanupWorkspaceState(opts workspaceOptions) {
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, opts.Name))
 }
 
+func listWorkspaces(stateDir string) ([]workspaceListEntry, error) {
+	names := map[string]bool{}
+	workspaceRoot := filepath.Join(stateDir, "workspaces")
+	if dirs, err := os.ReadDir(workspaceRoot); err == nil {
+		for _, dir := range dirs {
+			if dir.IsDir() {
+				names[dir.Name()] = true
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	if dirs, err := os.ReadDir(stateDir); err == nil {
+		for _, dir := range dirs {
+			if !dir.IsDir() || dir.Name() == "build" || dir.Name() == "workspaces" {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(stateDir, dir.Name(), "event.json")); err == nil {
+				names[dir.Name()] = true
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	sortedNames := make([]string, 0, len(names))
+	for name := range names {
+		sortedNames = append(sortedNames, name)
+	}
+	sort.Strings(sortedNames)
+	entries := make([]workspaceListEntry, 0, len(sortedNames))
+	for _, name := range sortedNames {
+		entries = append(entries, workspaceListEntryFor(stateDir, name))
+	}
+	return entries, nil
+}
+
+func workspaceListEntryFor(stateDir, name string) workspaceListEntry {
+	entry := workspaceListEntry{
+		Name:       name,
+		State:      string(vmkit.StateUnknown),
+		RootfsPath: filepath.Join(stateDir, "workspaces", name, "rootfs.ext4"),
+		SerialPath: filepath.Join(stateDir, name, "serial.log"),
+	}
+	var event vmkit.Event
+	if data, err := os.ReadFile(filepath.Join(stateDir, name, "event.json")); err == nil {
+		if err := json.Unmarshal(data, &event); err == nil {
+			entry.State = string(event.State)
+			entry.Backend = event.Identity.Backend
+			entry.ObservedAt = event.ObservedAt.UTC().Format(time.RFC3339)
+		}
+	}
+	if _, err := os.Stat(entry.RootfsPath); os.IsNotExist(err) {
+		entry.RootfsPath = ""
+	}
+	if _, err := os.Stat(entry.SerialPath); os.IsNotExist(err) {
+		entry.SerialPath = ""
+	}
+	return entry
+}
+
+func validateWorkspaceName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("workspace name is required")
+	}
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return fmt.Errorf("invalid workspace name: %s", name)
+	}
+	return nil
+}
+
 func defaultBackend() string {
 	if runtime.GOOS == "darwin" {
 		return vmkit.BackendAppleVF
@@ -889,6 +1054,18 @@ func workspaceCommand(opts workspaceOptions) string {
 		return ""
 	}
 	return "set -eu\n" + strings.Join(lines, "\n")
+}
+
+func workspaceHasGuestCommand(opts workspaceOptions) bool {
+	if strings.TrimSpace(opts.ExecCommand) != "" {
+		return true
+	}
+	for _, command := range opts.SetupCommands {
+		if strings.TrimSpace(command) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, vsocks []string) (vmkit.Request, error) {
@@ -1046,7 +1223,9 @@ Commands:
   run                  Run a command
   create               Create a workspace
   start                Start a workspace
+  ps                   List workspaces
   status               Show workspace state
+  logs                 Show workspace logs
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace

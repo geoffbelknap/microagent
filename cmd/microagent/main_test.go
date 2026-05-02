@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
@@ -269,6 +270,90 @@ func TestWorkspaceCommandAllowsMultiCommandExec(t *testing.T) {
 	want := "set -eu\necho setup\necho one; echo two"
 	if command != want {
 		t.Fatalf("workspaceCommand = %q, want %q", command, want)
+	}
+}
+
+func TestWorkspaceHasGuestCommand(t *testing.T) {
+	if !workspaceHasGuestCommand(workspaceOptions{SetupCommands: []string{"echo setup"}}) {
+		t.Fatal("setup command should count as guest work")
+	}
+	if !workspaceHasGuestCommand(workspaceOptions{ExecCommand: "echo run"}) {
+		t.Fatal("exec command should count as guest work")
+	}
+	if workspaceHasGuestCommand(workspaceOptions{SetupCommands: []string{"  "}}) {
+		t.Fatal("blank setup command should not count as guest work")
+	}
+}
+
+func TestRunPSListsWorkspaces(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eventDir := filepath.Join(dir, "research")
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	event := vmkit.Event{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		State:      vmkit.StateStopped,
+		ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "ps.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPS([]string{"--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runPS: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `"name": "research"`) || !strings.Contains(string(got), `"state": "stopped"`) {
+		t.Fatalf("ps output = %s", got)
+	}
+}
+
+func TestRunLogsPrintsSerialLog(t *testing.T) {
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, "research")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "serial.log"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "logs.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runLogs([]string{"research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runLogs: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello\n" {
+		t.Fatalf("logs = %q", got)
 	}
 }
 
