@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -266,6 +268,42 @@ func TestHighLevelCreateDetection(t *testing.T) {
 	}
 	if hasFlagValue([]string{"--kernel", "/tmp/kernel"}, "image") {
 		t.Fatal("did not expect image flag")
+	}
+}
+
+func TestKernelInstallFromLocalAndVerify(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "Image")
+	if err := os.WriteFile(src, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte("kernel")))
+	out := filepath.Join(dir, "kernels", "Image")
+	stdoutPath := filepath.Join(dir, "install.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runKernelInstall(t.Context(), []string{"--from", src, "--sha256", sum, "--out", out}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runKernelInstall: %v", err)
+	}
+	if data, err := os.ReadFile(out); err != nil || string(data) != "kernel" {
+		t.Fatalf("installed kernel = %q, %v", data, err)
+	}
+	verifyOut, err := os.Create(filepath.Join(dir, "verify.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runKernelVerify([]string{"--path", out, "--sha256", sum}, verifyOut)
+	if closeErr := verifyOut.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runKernelVerify: %v", err)
 	}
 }
 

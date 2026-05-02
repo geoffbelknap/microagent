@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,6 +42,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "rootfs" {
 		return runRootFS(ctx, args[1:], stdout)
 	}
+	if args[0] == "kernel" {
+		return runKernel(ctx, args[1:], stdout)
+	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
@@ -65,6 +71,188 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return encodeErr
 	}
 	return err
+}
+
+func runKernel(ctx context.Context, args []string, stdout *os.File) error {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		printKernelHelp(stdout)
+		return nil
+	}
+	switch args[0] {
+	case "install":
+		return runKernelInstall(ctx, args[1:], stdout)
+	case "verify":
+		return runKernelVerify(args[1:], stdout)
+	default:
+		return fmt.Errorf("unknown kernel command: %s", args[0])
+	}
+}
+
+func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error {
+	opts := kernelOptions{Backend: defaultBackend(), Architecture: defaultGuestArch()}
+	opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	fs := flag.NewFlagSet("kernel install", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.URL, "url", "", "Kernel URL")
+	fs.StringVar(&opts.FromPath, "from", "", "Local kernel path")
+	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
+	fs.StringVar(&opts.OutputPath, "out", opts.OutputPath, "Output path")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected kernel install argument: %s", fs.Arg(0))
+	}
+	if opts.OutputPath == "" {
+		opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	}
+	if err := installKernel(ctx, opts); err != nil {
+		return err
+	}
+	sum, err := fileSHA256(opts.OutputPath)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(map[string]string{
+		"path":   opts.OutputPath,
+		"sha256": sum,
+	})
+}
+
+func runKernelVerify(args []string, stdout *os.File) error {
+	opts := kernelOptions{Backend: defaultBackend(), Architecture: defaultGuestArch()}
+	opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	fs := flag.NewFlagSet("kernel verify", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.OutputPath, "path", opts.OutputPath, "Kernel path")
+	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected kernel verify argument: %s", fs.Arg(0))
+	}
+	if opts.OutputPath == "" {
+		opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	}
+	sum, err := fileSHA256(opts.OutputPath)
+	if err != nil {
+		return err
+	}
+	ok := opts.SHA256 == "" || strings.EqualFold(opts.SHA256, sum)
+	if !ok {
+		return fmt.Errorf("kernel sha256 = %s, want %s", sum, opts.SHA256)
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(map[string]any{
+		"ok":     true,
+		"path":   opts.OutputPath,
+		"sha256": sum,
+	})
+}
+
+type kernelOptions struct {
+	URL          string
+	FromPath     string
+	SHA256       string
+	OutputPath   string
+	Backend      string
+	Architecture string
+}
+
+func installKernel(ctx context.Context, opts kernelOptions) error {
+	if (opts.URL == "") == (opts.FromPath == "") {
+		return fmt.Errorf("kernel install requires exactly one of --url or --from")
+	}
+	if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(opts.OutputPath), ".kernel-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if opts.FromPath != "" {
+		in, err := os.Open(opts.FromPath)
+		if err != nil {
+			_ = tmp.Close()
+			return err
+		}
+		_, err = io.Copy(tmp, in)
+		closeErr := in.Close()
+		if err != nil {
+			_ = tmp.Close()
+			return err
+		}
+		if closeErr != nil {
+			_ = tmp.Close()
+			return closeErr
+		}
+	} else {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, opts.URL, nil)
+		if err != nil {
+			_ = tmp.Close()
+			return err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			_ = tmp.Close()
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode > 299 {
+			_ = tmp.Close()
+			return fmt.Errorf("download kernel: %s", resp.Status)
+		}
+		if _, err := io.Copy(tmp, resp.Body); err != nil {
+			_ = tmp.Close()
+			return err
+		}
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	sum, err := fileSHA256(tmpPath)
+	if err != nil {
+		return err
+	}
+	if opts.SHA256 != "" && !strings.EqualFold(opts.SHA256, sum) {
+		return fmt.Errorf("kernel sha256 = %s, want %s", sum, opts.SHA256)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, opts.OutputPath); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
@@ -632,6 +820,11 @@ func reorderFlagArgs(args []string) []string {
 		"-kernel":      true,
 		"-rootfs":      true,
 		"-state-dir":   true,
+		"-url":         true,
+		"-from":        true,
+		"-sha256":      true,
+		"-out":         true,
+		"-path":        true,
 		"-memory":      true,
 		"-cpus":        true,
 		"-vsock":       true,
@@ -729,6 +922,8 @@ Commands:
   kill                 Force stop a workspace
   delete               Delete a workspace
   doctor               Check the host
+  kernel install       Install a kernel
+  kernel verify        Verify a kernel
   rootfs build         Build a rootfs from an OCI image
   version              Print the version
   help                 Show help
@@ -766,6 +961,25 @@ Options:
   -keep                 Keep state
   -mke2fs <path>        mke2fs binary path
   -helper <path>        Override the Apple VF helper path
+`)
+}
+
+func printKernelHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent kernel
+
+Commands:
+  install              Install a kernel
+  verify               Verify a kernel
+
+Install options:
+  -url <url>           Download URL
+  -from <path>         Local kernel path
+  -sha256 <sha256>     Expected SHA-256
+  -out <path>          Output path
+
+Verify options:
+  -path <path>         Kernel path
+  -sha256 <sha256>     Expected SHA-256
 `)
 }
 
