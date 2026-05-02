@@ -16,8 +16,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Build
-        run: swift build
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.mod
 
-      - name: Test
-        run: swift test
+      - name: Test Go
+        run: go test ./...
+
+      - name: Build Apple VF helper
+        run: swift build --package-path helpers/applevf

@@ -1,17 +1,18 @@
 # microagent-vmkit
 
-Toolkit and CLI for running AI agents inside inspectable microVMs.
+Go CLI/library plus a Swift helper for running AI agents inside inspectable
+Apple Virtualization.framework microVMs.
 
 ## Scope
 
 This repository owns host-side microVM lifecycle primitives for agent
 workloads:
 
-- prepare, start, stop, kill, inspect, delete, and event streaming
+- prepare, start, stop, kill, inspect, and delete commands
 - guest metadata and runtime identity propagation
 - serial, block-device, and vsock-oriented host/guest wiring
 - bounded cleanup and observable runtime state
-- Apple Virtualization.framework as the first backend
+- Apple Virtualization.framework helper protocol
 
 ## Non-Goals
 
@@ -27,13 +28,14 @@ workloads:
 ## Design Rules
 
 - Keep the public contract structured and machine-readable.
+- Keep the Swift helper usable from Go, Python, Rust, Node, and shell scripts.
 - Treat lifecycle events as first-class API output, not log strings.
 - Preserve explicit runtime identity in requests, state files, and events.
-- Keep backend-specific details behind backend adapters.
+- Keep Apple VF details behind the helper protocol.
 - Fail closed on invalid runtime configuration.
 - Prefer narrow protocols over shell-string execution.
 
 ## Consumer Boundary
 
 Consumers supply policy, audit meaning, identity, rootfs artifacts, and
-operator intent. This project realizes VM lifecycle and reports state.
+operator intent. This project runs VM lifecycle commands and reports state.

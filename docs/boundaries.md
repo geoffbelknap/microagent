@@ -7,7 +7,7 @@
 - Host-side VM lifecycle commands
 - Structured runtime identity in lifecycle requests
 - Structured lifecycle events
-- Backend adapters, starting with Apple Virtualization.framework
+- Apple Virtualization.framework helper protocol
 - Runtime state files and cleanup semantics
 - Host/guest transport primitives such as vsock listeners
 
@@ -30,5 +30,5 @@
 - Rootfs provenance
 
 The boundary should let a consumer provide a prepared kernel, rootfs, runtime
-identity, and bridge targets. `microagent-vmkit` should then realize and
-observe the VM without learning the consumer's policy model.
+identity, and bridge targets. `microagent-vmkit` should then run lifecycle
+commands and report state without learning the consumer's policy model.

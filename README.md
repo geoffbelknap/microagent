@@ -1,29 +1,21 @@
 # microagent-vmkit
 
-`microagent-vmkit` is a toolkit and CLI for running AI agents inside
-inspectable microVMs.
+`microagent-vmkit` is a Go library, CLI, and Swift helper for running AI agents
+inside inspectable Apple Virtualization.framework microVMs.
 
-It gives agent runtimes a host-side API for preparing, starting, inspecting,
-stopping, and cleaning up microVM-backed workloads. VM policy, model calls,
-tool mediation, credentials, and operator UX stay with the caller.
+The command-line tool is `microagent`. Apple VF access lives in
+`microagent-applevf-helper`, a standalone process with a JSON stdin/stdout
+protocol. Go, Python, Rust, Node, and shell scripts can call the helper without
+linking Swift.
 
-Apple Virtualization.framework on Apple silicon is the first backend. The API
-keeps backend details out of the caller's lifecycle contract.
-
-## Goals
-
-- Swift library for microVM lifecycle operations
-- CLI for local validation and scripting
-- structured lifecycle events
-- runtime identity and metadata on every request and event
-- vsock-first host/guest control paths
-- policy, audit, credentials, and agent semantics left to the caller
+VM policy, model calls, tool mediation, credentials, and operator UX stay with
+the caller.
 
 ## Build
 
 ```bash
-swift build
-swift test
+go test ./...
+swift build --package-path helpers/applevf
 ```
 
 ## CLI
@@ -31,13 +23,13 @@ swift test
 Check whether the host can use Apple Virtualization.framework:
 
 ```bash
-microagent-vmkit apple-vf-host-check
+microagent host
 ```
 
-Validate a lifecycle request:
+Validate a lifecycle request without writing state:
 
 ```bash
-microagent-vmkit validate-config request.json
+microagent check request.json
 ```
 
 Input:
@@ -60,7 +52,30 @@ Input:
 }
 ```
 
-The command prints a JSON lifecycle event if the request is valid.
+The command prints a JSON response if the request is valid.
+
+Prepare, inspect, and delete state:
+
+```bash
+microagent prepare request.json
+microagent inspect request.json
+microagent delete request.json
+```
+
+These commands use `config.stateDir` from the request as the state root. The
+`start` command exists, but VM launch is not wired yet.
+
+Set `MICROAGENT_APPLEVF_HELPER` or pass `-helper` to point the Go CLI at a
+specific helper binary:
+
+```bash
+microagent prepare -helper ./helpers/applevf/.build/debug/microagent-applevf-helper request.json
+```
+
+## Helper Protocol
+
+The helper accepts one JSON request on stdin and writes one JSON response to
+stdout. The protocol is documented in `docs/protocol.md`.
 
 ## Boundary
 
