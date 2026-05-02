@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/geoffbelknap/microagent-vmkit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
 
 var version = "dev"

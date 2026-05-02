@@ -1,6 +1,6 @@
 # Security
 
-`microagent-vmkit` is a host-side lifecycle library and helper protocol for
+`microagent-kit` is a host-side lifecycle library and helper protocol for
 agent microVMs. Treat kernel images, root filesystems, and runtime request
 files as executable input.
 

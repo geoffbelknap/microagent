@@ -1,6 +1,6 @@
 # Boundaries
 
-`microagent-vmkit` is the VM lifecycle layer for agent runtimes.
+`microagent-kit` is the VM lifecycle layer for agent runtimes.
 
 ## Owned Here
 
@@ -30,5 +30,5 @@
 - Rootfs provenance
 
 The boundary should let a consumer provide a prepared kernel, rootfs, runtime
-identity, and bridge targets. `microagent-vmkit` should then run lifecycle
+identity, and bridge targets. `microagent-kit` should then run lifecycle
 commands and report state without learning the consumer's policy model.

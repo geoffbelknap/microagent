@@ -1,6 +1,6 @@
-# microagent-vmkit
+# microagent-kit
 
-`microagent-vmkit` is a Go library, CLI, and Swift helper for running AI agents
+`microagent-kit` is a Go library, CLI, and Swift helper for running AI agents
 inside inspectable Apple Virtualization.framework microVMs.
 
 The command-line tool is `microagent`. Apple VF access lives in
@@ -45,7 +45,7 @@ Input:
   "config": {
     "kernelPath": "/tmp/kernel",
     "rootfsPath": "/tmp/rootfs.ext4",
-    "stateDir": "/tmp/microagent-vmkit",
+    "stateDir": "/tmp/microagent-kit",
     "memoryMiB": 512,
     "cpuCount": 2
   }
@@ -79,11 +79,11 @@ stdout. The protocol is documented in `docs/protocol.md`.
 
 ## Boundary
 
-`microagent-vmkit` handles VM lifecycle work:
+`microagent-kit` handles VM lifecycle work:
 
 ```text
 agent runtime
-  -> microagent-vmkit
+  -> microagent-kit
        -> Apple Virtualization.framework backend
   -> microvm-rootfs
        -> OCI image to bootable rootfs artifact

@@ -1,3 +1,3 @@
-module github.com/geoffbelknap/microagent-vmkit
+module github.com/geoffbelknap/microagent-kit
 
 go 1.26

@@ -1,4 +1,4 @@
-# microagent-vmkit
+# microagent-kit
 
 Go CLI/library plus a Swift helper for running AI agents inside inspectable
 Apple Virtualization.framework microVMs.
