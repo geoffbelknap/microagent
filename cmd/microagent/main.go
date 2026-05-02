@@ -218,7 +218,17 @@ func firecrackerVersion(path string) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(output))
+	return firstOutputLine(string(output))
+}
+
+func firstOutputLine(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func runKernel(ctx context.Context, args []string, stdout *os.File) error {

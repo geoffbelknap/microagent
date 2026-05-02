@@ -163,6 +163,13 @@ func TestDefaultFirecrackerPathResolvesHomebrewSymlink(t *testing.T) {
 	}
 }
 
+func TestFirstOutputLine(t *testing.T) {
+	output := "\nFirecracker v1.15.1\n\n2026-05-02T17:44:08 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0\n"
+	if got := firstOutputLine(output); got != "Firecracker v1.15.1" {
+		t.Fatalf("firstOutputLine() = %q", got)
+	}
+}
+
 type fakeFileInfo struct {
 	name string
 }
