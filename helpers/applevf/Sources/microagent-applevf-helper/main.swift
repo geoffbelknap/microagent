@@ -148,7 +148,7 @@ func handle(_ request: Request) throws -> Response {
         let event = Event(identity: identity, state: .starting, detail: "serial=\(serialLogPath(identity: identity, stateDir: config.stateDir).path)", observedAt: Date())
         try writeState(event: event, config: config)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        process.executableURL = URL(fileURLWithPath: currentExecutablePath())
         process.arguments = ["--request-json", try requestJSON(request.withCommand("run"))]
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
@@ -343,6 +343,19 @@ func readRuntimeState(identity: Identity, stateDir: String) throws -> RuntimeSta
 func requestJSON(_ request: Request) throws -> String {
     let data = try encoder.encode(request)
     return String(data: data, encoding: .utf8) ?? "{}"
+}
+
+func currentExecutablePath() -> String {
+    #if canImport(Darwin)
+    var size = UInt32(0)
+    _ = _NSGetExecutablePath(nil, &size)
+    var buffer = [CChar](repeating: 0, count: Int(size))
+    if _NSGetExecutablePath(&buffer, &size) == 0 {
+        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+    #endif
+    return CommandLine.arguments[0]
 }
 
 extension Request {
