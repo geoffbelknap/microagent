@@ -153,6 +153,24 @@ microagent run \
   --exec "cat /workspace/status"
 ```
 
+Attach an existing ext4 disk:
+
+```bash
+microagent create \
+  --name research \
+  --image docker.io/library/ubuntu:24.04 \
+  --disk workspace=/tmp/workspace.ext4:/workspace:rw
+```
+
+Build a disk from a tar bundle and attach it read-only:
+
+```bash
+microagent create \
+  --name research \
+  --image docker.io/library/ubuntu:24.04 \
+  --bundle config=/tmp/config.tar:/config:ro
+```
+
 Create a workspace:
 
 ```bash
@@ -281,7 +299,7 @@ Request JSON:
 }
 ```
 
-Commands print JSON.
+Use `--json` when scripts need structured output.
 
 Delete state:
 

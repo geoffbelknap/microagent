@@ -45,8 +45,16 @@ type Config struct {
 	StateDir       string          `json:"stateDir"`
 	MemoryMiB      int             `json:"memoryMiB,omitempty"`
 	CPUCount       int             `json:"cpuCount,omitempty"`
+	Disks          []Disk          `json:"disks,omitempty"`
 	VsockListeners []VsockListener `json:"vsockListeners,omitempty"`
 	SerialInput    bool            `json:"serialInput,omitempty"`
+}
+
+type Disk struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Mountpoint string `json:"mountpoint"`
+	Mode       string `json:"mode"`
 }
 
 type VsockListener struct {
@@ -173,6 +181,38 @@ func ValidateConfig(config *Config) error {
 	}
 	if config.CPUCount <= 0 {
 		return errors.New("config.cpuCount must be positive")
+	}
+	diskNames := map[string]bool{}
+	diskMountpoints := map[string]bool{}
+	for _, disk := range config.Disks {
+		name := strings.TrimSpace(disk.Name)
+		if name == "" {
+			return errors.New("disk name is required")
+		}
+		if name == "rootfs" {
+			return errors.New("disk name rootfs is reserved")
+		}
+		if diskNames[name] {
+			return fmt.Errorf("duplicate disk name %q", name)
+		}
+		diskNames[name] = true
+		if strings.TrimSpace(disk.Path) == "" {
+			return fmt.Errorf("disk %q path is required", name)
+		}
+		mountpoint := strings.TrimSpace(disk.Mountpoint)
+		if mountpoint == "" {
+			return fmt.Errorf("disk %q mountpoint is required", name)
+		}
+		if !strings.HasPrefix(mountpoint, "/") {
+			return fmt.Errorf("disk %q mountpoint must be absolute", name)
+		}
+		if diskMountpoints[mountpoint] {
+			return fmt.Errorf("duplicate disk mountpoint %q", mountpoint)
+		}
+		diskMountpoints[mountpoint] = true
+		if disk.Mode != "ro" && disk.Mode != "rw" {
+			return fmt.Errorf("disk %q mode must be ro or rw", name)
+		}
 	}
 	ports := map[uint32]bool{}
 	for _, listener := range config.VsockListeners {
