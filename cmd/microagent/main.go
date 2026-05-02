@@ -598,7 +598,9 @@ type workspaceOptions struct {
 	Name            string
 	ImageRef        string
 	ExecCommand     string
+	Entrypoint      string
 	SetupCommands   []string
+	Env             map[string]string
 	Backend         string
 	KernelPath      string
 	StateDir        string
@@ -1030,8 +1032,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Name, "id", "", "Workspace ID")
 	fs.StringVar(&opts.ImageRef, "image", "", "OCI image reference")
 	fs.StringVar(&opts.ExecCommand, "exec", "", "Shell command to run as guest init")
+	fs.StringVar(&opts.Entrypoint, "entrypoint", "", "Shell command to run when the workspace starts")
 	var setupCommands multiFlag
 	fs.Var(&setupCommands, "setup", "Shell command to run before --exec")
+	var envVars multiFlag
+	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "Microagent state directory")
@@ -1054,6 +1059,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, fmt.Errorf("unexpected %s argument: %s", command, fs.Arg(0))
 	}
 	opts.SetupCommands = append([]string{}, setupCommands...)
+	env, err := parseEnvFlags(envVars)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.Env = env
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		return workspaceOptions{}, fmt.Errorf("%s requires --image", command)
@@ -1110,6 +1120,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		StateDir:       filepath.Join(opts.StateDir, "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
+		Env:            opts.Env,
 		AllowMutable:   true,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
@@ -1533,7 +1544,7 @@ func hasPositionalWorkspaceName(args []string) bool {
 		if !strings.HasPrefix(arg, "-") {
 			return true
 		}
-		if arg == "--json" || arg == "-json" || arg == "--rootfs" || arg == "-rootfs" || arg == "--kernel" || arg == "-kernel" || arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" {
+		if arg == "--json" || arg == "-json" || arg == "--rootfs" || arg == "-rootfs" || arg == "--kernel" || arg == "-kernel" || arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" || arg == "--entrypoint" || arg == "-entrypoint" || arg == "--env" || arg == "-env" {
 			return false
 		}
 	}
@@ -1576,7 +1587,7 @@ func workspaceCommand(opts workspaceOptions) string {
 		lines = append(lines, execCommand)
 	}
 	if opts.PrepareForStart {
-		lines = append(lines, resetGuestConfigCommand(0))
+		lines = append(lines, resetGuestConfigCommand(shellCommand(opts.Entrypoint), opts.Env, 0))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -1584,15 +1595,41 @@ func workspaceCommand(opts workspaceOptions) string {
 	return "set -eu\n" + strings.Join(lines, "\n")
 }
 
-func resetGuestConfigCommand(port uint32) string {
-	data, err := json.Marshal(map[string]any{
-		"command": []string{},
-		"port":    port,
+func resetGuestConfigCommand(command []string, env map[string]string, port uint32) string {
+	if command == nil {
+		command = []string{}
+	}
+	data, err := json.Marshal(struct {
+		Command []string `json:"command"`
+		Env     []string `json:"env,omitempty"`
+		Port    uint32   `json:"port"`
+	}{
+		Command: command,
+		Env:     envList(env),
+		Port:    port,
 	})
 	if err != nil {
 		panic(err)
 	}
 	return "printf '%s\\n' " + shellSingleQuote(string(data)) + " > /etc/microagent/run.json"
+}
+
+func envList(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		if validEnvName(key) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+env[key])
+	}
+	return out
 }
 
 func shellSingleQuote(value string) string {
@@ -1808,6 +1845,8 @@ func reorderFlagArgs(args []string) []string {
 		"-name":        true,
 		"-image":       true,
 		"-exec":        true,
+		"-entrypoint":  true,
+		"-env":         true,
 		"-setup":       true,
 		"-request-id":  true,
 		"-role":        true,
@@ -1906,6 +1945,39 @@ func (m *multiFlag) Set(value string) error {
 	return nil
 }
 
+func parseEnvFlags(values []string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	env := make(map[string]string, len(values))
+	for _, raw := range values {
+		key, value, ok := strings.Cut(raw, "=")
+		key = strings.TrimSpace(key)
+		if !ok || key == "" {
+			return nil, fmt.Errorf("env must be KEY=VALUE: %s", raw)
+		}
+		if !validEnvName(key) {
+			return nil, fmt.Errorf("env key is invalid: %s", key)
+		}
+		env[key] = value
+	}
+	return env, nil
+}
+
+func validEnvName(key string) bool {
+	for i, r := range key {
+		switch {
+		case r == '_':
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z' && i > 0:
+		case r >= '0' && r <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return key != ""
+}
+
 func printHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent
 
@@ -1935,6 +2007,8 @@ Options:
   -image <ref>          OCI image
   -name <name>          Workspace name
   -id <id>              Workspace ID
+  -entrypoint <command> Command to run on start
+  -env KEY=VALUE        Guest environment variable
   -kernel <path>        Custom kernel path
   -rootfs <path>        Rootfs image path
   -state-dir <dir>      State directory
@@ -1953,6 +2027,8 @@ Options:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
+  -entrypoint <command> Command to run on start
+  -env KEY=VALUE        Guest environment variable
   -name <name>          Workspace name; generated when omitted
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory

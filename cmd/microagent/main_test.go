@@ -459,6 +459,9 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 		"--exec", "uname -a",
 		"--setup", "apt-get update",
 		"--setup", "apt-get install -y git",
+		"--entrypoint", "/app/entrypoint.sh",
+		"--env", "AGENCY_AGENT_NAME=research",
+		"--env", "AGENCY_MODEL=standard",
 		"--name", "research",
 		"--kernel", "/tmp/kernel",
 		"--state-dir", "/tmp/microagent-state",
@@ -479,6 +482,12 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	}
 	if len(opts.SetupCommands) != 2 || opts.SetupCommands[0] != "apt-get update" || opts.SetupCommands[1] != "apt-get install -y git" {
 		t.Fatalf("SetupCommands = %#v", opts.SetupCommands)
+	}
+	if opts.Entrypoint != "/app/entrypoint.sh" {
+		t.Fatalf("Entrypoint = %q", opts.Entrypoint)
+	}
+	if opts.Env["AGENCY_AGENT_NAME"] != "research" || opts.Env["AGENCY_MODEL"] != "standard" {
+		t.Fatalf("Env = %#v", opts.Env)
 	}
 	if opts.Name != "research" {
 		t.Fatalf("Name = %q", opts.Name)
@@ -515,14 +524,18 @@ func TestWorkspaceCommandAllowsMultiCommandExec(t *testing.T) {
 
 func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	command := workspaceCommand(workspaceOptions{
+		Entrypoint:      "/app/entrypoint.sh",
 		SetupCommands:   []string{"echo setup"},
+		Env:             map[string]string{"AGENCY_AGENT_NAME": "research"},
 		ResultPort:      1024,
 		PrepareForStart: true,
 	})
 	if !strings.Contains(command, "echo setup") {
 		t.Fatalf("workspaceCommand missing setup: %q", command)
 	}
-	if !strings.Contains(command, `> /etc/microagent/run.json`) || !strings.Contains(command, `"command":[]`) {
+	if !strings.Contains(command, `> /etc/microagent/run.json`) ||
+		!strings.Contains(command, `"command":["/bin/sh","-lc","/app/entrypoint.sh"]`) ||
+		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) {
 		t.Fatalf("workspaceCommand missing guest config reset: %q", command)
 	}
 }

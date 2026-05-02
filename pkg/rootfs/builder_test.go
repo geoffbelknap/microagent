@@ -43,7 +43,10 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	if err := os.WriteFile(initBinary, []byte("guest-init"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, nil, initBinary, 1024)
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, map[string]string{
+		"GOOD_ENV": "ok",
+		"bad-env":  "ignored",
+	}, initBinary, 1024)
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -59,7 +62,10 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 		t.Fatalf("read run config: %v", err)
 	}
 	text := string(config)
-	if !strings.Contains(text, `"port":1024`) || !strings.Contains(text, `"/bin/echo"`) {
+	if !strings.Contains(text, `"port":1024`) ||
+		!strings.Contains(text, `"/bin/echo"`) ||
+		!strings.Contains(text, `"GOOD_ENV=ok"`) ||
+		strings.Contains(text, "bad-env") {
 		t.Fatalf("unexpected run config: %s", text)
 	}
 }

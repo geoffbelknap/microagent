@@ -20,6 +20,7 @@ const resultConnectTimeout = 15 * time.Second
 
 type config struct {
 	Command []string `json:"command"`
+	Env     []string `json:"env,omitempty"`
 	Port    uint32   `json:"port"`
 	Mode    string   `json:"mode,omitempty"`
 }
@@ -49,6 +50,7 @@ func run() int {
 	code := 0
 	if len(cfg.Command) > 0 {
 		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
+		cmd.Env = guestEnv(cfg.Env)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
@@ -63,6 +65,7 @@ func run() int {
 		}
 	} else {
 		cmd := exec.Command("/bin/sh")
+		cmd.Env = guestEnv(cfg.Env)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -77,6 +80,16 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 	}
 	return code
+}
+
+func guestEnv(extra []string) []string {
+	env := os.Environ()
+	for _, entry := range extra {
+		if entry != "" {
+			env = append(env, entry)
+		}
+	}
+	return env
 }
 
 func readConfig() (config, error) {

@@ -403,7 +403,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		if err := copyFile(initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
-		return writeGuestRunConfig(stageDir, command, resultPort)
+		return writeGuestRunConfig(stageDir, command, env, resultPort)
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -425,10 +425,11 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 
 type guestRunConfig struct {
 	Command []string `json:"command"`
+	Env     []string `json:"env,omitempty"`
 	Port    uint32   `json:"port"`
 }
 
-func writeGuestRunConfig(stageDir string, command []string, resultPort uint32) error {
+func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32) error {
 	target, err := safeStagePath(stageDir, "/etc/microagent/run.json")
 	if err != nil {
 		return err
@@ -436,12 +437,30 @@ func writeGuestRunConfig(stageDir string, command []string, resultPort uint32) e
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create guest config dir: %w", err)
 	}
-	data, err := json.Marshal(guestRunConfig{Command: command, Port: resultPort})
+	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort})
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
 	return os.WriteFile(target, data, 0o644)
+}
+
+func envList(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		if validShellEnvName(key) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+env[key])
+	}
+	return out
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
