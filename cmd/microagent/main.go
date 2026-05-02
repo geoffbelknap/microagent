@@ -350,8 +350,8 @@ var defaultKernels = []kernelManifestEntry{
 	{
 		Backend:      vmkit.BackendFirecracker,
 		Architecture: "amd64",
-		URL:          "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r1/microagent-kernel-6.1.155-firecracker-amd64",
-		SHA256:       "6f4196f67add6c49df08e780fd705eb9a55a3b4b8826a51948be9a7493f38d08",
+		URL:          "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r2/microagent-kernel-6.1.155-firecracker-amd64",
+		SHA256:       "4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0",
 	},
 }
 
