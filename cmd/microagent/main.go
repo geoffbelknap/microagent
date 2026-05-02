@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
@@ -32,10 +36,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&helperPath, "helper", helperPath, "Apple VF helper path")
-	if err := fs.Parse(args[1:]); err != nil {
-		return err
-	}
-	req, err := requestForCommand(args[0], fs.Args())
+	req, err := requestForCommand(args[0], fs, reorderFlagArgs(args[1:]))
 	if err != nil {
 		return err
 	}
@@ -53,37 +54,150 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	return err
 }
 
-func requestForCommand(command string, args []string) (vmkit.Request, error) {
+func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.Request, error) {
+	var jsonPath string
+	var dryRun bool
+	var identity vmkit.Identity
+	var config vmkit.Config
+	var vsocks multiFlag
+	fs.StringVar(&jsonPath, "json", "", "Read request JSON from path, or '-' for stdin")
+	fs.BoolVar(&dryRun, "dry-run", false, "Validate without writing state")
+	fs.StringVar(&identity.RuntimeID, "id", "", "Runtime ID")
+	fs.StringVar(&identity.RequestID, "request-id", "", "Request ID")
+	fs.StringVar((*string)(&identity.Role), "role", string(vmkit.RoleWorkload), "Runtime role")
+	fs.StringVar(&identity.Backend, "backend", vmkit.BackendAppleVF, "Runtime backend")
+	fs.StringVar(&config.KernelPath, "kernel", "", "Linux kernel path")
+	fs.StringVar(&config.RootfsPath, "rootfs", "", "Rootfs image path")
+	fs.StringVar(&config.StateDir, "state-dir", "", "Runtime state directory")
+	fs.IntVar(&config.MemoryMiB, "memory", 512, "Memory in MiB")
+	fs.IntVar(&config.CPUCount, "cpus", 2, "CPU count")
+	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
+	if err := fs.Parse(args); err != nil {
+		return vmkit.Request{}, err
+	}
+	args = fs.Args()
 	switch command {
-	case "host":
+	case "doctor":
 		if len(args) != 0 {
-			return vmkit.Request{}, fmt.Errorf("usage: microagent host")
+			return vmkit.Request{}, fmt.Errorf("usage: microagent doctor")
 		}
 		return vmkit.Request{Command: "host"}, nil
-	case "check", "prepare", "start", "inspect", "stop", "kill", "delete":
-		if len(args) != 1 {
-			return vmkit.Request{}, fmt.Errorf("usage: microagent %s <request.json>", command)
-		}
-		req, err := readRequest(args[0])
+	case "create":
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, vsocks)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
-		req.Command = command
-		if command == "check" {
-			vmkit.NormalizeConfig(req.Config)
-			if err := vmkit.ValidateRequest(req); err != nil {
-				return vmkit.Request{}, err
-			}
-			return req, nil
+		if dryRun {
+			req.Command = "check"
+		} else {
+			req.Command = "prepare"
 		}
+		return req, nil
+	case "start":
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, vsocks)
+		if err != nil {
+			return vmkit.Request{}, err
+		}
+		req.Command = "start"
+		return req, nil
+	case "status", "stop", "kill", "delete":
+		req, err := stateRequestFromFlagsOrJSON(command, jsonPath, args, identity, config)
+		if err != nil {
+			return vmkit.Request{}, err
+		}
+		req.Command = mapCLICommand(command)
 		return req, nil
 	default:
 		return vmkit.Request{}, fmt.Errorf("unknown command: %s", command)
 	}
 }
 
+func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, vsocks []string) (vmkit.Request, error) {
+	if jsonPath != "" {
+		if len(args) != 0 {
+			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
+		}
+		return readRequest(jsonPath)
+	}
+	if len(args) != 0 {
+		return vmkit.Request{}, fmt.Errorf("unexpected argument: %s", args[0])
+	}
+	if identity.RequestID == "" {
+		identity.RequestID = newRequestID()
+	}
+	config.VsockListeners = nil
+	for _, raw := range vsocks {
+		listener, err := parseVsock(raw)
+		if err != nil {
+			return vmkit.Request{}, err
+		}
+		config.VsockListeners = append(config.VsockListeners, listener)
+	}
+	return vmkit.Request{Identity: &identity, Config: &config}, nil
+}
+
+func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config) (vmkit.Request, error) {
+	if jsonPath != "" {
+		if len(args) != 0 {
+			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
+		}
+		return readRequest(jsonPath)
+	}
+	if len(args) > 1 {
+		return vmkit.Request{}, fmt.Errorf("usage: microagent %s [id] --state-dir <dir>", command)
+	}
+	if len(args) == 1 && identity.RuntimeID == "" {
+		identity.RuntimeID = args[0]
+	}
+	if identity.RequestID == "" {
+		identity.RequestID = newRequestID()
+	}
+	return vmkit.Request{Identity: &identity, Config: &config}, nil
+}
+
+func reorderFlagArgs(args []string) []string {
+	valueFlags := map[string]bool{
+		"-helper":     true,
+		"-json":       true,
+		"-id":         true,
+		"-request-id": true,
+		"-role":       true,
+		"-backend":    true,
+		"-kernel":     true,
+		"-rootfs":     true,
+		"-state-dir":  true,
+		"-memory":     true,
+		"-cpus":       true,
+		"-vsock":      true,
+	}
+	var flags []string
+	var positional []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positional = append(positional, arg)
+			continue
+		}
+		if strings.HasPrefix(arg, "--") {
+			arg = "-" + strings.TrimPrefix(arg, "--")
+		}
+		flags = append(flags, arg)
+		if valueFlags[arg] && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return append(flags, positional...)
+}
+
 func readRequest(path string) (vmkit.Request, error) {
-	data, err := os.ReadFile(path)
+	var data []byte
+	var err error
+	if path == "-" {
+		data, err = io.ReadAll(os.Stdin)
+	} else {
+		data, err = os.ReadFile(path)
+	}
 	if err != nil {
 		return vmkit.Request{}, err
 	}
@@ -94,22 +208,66 @@ func readRequest(path string) (vmkit.Request, error) {
 	return req, nil
 }
 
+func mapCLICommand(command string) string {
+	if command == "status" {
+		return "inspect"
+	}
+	return command
+}
+
+func parseVsock(raw string) (vmkit.VsockListener, error) {
+	left, right, ok := strings.Cut(raw, "=")
+	if !ok {
+		return vmkit.VsockListener{}, fmt.Errorf("vsock mapping must be port=host:port")
+	}
+	port, err := strconv.ParseUint(left, 10, 32)
+	if err != nil || port == 0 {
+		return vmkit.VsockListener{}, fmt.Errorf("vsock port must be a positive uint32")
+	}
+	if strings.TrimSpace(right) == "" {
+		return vmkit.VsockListener{}, fmt.Errorf("vsock target is required")
+	}
+	return vmkit.VsockListener{Port: uint32(port), Target: right}, nil
+}
+
+func newRequestID() string {
+	return fmt.Sprintf("req-%d", time.Now().UnixNano())
+}
+
+type multiFlag []string
+
+func (m *multiFlag) String() string {
+	return strings.Join(*m, ",")
+}
+
+func (m *multiFlag) Set(value string) error {
+	*m = append(*m, value)
+	return nil
+}
+
 func printHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent
 
 Commands:
-  host                 Print Apple VF host support
-  check <request>      Validate a lifecycle request
-  prepare <request>    Validate and persist prepared state
-  start <request>      Validate and attempt VM start
-  inspect <request>    Read persisted runtime state
-  stop <request>       Mark a runtime stopped
-  kill <request>       Mark a runtime forcibly stopped
-  delete <request>     Delete persisted runtime state
+  doctor               Diagnose local Apple VF support
+  create               Create runtime state
+  start                Validate and attempt VM start
+  status               Read persisted runtime state
+  stop                 Mark a runtime stopped
+  kill                 Mark a runtime forcibly stopped
+  delete               Delete persisted runtime state
   version              Print version information
   help                 Show this help
 
 Options:
   -helper <path>        Override the Apple VF helper path
+  -json <path|- >       Read request JSON from a file or stdin
+  -id <id>              Runtime ID
+  -kernel <path>        Linux kernel path
+  -rootfs <path>        Rootfs image path
+  -state-dir <dir>      Runtime state directory
+  -memory <MiB>         Memory in MiB
+  -cpus <n>             CPU count
+  -vsock p=host:port    Add a vsock listener mapping
 `)
 }

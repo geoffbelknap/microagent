@@ -23,16 +23,43 @@ swift build --package-path helpers/applevf
 Check whether the host can use Apple Virtualization.framework:
 
 ```bash
-microagent host
+microagent doctor
 ```
 
-Validate a lifecycle request without writing state:
+Create runtime state:
 
 ```bash
-microagent check request.json
+microagent create \
+  --id agent-1 \
+  --kernel /tmp/kernel \
+  --rootfs /tmp/rootfs.ext4 \
+  --state-dir /tmp/microagent-kit
 ```
 
-Input:
+Validate without writing state:
+
+```bash
+microagent create --dry-run \
+  --id agent-1 \
+  --kernel /tmp/kernel \
+  --rootfs /tmp/rootfs.ext4 \
+  --state-dir /tmp/microagent-kit
+```
+
+Read state:
+
+```bash
+microagent status agent-1 --state-dir /tmp/microagent-kit
+```
+
+JSON is still available for automation:
+
+```bash
+microagent create --json request.json
+microagent create --json - < request.json
+```
+
+Request JSON:
 
 ```json
 {
@@ -54,22 +81,19 @@ Input:
 
 The command prints a JSON response if the request is valid.
 
-Prepare, inspect, and delete state:
+Delete state:
 
 ```bash
-microagent prepare request.json
-microagent inspect request.json
-microagent delete request.json
+microagent delete agent-1 --state-dir /tmp/microagent-kit
 ```
 
-These commands use `config.stateDir` from the request as the state root. The
-`start` command exists, but VM launch is not wired yet.
+The `start` command exists, but VM launch is not wired yet.
 
 Set `MICROAGENT_APPLEVF_HELPER` or pass `-helper` to point the Go CLI at a
 specific helper binary:
 
 ```bash
-microagent prepare -helper ./helpers/applevf/.build/debug/microagent-applevf-helper request.json
+microagent create -helper ./helpers/applevf/.build/debug/microagent-applevf-helper --json request.json
 ```
 
 ## Helper Protocol

@@ -8,7 +8,7 @@ Apple Virtualization.framework microVMs.
 This repository owns host-side microVM lifecycle primitives for agent
 workloads:
 
-- prepare, start, stop, kill, inspect, and delete commands
+- create, start, status, stop, kill, and delete CLI commands
 - guest metadata and runtime identity propagation
 - serial, block-device, and vsock-oriented host/guest wiring
 - bounded cleanup and observable runtime state
