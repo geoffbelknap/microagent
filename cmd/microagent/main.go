@@ -1285,9 +1285,12 @@ func defaultGuestInitPath(arch string) string {
 		return "microagent-guestinit"
 	}
 	dir := filepath.Dir(executable)
+	libexecDir := filepath.Clean(filepath.Join(dir, "..", "libexec"))
 	candidates := []string{
 		filepath.Join(dir, "microagent-guestinit-"+arch),
 		filepath.Join(dir, "microagent-guestinit"),
+		filepath.Join(libexecDir, "microagent-guestinit-"+arch),
+		filepath.Join(libexecDir, "microagent-guestinit"),
 	}
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
