@@ -347,6 +347,12 @@ var defaultKernels = []kernelManifestEntry{
 		URL:          "https://github.com/geoffbelknap/microagent-kit/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-apple-vf-arm64",
 		SHA256:       "73fe78e51a8ce348e69311d376a02114440eee6b60bf2e91af54bdf2dfb405ec",
 	},
+	{
+		Backend:      vmkit.BackendFirecracker,
+		Architecture: "amd64",
+		URL:          "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r1/microagent-kernel-6.1.155-firecracker-amd64",
+		SHA256:       "6f4196f67add6c49df08e780fd705eb9a55a3b4b8826a51948be9a7493f38d08",
+	},
 }
 
 func defaultKernel(backend, arch string) (kernelManifestEntry, bool) {
