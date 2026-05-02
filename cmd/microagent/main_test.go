@@ -539,6 +539,37 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--arch", "amd64",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "research" {
+		t.Fatalf("Name = %q", opts.Name)
+	}
+	if opts.ImageRef != defaultWorkspaceImageAMD64 {
+		t.Fatalf("ImageRef = %q, want %q", opts.ImageRef, defaultWorkspaceImageAMD64)
+	}
+	if opts.MemoryMiB != defaultWorkspaceMemoryMiB || opts.CPUCount != 2 || opts.SizeMiB != rootfs.DefaultSizeMiB {
+		t.Fatalf("defaults = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+}
+
+func TestCreateDispatchKeepsLowLevelHelperCreate(t *testing.T) {
+	if !shouldUseHighLevelCreate([]string{"research"}) {
+		t.Fatal("positional create should use high-level workspace create")
+	}
+	if !shouldUseHighLevelCreate([]string{"--name", "research"}) {
+		t.Fatal("--name create should use high-level workspace create")
+	}
+	if shouldUseHighLevelCreate([]string{"--id", "agent", "--rootfs", "/tmp/rootfs.ext4", "--kernel", "/tmp/Image"}) {
+		t.Fatal("low-level rootfs create should stay on helper create path")
+	}
+}
+
 func TestWorkspaceCommandRunsSetupBeforeExec(t *testing.T) {
 	command := workspaceCommand(workspaceOptions{
 		SetupCommands: []string{"apt-get update", "apt-get install -y git"},

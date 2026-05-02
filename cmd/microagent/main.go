@@ -29,6 +29,13 @@ var (
 	outputFormat string
 )
 
+const (
+	defaultWorkspaceImageArm64 = "docker.io/library/busybox@sha256:bd44eb136a95dcc8dc58995e43abc40a413f2e8e3d4a2aae6bccbe94686acb05"
+	defaultWorkspaceImageAMD64 = "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
+	defaultWorkspaceImageOther = "docker.io/library/busybox:1.36.1"
+	defaultWorkspaceMemoryMiB  = 512
+)
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -80,7 +87,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "start" && hasPositionalWorkspaceName(args[1:]) {
 		return runStartWorkspace(ctx, args[1:], stdout)
 	}
-	if args[0] == "create" && hasFlagValue(args[1:], "image") {
+	if args[0] == "create" && shouldUseHighLevelCreate(args[1:]) {
 		return runHighLevelCreate(ctx, args[1:], stdout)
 	}
 	helperPath := os.Getenv("MICROAGENT_APPLEVF_HELPER")
@@ -889,7 +896,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	opts := workspaceOptions{
 		Backend:      defaultBackend(),
 		Architecture: defaultGuestArch(),
-		MemoryMiB:    512,
+		MemoryMiB:    defaultWorkspaceMemoryMiB,
 		CPUCount:     2,
 		StateDir:     defaultStateDir(),
 		HelperPath:   os.Getenv("MICROAGENT_APPLEVF_HELPER"),
@@ -950,7 +957,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	}
 	opts.PrepareForStart = true
 	if opts.Name == "" {
-		return fmt.Errorf("create requires --name")
+		return fmt.Errorf("create requires a name")
 	}
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
@@ -1012,7 +1019,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts := workspaceOptions{
 		Backend:      defaultBackend(),
 		Architecture: defaultGuestArch(),
-		MemoryMiB:    512,
+		MemoryMiB:    defaultWorkspaceMemoryMiB,
 		CPUCount:     2,
 		SizeMiB:      rootfs.DefaultSizeMiB,
 		Timeout:      2 * time.Minute,
@@ -1053,7 +1060,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	if fs.NArg() != 0 {
-		return workspaceOptions{}, fmt.Errorf("unexpected %s argument: %s", command, fs.Arg(0))
+		if command == "create" && fs.NArg() == 1 && opts.Name == "" {
+			opts.Name = fs.Arg(0)
+		} else {
+			return workspaceOptions{}, fmt.Errorf("unexpected %s argument: %s", command, fs.Arg(0))
+		}
 	}
 	opts.SetupCommands = append([]string{}, setupCommands...)
 	env, err := parseEnvFlags(envVars)
@@ -1063,7 +1074,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.Env = env
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
-		return workspaceOptions{}, fmt.Errorf("%s requires --image", command)
+		if command == "create" {
+			opts.ImageRef = defaultWorkspaceImage(opts.Architecture)
+		} else {
+			return workspaceOptions{}, fmt.Errorf("%s requires --image", command)
+		}
 	}
 	if !kernelExplicit {
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
@@ -1816,6 +1831,44 @@ func wantsHelp(args []string) bool {
 	return false
 }
 
+func shouldUseHighLevelCreate(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	if wantsHelp(args) {
+		return true
+	}
+	if hasLowLevelCreateFlag(args) {
+		return false
+	}
+	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
+		return true
+	}
+	return hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "env")
+}
+
+func hasLowLevelCreateFlag(args []string) bool {
+	for _, arg := range args {
+		switch arg {
+		case "--rootfs", "-rootfs", "--json", "-json", "--dry-run", "-dry-run", "--request-id", "-request-id", "--role", "-role", "--vsock", "-vsock":
+			return true
+		}
+		if strings.HasPrefix(arg, "--rootfs=") ||
+			strings.HasPrefix(arg, "-rootfs=") ||
+			strings.HasPrefix(arg, "--json=") ||
+			strings.HasPrefix(arg, "-json=") ||
+			strings.HasPrefix(arg, "--request-id=") ||
+			strings.HasPrefix(arg, "-request-id=") ||
+			strings.HasPrefix(arg, "--role=") ||
+			strings.HasPrefix(arg, "-role=") ||
+			strings.HasPrefix(arg, "--vsock=") ||
+			strings.HasPrefix(arg, "-vsock=") {
+			return true
+		}
+	}
+	return false
+}
+
 func defaultBackend() string {
 	if runtime.GOOS == "darwin" {
 		return vmkit.BackendAppleVF
@@ -1831,6 +1884,17 @@ func defaultGuestArch() string {
 		return "arm64"
 	default:
 		return runtime.GOARCH
+	}
+}
+
+func defaultWorkspaceImage(arch string) string {
+	switch strings.TrimSpace(arch) {
+	case "arm64", "aarch64":
+		return defaultWorkspaceImageArm64
+	case "amd64", "x86_64":
+		return defaultWorkspaceImageAMD64
+	default:
+		return defaultWorkspaceImageOther
 	}
 }
 
@@ -2390,7 +2454,7 @@ Options:
   -kernel <path>        Custom kernel path
   -rootfs <path>        Rootfs image path
   -state-dir <dir>      State directory
-  -memory <MiB>         Memory in MiB
+  -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
   -cpus <n>             CPU count
   -vsock p=host:port    Add a vsock mapping
 `)
@@ -2410,7 +2474,7 @@ Options:
   -name <name>          Workspace name; generated when omitted
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
-  -memory <MiB>         Memory in MiB
+  -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
   -timeout <seconds>    Timeout
@@ -2426,14 +2490,14 @@ func printCreateHelp(stdout *os.File) {
 Create a workspace from an image.
 
 Options:
-  -image <ref>          OCI image
+  -image <ref>          OCI image; defaults to a small BusyBox image
   -name <name>          Workspace name
   -setup <command>      Shell command to run before first start
   -entrypoint <command> Command to run on start
   -env KEY=VALUE        Guest environment variable
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
-  -memory <MiB>         Memory in MiB
+  -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
   -mke2fs <path>        mke2fs binary path
