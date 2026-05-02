@@ -75,6 +75,13 @@ Run the OCI rootfs smoke:
 make smoke-rootfs
 ```
 
+Run the Linux Firecracker boot smoke outside sandboxed environments so KVM,
+network, and Microagent state paths are visible:
+
+```bash
+make smoke-firecracker
+```
+
 Build and ad-hoc sign the Apple VF helper:
 
 ```bash
@@ -99,6 +106,8 @@ microagent doctor
 ```
 
 The output includes host support and default kernel status.
+On Linux, run `microagent` outside sandboxed agent environments when checking
+KVM or booting Firecracker microVMs.
 
 Run a command from an image:
 

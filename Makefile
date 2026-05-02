@@ -1,6 +1,6 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test smoke smoke-rootfs signed-helper smoke-boot
+.PHONY: test smoke smoke-rootfs smoke-firecracker signed-helper smoke-boot
 
 test:
 	go test ./...
@@ -17,6 +17,9 @@ endif
 
 smoke-rootfs:
 	scripts/rootfs-oci-smoke.sh
+
+smoke-firecracker:
+	scripts/firecracker-boot-smoke.sh
 
 signed-helper:
 	scripts/applevf-helper-build.sh
