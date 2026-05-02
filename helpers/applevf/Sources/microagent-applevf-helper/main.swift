@@ -549,14 +549,14 @@ func virtualMachineConfiguration(identity: Identity, config: Config, attachSeria
     let attachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: config.rootfsPath), readOnly: false)
     vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
     vmConfig.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
-    let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
     if attachSerial {
+        let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
         FileManager.default.createFile(atPath: serialLogPath(identity: identity, stateDir: config.stateDir).path, contents: nil)
         let serialHandle = try FileHandle(forWritingTo: serialLogPath(identity: identity, stateDir: config.stateDir))
         try serialHandle.seekToEnd()
         serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: nil, fileHandleForWriting: serialHandle)
+        vmConfig.serialPorts = [serial]
     }
-    vmConfig.serialPorts = [serial]
     if !(config.vsockListeners ?? []).isEmpty {
         vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
     }
