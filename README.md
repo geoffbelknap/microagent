@@ -1,15 +1,14 @@
 # microagent-kit
 
-`microagent-kit` is a Go library, CLI, and Swift helper for running AI agents
-inside inspectable Apple Virtualization.framework microVMs.
+`microagent-kit` runs Linux workspaces inside microVMs.
 
-The command-line tool is `microagent`. Apple VF access lives in
-`microagent-applevf-helper`, a standalone process with a JSON stdin/stdout
-protocol. Go, Python, Rust, Node, and shell scripts can call the helper without
-linking Swift.
+The command-line tool is `microagent`. On macOS, Apple Virtualization.framework
+access lives in `microagent-applevf-helper`, a small JSON helper that other
+languages can call directly.
 
-VM policy, model calls, tool mediation, credentials, and operator UX stay with
-the caller.
+Microagent provides the kernel, converts OCI images into VM disks, and starts
+the VM. Identity, policy, credentials, and higher-level control stay outside
+this project.
 
 ## Build
 
@@ -18,43 +17,61 @@ go test ./...
 swift build --package-path helpers/applevf --disable-sandbox
 ```
 
-Run the lifecycle smokes:
+Run the smokes:
 
 ```bash
 make smoke
 ```
 
-Run the real OCI rootfs smoke when `mke2fs` is installed and network access is
-available:
+Run the OCI rootfs smoke:
 
 ```bash
 make smoke-rootfs
 ```
 
-Build and ad-hoc sign the Apple VF helper for VM boot work:
+Build and ad-hoc sign the Apple VF helper:
 
 ```bash
 make signed-helper
 ```
 
-Boot a Linux VM when you have a Linux ARM64 kernel image:
+Boot a Linux VM:
 
 ```bash
 make smoke-boot
 ```
 
-The boot smoke looks for the kernel at
-`~/.microagent/kernels/apple-vf/Image`.
+The boot smoke looks for the kernel at `~/.microagent/kernels/apple-vf/arm64/Image`.
+The older `~/.microagent/kernels/apple-vf/Image` path still works.
 
 ## CLI
 
-Check whether the host can use Apple Virtualization.framework:
+Check the host:
 
 ```bash
 microagent doctor
 ```
 
-Create runtime state:
+Run a command:
+
+```bash
+microagent run \
+  --image docker.io/library/ubuntu:24.04 \
+  --exec "uname -a"
+```
+
+Create a workspace:
+
+```bash
+microagent create \
+  --name research \
+  --image docker.io/library/ubuntu:24.04
+```
+
+The image supplies Linux userspace. Microagent creates the disk and starts the
+VM.
+
+Create a workspace from an existing rootfs:
 
 ```bash
 microagent create \
@@ -64,7 +81,7 @@ microagent create \
   --state-dir /tmp/microagent-kit
 ```
 
-Validate without writing state:
+Validate an existing rootfs:
 
 ```bash
 microagent create --dry-run \
@@ -74,17 +91,16 @@ microagent create --dry-run \
   --state-dir /tmp/microagent-kit
 ```
 
-Read state:
+Show state:
 
 ```bash
 microagent status agent-1 --state-dir /tmp/microagent-kit
 ```
 
-JSON is still available for automation:
+Use JSON:
 
 ```bash
 microagent create --json request.json
-microagent create --json - < request.json
 ```
 
 Request JSON:
@@ -107,7 +123,7 @@ Request JSON:
 }
 ```
 
-The command prints a JSON response if the request is valid.
+The command prints JSON.
 
 Delete state:
 
@@ -115,37 +131,34 @@ Delete state:
 microagent delete agent-1 --state-dir /tmp/microagent-kit
 ```
 
-The `start` command exists, but VM launch is not wired yet.
-
-Build a rootfs from an OCI image:
+Build a rootfs:
 
 ```bash
 microagent rootfs build \
   --image docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6 \
   --arch arm64 \
   --size-mib 64 \
-  --mke2fs "$(brew --prefix e2fsprogs)/sbin/mke2fs" \
+  --mke2fs /opt/homebrew/opt/e2fsprogs/sbin/mke2fs \
   --out /tmp/busybox-rootfs.ext4
 ```
 
-Set `MICROAGENT_APPLEVF_HELPER` or pass `-helper` to point the Go CLI at a
-specific helper binary:
+Use a local helper build:
 
 ```bash
 microagent create -helper ./helpers/applevf/.build/debug/microagent-applevf-helper --json request.json
 ```
 
-## Helper protocol
+## Helper
 
-The helper accepts one JSON request on stdin and writes one JSON response to
-stdout. The protocol is documented in `docs/protocol.md`.
+The helper reads one JSON request from stdin and writes one JSON response to
+stdout. See `docs/protocol.md`.
 
 ## Boundary
 
-`microagent-kit` handles VM lifecycle work:
+`microagent-kit` handles the VM work:
 
 ```text
-agent runtime
+caller
   -> microagent-kit
        -> Apple Virtualization.framework backend
        -> OCI image to ext4 rootfs builds

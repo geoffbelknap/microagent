@@ -410,7 +410,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 	script := "#!/bin/sh\nset -eu\nmkdir -p /proc /sys /dev\nmount -t proc proc /proc || true\nmount -t sysfs sysfs /sys || true\n" +
 		envLines(env) +
 		commandLine +
-		"if [ \"$#\" -gt 0 ]; then\n  exec \"$@\"\nfi\nexec /bin/sh\n"
+		"if [ \"$#\" -gt 0 ]; then\n  set +e\n  \"$@\"\n  status=\"$?\"\n  set -e\n  poweroff -f || halt -f || reboot -f || true\n  exit \"$status\"\nfi\nexec /bin/sh\n"
 	if err := os.WriteFile(target, []byte(script), 0o755); err != nil {
 		return fmt.Errorf("write init: %w", err)
 	}

@@ -208,6 +208,67 @@ func TestRootFSExecMapsToShellCommand(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsForRun(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"--image", "docker.io/library/ubuntu:24.04",
+		"--exec", "uname -a",
+		"--name", "research",
+		"--kernel", "/tmp/kernel",
+		"--state-dir", "/tmp/microagent-state",
+		"--mke2fs", "/tmp/mke2fs",
+		"--arch", "arm64",
+		"--memory", "1024",
+		"--cpus", "4",
+		"--size-mib", "2048",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.ImageRef != "docker.io/library/ubuntu:24.04" {
+		t.Fatalf("ImageRef = %q", opts.ImageRef)
+	}
+	if opts.ExecCommand != "uname -a" {
+		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
+	}
+	if opts.Name != "research" {
+		t.Fatalf("Name = %q", opts.Name)
+	}
+	if opts.KernelPath != "/tmp/kernel" {
+		t.Fatalf("KernelPath = %q", opts.KernelPath)
+	}
+	if opts.MemoryMiB != 1024 || opts.CPUCount != 4 || opts.SizeMiB != 2048 {
+		t.Fatalf("resource opts = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+}
+
+func TestRunWorkspaceRequiresExec(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runWorkspace(t.Context(), []string{"--image", "docker.io/library/ubuntu:24.04"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "run requires --exec") {
+		t.Fatalf("err = %v, want --exec validation", err)
+	}
+}
+
+func TestHighLevelCreateDetection(t *testing.T) {
+	if !hasFlagValue([]string{"--image", "ubuntu:24.04"}, "image") {
+		t.Fatal("expected --image to be detected")
+	}
+	if !hasFlagValue([]string{"--image=ubuntu:24.04"}, "image") {
+		t.Fatal("expected --image=value to be detected")
+	}
+	if hasFlagValue([]string{"--kernel", "/tmp/kernel"}, "image") {
+		t.Fatal("did not expect image flag")
+	}
+}
+
 func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

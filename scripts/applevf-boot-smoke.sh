@@ -3,11 +3,14 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HELPER="${MICROAGENT_APPLEVF_HELPER:-$ROOT/helpers/applevf/.build/release/microagent-applevf-helper}"
-KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/Image}"
+KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
+if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
+  KERNEL="$HOME/.microagent/kernels/apple-vf/Image"
+fi
 IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
 ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-boot.XXXXXX")"
-ROOTFS="$STATE_DIR/rootfs.ext4"
+RESULT="$STATE_DIR/result.json"
 
 cleanup() {
   if [ "${MICROAGENT_KEEP_BOOT_SMOKE:-0}" != "1" ]; then
@@ -41,65 +44,38 @@ else
   exit 2
 fi
 
-go build -o "$STATE_DIR/microagent" "$ROOT/cmd/microagent"
+(
+  cd "$ROOT"
+  go build -o "$STATE_DIR/microagent" ./cmd/microagent
+)
 
-"$STATE_DIR/microagent" rootfs build \
+"$STATE_DIR/microagent" run \
   --image "$IMAGE" \
   --arch "$ARCH" \
   --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}" \
   --mke2fs "$MKE2FS" \
-  --exec "echo MICROAGENT_BOOT_OK; uname -m; poweroff -f || halt -f || true" \
-  --out "$ROOTFS" >/dev/null
-
-run_cli() {
-  "$STATE_DIR/microagent" "$@" --helper "$HELPER"
-}
-
-run_cli start \
-  --id boot-smoke \
+  --exec "echo MICROAGENT_BOOT_OK; uname -m" \
+  --name boot-smoke \
   --kernel "$KERNEL" \
-  --rootfs "$ROOTFS" \
   --state-dir "$STATE_DIR" \
   --memory "${MICROAGENT_APPLEVF_BOOT_MEMORY_MIB:-512}" \
-  --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}" >/dev/null
+  --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}" \
+  --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}" \
+  --helper "$HELPER" >"$RESULT"
 
-serial="$STATE_DIR/boot-smoke/serial.log"
-deadline=$((SECONDS + ${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}))
-state=""
-while [ "$SECONDS" -lt "$deadline" ]; do
-  status="$(run_cli status boot-smoke --state-dir "$STATE_DIR")"
-  state="$(python3 - <<'PY' "$status"
+python3 - "$RESULT" <<'PY'
 import json
 import sys
 
-print((json.loads(sys.argv[1]).get("event") or {}).get("state", ""))
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    result = json.load(f)
+
+serial = result.get("serial_log", "")
+print(serial[-8000:])
+if "MICROAGENT_BOOT_OK" not in serial:
+    raise SystemExit("VM booted but command output was not found in serial log")
+if result.get("final_state") != "stopped":
+    raise SystemExit(f"unexpected final state: {result.get('final_state')}")
 PY
-)"
-  if [ "$state" = "running" ] || [ "$state" = "stopped" ] || [ "$state" = "failed" ]; then
-    break
-  fi
-  sleep 1
-done
 
-if [ "$state" != "running" ] && [ "$state" != "stopped" ]; then
-  echo "VM did not reach running/stopped state; last state: ${state:-unknown}" >&2
-  if [ -f "$serial" ]; then
-    tail -100 "$serial" >&2
-  fi
-  run_cli delete boot-smoke --state-dir "$STATE_DIR" >/dev/null || true
-  exit 1
-fi
-
-if [ -f "$serial" ]; then
-  tail -100 "$serial"
-fi
-
-if ! grep -q "MICROAGENT_BOOT_OK" "$serial"; then
-  echo "VM booted but command output was not found in serial log" >&2
-  run_cli delete boot-smoke --state-dir "$STATE_DIR" >/dev/null || true
-  exit 1
-fi
-
-run_cli stop boot-smoke --state-dir "$STATE_DIR" >/dev/null || true
-run_cli delete boot-smoke --state-dir "$STATE_DIR" >/dev/null || true
-echo "Apple VF boot smoke reached state: $state"
+echo "Apple VF boot smoke reached stopped state"

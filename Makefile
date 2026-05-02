@@ -7,6 +7,7 @@ test:
 smoke: test
 	scripts/helper-lifecycle-smoke.sh
 	scripts/cli-lifecycle-smoke.sh
+	scripts/cli-workspace-smoke.sh
 
 smoke-rootfs:
 	scripts/rootfs-oci-smoke.sh
