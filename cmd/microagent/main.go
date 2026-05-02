@@ -402,22 +402,23 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 }
 
 type workspaceOptions struct {
-	Name          string
-	ImageRef      string
-	ExecCommand   string
-	Backend       string
-	KernelPath    string
-	StateDir      string
-	HelperPath    string
-	GuestInitPath string
-	Mke2fsPath    string
-	Architecture  string
-	MemoryMiB     int
-	CPUCount      int
-	SizeMiB       int64
-	Timeout       time.Duration
-	ResultPort    uint32
-	Keep          bool
+	Name           string
+	ImageRef       string
+	ExecCommand    string
+	Backend        string
+	KernelPath     string
+	StateDir       string
+	HelperPath     string
+	GuestInitPath  string
+	Mke2fsPath     string
+	Architecture   string
+	MemoryMiB      int
+	CPUCount       int
+	SizeMiB        int64
+	Timeout        time.Duration
+	ResultPort     uint32
+	KernelExplicit bool
+	Keep           bool
 }
 
 type workspaceResult struct {
@@ -456,6 +457,9 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if opts.Name == "" {
 		opts.Name = fmt.Sprintf("run-%d", time.Now().UnixNano())
+	}
+	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
+		return err
 	}
 	result, err := createWorkspaceRootfs(ctx, opts)
 	if err != nil {
@@ -505,6 +509,9 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	}
 	if opts.Name == "" {
 		return fmt.Errorf("create requires --name")
+	}
+	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
+		return err
 	}
 	result, err := createWorkspaceRootfs(ctx, opts)
 	if err != nil {
@@ -576,6 +583,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if !kernelExplicit {
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
+	opts.KernelExplicit = kernelExplicit
 	if timeoutSeconds <= 0 {
 		return workspaceOptions{}, fmt.Errorf("%s timeout must be positive", command)
 	}
@@ -585,6 +593,29 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.ResultPort = uint32(resultPort)
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
 	return opts, nil
+}
+
+func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
+	if opts.KernelExplicit {
+		return nil
+	}
+	if strings.TrimSpace(opts.KernelPath) == "" {
+		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	}
+	if _, err := os.Stat(opts.KernelPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	kernel, ok := defaultKernel(opts.Backend, opts.Architecture)
+	if !ok {
+		return fmt.Errorf("no default kernel for %s/%s; pass --kernel", opts.Backend, opts.Architecture)
+	}
+	return installKernel(ctx, kernelOptions{
+		URL:        kernel.URL,
+		SHA256:     kernel.SHA256,
+		OutputPath: opts.KernelPath,
+	})
 }
 
 func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspaceResult, error) {
@@ -965,11 +996,13 @@ Commands:
   kill                 Force stop a workspace
   delete               Delete a workspace
   doctor               Check the host
-  kernel install       Install a kernel
-  kernel verify        Verify a kernel
   rootfs build         Build a rootfs from an OCI image
   version              Print the version
   help                 Show help
+
+Advanced:
+  kernel install       Install a custom kernel
+  kernel verify        Verify a custom kernel
 
 Options:
   -helper <path>        Override the Apple VF helper path
@@ -977,7 +1010,7 @@ Options:
   -image <ref>          OCI image
   -name <name>          Workspace name
   -id <id>              Workspace ID
-  -kernel <path>        Kernel path
+  -kernel <path>        Custom kernel path
   -rootfs <path>        Rootfs image path
   -state-dir <dir>      State directory
   -memory <MiB>         Memory in MiB
@@ -995,7 +1028,7 @@ Options:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
   -name <name>          Workspace name; generated when omitted
-  -kernel <path>        Kernel path
+  -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
   -memory <MiB>         Memory in MiB
   -cpus <n>             CPU count
@@ -1010,12 +1043,15 @@ Options:
 func printKernelHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent kernel
 
+Advanced kernel commands. Most users can start with microagent run --image ...
+and skip this.
+
 Commands:
-  install              Install a kernel
-  verify               Verify a kernel
+  install              Install a custom kernel
+  verify               Verify a custom kernel
 
 Install options:
-  With no options, install the default kernel for this Mac.
+  With no options, install Microagent's default kernel for this Mac.
   -url <url>           Download URL
   -from <path>         Local kernel path
   -sha256 <sha256>     Expected SHA-256

@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -314,6 +316,56 @@ func TestDefaultKernelManifestHasAppleVFArm64(t *testing.T) {
 	}
 	if kernel.URL == "" || kernel.SHA256 == "" {
 		t.Fatalf("kernel = %#v", kernel)
+	}
+}
+
+func TestEnsureWorkspaceKernelSkipsExplicitKernel(t *testing.T) {
+	opts := workspaceOptions{
+		Backend:        vmkit.BackendAppleVF,
+		Architecture:   "arm64",
+		KernelPath:     filepath.Join(t.TempDir(), "missing"),
+		KernelExplicit: true,
+	}
+	if err := ensureWorkspaceKernel(t.Context(), &opts); err != nil {
+		t.Fatalf("ensureWorkspaceKernel: %v", err)
+	}
+}
+
+func TestEnsureWorkspaceKernelInstallsDefaultKernel(t *testing.T) {
+	kernelBytes := []byte("test kernel")
+	sum := sha256.Sum256(kernelBytes)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(kernelBytes)
+	}))
+	t.Cleanup(server.Close)
+
+	originalDefaults := defaultKernels
+	defaultKernels = []kernelManifestEntry{
+		{
+			Backend:      vmkit.BackendAppleVF,
+			Architecture: "arm64",
+			URL:          server.URL,
+			SHA256:       fmt.Sprintf("%x", sum),
+		},
+	}
+	t.Cleanup(func() {
+		defaultKernels = originalDefaults
+	})
+
+	opts := workspaceOptions{
+		Backend:      vmkit.BackendAppleVF,
+		Architecture: "arm64",
+		KernelPath:   filepath.Join(t.TempDir(), "Image"),
+	}
+	if err := ensureWorkspaceKernel(t.Context(), &opts); err != nil {
+		t.Fatalf("ensureWorkspaceKernel: %v", err)
+	}
+	got, err := os.ReadFile(opts.KernelPath)
+	if err != nil {
+		t.Fatalf("read kernel: %v", err)
+	}
+	if string(got) != string(kernelBytes) {
+		t.Fatalf("kernel bytes = %q, want %q", got, kernelBytes)
 	}
 }
 

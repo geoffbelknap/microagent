@@ -52,12 +52,6 @@ Check the host:
 microagent doctor
 ```
 
-Install the default kernel:
-
-```bash
-microagent kernel install
-```
-
 Run a command:
 
 ```bash
@@ -75,7 +69,7 @@ microagent create \
 ```
 
 The image supplies Linux userspace. Microagent creates the disk and starts the
-VM.
+VM. If the default kernel is missing, Microagent installs it first.
 
 Create a workspace from an existing rootfs:
 
@@ -146,6 +140,15 @@ microagent rootfs build \
   --size-mib 64 \
   --mke2fs /opt/homebrew/opt/e2fsprogs/sbin/mke2fs \
   --out /tmp/busybox-rootfs.ext4
+```
+
+Use a different kernel when you need one:
+
+```bash
+microagent run \
+  --image docker.io/library/ubuntu:24.04 \
+  --exec "uname -a" \
+  --kernel /tmp/Image
 ```
 
 Use a local helper build:
