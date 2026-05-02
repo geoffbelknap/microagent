@@ -129,8 +129,9 @@ func TestResolveFirecrackerPathUsesEnvironment(t *testing.T) {
 
 func TestDefaultFirecrackerPathResolvesHomebrewSymlink(t *testing.T) {
 	dir := t.TempDir()
-	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.17", "bin")
-	cellarLibexec := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.17", "libexec")
+	cellarVersion := "test-version"
+	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", cellarVersion, "bin")
+	cellarLibexec := filepath.Join(dir, "Cellar", "microagent-kit", cellarVersion, "libexec")
 	homebrewBin := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(cellarBin, 0o755); err != nil {
 		t.Fatal(err)
