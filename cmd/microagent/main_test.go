@@ -216,6 +216,8 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	opts, err := parseWorkspaceOptions("run", []string{
 		"--image", "docker.io/library/ubuntu:24.04",
 		"--exec", "uname -a",
+		"--setup", "apt-get update",
+		"--setup", "apt-get install -y git",
 		"--name", "research",
 		"--kernel", "/tmp/kernel",
 		"--state-dir", "/tmp/microagent-state",
@@ -234,6 +236,9 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	if opts.ExecCommand != "uname -a" {
 		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
 	}
+	if len(opts.SetupCommands) != 2 || opts.SetupCommands[0] != "apt-get update" || opts.SetupCommands[1] != "apt-get install -y git" {
+		t.Fatalf("SetupCommands = %#v", opts.SetupCommands)
+	}
 	if opts.Name != "research" {
 		t.Fatalf("Name = %q", opts.Name)
 	}
@@ -242,6 +247,28 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	}
 	if opts.MemoryMiB != 1024 || opts.CPUCount != 4 || opts.SizeMiB != 2048 {
 		t.Fatalf("resource opts = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+}
+
+func TestWorkspaceCommandRunsSetupBeforeExec(t *testing.T) {
+	command := workspaceCommand(workspaceOptions{
+		SetupCommands: []string{"apt-get update", "apt-get install -y git"},
+		ExecCommand:   "uname -a",
+	})
+	want := "set -eu\napt-get update\napt-get install -y git\nuname -a"
+	if command != want {
+		t.Fatalf("workspaceCommand = %q, want %q", command, want)
+	}
+}
+
+func TestWorkspaceCommandAllowsMultiCommandExec(t *testing.T) {
+	command := workspaceCommand(workspaceOptions{
+		SetupCommands: []string{"echo setup"},
+		ExecCommand:   "echo one; echo two",
+	})
+	want := "set -eu\necho setup\necho one; echo two"
+	if command != want {
+		t.Fatalf("workspaceCommand = %q, want %q", command, want)
 	}
 }
 

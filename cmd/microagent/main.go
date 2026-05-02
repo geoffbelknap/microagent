@@ -437,6 +437,7 @@ type workspaceOptions struct {
 	Name           string
 	ImageRef       string
 	ExecCommand    string
+	SetupCommands  []string
 	Backend        string
 	KernelPath     string
 	StateDir       string
@@ -587,6 +588,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Name, "id", "", "Workspace ID")
 	fs.StringVar(&opts.ImageRef, "image", "", "OCI image reference")
 	fs.StringVar(&opts.ExecCommand, "exec", "", "Shell command to run as guest init")
+	var setupCommands multiFlag
+	fs.Var(&setupCommands, "setup", "Shell command to run before --exec")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "Microagent state directory")
@@ -608,6 +611,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if fs.NArg() != 0 {
 		return workspaceOptions{}, fmt.Errorf("unexpected %s argument: %s", command, fs.Arg(0))
 	}
+	opts.SetupCommands = append([]string{}, setupCommands...)
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		return workspaceOptions{}, fmt.Errorf("%s requires --image", command)
@@ -658,7 +662,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
 		InitPath:       rootfs.DefaultInitPath,
-		Command:        shellCommand(opts.ExecCommand),
+		Command:        shellCommand(workspaceCommand(opts)),
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     opts.ResultPort,
 		StateDir:       filepath.Join(opts.StateDir, "build"),
@@ -869,6 +873,24 @@ func shellCommand(command string) []string {
 	return []string{"/bin/sh", "-lc", command}
 }
 
+func workspaceCommand(opts workspaceOptions) string {
+	var lines []string
+	for _, command := range opts.SetupCommands {
+		command = strings.TrimSpace(command)
+		if command != "" {
+			lines = append(lines, command)
+		}
+	}
+	execCommand := strings.TrimSpace(opts.ExecCommand)
+	if execCommand != "" {
+		lines = append(lines, execCommand)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "set -eu\n" + strings.Join(lines, "\n")
+}
+
 func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, vsocks []string) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
@@ -920,6 +942,7 @@ func reorderFlagArgs(args []string) []string {
 		"-name":        true,
 		"-image":       true,
 		"-exec":        true,
+		"-setup":       true,
 		"-request-id":  true,
 		"-role":        true,
 		"-backend":     true,
@@ -1059,6 +1082,7 @@ Run a command from an image.
 Options:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
+  -setup <command>      Shell command to run before --exec
   -name <name>          Workspace name; generated when omitted
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory

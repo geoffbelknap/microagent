@@ -78,6 +78,16 @@ microagent run \
   --exec "uname -a"
 ```
 
+Run setup commands first:
+
+```bash
+microagent run \
+  --image docker.io/library/busybox:1.36 \
+  --setup "mkdir -p /workspace" \
+  --setup "echo ready > /workspace/status" \
+  --exec "cat /workspace/status"
+```
+
 Create a workspace:
 
 ```bash
