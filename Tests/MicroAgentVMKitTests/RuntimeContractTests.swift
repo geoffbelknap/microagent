@@ -60,3 +60,19 @@ import Testing
     #expect(config.cpuCount == 2)
     #expect(config.vsockListeners.isEmpty)
 }
+
+@Test func validationRejectsDuplicateVsockPorts() throws {
+    let config = VMConfig(
+        kernelPath: "/tmp/kernel",
+        rootfsPath: "/tmp/rootfs.ext4",
+        stateDir: "/tmp/state",
+        vsockListeners: [
+            VsockListener(port: 1024, target: "127.0.0.1:8200"),
+            VsockListener(port: 1024, target: "127.0.0.1:8300"),
+        ]
+    )
+
+    #expect(throws: RuntimeDriverError.invalidConfiguration("duplicate vsock listener port 1024")) {
+        try validateRuntimeConfig(config)
+    }
+}

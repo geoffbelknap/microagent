@@ -61,4 +61,28 @@ public func validateRuntimeConfig(_ config: VMConfig) throws {
     if config.cpuCount <= 0 {
         throw RuntimeDriverError.invalidConfiguration("cpuCount must be positive")
     }
+    var ports = Set<UInt32>()
+    for listener in config.vsockListeners {
+        if listener.port == 0 {
+            throw RuntimeDriverError.invalidConfiguration("vsock listener port must be positive")
+        }
+        if !ports.insert(listener.port).inserted {
+            throw RuntimeDriverError.invalidConfiguration("duplicate vsock listener port \(listener.port)")
+        }
+        if listener.target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw RuntimeDriverError.invalidConfiguration("vsock listener \(listener.port) target is required")
+        }
+    }
+}
+
+public func validateRuntimeIdentity(_ identity: RuntimeIdentity) throws {
+    if identity.requestID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        throw RuntimeDriverError.invalidConfiguration("requestID is required")
+    }
+    if identity.runtimeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        throw RuntimeDriverError.invalidConfiguration("runtimeID is required")
+    }
+    if identity.backend.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        throw RuntimeDriverError.invalidConfiguration("backend is required")
+    }
 }

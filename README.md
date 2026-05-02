@@ -28,6 +28,12 @@ swift test
 
 ## CLI
 
+Check whether the host can use Apple Virtualization.framework:
+
+```bash
+microagent-vmkit apple-vf-host-check
+```
+
 Validate a lifecycle request:
 
 ```bash

@@ -10,6 +10,16 @@ let arguments = Array(CommandLine.arguments.dropFirst())
 let command = arguments.first ?? "help"
 
 switch command {
+case "apple-vf-host-check":
+    do {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try FileHandle.standardOutput.write(contentsOf: encoder.encode(AppleVirtualizationHost.support()))
+        print()
+    } catch {
+        fputs("\(error)\n", stderr)
+        exit(1)
+    }
 case "version":
     print("microagent-vmkit 0.1.0")
 case "validate-config":
@@ -37,9 +47,10 @@ case "help", "--help", "-h":
     microagent-vmkit
 
     Commands:
+      apple-vf-host-check           Print Apple Virtualization host support
       validate-config <request.json>  Validate a VM lifecycle request
-      version                         Print version information
-      help                            Show this help
+      version                       Print version information
+      help                          Show this help
     """)
 default:
     fputs("unknown command: \(command)\n", stderr)
