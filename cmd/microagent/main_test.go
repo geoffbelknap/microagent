@@ -287,6 +287,41 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	}
 }
 
+func TestDefaultGuestInitPathResolvesHomebrewSymlink(t *testing.T) {
+	dir := t.TempDir()
+	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.14", "bin")
+	cellarLibexec := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.14", "libexec")
+	homebrewBin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(cellarBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cellarLibexec, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(homebrewBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(cellarBin, "microagent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	guestInit := filepath.Join(cellarLibexec, "microagent-guestinit-arm64")
+	if err := os.WriteFile(guestInit, []byte("guest-init"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedGuestInit, err := filepath.EvalSymlinks(guestInit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(homebrewBin, "microagent")
+	if err := os.Symlink(executable, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := defaultGuestInitPathFromExecutable(link, "arm64"); got != resolvedGuestInit {
+		t.Fatalf("defaultGuestInitPathFromExecutable() = %q, want %q", got, resolvedGuestInit)
+	}
+}
+
 func TestWorkspaceHasGuestCommand(t *testing.T) {
 	if !workspaceHasGuestCommand(workspaceOptions{SetupCommands: []string{"echo setup"}}) {
 		t.Fatal("setup command should count as guest work")

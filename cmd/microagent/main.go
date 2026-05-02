@@ -1284,20 +1284,27 @@ func defaultGuestInitPath(arch string) string {
 	if err != nil {
 		return "microagent-guestinit"
 	}
+	return defaultGuestInitPathFromExecutable(executable, arch)
+}
+
+func defaultGuestInitPathFromExecutable(executable, arch string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
 	dir := filepath.Dir(executable)
 	libexecDir := filepath.Clean(filepath.Join(dir, "..", "libexec"))
 	candidates := []string{
-		filepath.Join(dir, "microagent-guestinit-"+arch),
-		filepath.Join(dir, "microagent-guestinit"),
 		filepath.Join(libexecDir, "microagent-guestinit-"+arch),
 		filepath.Join(libexecDir, "microagent-guestinit"),
+		filepath.Join(dir, "microagent-guestinit-"+arch),
+		filepath.Join(dir, "microagent-guestinit"),
 	}
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate
 		}
 	}
-	return candidates[1]
+	return candidates[0]
 }
 
 func hasFlagValue(args []string, name string) bool {
