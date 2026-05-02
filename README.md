@@ -52,6 +52,12 @@ Check the host:
 microagent doctor
 ```
 
+Install the default kernel:
+
+```bash
+microagent kernel install
+```
+
 Run a command:
 
 ```bash

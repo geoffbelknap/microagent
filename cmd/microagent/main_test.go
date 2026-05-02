@@ -307,6 +307,16 @@ func TestKernelInstallFromLocalAndVerify(t *testing.T) {
 	}
 }
 
+func TestDefaultKernelManifestHasAppleVFArm64(t *testing.T) {
+	kernel, ok := defaultKernel(vmkit.BackendAppleVF, "arm64")
+	if !ok {
+		t.Fatal("missing apple-vf arm64 kernel")
+	}
+	if kernel.URL == "" || kernel.SHA256 == "" {
+		t.Fatalf("kernel = %#v", kernel)
+	}
+}
+
 func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

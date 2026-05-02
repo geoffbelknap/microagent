@@ -108,6 +108,14 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	if opts.OutputPath == "" {
 		opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
+	if opts.URL == "" && opts.FromPath == "" && opts.SHA256 == "" {
+		kernel, ok := defaultKernel(opts.Backend, opts.Architecture)
+		if !ok {
+			return fmt.Errorf("no default kernel for %s/%s; use --url or --from", opts.Backend, opts.Architecture)
+		}
+		opts.URL = kernel.URL
+		opts.SHA256 = kernel.SHA256
+	}
 	if err := installKernel(ctx, opts); err != nil {
 		return err
 	}
@@ -167,6 +175,31 @@ type kernelOptions struct {
 	Architecture string
 }
 
+type kernelManifestEntry struct {
+	Backend      string
+	Architecture string
+	URL          string
+	SHA256       string
+}
+
+var defaultKernels = []kernelManifestEntry{
+	{
+		Backend:      vmkit.BackendAppleVF,
+		Architecture: "arm64",
+		URL:          "https://github.com/geoffbelknap/microagent-kit/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-apple-vf-arm64",
+		SHA256:       "73fe78e51a8ce348e69311d376a02114440eee6b60bf2e91af54bdf2dfb405ec",
+	},
+}
+
+func defaultKernel(backend, arch string) (kernelManifestEntry, bool) {
+	for _, kernel := range defaultKernels {
+		if kernel.Backend == backend && kernel.Architecture == arch {
+			return kernel, true
+		}
+	}
+	return kernelManifestEntry{}, false
+}
+
 func installKernel(ctx context.Context, opts kernelOptions) error {
 	if (opts.URL == "") == (opts.FromPath == "") {
 		return fmt.Errorf("kernel install requires exactly one of --url or --from")
@@ -207,6 +240,9 @@ func installKernel(ctx context.Context, opts kernelOptions) error {
 			_ = tmp.Close()
 			return err
 		}
+		if token := githubToken(); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			_ = tmp.Close()
@@ -240,6 +276,13 @@ func installKernel(ctx context.Context, opts kernelOptions) error {
 	}
 	cleanup = false
 	return nil
+}
+
+func githubToken() string {
+	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(os.Getenv("GH_TOKEN"))
 }
 
 func fileSHA256(path string) (string, error) {
@@ -972,6 +1015,7 @@ Commands:
   verify               Verify a kernel
 
 Install options:
+  With no options, install the default kernel for this Mac.
   -url <url>           Download URL
   -from <path>         Local kernel path
   -sha256 <sha256>     Expected SHA-256
