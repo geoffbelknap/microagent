@@ -13,6 +13,22 @@ export GOCACHE="$STATE_DIR/gocache"
 export GOMODCACHE="$STATE_DIR/gomodcache"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 
+case "$(uname -m)" in
+  arm64|aarch64)
+    ARCH="${MICROAGENT_WORKSPACE_SMOKE_ARCH:-arm64}"
+    IMAGE_DEFAULT="docker.io/library/busybox@sha256:bd44eb136a95dcc8dc58995e43abc40a413f2e8e3d4a2aae6bccbe94686acb05"
+    ;;
+  x86_64|amd64)
+    ARCH="${MICROAGENT_WORKSPACE_SMOKE_ARCH:-amd64}"
+    IMAGE_DEFAULT="docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
+    ;;
+  *)
+    ARCH="${MICROAGENT_WORKSPACE_SMOKE_ARCH:-$(uname -m)}"
+    IMAGE_DEFAULT="docker.io/library/busybox:1.36.1"
+    ;;
+esac
+IMAGE="${MICROAGENT_WORKSPACE_SMOKE_IMAGE:-$IMAGE_DEFAULT}"
+
 cleanup() {
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   rm -rf "$STATE_DIR"
@@ -50,11 +66,12 @@ touch "$KERNEL"
 (
   cd "$ROOT"
   go build -o "$CLI" ./cmd/microagent
-  GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+  GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
 "$CLI" run \
-  --image docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6 \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
   --exec "echo workspace-smoke" \
   --name workspace-smoke \
   --kernel "$KERNEL" \
