@@ -84,6 +84,8 @@ make smoke-firecracker
 
 See [docs/firecracker-smoke.md](docs/firecracker-smoke.md) for the expected
 kernel SHA, output, and host requirements.
+The boot-proven release note is in
+[docs/releases/firecracker-amd64-boot-proven.md](docs/releases/firecracker-amd64-boot-proven.md).
 
 Build and ad-hoc sign the Apple VF helper:
 
