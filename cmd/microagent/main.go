@@ -24,7 +24,10 @@ import (
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
 
-var version = "dev"
+var (
+	version      = "dev"
+	outputFormat string
+)
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
@@ -34,6 +37,8 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout *os.File) error {
+	outputFormat = ""
+	args = parseGlobalFlags(args)
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printHelp(stdout)
 		return nil
@@ -53,6 +58,10 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
+	}
+	if args[0] == "create" && wantsHelp(args[1:]) {
+		printCreateHelp(stdout)
+		return nil
 	}
 	if args[0] == "ps" {
 		return runPS(args[1:], stdout)
@@ -88,9 +97,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 			return err
 		}
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if encodeErr := enc.Encode(resp); encodeErr != nil {
+	if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -120,9 +127,7 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 		return fmt.Errorf("unexpected doctor argument: %s", fs.Arg(0))
 	}
 	resp, err := doctorResponse(ctx, opts)
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if encodeErr := enc.Encode(resp); encodeErr != nil {
+	if encodeErr := writeDoctorResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -704,9 +709,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 			result.SerialPath = ""
 		}
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if encodeErr := enc.Encode(result); encodeErr != nil {
+	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -727,9 +730,7 @@ func runPS(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(map[string]any{"workspaces": entries})
+	return writeWorkspaceList(stdout, entries)
 }
 
 func runLogs(args []string, stdout *os.File) error {
@@ -804,9 +805,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	if command == "delete" && resp.OK {
 		cleanupWorkspaceState(workspaceOptions{StateDir: opts.StateDir, Name: name})
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if encodeErr := enc.Encode(resp); encodeErr != nil {
+	if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -938,7 +937,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		SerialPath: serialLogPath(opts),
 		Response:   resp,
 	}
-	if encodeErr := json.NewEncoder(stdout).Encode(result); encodeErr != nil {
+	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -998,9 +997,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		}
 		result.Response = resp
 	}
-	enc := json.NewEncoder(stdout)
-	enc.SetIndent("", "  ")
-	if encodeErr := enc.Encode(result); encodeErr != nil {
+	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -1466,6 +1463,192 @@ func writeJSONFile(path string, value any) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+func writeJSON(stdout *os.File, value any) error {
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(value)
+}
+
+func outputJSON(stdout *os.File) bool {
+	switch outputFormat {
+	case "json":
+		return true
+	case "text":
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MICROAGENT_OUTPUT"))) {
+	case "json":
+		return true
+	case "text", "human":
+		return false
+	}
+	info, err := stdout.Stat()
+	if err != nil {
+		return true
+	}
+	return info.Mode()&os.ModeCharDevice == 0
+}
+
+func parseGlobalFlags(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			outputFormat = "json"
+		case "--text", "--human":
+			outputFormat = "text"
+		case "--output":
+			if i+1 < len(args) {
+				outputFormat = normalizeOutputFormat(args[i+1])
+				i++
+			} else {
+				out = append(out, args[i])
+			}
+		default:
+			if strings.HasPrefix(args[i], "--output=") {
+				outputFormat = normalizeOutputFormat(strings.TrimPrefix(args[i], "--output="))
+				continue
+			}
+			out = append(out, args[i:]...)
+			return out
+		}
+	}
+	return out
+}
+
+func normalizeOutputFormat(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "json":
+		return "json"
+	case "text", "human":
+		return "text"
+	default:
+		return ""
+	}
+}
+
+func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, resp)
+	}
+	fmt.Fprintf(stdout, "Backend: %s\n", nonEmpty(resp.Backend, "unknown"))
+	fmt.Fprintf(stdout, "Status: %s\n", humanOK(resp.OK))
+	if resp.Host != nil {
+		fmt.Fprintf(stdout, "Host: %s", nonEmpty(resp.Host.Architecture, "unknown"))
+		if resp.Host.VirtualizationSupported {
+			fmt.Fprint(stdout, ", virtualization supported")
+		}
+		if resp.Host.KVMAvailable {
+			fmt.Fprint(stdout, ", KVM available")
+		}
+		if resp.Host.VsockAvailable {
+			fmt.Fprint(stdout, ", vsock available")
+		}
+		fmt.Fprintln(stdout)
+	}
+	if resp.Kernel != nil {
+		fmt.Fprintf(stdout, "Kernel: %s", nonEmpty(resp.Kernel.Status, "unknown"))
+		if resp.Kernel.Path != "" {
+			fmt.Fprintf(stdout, " (%s)", resp.Kernel.Path)
+		}
+		fmt.Fprintln(stdout)
+	}
+	if resp.Error != "" {
+		fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
+	}
+	return nil
+}
+
+func writeResponse(stdout *os.File, resp vmkit.Response) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, resp)
+	}
+	fmt.Fprintf(stdout, "Status: %s\n", humanOK(resp.OK))
+	if resp.Backend != "" {
+		fmt.Fprintf(stdout, "Backend: %s\n", resp.Backend)
+	}
+	if resp.Event != nil {
+		fmt.Fprintf(stdout, "Workspace: %s\n", resp.Event.Identity.RuntimeID)
+		fmt.Fprintf(stdout, "State: %s\n", resp.Event.State)
+		if resp.Event.Detail != "" {
+			fmt.Fprintf(stdout, "Detail: %s\n", resp.Event.Detail)
+		}
+	}
+	if resp.Error != "" {
+		fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
+	}
+	return nil
+}
+
+func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	if result.Response.Event != nil {
+		fmt.Fprintf(stdout, "State: %s\n", result.Response.Event.State)
+	} else if result.FinalState != "" {
+		fmt.Fprintf(stdout, "State: %s\n", result.FinalState)
+	}
+	if result.RootfsPath != "" {
+		fmt.Fprintf(stdout, "Rootfs: %s\n", result.RootfsPath)
+	}
+	if result.KernelPath != "" {
+		fmt.Fprintf(stdout, "Kernel: %s\n", result.KernelPath)
+	}
+	if result.SerialPath != "" {
+		fmt.Fprintf(stdout, "Console log: %s\n", result.SerialPath)
+	}
+	if result.Result != nil {
+		fmt.Fprintf(stdout, "Exit code: %d\n", result.Result.ExitCode)
+		if strings.TrimSpace(result.Result.Stdout) != "" {
+			fmt.Fprintf(stdout, "\n%s", result.Result.Stdout)
+			if !strings.HasSuffix(result.Result.Stdout, "\n") {
+				fmt.Fprintln(stdout)
+			}
+		}
+		if strings.TrimSpace(result.Result.Stderr) != "" {
+			fmt.Fprintf(stdout, "\nStderr:\n%s", result.Result.Stderr)
+			if !strings.HasSuffix(result.Result.Stderr, "\n") {
+				fmt.Fprintln(stdout)
+			}
+		}
+	}
+	if result.Response.Error != "" {
+		fmt.Fprintf(stdout, "Error: %s\n", result.Response.Error)
+	}
+	return nil
+}
+
+func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"workspaces": entries})
+	}
+	if len(entries) == 0 {
+		fmt.Fprintln(stdout, "No workspaces.")
+		return nil
+	}
+	fmt.Fprintf(stdout, "%-24s %-12s %s\n", "NAME", "STATE", "BACKEND")
+	for _, entry := range entries {
+		fmt.Fprintf(stdout, "%-24s %-12s %s\n", entry.Name, entry.State, entry.Backend)
+	}
+	return nil
+}
+
+func humanOK(ok bool) string {
+	if ok {
+		return "ok"
+	}
+	return "failed"
+}
+
+func nonEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
 func inspectWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Response, error) {
 	if opts.Backend == vmkit.BackendFirecracker {
 		return inspectFirecrackerWorkspace(opts)
@@ -1622,6 +1805,15 @@ func validateWorkspaceName(name string) error {
 		return fmt.Errorf("invalid workspace name: %s", name)
 	}
 	return nil
+}
+
+func wantsHelp(args []string) bool {
+	for _, arg := range args {
+		if arg == "help" || arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultBackend() string {
@@ -2185,6 +2377,9 @@ Advanced:
   kernel verify        Verify a custom kernel
 
 Options:
+  --json                Print JSON output
+  --text                Print human-readable output
+  --output <json|text>  Select output format
   -helper <path>        Override the Apple VF helper path
   -json <path|- >       Read request JSON from a file or stdin
   -image <ref>          OCI image
@@ -2220,6 +2415,27 @@ Options:
   -size-mib <MiB>       Disk size
   -timeout <seconds>    Timeout
   -keep                 Keep state
+  -mke2fs <path>        mke2fs binary path
+  -helper <path>        Override the Apple VF helper path
+`)
+}
+
+func printCreateHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent create
+
+Create a workspace from an image.
+
+Options:
+  -image <ref>          OCI image
+  -name <name>          Workspace name
+  -setup <command>      Shell command to run before first start
+  -entrypoint <command> Command to run on start
+  -env KEY=VALUE        Guest environment variable
+  -kernel <path>        Custom kernel path
+  -state-dir <dir>      State directory
+  -memory <MiB>         Memory in MiB
+  -cpus <n>             CPU count
+  -size-mib <MiB>       Disk size
   -mke2fs <path>        mke2fs binary path
   -helper <path>        Override the Apple VF helper path
 `)

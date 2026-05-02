@@ -43,6 +43,45 @@ func TestRunVersionAliases(t *testing.T) {
 	}
 }
 
+func TestCreateHelpUsesWorkspaceHelp(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"create", "--help"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run create --help: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "microagent create") || !strings.Contains(text, "-entrypoint <command>") {
+		t.Fatalf("create help = %s", text)
+	}
+	if strings.Contains(text, "Rootfs image path") {
+		t.Fatalf("create help exposed low-level helper flags: %s", text)
+	}
+}
+
+func TestGlobalJSONOutputSwitch(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	args := parseGlobalFlags([]string{"--json", "doctor"})
+	if outputFormat != "json" {
+		t.Fatalf("outputFormat = %q, want json", outputFormat)
+	}
+	if len(args) != 1 || args[0] != "doctor" {
+		t.Fatalf("args = %#v", args)
+	}
+}
+
 func TestFirecrackerDoctorDoesNotRequireAppleVFHelper(t *testing.T) {
 	resp, err := firecrackerDoctorResponse(
 		vmkit.BackendFirecracker,
@@ -626,6 +665,46 @@ func TestRunPSListsWorkspaces(t *testing.T) {
 	}
 	if !strings.Contains(string(got), `"name": "research"`) || !strings.Contains(string(got), `"state": "stopped"`) {
 		t.Fatalf("ps output = %s", got)
+	}
+}
+
+func TestRunPSCanPrintHumanOutput(t *testing.T) {
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "research")
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	event := vmkit.Event{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		State:      vmkit.StateStopped,
+		ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "ps.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPS([]string{"--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runPS: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "NAME") || !strings.Contains(string(got), "research") || strings.Contains(string(got), `"workspaces"`) {
+		t.Fatalf("ps human output = %s", got)
 	}
 }
 
