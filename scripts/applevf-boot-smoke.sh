@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HELPER="${MICROAGENT_APPLEVF_HELPER:-$ROOT/helpers/applevf/.build/release/microagent-applevf-helper}"
+SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
 KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
 if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
   KERNEL="$HOME/.microagent/kernels/apple-vf/Image"
@@ -31,8 +31,8 @@ if [ ! -r "$KERNEL" ]; then
   echo "download or build a Linux ARM64 kernel Image before running this smoke" >&2
   exit 2
 fi
-if [ ! -x "$HELPER" ]; then
-  echo "helper is not executable at $HELPER; run make signed-helper" >&2
+if [ ! -x "$SUPERVISOR" ]; then
+  echo "supervisor is not executable at $SUPERVISOR; run make signed-supervisor" >&2
   exit 2
 fi
 
@@ -64,7 +64,7 @@ fi
   --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}" \
   --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}" \
   --guest-init "$GUEST_INIT" \
-  --helper "$HELPER" >"$RESULT"
+  --supervisor "$SUPERVISOR" >"$RESULT"
 
 python3 - "$RESULT" <<'PY'
 import json

@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-workspace-smoke.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
-HELPER="$STATE_DIR/helper"
+SUPERVISOR="$STATE_DIR/supervisor"
 KERNEL="$STATE_DIR/Image"
 RESULT="$STATE_DIR/result.json"
 
@@ -35,7 +35,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cat >"$HELPER" <<'PY'
+cat >"$SUPERVISOR" <<'PY'
 #!/usr/bin/env python3
 import datetime
 import json
@@ -60,7 +60,7 @@ print(json.dumps({
     },
 }))
 PY
-chmod +x "$HELPER"
+chmod +x "$SUPERVISOR"
 touch "$KERNEL"
 
 (
@@ -80,7 +80,7 @@ touch "$KERNEL"
   --size-mib 64 \
   --result-port 0 \
   --guest-init "$GUEST_INIT" \
-  --helper "$HELPER" >"$RESULT"
+  --supervisor "$SUPERVISOR" >"$RESULT"
 
 python3 - "$RESULT" <<'PY'
 import json

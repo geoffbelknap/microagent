@@ -14,7 +14,7 @@ func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello world"}, map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	}, "", 0)
+	}, "", 0, nil)
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	}, initBinary, 1024)
+	}, initBinary, 1024, []Mount{{Device: "/dev/vdb", Mountpoint: "/config", Mode: "ro"}})
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -65,6 +65,7 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	if !strings.Contains(text, `"port":1024`) ||
 		!strings.Contains(text, `"/bin/echo"`) ||
 		!strings.Contains(text, `"GOOD_ENV=ok"`) ||
+		!strings.Contains(text, `"/config"`) ||
 		strings.Contains(text, "bad-env") {
 		t.Fatalf("unexpected run config: %s", text)
 	}

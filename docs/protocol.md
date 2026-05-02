@@ -1,7 +1,13 @@
-# Helper protocol
+# Supervisor Protocol
 
-`microagent-applevf-helper` is a standalone process. It reads one JSON request
-from stdin, writes one JSON response to stdout, and exits.
+Microagent uses the supervisor concept for backend lifecycle work. The Apple VF
+supervisor is packaged as a standalone executable,
+`microagent-applevf-supervisor`, so non-Swift callers can cross the
+Virtualization.framework boundary through a narrow JSON protocol.
+
+This document describes the Apple VF supervisor protocol.
+`microagent-applevf-supervisor` reads one JSON request from stdin, writes one JSON
+response to stdout, and exits.
 
 Diagnostics go to stderr. Exit code `0` means the response has `"ok": true`.
 Nonzero exit means the response has `"ok": false` or the request could not be
@@ -23,7 +29,15 @@ decoded.
     "rootfsPath": "/tmp/rootfs.ext4",
     "stateDir": "/tmp/microagent",
     "memoryMiB": 512,
-    "cpuCount": 2
+    "cpuCount": 2,
+    "disks": [
+      {
+        "name": "config",
+        "path": "/tmp/config.ext4",
+        "mountpoint": "/config",
+        "mode": "ro"
+      }
+    ]
   }
 }
 ```
@@ -42,6 +56,10 @@ Commands:
 `host` does not require `identity` or `config`. `inspect`, `stop`, `kill`, and
 `delete` require `identity` and `config.stateDir`. `check`, `prepare`, and
 `start` require the full config.
+
+Extra disks are optional. `mode` must be `ro` or `rw`. The supervisor attaches
+them after the rootfs in request order; the guest init mounts them from
+`/dev/vdb` onward.
 
 ## Response
 

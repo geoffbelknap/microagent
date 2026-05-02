@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +68,7 @@ func TestCreateHelpUsesWorkspaceHelp(t *testing.T) {
 		t.Fatalf("create help = %s", text)
 	}
 	if strings.Contains(text, "Rootfs image path") {
-		t.Fatalf("create help exposed low-level helper flags: %s", text)
+		t.Fatalf("create help exposed low-level supervisor flags: %s", text)
 	}
 }
 
@@ -82,7 +84,7 @@ func TestGlobalJSONOutputSwitch(t *testing.T) {
 	}
 }
 
-func TestFirecrackerDoctorDoesNotRequireAppleVFHelper(t *testing.T) {
+func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 	resp, err := firecrackerDoctorResponse(
 		vmkit.BackendFirecracker,
 		"amd64",
@@ -350,6 +352,26 @@ func TestRequestForCommandParsesVsock(t *testing.T) {
 	}
 }
 
+func TestRequestForCommandParsesDisk(t *testing.T) {
+	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--disk", "constraints=/tmp/constraints.ext4:/config:ro",
+	}))
+	if err != nil {
+		t.Fatalf("requestForCommand: %v", err)
+	}
+	if len(req.Config.Disks) != 1 {
+		t.Fatalf("Disks len = %d, want 1", len(req.Config.Disks))
+	}
+	disk := req.Config.Disks[0]
+	if disk.Name != "constraints" || disk.Path != "/tmp/constraints.ext4" || disk.Mountpoint != "/config" || disk.Mode != "ro" {
+		t.Fatalf("disk = %#v", disk)
+	}
+}
+
 func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 	req := workspaceRequest(workspaceOptions{
 		Name:           "agent-1",
@@ -368,14 +390,36 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 	}
 }
 
-func TestRunUsesHelperOverride(t *testing.T) {
+func TestWorkspaceRequestIncludesDisks(t *testing.T) {
+	req := workspaceRequest(workspaceOptions{
+		Name:       "agent-1",
+		Backend:    "apple-vf",
+		KernelPath: "/tmp/kernel",
+		MemoryMiB:  512,
+		CPUCount:   2,
+		Disks: []workspaceDisk{{
+			Name:       "workspace",
+			Path:       "/tmp/workspace.ext4",
+			Mountpoint: "/workspace",
+			Mode:       "rw",
+		}},
+	}, "run", "/tmp/rootfs.ext4")
+	if len(req.Config.Disks) != 1 {
+		t.Fatalf("Disks len = %d, want 1", len(req.Config.Disks))
+	}
+	if req.Config.Disks[0].Mountpoint != "/workspace" || req.Config.Disks[0].Mode != "rw" {
+		t.Fatalf("disk = %#v", req.Config.Disks[0])
+	}
+}
+
+func TestRunUsesSupervisorOverride(t *testing.T) {
 	dir := t.TempDir()
-	helper := filepath.Join(dir, "helper")
+	supervisor := filepath.Join(dir, "supervisor")
 	script := `#!/usr/bin/env bash
 set -euo pipefail
 python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "prepared", "observedAt": "2026-05-02T00:00:00Z"}}))'
 `
-	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	stdoutPath := filepath.Join(dir, "stdout.json")
@@ -385,7 +429,8 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": T
 	}
 	err = run(t.Context(), []string{
 		"create",
-		"--helper", helper,
+		"--supervisor", supervisor,
+		"--backend", vmkit.BackendAppleVF,
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -408,13 +453,24 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": T
 
 func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	dir := t.TempDir()
-	helper := filepath.Join(dir, "helper")
-	script := `#!/usr/bin/env bash
-set -euo pipefail
-python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "inspect"; assert req["identity"]["runtimeID"] == "research"; assert req["config"]["stateDir"]; print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "running", "observedAt": "2026-05-02T00:00:00Z"}}))'
-`
-	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	req := vmkit.Request{
+		Command: "inspect",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendAppleVF,
+		},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatalf("writeWorkspaceProcessState: %v", err)
 	}
 	stdoutPath := filepath.Join(dir, "stdout.json")
 	stdout, err := os.Create(stdoutPath)
@@ -423,7 +479,6 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 	err = run(t.Context(), []string{
 		"status",
-		"--helper", helper,
 		"--state-dir", dir,
 		"--name", "research",
 	}, stdout)
@@ -444,12 +499,12 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 
 func TestRunDeleteRemovesSavedWorkspaceState(t *testing.T) {
 	dir := t.TempDir()
-	helper := filepath.Join(dir, "helper")
+	supervisor := filepath.Join(dir, "supervisor")
 	script := `#!/usr/bin/env bash
 set -euo pipefail
 python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
 `
-	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
@@ -465,7 +520,7 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 	err = run(t.Context(), []string{
 		"delete",
-		"--helper", helper,
+		"--supervisor", supervisor,
 		"--state-dir", dir,
 		"research",
 	}, stdout)
@@ -576,7 +631,27 @@ func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing
 	}
 }
 
-func TestCreateDispatchKeepsLowLevelHelperCreate(t *testing.T) {
+func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--disk", "workspace=/tmp/workspace.ext4:/workspace:rw",
+		"--bundle", "constraints=/tmp/constraints.tar:/config:ro",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if len(opts.Disks) != 2 {
+		t.Fatalf("Disks len = %d, want 2", len(opts.Disks))
+	}
+	if opts.Disks[0].Name != "workspace" || opts.Disks[0].Bundle {
+		t.Fatalf("disk = %#v", opts.Disks[0])
+	}
+	if opts.Disks[1].Name != "constraints" || !opts.Disks[1].Bundle || opts.Disks[1].Mode != "ro" {
+		t.Fatalf("bundle = %#v", opts.Disks[1])
+	}
+}
+
+func TestCreateDispatchKeepsLowLevelSupervisorCreate(t *testing.T) {
 	if !shouldUseHighLevelCreate([]string{"research"}) {
 		t.Fatal("positional create should use high-level workspace create")
 	}
@@ -584,7 +659,7 @@ func TestCreateDispatchKeepsLowLevelHelperCreate(t *testing.T) {
 		t.Fatal("--name create should use high-level workspace create")
 	}
 	if shouldUseHighLevelCreate([]string{"--id", "agent", "--rootfs", "/tmp/rootfs.ext4", "--kernel", "/tmp/Image"}) {
-		t.Fatal("low-level rootfs create should stay on helper create path")
+		t.Fatal("low-level rootfs create should stay on supervisor create path")
 	}
 }
 
@@ -615,6 +690,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 		Entrypoint:      "/app/entrypoint.sh",
 		SetupCommands:   []string{"echo setup"},
 		Env:             map[string]string{"AGENCY_AGENT_NAME": "research"},
+		Disks:           []workspaceDisk{{Name: "constraints", Path: "/tmp/constraints.ext4", Mountpoint: "/config", Mode: "ro"}},
 		ResultPort:      1024,
 		PrepareForStart: true,
 	})
@@ -623,6 +699,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(command, `> /etc/microagent/run.json`) ||
 		!strings.Contains(command, `"command":["/bin/sh","-lc","/app/entrypoint.sh"]`) ||
+		!strings.Contains(command, `"mountpoint":"/config"`) ||
 		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) {
 		t.Fatalf("workspaceCommand missing guest config reset: %q", command)
 	}
@@ -813,6 +890,264 @@ func TestHighLevelCreateDetection(t *testing.T) {
 	if hasFlagValue([]string{"--kernel", "/tmp/kernel"}, "image") {
 		t.Fatal("did not expect image flag")
 	}
+	if !shouldUseHighLevelCreate([]string{"test"}) {
+		t.Fatal("expected positional create name to use high-level create")
+	}
+	if shouldUseHighLevelCreate([]string{"--rootfs", "/tmp/rootfs.ext4", "--id", "agent-1"}) {
+		t.Fatal("legacy rootfs create should not use high-level create")
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsPositionalName(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{"test", "--image", "docker.io/library/ubuntu:24.04"})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "test" {
+		t.Fatalf("Name = %q, want test", opts.Name)
+	}
+}
+
+func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := writeWorkspaceProcessState(
+		workspaceOptions{StateDir: dir, Name: "agent-1"},
+		req,
+		vmkit.StateRunning,
+		cmd.Process.Pid,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"stop", "agent-1", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run stop: %v", err)
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "agent-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateStopped || state.PID != 0 {
+		t.Fatalf("state = %#v, want stopped with no pid", state)
+	}
+	active, err := processActive(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active {
+		t.Fatalf("process %d still active", cmd.Process.Pid)
+	}
+}
+
+func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := writeWorkspaceProcessState(
+		workspaceOptions{StateDir: dir, Name: "agent-1"},
+		req,
+		vmkit.StateRunning,
+		cmd.Process.Pid,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"kill", "agent-1", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run kill: %v", err)
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "agent-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateStopped || state.PID != 0 {
+		t.Fatalf("state = %#v, want stopped with no pid", state)
+	}
+}
+
+func TestFirecrackerDeleteRefusesRunningPID(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := writeWorkspaceProcessState(
+		workspaceOptions{StateDir: dir, Name: "agent-1"},
+		req,
+		vmkit.StateRunning,
+		cmd.Process.Pid,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"delete", "agent-1", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "is running; stop or kill it before delete") {
+		t.Fatalf("err = %v, want running delete refusal", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "agent-1", "runtime.json")); statErr != nil {
+		t.Fatalf("runtime state should remain after refused delete: %v", statErr)
+	}
+}
+
+func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	kernel := filepath.Join(dir, "Image")
+	rootfs := filepath.Join(dir, "rootfs.ext4")
+	if err := os.WriteFile(kernel, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfs, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{
+		"create",
+		"--rootfs", rootfs,
+		"--kernel", kernel,
+		"--id", "agent-1",
+		"--state-dir", dir,
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "agent-1", "runtime.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"state": "prepared"`) || !strings.Contains(string(data), `"backend": "firecracker"`) {
+		t.Fatalf("runtime state = %s", data)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agent-1", "firecracker.json")); err != nil {
+		t.Fatalf("firecracker config missing: %v", err)
+	}
+}
+
+func TestFirecrackerStatusReadsPreparedState(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	req := vmkit.Request{
+		Command: "prepare",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := prepareFirecrackerWorkspace(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendFirecracker}, req); err != nil {
+		t.Fatalf("prepareFirecrackerWorkspace: %v", err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "status.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"state": "prepared"`) || !strings.Contains(string(data), `"backend": "firecracker"`) {
+		t.Fatalf("status output = %s", data)
+	}
+}
+
+func testFirecrackerRuntimeState(t *testing.T, dir, name string, state vmkit.VMState, pid int) vmkit.Request {
+	t.Helper()
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: name,
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: name}, req, state, pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	return req
 }
 
 func TestKernelInstallFromLocalAndVerify(t *testing.T) {

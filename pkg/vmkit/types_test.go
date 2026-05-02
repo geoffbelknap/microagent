@@ -32,3 +32,20 @@ func TestValidateConfigRejectsDuplicateVsockPorts(t *testing.T) {
 		t.Fatal("expected duplicate port error")
 	}
 }
+
+func TestValidateConfigRejectsBadDiskMode(t *testing.T) {
+	cfg := &Config{
+		KernelPath: "/tmp/kernel",
+		RootfsPath: "/tmp/rootfs.ext4",
+		StateDir:   "/tmp/state",
+		Disks: []Disk{{
+			Name:       "constraints",
+			Path:       "/tmp/constraints.ext4",
+			Mountpoint: "/config",
+			Mode:       "writeable",
+		}},
+	}
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatal("ValidateConfig accepted bad disk mode")
+	}
+}
