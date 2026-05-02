@@ -273,6 +273,20 @@ func TestWorkspaceCommandAllowsMultiCommandExec(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
+	command := workspaceCommand(workspaceOptions{
+		SetupCommands:   []string{"echo setup"},
+		ResultPort:      1024,
+		PrepareForStart: true,
+	})
+	if !strings.Contains(command, "echo setup") {
+		t.Fatalf("workspaceCommand missing setup: %q", command)
+	}
+	if !strings.Contains(command, `> /etc/microagent/run.json`) || !strings.Contains(command, `"command":[]`) {
+		t.Fatalf("workspaceCommand missing guest config reset: %q", command)
+	}
+}
+
 func TestWorkspaceHasGuestCommand(t *testing.T) {
 	if !workspaceHasGuestCommand(workspaceOptions{SetupCommands: []string{"echo setup"}}) {
 		t.Fatal("setup command should count as guest work")

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
@@ -54,6 +56,12 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "logs" || args[0] == "log" {
 		return runLogs(args[1:], stdout)
+	}
+	if args[0] == "connect" {
+		return runConnect(ctx, args[1:], stdout)
+	}
+	if args[0] == "start" && hasPositionalWorkspaceName(args[1:]) {
+		return runStartWorkspace(ctx, args[1:], stdout)
 	}
 	if args[0] == "create" && hasFlagValue(args[1:], "image") {
 		return runHighLevelCreate(ctx, args[1:], stdout)
@@ -441,24 +449,26 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 }
 
 type workspaceOptions struct {
-	Name           string
-	ImageRef       string
-	ExecCommand    string
-	SetupCommands  []string
-	Backend        string
-	KernelPath     string
-	StateDir       string
-	HelperPath     string
-	GuestInitPath  string
-	Mke2fsPath     string
-	Architecture   string
-	MemoryMiB      int
-	CPUCount       int
-	SizeMiB        int64
-	Timeout        time.Duration
-	ResultPort     uint32
-	KernelExplicit bool
-	Keep           bool
+	Name            string
+	ImageRef        string
+	ExecCommand     string
+	SetupCommands   []string
+	Backend         string
+	KernelPath      string
+	StateDir        string
+	HelperPath      string
+	GuestInitPath   string
+	Mke2fsPath      string
+	Architecture    string
+	MemoryMiB       int
+	CPUCount        int
+	SizeMiB         int64
+	Timeout         time.Duration
+	ResultPort      uint32
+	KernelExplicit  bool
+	Keep            bool
+	PrepareForStart bool
+	SerialInput     bool
 }
 
 type workspaceResult struct {
@@ -517,8 +527,8 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	req := workspaceRequest(opts, "start", result.RootfsPath)
-	resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
+	req := workspaceRequest(opts, "run", result.RootfsPath)
+	resp, err := runWorkspaceForeground(ctx, opts, req)
 	if err != nil {
 		if resp.Error == "" {
 			return err
@@ -527,7 +537,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	result.Response = resp
 	result.SerialPath = serialLogPath(opts)
 	if err == nil && resp.OK {
-		finalResp, waitErr := waitForWorkspace(ctx, opts)
+		finalResp, waitErr := inspectWorkspace(ctx, opts)
 		if finalResp.Event != nil {
 			result.FinalState = string(finalResp.Event.State)
 			result.Response = finalResp
@@ -597,11 +607,144 @@ func runLogs(args []string, stdout *os.File) error {
 	return err
 }
 
+func runConnect(ctx context.Context, args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	send := fs.String("send", "", "Write text to the console and exit")
+	timeoutSeconds := fs.Int("timeout", 2, "Seconds to wait for output after --send")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent connect <name> [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	inputPath := serialInputPath(opts.StateDir, name)
+	logPath := filepath.Join(opts.StateDir, name, "serial.log")
+	if strings.TrimSpace(*send) != "" {
+		if *timeoutSeconds < 0 {
+			return fmt.Errorf("connect timeout must not be negative")
+		}
+		if err := waitForPath(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second); err != nil {
+			return err
+		}
+		if err := waitForConsoleReady(ctx, logPath, time.Duration(*timeoutSeconds)*time.Second); err != nil {
+			return err
+		}
+		before := fileSize(logPath)
+		input, err := openFIFOForWrite(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second)
+		if err != nil {
+			return err
+		}
+		text := *send
+		text = strings.ReplaceAll(text, "\n", "\r")
+		if !strings.HasSuffix(text, "\r") {
+			text += "\r"
+		}
+		if _, err := io.WriteString(input, text); err != nil {
+			_ = input.Close()
+			return err
+		}
+		if err := input.Close(); err != nil {
+			return err
+		}
+		tailCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeoutSeconds)*time.Second)
+		defer cancel()
+		return tailFile(tailCtx, logPath, stdout, before)
+	}
+	if err := waitForPath(ctx, inputPath, 0); err != nil {
+		return err
+	}
+	input, err := openFIFOForWrite(ctx, inputPath, 0)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	tailCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errs := make(chan error, 1)
+	go func() {
+		errs <- tailFile(tailCtx, logPath, stdout, 0)
+	}()
+	if _, err := copyConsoleInput(input, os.Stdin); err != nil {
+		cancel()
+		<-errs
+		return err
+	}
+	cancel()
+	<-errs
+	return nil
+}
+
+func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
+	opts := workspaceOptions{
+		Backend:      defaultBackend(),
+		Architecture: defaultGuestArch(),
+		MemoryMiB:    512,
+		CPUCount:     2,
+		StateDir:     defaultStateDir(),
+		HelperPath:   os.Getenv("MICROAGENT_APPLEVF_HELPER"),
+		SerialInput:  true,
+	}
+	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	kernelExplicit := hasFlagValue(args, "kernel")
+	fs := flag.NewFlagSet("start", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&opts.HelperPath, "helper", opts.HelperPath, "Apple VF helper path")
+	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
+	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent start <name> [--state-dir <dir>]")
+	}
+	opts.Name = fs.Arg(0)
+	opts.KernelExplicit = kernelExplicit
+	if err := validateWorkspaceName(opts.Name); err != nil {
+		return err
+	}
+	if !opts.KernelExplicit {
+		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	}
+	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
+		return err
+	}
+	rootfsPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4")
+	if _, err := os.Stat(rootfsPath); err != nil {
+		return err
+	}
+	req := workspaceRequest(opts, "run", rootfsPath)
+	resp, err := startWorkspaceDetached(opts, req)
+	result := workspaceResult{
+		Workspace:  opts.Name,
+		StateDir:   opts.StateDir,
+		RootfsPath: rootfsPath,
+		KernelPath: opts.KernelPath,
+		SerialPath: serialLogPath(opts),
+		Response:   resp,
+	}
+	if encodeErr := json.NewEncoder(stdout).Encode(result); encodeErr != nil {
+		return encodeErr
+	}
+	return err
+}
+
 func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) error {
 	opts, err := parseWorkspaceOptions("create", args)
 	if err != nil {
 		return err
 	}
+	opts.PrepareForStart = true
 	if opts.Name == "" {
 		return fmt.Errorf("create requires --name")
 	}
@@ -616,8 +759,8 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		return err
 	}
 	if workspaceHasGuestCommand(opts) {
-		startReq := workspaceRequest(opts, "start", result.RootfsPath)
-		startResp, startErr := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, startReq)
+		startReq := workspaceRequest(opts, "run", result.RootfsPath)
+		startResp, startErr := runWorkspaceForeground(ctx, opts, startReq)
 		result.Response = startResp
 		result.SerialPath = serialLogPath(opts)
 		if startErr != nil {
@@ -626,7 +769,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 			}
 			return startErr
 		}
-		finalResp, waitErr := waitForWorkspace(ctx, opts)
+		finalResp, waitErr := inspectWorkspace(ctx, opts)
 		if finalResp.Event != nil {
 			result.FinalState = string(finalResp.Event.State)
 			result.Response = finalResp
@@ -796,8 +939,141 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 			MemoryMiB:      opts.MemoryMiB,
 			CPUCount:       opts.CPUCount,
 			VsockListeners: listeners,
+			SerialInput:    opts.SerialInput,
 		},
 	}
+}
+
+func runWorkspaceForeground(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateStarting, 0, ""); err != nil {
+		return vmkit.Response{}, err
+	}
+	resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
+	state := vmkit.StateStopped
+	errorText := ""
+	if err != nil || !resp.OK {
+		state = vmkit.StateFailed
+		errorText = resp.Error
+		if errorText == "" && err != nil {
+			errorText = err.Error()
+		}
+	}
+	if stateErr := writeWorkspaceProcessState(opts, req, state, 0, errorText); stateErr != nil && err == nil {
+		return resp, stateErr
+	}
+	return resp, err
+}
+
+func startWorkspaceDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
+	path := opts.HelperPath
+	if path == "" {
+		path = "microagent-applevf-helper"
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if err := os.MkdirAll(filepath.Join(opts.StateDir, opts.Name), 0o755); err != nil {
+		return vmkit.Response{}, err
+	}
+	helperLogPath := filepath.Join(opts.StateDir, opts.Name, "helper.log")
+	helperLog, err := os.OpenFile(helperLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	defer helperLog.Close()
+	cmd := exec.Command(path)
+	cmd.Stdin = strings.NewReader(string(body))
+	cmd.Stdout = helperLog
+	cmd.Stderr = helperLog
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return vmkit.Response{}, err
+	}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateStarting, cmd.Process.Pid, ""); err != nil {
+		_ = cmd.Process.Kill()
+		return vmkit.Response{}, err
+	}
+	_ = cmd.Process.Release()
+	event := vmkit.Event{
+		Identity:   *req.Identity,
+		State:      vmkit.StateStarting,
+		Detail:     "serial=" + serialLogPath(opts),
+		ObservedAt: time.Now().UTC(),
+	}
+	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
+}
+
+func writeWorkspaceProcessState(opts workspaceOptions, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {
+	if req.Identity == nil || req.Config == nil {
+		return fmt.Errorf("workspace request is missing identity or config")
+	}
+	dir := filepath.Join(opts.StateDir, opts.Name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	event := vmkit.Event{
+		Identity:   *req.Identity,
+		State:      state,
+		Detail:     "serial=" + serialLogPath(opts),
+		ObservedAt: time.Now().UTC(),
+	}
+	fileEvent := workspaceEventFile{
+		Identity:   *req.Identity,
+		State:      state,
+		Detail:     event.Detail,
+		ObservedAt: event.ObservedAt.Format(time.RFC3339),
+	}
+	if err := writeJSONFile(filepath.Join(dir, "event.json"), fileEvent); err != nil {
+		return err
+	}
+	updatedAt := time.Now().UTC()
+	runtimeState := workspaceRuntimeState{
+		Event:           fileEvent,
+		Config:          *req.Config,
+		PID:             pid,
+		SerialLogPath:   serialLogPath(opts),
+		SerialInputPath: serialInputPath(opts.StateDir, opts.Name),
+		UpdatedAt:       updatedAt.Format(time.RFC3339),
+		Error:           errorText,
+	}
+	if state == vmkit.StateStarting || state == vmkit.StateRunning {
+		runtimeState.StartedAt = updatedAt.Format(time.RFC3339)
+	}
+	return writeJSONFile(filepath.Join(dir, "runtime.json"), runtimeState)
+}
+
+type workspaceEventFile struct {
+	Identity   vmkit.Identity `json:"identity"`
+	State      vmkit.VMState  `json:"state"`
+	Detail     string         `json:"detail,omitempty"`
+	ObservedAt string         `json:"observedAt"`
+}
+
+type workspaceRuntimeState struct {
+	Event           workspaceEventFile `json:"event"`
+	Config          vmkit.Config       `json:"config"`
+	PID             int                `json:"pid,omitempty"`
+	SerialLogPath   string             `json:"serialLogPath"`
+	SerialInputPath string             `json:"serialInputPath,omitempty"`
+	StartedAt       string             `json:"startedAt,omitempty"`
+	UpdatedAt       string             `json:"updatedAt"`
+	Error           string             `json:"error,omitempty"`
+}
+
+func writeJSONFile(path string, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0o644)
+}
+
+func inspectWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Response, error) {
+	req := workspaceRequest(opts, "inspect", filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4"))
+	req.Config.RootfsPath = ""
+	return vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
 }
 
 func waitForWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Response, error) {
@@ -854,6 +1130,10 @@ func waitForResultFile(ctx context.Context, opts workspaceOptions, deadline time
 
 func serialLogPath(opts workspaceOptions) string {
 	return filepath.Join(opts.StateDir, opts.Name, "serial.log")
+}
+
+func serialInputPath(stateDir, name string) string {
+	return filepath.Join(stateDir, name, "serial.in")
 }
 
 func resultPath(opts workspaceOptions) string {
@@ -1032,6 +1312,21 @@ func hasFlagValue(args []string, name string) bool {
 	return false
 }
 
+func hasPositionalWorkspaceName(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if !strings.HasPrefix(arg, "-") {
+			return true
+		}
+		if arg == "--json" || arg == "-json" || arg == "--rootfs" || arg == "-rootfs" || arg == "--kernel" || arg == "-kernel" || arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" {
+			return false
+		}
+	}
+	return false
+}
+
 func shellCommand(command string) []string {
 	if strings.TrimSpace(command) == "" {
 		return nil
@@ -1051,10 +1346,31 @@ func workspaceCommand(opts workspaceOptions) string {
 	if execCommand != "" {
 		lines = append(lines, execCommand)
 	}
+	if opts.PrepareForStart {
+		lines = append(lines, resetGuestConfigCommand(0))
+	}
 	if len(lines) == 0 {
 		return ""
 	}
 	return "set -eu\n" + strings.Join(lines, "\n")
+}
+
+func resetGuestConfigCommand(port uint32) string {
+	data, err := json.Marshal(map[string]any{
+		"command": []string{},
+		"port":    port,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return "printf '%s\\n' " + shellSingleQuote(string(data)) + " > /etc/microagent/run.json"
+}
+
+func shellSingleQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func workspaceHasGuestCommand(opts workspaceOptions) bool {
@@ -1067,6 +1383,149 @@ func workspaceHasGuestCommand(opts workspaceOptions) bool {
 		}
 	}
 	return false
+}
+
+func waitForPath(ctx context.Context, path string, timeout time.Duration) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			return fmt.Errorf("%s did not appear before timeout", path)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func fileSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+func openFIFOForWrite(ctx context.Context, path string, timeout time.Duration) (*os.File, error) {
+	type openResult struct {
+		file *os.File
+		err  error
+	}
+	results := make(chan openResult, 1)
+	go func() {
+		file, err := os.OpenFile(path, os.O_WRONLY, 0)
+		results <- openResult{file: file, err: err}
+	}()
+	var timer <-chan time.Time
+	if timeout > 0 {
+		timer = time.After(timeout)
+	}
+	select {
+	case result := <-results:
+		return result.file, result.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-timer:
+		return nil, fmt.Errorf("serial input is not ready: %s", path)
+	}
+}
+
+func tailFile(ctx context.Context, path string, stdout *os.File, offset int64) error {
+	for {
+		file, err := os.Open(path)
+		if err == nil {
+			if _, err := file.Seek(offset, io.SeekStart); err != nil {
+				_ = file.Close()
+				return err
+			}
+			n, copyErr := io.Copy(stdout, file)
+			offset += n
+			if closeErr := file.Close(); closeErr != nil {
+				return closeErr
+			}
+			if copyErr != nil {
+				return copyErr
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.Canceled || ctx.Err() == context.DeadlineExceeded {
+				return nil
+			}
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func waitForConsoleReady(ctx context.Context, path string, timeout time.Duration) error {
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && consoleLooksReady(string(data)) {
+			return nil
+		} else if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			return fmt.Errorf("console did not become ready before timeout: %s", path)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func consoleLooksReady(output string) bool {
+	return strings.Contains(output, "# ") ||
+		strings.Contains(output, "$ ") ||
+		strings.Contains(strings.ToLower(output), "login:")
+}
+
+func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
+	var total int64
+	buffer := make([]byte, 4096)
+	for {
+		n, readErr := src.Read(buffer)
+		if n > 0 {
+			chunk := bytes.ReplaceAll(buffer[:n], []byte("\n"), []byte("\r"))
+			written, writeErr := dst.Write(chunk)
+			total += int64(written)
+			if writeErr != nil {
+				return total, writeErr
+			}
+			if written != len(chunk) {
+				return total, io.ErrShortWrite
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return total, nil
+			}
+			return total, readErr
+		}
+	}
 }
 
 func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, vsocks []string) (vmkit.Request, error) {
@@ -1141,6 +1600,7 @@ func reorderFlagArgs(args []string) []string {
 		"-size-mib":    true,
 		"-timeout":     true,
 		"-result-port": true,
+		"-send":        true,
 	}
 	var flags []string
 	var positional []string
@@ -1224,6 +1684,7 @@ Commands:
   run                  Run a command
   create               Create a workspace
   start                Start a workspace
+  connect              Open the workspace console
   ps                   List workspaces
   status               Show workspace state
   logs                 Show workspace logs

@@ -96,8 +96,8 @@ microagent create \
   --image docker.io/library/ubuntu:24.04
 ```
 
-The image supplies Linux userspace. Microagent creates the disk and starts the
-VM. If the default kernel is missing, Microagent installs it first.
+The image supplies Linux userspace. Microagent creates the disk and records the
+workspace. If the default kernel is missing, Microagent installs it first.
 
 Prepare a workspace before saving it:
 
@@ -107,6 +107,24 @@ microagent create \
   --image docker.io/library/busybox:1.36 \
   --setup "mkdir -p /workspace" \
   --setup "echo ready > /workspace/status"
+```
+
+Start a workspace:
+
+```bash
+microagent start research
+```
+
+Open its console:
+
+```bash
+microagent connect research
+```
+
+For scripts, send one line and print any new console output:
+
+```bash
+microagent connect research --send "cat /workspace/status"
 ```
 
 List workspaces:

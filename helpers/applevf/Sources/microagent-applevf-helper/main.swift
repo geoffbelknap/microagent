@@ -37,6 +37,7 @@ struct Config: Codable {
     var memoryMiB: Int?
     var cpuCount: Int?
     var vsockListeners: [VsockListener]?
+    var serialInput: Bool?
 }
 
 struct VsockListener: Codable {
@@ -77,6 +78,8 @@ let eventFileName = "event.json"
 let configFileName = "config.json"
 let runtimeFileName = "runtime.json"
 let serialLogFileName = "serial.log"
+let serialInputFileName = "serial.in"
+let helperLogFileName = "helper.log"
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
 let encoder = JSONEncoder()
@@ -88,6 +91,7 @@ struct RuntimeState: Codable {
     var config: Config
     var pid: Int32?
     var serialLogPath: String
+    var serialInputPath: String?
     var startedAt: Date?
     var updatedAt: Date
     var error: String?
@@ -96,6 +100,10 @@ struct RuntimeState: Codable {
 func main() -> Int32 {
     do {
         let request = try readRequest()
+        if request.command == "console" {
+            try runConsole(request)
+            return 0
+        }
         let response = try handle(request)
         write(response)
         return response.ok ? 0 : 1
@@ -144,14 +152,22 @@ func handle(_ request: Request) throws -> Response {
         guard support.frameworkAvailable && support.virtualizationSupported else {
             return Response(ok: false, backend: backendName, error: "Apple Virtualization is not available on this host")
         }
+        #if canImport(Virtualization)
+        if #available(macOS 13.0, *) {
+            let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, serialMode: .detached)
+            try vmConfig.validate()
+        }
+        #endif
         let event = Event(identity: identity, state: .starting, detail: "serial=\(serialLogPath(identity: identity, stateDir: config.stateDir).path)", observedAt: Date())
         try writeState(event: event, config: config)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: currentExecutablePath())
         process.arguments = ["--request-json", try requestJSON(request.withCommand("run"))]
         process.standardInput = FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        FileManager.default.createFile(atPath: helperLogPath(identity: identity, stateDir: config.stateDir).path, contents: nil)
+        let helperLog = try FileHandle(forWritingTo: helperLogPath(identity: identity, stateDir: config.stateDir))
+        process.standardOutput = helperLog
+        process.standardError = helperLog
         try process.run()
         try writeRuntimeState(event: event, config: config, pid: process.processIdentifier, error: nil)
         return Response(ok: true, backend: backendName, event: event)
@@ -303,6 +319,14 @@ func serialLogPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(serialLogFileName)
 }
 
+func serialInputPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(serialInputFileName)
+}
+
+func helperLogPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(helperLogFileName)
+}
+
 func writeState(event: Event, config: Config) throws {
     let directory = runtimeDirectory(identity: event.identity, stateDir: config.stateDir)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -316,6 +340,7 @@ func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?
         config: config,
         pid: pid,
         serialLogPath: serialLogPath(identity: event.identity, stateDir: config.stateDir).path,
+        serialInputPath: serialInputPath(identity: event.identity, stateDir: config.stateDir).path,
         startedAt: event.state == .starting || event.state == .running ? Date() : nil,
         updatedAt: Date(),
         error: error
@@ -397,6 +422,11 @@ func parseTCPHostPort(_ raw: String) throws -> TCPHostPort {
 }
 
 #if canImport(Virtualization)
+enum SerialAttachmentMode {
+    case detached
+    case standardIO
+}
+
 @available(macOS 13.0, *)
 final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
     let identity: Identity
@@ -469,7 +499,52 @@ func runVM(_ request: Request) throws {
         throw ProtocolError.invalid("Apple Virtualization is not available on this host")
     }
     if #available(macOS 13.0, *) {
-        let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, attachSerial: true)
+        let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, serialMode: .detached)
+        try vmConfig.validate()
+
+        let vm = VZVirtualMachine(configuration: vmConfig)
+        let delegate = VMRunDelegate(identity: identity, config: config)
+        vm.delegate = delegate
+        var socketDelegates: [ResultSocketDelegate] = []
+        let semaphore = DispatchSemaphore(value: 0)
+        var startError: Error?
+        vm.start { result in
+            switch result {
+            case .success:
+                socketDelegates = installSocketListeners(vm: vm, config: config)
+                updateRuntime(identity: identity, config: config, state: .running, error: nil)
+            case .failure(let error):
+                startError = error
+                updateRuntime(identity: identity, config: config, state: .failed, error: error.localizedDescription)
+            }
+            semaphore.signal()
+        }
+        while semaphore.wait(timeout: .now()) == .timedOut {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+        }
+        if let startError {
+            throw startError
+        }
+        withExtendedLifetime((delegate, socketDelegates)) {
+            CFRunLoopRun()
+        }
+    } else {
+        throw ProtocolError.invalid("Apple Virtualization requires macOS 13 or newer")
+    }
+    #else
+    throw ProtocolError.invalid("Virtualization.framework is not available in this build")
+    #endif
+}
+
+func runConsole(_ request: Request) throws {
+    let identity = try validatedIdentity(request.identity)
+    let config = try validatedConfig(request.config)
+    #if canImport(Virtualization)
+    guard hostSupport().virtualizationSupported else {
+        throw ProtocolError.invalid("Apple Virtualization is not available on this host")
+    }
+    if #available(macOS 13.0, *) {
+        let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, serialMode: .standardIO)
         try vmConfig.validate()
 
         let vm = VZVirtualMachine(configuration: vmConfig)
@@ -524,7 +599,7 @@ func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [ResultSock
 }
 
 @available(macOS 13.0, *)
-func virtualMachineConfiguration(identity: Identity, config: Config, attachSerial: Bool) throws -> VZVirtualMachineConfiguration {
+func virtualMachineConfiguration(identity: Identity, config: Config, serialMode: SerialAttachmentMode?) throws -> VZVirtualMachineConfiguration {
     let vmConfig = VZVirtualMachineConfiguration()
     vmConfig.platform = VZGenericPlatformConfiguration()
     let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: config.kernelPath))
@@ -535,18 +610,84 @@ func virtualMachineConfiguration(identity: Identity, config: Config, attachSeria
     let attachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: config.rootfsPath), readOnly: false)
     vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
     vmConfig.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
-    if attachSerial {
+    if let serialMode {
         let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
-        FileManager.default.createFile(atPath: serialLogPath(identity: identity, stateDir: config.stateDir).path, contents: nil)
-        let serialHandle = try FileHandle(forWritingTo: serialLogPath(identity: identity, stateDir: config.stateDir))
-        try serialHandle.seekToEnd()
-        serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: nil, fileHandleForWriting: serialHandle)
+        switch serialMode {
+        case .detached:
+            try FileManager.default.createDirectory(at: runtimeDirectory(identity: identity, stateDir: config.stateDir), withIntermediateDirectories: true)
+            let inputHandle: FileHandle?
+            if config.serialInput == true {
+                let inputURL = serialInputPath(identity: identity, stateDir: config.stateDir)
+                try prepareSerialInput(path: inputURL.path)
+                let inputPipe = Pipe()
+                bridgeSerialInput(path: inputURL.path, to: inputPipe.fileHandleForWriting)
+                inputHandle = inputPipe.fileHandleForReading
+            } else {
+                inputHandle = nil
+            }
+            FileManager.default.createFile(atPath: serialLogPath(identity: identity, stateDir: config.stateDir).path, contents: nil)
+            let serialHandle = try FileHandle(forWritingTo: serialLogPath(identity: identity, stateDir: config.stateDir))
+            try serialHandle.seekToEnd()
+            serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: inputHandle, fileHandleForWriting: serialHandle)
+        case .standardIO:
+            configureRawTerminal(FileHandle.standardInput)
+            serial.attachment = VZFileHandleSerialPortAttachment(fileHandleForReading: FileHandle.standardInput, fileHandleForWriting: FileHandle.standardOutput)
+        }
         vmConfig.serialPorts = [serial]
     }
     if !(config.vsockListeners ?? []).isEmpty {
         vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
     }
     return vmConfig
+}
+
+func configureRawTerminal(_ fileHandle: FileHandle) {
+    guard isatty(fileHandle.fileDescriptor) == 1 else {
+        return
+    }
+    var attributes = termios()
+    if tcgetattr(fileHandle.fileDescriptor, &attributes) == 0 {
+        attributes.c_iflag &= ~tcflag_t(ICRNL)
+        attributes.c_lflag &= ~tcflag_t(ICANON | ECHO)
+        tcsetattr(fileHandle.fileDescriptor, TCSANOW, &attributes)
+    }
+}
+
+func prepareSerialInput(path: String) throws {
+    var info = stat()
+    if lstat(path, &info) == 0 {
+        if (info.st_mode & S_IFMT) == S_IFIFO {
+            return
+        }
+        try FileManager.default.removeItem(atPath: path)
+    } else if errno != ENOENT {
+        throw ProtocolError.invalid("inspect serial input failed with errno \(errno)")
+    }
+    if mkfifo(path, S_IRUSR | S_IWUSR) != 0 && errno != EEXIST {
+        throw ProtocolError.invalid("create serial input failed with errno \(errno)")
+    }
+}
+
+func bridgeSerialInput(path: String, to output: FileHandle) {
+    DispatchQueue.global(qos: .utility).async {
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let fd = open(path, O_RDONLY)
+            if fd < 0 {
+                usleep(100_000)
+                continue
+            }
+            while true {
+                let n = read(fd, &buffer, buffer.count)
+                if n > 0 {
+                    output.write(Data(buffer.prefix(n)))
+                    continue
+                }
+                break
+            }
+            close(fd)
+        }
+    }
 }
 #endif
 

@@ -43,6 +43,7 @@ type Config struct {
 	MemoryMiB      int             `json:"memoryMiB,omitempty"`
 	CPUCount       int             `json:"cpuCount,omitempty"`
 	VsockListeners []VsockListener `json:"vsockListeners,omitempty"`
+	SerialInput    bool            `json:"serialInput,omitempty"`
 }
 
 type VsockListener struct {
@@ -107,7 +108,7 @@ func ValidateRequest(req Request) error {
 	switch req.Command {
 	case "host":
 		return nil
-	case "check", "prepare", "start":
+	case "check", "prepare", "start", "run", "console":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}

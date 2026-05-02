@@ -16,11 +16,12 @@ import (
 )
 
 const configPath = "/etc/microagent/run.json"
-const resultConnectTimeout = 5 * time.Second
+const resultConnectTimeout = 15 * time.Second
 
 type config struct {
 	Command []string `json:"command"`
 	Port    uint32   `json:"port"`
+	Mode    string   `json:"mode,omitempty"`
 }
 
 type result struct {
@@ -57,6 +58,15 @@ func run() int {
 		fmt.Print(res.Stdout)
 		fmt.Fprint(os.Stderr, res.Stderr)
 		if err != nil {
+			code = exitCode(err)
+			res.Error = err.Error()
+		}
+	} else {
+		cmd := exec.Command("/bin/sh")
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
 			code = exitCode(err)
 			res.Error = err.Error()
 		}
