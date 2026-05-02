@@ -138,7 +138,7 @@ func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, er
 		resp.Kernel = defaultKernelSupport(opts.Backend, opts.Arch)
 		return resp, err
 	case vmkit.BackendFirecracker:
-		return firecrackerDoctorResponse(opts.Backend, opts.Arch, exec.LookPath, os.Stat)
+		return firecrackerDoctorResponse(opts.Backend, opts.Arch, resolveFirecrackerPath, os.Stat, firecrackerVersion)
 	default:
 		resp := vmkit.Response{
 			OK:      false,
@@ -150,17 +150,18 @@ func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, er
 	}
 }
 
-func firecrackerDoctorResponse(backend, arch string, lookPath func(string) (string, error), stat func(string) (os.FileInfo, error)) (vmkit.Response, error) {
+func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (string, error), stat func(string) (os.FileInfo, error), binaryVersion func(string) string) (vmkit.Response, error) {
 	host := &vmkit.HostSupport{
 		Backend:      backend,
 		Architecture: arch,
 	}
 	var issues []string
-	if path, err := lookPath("firecracker"); err == nil {
+	if path, err := resolveBinary(); err == nil {
 		host.BinaryPath = path
+		host.BinaryVersion = binaryVersion(path)
 		host.FrameworkAvailable = true
 	} else {
-		issues = append(issues, "firecracker binary not found in PATH")
+		issues = append(issues, err.Error())
 	}
 	if _, err := stat("/dev/kvm"); err == nil {
 		host.KVMAvailable = true
@@ -182,6 +183,42 @@ func firecrackerDoctorResponse(backend, arch string, lookPath func(string) (stri
 		return resp, fmt.Errorf("%s", resp.Error)
 	}
 	return resp, nil
+}
+
+func resolveFirecrackerPath() (string, error) {
+	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER")); path != "" {
+		if _, err := os.Stat(path); err != nil {
+			return "", fmt.Errorf("MICROAGENT_FIRECRACKER is not usable: %s", err)
+		}
+		return path, nil
+	}
+	if path, err := exec.LookPath("firecracker"); err == nil {
+		return path, nil
+	}
+	if exe, err := os.Executable(); err == nil {
+		path := defaultFirecrackerPathFromExecutable(exe)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("firecracker binary not found")
+}
+
+func defaultFirecrackerPathFromExecutable(executable string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "libexec", "firecracker"))
+}
+
+func firecrackerVersion(path string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func runKernel(ctx context.Context, args []string, stdout *os.File) error {

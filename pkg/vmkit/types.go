@@ -73,6 +73,7 @@ type HostSupport struct {
 	FrameworkAvailable      bool   `json:"frameworkAvailable"`
 	VirtualizationSupported bool   `json:"virtualizationSupported"`
 	BinaryPath              string `json:"binaryPath,omitempty"`
+	BinaryVersion           string `json:"binaryVersion,omitempty"`
 	KVMAvailable            bool   `json:"kvmAvailable,omitempty"`
 	VsockAvailable          bool   `json:"vsockAvailable,omitempty"`
 }

@@ -47,12 +47,7 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFHelper(t *testing.T) {
 	resp, err := firecrackerDoctorResponse(
 		vmkit.BackendFirecracker,
 		"amd64",
-		func(name string) (string, error) {
-			if name != "firecracker" {
-				t.Fatalf("lookPath(%q), want firecracker", name)
-			}
-			return "/usr/local/bin/firecracker", nil
-		},
+		func() (string, error) { return "/usr/local/bin/firecracker", nil },
 		func(path string) (os.FileInfo, error) {
 			switch path {
 			case "/dev/kvm", "/dev/vhost-vsock":
@@ -60,6 +55,12 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFHelper(t *testing.T) {
 			default:
 				return nil, os.ErrNotExist
 			}
+		},
+		func(path string) string {
+			if path != "/usr/local/bin/firecracker" {
+				t.Fatalf("version path = %q", path)
+			}
+			return "Firecracker v1.15.1"
 		},
 	)
 	if err != nil {
@@ -77,6 +78,9 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFHelper(t *testing.T) {
 	if resp.Host.BinaryPath != "/usr/local/bin/firecracker" {
 		t.Fatalf("BinaryPath = %q", resp.Host.BinaryPath)
 	}
+	if resp.Host.BinaryVersion != "Firecracker v1.15.1" {
+		t.Fatalf("BinaryVersion = %q", resp.Host.BinaryVersion)
+	}
 	if !resp.Host.VirtualizationSupported || !resp.Host.KVMAvailable || !resp.Host.VsockAvailable {
 		t.Fatalf("Host support = %+v", resp.Host)
 	}
@@ -86,8 +90,9 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 	resp, err := firecrackerDoctorResponse(
 		vmkit.BackendFirecracker,
 		"amd64",
-		func(string) (string, error) { return "", os.ErrNotExist },
+		func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
 		func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+		func(string) string { return "" },
 	)
 	if err == nil {
 		t.Fatal("firecrackerDoctorResponse returned nil error")
@@ -103,6 +108,57 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "firecracker binary not found") || !strings.Contains(resp.Error, "/dev/kvm") {
 		t.Fatalf("Error = %q", resp.Error)
+	}
+}
+
+func TestResolveFirecrackerPathUsesEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "firecracker")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MICROAGENT_FIRECRACKER", path)
+	got, err := resolveFirecrackerPath()
+	if err != nil {
+		t.Fatalf("resolveFirecrackerPath: %v", err)
+	}
+	if got != path {
+		t.Fatalf("path = %q, want %q", got, path)
+	}
+}
+
+func TestDefaultFirecrackerPathResolvesHomebrewSymlink(t *testing.T) {
+	dir := t.TempDir()
+	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.17", "bin")
+	cellarLibexec := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.17", "libexec")
+	homebrewBin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(cellarBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cellarLibexec, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(homebrewBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(cellarBin, "microagent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	firecracker := filepath.Join(cellarLibexec, "firecracker")
+	if err := os.WriteFile(firecracker, []byte("firecracker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedFirecracker, err := filepath.EvalSymlinks(firecracker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(homebrewBin, "microagent")
+	if err := os.Symlink(executable, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := defaultFirecrackerPathFromExecutable(link); got != resolvedFirecracker {
+		t.Fatalf("defaultFirecrackerPathFromExecutable() = %q, want %q", got, resolvedFirecracker)
 	}
 }
 
