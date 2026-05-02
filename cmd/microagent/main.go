@@ -615,15 +615,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil {
 		return err
 	}
-	req := workspaceRequest(opts, "prepare", result.RootfsPath)
-	resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
-	if err != nil {
-		if resp.Error == "" {
-			return err
-		}
-	}
-	result.Response = resp
-	if err == nil && resp.OK && workspaceHasGuestCommand(opts) {
+	if workspaceHasGuestCommand(opts) {
 		startReq := workspaceRequest(opts, "start", result.RootfsPath)
 		startResp, startErr := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, startReq)
 		result.Response = startResp
@@ -648,6 +640,15 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		if waitErr != nil {
 			return waitErr
 		}
+	} else {
+		req := workspaceRequest(opts, "prepare", result.RootfsPath)
+		resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
+		if err != nil {
+			if resp.Error == "" {
+				return err
+			}
+		}
+		result.Response = resp
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
