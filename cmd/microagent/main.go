@@ -1199,14 +1199,16 @@ func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
 func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspaceResult, error) {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
+	command, resultPort := workspaceBuildCommandAndPort(opts)
 	req := rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
 		InitPath:       rootfs.DefaultInitPath,
-		Command:        shellCommand(workspaceCommand(opts)),
+		Command:        command,
 		InitBinaryPath: opts.GuestInitPath,
-		ResultPort:     opts.ResultPort,
+		ResultPort:     resultPort,
+		NoImageCommand: opts.PrepareForStart && !workspaceHasGuestCommand(opts),
 		StateDir:       filepath.Join(opts.StateDir, "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
@@ -2497,6 +2499,13 @@ func workspaceCommand(opts workspaceOptions) string {
 		return ""
 	}
 	return "set -eu\n" + strings.Join(lines, "\n")
+}
+
+func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
+	if opts.PrepareForStart && !workspaceHasGuestCommand(opts) {
+		return shellCommand(opts.Entrypoint), 0
+	}
+	return shellCommand(workspaceCommand(opts)), opts.ResultPort
 }
 
 func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount) string {

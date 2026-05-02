@@ -23,6 +23,7 @@ type BuildRequest struct {
 	InitPath       string            `json:"init_path,omitempty"`
 	InitBinaryPath string            `json:"init_binary_path,omitempty"`
 	Command        []string          `json:"command,omitempty"`
+	NoImageCommand bool              `json:"no_image_command,omitempty"`
 	ResultPort     uint32            `json:"result_port,omitempty"`
 	StateDir       string            `json:"state_dir,omitempty"`
 	Mke2fsPath     string            `json:"mke2fs_path,omitempty"`

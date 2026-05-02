@@ -705,6 +705,36 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceBuildCommandUsesStartConfigWhenNoSetupIsNeeded(t *testing.T) {
+	command, port := workspaceBuildCommandAndPort(workspaceOptions{
+		Entrypoint:      "/app/entrypoint.sh",
+		ResultPort:      1024,
+		PrepareForStart: true,
+	})
+	if port != 0 {
+		t.Fatalf("port = %d, want 0", port)
+	}
+	if strings.Join(command, " ") != "/bin/sh -lc /app/entrypoint.sh" {
+		t.Fatalf("command = %#v", command)
+	}
+}
+
+func TestWorkspaceBuildCommandKeepsSetupResultPort(t *testing.T) {
+	command, port := workspaceBuildCommandAndPort(workspaceOptions{
+		Entrypoint:      "/app/entrypoint.sh",
+		SetupCommands:   []string{"echo setup"},
+		ResultPort:      1024,
+		PrepareForStart: true,
+	})
+	if port != 1024 {
+		t.Fatalf("port = %d, want 1024", port)
+	}
+	joined := strings.Join(command, " ")
+	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, "/etc/microagent/run.json") {
+		t.Fatalf("command = %#v", command)
+	}
+}
+
 func TestDefaultGuestInitPathResolvesHomebrewSymlink(t *testing.T) {
 	dir := t.TempDir()
 	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.14", "bin")

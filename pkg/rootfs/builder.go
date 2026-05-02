@@ -132,11 +132,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	}
 
 	provenance.BuilderPhase = "write-init"
-	command := append([]string{}, req.Command...)
-	if len(command) == 0 {
-		command = append([]string{}, imageConfig.Config.Entrypoint...)
-		command = append(command, imageConfig.Config.Cmd...)
-	}
+	command := buildCommand(req, imageConfig)
 	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts); err != nil {
 		return provenance, err
 	}
@@ -170,6 +166,15 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	provenance.SizeBytes = info.Size()
 	provenance.BuilderPhase = "complete"
 	return provenance, nil
+}
+
+func buildCommand(req BuildRequest, imageConfig ocispec.Image) []string {
+	command := append([]string{}, req.Command...)
+	if len(command) == 0 && !req.NoImageCommand {
+		command = append([]string{}, imageConfig.Config.Entrypoint...)
+		command = append(command, imageConfig.Config.Cmd...)
+	}
+	return command
 }
 
 func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProvenance, error) {

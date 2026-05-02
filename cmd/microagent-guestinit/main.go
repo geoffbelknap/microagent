@@ -80,14 +80,19 @@ func run() int {
 			res.Error = err.Error()
 		}
 	} else {
-		cmd := exec.Command("/bin/sh")
-		cmd.Env = guestEnv(cfg.Env)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			code = exitCode(err)
+		if err := attachConsole(); err != nil {
+			code = 127
 			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = sendResult(cfg.Port, res)
+			return code
+		}
+		if err := syscall.Exec("/bin/sh", []string{"sh", "-i"}, guestEnv(cfg.Env)); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
 		}
 	}
 	res.ExitCode = code
@@ -127,6 +132,31 @@ func guestEnv(extra []string) []string {
 		}
 	}
 	return env
+}
+
+func attachConsole() error {
+	for _, path := range []string{"/dev/hvc0", "/dev/console"} {
+		fd, err := unix.Open(path, unix.O_RDWR, 0)
+		if err != nil {
+			continue
+		}
+		if _, err := unix.Setsid(); err != nil && err != unix.EPERM {
+			_ = unix.Close(fd)
+			return fmt.Errorf("start console session: %w", err)
+		}
+		_ = unix.IoctlSetInt(fd, unix.TIOCSCTTY, 0)
+		for target := 0; target <= 2; target++ {
+			if err := unix.Dup2(fd, target); err != nil {
+				_ = unix.Close(fd)
+				return fmt.Errorf("attach %s to fd %d: %w", path, target, err)
+			}
+		}
+		if fd > 2 {
+			_ = unix.Close(fd)
+		}
+		return nil
+	}
+	return fmt.Errorf("open guest console: /dev/hvc0 and /dev/console are unavailable")
 }
 
 func readConfig() (config, error) {

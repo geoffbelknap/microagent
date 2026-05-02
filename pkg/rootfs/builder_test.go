@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
@@ -68,6 +70,29 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 		!strings.Contains(text, `"/config"`) ||
 		strings.Contains(text, "bad-env") {
 		t.Fatalf("unexpected run config: %s", text)
+	}
+}
+
+func TestBuildCommandCanSkipImageCommand(t *testing.T) {
+	image := ocispec.Image{}
+	image.Config.Entrypoint = []string{"/entrypoint"}
+	image.Config.Cmd = []string{"serve"}
+
+	got := buildCommand(BuildRequest{NoImageCommand: true}, image)
+	if len(got) != 0 {
+		t.Fatalf("buildCommand = %#v, want no command", got)
+	}
+}
+
+func TestBuildCommandUsesImageCommandByDefault(t *testing.T) {
+	image := ocispec.Image{}
+	image.Config.Entrypoint = []string{"/entrypoint"}
+	image.Config.Cmd = []string{"serve"}
+
+	got := buildCommand(BuildRequest{}, image)
+	want := []string{"/entrypoint", "serve"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("buildCommand = %#v, want %#v", got, want)
 	}
 }
 
