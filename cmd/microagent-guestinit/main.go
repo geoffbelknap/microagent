@@ -154,5 +154,6 @@ func exitCode(err error) int {
 
 func poweroff() {
 	unix.Sync()
+	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
 	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF)
 }
