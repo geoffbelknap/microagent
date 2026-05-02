@@ -79,7 +79,7 @@ let configFileName = "config.json"
 let runtimeFileName = "runtime.json"
 let serialLogFileName = "serial.log"
 let serialInputFileName = "serial.in"
-let helperLogFileName = "helper.log"
+let supervisorLogFileName = "supervisor.log"
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
 let encoder = JSONEncoder()
@@ -164,10 +164,10 @@ func handle(_ request: Request) throws -> Response {
         process.executableURL = URL(fileURLWithPath: currentExecutablePath())
         process.arguments = ["--request-json", try requestJSON(request.withCommand("run"))]
         process.standardInput = FileHandle.nullDevice
-        FileManager.default.createFile(atPath: helperLogPath(identity: identity, stateDir: config.stateDir).path, contents: nil)
-        let helperLog = try FileHandle(forWritingTo: helperLogPath(identity: identity, stateDir: config.stateDir))
-        process.standardOutput = helperLog
-        process.standardError = helperLog
+        FileManager.default.createFile(atPath: supervisorLogPath(identity: identity, stateDir: config.stateDir).path, contents: nil)
+        let supervisorLog = try FileHandle(forWritingTo: supervisorLogPath(identity: identity, stateDir: config.stateDir))
+        process.standardOutput = supervisorLog
+        process.standardError = supervisorLog
         try process.run()
         try writeRuntimeState(event: event, config: config, pid: process.processIdentifier, error: nil)
         return Response(ok: true, backend: backendName, event: event)
@@ -323,8 +323,8 @@ func serialInputPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(serialInputFileName)
 }
 
-func helperLogPath(identity: Identity, stateDir: String) -> URL {
-    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(helperLogFileName)
+func supervisorLogPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(supervisorLogFileName)
 }
 
 func writeState(event: Event, config: Config) throws {

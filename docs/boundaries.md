@@ -8,7 +8,8 @@
 - OCI image to rootfs builds
 - Identity in requests and state files
 - State changes as JSON
-- Apple Virtualization.framework helper protocol
+- Firecracker supervisor
+- Apple Virtualization.framework supervisor protocol
 - State files and cleanup
 - Host/guest wiring such as vsock listeners
 

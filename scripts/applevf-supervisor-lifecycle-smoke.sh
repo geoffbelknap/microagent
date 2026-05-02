@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HELPER="$ROOT/helpers/applevf/.build/debug/microagent-applevf-helper"
-STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-helper-smoke.XXXXXX")"
+SUPERVISOR="$ROOT/supervisors/applevf/.build/debug/microagent-applevf-supervisor"
+STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-supervisor-smoke.XXXXXX")"
 KERNEL="$STATE_DIR/kernel"
 ROOTFS="$STATE_DIR/rootfs.ext4"
 
@@ -14,7 +14,7 @@ trap cleanup EXIT
 
 touch "$KERNEL" "$ROOTFS"
 
-swift build --package-path "$ROOT/helpers/applevf" --disable-sandbox >/dev/null
+swift build --package-path "$ROOT/supervisors/applevf" --disable-sandbox >/dev/null
 
 request() {
   local command="$1"
@@ -87,7 +87,7 @@ if want_state:
 PY
 }
 
-host_response="$("$HELPER" <<< '{"command":"host"}')"
+host_response="$("$SUPERVISOR" <<< '{"command":"host"}')"
 python3 - "$host_response" <<'PY'
 import json
 import sys
@@ -100,21 +100,21 @@ if host.get("backend") != "apple-vf":
     raise SystemExit(body)
 PY
 
-check_response="$(request check | "$HELPER")"
+check_response="$(request check | "$SUPERVISOR")"
 assert_response "$check_response" true prepared
 
-prepare_response="$(request prepare | "$HELPER")"
+prepare_response="$(request prepare | "$SUPERVISOR")"
 assert_response "$prepare_response" true prepared
 test -f "$STATE_DIR/agent-smoke/event.json"
 test -f "$STATE_DIR/agent-smoke/config.json"
 
-inspect_response="$(request_state_only inspect | "$HELPER")"
+inspect_response="$(request_state_only inspect | "$SUPERVISOR")"
 assert_response "$inspect_response" true prepared
 
-stop_response="$(request_state_only stop | "$HELPER")"
+stop_response="$(request_state_only stop | "$SUPERVISOR")"
 assert_response "$stop_response" true stopped
 
-kill_response="$(request_state_only kill | "$HELPER")"
+kill_response="$(request_state_only kill | "$SUPERVISOR")"
 assert_response "$kill_response" true stopped
 python3 - "$kill_response" <<'PY'
 import json
@@ -125,7 +125,7 @@ if (body.get("event") or {}).get("detail") != "forced":
     raise SystemExit(body)
 PY
 
-if start_response="$(request start | "$HELPER" 2>/dev/null)"; then
+if start_response="$(request start | "$SUPERVISOR" 2>/dev/null)"; then
   echo "expected start to return a nonzero status" >&2
   exit 1
 fi
@@ -139,13 +139,13 @@ if not body.get("error"):
     raise SystemExit(body)
 PY
 
-delete_response="$(request_state_only delete | "$HELPER")"
+delete_response="$(request_state_only delete | "$SUPERVISOR")"
 assert_response "$delete_response" true stopped
 test ! -e "$STATE_DIR/agent-smoke"
 
 invalid_response="$STATE_DIR/invalid.json"
-if "$HELPER" <<< '{"command":"check"}' >"$invalid_response" 2>/dev/null; then
-  echo "expected invalid helper request to fail" >&2
+if "$SUPERVISOR" <<< '{"command":"check"}' >"$invalid_response" 2>/dev/null; then
+  echo "expected invalid supervisor request to fail" >&2
   exit 1
 fi
 python3 - "$invalid_response" <<'PY'
@@ -158,4 +158,4 @@ if body.get("ok") is not False or "identity is required" not in body.get("error"
     raise SystemExit(body)
 PY
 
-echo "helper lifecycle smoke passed"
+echo "supervisor lifecycle smoke passed"

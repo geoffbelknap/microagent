@@ -90,15 +90,19 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "create" && shouldUseHighLevelCreate(args[1:]) {
 		return runHighLevelCreate(ctx, args[1:], stdout)
 	}
-	helperPath := os.Getenv("MICROAGENT_APPLEVF_HELPER")
+	supervisorPath := os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	fs.StringVar(&helperPath, "helper", helperPath, "Apple VF helper path")
+	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	req, err := requestForCommand(args[0], fs, reorderFlagArgs(args[1:]))
 	if err != nil {
 		return err
 	}
-	resp, err := vmkit.HelperClient{Path: helperPath}.Do(ctx, req)
+	opts, err := workspaceOptionsFromRequest(req, supervisorPath)
+	if err != nil {
+		return err
+	}
+	resp, err := dispatchWorkspaceRequest(ctx, opts, req)
 	if err != nil {
 		if resp.Error == "" {
 			return err
@@ -111,21 +115,21 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 type doctorOptions struct {
-	Backend    string
-	Arch       string
-	HelperPath string
+	Backend        string
+	Arch           string
+	SupervisorPath string
 }
 
 func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	opts := doctorOptions{
-		Backend:    defaultBackend(),
-		Arch:       defaultGuestArch(),
-		HelperPath: os.Getenv("MICROAGENT_APPLEVF_HELPER"),
+		Backend:        hostBackend(),
+		Arch:           defaultGuestArch(),
+		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
 	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	fs.StringVar(&opts.HelperPath, "helper", opts.HelperPath, "Apple VF helper path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
@@ -143,7 +147,7 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, error) {
 	switch opts.Backend {
 	case vmkit.BackendAppleVF:
-		resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, vmkit.Request{Command: "host"})
+		resp, err := vmkit.SupervisorClient{Path: opts.SupervisorPath}.Do(ctx, vmkit.Request{Command: "host"})
 		if resp.Backend == "" {
 			resp.Backend = opts.Backend
 		}
@@ -259,7 +263,7 @@ func runKernel(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error {
-	opts := kernelOptions{Backend: defaultBackend(), Architecture: defaultGuestArch()}
+	opts := kernelOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
 	opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	fs := flag.NewFlagSet("kernel install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -267,7 +271,7 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	fs.StringVar(&opts.FromPath, "from", "", "Local kernel path")
 	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
 	fs.StringVar(&opts.OutputPath, "out", opts.OutputPath, "Output path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
@@ -302,13 +306,13 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 }
 
 func runKernelVerify(args []string, stdout *os.File) error {
-	opts := kernelOptions{Backend: defaultBackend(), Architecture: defaultGuestArch()}
+	opts := kernelOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
 	opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	fs := flag.NewFlagSet("kernel verify", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.OutputPath, "path", opts.OutputPath, "Kernel path")
 	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
@@ -559,7 +563,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.StringVar(&identity.RuntimeID, "name", "", "Workspace name")
 	fs.StringVar(&identity.RequestID, "request-id", "", "Request ID")
 	fs.StringVar((*string)(&identity.Role), "role", string(vmkit.RoleWorkload), "Role")
-	fs.StringVar(&identity.Backend, "backend", vmkit.BackendAppleVF, "VM backend")
+	fs.StringVar(&identity.Backend, "backend", hostBackend(), "Backend override")
 	fs.StringVar(&config.KernelPath, "kernel", "", "Linux kernel path")
 	fs.StringVar(&config.RootfsPath, "rootfs", "", "Rootfs image path")
 	fs.StringVar(&config.StateDir, "state-dir", "", "Runtime state directory")
@@ -616,7 +620,7 @@ type workspaceOptions struct {
 	Backend         string
 	KernelPath      string
 	StateDir        string
-	HelperPath      string
+	SupervisorPath  string
 	GuestInitPath   string
 	Mke2fsPath      string
 	Architecture    string
@@ -766,14 +770,14 @@ func runLogs(args []string, stdout *os.File) error {
 
 func runWorkspaceStateCommand(ctx context.Context, command string, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	helperPath := os.Getenv("MICROAGENT_APPLEVF_HELPER")
-	backend := defaultBackend()
+	supervisorPath := os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	backend := hostBackend()
 	name := ""
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	fs.StringVar(&helperPath, "helper", helperPath, "Apple VF helper path")
-	fs.StringVar(&backend, "backend", backend, "VM backend")
+	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
+	fs.StringVar(&backend, "backend", backend, "Backend override")
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
@@ -804,7 +808,8 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		},
 		Config: &vmkit.Config{StateDir: opts.StateDir},
 	}
-	resp, err := vmkit.HelperClient{Path: helperPath}.Do(ctx, req)
+	workspaceOpts := workspaceOptions{StateDir: opts.StateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath}
+	resp, err := dispatchWorkspaceRequest(ctx, workspaceOpts, req)
 	if err != nil {
 		if resp.Error == "" {
 			return err
@@ -836,6 +841,9 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
+	if state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name}); err == nil && state.Event.Identity.Backend == vmkit.BackendFirecracker {
+		return fmt.Errorf("firecracker connect is not supported; use microagent logs")
+	}
 	inputPath := serialInputPath(opts.StateDir, name)
 	logPath := filepath.Join(opts.StateDir, name, "serial.log")
 	if strings.TrimSpace(*send) != "" {
@@ -843,9 +851,6 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 			return fmt.Errorf("connect timeout must not be negative")
 		}
 		if err := waitForPath(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second); err != nil {
-			return err
-		}
-		if err := waitForConsoleReady(ctx, logPath, time.Duration(*timeoutSeconds)*time.Second); err != nil {
 			return err
 		}
 		before := fileSize(logPath)
@@ -895,22 +900,22 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	opts := workspaceOptions{
-		Backend:      defaultBackend(),
-		Architecture: defaultGuestArch(),
-		MemoryMiB:    defaultWorkspaceMemoryMiB,
-		CPUCount:     2,
-		StateDir:     defaultStateDir(),
-		HelperPath:   os.Getenv("MICROAGENT_APPLEVF_HELPER"),
-		SerialInput:  true,
+		Backend:        hostBackend(),
+		Architecture:   defaultGuestArch(),
+		MemoryMiB:      defaultWorkspaceMemoryMiB,
+		CPUCount:       2,
+		StateDir:       defaultStateDir(),
+		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SerialInput:    false,
 	}
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	kernelExplicit := hasFlagValue(args, "kernel")
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	fs.StringVar(&opts.HelperPath, "helper", opts.HelperPath, "Apple VF helper path")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
@@ -919,6 +924,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
+	opts.SerialInput = opts.Backend == vmkit.BackendAppleVF
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent start <name> [--state-dir <dir>]")
 	}
@@ -1004,7 +1010,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		}
 	} else {
 		req := workspaceRequest(opts, "prepare", result.RootfsPath)
-		resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
+		resp, err := dispatchWorkspaceRequest(ctx, opts, req)
 		if err != nil {
 			if resp.Error == "" {
 				return err
@@ -1025,7 +1031,7 @@ type stateCommandOptions struct {
 func parseWorkspaceOptions(command string, args []string) (workspaceOptions, error) {
 	kernelExplicit := hasFlagValue(args, "kernel")
 	opts := workspaceOptions{
-		Backend:      defaultBackend(),
+		Backend:      hostBackend(),
 		Architecture: defaultGuestArch(),
 		MemoryMiB:    defaultWorkspaceMemoryMiB,
 		CPUCount:     2,
@@ -1037,7 +1043,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	opts.Mke2fsPath = defaultMke2fsPath()
 	opts.GuestInitPath = defaultGuestInitPath(opts.Architecture)
-	opts.HelperPath = os.Getenv("MICROAGENT_APPLEVF_HELPER")
+	opts.SupervisorPath = os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.Name, "name", "", "Workspace name")
@@ -1049,10 +1055,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&setupCommands, "setup", "Shell command to run before --exec")
 	var envVars multiFlag
 	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "Microagent state directory")
-	fs.StringVar(&opts.HelperPath, "helper", opts.HelperPath, "Apple VF helper path")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.GuestInitPath, "guest-init", opts.GuestInitPath, "Guest init path")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
@@ -1179,16 +1185,42 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 	}
 }
 
+func workspaceOptionsFromRequest(req vmkit.Request, supervisorPath string) (workspaceOptions, error) {
+	if req.Identity == nil {
+		return workspaceOptions{}, fmt.Errorf("identity is required")
+	}
+	if req.Config == nil {
+		return workspaceOptions{}, fmt.Errorf("config is required")
+	}
+	return workspaceOptions{
+		Name:           req.Identity.RuntimeID,
+		Backend:        req.Identity.Backend,
+		KernelPath:     req.Config.KernelPath,
+		StateDir:       req.Config.StateDir,
+		SupervisorPath: supervisorPath,
+		MemoryMiB:      req.Config.MemoryMiB,
+		CPUCount:       req.Config.CPUCount,
+	}, nil
+}
+
+func dispatchWorkspaceRequest(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
+	switch opts.Backend {
+	case vmkit.BackendFirecracker:
+		return dispatchFirecrackerRequest(ctx, opts, req)
+	case vmkit.BackendAppleVF:
+		return vmkit.SupervisorClient{Path: opts.SupervisorPath}.Do(ctx, req)
+	default:
+		return vmkit.Response{Backend: opts.Backend, Error: fmt.Sprintf("unsupported backend: %s", opts.Backend)}, fmt.Errorf("unsupported backend: %s", opts.Backend)
+	}
+}
+
 func runWorkspaceForeground(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
-	if opts.Backend == vmkit.BackendFirecracker {
-		return runFirecrackerForeground(ctx, opts, req)
-	}
-	if err := writeWorkspaceProcessState(opts, req, vmkit.StateStarting, 0, ""); err != nil {
-		return vmkit.Response{}, err
-	}
-	resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
+	resp, err := dispatchWorkspaceRequest(ctx, opts, req)
 	state := vmkit.StateStopped
 	errorText := ""
+	if opts.Backend == vmkit.BackendFirecracker {
+		return resp, err
+	}
 	if err != nil || !resp.OK {
 		state = vmkit.StateFailed
 		errorText = resp.Error
@@ -1206,9 +1238,12 @@ func startWorkspaceDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Res
 	if opts.Backend == vmkit.BackendFirecracker {
 		return startFirecrackerDetached(opts, req)
 	}
-	path := opts.HelperPath
+	if opts.Backend != vmkit.BackendAppleVF {
+		return dispatchWorkspaceRequest(context.Background(), opts, req)
+	}
+	path := opts.SupervisorPath
 	if path == "" {
-		path = "microagent-applevf-helper"
+		path = "microagent-applevf-supervisor"
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -1217,16 +1252,16 @@ func startWorkspaceDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Res
 	if err := os.MkdirAll(filepath.Join(opts.StateDir, opts.Name), 0o755); err != nil {
 		return vmkit.Response{}, err
 	}
-	helperLogPath := filepath.Join(opts.StateDir, opts.Name, "helper.log")
-	helperLog, err := os.OpenFile(helperLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	supervisorLogPath := filepath.Join(opts.StateDir, opts.Name, "supervisor.log")
+	supervisorLog, err := os.OpenFile(supervisorLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	defer helperLog.Close()
+	defer supervisorLog.Close()
 	cmd := exec.Command(path)
 	cmd.Stdin = strings.NewReader(string(body))
-	cmd.Stdout = helperLog
-	cmd.Stderr = helperLog
+	cmd.Stdout = supervisorLog
+	cmd.Stderr = supervisorLog
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return vmkit.Response{}, err
@@ -1277,6 +1312,209 @@ func startFirecrackerDetached(opts workspaceOptions, req vmkit.Request) (vmkit.R
 	return startFirecrackerProcess(context.Background(), opts, req, true)
 }
 
+func dispatchFirecrackerRequest(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
+	if err := vmkit.ValidateRequest(req); err != nil {
+		return vmkit.Response{}, err
+	}
+	switch req.Command {
+	case "check":
+		return vmkit.Response{OK: true, Backend: vmkit.BackendFirecracker}, nil
+	case "prepare":
+		if err := prepareFirecrackerWorkspace(opts, req); err != nil {
+			return failedFirecrackerResponse(req, err.Error()), err
+		}
+		return preparedFirecrackerResponse(req), nil
+	case "run":
+		return runFirecrackerForeground(ctx, opts, req)
+	case "start":
+		return startFirecrackerDetached(opts, req)
+	case "inspect":
+		return inspectFirecrackerWorkspace(opts)
+	case "stop":
+		return stopFirecrackerWorkspace(ctx, opts, req, syscall.SIGTERM)
+	case "kill":
+		return stopFirecrackerWorkspace(ctx, opts, req, syscall.SIGKILL)
+	case "delete":
+		if err := ensureFirecrackerWorkspaceCanDelete(opts); err != nil {
+			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		}
+		cleanupWorkspaceState(opts)
+		return firecrackerEventResponse(req, vmkit.StateStopped, ""), nil
+	default:
+		err := fmt.Errorf("unknown firecracker command %q", req.Command)
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+	}
+}
+
+func prepareFirecrackerWorkspace(opts workspaceOptions, req vmkit.Request) error {
+	if err := vmkit.ValidateRequest(req); err != nil {
+		return err
+	}
+	if opts.Name == "" && req.Identity != nil {
+		opts.Name = req.Identity.RuntimeID
+	}
+	if opts.StateDir == "" && req.Config != nil {
+		opts.StateDir = req.Config.StateDir
+	}
+	if err := writeFirecrackerConfig(opts, req); err != nil {
+		_ = writeWorkspaceProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o755); err != nil {
+		return err
+	}
+	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if err := serialLog.Close(); err != nil {
+		return err
+	}
+	return writeWorkspaceProcessState(opts, req, vmkit.StatePrepared, 0, "")
+}
+
+func stopFirecrackerWorkspace(ctx context.Context, opts workspaceOptions, req vmkit.Request, signal syscall.Signal) (vmkit.Response, error) {
+	state, err := readWorkspaceRuntimeState(opts)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if state.PID == 0 {
+		if err := writeWorkspaceProcessState(opts, runtimeStateRequest(req, state), vmkit.StateStopped, 0, ""); err != nil {
+			return vmkit.Response{}, err
+		}
+		return stoppedFirecrackerResponse(req), nil
+	}
+	active, err := processActive(state.PID)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if active {
+		if err := signalProcessGroup(state.PID, signal); err != nil && err != syscall.ESRCH {
+			errorText := err.Error()
+			_ = writeWorkspaceProcessState(opts, runtimeStateRequest(req, state), vmkit.StateFailed, state.PID, errorText)
+			return failedFirecrackerResponse(req, errorText), err
+		}
+		if err := waitForProcessExit(ctx, state.PID, 5*time.Second); err != nil {
+			errorText := err.Error()
+			_ = writeWorkspaceProcessState(opts, runtimeStateRequest(req, state), vmkit.StateFailed, state.PID, errorText)
+			return failedFirecrackerResponse(req, errorText), err
+		}
+	}
+	if err := writeWorkspaceProcessState(opts, runtimeStateRequest(req, state), vmkit.StateStopped, 0, ""); err != nil {
+		return vmkit.Response{}, err
+	}
+	return stoppedFirecrackerResponse(req), nil
+}
+
+func ensureFirecrackerWorkspaceCanDelete(opts workspaceOptions) error {
+	state, err := readWorkspaceRuntimeState(opts)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if state.PID == 0 {
+		return nil
+	}
+	active, err := processActive(state.PID)
+	if err != nil {
+		return err
+	}
+	if active {
+		return fmt.Errorf("firecracker workspace %s is running; stop or kill it before delete", opts.Name)
+	}
+	return nil
+}
+
+func signalProcessGroup(pid int, signal syscall.Signal) error {
+	if pid <= 0 {
+		return nil
+	}
+	if err := syscall.Kill(-pid, signal); err == nil || err != syscall.ESRCH {
+		return err
+	}
+	return syscall.Kill(pid, signal)
+}
+
+func readWorkspaceRuntimeState(opts workspaceOptions) (workspaceRuntimeState, error) {
+	var state workspaceRuntimeState
+	data, err := os.ReadFile(filepath.Join(opts.StateDir, opts.Name, "runtime.json"))
+	if err != nil {
+		return state, err
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, err
+	}
+	return state, nil
+}
+
+func runtimeStateRequest(req vmkit.Request, state workspaceRuntimeState) vmkit.Request {
+	if req.Identity == nil {
+		identity := state.Event.Identity
+		req.Identity = &identity
+	}
+	if req.Config == nil {
+		config := state.Config
+		req.Config = &config
+	} else {
+		req.Config.KernelPath = state.Config.KernelPath
+		req.Config.RootfsPath = state.Config.RootfsPath
+		req.Config.MemoryMiB = state.Config.MemoryMiB
+		req.Config.CPUCount = state.Config.CPUCount
+	}
+	return req
+}
+
+func processActive(pid int) (bool, error) {
+	if pid <= 0 {
+		return false, nil
+	}
+	if err := syscall.Kill(pid, 0); err != nil {
+		if err == syscall.ESRCH {
+			return false, nil
+		}
+		return false, err
+	}
+	if state, err := linuxProcessState(pid); err == nil && state == "Z" {
+		return false, nil
+	}
+	return true, nil
+}
+
+func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		active, err := processActive(pid)
+		if err != nil {
+			return err
+		}
+		if !active {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("process %d did not exit before timeout", pid)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func linuxProcessState(pid int) (string, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return "", err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) < 3 {
+		return "", fmt.Errorf("invalid proc stat for pid %d", pid)
+	}
+	return fields[2], nil
+}
+
 func startFirecrackerProcess(ctx context.Context, opts workspaceOptions, req vmkit.Request, detached bool) (vmkit.Response, error) {
 	if err := vmkit.ValidateRequest(req); err != nil {
 		return vmkit.Response{}, err
@@ -1296,6 +1534,10 @@ func startFirecrackerProcess(ctx context.Context, opts workspaceOptions, req vmk
 	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return vmkit.Response{}, err
+	}
+	if req.Config.SerialInput {
+		_ = serialLog.Close()
+		return vmkit.Response{}, fmt.Errorf("firecracker serial input is not supported")
 	}
 	cmd := exec.CommandContext(ctx, firecrackerPath, "--no-api", "--config-file", firecrackerConfigPath(opts))
 	cmd.Stdout = serialLog
@@ -1392,6 +1634,10 @@ func inspectFirecrackerWorkspace(opts workspaceOptions) (vmkit.Response, error) 
 
 func runningFirecrackerResponse(req vmkit.Request) vmkit.Response {
 	return firecrackerEventResponse(req, vmkit.StateRunning, "")
+}
+
+func preparedFirecrackerResponse(req vmkit.Request) vmkit.Response {
+	return firecrackerEventResponse(req, vmkit.StatePrepared, "")
 }
 
 func stoppedFirecrackerResponse(req vmkit.Request) vmkit.Response {
@@ -1674,12 +1920,9 @@ func nonEmpty(value, fallback string) string {
 }
 
 func inspectWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Response, error) {
-	if opts.Backend == vmkit.BackendFirecracker {
-		return inspectFirecrackerWorkspace(opts)
-	}
 	req := workspaceRequest(opts, "inspect", filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4"))
 	req.Config.RootfsPath = ""
-	return vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, req)
+	return dispatchWorkspaceRequest(ctx, opts, req)
 }
 
 func waitForWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Response, error) {
@@ -1878,11 +2121,11 @@ func hasLowLevelCreateFlag(args []string) bool {
 	return false
 }
 
-func defaultBackend() string {
+func hostBackend() string {
 	if runtime.GOOS == "darwin" {
 		return vmkit.BackendAppleVF
 	}
-	return "firecracker"
+	return vmkit.BackendFirecracker
 }
 
 func defaultGuestArch() string {
@@ -2284,7 +2527,7 @@ func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identi
 
 func reorderFlagArgs(args []string) []string {
 	valueFlags := map[string]bool{
-		"-helper":      true,
+		"-supervisor":  true,
 		"-json":        true,
 		"-id":          true,
 		"-name":        true,
@@ -2465,7 +2708,7 @@ Options:
   --json                Print JSON output
   --text                Print human-readable output
   --output <json|text>  Select output format
-  -helper <path>        Override the Apple VF helper path
+  -supervisor <path>    Override the supervisor path
   -json <path|- >       Read request JSON from a file or stdin
   -image <ref>          OCI image
   -name <name>          Workspace name
@@ -2501,7 +2744,7 @@ Options:
   -timeout <seconds>    Timeout
   -keep                 Keep state
   -mke2fs <path>        mke2fs binary path
-  -helper <path>        Override the Apple VF helper path
+  -supervisor <path>    Override the supervisor path
 `)
 }
 
@@ -2522,7 +2765,7 @@ Options:
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
   -mke2fs <path>        mke2fs binary path
-  -helper <path>        Override the Apple VF helper path
+  -supervisor <path>    Override the supervisor path
 `)
 }
 

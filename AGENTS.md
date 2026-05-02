@@ -1,6 +1,6 @@
 # microagent-kit
 
-Go CLI/library plus a Swift helper for running Linux workspaces inside
+Go CLI/library plus backend supervisors for running Linux workspaces inside
 microVMs.
 
 ## Scope
@@ -12,7 +12,8 @@ This repository owns the VM pieces:
 - guest metadata and identity propagation
 - serial, block-device, and vsock wiring
 - cleanup and state files
-- Apple Virtualization.framework helper protocol
+- Firecracker supervisor
+- Apple Virtualization.framework supervisor protocol
 
 ## Non-goals
 
@@ -27,10 +28,10 @@ This repository owns the VM pieces:
 ## Design rules
 
 - Keep public output structured and machine-readable.
-- Keep the Swift helper usable from Go, Python, Rust, Node, and shell scripts.
+- Keep the Apple VF supervisor usable from Go, Python, Rust, Node, and shell scripts.
 - Treat state changes as API output, not log strings.
 - Preserve explicit identity in requests, state files, and events.
-- Keep Apple VF details behind the helper protocol.
+- Keep backend details behind supervisor boundaries.
 - Fail closed on invalid VM config.
 - Prefer narrow protocols over shell-string execution.
 

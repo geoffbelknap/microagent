@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HELPER="${MICROAGENT_APPLEVF_HELPER:-$ROOT/helpers/applevf/.build/release/microagent-applevf-helper}"
+SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
 KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
 if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
   KERNEL="$HOME/.microagent/kernels/apple-vf/Image"
@@ -33,8 +33,8 @@ if [ ! -r "$KERNEL" ]; then
   echo "kernel is not readable at $KERNEL" >&2
   exit 2
 fi
-if [ ! -x "$HELPER" ]; then
-  echo "helper is not executable at $HELPER; run make signed-helper" >&2
+if [ ! -x "$SUPERVISOR" ]; then
+  echo "supervisor is not executable at $SUPERVISOR; run make signed-supervisor" >&2
   exit 2
 fi
 
@@ -86,14 +86,14 @@ with open(request_path, "w", encoding="utf-8") as f:
 PY
 
 mkfifo "$INPUT"
-"$HELPER" --request "$REQUEST" <"$INPUT" >"$OUTPUT" &
-HELPER_PID="$!"
+"$SUPERVISOR" --request "$REQUEST" <"$INPUT" >"$OUTPUT" &
+SUPERVISOR_PID="$!"
 
 exec 3>"$INPUT"
 sleep "${MICROAGENT_DIRECT_CONSOLE_INPUT_DELAY_SECONDS:-4}"
 printf 'echo DIRECT_CONSOLE_READY\rpoweroff -f\r' >&3
 exec 3>&-
-wait "$HELPER_PID"
+wait "$SUPERVISOR_PID"
 
 if ! grep -q "DIRECT_CONSOLE_READY" "$OUTPUT"; then
   echo "direct console input did not reach the guest" >&2

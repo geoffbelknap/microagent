@@ -1,7 +1,13 @@
-# Helper protocol
+# Supervisor Protocol
 
-`microagent-applevf-helper` is a standalone process. It reads one JSON request
-from stdin, writes one JSON response to stdout, and exits.
+Microagent uses the supervisor concept for backend lifecycle work. The Apple VF
+supervisor is packaged as a standalone executable,
+`microagent-applevf-supervisor`, so non-Swift callers can cross the
+Virtualization.framework boundary through a narrow JSON protocol.
+
+This document describes the Apple VF supervisor protocol.
+`microagent-applevf-supervisor` reads one JSON request from stdin, writes one JSON
+response to stdout, and exits.
 
 Diagnostics go to stderr. Exit code `0` means the response has `"ok": true`.
 Nonzero exit means the response has `"ok": false` or the request could not be

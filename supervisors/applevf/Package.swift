@@ -3,19 +3,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "microagent-applevf-helper",
+    name: "microagent-applevf-supervisor",
     platforms: [
         .macOS(.v14)
     ],
     products: [
         .executable(
-            name: "microagent-applevf-helper",
-            targets: ["microagent-applevf-helper"]
+            name: "microagent-applevf-supervisor",
+            targets: ["microagent-applevf-supervisor"]
         )
     ],
     targets: [
         .executableTarget(
-            name: "microagent-applevf-helper"
+            name: "microagent-applevf-supervisor"
         )
     ]
 )

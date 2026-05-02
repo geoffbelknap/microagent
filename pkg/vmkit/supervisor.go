@@ -8,18 +8,18 @@ import (
 	"os/exec"
 )
 
-type HelperClient struct {
+type SupervisorClient struct {
 	Path string
 }
 
-func (c HelperClient) Do(ctx context.Context, req Request) (Response, error) {
+func (c SupervisorClient) Do(ctx context.Context, req Request) (Response, error) {
 	NormalizeConfig(req.Config)
 	if err := ValidateRequest(req); err != nil {
 		return Response{}, err
 	}
 	path := c.Path
 	if path == "" {
-		path = "microagent-applevf-helper"
+		path = "microagent-applevf-supervisor"
 	}
 	body, err := json.Marshal(req)
 	if err != nil {

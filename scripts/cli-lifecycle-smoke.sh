@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HELPER="$ROOT/helpers/applevf/.build/debug/microagent-applevf-helper"
+SUPERVISOR="$ROOT/supervisors/applevf/.build/debug/microagent-applevf-supervisor"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-cli-smoke.XXXXXX")"
 KERNEL="$STATE_DIR/kernel"
 ROOTFS="$STATE_DIR/rootfs.ext4"
@@ -15,10 +15,10 @@ trap cleanup EXIT
 touch "$KERNEL" "$ROOTFS"
 
 go build -o "$STATE_DIR/microagent" "$ROOT/cmd/microagent"
-swift build --package-path "$ROOT/helpers/applevf" --disable-sandbox >/dev/null
+swift build --package-path "$ROOT/supervisors/applevf" --disable-sandbox >/dev/null
 
 run_cli() {
-  "$STATE_DIR/microagent" "$@" --helper "$HELPER"
+  "$STATE_DIR/microagent" "$@" --supervisor "$SUPERVISOR"
 }
 
 assert_json() {

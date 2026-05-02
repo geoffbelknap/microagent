@@ -2,9 +2,11 @@
 
 `microagent-kit` runs Linux workspaces inside microVMs.
 
-The command-line tool is `microagent`. On macOS it uses Apple
-Virtualization.framework through `microagent-applevf-helper`, a small JSON
-helper that Go, Python, Rust, Node, and shell scripts can call.
+The command-line tool is `microagent`. Each host OS has one VM backend:
+Firecracker on Linux and Apple Virtualization.framework on macOS. Each backend
+has a supervisor that owns VM lifecycle state changes. The Apple VF supervisor
+is packaged as `microagent-applevf-supervisor`, a small JSON executable that Go,
+Python, Rust, Node, and shell scripts can call.
 
 Microagent provides the kernel, converts OCI images into VM disks, and starts
 the VM. Identity, policy, credentials, and higher-level control stay outside
@@ -56,11 +58,21 @@ microagent stop research
 microagent delete research
 ```
 
+Linux has one backend: Firecracker. macOS has one backend: Apple VF. The
+`--backend` flag exists for lower-level request compatibility and backend
+smoke tests, not as a user-facing backend selector.
+
+Both backends expose the same lifecycle surface: `run`, `create`, `start`,
+`status`, `stop`, `kill`, and `delete`. Backend supervisors record state files
+and emit lifecycle events. Firecracker records process IDs so `stop` can send a
+graceful signal and `kill` can send a hard kill. Firecracker does not support
+interactive `connect`; use `logs` for serial output.
+
 ## Build
 
 ```bash
 go test ./...
-swift build --package-path helpers/applevf --disable-sandbox
+swift build --package-path supervisors/applevf --disable-sandbox
 ```
 
 Run the smokes:
@@ -68,6 +80,9 @@ Run the smokes:
 ```bash
 make smoke
 ```
+
+`make smoke` runs the feature smoke suite for the HostOS backend: Firecracker
+on Linux, Apple VF on macOS.
 
 Run the OCI rootfs smoke:
 
@@ -82,15 +97,21 @@ network, and Microagent state paths are visible:
 make smoke-firecracker
 ```
 
+Run only the HostOS workspace lifecycle smoke:
+
+```bash
+make smoke-workspace
+```
+
 See [docs/firecracker-smoke.md](docs/firecracker-smoke.md) for the expected
 kernel SHA, output, and host requirements.
 The boot-proven release note is in
 [docs/releases/firecracker-amd64-boot-proven.md](docs/releases/firecracker-amd64-boot-proven.md).
 
-Build and ad-hoc sign the Apple VF helper:
+Build and ad-hoc sign the Apple VF supervisor:
 
 ```bash
-make signed-helper
+make signed-supervisor
 ```
 
 Boot a Linux VM:
@@ -140,6 +161,12 @@ microagent create \
   --image docker.io/library/ubuntu:24.04
 ```
 
+The workspace name can also be positional:
+
+```bash
+microagent create research --image docker.io/library/ubuntu:24.04
+```
+
 The image supplies Linux userspace. Microagent creates the disk and records the
 workspace. If the default kernel is missing, Microagent installs it first.
 
@@ -164,6 +191,9 @@ Open its console:
 ```bash
 microagent connect research
 ```
+
+`connect` is supported by Apple VF. Firecracker workspaces currently expose
+serial output through `logs`.
 
 For scripts, send one line and print any new console output:
 
@@ -196,7 +226,10 @@ microagent stop research
 microagent delete research
 ```
 
-Create a workspace from an existing rootfs:
+For Firecracker, `delete` refuses to remove state while the recorded VM process
+is still running. Use `stop` or `kill` first.
+
+Prepare a workspace from an existing rootfs with the lower-level request form:
 
 ```bash
 microagent create \
@@ -276,16 +309,21 @@ microagent run \
   --kernel /tmp/Image
 ```
 
-Use a local helper build:
+Use a local Apple VF supervisor build:
 
 ```bash
-microagent create -helper ./helpers/applevf/.build/debug/microagent-applevf-helper --json request.json
+microagent create \
+  --backend apple-vf \
+  --supervisor ./supervisors/applevf/.build/debug/microagent-applevf-supervisor \
+  --json request.json
 ```
 
-## Helper
+## Supervisors
 
-The helper reads one JSON request from stdin and writes one JSON response to
-stdout. See `docs/protocol.md`.
+Firecracker and Apple VF both use the supervisor concept for backend lifecycle
+work. The Apple VF supervisor is packaged as a Swift executable because the
+Virtualization.framework boundary is host-native. It reads one JSON request from
+stdin and writes one JSON response to stdout. See `docs/protocol.md`.
 
 ## Boundary
 
@@ -294,6 +332,7 @@ stdout. See `docs/protocol.md`.
 ```text
 your program
   -> microagent-kit
+       -> Firecracker backend
        -> Apple Virtualization.framework backend
        -> OCI image to ext4 rootfs builds
 ```
