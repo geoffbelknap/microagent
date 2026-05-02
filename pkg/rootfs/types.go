@@ -17,18 +17,20 @@ type Platform struct {
 }
 
 type BuildRequest struct {
-	ImageRef      string            `json:"image_ref"`
-	Platform      Platform          `json:"platform"`
-	OutputPath    string            `json:"output_path"`
-	InitPath      string            `json:"init_path,omitempty"`
-	Command       []string          `json:"command,omitempty"`
-	StateDir      string            `json:"state_dir,omitempty"`
-	Mke2fsPath    string            `json:"mke2fs_path,omitempty"`
-	SizeMiB       int64             `json:"size_mib,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
-	AllowMutable  bool              `json:"allow_mutable,omitempty"`
-	KeepStage     bool              `json:"keep_stage,omitempty"`
-	StageSnapshot string            `json:"stage_snapshot,omitempty"`
+	ImageRef       string            `json:"image_ref"`
+	Platform       Platform          `json:"platform"`
+	OutputPath     string            `json:"output_path"`
+	InitPath       string            `json:"init_path,omitempty"`
+	InitBinaryPath string            `json:"init_binary_path,omitempty"`
+	Command        []string          `json:"command,omitempty"`
+	ResultPort     uint32            `json:"result_port,omitempty"`
+	StateDir       string            `json:"state_dir,omitempty"`
+	Mke2fsPath     string            `json:"mke2fs_path,omitempty"`
+	SizeMiB        int64             `json:"size_mib,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	AllowMutable   bool              `json:"allow_mutable,omitempty"`
+	KeepStage      bool              `json:"keep_stage,omitempty"`
+	StageSnapshot  string            `json:"stage_snapshot,omitempty"`
 }
 
 type Provenance struct {
@@ -83,6 +85,7 @@ func NormalizeRequest(req BuildRequest) BuildRequest {
 	req.ImageRef = strings.TrimSpace(req.ImageRef)
 	req.OutputPath = strings.TrimSpace(req.OutputPath)
 	req.InitPath = strings.TrimSpace(req.InitPath)
+	req.InitBinaryPath = strings.TrimSpace(req.InitBinaryPath)
 	req.StateDir = strings.TrimSpace(req.StateDir)
 	req.Mke2fsPath = strings.TrimSpace(req.Mke2fsPath)
 	req.StageSnapshot = strings.TrimSpace(req.StageSnapshot)

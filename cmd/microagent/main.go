@@ -171,20 +171,22 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 }
 
 type workspaceOptions struct {
-	Name         string
-	ImageRef     string
-	ExecCommand  string
-	Backend      string
-	KernelPath   string
-	StateDir     string
-	HelperPath   string
-	Mke2fsPath   string
-	Architecture string
-	MemoryMiB    int
-	CPUCount     int
-	SizeMiB      int64
-	Timeout      time.Duration
-	Keep         bool
+	Name          string
+	ImageRef      string
+	ExecCommand   string
+	Backend       string
+	KernelPath    string
+	StateDir      string
+	HelperPath    string
+	GuestInitPath string
+	Mke2fsPath    string
+	Architecture  string
+	MemoryMiB     int
+	CPUCount      int
+	SizeMiB       int64
+	Timeout       time.Duration
+	ResultPort    uint32
+	Keep          bool
 }
 
 type workspaceResult struct {
@@ -195,8 +197,18 @@ type workspaceResult struct {
 	SerialPath string            `json:"serial_path,omitempty"`
 	SerialLog  string            `json:"serial_log,omitempty"`
 	FinalState string            `json:"final_state,omitempty"`
+	Result     *guestResult      `json:"result,omitempty"`
 	Image      rootfs.Provenance `json:"image"`
 	Response   vmkit.Response    `json:"response"`
+}
+
+type guestResult struct {
+	StartedAt string `json:"started_at"`
+	ExitedAt  string `json:"exited_at"`
+	ExitCode  int    `json:"exit_code"`
+	Stdout    string `json:"stdout,omitempty"`
+	Stderr    string `json:"stderr,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
@@ -235,6 +247,9 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		if serial, readErr := os.ReadFile(result.SerialPath); readErr == nil {
 			result.SerialLog = string(serial)
+		}
+		if guest, readErr := readGuestResult(opts); readErr == nil {
+			result.Result = &guest
 		}
 		if waitErr != nil {
 			return waitErr
@@ -289,10 +304,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		CPUCount:     2,
 		SizeMiB:      rootfs.DefaultSizeMiB,
 		Timeout:      2 * time.Minute,
+		ResultPort:   1024,
 	}
 	opts.StateDir = defaultStateDir()
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	opts.Mke2fsPath = defaultMke2fsPath()
+	opts.GuestInitPath = defaultGuestInitPath(opts.Architecture)
 	opts.HelperPath = os.Getenv("MICROAGENT_APPLEVF_HELPER")
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -304,11 +321,14 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "Microagent state directory")
 	fs.StringVar(&opts.HelperPath, "helper", opts.HelperPath, "Apple VF helper path")
+	fs.StringVar(&opts.GuestInitPath, "guest-init", opts.GuestInitPath, "Guest init path")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
+	resultPort := uint(opts.ResultPort)
+	fs.UintVar(&resultPort, "result-port", resultPort, "Vsock result port")
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run")
@@ -328,6 +348,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if timeoutSeconds <= 0 {
 		return workspaceOptions{}, fmt.Errorf("%s timeout must be positive", command)
 	}
+	if resultPort > uint(^uint32(0)) {
+		return workspaceOptions{}, fmt.Errorf("%s result port is too large", command)
+	}
+	opts.ResultPort = uint32(resultPort)
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
 	return opts, nil
 }
@@ -336,15 +360,17 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
 	req := rootfs.BuildRequest{
-		ImageRef:     opts.ImageRef,
-		Platform:     rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
-		OutputPath:   rootfsPath,
-		InitPath:     rootfs.DefaultInitPath,
-		Command:      shellCommand(opts.ExecCommand),
-		StateDir:     filepath.Join(opts.StateDir, "build"),
-		Mke2fsPath:   opts.Mke2fsPath,
-		SizeMiB:      opts.SizeMiB,
-		AllowMutable: true,
+		ImageRef:       opts.ImageRef,
+		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
+		OutputPath:     rootfsPath,
+		InitPath:       rootfs.DefaultInitPath,
+		Command:        shellCommand(opts.ExecCommand),
+		InitBinaryPath: opts.GuestInitPath,
+		ResultPort:     opts.ResultPort,
+		StateDir:       filepath.Join(opts.StateDir, "build"),
+		Mke2fsPath:     opts.Mke2fsPath,
+		SizeMiB:        opts.SizeMiB,
+		AllowMutable:   true,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	return workspaceResult{
@@ -357,6 +383,10 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 }
 
 func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.Request {
+	var listeners []vmkit.VsockListener
+	if opts.ResultPort != 0 {
+		listeners = []vmkit.VsockListener{{Port: opts.ResultPort, Target: resultPath(opts)}}
+	}
 	return vmkit.Request{
 		Command: command,
 		Identity: &vmkit.Identity{
@@ -366,11 +396,12 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 			Backend:   opts.Backend,
 		},
 		Config: &vmkit.Config{
-			KernelPath: opts.KernelPath,
-			RootfsPath: rootfsPath,
-			StateDir:   opts.StateDir,
-			MemoryMiB:  opts.MemoryMiB,
-			CPUCount:   opts.CPUCount,
+			KernelPath:     opts.KernelPath,
+			RootfsPath:     rootfsPath,
+			StateDir:       opts.StateDir,
+			MemoryMiB:      opts.MemoryMiB,
+			CPUCount:       opts.CPUCount,
+			VsockListeners: listeners,
 		},
 	}
 }
@@ -390,6 +421,11 @@ func waitForWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Respons
 		if resp.Event != nil {
 			switch resp.Event.State {
 			case vmkit.StateStopped:
+				if opts.ResultPort != 0 {
+					if err := waitForResultFile(ctx, opts, deadline); err != nil {
+						return resp, err
+					}
+				}
 				return resp, nil
 			case vmkit.StateFailed:
 				return resp, fmt.Errorf("workspace %s failed", opts.Name)
@@ -406,8 +442,40 @@ func waitForWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Respons
 	}
 }
 
+func waitForResultFile(ctx context.Context, opts workspaceOptions, deadline time.Time) error {
+	for {
+		if _, err := os.Stat(resultPath(opts)); err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("workspace %s did not report a result before timeout", opts.Name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
 func serialLogPath(opts workspaceOptions) string {
 	return filepath.Join(opts.StateDir, opts.Name, "serial.log")
+}
+
+func resultPath(opts workspaceOptions) string {
+	return filepath.Join(opts.StateDir, opts.Name, "result.json")
+}
+
+func readGuestResult(opts workspaceOptions) (guestResult, error) {
+	var result guestResult
+	data, err := os.ReadFile(resultPath(opts))
+	if err != nil {
+		return result, err
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func cleanupWorkspaceState(opts workspaceOptions) {
@@ -465,6 +533,24 @@ func defaultMke2fsPath() string {
 		return "/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
 	}
 	return "mke2fs"
+}
+
+func defaultGuestInitPath(arch string) string {
+	executable, err := os.Executable()
+	if err != nil {
+		return "microagent-guestinit"
+	}
+	dir := filepath.Dir(executable)
+	candidates := []string{
+		filepath.Join(dir, "microagent-guestinit-"+arch),
+		filepath.Join(dir, "microagent-guestinit"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return candidates[1]
 }
 
 func hasFlagValue(args []string, name string) bool {
@@ -534,25 +620,27 @@ func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identi
 
 func reorderFlagArgs(args []string) []string {
 	valueFlags := map[string]bool{
-		"-helper":     true,
-		"-json":       true,
-		"-id":         true,
-		"-name":       true,
-		"-image":      true,
-		"-exec":       true,
-		"-request-id": true,
-		"-role":       true,
-		"-backend":    true,
-		"-kernel":     true,
-		"-rootfs":     true,
-		"-state-dir":  true,
-		"-memory":     true,
-		"-cpus":       true,
-		"-vsock":      true,
-		"-mke2fs":     true,
-		"-arch":       true,
-		"-size-mib":   true,
-		"-timeout":    true,
+		"-helper":      true,
+		"-json":        true,
+		"-id":          true,
+		"-name":        true,
+		"-image":       true,
+		"-exec":        true,
+		"-request-id":  true,
+		"-role":        true,
+		"-backend":     true,
+		"-kernel":      true,
+		"-rootfs":      true,
+		"-state-dir":   true,
+		"-memory":      true,
+		"-cpus":        true,
+		"-vsock":       true,
+		"-mke2fs":      true,
+		"-guest-init":  true,
+		"-arch":        true,
+		"-size-mib":    true,
+		"-timeout":     true,
+		"-result-port": true,
 	}
 	var flags []string
 	var positional []string

@@ -11,6 +11,7 @@ IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox@sha256:c4e5b27
 ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-boot.XXXXXX")"
 RESULT="$STATE_DIR/result.json"
+GUEST_INIT="$STATE_DIR/microagent-guestinit"
 
 cleanup() {
   if [ "${MICROAGENT_KEEP_BOOT_SMOKE:-0}" != "1" ]; then
@@ -47,6 +48,7 @@ fi
 (
   cd "$ROOT"
   go build -o "$STATE_DIR/microagent" ./cmd/microagent
+  GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
 "$STATE_DIR/microagent" run \
@@ -61,6 +63,7 @@ fi
   --memory "${MICROAGENT_APPLEVF_BOOT_MEMORY_MIB:-512}" \
   --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}" \
   --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}" \
+  --guest-init "$GUEST_INIT" \
   --helper "$HELPER" >"$RESULT"
 
 python3 - "$RESULT" <<'PY'
@@ -72,8 +75,12 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 
 serial = result.get("serial_log", "")
 print(serial[-8000:])
-if "MICROAGENT_BOOT_OK" not in serial:
-    raise SystemExit("VM booted but command output was not found in serial log")
+guest = result.get("result") or {}
+stdout = guest.get("stdout", "")
+if "MICROAGENT_BOOT_OK" not in stdout:
+    raise SystemExit("VM booted but command output was not found in guest result")
+if guest.get("exit_code") != 0:
+    raise SystemExit(f"unexpected exit code: {guest.get('exit_code')}")
 if result.get("final_state") != "stopped":
     raise SystemExit(f"unexpected final state: {result.get('final_state')}")
 PY

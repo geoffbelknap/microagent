@@ -14,7 +14,7 @@ func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello world"}, map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	})
+	}, "", 0)
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -34,6 +34,33 @@ func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	}
 	if !strings.Contains(text, "mkdir -p /proc /sys /dev") {
 		t.Fatalf("init missing mount point setup: %s", text)
+	}
+}
+
+func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
+	dir := t.TempDir()
+	initBinary := filepath.Join(dir, "guestinit")
+	if err := os.WriteFile(initBinary, []byte("guest-init"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, nil, initBinary, 1024)
+	if err != nil {
+		t.Fatalf("writeInit: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "sbin", "microagent-init"))
+	if err != nil {
+		t.Fatalf("read init: %v", err)
+	}
+	if string(data) != "guest-init" {
+		t.Fatalf("init binary = %q", data)
+	}
+	config, err := os.ReadFile(filepath.Join(dir, "etc", "microagent", "run.json"))
+	if err != nil {
+		t.Fatalf("read run config: %v", err)
+	}
+	text := string(config)
+	if !strings.Contains(text, `"port":1024`) || !strings.Contains(text, `"/bin/echo"`) {
+		t.Fatalf("unexpected run config: %s", text)
 	}
 }
 

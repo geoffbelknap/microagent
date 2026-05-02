@@ -137,7 +137,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		command = append([]string{}, imageConfig.Config.Entrypoint...)
 		command = append(command, imageConfig.Config.Cmd...)
 	}
-	if err := writeInit(stageDir, req.InitPath, command, req.Env); err != nil {
+	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort); err != nil {
 		return provenance, err
 	}
 	if req.StageSnapshot != "" {
@@ -391,13 +391,19 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 	return nil
 }
 
-func writeInit(stageDir, initPath string, command []string, env map[string]string) error {
+func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32) error {
 	target, err := safeStagePath(stageDir, initPath)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create init dir: %w", err)
+	}
+	if initBinaryPath != "" {
+		if err := copyFile(initBinaryPath, target, 0o755); err != nil {
+			return fmt.Errorf("copy init binary: %w", err)
+		}
+		return writeGuestRunConfig(stageDir, command, resultPort)
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -415,6 +421,47 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		return fmt.Errorf("write init: %w", err)
 	}
 	return nil
+}
+
+type guestRunConfig struct {
+	Command []string `json:"command"`
+	Port    uint32   `json:"port"`
+}
+
+func writeGuestRunConfig(stageDir string, command []string, resultPort uint32) error {
+	target, err := safeStagePath(stageDir, "/etc/microagent/run.json")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("create guest config dir: %w", err)
+	}
+	data, err := json.Marshal(guestRunConfig{Command: command, Port: resultPort})
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	return os.WriteFile(target, data, 0o644)
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func safeStagePath(stageDir, guestPath string) (string, error) {

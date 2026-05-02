@@ -247,7 +247,6 @@ func validatedConfig(_ config: Config?) throws -> Config {
         if listener.target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw ProtocolError.invalid("vsock listener \(listener.port) target is required")
         }
-        _ = try parseTCPHostPort(listener.target)
     }
     try readableFile(config.kernelPath, name: "config.kernelPath")
     try readableFile(config.rootfsPath, name: "config.rootfsPath")
@@ -406,6 +405,37 @@ final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
         CFRunLoopStop(CFRunLoopGetMain())
     }
 }
+
+@available(macOS 13.0, *)
+final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate {
+    private let path: String
+    private var connections: [VZVirtioSocketConnection] = []
+
+    init(path: String) {
+        self.path = path
+    }
+
+    func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
+        connections.append(connection)
+        let fd = connection.fileDescriptor
+        let path = self.path
+        DispatchQueue.global(qos: .utility).async {
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while true {
+                let n = read(fd, &buffer, buffer.count)
+                if n > 0 {
+                    data.append(buffer, count: n)
+                    continue
+                }
+                break
+            }
+            try? FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+        return true
+    }
+}
 #endif
 
 func updateRuntime(identity: Identity, config: Config, state: VMState, error: String?) {
@@ -446,11 +476,13 @@ func runVM(_ request: Request) throws {
         let vm = VZVirtualMachine(configuration: vmConfig)
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
+        var socketDelegates: [ResultSocketDelegate] = []
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
             switch result {
             case .success:
+                socketDelegates = installSocketListeners(vm: vm, config: config)
                 updateRuntime(identity: identity, config: config, state: .running, error: nil)
             case .failure(let error):
                 startError = error
@@ -464,7 +496,7 @@ func runVM(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime(delegate) {
+        withExtendedLifetime((delegate, socketDelegates)) {
             CFRunLoopRun()
         }
     } else {
@@ -476,6 +508,22 @@ func runVM(_ request: Request) throws {
 }
 
 #if canImport(Virtualization)
+@available(macOS 13.0, *)
+func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [ResultSocketDelegate] {
+    guard let socket = vm.socketDevices.first as? VZVirtioSocketDevice else {
+        return []
+    }
+    var delegates: [ResultSocketDelegate] = []
+    for listenerConfig in config.vsockListeners ?? [] {
+        let listener = VZVirtioSocketListener()
+        let delegate = ResultSocketDelegate(path: listenerConfig.target)
+        listener.delegate = delegate
+        socket.setSocketListener(listener, forPort: listenerConfig.port)
+        delegates.append(delegate)
+    }
+    return delegates
+}
+
 @available(macOS 13.0, *)
 func virtualMachineConfiguration(identity: Identity, config: Config, attachSerial: Bool) throws -> VZVirtualMachineConfiguration {
     let vmConfig = VZVirtualMachineConfiguration()

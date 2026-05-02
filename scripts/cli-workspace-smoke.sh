@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-workspace-smoke.XXXXXX")"
 CLI="$STATE_DIR/microagent"
+GUEST_INIT="$STATE_DIR/microagent-guestinit"
 HELPER="$STATE_DIR/helper"
 KERNEL="$STATE_DIR/Image"
 RESULT="$STATE_DIR/result.json"
@@ -49,6 +50,7 @@ touch "$KERNEL"
 (
   cd "$ROOT"
   go build -o "$CLI" ./cmd/microagent
+  GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
 "$CLI" run \
@@ -58,6 +60,8 @@ touch "$KERNEL"
   --kernel "$KERNEL" \
   --state-dir "$STATE_DIR" \
   --size-mib 64 \
+  --result-port 0 \
+  --guest-init "$GUEST_INIT" \
   --helper "$HELPER" >"$RESULT"
 
 python3 - "$RESULT" <<'PY'
