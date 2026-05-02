@@ -48,6 +48,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "kernel" {
 		return runKernel(ctx, args[1:], stdout)
 	}
+	if args[0] == "doctor" {
+		return runDoctor(ctx, args[1:], stdout)
+	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
@@ -85,15 +88,100 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 			return err
 		}
 	}
-	if args[0] == "doctor" {
-		resp.Kernel = defaultKernelSupport(defaultBackend(), defaultGuestArch())
-	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if encodeErr := enc.Encode(resp); encodeErr != nil {
 		return encodeErr
 	}
 	return err
+}
+
+type doctorOptions struct {
+	Backend    string
+	Arch       string
+	HelperPath string
+}
+
+func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
+	opts := doctorOptions{
+		Backend:    defaultBackend(),
+		Arch:       defaultGuestArch(),
+		HelperPath: os.Getenv("MICROAGENT_APPLEVF_HELPER"),
+	}
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.HelperPath, "helper", opts.HelperPath, "Apple VF helper path")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "VM backend")
+	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected doctor argument: %s", fs.Arg(0))
+	}
+	resp, err := doctorResponse(ctx, opts)
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if encodeErr := enc.Encode(resp); encodeErr != nil {
+		return encodeErr
+	}
+	return err
+}
+
+func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, error) {
+	switch opts.Backend {
+	case vmkit.BackendAppleVF:
+		resp, err := vmkit.HelperClient{Path: opts.HelperPath}.Do(ctx, vmkit.Request{Command: "host"})
+		if resp.Backend == "" {
+			resp.Backend = opts.Backend
+		}
+		resp.Kernel = defaultKernelSupport(opts.Backend, opts.Arch)
+		return resp, err
+	case vmkit.BackendFirecracker:
+		return firecrackerDoctorResponse(opts.Backend, opts.Arch, exec.LookPath, os.Stat)
+	default:
+		resp := vmkit.Response{
+			OK:      false,
+			Backend: opts.Backend,
+			Kernel:  defaultKernelSupport(opts.Backend, opts.Arch),
+			Error:   fmt.Sprintf("unsupported backend: %s", opts.Backend),
+		}
+		return resp, fmt.Errorf("%s", resp.Error)
+	}
+}
+
+func firecrackerDoctorResponse(backend, arch string, lookPath func(string) (string, error), stat func(string) (os.FileInfo, error)) (vmkit.Response, error) {
+	host := &vmkit.HostSupport{
+		Backend:      backend,
+		Architecture: arch,
+	}
+	var issues []string
+	if path, err := lookPath("firecracker"); err == nil {
+		host.BinaryPath = path
+		host.FrameworkAvailable = true
+	} else {
+		issues = append(issues, "firecracker binary not found in PATH")
+	}
+	if _, err := stat("/dev/kvm"); err == nil {
+		host.KVMAvailable = true
+		host.VirtualizationSupported = true
+	} else {
+		issues = append(issues, "/dev/kvm is not available")
+	}
+	if _, err := stat("/dev/vhost-vsock"); err == nil {
+		host.VsockAvailable = true
+	}
+	resp := vmkit.Response{
+		OK:      len(issues) == 0,
+		Backend: backend,
+		Host:    host,
+		Kernel:  defaultKernelSupport(backend, arch),
+	}
+	if len(issues) > 0 {
+		resp.Error = strings.Join(issues, "; ")
+		return resp, fmt.Errorf("%s", resp.Error)
+	}
+	return resp, nil
 }
 
 func runKernel(ctx context.Context, args []string, stdout *os.File) error {

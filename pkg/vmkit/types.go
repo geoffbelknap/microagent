@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-const BackendAppleVF = "apple-vf"
+const (
+	BackendAppleVF     = "apple-vf"
+	BackendFirecracker = "firecracker"
+)
 
 type ComponentRole string
 
@@ -69,6 +72,9 @@ type HostSupport struct {
 	Architecture            string `json:"architecture"`
 	FrameworkAvailable      bool   `json:"frameworkAvailable"`
 	VirtualizationSupported bool   `json:"virtualizationSupported"`
+	BinaryPath              string `json:"binaryPath,omitempty"`
+	KVMAvailable            bool   `json:"kvmAvailable,omitempty"`
+	VsockAvailable          bool   `json:"vsockAvailable,omitempty"`
 }
 
 type KernelSupport struct {

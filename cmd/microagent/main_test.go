@@ -43,6 +43,80 @@ func TestRunVersionAliases(t *testing.T) {
 	}
 }
 
+func TestFirecrackerDoctorDoesNotRequireAppleVFHelper(t *testing.T) {
+	resp, err := firecrackerDoctorResponse(
+		vmkit.BackendFirecracker,
+		"amd64",
+		func(name string) (string, error) {
+			if name != "firecracker" {
+				t.Fatalf("lookPath(%q), want firecracker", name)
+			}
+			return "/usr/local/bin/firecracker", nil
+		},
+		func(path string) (os.FileInfo, error) {
+			switch path {
+			case "/dev/kvm", "/dev/vhost-vsock":
+				return fakeFileInfo{name: filepath.Base(path)}, nil
+			default:
+				return nil, os.ErrNotExist
+			}
+		},
+	)
+	if err != nil {
+		t.Fatalf("firecrackerDoctorResponse: %v", err)
+	}
+	if !resp.OK {
+		t.Fatalf("OK = false, error = %q", resp.Error)
+	}
+	if resp.Backend != vmkit.BackendFirecracker {
+		t.Fatalf("Backend = %q, want %q", resp.Backend, vmkit.BackendFirecracker)
+	}
+	if resp.Host == nil {
+		t.Fatal("Host is nil")
+	}
+	if resp.Host.BinaryPath != "/usr/local/bin/firecracker" {
+		t.Fatalf("BinaryPath = %q", resp.Host.BinaryPath)
+	}
+	if !resp.Host.VirtualizationSupported || !resp.Host.KVMAvailable || !resp.Host.VsockAvailable {
+		t.Fatalf("Host support = %+v", resp.Host)
+	}
+}
+
+func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
+	resp, err := firecrackerDoctorResponse(
+		vmkit.BackendFirecracker,
+		"amd64",
+		func(string) (string, error) { return "", os.ErrNotExist },
+		func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+	)
+	if err == nil {
+		t.Fatal("firecrackerDoctorResponse returned nil error")
+	}
+	if resp.OK {
+		t.Fatal("OK = true, want false")
+	}
+	if resp.Host == nil {
+		t.Fatal("Host is nil")
+	}
+	if resp.Host.FrameworkAvailable || resp.Host.VirtualizationSupported || resp.Host.KVMAvailable {
+		t.Fatalf("Host support = %+v", resp.Host)
+	}
+	if !strings.Contains(resp.Error, "firecracker binary not found") || !strings.Contains(resp.Error, "/dev/kvm") {
+		t.Fatalf("Error = %q", resp.Error)
+	}
+}
+
+type fakeFileInfo struct {
+	name string
+}
+
+func (f fakeFileInfo) Name() string       { return f.name }
+func (f fakeFileInfo) Size() int64        { return 0 }
+func (f fakeFileInfo) Mode() os.FileMode  { return 0 }
+func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeFileInfo) IsDir() bool        { return false }
+func (f fakeFileInfo) Sys() any           { return nil }
+
 func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 	tests := []struct {
 		name        string
