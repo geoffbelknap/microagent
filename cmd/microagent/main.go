@@ -57,6 +57,11 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "logs" || args[0] == "log" {
 		return runLogs(args[1:], stdout)
 	}
+	if args[0] == "status" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
+		if hasWorkspaceStateTarget(args[1:]) {
+			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
+		}
+	}
 	if args[0] == "connect" {
 		return runConnect(ctx, args[1:], stdout)
 	}
@@ -604,6 +609,60 @@ func runLogs(args []string, stdout *os.File) error {
 		return err
 	}
 	_, err = stdout.Write(data)
+	return err
+}
+
+func runWorkspaceStateCommand(ctx context.Context, command string, args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	helperPath := os.Getenv("MICROAGENT_APPLEVF_HELPER")
+	backend := defaultBackend()
+	name := ""
+	fs := flag.NewFlagSet(command, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&helperPath, "helper", helperPath, "Apple VF helper path")
+	fs.StringVar(&backend, "backend", backend, "VM backend")
+	fs.StringVar(&name, "name", "", "Workspace name")
+	fs.StringVar(&name, "id", "", "Workspace ID")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return fmt.Errorf("usage: microagent %s <name> [--state-dir <dir>]", command)
+	}
+	if fs.NArg() == 1 {
+		if name != "" {
+			return fmt.Errorf("workspace name specified twice")
+		}
+		name = fs.Arg(0)
+	}
+	if name == "" {
+		return fmt.Errorf("usage: microagent %s <name> [--state-dir <dir>]", command)
+	}
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	req := vmkit.Request{
+		Command: mapCLICommand(command),
+		Identity: &vmkit.Identity{
+			RequestID: newRequestID(),
+			RuntimeID: name,
+			Role:      vmkit.RoleWorkload,
+			Backend:   backend,
+		},
+		Config: &vmkit.Config{StateDir: opts.StateDir},
+	}
+	resp, err := vmkit.HelperClient{Path: helperPath}.Do(ctx, req)
+	if err != nil {
+		if resp.Error == "" {
+			return err
+		}
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if encodeErr := enc.Encode(resp); encodeErr != nil {
+		return encodeErr
+	}
 	return err
 }
 
@@ -1333,6 +1392,22 @@ func hasPositionalWorkspaceName(args []string) bool {
 		if arg == "--json" || arg == "-json" || arg == "--rootfs" || arg == "-rootfs" || arg == "--kernel" || arg == "-kernel" || arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" {
 			return false
 		}
+	}
+	return false
+}
+
+func hasWorkspaceStateTarget(args []string) bool {
+	for i, arg := range args {
+		if arg == "--json" || arg == "-json" {
+			return false
+		}
+		if arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" {
+			return i+1 < len(args)
+		}
+		if strings.HasPrefix(arg, "-") {
+			continue
+		}
+		return true
 	}
 	return false
 }
