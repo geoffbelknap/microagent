@@ -658,6 +658,9 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 			return err
 		}
 	}
+	if command == "delete" && resp.OK {
+		cleanupWorkspaceState(workspaceOptions{StateDir: opts.StateDir, Name: name})
+	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if encodeErr := enc.Encode(resp); encodeErr != nil {

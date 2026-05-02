@@ -222,6 +222,47 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 }
 
+func TestRunDeleteRemovesSavedWorkspaceState(t *testing.T) {
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "helper")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`
+	if err := os.WriteFile(helper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{
+		"delete",
+		"--helper", helper,
+		"--state-dir", dir,
+		"research",
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "workspaces", "research")); !os.IsNotExist(err) {
+		t.Fatalf("workspace root still exists after delete: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "research")); !os.IsNotExist(err) {
+		t.Fatalf("runtime state still exists after delete: %v", err)
+	}
+}
+
 func TestRunRootFSValidatesRequiredFlags(t *testing.T) {
 	dir := t.TempDir()
 	stdoutPath := filepath.Join(dir, "stdout.json")
