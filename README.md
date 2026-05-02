@@ -26,6 +26,36 @@ microagent run \
 
 Microagent downloads its default kernel the first time it needs one.
 
+Or create a named workspace:
+
+```bash
+microagent create \
+  --name research \
+  --image docker.io/library/ubuntu:24.04 \
+  --size-mib 2048 \
+  --memory 1024 \
+  --cpus 2 \
+  --setup "mkdir -p /workspace" \
+  --setup "echo ready > /workspace/status"
+```
+
+Start it and run a command through the console:
+
+```bash
+microagent start research
+microagent connect research --send "cat /etc/os-release; cat /workspace/status; uname -m"
+```
+
+Check state, read the boot log, and remove the workspace:
+
+```bash
+microagent ps
+microagent status --name research
+microagent logs research
+microagent stop research
+microagent delete research
+```
+
 ## Build
 
 ```bash
@@ -133,10 +163,23 @@ List workspaces:
 microagent ps
 ```
 
+Show workspace state:
+
+```bash
+microagent status --name research
+```
+
 Show boot logs:
 
 ```bash
 microagent logs research
+```
+
+Stop and remove a workspace:
+
+```bash
+microagent stop research
+microagent delete research
 ```
 
 Create a workspace from an existing rootfs:
