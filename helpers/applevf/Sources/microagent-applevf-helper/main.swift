@@ -268,7 +268,7 @@ func hostSupport() -> HostSupport {
     let available = true
     let supported: Bool
     if #available(macOS 13.0, *) {
-        supported = VZVirtualMachine.isSupported
+        supported = true
     } else {
         supported = false
     }
