@@ -2,16 +2,17 @@
 
 `microagent-kit` is the VM lifecycle layer for agent runtimes.
 
-## Owned Here
+## In this repo
 
 - Host-side VM lifecycle commands
+- OCI image to ext4 rootfs builds
 - Structured runtime identity in lifecycle requests
 - Structured lifecycle events
 - Apple Virtualization.framework helper protocol
 - Runtime state files and cleanup semantics
 - Host/guest transport primitives such as vsock listeners
 
-## Owned By Consumers
+## Left to callers
 
 - Agent planning and execution loops
 - LLM/provider calls
@@ -21,14 +22,6 @@
 - Credentials and grants
 - User/operator experience
 
-## Owned By `microvm-rootfs`
-
-- OCI image resolution
-- OCI layer unpack
-- Rootfs filesystem construction
-- Guest init injection
-- Rootfs provenance
-
-The boundary should let a consumer provide a prepared kernel, rootfs, runtime
-identity, and bridge targets. `microagent-kit` should then run lifecycle
-commands and report state without learning the consumer's policy model.
+Callers provide the kernel, rootfs, runtime identity, and bridge targets.
+`microagent-kit` runs lifecycle commands and reports state without taking over
+the caller's policy model.

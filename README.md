@@ -89,6 +89,17 @@ microagent delete agent-1 --state-dir /tmp/microagent-kit
 
 The `start` command exists, but VM launch is not wired yet.
 
+Build a rootfs from an OCI image:
+
+```bash
+microagent rootfs build \
+  --image docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6 \
+  --arch arm64 \
+  --size-mib 64 \
+  --mke2fs "$(brew --prefix e2fsprogs)/sbin/mke2fs" \
+  --out /tmp/busybox-rootfs.ext4
+```
+
 Set `MICROAGENT_APPLEVF_HELPER` or pass `-helper` to point the Go CLI at a
 specific helper binary:
 
@@ -96,7 +107,7 @@ specific helper binary:
 microagent create -helper ./helpers/applevf/.build/debug/microagent-applevf-helper --json request.json
 ```
 
-## Helper Protocol
+## Helper protocol
 
 The helper accepts one JSON request on stdin and writes one JSON response to
 stdout. The protocol is documented in `docs/protocol.md`.
@@ -109,11 +120,5 @@ stdout. The protocol is documented in `docs/protocol.md`.
 agent runtime
   -> microagent-kit
        -> Apple Virtualization.framework backend
-  -> microvm-rootfs
-       -> OCI image to bootable rootfs artifact
+       -> OCI image to ext4 rootfs builds
 ```
-
-## Companion Project
-
-Use `microvm-rootfs` to turn OCI images into rootfs artifacts for this project
-or other microVM runtimes.

@@ -1,4 +1,4 @@
-# Helper Protocol
+# Helper protocol
 
 `microagent-applevf-helper` is a standalone process. It reads one JSON request
 from stdin, writes one JSON response to stdout, and exits.

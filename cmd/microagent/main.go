@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
 
@@ -32,6 +33,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		fmt.Fprintf(stdout, "microagent %s\n", version)
 		return nil
 	}
+	if args[0] == "rootfs" {
+		return runRootFS(ctx, args[1:], stdout)
+	}
 	helperPath := os.Getenv("MICROAGENT_APPLEVF_HELPER")
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -50,6 +54,45 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	enc.SetIndent("", "  ")
 	if encodeErr := enc.Encode(resp); encodeErr != nil {
 		return encodeErr
+	}
+	return err
+}
+
+func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		printRootFSHelp(stdout)
+		return nil
+	}
+	if args[0] != "build" {
+		return fmt.Errorf("unknown rootfs command: %s", args[0])
+	}
+	var req rootfs.BuildRequest
+	fs := flag.NewFlagSet("rootfs build", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&req.ImageRef, "image", "", "OCI image reference")
+	fs.StringVar(&req.Platform.OS, "os", "linux", "target operating system")
+	fs.StringVar(&req.Platform.Architecture, "arch", "arm64", "target architecture")
+	fs.StringVar(&req.OutputPath, "out", "", "output rootfs path")
+	fs.StringVar(&req.InitPath, "init", rootfs.DefaultInitPath, "guest init path to inject")
+	fs.StringVar(&req.StateDir, "state-dir", "", "builder state directory")
+	fs.StringVar(&req.Mke2fsPath, "mke2fs", "mke2fs", "mke2fs binary path")
+	fs.Int64Var(&req.SizeMiB, "size-mib", rootfs.DefaultSizeMiB, "rootfs image size in MiB")
+	fs.BoolVar(&req.KeepStage, "keep-stage", false, "keep temporary unpacked stage directory")
+	fs.StringVar(&req.StageSnapshot, "stage-snapshot", "", "copy unpacked stage directory to this path before ext4 creation")
+	fs.BoolVar(&req.AllowMutable, "allow-mutable", false, "allow mutable image references")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected rootfs argument: %s", fs.Arg(0))
+	}
+	provenance, err := rootfs.NewBuilder().Build(ctx, req)
+	if provenance.ImageRef != "" {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if encodeErr := enc.Encode(provenance); encodeErr != nil {
+			return encodeErr
+		}
 	}
 	return err
 }
@@ -256,6 +299,7 @@ Commands:
   stop                 Mark a runtime stopped
   kill                 Mark a runtime forcibly stopped
   delete               Delete persisted runtime state
+  rootfs build         Build an ext4 rootfs from an OCI image
   version              Print version information
   help                 Show this help
 
@@ -269,5 +313,22 @@ Options:
   -memory <MiB>         Memory in MiB
   -cpus <n>             CPU count
   -vsock p=host:port    Add a vsock listener mapping
+`)
+}
+
+func printRootFSHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent rootfs
+
+Commands:
+  build                Build an ext4 rootfs from an OCI image
+
+Build options:
+  -image <ref>         OCI image reference
+  -out <path>          Output rootfs path
+  -os <os>             Target OS
+  -arch <arch>         Target architecture
+  -size-mib <MiB>      Rootfs image size
+  -mke2fs <path>       mke2fs binary path
+  -allow-mutable       Allow tag references
 `)
 }
