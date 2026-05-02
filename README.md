@@ -82,6 +82,9 @@ network, and Microagent state paths are visible:
 make smoke-firecracker
 ```
 
+See [docs/firecracker-smoke.md](docs/firecracker-smoke.md) for the expected
+kernel SHA, output, and host requirements.
+
 Build and ad-hoc sign the Apple VF helper:
 
 ```bash
