@@ -23,6 +23,13 @@ type config struct {
 	Env     []string `json:"env,omitempty"`
 	Port    uint32   `json:"port"`
 	Mode    string   `json:"mode,omitempty"`
+	Mounts  []mount  `json:"mounts,omitempty"`
+}
+
+type mount struct {
+	Device     string `json:"device"`
+	Mountpoint string `json:"mountpoint"`
+	Mode       string `json:"mode"`
 }
 
 type result struct {
@@ -48,6 +55,15 @@ func run() int {
 	}
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
+	if err := mountDisks(cfg.Mounts); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
 	if len(cfg.Command) > 0 {
 		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 		cmd.Env = guestEnv(cfg.Env)
@@ -80,6 +96,27 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 	}
 	return code
+}
+
+func mountDisks(mounts []mount) error {
+	for _, mount := range mounts {
+		if mount.Device == "" || mount.Mountpoint == "" {
+			return fmt.Errorf("mount device and mountpoint are required")
+		}
+		if err := os.MkdirAll(mount.Mountpoint, 0o755); err != nil {
+			return fmt.Errorf("create mountpoint %s: %w", mount.Mountpoint, err)
+		}
+		flags := uintptr(0)
+		if mount.Mode == "ro" {
+			flags = unix.MS_RDONLY
+		} else if mount.Mode != "rw" {
+			return fmt.Errorf("mount %s mode must be ro or rw", mount.Mountpoint)
+		}
+		if err := unix.Mount(mount.Device, mount.Mountpoint, "ext4", flags, ""); err != nil {
+			return fmt.Errorf("mount %s at %s: %w", mount.Device, mount.Mountpoint, err)
+		}
+	}
+	return nil
 }
 
 func guestEnv(extra []string) []string {
@@ -154,6 +191,7 @@ func exitCode(err error) int {
 
 func poweroff() {
 	unix.Sync()
-	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
+	time.Sleep(250 * time.Millisecond)
 	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF)
+	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
 }

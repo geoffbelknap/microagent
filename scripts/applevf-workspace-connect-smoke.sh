@@ -82,11 +82,17 @@ for _ in $(seq 1 50); do
   fi
   sleep 0.1
 done
+for _ in $(seq 1 100); do
+  if grep -q "~ #" "$STATE_DIR/$WORKSPACE/serial.log"; then
+    break
+  fi
+  sleep 0.1
+done
 
 "$STATE_DIR/microagent" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
   --send "echo CONNECT_READY; poweroff -f" \
-  --timeout 5 >"$CONNECT_RESULT"
+  --timeout 10 >"$CONNECT_RESULT"
 
 for _ in $(seq 1 50); do
   if "$STATE_DIR/microagent" status --name "$WORKSPACE" --state-dir "$STATE_DIR" | grep -q '"state" : "stopped"'; then

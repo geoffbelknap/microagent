@@ -352,6 +352,26 @@ func TestRequestForCommandParsesVsock(t *testing.T) {
 	}
 }
 
+func TestRequestForCommandParsesDisk(t *testing.T) {
+	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--disk", "constraints=/tmp/constraints.ext4:/config:ro",
+	}))
+	if err != nil {
+		t.Fatalf("requestForCommand: %v", err)
+	}
+	if len(req.Config.Disks) != 1 {
+		t.Fatalf("Disks len = %d, want 1", len(req.Config.Disks))
+	}
+	disk := req.Config.Disks[0]
+	if disk.Name != "constraints" || disk.Path != "/tmp/constraints.ext4" || disk.Mountpoint != "/config" || disk.Mode != "ro" {
+		t.Fatalf("disk = %#v", disk)
+	}
+}
+
 func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 	req := workspaceRequest(workspaceOptions{
 		Name:           "agent-1",
@@ -367,6 +387,28 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 	}
 	if req.Config.VsockListeners[1].Port != 3128 || req.Config.VsockListeners[1].Target != "127.0.0.1:19000" {
 		t.Fatalf("enforcer listener = %#v", req.Config.VsockListeners[1])
+	}
+}
+
+func TestWorkspaceRequestIncludesDisks(t *testing.T) {
+	req := workspaceRequest(workspaceOptions{
+		Name:       "agent-1",
+		Backend:    "apple-vf",
+		KernelPath: "/tmp/kernel",
+		MemoryMiB:  512,
+		CPUCount:   2,
+		Disks: []workspaceDisk{{
+			Name:       "workspace",
+			Path:       "/tmp/workspace.ext4",
+			Mountpoint: "/workspace",
+			Mode:       "rw",
+		}},
+	}, "run", "/tmp/rootfs.ext4")
+	if len(req.Config.Disks) != 1 {
+		t.Fatalf("Disks len = %d, want 1", len(req.Config.Disks))
+	}
+	if req.Config.Disks[0].Mountpoint != "/workspace" || req.Config.Disks[0].Mode != "rw" {
+		t.Fatalf("disk = %#v", req.Config.Disks[0])
 	}
 }
 
@@ -411,13 +453,24 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": T
 
 func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	dir := t.TempDir()
-	supervisor := filepath.Join(dir, "supervisor")
-	script := `#!/usr/bin/env bash
-set -euo pipefail
-python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "inspect"; assert req["identity"]["runtimeID"] == "research"; assert req["config"]["stateDir"]; print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "running", "observedAt": "2026-05-02T00:00:00Z"}}))'
-`
-	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	req := vmkit.Request{
+		Command: "inspect",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendAppleVF,
+		},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatalf("writeWorkspaceProcessState: %v", err)
 	}
 	stdoutPath := filepath.Join(dir, "stdout.json")
 	stdout, err := os.Create(stdoutPath)
@@ -426,8 +479,6 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 	err = run(t.Context(), []string{
 		"status",
-		"--supervisor", supervisor,
-		"--backend", vmkit.BackendAppleVF,
 		"--state-dir", dir,
 		"--name", "research",
 	}, stdout)
@@ -580,6 +631,26 @@ func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing
 	}
 }
 
+func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--disk", "workspace=/tmp/workspace.ext4:/workspace:rw",
+		"--bundle", "constraints=/tmp/constraints.tar:/config:ro",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if len(opts.Disks) != 2 {
+		t.Fatalf("Disks len = %d, want 2", len(opts.Disks))
+	}
+	if opts.Disks[0].Name != "workspace" || opts.Disks[0].Bundle {
+		t.Fatalf("disk = %#v", opts.Disks[0])
+	}
+	if opts.Disks[1].Name != "constraints" || !opts.Disks[1].Bundle || opts.Disks[1].Mode != "ro" {
+		t.Fatalf("bundle = %#v", opts.Disks[1])
+	}
+}
+
 func TestCreateDispatchKeepsLowLevelSupervisorCreate(t *testing.T) {
 	if !shouldUseHighLevelCreate([]string{"research"}) {
 		t.Fatal("positional create should use high-level workspace create")
@@ -619,6 +690,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 		Entrypoint:      "/app/entrypoint.sh",
 		SetupCommands:   []string{"echo setup"},
 		Env:             map[string]string{"AGENCY_AGENT_NAME": "research"},
+		Disks:           []workspaceDisk{{Name: "constraints", Path: "/tmp/constraints.ext4", Mountpoint: "/config", Mode: "ro"}},
 		ResultPort:      1024,
 		PrepareForStart: true,
 	})
@@ -627,6 +699,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(command, `> /etc/microagent/run.json`) ||
 		!strings.Contains(command, `"command":["/bin/sh","-lc","/app/entrypoint.sh"]`) ||
+		!strings.Contains(command, `"mountpoint":"/config"`) ||
 		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) {
 		t.Fatalf("workspaceCommand missing guest config reset: %q", command)
 	}

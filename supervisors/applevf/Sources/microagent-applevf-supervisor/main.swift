@@ -36,8 +36,16 @@ struct Config: Codable {
     var stateDir: String
     var memoryMiB: Int?
     var cpuCount: Int?
+    var disks: [Disk]?
     var vsockListeners: [VsockListener]?
     var serialInput: Bool?
+}
+
+struct Disk: Codable {
+    var name: String
+    var path: String
+    var mountpoint: String
+    var mode: String
 }
 
 struct VsockListener: Codable {
@@ -250,6 +258,32 @@ func validatedConfig(_ config: Config?) throws -> Config {
     }
     if config.cpuCount ?? 0 <= 0 {
         throw ProtocolError.invalid("config.cpuCount must be positive")
+    }
+    var diskNames = Set<String>()
+    var diskMountpoints = Set<String>()
+    for disk in config.disks ?? [] {
+        if disk.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ProtocolError.invalid("disk name is required")
+        }
+        if disk.name == "rootfs" {
+            throw ProtocolError.invalid("disk name rootfs is reserved")
+        }
+        if !diskNames.insert(disk.name).inserted {
+            throw ProtocolError.invalid("duplicate disk name \(disk.name)")
+        }
+        if disk.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw ProtocolError.invalid("disk \(disk.name) path is required")
+        }
+        if disk.mountpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !disk.mountpoint.hasPrefix("/") {
+            throw ProtocolError.invalid("disk \(disk.name) mountpoint must be absolute")
+        }
+        if !diskMountpoints.insert(disk.mountpoint).inserted {
+            throw ProtocolError.invalid("duplicate disk mountpoint \(disk.mountpoint)")
+        }
+        if disk.mode != "ro" && disk.mode != "rw" {
+            throw ProtocolError.invalid("disk \(disk.name) mode must be ro or rw")
+        }
+        try readableFile(disk.path, name: "disk \(disk.name) path")
     }
     var ports = Set<UInt32>()
     for listener in config.vsockListeners ?? [] {
@@ -608,7 +642,16 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
     vmConfig.cpuCount = config.cpuCount ?? 2
     vmConfig.memorySize = UInt64(config.memoryMiB ?? 512) * 1024 * 1024
     let attachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: config.rootfsPath), readOnly: false)
-    vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
+    if let disks = config.disks, !disks.isEmpty {
+        var storageDevices: [VZVirtioBlockDeviceConfiguration] = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
+        for disk in disks {
+            let diskAttachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: disk.path), readOnly: disk.mode == "ro")
+            storageDevices.append(VZVirtioBlockDeviceConfiguration(attachment: diskAttachment))
+        }
+        vmConfig.storageDevices = storageDevices
+    } else {
+        vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
+    }
     vmConfig.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
     if let serialMode {
         let serial = VZVirtioConsoleDeviceSerialPortConfiguration()

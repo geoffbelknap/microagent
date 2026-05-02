@@ -557,6 +557,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	var identity vmkit.Identity
 	var config vmkit.Config
 	var vsocks multiFlag
+	var disks multiFlag
 	fs.StringVar(&jsonPath, "json", "", "Read request JSON from path, or '-' for stdin")
 	fs.BoolVar(&dryRun, "dry-run", false, "Validate without writing state")
 	fs.StringVar(&identity.RuntimeID, "id", "", "Workspace ID")
@@ -566,9 +567,10 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.StringVar(&identity.Backend, "backend", hostBackend(), "Backend override")
 	fs.StringVar(&config.KernelPath, "kernel", "", "Linux kernel path")
 	fs.StringVar(&config.RootfsPath, "rootfs", "", "Rootfs image path")
-	fs.StringVar(&config.StateDir, "state-dir", "", "Runtime state directory")
+	fs.StringVar(&config.StateDir, "state-dir", "", "State directory")
 	fs.IntVar(&config.MemoryMiB, "memory", 512, "Memory in MiB")
 	fs.IntVar(&config.CPUCount, "cpus", 2, "CPU count")
+	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
@@ -581,7 +583,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return vmkit.Request{Command: "host"}, nil
 	case "create":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, vsocks)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -592,7 +594,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return req, nil
 	case "start":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, vsocks)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -629,6 +631,7 @@ type workspaceOptions struct {
 	SizeMiB         int64
 	Timeout         time.Duration
 	ResultPort      uint32
+	Disks           []workspaceDisk
 	VsockListeners  []vmkit.VsockListener
 	KernelExplicit  bool
 	Keep            bool
@@ -636,11 +639,26 @@ type workspaceOptions struct {
 	SerialInput     bool
 }
 
+type workspaceDisk struct {
+	Name       string `json:"name"`
+	SourcePath string `json:"source_path,omitempty"`
+	Path       string `json:"path"`
+	Mountpoint string `json:"mountpoint"`
+	Mode       string `json:"mode"`
+	Bundle     bool   `json:"bundle,omitempty"`
+}
+
+type workspaceManifest struct {
+	Name  string          `json:"name"`
+	Disks []workspaceDisk `json:"disks,omitempty"`
+}
+
 type workspaceResult struct {
 	Workspace  string            `json:"workspace"`
 	StateDir   string            `json:"state_dir"`
 	RootfsPath string            `json:"rootfs_path"`
 	KernelPath string            `json:"kernel_path"`
+	Disks      []workspaceDisk   `json:"disks,omitempty"`
 	SerialPath string            `json:"serial_path,omitempty"`
 	SerialLog  string            `json:"serial_log,omitempty"`
 	FinalState string            `json:"final_state,omitempty"`
@@ -688,8 +706,17 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
 		return err
 	}
+	disks, err := prepareWorkspaceDisks(ctx, opts)
+	if err != nil {
+		return err
+	}
+	opts.Disks = disks
 	result, err := createWorkspaceRootfs(ctx, opts)
 	if err != nil {
+		return err
+	}
+	result.Disks = disks
+	if err := writeWorkspaceManifest(opts); err != nil {
 		return err
 	}
 	req := workspaceRequest(opts, "run", result.RootfsPath)
@@ -809,6 +836,13 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		Config: &vmkit.Config{StateDir: opts.StateDir},
 	}
 	workspaceOpts := workspaceOptions{StateDir: opts.StateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath}
+	if command == "status" {
+		resp, err := inspectWorkspaceState(workspaceOpts)
+		if err != nil {
+			return err
+		}
+		return writeResponse(stdout, resp)
+	}
 	resp, err := dispatchWorkspaceRequest(ctx, workspaceOpts, req)
 	if err != nil {
 		if resp.Error == "" {
@@ -948,6 +982,13 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if _, err := os.Stat(rootfsPath); err != nil {
 		return err
 	}
+	manifest, err := readWorkspaceManifest(opts.StateDir, opts.Name)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil {
+		opts.Disks = manifest.Disks
+	}
 	req := workspaceRequest(opts, "run", rootfsPath)
 	resp, err := startWorkspaceDetached(opts, req)
 	result := workspaceResult{
@@ -955,6 +996,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		StateDir:   opts.StateDir,
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
+		Disks:      opts.Disks,
 		SerialPath: serialLogPath(opts),
 		Response:   resp,
 	}
@@ -979,8 +1021,17 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
 		return err
 	}
+	disks, err := prepareWorkspaceDisks(ctx, opts)
+	if err != nil {
+		return err
+	}
+	opts.Disks = disks
 	result, err := createWorkspaceRootfs(ctx, opts)
 	if err != nil {
+		return err
+	}
+	result.Disks = disks
+	if err := writeWorkspaceManifest(opts); err != nil {
 		return err
 	}
 	if workspaceHasGuestCommand(opts) {
@@ -1055,9 +1106,13 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&setupCommands, "setup", "Shell command to run before --exec")
 	var envVars multiFlag
 	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
+	var diskFlags multiFlag
+	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
+	var bundleFlags multiFlag
+	fs.Var(&bundleFlags, "bundle", "Build and attach bundle name=tar:/mount:ro|rw")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
-	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "Microagent state directory")
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.GuestInitPath, "guest-init", opts.GuestInitPath, "Guest init path")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
@@ -1086,6 +1141,15 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.Env = env
+	disks, err := parseWorkspaceDisks(diskFlags, false)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	bundles, err := parseWorkspaceDisks(bundleFlags, true)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.Disks = append(disks, bundles...)
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		if command == "create" {
@@ -1147,6 +1211,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
 		Env:            opts.Env,
+		Mounts:         workspaceMounts(opts.Disks),
 		AllowMutable:   true,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
@@ -1159,12 +1224,109 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 	}, err
 }
 
+func workspaceMounts(disks []workspaceDisk) []rootfs.Mount {
+	if len(disks) == 0 {
+		return nil
+	}
+	mounts := make([]rootfs.Mount, 0, len(disks))
+	for idx, disk := range disks {
+		mounts = append(mounts, rootfs.Mount{
+			Device:     virtioBlockDevice(idx + 1),
+			Mountpoint: disk.Mountpoint,
+			Mode:       disk.Mode,
+		})
+	}
+	return mounts
+}
+
+func virtioBlockDevice(index int) string {
+	if index < 0 {
+		index = 0
+	}
+	name := ""
+	for {
+		name = string(rune('a'+(index%26))) + name
+		index = index/26 - 1
+		if index < 0 {
+			break
+		}
+	}
+	return "/dev/vd" + name
+}
+
+func prepareWorkspaceDisks(ctx context.Context, opts workspaceOptions) ([]workspaceDisk, error) {
+	if len(opts.Disks) == 0 {
+		return nil, nil
+	}
+	disks := make([]workspaceDisk, 0, len(opts.Disks))
+	seenNames := map[string]bool{}
+	seenMountpoints := map[string]bool{}
+	for _, disk := range opts.Disks {
+		if seenNames[disk.Name] {
+			return nil, fmt.Errorf("duplicate disk name %q", disk.Name)
+		}
+		seenNames[disk.Name] = true
+		if seenMountpoints[disk.Mountpoint] {
+			return nil, fmt.Errorf("duplicate disk mountpoint %q", disk.Mountpoint)
+		}
+		seenMountpoints[disk.Mountpoint] = true
+		if disk.Bundle {
+			outputPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "disks", disk.Name+".ext4")
+			_, err := rootfs.NewBuilder().BuildBundle(ctx, rootfs.BundleRequest{
+				SourcePath: disk.SourcePath,
+				OutputPath: outputPath,
+				StateDir:   filepath.Join(opts.StateDir, "build"),
+				Mke2fsPath: opts.Mke2fsPath,
+				SizeMiB:    64,
+			})
+			if err != nil {
+				return nil, err
+			}
+			disk.Path = outputPath
+		}
+		disks = append(disks, disk)
+	}
+	return disks, nil
+}
+
+func writeWorkspaceManifest(opts workspaceOptions) error {
+	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		return err
+	}
+	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), workspaceManifest{
+		Name:  opts.Name,
+		Disks: opts.Disks,
+	})
+}
+
+func readWorkspaceManifest(stateDir, name string) (workspaceManifest, error) {
+	data, err := os.ReadFile(filepath.Join(stateDir, "workspaces", name, "workspace.json"))
+	if err != nil {
+		return workspaceManifest{}, err
+	}
+	var manifest workspaceManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return workspaceManifest{}, err
+	}
+	return manifest, nil
+}
+
 func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.Request {
 	var listeners []vmkit.VsockListener
 	if opts.ResultPort != 0 {
 		listeners = []vmkit.VsockListener{{Port: opts.ResultPort, Target: resultPath(opts)}}
 	}
 	listeners = append(listeners, opts.VsockListeners...)
+	disks := make([]vmkit.Disk, 0, len(opts.Disks))
+	for _, disk := range opts.Disks {
+		disks = append(disks, vmkit.Disk{
+			Name:       disk.Name,
+			Path:       disk.Path,
+			Mountpoint: disk.Mountpoint,
+			Mode:       disk.Mode,
+		})
+	}
 	return vmkit.Request{
 		Command: command,
 		Identity: &vmkit.Identity{
@@ -1179,6 +1341,7 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 			StateDir:       opts.StateDir,
 			MemoryMiB:      opts.MemoryMiB,
 			CPUCount:       opts.CPUCount,
+			Disks:          disks,
 			VsockListeners: listeners,
 			SerialInput:    opts.SerialInput,
 		},
@@ -1200,7 +1363,24 @@ func workspaceOptionsFromRequest(req vmkit.Request, supervisorPath string) (work
 		SupervisorPath: supervisorPath,
 		MemoryMiB:      req.Config.MemoryMiB,
 		CPUCount:       req.Config.CPUCount,
+		Disks:          configDisksToWorkspaceDisks(req.Config.Disks),
 	}, nil
+}
+
+func configDisksToWorkspaceDisks(disks []vmkit.Disk) []workspaceDisk {
+	if len(disks) == 0 {
+		return nil
+	}
+	out := make([]workspaceDisk, 0, len(disks))
+	for _, disk := range disks {
+		out = append(out, workspaceDisk{
+			Name:       disk.Name,
+			Path:       disk.Path,
+			Mountpoint: disk.Mountpoint,
+			Mode:       disk.Mode,
+		})
+	}
+	return out
 }
 
 func dispatchWorkspaceRequest(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
@@ -1449,6 +1629,18 @@ func readWorkspaceRuntimeState(opts workspaceOptions) (workspaceRuntimeState, er
 	return state, nil
 }
 
+func readWorkspaceEvent(opts workspaceOptions) (workspaceEventFile, error) {
+	var event workspaceEventFile
+	data, err := os.ReadFile(filepath.Join(opts.StateDir, opts.Name, "event.json"))
+	if err != nil {
+		return event, err
+	}
+	if err := json.Unmarshal(data, &event); err != nil {
+		return event, err
+	}
+	return event, nil
+}
+
 func runtimeStateRequest(req vmkit.Request, state workspaceRuntimeState) vmkit.Request {
 	if req.Identity == nil {
 		identity := state.Event.Identity
@@ -1462,6 +1654,7 @@ func runtimeStateRequest(req vmkit.Request, state workspaceRuntimeState) vmkit.R
 		req.Config.RootfsPath = state.Config.RootfsPath
 		req.Config.MemoryMiB = state.Config.MemoryMiB
 		req.Config.CPUCount = state.Config.CPUCount
+		req.Config.Disks = state.Config.Disks
 	}
 	return req
 }
@@ -1601,6 +1794,14 @@ func writeFirecrackerConfig(opts workspaceOptions, req vmkit.Request) error {
 			SMT:        false,
 		},
 	}
+	for _, disk := range req.Config.Disks {
+		cfg.Drives = append(cfg.Drives, firecrackerDrive{
+			DriveID:      disk.Name,
+			PathOnHost:   disk.Path,
+			IsRootDevice: false,
+			IsReadOnly:   disk.Mode == "ro",
+		})
+	}
 	if err := os.MkdirAll(filepath.Dir(firecrackerConfigPath(opts)), 0o755); err != nil {
 		return err
 	}
@@ -1608,28 +1809,40 @@ func writeFirecrackerConfig(opts workspaceOptions, req vmkit.Request) error {
 }
 
 func inspectFirecrackerWorkspace(opts workspaceOptions) (vmkit.Response, error) {
-	data, err := os.ReadFile(filepath.Join(opts.StateDir, opts.Name, "runtime.json"))
+	return inspectWorkspaceState(opts)
+}
+
+func inspectWorkspaceState(opts workspaceOptions) (vmkit.Response, error) {
+	state, err := readWorkspaceRuntimeState(opts)
 	if err != nil {
-		return vmkit.Response{}, err
+		event, eventErr := readWorkspaceEvent(opts)
+		if eventErr != nil {
+			return vmkit.Response{}, err
+		}
+		return responseFromWorkspaceEvent(opts, event, ""), nil
 	}
-	var state workspaceRuntimeState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return vmkit.Response{}, err
-	}
+	return responseFromWorkspaceEvent(opts, state.Event, state.Error), nil
+}
+
+func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventFile, errorText string) vmkit.Response {
 	event := vmkit.Event{
-		Identity:   state.Event.Identity,
-		State:      state.Event.State,
-		Detail:     state.Event.Detail,
+		Identity:   eventFile.Identity,
+		State:      eventFile.State,
+		Detail:     eventFile.Detail,
 		ObservedAt: time.Now().UTC(),
 	}
-	if parsed, err := time.Parse(time.RFC3339, state.Event.ObservedAt); err == nil {
+	if parsed, err := time.Parse(time.RFC3339, eventFile.ObservedAt); err == nil {
 		event.ObservedAt = parsed
 	}
-	resp := vmkit.Response{OK: state.Event.State != vmkit.StateFailed, Backend: opts.Backend, Event: &event}
-	if state.Error != "" {
-		resp.Error = state.Error
+	backend := opts.Backend
+	if backend == "" {
+		backend = eventFile.Identity.Backend
 	}
-	return resp, nil
+	resp := vmkit.Response{OK: eventFile.State != vmkit.StateFailed, Backend: backend, Event: &event}
+	if errorText != "" {
+		resp.Error = errorText
+	}
+	return resp
 }
 
 func runningFirecrackerResponse(req vmkit.Request) vmkit.Response {
@@ -2096,7 +2309,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
 		return true
 	}
-	return hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "env")
+	return hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle")
 }
 
 func hasLowLevelCreateFlag(args []string) bool {
@@ -2278,7 +2491,7 @@ func workspaceCommand(opts workspaceOptions) string {
 		lines = append(lines, execCommand)
 	}
 	if opts.PrepareForStart {
-		lines = append(lines, resetGuestConfigCommand(shellCommand(opts.Entrypoint), opts.Env, 0))
+		lines = append(lines, resetGuestConfigCommand(shellCommand(opts.Entrypoint), opts.Env, 0, workspaceMounts(opts.Disks)))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -2286,18 +2499,20 @@ func workspaceCommand(opts workspaceOptions) string {
 	return "set -eu\n" + strings.Join(lines, "\n")
 }
 
-func resetGuestConfigCommand(command []string, env map[string]string, port uint32) string {
+func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount) string {
 	if command == nil {
 		command = []string{}
 	}
 	data, err := json.Marshal(struct {
-		Command []string `json:"command"`
-		Env     []string `json:"env,omitempty"`
-		Port    uint32   `json:"port"`
+		Command []string       `json:"command"`
+		Env     []string       `json:"env,omitempty"`
+		Port    uint32         `json:"port"`
+		Mounts  []rootfs.Mount `json:"mounts,omitempty"`
 	}{
 		Command: command,
 		Env:     envList(env),
 		Port:    port,
+		Mounts:  mounts,
 	})
 	if err != nil {
 		panic(err)
@@ -2485,7 +2700,7 @@ func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 	}
 }
 
-func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, vsocks []string) (vmkit.Request, error) {
+func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
 			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
@@ -2501,6 +2716,18 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 	listeners, err := parseVsockMappings(vsocks)
 	if err != nil {
 		return vmkit.Request{}, err
+	}
+	parsedDisks, err := parseWorkspaceDisks(disks, false)
+	if err != nil {
+		return vmkit.Request{}, err
+	}
+	for _, disk := range parsedDisks {
+		config.Disks = append(config.Disks, vmkit.Disk{
+			Name:       disk.Name,
+			Path:       disk.Path,
+			Mountpoint: disk.Mountpoint,
+			Mode:       disk.Mode,
+		})
 	}
 	config.VsockListeners = listeners
 	return vmkit.Request{Identity: &identity, Config: &config}, nil
@@ -2541,6 +2768,8 @@ func reorderFlagArgs(args []string) []string {
 		"-backend":     true,
 		"-kernel":      true,
 		"-rootfs":      true,
+		"-disk":        true,
+		"-bundle":      true,
 		"-state-dir":   true,
 		"-url":         true,
 		"-from":        true,
@@ -2633,6 +2862,56 @@ func parseVsockMappings(raw []string) ([]vmkit.VsockListener, error) {
 	return listeners, nil
 }
 
+func parseWorkspaceDisks(values []string, bundle bool) ([]workspaceDisk, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	disks := make([]workspaceDisk, 0, len(values))
+	for _, raw := range values {
+		disk, err := parseWorkspaceDisk(raw, bundle)
+		if err != nil {
+			return nil, err
+		}
+		disks = append(disks, disk)
+	}
+	return disks, nil
+}
+
+func parseWorkspaceDisk(raw string, bundle bool) (workspaceDisk, error) {
+	name, rest, ok := strings.Cut(raw, "=")
+	name = strings.TrimSpace(name)
+	if !ok || name == "" {
+		return workspaceDisk{}, fmt.Errorf("disk must be name=path:/mount:ro|rw")
+	}
+	if name == "rootfs" {
+		return workspaceDisk{}, fmt.Errorf("disk name rootfs is reserved")
+	}
+	parts := strings.Split(rest, ":")
+	if len(parts) < 3 {
+		return workspaceDisk{}, fmt.Errorf("disk %q must be path:/mount:ro|rw", name)
+	}
+	mode := strings.TrimSpace(parts[len(parts)-1])
+	mountpoint := strings.TrimSpace(parts[len(parts)-2])
+	sourcePath := strings.TrimSpace(strings.Join(parts[:len(parts)-2], ":"))
+	if sourcePath == "" {
+		return workspaceDisk{}, fmt.Errorf("disk %q path is required", name)
+	}
+	if mountpoint == "" || !strings.HasPrefix(mountpoint, "/") {
+		return workspaceDisk{}, fmt.Errorf("disk %q mountpoint must be absolute", name)
+	}
+	if mode != "ro" && mode != "rw" {
+		return workspaceDisk{}, fmt.Errorf("disk %q mode must be ro or rw", name)
+	}
+	return workspaceDisk{
+		Name:       name,
+		SourcePath: sourcePath,
+		Path:       sourcePath,
+		Mountpoint: mountpoint,
+		Mode:       mode,
+		Bundle:     bundle,
+	}, nil
+}
+
 func newRequestID() string {
 	return fmt.Sprintf("req-%d", time.Now().UnixNano())
 }
@@ -2715,6 +2994,8 @@ Options:
   -id <id>              Workspace ID
   -entrypoint <command> Command to run on start
   -env KEY=VALUE        Guest environment variable
+  -disk n=p:/m:ro|rw    Attach an ext4 disk
+  -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
   -kernel <path>        Custom kernel path
   -rootfs <path>        Rootfs image path
   -state-dir <dir>      State directory
@@ -2735,6 +3016,8 @@ Options:
   -setup <command>      Shell command to run before --exec
   -entrypoint <command> Command to run on start
   -env KEY=VALUE        Guest environment variable
+  -disk n=p:/m:ro|rw    Attach an ext4 disk
+  -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
   -name <name>          Workspace name; generated when omitted
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
@@ -2759,6 +3042,8 @@ Options:
   -setup <command>      Shell command to run before first start
   -entrypoint <command> Command to run on start
   -env KEY=VALUE        Guest environment variable
+  -disk n=p:/m:ro|rw    Attach an ext4 disk
+  -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
   -memory <MiB>         Memory in MiB; defaults to 512

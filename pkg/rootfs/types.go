@@ -28,9 +28,32 @@ type BuildRequest struct {
 	Mke2fsPath     string            `json:"mke2fs_path,omitempty"`
 	SizeMiB        int64             `json:"size_mib,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
+	Mounts         []Mount           `json:"mounts,omitempty"`
 	AllowMutable   bool              `json:"allow_mutable,omitempty"`
 	KeepStage      bool              `json:"keep_stage,omitempty"`
 	StageSnapshot  string            `json:"stage_snapshot,omitempty"`
+}
+
+type Mount struct {
+	Device     string `json:"device"`
+	Mountpoint string `json:"mountpoint"`
+	Mode       string `json:"mode"`
+}
+
+type BundleRequest struct {
+	SourcePath string `json:"source_path"`
+	OutputPath string `json:"output_path"`
+	StateDir   string `json:"state_dir,omitempty"`
+	Mke2fsPath string `json:"mke2fs_path,omitempty"`
+	SizeMiB    int64  `json:"size_mib,omitempty"`
+}
+
+type BundleProvenance struct {
+	SourcePath   string `json:"source_path"`
+	OutputPath   string `json:"output_path"`
+	SizeBytes    int64  `json:"size_bytes,omitempty"`
+	Builder      string `json:"builder"`
+	BuilderPhase string `json:"builder_phase"`
 }
 
 type Provenance struct {
@@ -46,6 +69,19 @@ type Provenance struct {
 	StageDir      string   `json:"stage_dir,omitempty"`
 	StageSnapshot string   `json:"stage_snapshot,omitempty"`
 	LayerDigests  []string `json:"layer_digests,omitempty"`
+}
+
+func ValidateBundleRequest(req BundleRequest) error {
+	if strings.TrimSpace(req.SourcePath) == "" {
+		return errors.New("source_path is required")
+	}
+	if strings.TrimSpace(req.OutputPath) == "" {
+		return errors.New("output_path is required")
+	}
+	if req.SizeMiB < 0 {
+		return errors.New("size_mib must not be negative")
+	}
+	return nil
 }
 
 func ValidateRequest(req BuildRequest) error {
@@ -100,6 +136,20 @@ func NormalizeRequest(req BuildRequest) BuildRequest {
 	}
 	if req.SizeMiB == 0 {
 		req.SizeMiB = DefaultSizeMiB
+	}
+	if req.Mke2fsPath == "" {
+		req.Mke2fsPath = "mke2fs"
+	}
+	return req
+}
+
+func NormalizeBundleRequest(req BundleRequest) BundleRequest {
+	req.SourcePath = strings.TrimSpace(req.SourcePath)
+	req.OutputPath = strings.TrimSpace(req.OutputPath)
+	req.StateDir = strings.TrimSpace(req.StateDir)
+	req.Mke2fsPath = strings.TrimSpace(req.Mke2fsPath)
+	if req.SizeMiB == 0 {
+		req.SizeMiB = 64
 	}
 	if req.Mke2fsPath == "" {
 		req.Mke2fsPath = "mke2fs"

@@ -137,7 +137,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		command = append([]string{}, imageConfig.Config.Entrypoint...)
 		command = append(command, imageConfig.Config.Cmd...)
 	}
-	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort); err != nil {
+	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts); err != nil {
 		return provenance, err
 	}
 	if req.StageSnapshot != "" {
@@ -166,6 +166,76 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	info, err := os.Stat(req.OutputPath)
 	if err != nil {
 		return provenance, fmt.Errorf("stat output rootfs: %w", err)
+	}
+	provenance.SizeBytes = info.Size()
+	provenance.BuilderPhase = "complete"
+	return provenance, nil
+}
+
+func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProvenance, error) {
+	req = NormalizeBundleRequest(req)
+	provenance := BundleProvenance{
+		SourcePath:   req.SourcePath,
+		OutputPath:   req.OutputPath,
+		Builder:      b.Name,
+		BuilderPhase: "validate",
+	}
+	if provenance.Builder == "" {
+		provenance.Builder = "microagent-rootfs"
+	}
+	if err := ValidateBundleRequest(req); err != nil {
+		return provenance, err
+	}
+	tmpBase := req.StateDir
+	if tmpBase == "" {
+		tmpBase = filepath.Join(os.TempDir(), "microagent-rootfs")
+	}
+	if err := os.MkdirAll(tmpBase, 0o755); err != nil {
+		return provenance, fmt.Errorf("create temp dir: %w", err)
+	}
+	tmpDir, err := os.MkdirTemp(tmpBase, "bundle-*")
+	if err != nil {
+		return provenance, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	stageDir := filepath.Join(tmpDir, "stage")
+	if err := os.MkdirAll(stageDir, 0o755); err != nil {
+		return provenance, fmt.Errorf("create stage dir: %w", err)
+	}
+	provenance.BuilderPhase = "extract-bundle"
+	source, err := os.Open(req.SourcePath)
+	if err != nil {
+		return provenance, fmt.Errorf("open bundle: %w", err)
+	}
+	mediaType := ""
+	if strings.HasSuffix(req.SourcePath, ".tgz") || strings.HasSuffix(req.SourcePath, ".tar.gz") {
+		mediaType = "application/gzip"
+	}
+	if err := extractLayer(stageDir, mediaType, source); err != nil {
+		_ = source.Close()
+		return provenance, fmt.Errorf("extract bundle: %w", err)
+	}
+	if err := source.Close(); err != nil {
+		return provenance, fmt.Errorf("close bundle: %w", err)
+	}
+	provenance.BuilderPhase = "build-ext4"
+	if err := os.MkdirAll(filepath.Dir(req.OutputPath), 0o755); err != nil {
+		return provenance, fmt.Errorf("create output dir: %w", err)
+	}
+	tmpImage := filepath.Join(tmpDir, "bundle.ext4")
+	if err := allocateFile(tmpImage, req.SizeMiB*1024*1024); err != nil {
+		return provenance, fmt.Errorf("allocate bundle image: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, req.Mke2fsPath, "-q", "-t", "ext4", "-d", stageDir, tmpImage)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return provenance, fmt.Errorf("build ext4 bundle: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if err := os.Rename(tmpImage, req.OutputPath); err != nil {
+		return provenance, fmt.Errorf("commit bundle image: %w", err)
+	}
+	info, err := os.Stat(req.OutputPath)
+	if err != nil {
+		return provenance, fmt.Errorf("stat output bundle: %w", err)
 	}
 	provenance.SizeBytes = info.Size()
 	provenance.BuilderPhase = "complete"
@@ -391,7 +461,7 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 	return nil
 }
 
-func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32) error {
+func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount) error {
 	target, err := safeStagePath(stageDir, initPath)
 	if err != nil {
 		return err
@@ -403,7 +473,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		if err := copyFile(initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
-		return writeGuestRunConfig(stageDir, command, env, resultPort)
+		return writeGuestRunConfig(stageDir, command, env, resultPort, mounts)
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -427,9 +497,10 @@ type guestRunConfig struct {
 	Command []string `json:"command"`
 	Env     []string `json:"env,omitempty"`
 	Port    uint32   `json:"port"`
+	Mounts  []Mount  `json:"mounts,omitempty"`
 }
 
-func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32) error {
+func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32, mounts []Mount) error {
 	target, err := safeStagePath(stageDir, "/etc/microagent/run.json")
 	if err != nil {
 		return err
@@ -437,7 +508,7 @@ func writeGuestRunConfig(stageDir string, command []string, env map[string]strin
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create guest config dir: %w", err)
 	}
-	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort})
+	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort, Mounts: mounts})
 	if err != nil {
 		return err
 	}

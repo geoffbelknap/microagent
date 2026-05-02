@@ -29,7 +29,15 @@ decoded.
     "rootfsPath": "/tmp/rootfs.ext4",
     "stateDir": "/tmp/microagent",
     "memoryMiB": 512,
-    "cpuCount": 2
+    "cpuCount": 2,
+    "disks": [
+      {
+        "name": "config",
+        "path": "/tmp/config.ext4",
+        "mountpoint": "/config",
+        "mode": "ro"
+      }
+    ]
   }
 }
 ```
@@ -48,6 +56,10 @@ Commands:
 `host` does not require `identity` or `config`. `inspect`, `stop`, `kill`, and
 `delete` require `identity` and `config.stateDir`. `check`, `prepare`, and
 `start` require the full config.
+
+Extra disks are optional. `mode` must be `ro` or `rw`. The supervisor attaches
+them after the rootfs in request order; the guest init mounts them from
+`/dev/vdb` onward.
 
 ## Response
 
