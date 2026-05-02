@@ -18,6 +18,31 @@ import (
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
 
+func TestRunVersionAliases(t *testing.T) {
+	for _, args := range [][]string{{"version"}, {"--version"}, {"-v"}} {
+		dir := t.TempDir()
+		stdoutPath := filepath.Join(dir, "stdout.txt")
+		stdout, err := os.Create(stdoutPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = run(t.Context(), args, stdout)
+		if closeErr := stdout.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		if err != nil {
+			t.Fatalf("run(%v): %v", args, err)
+		}
+		data, err := os.ReadFile(stdoutPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(string(data), "microagent ") {
+			t.Fatalf("version output = %q", data)
+		}
+	}
+}
+
 func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 	tests := []struct {
 		name        string

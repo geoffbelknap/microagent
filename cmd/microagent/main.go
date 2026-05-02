@@ -38,7 +38,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		printHelp(stdout)
 		return nil
 	}
-	if args[0] == "version" {
+	if args[0] == "version" || args[0] == "--version" || args[0] == "-v" {
 		fmt.Fprintf(stdout, "microagent %s\n", version)
 		return nil
 	}
