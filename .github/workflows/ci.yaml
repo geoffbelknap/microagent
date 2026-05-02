@@ -26,4 +26,10 @@ jobs:
         run: go test ./...
 
       - name: Build Apple VF helper
-        run: swift build --package-path helpers/applevf
+        run: swift build --package-path helpers/applevf --disable-sandbox
+
+      - name: Smoke Apple VF helper lifecycle
+        run: scripts/helper-lifecycle-smoke.sh
+
+      - name: Smoke CLI lifecycle
+        run: scripts/cli-lifecycle-smoke.sh

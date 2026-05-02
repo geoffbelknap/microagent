@@ -15,7 +15,20 @@ the caller.
 
 ```bash
 go test ./...
-swift build --package-path helpers/applevf
+swift build --package-path helpers/applevf --disable-sandbox
+```
+
+Run the lifecycle smokes:
+
+```bash
+make smoke
+```
+
+Run the real OCI rootfs smoke when `mke2fs` is installed and network access is
+available:
+
+```bash
+make smoke-rootfs
 ```
 
 ## CLI
