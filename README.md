@@ -2,13 +2,29 @@
 
 `microagent-kit` runs Linux workspaces inside microVMs.
 
-The command-line tool is `microagent`. On macOS, Apple Virtualization.framework
-access lives in `microagent-applevf-helper`, a small JSON helper that other
-languages can call directly.
+The command-line tool is `microagent`. On macOS it uses Apple
+Virtualization.framework through `microagent-applevf-helper`, a small JSON
+helper that Go, Python, Rust, Node, and shell scripts can call.
 
 Microagent provides the kernel, converts OCI images into VM disks, and starts
 the VM. Identity, policy, credentials, and higher-level control stay outside
 this project.
+
+## Install
+
+```bash
+brew install geoffbelknap/tap/microagent-kit
+```
+
+Then run a command from an OCI image:
+
+```bash
+microagent run \
+  --image docker.io/library/ubuntu:24.04 \
+  --exec "uname -a"
+```
+
+Microagent downloads its default kernel the first time it needs one.
 
 ## Build
 
@@ -52,7 +68,7 @@ Check the host:
 microagent doctor
 ```
 
-Run a command:
+Run a command from an image:
 
 ```bash
 microagent run \
@@ -97,7 +113,7 @@ Show state:
 microagent status agent-1 --state-dir /tmp/microagent-kit
 ```
 
-Use JSON:
+Use request JSON:
 
 ```bash
 microagent create --json request.json
@@ -123,7 +139,7 @@ Request JSON:
 }
 ```
 
-The command prints JSON.
+Commands print JSON.
 
 Delete state:
 
@@ -142,7 +158,7 @@ microagent rootfs build \
   --out /tmp/busybox-rootfs.ext4
 ```
 
-Use a different kernel when you need one:
+Use a custom kernel when you need one:
 
 ```bash
 microagent run \
@@ -164,10 +180,10 @@ stdout. See `docs/protocol.md`.
 
 ## Boundary
 
-`microagent-kit` handles the VM work:
+`microagent-kit` stays at the VM boundary:
 
 ```text
-caller
+your program
   -> microagent-kit
        -> Apple Virtualization.framework backend
        -> OCI image to ext4 rootfs builds

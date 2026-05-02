@@ -18,7 +18,7 @@ This repository owns the VM pieces:
 
 - Do not implement orchestration, planning, LLM calls, tools, or memory.
 - Do not implement policy, audit meaning, credential mediation, or enforcement
-  decisions. Consumers own those.
+  decisions. Other projects own those.
 - Do not become a general-purpose Mac VM manager. Lima, Tart, vfkit, and Lume
   already serve that space.
 - Do not grow rootfs build logic into a general image scanner, signer, or
@@ -34,7 +34,7 @@ This repository owns the VM pieces:
 - Fail closed on invalid VM config.
 - Prefer narrow protocols over shell-string execution.
 
-## Consumer boundary
+## Project boundary
 
-Consumers supply policy, audit meaning, identity, and user intent. This project
-owns kernels, rootfs conversion, VM commands, and state reporting.
+Other projects supply policy, audit meaning, identity, and user intent. This
+project owns kernels, rootfs conversion, VM commands, and state reporting.

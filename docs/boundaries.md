@@ -12,7 +12,7 @@
 - State files and cleanup
 - Host/guest wiring such as vsock listeners
 
-## Left to callers
+## Outside this repo
 
 - Planning loops
 - LLM/provider calls
@@ -22,6 +22,5 @@
 - Credentials and grants
 - User experience
 
-Callers provide identity and bridge targets. Microagent provides the kernel,
-rootfs conversion, VM state, and VM commands without taking over the caller's
-policy model.
+Your program provides identity and bridge targets. Microagent provides the
+kernel, rootfs conversion, VM state, and VM commands without taking over policy.
