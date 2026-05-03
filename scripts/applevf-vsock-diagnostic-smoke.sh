@@ -82,43 +82,111 @@ done
 )
 
 diagnostic='
+mkdir -p /proc /sys
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
 echo MICROAGENT_VSOCK_DIAGNOSTIC_START
 echo "--- uname ---"
 uname -a
 echo "--- proc devices ---"
-cat /proc/devices 2>/dev/null | grep -i vsock || true
+cat /proc/devices 2>/dev/null || true
 echo "--- proc net vsock ---"
 cat /proc/net/vsock 2>/dev/null || true
+echo "--- virtio devices ---"
+for device in /sys/bus/virtio/devices/*; do
+  [ -e "$device" ] || continue
+  printf "%s " "$device"
+  printf "device="
+  cat "$device/device" 2>/dev/null || printf "?"
+  printf " vendor="
+  cat "$device/vendor" 2>/dev/null || printf "?"
+  printf " status="
+  cat "$device/status" 2>/dev/null || printf "?"
+  printf "\n"
+done
+echo "--- virtio drivers ---"
+find /sys/bus/virtio/drivers -maxdepth 2 -type l -print 2>/dev/null || true
+echo "--- pci devices ---"
+for device in /sys/bus/pci/devices/*; do
+  [ -e "$device" ] || continue
+  printf "%s " "$device"
+  printf "vendor="
+  cat "$device/vendor" 2>/dev/null || printf "?"
+  printf " device="
+  cat "$device/device" 2>/dev/null || printf "?"
+  printf " class="
+  cat "$device/class" 2>/dev/null || printf "?"
+  printf "\n"
+done
 echo "--- dmesg vsock ---"
 dmesg 2>/dev/null | grep -i vsock || true
 echo "--- dmesg virtio ---"
 dmesg 2>/dev/null | grep -i virtio || true
 echo "--- bridge probe ---"
-wget -S -O- http://127.0.0.1:3128/health || true
+if command -v wget >/dev/null 2>&1; then
+  wget -S -O- http://127.0.0.1:3128/health || true
+elif command -v curl >/dev/null 2>&1; then
+  curl -v http://127.0.0.1:3128/health || true
+elif command -v python3 >/dev/null 2>&1; then
+  python3 - <<PY || true
+import urllib.request
+try:
+    print(urllib.request.urlopen("http://127.0.0.1:3128/health", timeout=15).read().decode())
+except Exception as exc:
+    print(f"python bridge probe failed: {exc}")
+PY
+else
+  echo "no wget, curl, or python3 available for bridge probe"
+fi
+sleep 12
 echo MICROAGENT_VSOCK_DIAGNOSTIC_DONE
 '
 
-"$STATE_DIR/microagent" create "$WORKSPACE" \
-  --image "$IMAGE" \
-  --arch "$ARCH" \
-  --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}" \
-  --mke2fs "$MKE2FS" \
-  --env MICROAGENT_VSOCK_TCP_LISTENERS=3128=3128 \
-  --exec "$diagnostic" \
-  --result-port 0 \
-  --kernel "$KERNEL" \
-  --state-dir "$STATE_DIR" \
-  --memory "${MICROAGENT_APPLEVF_BOOT_MEMORY_MIB:-512}" \
-  --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}" \
-  --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}" \
-  --guest-init "$GUEST_INIT" \
-  --supervisor "$SUPERVISOR" >"$RESULT"
+create_args=(
+  create "$WORKSPACE"
+  --image "$IMAGE"
+  --arch "$ARCH"
+  --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}"
+  --mke2fs "$MKE2FS"
+  --env MICROAGENT_VSOCK_TCP_LISTENERS=3128=3128
+  --entrypoint "$diagnostic"
+  --result-port 0
+  --kernel "$KERNEL"
+  --state-dir "$STATE_DIR"
+  --memory "${MICROAGENT_APPLEVF_BOOT_MEMORY_MIB:-512}"
+  --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}"
+  --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}"
+  --guest-init "$GUEST_INIT"
+  --supervisor "$SUPERVISOR"
+)
+
+"$STATE_DIR/microagent" "${create_args[@]}" >"$RESULT"
 
 "$STATE_DIR/microagent" start "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
   --kernel "$KERNEL" \
   --supervisor "$SUPERVISOR" \
   --vsock "3128=127.0.0.1:$HOST_PORT" >"$START_RESULT"
+
+SERIAL_PATH="$(python3 - "$START_RESULT" <<'PY'
+import json
+import sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    print(json.load(f).get("serial_path", ""))
+PY
+)"
+for _ in $(seq 1 80); do
+  if [ -n "$SERIAL_PATH" ] && [ -e "$SERIAL_PATH" ]; then
+    break
+  fi
+  sleep 0.25
+done
+for _ in $(seq 1 120); do
+  if [ -n "$SERIAL_PATH" ] && grep -q "MICROAGENT_VSOCK_DIAGNOSTIC_DONE" "$SERIAL_PATH" 2>/dev/null; then
+    break
+  fi
+  sleep 0.25
+done
 
 "$STATE_DIR/microagent" logs "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/serial.log"
 cat "$STATE_DIR/serial.log"
