@@ -1,6 +1,6 @@
 # microagent-kit
 
-`microagent-kit` runs Linux workspaces inside microVMs.
+`microagent-kit` Provides the tools need to runs AI Agent workspaces in microVMs.
 
 The command-line tool is `microagent`. Each host OS has one VM backend:
 Firecracker on Linux and Apple Virtualization.framework on macOS. Each backend
