@@ -1,6 +1,6 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test smoke smoke-rootfs smoke-firecracker smoke-workspace release-check signed-supervisor smoke-boot
+.PHONY: test smoke smoke-rootfs smoke-firecracker smoke-workspace smoke-applevf-vsock release-check signed-supervisor smoke-boot
 
 test:
 	go test ./...
@@ -39,6 +39,9 @@ else
 	@echo "workspace smoke is not supported on $(UNAME_S)" >&2
 	@exit 2
 endif
+
+smoke-applevf-vsock: signed-supervisor
+	scripts/applevf-vsock-diagnostic-smoke.sh
 
 release-check: test smoke smoke-rootfs
 
