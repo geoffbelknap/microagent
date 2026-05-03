@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -1755,7 +1756,7 @@ func startFirecrackerProcess(ctx context.Context, opts workspaceOptions, req vmk
 		_ = cmd.Process.Release()
 		return runningFirecrackerResponse(req), nil
 	}
-	waitErr := cmd.Wait()
+	waitErr := waitForFirecrackerForeground(ctx, cmd, serialLogPath(opts), opts.Timeout)
 	closeErr := serialLog.Close()
 	state := vmkit.StateStopped
 	errorText := ""
@@ -1774,6 +1775,73 @@ func startFirecrackerProcess(ctx context.Context, opts workspaceOptions, req vmk
 		return failedFirecrackerResponse(req, errorText), fmt.Errorf("%s", errorText)
 	}
 	return stoppedFirecrackerResponse(req), nil
+}
+
+func waitForFirecrackerForeground(ctx context.Context, cmd *exec.Cmd, serialPath string, timeout time.Duration) error {
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+	var timer <-chan time.Time
+	if timeout > 0 {
+		t := time.NewTimer(timeout)
+		defer t.Stop()
+		timer = t.C
+	}
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-waitCh:
+			return err
+		case <-ticker.C:
+			if firecrackerGuestHalted(serialPath) {
+				if err := terminateProcess(cmd.Process, waitCh, 5*time.Second); err != nil {
+					return err
+				}
+				return nil
+			}
+		case <-timer:
+			_ = cmd.Process.Kill()
+			<-waitCh
+			return fmt.Errorf("firecracker process did not exit before timeout")
+		case <-ctx.Done():
+			_ = cmd.Process.Kill()
+			<-waitCh
+			return ctx.Err()
+		}
+	}
+}
+
+func firecrackerGuestHalted(serialPath string) bool {
+	data, err := os.ReadFile(serialPath)
+	if err != nil {
+		return false
+	}
+	log := string(data)
+	return strings.Contains(log, "reboot: System halted") ||
+		strings.Contains(log, "reboot: Power down")
+}
+
+func terminateProcess(process *os.Process, waitCh <-chan error, timeout time.Duration) error {
+	if process == nil {
+		return nil
+	}
+	if err := process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return err
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-waitCh:
+		return nil
+	case <-timer.C:
+		if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return err
+		}
+		<-waitCh
+		return nil
+	}
 }
 
 func writeFirecrackerConfig(opts workspaceOptions, req vmkit.Request) error {

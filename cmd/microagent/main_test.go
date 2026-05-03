@@ -1314,6 +1314,26 @@ func TestEnsureWorkspaceKernelInstallsDefaultKernel(t *testing.T) {
 	}
 }
 
+func TestFirecrackerGuestHaltedDetectsKernelShutdown(t *testing.T) {
+	dir := t.TempDir()
+	serialPath := filepath.Join(dir, "serial.log")
+	if firecrackerGuestHalted(serialPath) {
+		t.Fatal("missing serial log reported halted")
+	}
+	if err := os.WriteFile(serialPath, []byte("[ 1.0 ] reboot: System halted\n"), 0o644); err != nil {
+		t.Fatalf("write serial log: %v", err)
+	}
+	if !firecrackerGuestHalted(serialPath) {
+		t.Fatal("system halt was not detected")
+	}
+	if err := os.WriteFile(serialPath, []byte("[ 1.0 ] reboot: Power down\n"), 0o644); err != nil {
+		t.Fatalf("write serial log: %v", err)
+	}
+	if !firecrackerGuestHalted(serialPath) {
+		t.Fatal("power down was not detected")
+	}
+}
+
 func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
