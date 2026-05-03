@@ -7,8 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,6 +21,7 @@ import (
 
 const configPath = "/etc/microagent/run.json"
 const resultConnectTimeout = 15 * time.Second
+const tcpVsockListenersEnv = "MICROAGENT_VSOCK_TCP_LISTENERS"
 
 type config struct {
 	Command []string `json:"command"`
@@ -56,6 +61,15 @@ func run() int {
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
 	if err := mountDisks(cfg.Mounts); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
+	if err := startTCPVsockBridges(cfg.Env); err != nil {
 		code = 127
 		res.Error = err.Error()
 		fmt.Fprintln(os.Stderr, err)
@@ -132,6 +146,113 @@ func guestEnv(extra []string) []string {
 		}
 	}
 	return env
+}
+
+type tcpVsockBridge struct {
+	Listen string
+	Port   uint32
+}
+
+func startTCPVsockBridges(env []string) error {
+	specs, err := parseTCPVsockBridges(envValue(env, tcpVsockListenersEnv))
+	if err != nil {
+		return err
+	}
+	for _, spec := range specs {
+		listener, err := net.Listen("tcp", spec.Listen)
+		if err != nil {
+			return fmt.Errorf("listen %s for vsock bridge: %w", spec.Listen, err)
+		}
+		go serveTCPVsockBridge(listener, spec.Port)
+	}
+	return nil
+}
+
+func parseTCPVsockBridges(raw string) ([]tcpVsockBridge, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	bridges := make([]tcpVsockBridge, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		left, right, ok := strings.Cut(part, "=")
+		if !ok {
+			return nil, fmt.Errorf("%s entry %q must be listen=vsockPort", tcpVsockListenersEnv, part)
+		}
+		listen := normalizeTCPListen(left)
+		port, err := strconv.ParseUint(strings.TrimSpace(right), 10, 32)
+		if err != nil || port == 0 {
+			return nil, fmt.Errorf("%s entry %q has invalid vsock port", tcpVsockListenersEnv, part)
+		}
+		bridges = append(bridges, tcpVsockBridge{Listen: listen, Port: uint32(port)})
+	}
+	return bridges, nil
+}
+
+func normalizeTCPListen(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "127.0.0.1:0"
+	}
+	if strings.Contains(value, ":") {
+		return value
+	}
+	return "127.0.0.1:" + value
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return os.Getenv(key)
+}
+
+func serveTCPVsockBridge(listener net.Listener, port uint32) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go proxyTCPToHostVsock(conn, port)
+	}
+}
+
+func proxyTCPToHostVsock(conn net.Conn, port uint32) {
+	defer conn.Close()
+	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open vsock for bridge port %d: %v\n", port, err)
+		return
+	}
+	if err := unix.Connect(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port}); err != nil {
+		_ = unix.Close(fd)
+		fmt.Fprintf(os.Stderr, "connect vsock bridge port %d: %v\n", port, err)
+		return
+	}
+	file := os.NewFile(uintptr(fd), "vsock")
+	if file == nil {
+		_ = unix.Close(fd)
+		return
+	}
+	defer file.Close()
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(file, conn)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(conn, file)
+		done <- struct{}{}
+	}()
+	<-done
 }
 
 func attachConsole() error {
