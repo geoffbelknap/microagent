@@ -116,8 +116,8 @@ with open(sys.argv[4], "r", encoding="utf-8", errors="replace") as f:
 
 if create.get("final_state") != "stopped":
     raise SystemExit(f"create did not stop cleanly: {create.get('final_state')}")
-if start.get("response", {}).get("event", {}).get("state") != "starting":
-    raise SystemExit("start did not return starting state")
+if start.get("response", {}).get("event", {}).get("state") != "running":
+    raise SystemExit("start did not return running state")
 if "CONNECT_READY" not in connect + serial:
     raise SystemExit("connect output did not reach the guest shell")
 PY

@@ -1449,14 +1449,14 @@ func startWorkspaceDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Res
 	if err := cmd.Start(); err != nil {
 		return vmkit.Response{}, err
 	}
-	if err := writeWorkspaceProcessState(opts, req, vmkit.StateStarting, cmd.Process.Pid, ""); err != nil {
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateRunning, cmd.Process.Pid, ""); err != nil {
 		_ = cmd.Process.Kill()
 		return vmkit.Response{}, err
 	}
 	_ = cmd.Process.Release()
 	event := vmkit.Event{
 		Identity:   *req.Identity,
-		State:      vmkit.StateStarting,
+		State:      vmkit.StateRunning,
 		Detail:     "serial=" + serialLogPath(opts),
 		ObservedAt: time.Now().UTC(),
 	}
