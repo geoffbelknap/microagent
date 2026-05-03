@@ -462,6 +462,9 @@ enum SerialAttachmentMode {
 }
 
 @available(macOS 13.0, *)
+extension VZVirtioSocketConnection: @retroactive @unchecked Sendable {}
+
+@available(macOS 13.0, *)
 final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
     let identity: Identity
     let config: Config
@@ -483,7 +486,18 @@ final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
 }
 
 @available(macOS 13.0, *)
-final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate {
+final class SocketListenerHandle {
+    let listener: VZVirtioSocketListener
+    let delegate: VZVirtioSocketListenerDelegate
+
+    init(listener: VZVirtioSocketListener, delegate: VZVirtioSocketListenerDelegate) {
+        self.listener = listener
+        self.delegate = delegate
+    }
+}
+
+@available(macOS 13.0, *)
+final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
     private let path: String
     private var connections: [VZVirtioSocketConnection] = []
 
@@ -510,6 +524,51 @@ final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }
         return true
+    }
+}
+
+@available(macOS 13.0, *)
+final class TCPSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
+    private let target: TCPHostPort
+    private let lock = NSLock()
+    private var connections: [VZVirtioSocketConnection] = []
+
+    init(target: TCPHostPort) {
+        self.target = target
+    }
+
+    func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
+        let remoteFD = dialTCP(target)
+        if remoteFD < 0 {
+            return false
+        }
+        retain(connection)
+        let localFD = connection.fileDescriptor
+        Thread.detachNewThread {
+            copyFD(from: localFD, to: remoteFD)
+            shutdown(remoteFD, SHUT_WR)
+            connection.close()
+        }
+        Thread.detachNewThread {
+            copyFD(from: remoteFD, to: localFD)
+            shutdown(localFD, SHUT_WR)
+            close(remoteFD)
+            connection.close()
+            self.release(connection)
+        }
+        return true
+    }
+
+    private func retain(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.append(connection)
+        lock.unlock()
+    }
+
+    private func release(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.removeAll { $0 === connection }
+        lock.unlock()
     }
 }
 #endif
@@ -539,13 +598,12 @@ func runVM(_ request: Request) throws {
         let vm = VZVirtualMachine(configuration: vmConfig)
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
-        var socketDelegates: [ResultSocketDelegate] = []
+        let socketListeners = installSocketListeners(vm: vm, config: config)
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
             switch result {
             case .success:
-                socketDelegates = installSocketListeners(vm: vm, config: config)
                 updateRuntime(identity: identity, config: config, state: .running, error: nil)
             case .failure(let error):
                 startError = error
@@ -559,7 +617,7 @@ func runVM(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketDelegates)) {
+        withExtendedLifetime((delegate, socketListeners)) {
             CFRunLoopRun()
         }
     } else {
@@ -584,13 +642,12 @@ func runConsole(_ request: Request) throws {
         let vm = VZVirtualMachine(configuration: vmConfig)
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
-        var socketDelegates: [ResultSocketDelegate] = []
+        let socketListeners = installSocketListeners(vm: vm, config: config)
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
             switch result {
             case .success:
-                socketDelegates = installSocketListeners(vm: vm, config: config)
                 updateRuntime(identity: identity, config: config, state: .running, error: nil)
             case .failure(let error):
                 startError = error
@@ -604,7 +661,7 @@ func runConsole(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketDelegates)) {
+        withExtendedLifetime((delegate, socketListeners)) {
             CFRunLoopRun()
         }
     } else {
@@ -617,19 +674,74 @@ func runConsole(_ request: Request) throws {
 
 #if canImport(Virtualization)
 @available(macOS 13.0, *)
-func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [ResultSocketDelegate] {
+func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [SocketListenerHandle] {
     guard let socket = vm.socketDevices.first as? VZVirtioSocketDevice else {
         return []
     }
-    var delegates: [ResultSocketDelegate] = []
+    var handles: [SocketListenerHandle] = []
     for listenerConfig in config.vsockListeners ?? [] {
         let listener = VZVirtioSocketListener()
-        let delegate = ResultSocketDelegate(path: listenerConfig.target)
+        let delegate: VZVirtioSocketListenerDelegate
+        if let target = try? parseTCPHostPort(listenerConfig.target) {
+            delegate = TCPSocketDelegate(target: target)
+        } else {
+            delegate = ResultSocketDelegate(path: listenerConfig.target)
+        }
         listener.delegate = delegate
         socket.setSocketListener(listener, forPort: listenerConfig.port)
-        delegates.append(delegate)
+        handles.append(SocketListenerHandle(listener: listener, delegate: delegate))
     }
-    return delegates
+    return handles
+}
+
+func dialTCP(_ target: TCPHostPort) -> Int32 {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    if fd < 0 {
+        return -1
+    }
+    var addr = sockaddr_in()
+    #if os(macOS)
+    addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = target.port.bigEndian
+    let host = target.host == "localhost" ? "127.0.0.1" : target.host
+    guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else {
+        close(fd)
+        return -1
+    }
+    let result = withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+    }
+    if result != 0 {
+        close(fd)
+        return -1
+    }
+    return fd
+}
+
+func copyFD(from source: Int32, to destination: Int32) {
+    var buffer = [UInt8](repeating: 0, count: 32 * 1024)
+    while true {
+        let readCount = buffer.withUnsafeMutableBytes {
+            read(source, $0.baseAddress, $0.count)
+        }
+        if readCount <= 0 {
+            return
+        }
+        var written = 0
+        while written < readCount {
+            let result = buffer.withUnsafeBytes {
+                write(destination, $0.baseAddress!.advanced(by: written), readCount - written)
+            }
+            if result <= 0 {
+                return
+            }
+            written += result
+        }
+    }
 }
 
 @available(macOS 13.0, *)

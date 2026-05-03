@@ -158,6 +158,11 @@ func startTCPVsockBridges(env []string) error {
 	if err != nil {
 		return err
 	}
+	if len(specs) > 0 {
+		if err := bringUpLoopback(); err != nil {
+			return err
+		}
+	}
 	for _, spec := range specs {
 		listener, err := net.Listen("tcp", spec.Listen)
 		if err != nil {
@@ -194,6 +199,23 @@ func parseTCPVsockBridges(raw string) ([]tcpVsockBridge, error) {
 	return bridges, nil
 }
 
+func bringUpLoopback() error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return fmt.Errorf("open control socket for loopback: %w", err)
+	}
+	defer unix.Close(fd)
+	ifr, err := unix.NewIfreq("lo")
+	if err != nil {
+		return fmt.Errorf("prepare loopback interface request: %w", err)
+	}
+	ifr.SetUint16(unix.IFF_UP | unix.IFF_RUNNING)
+	if err := unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifr); err != nil {
+		return fmt.Errorf("bring loopback up: %w", err)
+	}
+	return nil
+}
+
 func normalizeTCPListen(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -227,13 +249,8 @@ func serveTCPVsockBridge(listener net.Listener, port uint32) {
 
 func proxyTCPToHostVsock(conn net.Conn, port uint32) {
 	defer conn.Close()
-	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+	fd, err := dialHostVsock(port, 10*time.Second)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "open vsock for bridge port %d: %v\n", port, err)
-		return
-	}
-	if err := unix.Connect(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port}); err != nil {
-		_ = unix.Close(fd)
 		fmt.Fprintf(os.Stderr, "connect vsock bridge port %d: %v\n", port, err)
 		return
 	}
@@ -253,6 +270,26 @@ func proxyTCPToHostVsock(conn net.Conn, port uint32) {
 		done <- struct{}{}
 	}()
 	<-done
+}
+
+func dialHostVsock(port uint32, timeout time.Duration) (int, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+		if err == nil {
+			err = unix.Connect(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port})
+			if err == nil {
+				return fd, nil
+			}
+			_ = unix.Close(fd)
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return -1, lastErr
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func attachConsole() error {
