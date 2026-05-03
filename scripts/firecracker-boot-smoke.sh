@@ -101,7 +101,7 @@ assert result["response"]["backend"] == "firecracker"
 assert result["final_state"] == "stopped"
 assert result["image"]["platform"]["architecture"] == "amd64"
 assert expected_output in result["serial_log"]
-assert "Firecracker exiting successfully. exit_code=0" in result["serial_log"]
+assert "reboot: System halted" in result["serial_log"] or "reboot: Power down" in result["serial_log"]
 assert expected_kernel_sha
 PY
 
