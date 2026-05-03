@@ -265,7 +265,8 @@ func runKernel(ctx context.Context, args []string, stdout *os.File) error {
 
 func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error {
 	opts := kernelOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
-	opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	opts.OutputPath = defaultWritableKernelPath(opts.Backend, opts.Architecture)
+	outputExplicit := hasFlagValue(args, "out")
 	fs := flag.NewFlagSet("kernel install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.URL, "url", "", "Kernel URL")
@@ -280,8 +281,8 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected kernel install argument: %s", fs.Arg(0))
 	}
-	if opts.OutputPath == "" {
-		opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	if !outputExplicit || opts.OutputPath == "" {
+		opts.OutputPath = defaultWritableKernelPath(opts.Backend, opts.Architecture)
 	}
 	if opts.URL == "" && opts.FromPath == "" && opts.SHA256 == "" {
 		kernel, ok := defaultKernel(opts.Backend, opts.Architecture)
@@ -2442,19 +2443,65 @@ func defaultStateDir() string {
 }
 
 func defaultKernelPath(backend, arch string) string {
+	writable := defaultWritableKernelPath(backend, arch)
+	if writable == "" {
+		return defaultPackagedKernelPath(backend, arch)
+	}
+	if _, err := os.Stat(writable); err == nil {
+		return writable
+	}
+	legacy := defaultLegacyKernelPath(backend)
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	packaged := defaultPackagedKernelPath(backend, arch)
+	if packaged != "" {
+		if _, err := os.Stat(packaged); err == nil {
+			return packaged
+		}
+	}
+	return writable
+}
+
+func defaultWritableKernelPath(backend, arch string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
 	}
-	path := filepath.Join(home, ".microagent", "kernels", backend, arch, "Image")
-	legacy := filepath.Join(home, ".microagent", "kernels", backend, "Image")
-	if _, err := os.Stat(path); err == nil {
-		return path
+	return filepath.Join(home, ".microagent", "kernels", backend, arch, "Image")
+}
+
+func defaultLegacyKernelPath(backend string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
 	}
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
+	return filepath.Join(home, ".microagent", "kernels", backend, "Image")
+}
+
+func defaultPackagedKernelPath(backend, arch string) string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
 	}
-	return path
+	return defaultPackagedKernelPathFromExecutable(executable, backend, arch)
+}
+
+func defaultPackagedKernelPathFromExecutable(executable, backend, arch string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	dir := filepath.Dir(executable)
+	candidates := []string{
+		filepath.Join(filepath.Clean(filepath.Join(dir, "..", "libexec")), "kernels", backend, arch, "Image"),
+		filepath.Join(dir, "kernels", backend, arch, "Image"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return candidates[0]
 }
 
 func defaultMke2fsPath() string {

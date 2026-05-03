@@ -204,6 +204,43 @@ func TestDefaultFirecrackerPathResolvesHomebrewSymlink(t *testing.T) {
 	}
 }
 
+func TestDefaultPackagedKernelPathResolvesHomebrewSymlink(t *testing.T) {
+	dir := t.TempDir()
+	cellarVersion := "test-version"
+	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", cellarVersion, "bin")
+	cellarLibexec := filepath.Join(dir, "Cellar", "microagent-kit", cellarVersion, "libexec")
+	homebrewBin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(cellarBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kernelDir := filepath.Join(cellarLibexec, "kernels", "apple-vf", "arm64")
+	if err := os.MkdirAll(kernelDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(homebrewBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(cellarBin, "microagent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	kernel := filepath.Join(kernelDir, "Image")
+	if err := os.WriteFile(kernel, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resolvedKernel, err := filepath.EvalSymlinks(kernel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(homebrewBin, "microagent")
+	if err := os.Symlink(executable, link); err != nil {
+		t.Fatal(err)
+	}
+	if got := defaultPackagedKernelPathFromExecutable(link, "apple-vf", "arm64"); got != resolvedKernel {
+		t.Fatalf("defaultPackagedKernelPathFromExecutable() = %q, want %q", got, resolvedKernel)
+	}
+}
+
 func TestFirstOutputLine(t *testing.T) {
 	output := "\nFirecracker v1.15.1\n\n2026-05-02T17:44:08 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0\n"
 	if got := firstOutputLine(output); got != "Firecracker v1.15.1" {
