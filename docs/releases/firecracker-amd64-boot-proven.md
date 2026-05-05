@@ -1,4 +1,7 @@
-# Firecracker amd64 Boot-Proven Release
+---
+title: Firecracker amd64 Boot-Proven Release
+description: First microagent-kit release proven to boot a Firecracker amd64 guest from the default kernel.
+---
 
 `microagent-kit v0.1.22` is the first release proven to boot a Firecracker
 amd64 Microagent guest from the default released kernel path.
