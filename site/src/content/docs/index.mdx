@@ -1,0 +1,48 @@
+---
+title: microagent-kit
+description: Run AI agent workspaces in microVMs.
+template: splash
+hero:
+  tagline: Run AI agent workspaces in microVMs. Firecracker on Linux, Apple Virtualization.framework on macOS.
+  actions:
+    - text: Install
+      link: /getting-started/install/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/geoffbelknap/microagent-kit
+      icon: external
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## What it does
+
+`microagent-kit` provides the `microagent` CLI for running Linux workspaces
+inside microVMs. Each host OS uses one backend: Firecracker on Linux, Apple
+Virtualization.framework on macOS. Microagent owns the kernel, the OCI-to-disk
+conversion, and the VM lifecycle. Identity, policy, credentials, and
+higher-level control stay outside this project.
+
+<CardGrid>
+  <Card title="Run a one-shot command" icon="rocket">
+    `microagent run --image docker.io/library/ubuntu:24.04 --exec "uname -a"`
+  </Card>
+  <Card title="Create a named workspace" icon="seti:folder">
+    Persistent state, restartable, with attached disks and bundles.
+  </Card>
+  <Card title="Two backends, one surface" icon="laptop">
+    The same lifecycle commands target Firecracker or Apple VF.
+  </Card>
+  <Card title="Narrow JSON protocol" icon="document">
+    The Apple VF supervisor is callable from Go, Python, Rust, Node, or shell.
+  </Card>
+</CardGrid>
+
+## Where to start
+
+- **New here?** [Install](/getting-started/install/), then
+  [run your first VM](/getting-started/first-vm/).
+- **Need the CLI surface?** Jump to the [CLI reference](/cli/).
+- **Integrating?** Read [Architecture](/concepts/architecture/) and the
+  [Apple VF supervisor protocol](/protocol/applevf/).

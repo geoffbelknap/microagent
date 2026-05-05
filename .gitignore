@@ -4,3 +4,8 @@ DerivedData/
 *.xcodeproj
 *.xcworkspace
 *.xcuserstate
+
+# docs site
+site/node_modules/
+site/dist/
+site/.astro/

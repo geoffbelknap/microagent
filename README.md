@@ -12,6 +12,8 @@ Microagent provides the kernel, converts OCI images into VM disks, and starts
 the VM. Identity, policy, credentials, and higher-level control stay outside
 this project.
 
+Documentation: <https://microagent-kit.pages.dev>
+
 ## Install
 
 ```bash
