@@ -1,0 +1,29 @@
+---
+title: microagent-kit
+description: Run AI agent workspaces in microVMs.
+---
+
+`microagent-kit` provides the `microagent` CLI for running Linux workspaces
+inside microVMs. Each host OS uses one backend: Firecracker on Linux, Apple
+Virtualization.framework on macOS. Microagent owns the kernel, the OCI-to-disk
+conversion, and the VM lifecycle. Identity, policy, credentials, and
+higher-level control stay outside this project.
+
+## Where to start
+
+- New here? [Install](getting-started/install.md), then
+  [run your first VM](getting-started/first-vm.md).
+- Need the CLI surface? Jump to the [CLI reference](cli/index.md).
+- Integrating? Read the [architecture overview](concepts/architecture.md) and
+  the [Apple VF supervisor protocol](protocol/applevf.md).
+
+## Sections
+
+- [Getting started](getting-started/install.md) — install, first VM, named
+  workspaces.
+- [Concepts](concepts/architecture.md) — architecture, backends, boundaries,
+  state and identity.
+- [CLI reference](cli/index.md) — every subcommand.
+- [Protocol](protocol/applevf.md) — Apple VF supervisor JSON protocol.
+- [Operations](operations/smoke-tests.md) — smoke tests, troubleshooting.
+- [Security](security.md) — trust boundary and reporting.

@@ -12,7 +12,7 @@ Microagent provides the kernel, converts OCI images into VM disks, and starts
 the VM. Identity, policy, credentials, and higher-level control stay outside
 this project.
 
-Documentation: <https://microagent-kit.pages.dev>
+See [`docs/`](docs/) for the full guide and CLI reference.
 
 ## Install
 
@@ -105,8 +105,8 @@ Run only the HostOS workspace lifecycle smoke:
 make smoke-workspace
 ```
 
-See [docs/firecracker-smoke.md](docs/firecracker-smoke.md) for the expected
-kernel SHA, output, and host requirements.
+See [docs/operations/smoke-tests.md](docs/operations/smoke-tests.md) for the
+expected kernel SHA, output, and host requirements.
 The boot-proven release note is in
 [docs/releases/firecracker-amd64-boot-proven.md](docs/releases/firecracker-amd64-boot-proven.md).
 
@@ -343,7 +343,8 @@ microagent create \
 Firecracker and Apple VF both use the supervisor concept for backend lifecycle
 work. The Apple VF supervisor is packaged as a Swift executable because the
 Virtualization.framework boundary is host-native. It reads one JSON request from
-stdin and writes one JSON response to stdout. See `docs/protocol.md`.
+stdin and writes one JSON response to stdout. See
+[docs/protocol/applevf.md](docs/protocol/applevf.md).
 
 ## Boundary
 
