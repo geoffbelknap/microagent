@@ -3,9 +3,9 @@ title: State and identity
 description: Where workspace state lives and how identity flows through requests.
 ---
 
-Microagent treats VM state changes as structured output. Every request carries
-an identity block; every response carries an event block describing the
-resulting state.
+Microagent reports VM state changes as JSON events. Every request carries an
+identity block; every response carries an event block describing the resulting
+state.
 
 ## Identity
 
@@ -63,8 +63,8 @@ hash checks to detect runtime drift.
 
 ## Readiness
 
-Status responses include a readiness block for consumers that need to sequence
-work without polling files or serial logs:
+Status responses include readiness signals so callers can sequence work without
+polling files or serial logs:
 
 - **`guestReady`** — the workspace reached a started runtime state.
 - **`shellReady`** — the workspace is running and console input is available.
@@ -91,7 +91,7 @@ Lifecycle responses include an event:
 }
 ```
 
-States cover the full lifecycle: `unknown`, `prepared`, `starting`, `running`,
+States cover the lifecycle: `unknown`, `prepared`, `starting`, `running`,
 `stopping`, `halted`, `quarantined`, `stopped`, and `failed`. `halted` means
 the workspace was cleanly stopped with disk state and identity preserved for a
 later `start`. `quarantined` means host-side network, mediation, and side

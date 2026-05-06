@@ -6,7 +6,7 @@ description: Lifecycle and boot smokes for both backends.
 The Makefile drives all smoke suites. `make smoke` selects the right one for
 the host: Firecracker on Linux, Apple VF on macOS.
 
-For the full pre-release flow, see [Release process](release.md).
+For the pre-release flow, see [Release process](release.md).
 
 The normal GitHub CI workflow keeps unit tests separate from live KVM gates.
 Live Firecracker parity runs through the manual `Live Linux Parity` workflow on
@@ -38,9 +38,8 @@ make smoke-contract
 
 This smoke does not boot a VM. It builds the CLI, validates
 `microagent --json contract`, synthesizes a persisted workspace state, and then
-checks `status`, `result`, `artifacts`, and `artifacts get`. It is intended to
-catch regressions in the structured runtime surface before backend-specific live
-VM smokes run.
+checks `status`, `result`, `artifacts`, and `artifacts get`. It catches
+regressions in the runtime contract before backend-specific live VM smokes run.
 
 ## Firecracker workspace smoke
 

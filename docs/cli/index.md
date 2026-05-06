@@ -45,7 +45,7 @@ description: All microagent subcommands at a glance.
 
 ## Output
 
-All commands return structured output. With `--json` before the subcommand (or
+All commands can print JSON output. With `--json` before the subcommand (or
 `MICROAGENT_OUTPUT=json`), the response matches the shape documented in the
 [supervisor protocol](/protocol/). Scripts should consume JSON; humans get the
 text format by default.

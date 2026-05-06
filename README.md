@@ -10,10 +10,10 @@ packaged as `microagent-firecracker-supervisor`. Both are small JSON
 executables that Go, Python, Rust, Node, and shell scripts can call.
 
 Microagent provides the kernel, converts OCI images into VM disks, and starts
-the VM. Identity, policy, credentials, and higher-level control stay outside
+the VM. Identity, policy, credentials, and control-plane decisions stay outside
 this project.
 
-See [`docs/`](docs/) for the full guide and CLI reference.
+See [`docs/`](docs/) for the guide and CLI reference.
 
 Go callers can use `pkg/rootfs` for OCI-to-ext4 builds and `pkg/vmkit` for the
 shared supervisor request/response types. The high-level workspace lifecycle API
@@ -96,7 +96,7 @@ microagent delete research
 
 Linux has one backend: Firecracker. macOS has one backend: Apple VF. The
 `--backend` flag exists for lower-level request compatibility and backend
-validation, not as a user-facing backend selector.
+validation, not for normal backend selection.
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
 `status`, `halt`, `quarantine`, `stop`, `kill`, and `delete`. Backend
@@ -109,7 +109,7 @@ serial output.
 
 Named workspace manifests also record runtime verification metadata: image
 digest, kernel hash, rootfs hash, and injected init hash. `microagent status
---json` recomputes current hashes and reports structured divergence.
+--json` recomputes current hashes and reports mismatches.
 Status JSON also reports `guestReady`, `shellReady`, and `resultReady` so
 callers can sequence work without polling serial logs or guessing from files.
 Declare the mediation channel with `--mediation port=host:port`; it is recorded
@@ -317,8 +317,8 @@ Use request JSON:
 microagent create --json request.json
 ```
 
-This `create --json <path>` form reads request JSON. For structured command
-output, place the global output flag before the command, for example
+This `create --json <path>` form reads request JSON. For JSON command output,
+place the global output flag before the command, for example
 `microagent --json status research`.
 
 Request JSON:

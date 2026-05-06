@@ -37,7 +37,7 @@ Important files include:
 
 | File | Purpose |
 |---|---|
-| `runtime.json` | latest structured lifecycle state |
+| `runtime.json` | latest lifecycle state |
 | `firecracker.json` | generated Firecracker config |
 | `serial.log` | guest serial output |
 | `serial.in` | console input FIFO for running workspaces |
@@ -89,7 +89,7 @@ devices, unlinks the workspace vsock socket, and records the state as
 
 ## Console
 
-Firecracker matches the Apple VF operator-facing console behavior:
+Firecracker matches the Apple VF console behavior callers see:
 
 - `microagent connect <name> --send "echo CONNECT_READY"` reaches a running
   guest shell and prints `CONNECT_READY`.

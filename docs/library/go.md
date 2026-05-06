@@ -12,7 +12,7 @@ description: Use microagent-kit packages directly from Go.
 | `pkg/supervisors/firecracker` | Linux Firecracker supervisor implementation |
 
 The CLI still owns the workspace orchestration code under `cmd/microagent`.
-The full high-level `run`, `create`, `start`, `stop`, and `delete` workflow is
+The high-level `run`, `create`, `start`, `stop`, and `delete` workflow is
 not exported as a stable Go package API yet.
 
 ## Supervisor Types
@@ -89,6 +89,6 @@ func main() {
 
 The intended architecture is a reusable Go library plus CLI. The exported
 library already covers rootfs builds, supervisor data types, and the
-Firecracker supervisor. The complete high-level workspace API still needs to
+Firecracker supervisor. The high-level workspace API still needs to
 move out of `cmd/microagent` before Go callers can drive both backends with the
 same convenience API the CLI uses.

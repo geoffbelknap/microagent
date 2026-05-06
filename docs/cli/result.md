@@ -8,7 +8,7 @@ microagent result <name> [--state-dir <dir>]
 ```
 
 `result` reads the guest result channel for one workspace. It returns the
-machine-readable completion payload separately from serial logs.
+completion payload separately from serial logs.
 
 With the global `--json` flag, the response includes `result` with identity, backend, result
 path, start/completion timestamps, exit code, stdout, stderr, and failure
