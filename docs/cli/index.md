@@ -36,7 +36,7 @@ description: All microagent subcommands at a glance.
 
 ## Global flags
 
-- `--json` — print JSON output
+- `--json` — print JSON output; place before the subcommand
 - `--text` — print human-readable output
 - `--output <json|text>` — select output format
 - `--supervisor <path>` — override the active backend supervisor path
@@ -45,7 +45,7 @@ description: All microagent subcommands at a glance.
 
 ## Output
 
-All commands return structured output. With `--json` (or
+All commands return structured output. With `--json` before the subcommand (or
 `MICROAGENT_OUTPUT=json`), the response matches the shape documented in the
 [supervisor protocol](/protocol/). Scripts should consume JSON; humans get the
 text format by default.

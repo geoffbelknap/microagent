@@ -56,8 +56,8 @@ rootfs is built or copied from the local image store. The record includes:
 - rootfs path and SHA-256
 - injected guest init path and SHA-256
 
-`microagent status --json` recomputes the current file hashes and compares them
-with the recorded values. A mismatch is reported under
+`microagent --json status <name>` recomputes the current file hashes and
+compares them with the recorded values. A mismatch is reported under
 `verification.divergence`; callers do not need to scrape logs or reimplement
 hash checks to detect runtime drift.
 

@@ -31,13 +31,13 @@ visibility is honest.
 | `--backend <name>` | Backend override (`apple-vf` or `firecracker`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the Apple VF supervisor path |
-| `--json` | Print structured JSON output |
+| `--json` | Global flag before `doctor`; print structured JSON output |
 
 ## Example
 
 ```bash
 microagent doctor
-microagent doctor --json
+microagent --json doctor
 ```
 
 ## Related

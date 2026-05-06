@@ -24,6 +24,7 @@ self-hosted Linux runners labeled `kvm`, or directly on a Linux host with
 | `make smoke-firecracker-network` | Linux KVM Firecracker network modes |
 | `make smoke-applevf-network` | macOS Apple VF network mode validation |
 | `make smoke-applevf-publish` | macOS Apple VF TCP publish |
+| `make smoke-applevf-vsock` | macOS Apple VF vsock diagnostics |
 | `make smoke-workspace` | HostOS workspace lifecycle |
 | `make smoke-boot` | Boot a Linux VM end-to-end (Apple VF) |
 
@@ -34,10 +35,31 @@ make smoke-contract
 ```
 
 This smoke does not boot a VM. It builds the CLI, validates
-`microagent contract --json`, synthesizes a persisted workspace state, and then
+`microagent --json contract`, synthesizes a persisted workspace state, and then
 checks `status`, `result`, `artifacts`, and `artifacts get`. It is intended to
 catch regressions in the structured runtime surface before backend-specific live
 VM smokes run.
+
+## Firecracker workspace smoke
+
+```bash
+make smoke-workspace
+```
+
+On Linux this runs the Firecracker workspace substrate smoke. It verifies
+create/start/status, halt with disk-state preservation, restart from the same
+disk, quarantine, quarantined-start rejection, event history, readiness, and
+declared artifact retrieval.
+
+## Linux smoke suite
+
+```bash
+make smoke
+```
+
+On Linux this runs unit tests, the runtime contract smoke, Firecracker
+workspace substrate, console parity, TCP publish, network modes, and the boot
+smoke.
 
 ## Firecracker boot smoke
 
@@ -133,3 +155,11 @@ make smoke-applevf-publish
 This macOS Apple silicon target verifies that `--publish` forwards a host TCP
 listener into a running Apple VF workspace. It checks both a minimal TCP
 responder and a BusyBox HTTP server.
+
+## Apple VF workspace smoke
+
+On macOS, `make smoke` also builds the supervisor and runs Apple VF supervisor
+lifecycle, CLI lifecycle, workspace connect, network, and publish smokes.
+`scripts/dev/applevf-substrate-smoke.sh` is the standalone substrate check for
+halt/restart disk preservation, quarantine, event history, readiness, and
+declared artifacts.

@@ -1,6 +1,6 @@
 ---
 title: Firecracker Linux Parity Readiness
-description: Linux Firecracker parity validation record for console, publish, lifecycle, and boot gates.
+description: Linux Firecracker parity validation record for console, publish, network, lifecycle, and boot gates.
 ---
 
 This note records the Linux Firecracker parity validation performed for the
@@ -26,6 +26,7 @@ scripts/dev/linux-host-facts.sh
 scripts/dev/go-test.sh
 scripts/dev/firecracker-console-parity-smoke.sh
 scripts/dev/firecracker-publish-smoke.sh
+scripts/dev/firecracker-network-mode-smoke.sh
 scripts/dev/firecracker-workspace-smoke.sh
 scripts/dev/firecracker-boot-smoke.sh
 make smoke
@@ -38,6 +39,7 @@ make smoke
 | `scripts/dev/go-test.sh` | pass |
 | `scripts/dev/firecracker-console-parity-smoke.sh` | pass |
 | `scripts/dev/firecracker-publish-smoke.sh` | pass |
+| `scripts/dev/firecracker-network-mode-smoke.sh` | pass; bridged fails closed without a configured Linux bridge |
 | `scripts/dev/firecracker-workspace-smoke.sh` | pass |
 | `scripts/dev/firecracker-boot-smoke.sh` | pass |
 | `make smoke` | pass |
@@ -72,3 +74,6 @@ Validated Firecracker behavior:
   Firecracker workspace.
 - lifecycle smokes continue to cover prepare, start, status, stop, delete, and
   running-delete refusal.
+- workspace substrate smokes cover halt/restart with preserved disk state,
+  quarantine, event history, readiness, structured results, and declared
+  artifacts.

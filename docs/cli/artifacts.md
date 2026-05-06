@@ -21,12 +21,12 @@ copying, use [`cp`](/cli/cp/).
 |---|---|
 | `--state-dir <dir>` | State directory |
 | `--debugfs <path>` | debugfs binary path for `artifacts get` |
-| `--json` | Print structured JSON output |
+| `--json` | Global flag before `artifacts`; print structured JSON output |
 
 ## Examples
 
 ```bash
-microagent artifacts research --json
+microagent --json artifacts research
 microagent artifacts get research report ./out/
 ```
 

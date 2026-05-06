@@ -15,13 +15,13 @@ backend, and current state.
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory to scan |
-| `--json` | Print structured JSON output |
+| `--json` | Global flag before `ps`; print structured JSON output |
 
 ## Example
 
 ```bash
 microagent ps
-microagent ps --json
+microagent --json ps
 ```
 
 ## Related
