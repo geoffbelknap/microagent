@@ -22,6 +22,7 @@ import (
 
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -707,18 +708,33 @@ type workspaceOptions struct {
 	Disks           []workspaceDisk
 	VsockListeners  []vmkit.VsockListener
 	KernelExplicit  bool
+	SpecMemory      bool
+	SpecCPU         bool
+	SpecSize        bool
 	Keep            bool
 	PrepareForStart bool
 	SerialInput     bool
 }
 
+type workspaceSpec struct {
+	Name       string            `yaml:"name"`
+	ImageRef   string            `yaml:"image"`
+	Profile    string            `yaml:"profile"`
+	Entrypoint string            `yaml:"entrypoint"`
+	Setup      []string          `yaml:"setup"`
+	Env        map[string]string `yaml:"env"`
+	Resources  resourceConfig    `yaml:"resources"`
+	Disks      []workspaceDisk   `yaml:"disks"`
+	Bundles    []workspaceDisk   `yaml:"bundles"`
+}
+
 type workspaceDisk struct {
-	Name       string `json:"name"`
-	SourcePath string `json:"source_path,omitempty"`
-	Path       string `json:"path"`
-	Mountpoint string `json:"mountpoint"`
-	Mode       string `json:"mode"`
-	Bundle     bool   `json:"bundle,omitempty"`
+	Name       string `json:"name" yaml:"name"`
+	SourcePath string `json:"source_path,omitempty" yaml:"sourcePath,omitempty"`
+	Path       string `json:"path" yaml:"path"`
+	Mountpoint string `json:"mountpoint" yaml:"mountpoint"`
+	Mode       string `json:"mode" yaml:"mode"`
+	Bundle     bool   `json:"bundle,omitempty" yaml:"bundle,omitempty"`
 }
 
 type workspaceManifest struct {
@@ -774,9 +790,9 @@ type workspaceListEntry struct {
 }
 
 type resourceConfig struct {
-	MemoryMiB int   `json:"memory_mib"`
-	CPUCount  int   `json:"cpu_count"`
-	SizeMiB   int64 `json:"size_mib,omitempty"`
+	MemoryMiB int   `json:"memory_mib" yaml:"memoryMiB"`
+	CPUCount  int   `json:"cpu_count" yaml:"cpuCount"`
+	SizeMiB   int64 `json:"size_mib,omitempty" yaml:"sizeMiB,omitempty"`
 }
 
 type resourceProfile struct {
@@ -1312,6 +1328,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	memoryExplicit := hasFlagValue(args, "memory")
 	cpusExplicit := hasFlagValue(args, "cpus")
 	sizeExplicit := hasFlagValue(args, "size-mib")
+	specExplicit := hasFlagValue(args, "file")
 	opts := workspaceOptions{
 		Backend:      hostBackend(),
 		Architecture: defaultGuestArch(),
@@ -1327,14 +1344,21 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.Mke2fsPath = defaultMke2fsPath()
 	opts.GuestInitPath = defaultGuestInitPath(opts.Architecture)
 	opts.SupervisorPath = os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	specPath := workspaceSpecPath(command, args)
+	if specPath != "" {
+		if err := applyWorkspaceSpecFile(&opts, specPath, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
+			return workspaceOptions{}, err
+		}
+	}
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	fs.StringVar(&opts.Name, "name", "", "Workspace name")
-	fs.StringVar(&opts.Name, "id", "", "Workspace ID")
-	fs.StringVar(&opts.ImageRef, "image", "", "OCI image reference")
+	fs.StringVar(&specPath, "file", specPath, "Workspace spec file")
+	fs.StringVar(&opts.Name, "name", opts.Name, "Workspace name")
+	fs.StringVar(&opts.Name, "id", opts.Name, "Workspace ID")
+	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
 	fs.StringVar(&opts.ExecCommand, "exec", "", "Shell command to run as guest init")
-	fs.StringVar(&opts.Entrypoint, "entrypoint", "", "Shell command to run when the workspace starts")
-	var setupCommands multiFlag
+	fs.StringVar(&opts.Entrypoint, "entrypoint", opts.Entrypoint, "Shell command to run when the workspace starts")
+	setupCommands := multiFlag(append([]string{}, opts.SetupCommands...))
 	fs.Var(&setupCommands, "setup", "Shell command to run before --exec")
 	var envVars multiFlag
 	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
@@ -1373,7 +1397,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err != nil {
 		return workspaceOptions{}, err
 	}
-	opts.Env = env
+	opts.Env = mergeEnv(opts.Env, env)
 	disks, err := parseWorkspaceDisks(diskFlags, false)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -1382,7 +1406,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err != nil {
 		return workspaceOptions{}, err
 	}
-	opts.Disks = append(disks, bundles...)
+	opts.Disks = append(opts.Disks, disks...)
+	opts.Disks = append(opts.Disks, bundles...)
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		if command == "create" {
@@ -1395,7 +1420,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
 	opts.KernelExplicit = kernelExplicit
-	if err := applyResourceProfile(&opts, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
+	if specExplicit && specPath == "" {
+		return workspaceOptions{}, fmt.Errorf("%s requires --file path", command)
+	}
+	if err := applyResourceProfile(&opts, memoryExplicit || opts.SpecMemory, cpusExplicit || opts.SpecCPU, sizeExplicit || opts.SpecSize); err != nil {
 		return workspaceOptions{}, err
 	}
 	if err := validateResourceConfig(workspaceResources(opts), true); err != nil {
@@ -1433,6 +1461,140 @@ func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
 		SHA256:     kernel.SHA256,
 		OutputPath: opts.KernelPath,
 	})
+}
+
+func workspaceSpecPath(command string, args []string) string {
+	if command != "create" {
+		return ""
+	}
+	if value, ok := flagValue(args, "file"); ok {
+		return value
+	}
+	if _, err := os.Stat("microagent.yaml"); err == nil {
+		return "microagent.yaml"
+	}
+	if _, err := os.Stat("microagent.yml"); err == nil {
+		return "microagent.yml"
+	}
+	return ""
+}
+
+func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit, cpusExplicit, sizeExplicit bool) error {
+	spec, err := readWorkspaceSpec(path)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(spec.Name) != "" {
+		opts.Name = strings.TrimSpace(spec.Name)
+	}
+	if strings.TrimSpace(spec.ImageRef) != "" {
+		opts.ImageRef = strings.TrimSpace(spec.ImageRef)
+	}
+	if strings.TrimSpace(spec.Profile) != "" {
+		opts.Profile = strings.TrimSpace(spec.Profile)
+		if err := applyResourceProfile(opts, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
+			return err
+		}
+	}
+	if spec.Resources.MemoryMiB != 0 && !memoryExplicit {
+		opts.MemoryMiB = spec.Resources.MemoryMiB
+		opts.SpecMemory = true
+	}
+	if spec.Resources.CPUCount != 0 && !cpusExplicit {
+		opts.CPUCount = spec.Resources.CPUCount
+		opts.SpecCPU = true
+	}
+	if spec.Resources.SizeMiB != 0 && !sizeExplicit {
+		opts.SizeMiB = spec.Resources.SizeMiB
+		opts.SpecSize = true
+	}
+	if strings.TrimSpace(spec.Entrypoint) != "" {
+		opts.Entrypoint = spec.Entrypoint
+	}
+	if len(spec.Setup) != 0 {
+		opts.SetupCommands = append([]string{}, spec.Setup...)
+	}
+	opts.Env = mergeEnv(opts.Env, spec.Env)
+	disks, err := workspaceSpecDisks(spec)
+	if err != nil {
+		return err
+	}
+	opts.Disks = append(opts.Disks, disks...)
+	return nil
+}
+
+func readWorkspaceSpec(path string) (workspaceSpec, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return workspaceSpec{}, err
+	}
+	var spec workspaceSpec
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		return workspaceSpec{}, err
+	}
+	return spec, nil
+}
+
+func workspaceSpecDisks(spec workspaceSpec) ([]workspaceDisk, error) {
+	disks := make([]workspaceDisk, 0, len(spec.Disks)+len(spec.Bundles))
+	for _, disk := range spec.Disks {
+		disk.Bundle = false
+		if err := validateWorkspaceDisk(disk); err != nil {
+			return nil, err
+		}
+		disks = append(disks, disk)
+	}
+	for _, disk := range spec.Bundles {
+		disk.Bundle = true
+		if disk.SourcePath == "" {
+			disk.SourcePath = disk.Path
+		}
+		if err := validateWorkspaceDisk(disk); err != nil {
+			return nil, err
+		}
+		disks = append(disks, disk)
+	}
+	return disks, nil
+}
+
+func validateWorkspaceDisk(disk workspaceDisk) error {
+	if strings.TrimSpace(disk.Name) == "" {
+		return fmt.Errorf("disk name is required")
+	}
+	if disk.Name == "rootfs" {
+		return fmt.Errorf("disk name rootfs is reserved")
+	}
+	path := disk.Path
+	if disk.Bundle {
+		path = disk.SourcePath
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("disk %q path is required", disk.Name)
+	}
+	if strings.TrimSpace(disk.Mountpoint) == "" {
+		return fmt.Errorf("disk %q mountpoint is required", disk.Name)
+	}
+	if !strings.HasPrefix(disk.Mountpoint, "/") {
+		return fmt.Errorf("disk %q mountpoint must be absolute", disk.Name)
+	}
+	if disk.Mode != "ro" && disk.Mode != "rw" {
+		return fmt.Errorf("disk %q mode must be ro or rw", disk.Name)
+	}
+	return nil
+}
+
+func mergeEnv(base, overrides map[string]string) map[string]string {
+	if len(base) == 0 && len(overrides) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(base)+len(overrides))
+	for key, value := range base {
+		out[key] = value
+	}
+	for key, value := range overrides {
+		out[key] = value
+	}
+	return out
 }
 
 func applyResourceProfile(opts *workspaceOptions, memoryExplicit, cpusExplicit, sizeExplicit bool) error {
@@ -2710,7 +2872,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
 		return true
 	}
-	return hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle")
+	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle")
 }
 
 func hasLowLevelCreateFlag(args []string) bool {
@@ -2883,18 +3045,29 @@ func defaultGuestInitPathFromExecutable(executable, arch string) string {
 }
 
 func hasFlagValue(args []string, name string) bool {
+	_, ok := flagValue(args, name)
+	return ok
+}
+
+func flagValue(args []string, name string) (string, bool) {
 	long := "--" + name
 	short := "-" + name
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == long || arg == short {
-			return i+1 < len(args)
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", true
 		}
-		if strings.HasPrefix(arg, long+"=") || strings.HasPrefix(arg, short+"=") {
-			return true
+		if strings.HasPrefix(arg, long+"=") {
+			return strings.TrimPrefix(arg, long+"="), true
+		}
+		if strings.HasPrefix(arg, short+"=") {
+			return strings.TrimPrefix(arg, short+"="), true
 		}
 	}
-	return false
+	return "", false
 }
 
 func hasPositionalWorkspaceName(args []string) bool {
@@ -2905,7 +3078,7 @@ func hasPositionalWorkspaceName(args []string) bool {
 		if !strings.HasPrefix(arg, "-") {
 			return true
 		}
-		if arg == "--json" || arg == "-json" || arg == "--rootfs" || arg == "-rootfs" || arg == "--kernel" || arg == "-kernel" || arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" || arg == "--entrypoint" || arg == "-entrypoint" || arg == "--env" || arg == "-env" {
+		if arg == "--json" || arg == "-json" || arg == "--rootfs" || arg == "-rootfs" || arg == "--kernel" || arg == "-kernel" || arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" || arg == "--file" || arg == "-file" || arg == "--entrypoint" || arg == "-entrypoint" || arg == "--env" || arg == "-env" {
 			return false
 		}
 	}
@@ -3225,6 +3398,7 @@ func reorderFlagArgs(args []string) []string {
 		"-image":       true,
 		"-exec":        true,
 		"-entrypoint":  true,
+		"-file":        true,
 		"-env":         true,
 		"-setup":       true,
 		"-request-id":  true,
@@ -3467,6 +3641,7 @@ Options:
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
   -debugfs <path>       debugfs binary path
+  -file <path>          Workspace spec file
   -kernel <path>        Custom kernel path
   -rootfs <path>        Rootfs image path
   -state-dir <dir>      State directory
@@ -3490,6 +3665,7 @@ Options:
   -env KEY=VALUE        Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -file <path>          Workspace spec file
   -name <name>          Workspace name; generated when omitted
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
@@ -3517,6 +3693,7 @@ Options:
   -env KEY=VALUE        Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -file <path>          Workspace spec file
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large

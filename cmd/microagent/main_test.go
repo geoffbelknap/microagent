@@ -802,6 +802,121 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsReadsSpecFile(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "microagent.yaml")
+	spec := `
+name: research
+image: docker.io/library/ubuntu:24.04
+profile: medium
+entrypoint: /app/start.sh
+setup:
+  - mkdir -p /workspace
+  - echo ready > /workspace/status
+env:
+  MICROAGENT_NAME: research
+resources:
+  memoryMiB: 3072
+  cpuCount: 3
+  sizeMiB: 12288
+disks:
+  - name: workspace
+    path: /tmp/workspace.ext4
+    mountpoint: /workspace
+    mode: rw
+bundles:
+  - name: config
+    path: /tmp/config.tar
+    mountpoint: /config
+    mode: ro
+`
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "research" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "medium" {
+		t.Fatalf("identity/image/profile = %#v", opts)
+	}
+	if opts.Entrypoint != "/app/start.sh" || len(opts.SetupCommands) != 2 {
+		t.Fatalf("commands = entrypoint %q setup %#v", opts.Entrypoint, opts.SetupCommands)
+	}
+	if opts.Env["MICROAGENT_NAME"] != "research" {
+		t.Fatalf("env = %#v", opts.Env)
+	}
+	if opts.MemoryMiB != 3072 || opts.CPUCount != 3 || opts.SizeMiB != 12288 {
+		t.Fatalf("resources = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+	if len(opts.Disks) != 2 || opts.Disks[0].Name != "workspace" || opts.Disks[1].Name != "config" || !opts.Disks[1].Bundle {
+		t.Fatalf("disks = %#v", opts.Disks)
+	}
+}
+
+func TestParseWorkspaceOptionsFlagsOverrideSpecFile(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "microagent.yaml")
+	spec := `
+name: from-spec
+image: docker.io/library/busybox:1.36
+profile: large
+env:
+  MODE: spec
+resources:
+  memoryMiB: 4096
+`
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := parseWorkspaceOptions("create", []string{
+		"--file", specPath,
+		"--name", "from-flag",
+		"--image", "docker.io/library/ubuntu:24.04",
+		"--profile", "small",
+		"--memory", "1536",
+		"--env", "MODE=flag",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "from-flag" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "small" {
+		t.Fatalf("overrides = name %q image %q profile %q", opts.Name, opts.ImageRef, opts.Profile)
+	}
+	if opts.MemoryMiB != 1536 || opts.CPUCount != 2 || opts.SizeMiB != rootfs.DefaultSizeMiB {
+		t.Fatalf("resources = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+	if opts.Env["MODE"] != "flag" {
+		t.Fatalf("env = %#v", opts.Env)
+	}
+}
+
+func TestParseWorkspaceOptionsFindsDefaultSpecFile(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := os.WriteFile(filepath.Join(dir, "microagent.yaml"), []byte("name: default-spec\nprofile: tiny\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := parseWorkspaceOptions("create", nil)
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "default-spec" || opts.Profile != "tiny" || opts.MemoryMiB != 256 {
+		t.Fatalf("opts = %#v", opts)
+	}
+}
+
 func TestRunProfilesPrintsExactConfigs(t *testing.T) {
 	outputFormat = ""
 	t.Cleanup(func() { outputFormat = "" })

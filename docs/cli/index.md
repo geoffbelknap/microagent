@@ -22,6 +22,7 @@ description: All microagent subcommands at a glance.
 | [`doctor`](/cli/doctor/) | Check the host for backend support |
 | [`rootfs`](/cli/rootfs/) | Build a rootfs from an OCI image |
 | [`kernel`](/cli/kernel/) | Install or verify a custom kernel |
+| [`microagent.yaml`](/cli/spec/) | Declarative workspace spec |
 | [`version`](/cli/version/) | Print the version |
 
 ## Global flags

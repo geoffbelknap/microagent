@@ -46,6 +46,22 @@ microagent create \
   --setup "echo ready > /workspace/status"
 ```
 
+Or put the workspace in source control:
+
+```yaml
+# microagent.yaml
+name: research
+image: docker.io/library/ubuntu:24.04
+profile: medium
+setup:
+  - mkdir -p /workspace
+  - echo ready > /workspace/status
+```
+
+```bash
+microagent create
+```
+
 Start it and run a command through the console:
 
 ```bash

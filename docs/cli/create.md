@@ -18,6 +18,7 @@ first.
 | Flag | Description |
 |---|---|
 | `--image <ref>` | OCI image reference. Defaults to a small BusyBox image |
+| `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
 | `--name <name>` | Workspace name (also accepted as a positional argument) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
 | `--entrypoint <command>` | Command to run on start |
@@ -67,6 +68,37 @@ microagent create \
   --setup "mkdir -p /workspace" \
   --setup "echo ready > /workspace/status"
 ```
+
+Create from a declarative spec:
+
+```yaml
+name: research
+image: docker.io/library/ubuntu:24.04
+profile: medium
+entrypoint: /app/start.sh
+setup:
+  - mkdir -p /workspace
+  - echo ready > /workspace/status
+env:
+  MICROAGENT_NAME: research
+resources:
+  memoryMiB: 2048
+  cpuCount: 2
+  sizeMiB: 8192
+disks:
+  - name: workspace
+    path: /tmp/workspace.ext4
+    mountpoint: /workspace
+    mode: rw
+```
+
+```bash
+microagent create --file microagent.yaml
+```
+
+When `microagent.yaml` or `microagent.yml` exists in the current directory,
+`microagent create` reads it automatically. CLI flags override fields from the
+spec.
 
 Attach an existing ext4 disk:
 
