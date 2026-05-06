@@ -3,6 +3,7 @@ set -euo pipefail
 
 printf 'distro='
 if [ -r /etc/os-release ]; then
+  # shellcheck source=/dev/null
   . /etc/os-release
   printf '%s\n' "${PRETTY_NAME:-unknown}"
 else
