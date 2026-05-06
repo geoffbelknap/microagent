@@ -1,10 +1,15 @@
 ---
 title: Smoke tests
-description: Lifecycle and boot smokes for both backends.
+description: Maintainer checks that boot real VMs.
 ---
 
-The Makefile drives all smoke suites. `make smoke` selects the right one for
-the host: Firecracker on Linux, Apple VF on macOS.
+Smoke tests are for maintainers and operators who need to prove backend changes
+against real host virtualization. They are not part of the normal user install
+path; use [`microagent doctor`](/cli/doctor/) when you only need to check
+whether a host is ready to run VMs.
+
+The Makefile drives these checks. `make smoke` selects the right suite for the
+host: Firecracker on Linux, Apple VF on macOS.
 
 ## Suites
 
@@ -16,7 +21,7 @@ the host: Firecracker on Linux, Apple VF on macOS.
 | `make smoke-workspace` | HostOS workspace lifecycle |
 | `make smoke-boot` | Boot a Linux VM end-to-end (Apple VF) |
 
-## Firecracker boot smoke
+## Firecracker Boot
 
 Run from the `microagent-kit` checkout on a Linux amd64 host with KVM:
 
@@ -28,7 +33,7 @@ This target must run **outside sandboxed agent environments**. It needs host
 KVM visibility, network access for OCI layer fetches, and normal writes to
 Microagent state paths.
 
-The smoke:
+This check:
 
 - builds local `microagent` and `microagent-guestinit` binaries
 - installs the default Firecracker amd64 kernel
@@ -58,13 +63,13 @@ non-KVM check is:
 make check-kernel-config-amd64
 ```
 
-## Apple VF boot smoke
+## Apple VF Boot
 
 ```bash
 make signed-supervisor    # build + ad-hoc sign the supervisor
 make smoke-boot
 ```
 
-The smoke looks for the kernel at
+This check looks for the kernel at
 `~/.microagent/kernels/apple-vf/arm64/Image`. The older
 `~/.microagent/kernels/apple-vf/Image` path still works.

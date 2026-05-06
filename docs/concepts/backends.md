@@ -4,7 +4,7 @@ description: One backend per host OS. Same lifecycle surface, different mechanic
 ---
 
 Microagent has one backend per host OS. The `--backend` flag exists for
-lower-level request compatibility and backend smoke tests, not as a user-facing
+lower-level request compatibility and backend validation, not as a user-facing
 backend selector.
 
 | Backend | Host OS | Supervisor | `connect` | Process model |
@@ -28,7 +28,8 @@ supervisor-shaped request/response boundary.
   running. Use `stop` or `kill` first.
 - Does not support interactive `connect`. Use [`logs`](/cli/logs/) for serial
   output.
-- Default kernel SHA is pinned. See [Smoke tests](/operations/smoke-tests/).
+- Default kernel SHA is pinned. Maintainers can verify real boots with
+  [smoke tests](/development/smoke-tests/).
 
 ## Apple VF (macOS)
 

@@ -52,10 +52,10 @@ OCI image ──► pkg/rootfs ──► ext4 disk ──► VM
 ## Why Supervisors Are Executable
 
 Running backend supervisors as separate processes lets every language with a
-JSON parser drive the same lifecycle contract and keeps host-specific backend
+JSON parser drive the same lifecycle protocol and keeps host-specific backend
 code out of the main CLI binary. Apple VF also needs this boundary because
 Virtualization.framework is Swift-only.
 
-The shared contract is documented at [Supervisor contract](/protocol/). The
+The shared protocol is documented at [Supervisor protocol](/protocol/). The
 Apple VF executable protocol is documented at
 [Apple VF supervisor](/protocol/applevf/).

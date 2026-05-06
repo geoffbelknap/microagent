@@ -32,7 +32,7 @@ first.
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the active backend supervisor path |
 | `--dry-run` | Validate config without creating |
-| `--json <path\|->` | Read a [request JSON](/protocol/applevf/) from a file or stdin |
+| `--json <path\|->` | Read a [request JSON](/protocol/) from a file or stdin |
 
 ## Examples
 
@@ -105,4 +105,4 @@ microagent create --json request.json
 
 - [`start`](/cli/start/), [`stop`](/cli/stop/), [`delete`](/cli/delete/)
 - [State and identity](/concepts/state-and-identity/)
-- [Supervisor contract](/protocol/)
+- [Supervisor protocol](/protocol/)

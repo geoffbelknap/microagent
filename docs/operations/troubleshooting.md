@@ -24,7 +24,7 @@ Either install Firecracker on PATH or set `MICROAGENT_FIRECRACKER`.
 KVM is required for Firecracker. Check the host actually has KVM (it isn't
 present in many container or sandbox environments) and that your user has
 permission. Re-run the smoke **outside** sandboxed agent environments — see
-[Smoke tests](/operations/smoke-tests/).
+[Smoke tests](/development/smoke-tests/).
 
 ### `delete` refuses to remove a workspace
 
@@ -66,4 +66,4 @@ Use `make signed-supervisor` to produce an ad-hoc-signed build.
 ### Need structured output
 
 Every command supports `--json` (or `MICROAGENT_OUTPUT=json`). Scripts should
-consume JSON; the [supervisor contract](/protocol/) describes the shape.
+consume JSON; the [supervisor protocol](/protocol/) describes the shape.

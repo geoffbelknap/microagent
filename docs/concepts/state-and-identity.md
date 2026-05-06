@@ -67,5 +67,5 @@ return lifecycle events, usually with state `stopped` and a `detail` field.
 Callers should treat these strings as the authoritative source of truth, not
 log scraping.
 
-See the [supervisor contract](/protocol/) for the shared request and response
+See the [supervisor protocol](/protocol/) for the shared request and response
 schema.

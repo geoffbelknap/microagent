@@ -15,7 +15,7 @@ higher-level control stay outside this project.
   [run your first VM](getting-started/first-vm.md).
 - Need the CLI surface? Jump to the [CLI reference](cli/index.md).
 - Integrating? Read the [architecture overview](concepts/architecture.md), the
-  [supervisor contract](protocol/index.md), and the [Go library](library/go.md).
+  [supervisor protocol](protocol/index.md), and the [Go library](library/go.md).
 
 ## Sections
 
@@ -24,7 +24,9 @@ higher-level control stay outside this project.
 - [Concepts](concepts/architecture.md) — architecture, backends, boundaries,
   state and identity.
 - [CLI reference](cli/index.md) — every subcommand.
-- [Protocol](protocol/index.md) — shared supervisor contract and backend notes.
+- [Protocol](protocol/index.md) — shared supervisor protocol and backend notes.
 - [Library](library/go.md) — exported Go package surface.
-- [Operations](operations/smoke-tests.md) — smoke tests, troubleshooting.
+- [Operations](operations/troubleshooting.md) — troubleshooting.
+- [Development](development/smoke-tests.md) — maintainer checks for real VM
+  behavior.
 - [Security](security.md) — trust boundary and reporting.

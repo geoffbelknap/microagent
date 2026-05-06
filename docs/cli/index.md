@@ -33,5 +33,5 @@ description: All microagent subcommands at a glance.
 
 All commands return structured output. With `--json` (or
 `MICROAGENT_OUTPUT=json`), the response matches the shape documented in the
-[supervisor contract](/protocol/). Scripts should consume JSON; humans get the
+[supervisor protocol](/protocol/). Scripts should consume JSON; humans get the
 text format by default.

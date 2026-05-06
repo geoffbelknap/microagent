@@ -67,7 +67,7 @@ microagent delete research
 
 Linux has one backend: Firecracker. macOS has one backend: Apple VF. The
 `--backend` flag exists for lower-level request compatibility and backend
-smoke tests, not as a user-facing backend selector.
+validation, not as a user-facing backend selector.
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
 `status`, `stop`, `kill`, and `delete`. Backend supervisors record state files
@@ -84,53 +84,28 @@ go build ./cmd/microagent-firecracker-supervisor              # Linux only
 swift build --package-path supervisors/applevf --disable-sandbox  # macOS only
 ```
 
-Run the smokes:
-
-```bash
-make smoke
-```
-
-`make smoke` runs the feature smoke suite for the HostOS backend: Firecracker
-on Linux, Apple VF on macOS.
-
-Run the OCI rootfs smoke:
-
-```bash
-make smoke-rootfs
-```
-
-Run the Linux Firecracker boot smoke outside sandboxed environments so KVM,
-network, and Microagent state paths are visible:
-
-```bash
-make smoke-firecracker
-```
-
-Run only the HostOS workspace lifecycle smoke:
-
-```bash
-make smoke-workspace
-```
-
-See [docs/operations/smoke-tests.md](docs/operations/smoke-tests.md) for the
-expected kernel SHA, output, and host requirements.
-The boot-proven release note is in
-[docs/releases/firecracker-amd64-boot-proven.md](docs/releases/firecracker-amd64-boot-proven.md).
-
 Build and ad-hoc sign the Apple VF supervisor:
 
 ```bash
 make signed-supervisor
 ```
 
-Boot a Linux VM:
+## Development
+
+Use the smoke targets when changing kernels, supervisors, rootfs conversion, or
+host backend behavior. They boot real VMs and need host virtualization access,
+so they are maintainer checks rather than normal install steps.
 
 ```bash
+make smoke
+make smoke-rootfs
+make smoke-firecracker
+make smoke-workspace
 make smoke-boot
 ```
 
-The boot smoke looks for the kernel at `~/.microagent/kernels/apple-vf/arm64/Image`.
-The older `~/.microagent/kernels/apple-vf/Image` path still works.
+See [docs/development/smoke-tests.md](docs/development/smoke-tests.md) for host
+requirements and expected output.
 
 ## CLI
 
