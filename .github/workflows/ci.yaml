@@ -29,7 +29,7 @@ jobs:
         run: swift build --package-path supervisors/applevf --disable-sandbox
 
       - name: Smoke Apple VF supervisor lifecycle
-        run: scripts/applevf-supervisor-lifecycle-smoke.sh
+        run: scripts/dev/applevf-supervisor-lifecycle-smoke.sh
 
       - name: Smoke CLI lifecycle
-        run: scripts/cli-lifecycle-smoke.sh
+        run: scripts/dev/cli-lifecycle-smoke.sh

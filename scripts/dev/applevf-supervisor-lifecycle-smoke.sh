@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUPERVISOR="$ROOT/supervisors/applevf/.build/debug/microagent-applevf-supervisor"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-supervisor-smoke.XXXXXX")"
 KERNEL="$STATE_DIR/kernel"

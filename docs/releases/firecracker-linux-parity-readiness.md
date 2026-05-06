@@ -22,12 +22,12 @@ firecracker=Firecracker v1.15.1
 The live KVM commands were run outside sandboxed agent environments:
 
 ```bash
-scripts/linux-host-facts.sh
-scripts/go-test.sh
-scripts/firecracker-console-parity-smoke.sh
-scripts/firecracker-publish-smoke.sh
-scripts/firecracker-workspace-smoke.sh
-scripts/firecracker-boot-smoke.sh
+scripts/dev/linux-host-facts.sh
+scripts/dev/go-test.sh
+scripts/dev/firecracker-console-parity-smoke.sh
+scripts/dev/firecracker-publish-smoke.sh
+scripts/dev/firecracker-workspace-smoke.sh
+scripts/dev/firecracker-boot-smoke.sh
 make smoke
 ```
 
@@ -35,11 +35,11 @@ make smoke
 
 | Gate | Result |
 |---|---|
-| `scripts/go-test.sh` | pass |
-| `scripts/firecracker-console-parity-smoke.sh` | pass |
-| `scripts/firecracker-publish-smoke.sh` | pass |
-| `scripts/firecracker-workspace-smoke.sh` | pass |
-| `scripts/firecracker-boot-smoke.sh` | pass |
+| `scripts/dev/go-test.sh` | pass |
+| `scripts/dev/firecracker-console-parity-smoke.sh` | pass |
+| `scripts/dev/firecracker-publish-smoke.sh` | pass |
+| `scripts/dev/firecracker-workspace-smoke.sh` | pass |
+| `scripts/dev/firecracker-boot-smoke.sh` | pass |
 | `make smoke` | pass |
 
 The Firecracker boot smoke verified kernel SHA:
