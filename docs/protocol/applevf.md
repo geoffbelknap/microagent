@@ -58,13 +58,21 @@ Apple VF process boundary.
 - `start`
 - `console`
 - `inspect`
+- `halt`
+- `quarantine`
 - `stop`
 - `kill`
 - `delete`
 
-`host` does not require `identity` or `config`. `inspect`, `stop`, `kill`,
-and `delete` require `identity` and `config.stateDir`. `check`, `prepare`,
-`start`, `run`, and `console` require the full config.
+`host` does not require `identity` or `config`. `inspect`, `halt`,
+`quarantine`, `stop`, `kill`, and `delete` require `identity` and
+`config.stateDir`. `check`, `prepare`, `start`, `run`, and `console` require
+the full config.
+
+`halt` is a clean disk-preserving stop. `quarantine` is a distinct forensic
+state that preserves disk state and event history while severing host-side
+network and mediation paths. A quarantined workspace must be halted, stopped,
+or killed before it can be started again.
 
 ### Disks
 
@@ -94,6 +102,23 @@ Port forwards are supported for TCP. The supervisor listens on the requested
 host address and port, connects to the guest over virtio-vsock, and guest init
 proxies the stream to the requested guest TCP port.
 
+### Mediation
+
+`config.mediation` uses the backend-neutral shape:
+
+```json
+{
+  "enabled": true,
+  "required": true,
+  "port": 2048,
+  "target": "127.0.0.1:9900",
+  "failClosed": true
+}
+```
+
+Required mediation fails closed: `failClosed` must be `true`, and enabled
+mediation must declare a port and target.
+
 ## Response
 
 ```json
@@ -109,6 +134,12 @@ proxies the stream to the requested guest TCP port.
     },
     "state": "prepared",
     "observedAt": "2026-05-02T00:00:00Z"
+  },
+  "readiness": {
+    "guestReady": {},
+    "shellReady": {},
+    "resultReady": {},
+    "mediationReady": {}
   }
 }
 ```

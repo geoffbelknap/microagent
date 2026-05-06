@@ -37,6 +37,13 @@ body = {
         "stateDir": state_dir,
         "memoryMiB": 512,
         "cpuCount": 2,
+        "mediation": {
+            "enabled": True,
+            "required": True,
+            "port": 2048,
+            "target": "127.0.0.1:9900",
+            "failClosed": True,
+        },
         "vsockListeners": [{"port": 1024, "target": "127.0.0.1:8200"}],
     },
 }
@@ -106,10 +113,86 @@ assert_response "$check_response" true prepared
 prepare_response="$(request prepare | "$SUPERVISOR")"
 assert_response "$prepare_response" true prepared
 test -f "$STATE_DIR/agent-smoke/event.json"
+test -f "$STATE_DIR/agent-smoke/events.json"
 test -f "$STATE_DIR/agent-smoke/config.json"
+test -f "$STATE_DIR/agent-smoke/runtime.json"
+python3 - "$prepare_response" "$STATE_DIR/agent-smoke/runtime.json" <<'PY'
+import json
+import sys
+
+body = json.loads(sys.argv[1])
+if not ((body.get("mediation") or {}).get("failClosed")):
+    raise SystemExit(body)
+if ((body.get("readiness") or {}).get("mediationReady") or {}).get("error") != "required mediation is not ready":
+    raise SystemExit(body)
+with open(sys.argv[2], "r", encoding="utf-8") as handle:
+    runtime = json.load(handle)
+if runtime["event"]["state"] != "prepared":
+    raise SystemExit(runtime)
+if not ((runtime.get("readiness") or {}).get("mediationReady") or {}).get("error"):
+    raise SystemExit(runtime)
+PY
+
+python3 - "$STATE_DIR/agent-smoke/result.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump({
+        "started_at": "2026-05-06T00:00:00Z",
+        "exited_at": "2026-05-06T00:00:01Z",
+        "exit_code": 0,
+        "stdout": "apple-vf result\n",
+    }, handle)
+    handle.write("\n")
+PY
 
 inspect_response="$(request_state_only inspect | "$SUPERVISOR")"
 assert_response "$inspect_response" true prepared
+python3 - "$inspect_response" <<'PY'
+import json
+import sys
+
+body = json.loads(sys.argv[1])
+if ((body.get("readiness") or {}).get("resultReady") or {}).get("ready") is not True:
+    raise SystemExit(body)
+result = body.get("result") or {}
+if result.get("backend") != "apple-vf" or result.get("exitCode") != 0 or result.get("completedAt") != "2026-05-06T00:00:01Z":
+    raise SystemExit(body)
+PY
+
+quarantine_response="$(request_state_only quarantine | "$SUPERVISOR")"
+assert_response "$quarantine_response" true quarantined
+python3 - "$quarantine_response" "$STATE_DIR/agent-smoke/events.json" <<'PY'
+import json
+import sys
+
+body = json.loads(sys.argv[1])
+if ((body.get("event") or {}).get("detail")) != "host-side network and mediation severed":
+    raise SystemExit(body)
+with open(sys.argv[2], "r", encoding="utf-8") as handle:
+    states = [event["state"] for event in json.load(handle)]
+for expected in ("prepared", "quarantined"):
+    if expected not in states:
+        raise SystemExit(states)
+PY
+
+if start_quarantined_response="$(request start | "$SUPERVISOR" 2>/dev/null)"; then
+  echo "expected start from quarantined state to return a nonzero status" >&2
+  exit 1
+fi
+assert_response "$start_quarantined_response" false
+python3 - "$start_quarantined_response" <<'PY'
+import json
+import sys
+
+body = json.loads(sys.argv[1])
+if "quarantined" not in body.get("error", ""):
+    raise SystemExit(body)
+PY
+
+halt_response="$(request_state_only halt | "$SUPERVISOR")"
+assert_response "$halt_response" true halted
 
 stop_response="$(request_state_only stop | "$SUPERVISOR")"
 assert_response "$stop_response" true stopped
