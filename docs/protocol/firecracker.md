@@ -40,6 +40,7 @@ Important files include:
 | `firecracker.json` | generated Firecracker config |
 | `serial.log` | guest serial output |
 | `serial.in` | console input FIFO for running workspaces |
+| transient `magtap*` device | TAP created for bridged mode and removed on stop/kill/delete |
 
 Persistent workspace disks live under:
 
@@ -55,10 +56,27 @@ Persistent workspace disks live under:
   through `MICROAGENT_FIRECRACKER`.
 - Supports interactive `microagent connect`; use `microagent logs` to review
   captured serial output.
-- Firecracker `network.mode` must be `nat`; unsupported modes fail closed at
-  the supervisor boundary.
+- Firecracker `network.mode` supports `nat`, `isolated`, and `bridged`.
+- Firecracker `bridged` requires `network.interface` to name an existing Linux
+  bridge and requires host permissions to create and attach a TAP device.
 - The supervisor does not implement a direct `console` command. The CLI uses
   the Firecracker serial input FIFO for `microagent connect`.
+
+## Networking
+
+`nat` preserves the existing Firecracker behavior and live TCP `--publish`
+support. Published TCP listeners are still host-side listeners bridged to the
+guest through vsock.
+
+`isolated` writes no Firecracker network device and rejects `--publish` before
+the supervisor starts the VM.
+
+`bridged` creates a deterministic transient TAP device, attaches it to the
+requested Linux bridge, and writes a Firecracker `network-interfaces` entry
+using that TAP. The TAP name is recorded in `runtime.json` while running and is
+deleted on `stop`, `kill`, or `delete`. Missing `network.interface`, a
+nonexistent interface, a non-bridge interface, missing `iproute2`, missing
+permissions, or TAP setup failure all fail closed with explicit errors.
 
 ## Console
 

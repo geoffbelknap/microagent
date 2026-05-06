@@ -4,6 +4,7 @@ package firecracker
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"os"
@@ -148,13 +149,26 @@ func TestSerialInputFIFOUsesFIFOType(t *testing.T) {
 }
 
 func TestValidateFirecrackerConfigRejectsUnsupportedNetworkMode(t *testing.T) {
-	err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "bridged"}})
+	err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "open"}})
 	if err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("validateFirecrackerConfig err = %v", err)
 	}
 }
 
-func TestSupervisorCheckRejectsUnsupportedFirecrackerNetworkMode(t *testing.T) {
+func TestValidateFirecrackerConfigAcceptsIsolatedNetworkMode(t *testing.T) {
+	if err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "isolated"}}); err != nil {
+		t.Fatalf("validateFirecrackerConfig isolated: %v", err)
+	}
+}
+
+func TestValidateFirecrackerConfigRejectsBridgedWithoutInterface(t *testing.T) {
+	err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "bridged"}})
+	if err == nil || !strings.Contains(err.Error(), "network.interface is required") {
+		t.Fatalf("validateFirecrackerConfig err = %v", err)
+	}
+}
+
+func TestSupervisorCheckAcceptsIsolatedFirecrackerNetworkMode(t *testing.T) {
 	req := vmkit.Request{
 		Command: "check",
 		Identity: &vmkit.Identity{
@@ -171,10 +185,81 @@ func TestSupervisorCheckRejectsUnsupportedFirecrackerNetworkMode(t *testing.T) {
 		},
 	}
 	resp, err := Supervisor{}.Do(context.Background(), req)
-	if err == nil {
-		t.Fatal("Supervisor.Do accepted unsupported network mode")
+	if err != nil {
+		t.Fatalf("Supervisor.Do rejected isolated network mode: resp=%+v err=%v", resp, err)
 	}
-	if resp.Backend != vmkit.BackendFirecracker || !strings.Contains(resp.Error, "unsupported") {
+	if !resp.OK || resp.Backend != vmkit.BackendFirecracker {
 		t.Fatalf("response = %+v err = %v", resp, err)
+	}
+}
+
+func TestWriteConfigAddsBridgedNetworkInterface(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   opts.StateDir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+			Network:    &vmkit.NetworkConfig{Mode: "bridged", Interface: "br0"},
+		},
+	}
+	if err := writeConfig(opts, req); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+	var cfg config
+	data, err := os.ReadFile(configPath(opts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetworkInterfaces) != 1 {
+		t.Fatalf("network interfaces = %#v", cfg.NetworkInterfaces)
+	}
+	if cfg.NetworkInterfaces[0].IfaceID != "eth0" || cfg.NetworkInterfaces[0].HostDevName == "" || cfg.NetworkInterfaces[0].GuestMAC == "" {
+		t.Fatalf("network interface = %#v", cfg.NetworkInterfaces[0])
+	}
+}
+
+func TestWriteConfigOmitsNetworkInterfaceForIsolated(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   opts.StateDir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+			Network:    &vmkit.NetworkConfig{Mode: "isolated"},
+		},
+	}
+	if err := writeConfig(opts, req); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+	var cfg config
+	data, err := os.ReadFile(configPath(opts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetworkInterfaces) != 0 {
+		t.Fatalf("network interfaces = %#v", cfg.NetworkInterfaces)
 	}
 }

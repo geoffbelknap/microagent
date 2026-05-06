@@ -1,6 +1,6 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test smoke smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-workspace smoke-applevf-network smoke-applevf-vsock release-check signed-supervisor smoke-boot
+.PHONY: test smoke smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-vsock release-check signed-supervisor smoke-boot
 
 test:
 	go test ./...
@@ -20,6 +20,7 @@ else ifeq ($(UNAME_S),Linux)
 	scripts/firecracker-workspace-smoke.sh
 	scripts/firecracker-console-parity-smoke.sh
 	scripts/firecracker-publish-smoke.sh
+	scripts/firecracker-network-mode-smoke.sh
 	scripts/firecracker-boot-smoke.sh
 else
 	@echo "smoke is not supported on $(UNAME_S)" >&2
@@ -37,6 +38,9 @@ smoke-firecracker-console:
 
 smoke-firecracker-publish:
 	scripts/firecracker-publish-smoke.sh
+
+smoke-firecracker-network:
+	scripts/firecracker-network-mode-smoke.sh
 
 smoke-workspace:
 ifeq ($(UNAME_S),Darwin)
