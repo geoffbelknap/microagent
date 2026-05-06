@@ -395,3 +395,10 @@ your program
        -> Apple Virtualization.framework backend
        -> OCI image to ext4 rootfs builds
 ```
+
+## Project
+
+- Contributions: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security: [`SECURITY.md`](SECURITY.md)
+- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+- License: [`Apache-2.0`](LICENSE)

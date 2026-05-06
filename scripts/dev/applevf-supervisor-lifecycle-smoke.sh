@@ -11,7 +11,13 @@ cleanup() {
   rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
-trap 'status=$?; echo "applevf supervisor lifecycle smoke failed at line $LINENO with status $status" >&2; exit "$status"' ERR
+
+report_error() {
+  local status="$?"
+  echo "applevf supervisor lifecycle smoke failed at line $1 with status $status" >&2
+  exit "$status"
+}
+trap 'report_error "$LINENO"' ERR
 
 touch "$KERNEL" "$ROOTFS"
 
