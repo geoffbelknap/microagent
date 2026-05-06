@@ -22,6 +22,7 @@ scratch state (unless `--keep` is set).
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
+| `--output n=/guest/path` | Declare an output artifact path |
 | `--name <name>` | Workspace name; generated when omitted |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |

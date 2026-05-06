@@ -31,6 +31,9 @@ bundles:
     path: ./config.tar
     mountpoint: /config
     mode: ro
+outputs:
+  - name: report
+    path: /workspace/report.json
 ```
 
 ## Usage
@@ -64,6 +67,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `resources.sizeMiB` | Rootfs disk size override |
 | `disks` | Existing ext4 disks to attach |
 | `bundles` | Tar bundles to build into ext4 disks and attach |
+| `outputs` | Declared output artifact paths inside the workspace |
 
 ## Related
 

@@ -168,6 +168,19 @@ type RuntimeResult struct {
 	Error       string   `json:"error,omitempty"`
 }
 
+type ArtifactRef struct {
+	Name       string `json:"name"`
+	Path       string `json:"path,omitempty"`
+	Mountpoint string `json:"mountpoint,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+}
+
+type RuntimeArtifacts struct {
+	Ingress []ArtifactRef `json:"ingress,omitempty"`
+	Egress  []ArtifactRef `json:"egress,omitempty"`
+}
+
 type Response struct {
 	OK            bool                 `json:"ok"`
 	Backend       string               `json:"backend,omitempty"`
@@ -177,6 +190,7 @@ type Response struct {
 	Verification  *RuntimeVerification `json:"verification,omitempty"`
 	Readiness     *RuntimeReadiness    `json:"readiness,omitempty"`
 	Result        *RuntimeResult       `json:"result,omitempty"`
+	Artifacts     *RuntimeArtifacts    `json:"artifacts,omitempty"`
 	RestartPolicy string               `json:"restartPolicy,omitempty"`
 	Network       *NetworkConfig       `json:"network,omitempty"`
 	Error         string               `json:"error,omitempty"`

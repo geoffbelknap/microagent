@@ -1150,6 +1150,7 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 		"research",
 		"--disk", "workspace=/tmp/workspace.ext4:/workspace:rw",
 		"--bundle", "constraints=/tmp/constraints.tar:/config:ro",
+		"--output", "report=/workspace/report.json",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
@@ -1162,6 +1163,9 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	}
 	if opts.Disks[1].Name != "constraints" || !opts.Disks[1].Bundle || opts.Disks[1].Mode != "ro" {
 		t.Fatalf("bundle = %#v", opts.Disks[1])
+	}
+	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "report" || opts.Outputs[0].Path != "/workspace/report.json" {
+		t.Fatalf("outputs = %#v", opts.Outputs)
 	}
 }
 
@@ -1204,6 +1208,9 @@ bundles:
     path: /tmp/config.tar
     mountpoint: /config
     mode: ro
+outputs:
+  - name: report
+    path: /workspace/report.json
 `
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
@@ -1229,6 +1236,9 @@ bundles:
 	}
 	if len(opts.Disks) != 2 || opts.Disks[0].Name != "workspace" || opts.Disks[1].Name != "config" || !opts.Disks[1].Bundle {
 		t.Fatalf("disks = %#v", opts.Disks)
+	}
+	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "report" || opts.Outputs[0].Path != "/workspace/report.json" {
+		t.Fatalf("outputs = %#v", opts.Outputs)
 	}
 }
 
@@ -1748,6 +1758,73 @@ func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, `"hostPort": 8080`) || !strings.Contains(text, `"ip": "192.168.64.2"`) {
 		t.Fatalf("network output = %s", data)
+	}
+}
+
+func TestStatusReportsDeclaredArtifacts(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	opts := workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Disks: []workspaceDisk{{
+			Name:       "config",
+			SourcePath: "/tmp/config.tar",
+			Path:       filepath.Join(dir, "workspaces", "research", "config.ext4"),
+			Mountpoint: "/config",
+			Mode:       "ro",
+			Bundle:     true,
+		}},
+		Outputs: []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}
+	if err := writeWorkspaceManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StatePrepared, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Artifacts == nil || len(resp.Artifacts.Ingress) != 1 || len(resp.Artifacts.Egress) != 1 {
+		t.Fatalf("artifacts = %#v", resp.Artifacts)
+	}
+	if resp.Artifacts.Ingress[0].Name != "config" || resp.Artifacts.Ingress[0].Kind != "bundle" || resp.Artifacts.Ingress[0].Mountpoint != "/config" {
+		t.Fatalf("ingress = %#v", resp.Artifacts.Ingress[0])
+	}
+	if resp.Artifacts.Egress[0].Name != "report" || resp.Artifacts.Egress[0].Path != "/workspace/report.json" {
+		t.Fatalf("egress = %#v", resp.Artifacts.Egress[0])
 	}
 }
 

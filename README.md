@@ -112,6 +112,8 @@ Status JSON also reports `guestReady`, `shellReady`, and `resultReady` so
 callers can sequence work without polling serial logs or guessing from files.
 Use `microagent result <name> --json` to read the structured completion payload
 without scraping logs.
+Declare output artifacts with `--output name=/guest/path`; status/result JSON
+then reports them under `artifacts.egress`.
 
 ## Build
 

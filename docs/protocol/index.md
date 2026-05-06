@@ -126,6 +126,24 @@ forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
     "startedAt": "2026-05-02T00:00:00Z",
     "completedAt": "2026-05-02T00:00:01Z",
     "exitCode": 0
+  },
+  "artifacts": {
+    "ingress": [
+      {
+        "name": "config",
+        "path": "./config.tar",
+        "mountpoint": "/config",
+        "mode": "ro",
+        "kind": "bundle"
+      }
+    ],
+    "egress": [
+      {
+        "name": "report",
+        "path": "/workspace/report.json",
+        "kind": "output"
+      }
+    ]
   }
 }
 ```
@@ -142,6 +160,9 @@ When the guest result channel has completed, status responses may include
 `result`. The result is structured separately from serial logs and carries
 identity, backend, result path, start/completion timestamps, exit code, stdout,
 stderr, and guest-reported error.
+
+`artifacts` reports declared input bundles and output paths. These declarations
+are persisted with the workspace manifest and are independent of serial logs.
 
 Host responses use `host` instead of `event`.
 

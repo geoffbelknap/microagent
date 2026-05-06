@@ -734,6 +734,7 @@ type workspaceOptions struct {
 	Timeout         time.Duration
 	ResultPort      uint32
 	Disks           []workspaceDisk
+	Outputs         []workspaceOutput
 	VsockListeners  []vmkit.VsockListener
 	KernelExplicit  bool
 	SpecMemory      bool
@@ -757,6 +758,7 @@ type workspaceSpec struct {
 	Network    networkSpec       `yaml:"network"`
 	Disks      []workspaceDisk   `yaml:"disks"`
 	Bundles    []workspaceDisk   `yaml:"bundles"`
+	Outputs    []workspaceOutput `yaml:"outputs"`
 }
 
 type networkSpec struct {
@@ -777,6 +779,16 @@ type workspaceDisk struct {
 	Bundle     bool   `json:"bundle,omitempty" yaml:"bundle,omitempty"`
 }
 
+type workspaceOutput struct {
+	Name string `json:"name" yaml:"name"`
+	Path string `json:"path" yaml:"path"`
+}
+
+type workspaceArtifacts struct {
+	Ingress []workspaceDisk   `json:"ingress,omitempty"`
+	Egress  []workspaceOutput `json:"egress,omitempty"`
+}
+
 type workspaceManifest struct {
 	Name         string                     `json:"name"`
 	Profile      string                     `json:"profile,omitempty"`
@@ -784,6 +796,7 @@ type workspaceManifest struct {
 	Resources    resourceConfig             `json:"resources"`
 	Network      networkSpec                `json:"network,omitempty"`
 	Disks        []workspaceDisk            `json:"disks,omitempty"`
+	Artifacts    workspaceArtifacts         `json:"artifacts,omitempty"`
 	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
 }
 
@@ -797,6 +810,7 @@ type workspaceResult struct {
 	RootfsPath   string                     `json:"rootfs_path"`
 	KernelPath   string                     `json:"kernel_path"`
 	Disks        []workspaceDisk            `json:"disks,omitempty"`
+	Artifacts    workspaceArtifacts         `json:"artifacts,omitempty"`
 	SerialPath   string                     `json:"serial_path,omitempty"`
 	SerialLog    string                     `json:"serial_log,omitempty"`
 	FinalState   string                     `json:"final_state,omitempty"`
@@ -2202,6 +2216,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
 	fs.Var(&bundleFlags, "bundle", "Build and attach bundle name=tar:/mount:ro|rw")
+	var outputFlags multiFlag
+	fs.Var(&outputFlags, "output", "Declare output artifact name=/guest/path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
@@ -2249,6 +2265,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	opts.Disks = append(opts.Disks, disks...)
 	opts.Disks = append(opts.Disks, bundles...)
+	outputs, err := parseWorkspaceOutputs(outputFlags)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.Outputs = append(opts.Outputs, outputs...)
 	published, err := parsePortForwardMappings(publishFlags)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -2387,6 +2408,11 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 		return err
 	}
 	opts.Disks = append(opts.Disks, disks...)
+	outputs, err := validateWorkspaceOutputs(spec.Outputs)
+	if err != nil {
+		return err
+	}
+	opts.Outputs = append(opts.Outputs, outputs...)
 	return nil
 }
 
@@ -2446,6 +2472,53 @@ func validateWorkspaceDisk(disk workspaceDisk) error {
 	}
 	if disk.Mode != "ro" && disk.Mode != "rw" {
 		return fmt.Errorf("disk %q mode must be ro or rw", disk.Name)
+	}
+	return nil
+}
+
+func parseWorkspaceOutputs(values []string) ([]workspaceOutput, error) {
+	outputs := make([]workspaceOutput, 0, len(values))
+	for _, raw := range values {
+		left, path, ok := strings.Cut(raw, "=")
+		if !ok {
+			return nil, fmt.Errorf("output must be name=/guest/path")
+		}
+		output := workspaceOutput{Name: strings.TrimSpace(left), Path: strings.TrimSpace(path)}
+		if err := validateWorkspaceOutput(output); err != nil {
+			return nil, err
+		}
+		outputs = append(outputs, output)
+	}
+	return validateWorkspaceOutputs(outputs)
+}
+
+func validateWorkspaceOutputs(outputs []workspaceOutput) ([]workspaceOutput, error) {
+	seen := map[string]bool{}
+	validated := make([]workspaceOutput, 0, len(outputs))
+	for _, output := range outputs {
+		output.Name = strings.TrimSpace(output.Name)
+		output.Path = strings.TrimSpace(output.Path)
+		if err := validateWorkspaceOutput(output); err != nil {
+			return nil, err
+		}
+		if seen[output.Name] {
+			return nil, fmt.Errorf("duplicate output artifact %q", output.Name)
+		}
+		seen[output.Name] = true
+		validated = append(validated, output)
+	}
+	return validated, nil
+}
+
+func validateWorkspaceOutput(output workspaceOutput) error {
+	if strings.TrimSpace(output.Name) == "" {
+		return fmt.Errorf("output name is required")
+	}
+	if strings.TrimSpace(output.Path) == "" {
+		return fmt.Errorf("output %q path is required", output.Name)
+	}
+	if !strings.HasPrefix(output.Path, "/") {
+		return fmt.Errorf("output %q path must be absolute", output.Name)
 	}
 	return nil
 }
@@ -2591,6 +2664,41 @@ func networkConfigPtr(network vmkit.NetworkConfig) *vmkit.NetworkConfig {
 	return &normalized
 }
 
+func workspaceArtifactsFromOptions(opts workspaceOptions) workspaceArtifacts {
+	artifacts := workspaceArtifacts{Egress: append([]workspaceOutput{}, opts.Outputs...)}
+	for _, disk := range opts.Disks {
+		if disk.Bundle {
+			artifacts.Ingress = append(artifacts.Ingress, disk)
+		}
+	}
+	return artifacts
+}
+
+func runtimeArtifactsFromManifest(artifacts workspaceArtifacts) vmkit.RuntimeArtifacts {
+	result := vmkit.RuntimeArtifacts{}
+	for _, ingress := range artifacts.Ingress {
+		kind := "disk"
+		if ingress.Bundle {
+			kind = "bundle"
+		}
+		result.Ingress = append(result.Ingress, vmkit.ArtifactRef{
+			Name:       ingress.Name,
+			Path:       firstNonEmpty(ingress.SourcePath, ingress.Path),
+			Mountpoint: ingress.Mountpoint,
+			Mode:       ingress.Mode,
+			Kind:       kind,
+		})
+	}
+	for _, egress := range artifacts.Egress {
+		result.Egress = append(result.Egress, vmkit.ArtifactRef{
+			Name: egress.Name,
+			Path: egress.Path,
+			Kind: "output",
+		})
+	}
+	return result
+}
+
 func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspaceResult, error) {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
@@ -2608,6 +2716,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 				Network:    networkSpecFromConfig(opts.Network),
 				RootfsPath: rootfsPath,
 				KernelPath: opts.KernelPath,
+				Artifacts:  workspaceArtifactsFromOptions(opts),
 				Image:      provenanceFromImageRecord(record, rootfsPath),
 			}, nil
 		}
@@ -2640,6 +2749,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Network:    networkSpecFromConfig(opts.Network),
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
+		Artifacts:  workspaceArtifactsFromOptions(opts),
 		Image:      provenance,
 	}
 	if err != nil {
@@ -2743,6 +2853,7 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 		Resources:    workspaceResources(opts),
 		Network:      networkSpecFromConfig(opts.Network),
 		Disks:        opts.Disks,
+		Artifacts:    workspaceArtifactsFromOptions(opts),
 		Verification: opts.Verification,
 	})
 }
@@ -2988,6 +3099,8 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 		resp.RestartPolicy = nonEmpty(manifest.Restart, defaultRestartPolicy)
 		network := networkConfigFromSpec(manifest.Network)
 		resp.Network = &network
+		artifacts := runtimeArtifactsFromManifest(manifest.Artifacts)
+		resp.Artifacts = &artifacts
 		resp.Verification = workspaceVerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest)
 	}
 	readiness := workspaceReadinessForStatus(opts, eventFile)
@@ -3488,6 +3601,9 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 				humanReady(resp.Readiness.ResultReady.Ready),
 			)
 		}
+		if resp.Artifacts != nil {
+			fmt.Fprintf(stdout, "Artifacts: ingress=%d egress=%d\n", len(resp.Artifacts.Ingress), len(resp.Artifacts.Egress))
+		}
 		if resp.Result != nil {
 			fmt.Fprintf(stdout, "Exit code: %d\n", resp.Result.ExitCode)
 			if resp.Result.CompletedAt != "" {
@@ -3570,6 +3686,9 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	}
 	if result.Network.Mode != "" {
 		fmt.Fprintf(stdout, "Network: %s\n", result.Network.Mode)
+	}
+	if len(result.Artifacts.Ingress) != 0 || len(result.Artifacts.Egress) != 0 {
+		fmt.Fprintf(stdout, "Artifacts: ingress=%d egress=%d\n", len(result.Artifacts.Ingress), len(result.Artifacts.Egress))
 	}
 	if result.Resources.MemoryMiB != 0 || result.Resources.CPUCount != 0 || result.Resources.SizeMiB != 0 {
 		fmt.Fprintf(stdout, "Resources: memory=%dMiB cpus=%d", result.Resources.MemoryMiB, result.Resources.CPUCount)
@@ -3768,6 +3887,15 @@ func nonEmpty(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func inspectWorkspace(ctx context.Context, opts workspaceOptions) (vmkit.Response, error) {
@@ -4691,7 +4819,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
 		return true
 	}
-	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle")
+	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
 }
 
 func hasLowLevelCreateFlag(args []string) bool {
@@ -5258,6 +5386,7 @@ func reorderFlagArgs(args []string) []string {
 		"-rootfs":            true,
 		"-disk":              true,
 		"-bundle":            true,
+		"-output":            true,
 		"-debugfs":           true,
 		"-profile":           true,
 		"-restart":           true,
@@ -5625,6 +5754,7 @@ Options:
   -env KEY=VALUE        Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -name <name>          Workspace name; generated when omitted
   -kernel <path>        Custom kernel path
@@ -5657,6 +5787,7 @@ Options:
   -env KEY=VALUE        Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
