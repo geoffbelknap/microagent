@@ -21,6 +21,7 @@ description: All microagent subcommands at a glance.
 | [`connect`](/cli/connect/) | Open the workspace console (Apple VF) |
 | `profiles` | List exact named resource profiles |
 | [`images`](/cli/images/) | List or prune local image records |
+| [`perf`](/cli/perf/) | Measure workspace boot performance |
 | [`host`](/cli/host/) | Report host backend capabilities |
 | [`doctor`](/cli/doctor/) | Check the host for backend support |
 | [`rootfs`](/cli/rootfs/) | Build a rootfs from an OCI image |

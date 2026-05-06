@@ -1043,6 +1043,33 @@ func TestRunProfilesPrintsExactConfigs(t *testing.T) {
 	}
 }
 
+func TestPerfBootRejectsInvalidIterations(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "perf.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerf(t.Context(), []string{"boot", "--iterations", "0"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "iterations must be positive") {
+		t.Fatalf("runPerf err = %v", err)
+	}
+}
+
+func TestSummarizePerfIterations(t *testing.T) {
+	summary := summarizePerfIterations([]perfIteration{
+		{Name: "one", OK: true, DurationMs: 30},
+		{Name: "two", OK: true, DurationMs: 10},
+		{Name: "three", OK: true, DurationMs: 20},
+	})
+	if summary.Count != 3 || summary.MinMs != 10 || summary.AvgMs != 20 || summary.MaxMs != 30 {
+		t.Fatalf("summary = %#v", summary)
+	}
+}
+
 func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })

@@ -77,6 +77,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "images" {
 		return runImages(args[1:], stdout)
 	}
+	if args[0] == "perf" {
+		return runPerf(ctx, args[1:], stdout)
+	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
@@ -869,6 +872,42 @@ type imagePullOptions struct {
 	GuestInitPath string
 }
 
+type perfBootOptions struct {
+	StateDir       string
+	ImageRef       string
+	Profile        string
+	ExecCommand    string
+	Iterations     int
+	TimeoutSeconds int
+	Mke2fsPath     string
+	SupervisorPath string
+}
+
+type perfReport struct {
+	Benchmark  string             `json:"benchmark"`
+	Backend    string             `json:"backend"`
+	Arch       string             `json:"arch"`
+	ImageRef   string             `json:"image_ref"`
+	Profile    string             `json:"profile"`
+	Iterations []perfIteration    `json:"iterations"`
+	Summary    perfSummary        `json:"summary"`
+	Host       *vmkit.HostSupport `json:"host,omitempty"`
+}
+
+type perfIteration struct {
+	Name       string `json:"name"`
+	OK         bool   `json:"ok"`
+	DurationMs int64  `json:"duration_ms"`
+	Error      string `json:"error,omitempty"`
+}
+
+type perfSummary struct {
+	Count int   `json:"count"`
+	MinMs int64 `json:"min_ms"`
+	AvgMs int64 `json:"avg_ms"`
+	MaxMs int64 `json:"max_ms"`
+}
+
 var resourceProfiles = []resourceProfile{
 	{
 		Name:        "tiny",
@@ -1114,6 +1153,153 @@ func runImages(args []string, stdout *os.File) error {
 	default:
 		return fmt.Errorf("unknown images command: %s", fs.Arg(0))
 	}
+}
+
+func runPerf(ctx context.Context, args []string, stdout *os.File) error {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		printPerfHelp(stdout)
+		return nil
+	}
+	switch args[0] {
+	case "boot":
+		return runPerfBoot(ctx, args[1:], stdout)
+	default:
+		return fmt.Errorf("unknown perf command: %s", args[0])
+	}
+}
+
+func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
+	opts := perfBootOptions{
+		StateDir:       defaultStateDir(),
+		ImageRef:       defaultWorkspaceImage(defaultGuestArch()),
+		Profile:        defaultWorkspaceProfile,
+		ExecCommand:    "true",
+		Iterations:     1,
+		TimeoutSeconds: 120,
+		Mke2fsPath:     defaultMke2fsPath(),
+		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+	}
+	fs := flag.NewFlagSet("perf boot", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
+	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
+	fs.StringVar(&opts.ExecCommand, "exec", opts.ExecCommand, "Guest command used to mark boot completion")
+	fs.IntVar(&opts.Iterations, "iterations", opts.Iterations, "Number of boot measurements")
+	fs.IntVar(&opts.TimeoutSeconds, "timeout", opts.TimeoutSeconds, "Per-iteration timeout in seconds")
+	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected perf boot argument: %s", fs.Arg(0))
+	}
+	if opts.Iterations <= 0 {
+		return fmt.Errorf("perf boot iterations must be positive")
+	}
+	if opts.TimeoutSeconds <= 0 {
+		return fmt.Errorf("perf boot timeout must be positive")
+	}
+	if strings.TrimSpace(opts.ImageRef) == "" {
+		return fmt.Errorf("perf boot requires --image")
+	}
+	if strings.TrimSpace(opts.ExecCommand) == "" {
+		return fmt.Errorf("perf boot requires --exec")
+	}
+	hostResp, _ := doctorResponse(ctx, doctorOptions{Backend: hostBackend(), Arch: defaultGuestArch(), SupervisorPath: opts.SupervisorPath})
+	report := perfReport{
+		Benchmark: "boot",
+		Backend:   hostBackend(),
+		Arch:      defaultGuestArch(),
+		ImageRef:  strings.TrimSpace(opts.ImageRef),
+		Profile:   strings.TrimSpace(opts.Profile),
+		Host:      hostResp.Host,
+	}
+	for i := 0; i < opts.Iterations; i++ {
+		name := fmt.Sprintf("perf-boot-%d-%d", time.Now().UnixNano(), i+1)
+		start := time.Now()
+		err := runWorkspaceToDiscardedOutput(ctx, perfBootWorkspaceArgs(opts, name))
+		duration := time.Since(start)
+		result := perfIteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds()}
+		if err != nil {
+			result.Error = err.Error()
+		}
+		report.Iterations = append(report.Iterations, result)
+	}
+	report.Summary = summarizePerfIterations(report.Iterations)
+	return writePerfReport(stdout, report)
+}
+
+func perfBootWorkspaceArgs(opts perfBootOptions, name string) []string {
+	args := []string{
+		"--name", name,
+		"--image", strings.TrimSpace(opts.ImageRef),
+		"--exec", opts.ExecCommand,
+		"--state-dir", opts.StateDir,
+		"--profile", strings.TrimSpace(opts.Profile),
+		"--timeout", strconv.Itoa(opts.TimeoutSeconds),
+		"--mke2fs", opts.Mke2fsPath,
+	}
+	if strings.TrimSpace(opts.SupervisorPath) != "" {
+		args = append(args, "--supervisor", opts.SupervisorPath)
+	}
+	return args
+}
+
+func runWorkspaceToDiscardedOutput(ctx context.Context, args []string) error {
+	file, err := os.CreateTemp("", "microagent-perf-*.json")
+	if err != nil {
+		return err
+	}
+	path := file.Name()
+	defer os.Remove(path)
+	defer file.Close()
+	return runWorkspace(ctx, args, file)
+}
+
+func summarizePerfIterations(iterations []perfIteration) perfSummary {
+	summary := perfSummary{Count: len(iterations)}
+	if len(iterations) == 0 {
+		return summary
+	}
+	var total int64
+	for i, iteration := range iterations {
+		if i == 0 || iteration.DurationMs < summary.MinMs {
+			summary.MinMs = iteration.DurationMs
+		}
+		if iteration.DurationMs > summary.MaxMs {
+			summary.MaxMs = iteration.DurationMs
+		}
+		total += iteration.DurationMs
+	}
+	summary.AvgMs = total / int64(len(iterations))
+	return summary
+}
+
+func writePerfReport(stdout *os.File, report perfReport) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, report)
+	}
+	fmt.Fprintf(stdout, "Benchmark: %s\n", report.Benchmark)
+	fmt.Fprintf(stdout, "Backend: %s\n", report.Backend)
+	fmt.Fprintf(stdout, "Arch: %s\n", report.Arch)
+	fmt.Fprintf(stdout, "Image: %s\n", report.ImageRef)
+	fmt.Fprintf(stdout, "Profile: %s\n", report.Profile)
+	fmt.Fprintf(stdout, "Iterations: %d\n", report.Summary.Count)
+	fmt.Fprintf(stdout, "Boot ms: min=%d avg=%d max=%d\n", report.Summary.MinMs, report.Summary.AvgMs, report.Summary.MaxMs)
+	for _, iteration := range report.Iterations {
+		status := "ok"
+		if !iteration.OK {
+			status = "failed"
+		}
+		fmt.Fprintf(stdout, "%-28s %-8s %d", iteration.Name, status, iteration.DurationMs)
+		if iteration.Error != "" {
+			fmt.Fprintf(stdout, " %s", iteration.Error)
+		}
+		fmt.Fprintln(stdout)
+	}
+	return nil
 }
 
 func runLogs(args []string, stdout *os.File) error {
@@ -4597,6 +4783,7 @@ Commands:
   logs                 Show workspace logs
   profiles             List resource profiles
   images               List or prune local image records
+  perf                 Measure workspace performance
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace
@@ -4633,6 +4820,26 @@ Options:
   -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
   -cpus <n>             CPU count
   -vsock p=host:port    Add a vsock mapping
+`)
+}
+
+func printPerfHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent perf
+
+Measure workspace performance.
+
+Commands:
+  boot                 Measure disposable workspace boot time
+
+Boot options:
+  -image <ref>          OCI image; defaults to the small BusyBox baseline
+  -exec <command>       Guest command used to mark boot completion; defaults to true
+  -iterations <n>       Number of boot measurements
+  -profile <name>       Resource profile: tiny, small, medium, or large
+  -state-dir <dir>      State directory
+  -timeout <seconds>    Per-iteration timeout
+  -mke2fs <path>        mke2fs binary path
+  -supervisor <path>    Override the supervisor path
 `)
 }
 
