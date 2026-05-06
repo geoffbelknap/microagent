@@ -3,14 +3,24 @@ title: Networking
 description: Declarative workspace network intent.
 ---
 
-Workspaces carry a declarative network record in their manifest and supervisor
-request. The current modes are:
+Workspaces carry a network record in their manifest and supervisor request.
+The current CLI accepts these modes:
 
 | Mode | Meaning |
 |---|---|
-| `nat` | Default outbound-capable network intent |
-| `isolated` | No external network intent |
-| `bridged` | Host-network bridge intent |
+| `nat` | Default backend network mode |
+| `isolated` | Reserved mode for no external guest network |
+| `bridged` | Reserved mode for host-bridge attachment |
+
+Current backend support is narrower than the full enum:
+
+| Backend | Supported mode today |
+|---|---|
+| Apple VF | `nat` record only; explicit NAT/isolated/bridged device behavior still needs backend work |
+| Firecracker | `nat` plus live TCP `--publish`; `isolated` and `bridged` fail closed in the supervisor |
+
+On Apple VF, non-`nat` modes are currently preserved as manifest intent only;
+they do not yet enforce guest isolation or attach a bridged host interface.
 
 Create records the mode:
 
@@ -24,9 +34,10 @@ Port forwards are declared with repeatable `--publish` flags:
 microagent create research --publish 127.0.0.1:8080:80/tcp
 ```
 
-For TCP forwards, guest init records a `hostForwards` entry and listens on a
-guest vsock port matching the declared host port. Backend supervisors own the
-host-side listener that connects host TCP to that guest vsock port.
+For TCP forwards on Firecracker, guest init records a `hostForwards` entry and
+listens on a guest vsock port matching the declared host port. The Firecracker
+supervisor owns the host-side listener that connects host TCP to that guest
+vsock port. Apple VF `--publish` still needs backend work.
 
 The same shape is available in `microagent.yaml`:
 
@@ -42,5 +53,4 @@ network:
 
 The network record is visible in JSON output from `create`, `start`, `status`,
 and `ps`. Backend-specific wiring is intentionally behind the supervisor
-contract; invalid network modes and malformed port forwards fail closed before
-a request is sent.
+contract; malformed port forwards fail closed before a request is sent.

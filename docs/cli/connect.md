@@ -45,6 +45,11 @@ microagent connect research --send "cat /workspace/status; uname -m"
 before attaching or writing. If the guest shell is not ready, it exits with an
 error that points to [`logs`](/cli/logs/).
 
+The host-level `consoleAvailable` field means the backend supports an
+interactive console on this machine. It is not a guarantee that a specific
+workspace is ready for input; the workspace must be running and past the shell
+readiness gate.
+
 ## Related
 
 - [`logs`](/cli/logs/), [`status`](/cli/status/)

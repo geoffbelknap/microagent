@@ -26,7 +26,11 @@ vsock support, and console mode. It uses the same probes as
 | Backend | Console |
 |---|---|
 | Apple VF | `interactive` via [`connect`](/cli/connect/) |
-| Firecracker | `serial-log` via [`logs`](/cli/logs/) |
+| Firecracker | `interactive` via [`connect`](/cli/connect/); captured output via [`logs`](/cli/logs/) |
+
+`consoleAvailable` reports backend capability on this host. A workspace can
+still reject `connect` until it is running and the backend has created the
+runtime console input endpoint.
 
 ## Example
 
