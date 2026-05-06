@@ -38,6 +38,9 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 	if err := vmkit.ValidateRequest(req); err != nil {
 		return vmkit.Response{}, err
 	}
+	if err := validateFirecrackerRequest(req); err != nil {
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+	}
 	opts := s.normalizedOptions(req)
 	switch req.Command {
 	case "host":
@@ -65,10 +68,36 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		}
 		cleanupWorkspaceState(opts)
 		return eventResponse(req, vmkit.StateStopped, ""), nil
+	case "console":
+		err := fmt.Errorf("firecracker supervisor console command is unsupported; use serial input FIFO")
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 	default:
 		err := fmt.Errorf("unknown firecracker command %q", req.Command)
 		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 	}
+}
+
+func validateFirecrackerRequest(req vmkit.Request) error {
+	switch req.Command {
+	case "check", "prepare", "start", "run", "console":
+		return validateFirecrackerConfig(req.Config)
+	default:
+		return nil
+	}
+}
+
+func validateFirecrackerConfig(config *vmkit.Config) error {
+	if config == nil || config.Network == nil {
+		return nil
+	}
+	mode := strings.TrimSpace(config.Network.Mode)
+	if mode == "" {
+		mode = "nat"
+	}
+	if mode != "nat" {
+		return fmt.Errorf("firecracker network.mode %q is unsupported; use nat", mode)
+	}
+	return nil
 }
 
 func hostResponse(opts Options) (vmkit.Response, error) {
@@ -527,6 +556,7 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 			}
 			return fmt.Errorf("listen %s: %w", addr, err)
 		}
+		fmt.Fprintf(os.Stderr, "forward tcp %s to guest port %d via vsock port %d\n", addr, forward.GuestPort, forward.HostPort)
 		listeners = append(listeners, listener)
 		go servePortForward(listener, vsockSocketPath(opts), uint32(forward.HostPort))
 	}
@@ -541,6 +571,7 @@ func servePortForward(listener net.Listener, udsPath string, guestPort uint32) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "accept published tcp connection: %v\n", err)
 			return
 		}
 		go proxyTCPToGuestVsock(conn, udsPath, guestPort)
@@ -557,12 +588,16 @@ func proxyTCPToGuestVsock(conn net.Conn, udsPath string, guestPort uint32) {
 	defer vsock.Close()
 	done := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(vsock, conn)
+		if _, err := io.Copy(vsock, conn); err != nil {
+			fmt.Fprintf(os.Stderr, "copy published tcp to guest vsock port %d: %v\n", guestPort, err)
+		}
 		closeWriteConn(vsock)
 		done <- struct{}{}
 	}()
 	go func() {
-		_, _ = io.Copy(conn, reader)
+		if _, err := io.Copy(conn, reader); err != nil {
+			fmt.Fprintf(os.Stderr, "copy guest vsock port %d to published tcp: %v\n", guestPort, err)
+		}
 		closeWriteConn(conn)
 		done <- struct{}{}
 	}()

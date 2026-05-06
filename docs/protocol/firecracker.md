@@ -55,6 +55,10 @@ Persistent workspace disks live under:
   through `MICROAGENT_FIRECRACKER`.
 - Supports interactive `microagent connect`; use `microagent logs` to review
   captured serial output.
+- Firecracker `network.mode` must be `nat`; unsupported modes fail closed at
+  the supervisor boundary.
+- The supervisor does not implement a direct `console` command. The CLI uses
+  the Firecracker serial input FIFO for `microagent connect`.
 
 ## Console
 
@@ -77,3 +81,7 @@ make smoke-firecracker-console
 
 That target requires Linux amd64 with KVM and is part of the Linux `make smoke`
 suite.
+
+`consoleAvailable` in host reports describes backend capability. A prepared
+workspace still reports "console input is not ready" until it has been started
+and the runtime serial input FIFO exists.

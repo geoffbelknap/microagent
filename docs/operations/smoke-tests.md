@@ -6,6 +6,11 @@ description: Lifecycle and boot smokes for both backends.
 The Makefile drives all smoke suites. `make smoke` selects the right one for
 the host: Firecracker on Linux, Apple VF on macOS.
 
+The normal GitHub CI workflow keeps unit tests separate from live KVM gates.
+Live Firecracker parity runs through the manual `Live Linux Parity` workflow on
+self-hosted Linux runners labeled `kvm`, or directly on a Linux host with
+`scripts/linux-parity-handoff-strict.sh`.
+
 ## Suites
 
 | Target | What it covers |
@@ -77,7 +82,8 @@ make smoke-firecracker-publish
 ```
 
 This Linux amd64 KVM target verifies that `--publish` forwards a host TCP
-listener into a running Firecracker workspace.
+listener into a running Firecracker workspace. It checks both a minimal TCP
+responder and a BusyBox HTTP server.
 
 ## Apple VF boot smoke
 

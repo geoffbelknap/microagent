@@ -330,6 +330,7 @@ func serveHostForward(fd int, guestPort uint16) {
 	for {
 		connFD, _, err := unix.Accept(fd)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "accept host forward vsock for guest tcp port %d: %v\n", guestPort, err)
 			_ = unix.Close(fd)
 			return
 		}
@@ -352,12 +353,16 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 	defer conn.Close()
 	done := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(file, conn)
+		if _, err := io.Copy(file, conn); err != nil {
+			fmt.Fprintf(os.Stderr, "copy guest tcp port %d to host forward vsock: %v\n", guestPort, err)
+		}
 		closeWriteFile(file)
 		done <- struct{}{}
 	}()
 	go func() {
-		_, _ = io.Copy(conn, file)
+		if _, err := io.Copy(conn, file); err != nil {
+			fmt.Fprintf(os.Stderr, "copy host forward vsock to guest tcp port %d: %v\n", guestPort, err)
+		}
 		closeWriteConn(conn)
 		done <- struct{}{}
 	}()

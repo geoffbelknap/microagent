@@ -3,12 +3,16 @@
 package firecracker
 
 import (
+	"context"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
 
 func TestDialGuestVsockUsesFirecrackerConnectHandshake(t *testing.T) {
@@ -140,5 +144,37 @@ func TestSerialInputFIFOUsesFIFOType(t *testing.T) {
 	}
 	if stat.Mode&syscall.S_IFMT != syscall.S_IFIFO {
 		t.Fatalf("mode = %#o, want fifo", stat.Mode)
+	}
+}
+
+func TestValidateFirecrackerConfigRejectsUnsupportedNetworkMode(t *testing.T) {
+	err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "bridged"}})
+	if err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("validateFirecrackerConfig err = %v", err)
+	}
+}
+
+func TestSupervisorCheckRejectsUnsupportedFirecrackerNetworkMode(t *testing.T) {
+	req := vmkit.Request{
+		Command: "check",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   t.TempDir(),
+			Network:    &vmkit.NetworkConfig{Mode: "isolated"},
+		},
+	}
+	resp, err := Supervisor{}.Do(context.Background(), req)
+	if err == nil {
+		t.Fatal("Supervisor.Do accepted unsupported network mode")
+	}
+	if resp.Backend != vmkit.BackendFirecracker || !strings.Contains(resp.Error, "unsupported") {
+		t.Fatalf("response = %+v err = %v", resp, err)
 	}
 }
