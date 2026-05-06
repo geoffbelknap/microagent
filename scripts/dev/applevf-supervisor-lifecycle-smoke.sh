@@ -210,7 +210,7 @@ with open(os.path.join(runtime_dir, "event.json"), "r", encoding="utf-8") as han
     event = json.load(handle)
 event["state"] = "running"
 event["detail"] = "serial=" + os.path.join(runtime_dir, "serial.log")
-event["observedAt"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+event["observedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 runtime = {
     "event": event,
     "config": config,
