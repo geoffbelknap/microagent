@@ -576,6 +576,9 @@ func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, req, vmkit.StateRunning, 123, ""); err != nil {
 		t.Fatalf("writeWorkspaceProcessState: %v", err)
 	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", RestartPolicy: "always", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
 	stdoutPath := filepath.Join(dir, "stdout.json")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
@@ -596,7 +599,7 @@ func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"state": "running"`) {
+	if !strings.Contains(string(data), `"state": "running"`) || !strings.Contains(string(data), `"restartPolicy": "always"`) {
 		t.Fatalf("status output = %s", data)
 	}
 }
@@ -764,6 +767,26 @@ func TestParseWorkspaceOptionsLetsExplicitResourcesOverrideProfile(t *testing.T)
 	}
 }
 
+func TestParseWorkspaceOptionsAcceptsRestartPolicy(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--restart", "on-failure",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.RestartPolicy != "on-failure" {
+		t.Fatalf("RestartPolicy = %q", opts.RestartPolicy)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsInvalidRestartPolicy(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{"research", "--restart", "sometimes"})
+	if err == nil || !strings.Contains(err.Error(), "restart policy") {
+		t.Fatalf("err = %v, want restart validation", err)
+	}
+}
+
 func TestParseWorkspaceOptionsRejectsUnknownProfile(t *testing.T) {
 	_, err := parseWorkspaceOptions("create", []string{"research", "--profile", "huge"})
 	if err == nil || !strings.Contains(err.Error(), "unknown resource profile") {
@@ -809,6 +832,7 @@ func TestParseWorkspaceOptionsReadsSpecFile(t *testing.T) {
 name: research
 image: docker.io/library/ubuntu:24.04
 profile: medium
+restart: on-failure
 entrypoint: /app/start.sh
 setup:
   - mkdir -p /workspace
@@ -837,7 +861,7 @@ bundles:
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
-	if opts.Name != "research" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "medium" {
+	if opts.Name != "research" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "medium" || opts.RestartPolicy != "on-failure" {
 		t.Fatalf("identity/image/profile = %#v", opts)
 	}
 	if opts.Entrypoint != "/app/start.sh" || len(opts.SetupCommands) != 2 {
@@ -954,12 +978,13 @@ func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := writeWorkspaceManifest(workspaceOptions{
-		StateDir:  dir,
-		Name:      "research",
-		Profile:   "medium",
-		MemoryMiB: 2048,
-		CPUCount:  2,
-		SizeMiB:   8192,
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "medium",
+		RestartPolicy: "always",
+		MemoryMiB:     2048,
+		CPUCount:      2,
+		SizeMiB:       8192,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -996,6 +1021,13 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": T
 	}
 	if state.Config.MemoryMiB != 2048 || state.Config.CPUCount != 2 {
 		t.Fatalf("runtime config = memory %d cpus %d", state.Config.MemoryMiB, state.Config.CPUCount)
+	}
+	manifest, err := readWorkspaceManifest(dir, "research")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Restart != "always" {
+		t.Fatalf("restart = %q", manifest.Restart)
 	}
 }
 
@@ -1567,6 +1599,9 @@ func TestRunPSListsWorkspaces(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", RestartPolicy: "on-failure", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
 	stdoutPath := filepath.Join(dir, "ps.json")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
@@ -1583,7 +1618,7 @@ func TestRunPSListsWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), `"name": "research"`) || !strings.Contains(string(got), `"state": "stopped"`) {
+	if !strings.Contains(string(got), `"name": "research"`) || !strings.Contains(string(got), `"state": "stopped"`) || !strings.Contains(string(got), `"restart": "on-failure"`) {
 		t.Fatalf("ps output = %s", got)
 	}
 }

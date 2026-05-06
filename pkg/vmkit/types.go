@@ -100,12 +100,13 @@ type KernelSupport struct {
 }
 
 type Response struct {
-	OK      bool           `json:"ok"`
-	Backend string         `json:"backend,omitempty"`
-	Event   *Event         `json:"event,omitempty"`
-	Host    *HostSupport   `json:"host,omitempty"`
-	Kernel  *KernelSupport `json:"kernel,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	OK            bool           `json:"ok"`
+	Backend       string         `json:"backend,omitempty"`
+	Event         *Event         `json:"event,omitempty"`
+	Host          *HostSupport   `json:"host,omitempty"`
+	Kernel        *KernelSupport `json:"kernel,omitempty"`
+	RestartPolicy string         `json:"restartPolicy,omitempty"`
+	Error         string         `json:"error,omitempty"`
 }
 
 func NormalizeConfig(config *Config) {

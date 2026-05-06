@@ -10,6 +10,7 @@ control. It is consumed by [`microagent create`](/cli/create/).
 name: research
 image: docker.io/library/ubuntu:24.04
 profile: medium
+restart: on-failure
 entrypoint: /app/start.sh
 setup:
   - mkdir -p /workspace
@@ -54,6 +55,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `name` | Workspace name |
 | `image` | OCI image reference |
 | `profile` | Resource profile: `tiny`, `small`, `medium`, or `large` |
+| `restart` | Restart policy: `never`, `on-failure`, or `always` |
 | `entrypoint` | Command to run when the workspace starts |
 | `setup` | Commands to run before first start |
 | `env` | Guest environment variables |

@@ -37,6 +37,7 @@ const (
 	defaultWorkspaceMemoryMiB  = 512
 	defaultWorkspaceCPUCount   = 2
 	defaultWorkspaceProfile    = "small"
+	defaultRestartPolicy       = "never"
 )
 
 func main() {
@@ -693,6 +694,7 @@ type workspaceOptions struct {
 	SetupCommands   []string
 	Env             map[string]string
 	Profile         string
+	RestartPolicy   string
 	Backend         string
 	KernelPath      string
 	StateDir        string
@@ -720,6 +722,7 @@ type workspaceSpec struct {
 	Name       string            `yaml:"name"`
 	ImageRef   string            `yaml:"image"`
 	Profile    string            `yaml:"profile"`
+	Restart    string            `yaml:"restart"`
 	Entrypoint string            `yaml:"entrypoint"`
 	Setup      []string          `yaml:"setup"`
 	Env        map[string]string `yaml:"env"`
@@ -740,6 +743,7 @@ type workspaceDisk struct {
 type workspaceManifest struct {
 	Name      string          `json:"name"`
 	Profile   string          `json:"profile,omitempty"`
+	Restart   string          `json:"restart"`
 	Resources resourceConfig  `json:"resources"`
 	Disks     []workspaceDisk `json:"disks,omitempty"`
 }
@@ -748,6 +752,7 @@ type workspaceResult struct {
 	Workspace  string            `json:"workspace"`
 	StateDir   string            `json:"state_dir"`
 	Profile    string            `json:"profile,omitempty"`
+	Restart    string            `json:"restart"`
 	Resources  resourceConfig    `json:"resources"`
 	RootfsPath string            `json:"rootfs_path"`
 	KernelPath string            `json:"kernel_path"`
@@ -784,6 +789,7 @@ type workspaceListEntry struct {
 	State      string `json:"state"`
 	Backend    string `json:"backend,omitempty"`
 	Profile    string `json:"profile,omitempty"`
+	Restart    string `json:"restart,omitempty"`
 	ObservedAt string `json:"observed_at,omitempty"`
 	RootfsPath string `json:"rootfs_path,omitempty"`
 	SerialPath string `json:"serial_path,omitempty"`
@@ -1219,6 +1225,9 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		if manifest.Profile != "" {
 			opts.Profile = manifest.Profile
 		}
+		if manifest.Restart != "" {
+			opts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
+		}
 		if manifest.Resources.MemoryMiB != 0 && !memoryExplicit {
 			opts.MemoryMiB = manifest.Resources.MemoryMiB
 		}
@@ -1246,6 +1255,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		Workspace:  opts.Name,
 		StateDir:   opts.StateDir,
 		Profile:    opts.Profile,
+		Restart:    opts.RestartPolicy,
 		Resources:  workspaceResources(opts),
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
@@ -1339,11 +1349,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	sizeExplicit := hasFlagValue(args, "size-mib")
 	specExplicit := hasFlagValue(args, "file")
 	opts := workspaceOptions{
-		Backend:      hostBackend(),
-		Architecture: defaultGuestArch(),
-		Profile:      defaultWorkspaceProfile,
-		Timeout:      2 * time.Minute,
-		ResultPort:   1024,
+		Backend:       hostBackend(),
+		Architecture:  defaultGuestArch(),
+		Profile:       defaultWorkspaceProfile,
+		RestartPolicy: defaultRestartPolicy,
+		Timeout:       2 * time.Minute,
+		ResultPort:    1024,
 	}
 	if err := applyResourceProfile(&opts, false, false, false); err != nil {
 		return workspaceOptions{}, err
@@ -1383,6 +1394,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
+	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
@@ -1429,6 +1441,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
 	opts.KernelExplicit = kernelExplicit
+	if err := validateRestartPolicy(opts.RestartPolicy); err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.RestartPolicy = normalizeRestartPolicy(opts.RestartPolicy)
 	if specExplicit && specPath == "" {
 		return workspaceOptions{}, fmt.Errorf("%s requires --file path", command)
 	}
@@ -1504,6 +1520,9 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 		if err := applyResourceProfile(opts, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
 			return err
 		}
+	}
+	if strings.TrimSpace(spec.Restart) != "" {
+		opts.RestartPolicy = normalizeRestartPolicy(spec.Restart)
 	}
 	if spec.Resources.MemoryMiB != 0 && !memoryExplicit {
 		opts.MemoryMiB = spec.Resources.MemoryMiB
@@ -1666,6 +1685,22 @@ func validateResourceConfig(resources resourceConfig, requireDisk bool) error {
 	return nil
 }
 
+func validateRestartPolicy(policy string) error {
+	switch normalizeRestartPolicy(policy) {
+	case "never", "on-failure", "always":
+		return nil
+	default:
+		return fmt.Errorf("restart policy must be never, on-failure, or always")
+	}
+}
+
+func normalizeRestartPolicy(policy string) string {
+	if strings.TrimSpace(policy) == "" {
+		return defaultRestartPolicy
+	}
+	return strings.TrimSpace(policy)
+}
+
 func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspaceResult, error) {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
@@ -1691,6 +1726,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Workspace:  opts.Name,
 		StateDir:   opts.StateDir,
 		Profile:    opts.Profile,
+		Restart:    opts.RestartPolicy,
 		Resources:  workspaceResources(opts),
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
@@ -1771,6 +1807,7 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), workspaceManifest{
 		Name:      opts.Name,
 		Profile:   opts.Profile,
+		Restart:   normalizeRestartPolicy(opts.RestartPolicy),
 		Resources: workspaceResources(opts),
 		Disks:     opts.Disks,
 	})
@@ -1837,6 +1874,7 @@ func workspaceOptionsFromRequest(req vmkit.Request, supervisorPath string) (work
 		KernelPath:     req.Config.KernelPath,
 		StateDir:       req.Config.StateDir,
 		SupervisorPath: supervisorPath,
+		RestartPolicy:  defaultRestartPolicy,
 		MemoryMiB:      req.Config.MemoryMiB,
 		CPUCount:       req.Config.CPUCount,
 		Disks:          configDisksToWorkspaceDisks(req.Config.Disks),
@@ -2006,6 +2044,9 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 		backend = eventFile.Identity.Backend
 	}
 	resp := vmkit.Response{OK: eventFile.State != vmkit.StateFailed, Backend: backend, Event: &event}
+	if manifest, err := readWorkspaceManifest(opts.StateDir, eventFile.Identity.RuntimeID); err == nil {
+		resp.RestartPolicy = nonEmpty(manifest.Restart, defaultRestartPolicy)
+	}
 	if errorText != "" {
 		resp.Error = errorText
 	}
@@ -2199,6 +2240,9 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 	if resp.Event != nil {
 		fmt.Fprintf(stdout, "Workspace: %s\n", resp.Event.Identity.RuntimeID)
 		fmt.Fprintf(stdout, "State: %s\n", resp.Event.State)
+		if resp.RestartPolicy != "" {
+			fmt.Fprintf(stdout, "Restart: %s\n", resp.RestartPolicy)
+		}
 		if resp.Event.Detail != "" {
 			fmt.Fprintf(stdout, "Detail: %s\n", resp.Event.Detail)
 		}
@@ -2224,6 +2268,9 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	}
 	if result.Profile != "" {
 		fmt.Fprintf(stdout, "Profile: %s\n", result.Profile)
+	}
+	if result.Restart != "" {
+		fmt.Fprintf(stdout, "Restart: %s\n", result.Restart)
 	}
 	if result.Resources.MemoryMiB != 0 || result.Resources.CPUCount != 0 || result.Resources.SizeMiB != 0 {
 		fmt.Fprintf(stdout, "Resources: memory=%dMiB cpus=%d", result.Resources.MemoryMiB, result.Resources.CPUCount)
@@ -2282,9 +2329,9 @@ func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 		fmt.Fprintln(stdout, "No workspaces.")
 		return nil
 	}
-	fmt.Fprintf(stdout, "%-24s %-12s %-12s %s\n", "NAME", "STATE", "BACKEND", "PROFILE")
+	fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %s\n", "NAME", "STATE", "BACKEND", "PROFILE", "RESTART")
 	for _, entry := range entries {
-		fmt.Fprintf(stdout, "%-24s %-12s %-12s %s\n", entry.Name, entry.State, entry.Backend, entry.Profile)
+		fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %s\n", entry.Name, entry.State, entry.Backend, entry.Profile, entry.Restart)
 	}
 	return nil
 }
@@ -2676,6 +2723,7 @@ func cloneWorkspace(stateDir, source, target string) (workspaceResult, error) {
 		Workspace:  target,
 		StateDir:   stateDir,
 		Profile:    manifest.Profile,
+		Restart:    nonEmpty(manifest.Restart, defaultRestartPolicy),
 		Resources:  manifest.Resources,
 		RootfsPath: filepath.Join(targetWorkspaceDir, "rootfs.ext4"),
 		Disks:      manifest.Disks,
@@ -2839,6 +2887,7 @@ func workspaceListEntryFor(stateDir, name string) workspaceListEntry {
 	}
 	if manifest, err := readWorkspaceManifest(stateDir, name); err == nil {
 		entry.Profile = manifest.Profile
+		entry.Restart = nonEmpty(manifest.Restart, defaultRestartPolicy)
 	}
 	if _, err := os.Stat(entry.RootfsPath); os.IsNotExist(err) {
 		entry.RootfsPath = ""
@@ -3419,6 +3468,7 @@ func reorderFlagArgs(args []string) []string {
 		"-bundle":        true,
 		"-debugfs":       true,
 		"-profile":       true,
+		"-restart":       true,
 		"-state-dir":     true,
 		"-url":           true,
 		"-from":          true,
@@ -3656,6 +3706,7 @@ Options:
   -rootfs <path>        Rootfs image path
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
+  -restart <policy>     Restart policy: never, on-failure, or always
   -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
   -cpus <n>             CPU count
   -vsock p=host:port    Add a vsock mapping
@@ -3680,6 +3731,7 @@ Options:
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
+  -restart <policy>     Restart policy: never, on-failure, or always
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
@@ -3707,6 +3759,7 @@ Options:
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
+  -restart <policy>     Restart policy: never, on-failure, or always
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size

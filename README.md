@@ -53,6 +53,7 @@ Or put the workspace in source control:
 name: research
 image: docker.io/library/ubuntu:24.04
 profile: medium
+restart: on-failure
 setup:
   - mkdir -p /workspace
   - echo ready > /workspace/status

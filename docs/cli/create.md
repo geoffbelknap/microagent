@@ -28,6 +28,7 @@ first.
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
+| `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
@@ -75,6 +76,7 @@ Create from a declarative spec:
 name: research
 image: docker.io/library/ubuntu:24.04
 profile: medium
+restart: on-failure
 entrypoint: /app/start.sh
 setup:
   - mkdir -p /workspace
