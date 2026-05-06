@@ -30,7 +30,7 @@ first.
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
 | `--mke2fs <path>` | mke2fs binary path |
-| `--supervisor <path>` | Override the Apple VF supervisor path |
+| `--supervisor <path>` | Override the active backend supervisor path |
 | `--dry-run` | Validate config without creating |
 | `--json <path\|->` | Read a [request JSON](/protocol/applevf/) from a file or stdin |
 
@@ -105,4 +105,4 @@ microagent create --json request.json
 
 - [`start`](/cli/start/), [`stop`](/cli/stop/), [`delete`](/cli/delete/)
 - [State and identity](/concepts/state-and-identity/)
-- [Apple VF supervisor protocol](/protocol/applevf/)
+- [Supervisor contract](/protocol/)

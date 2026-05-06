@@ -1,18 +1,23 @@
 # microagent-kit
 
-`microagent-kit` Provides the tools need to runs AI Agent workspaces in microVMs.
+`microagent-kit` provides the tools needed to run AI Agent workspaces in microVMs.
 
 The command-line tool is `microagent`. Each host OS has one VM backend:
 Firecracker on Linux and Apple Virtualization.framework on macOS. Each backend
 has a supervisor that owns VM lifecycle state changes. The Apple VF supervisor
-is packaged as `microagent-applevf-supervisor`, a small JSON executable that Go,
-Python, Rust, Node, and shell scripts can call.
+is packaged as `microagent-applevf-supervisor`; the Firecracker supervisor is
+packaged as `microagent-firecracker-supervisor`. Both are small JSON
+executables that Go, Python, Rust, Node, and shell scripts can call.
 
 Microagent provides the kernel, converts OCI images into VM disks, and starts
 the VM. Identity, policy, credentials, and higher-level control stay outside
 this project.
 
 See [`docs/`](docs/) for the full guide and CLI reference.
+
+Go callers can use `pkg/rootfs` for OCI-to-ext4 builds and `pkg/vmkit` for the
+shared supervisor request/response types. The high-level workspace lifecycle API
+is still implemented by the CLI. See [`docs/library/go.md`](docs/library/go.md).
 
 ## Install
 
@@ -74,7 +79,9 @@ interactive `connect`; use `logs` for serial output.
 
 ```bash
 go test ./...
-swift build --package-path supervisors/applevf --disable-sandbox
+go build ./cmd/microagent
+go build ./cmd/microagent-firecracker-supervisor              # Linux only
+swift build --package-path supervisors/applevf --disable-sandbox  # macOS only
 ```
 
 Run the smokes:
@@ -340,10 +347,12 @@ microagent create \
 
 ## Supervisors
 
-Firecracker and Apple VF both use the supervisor concept for backend lifecycle
-work. The Apple VF supervisor is packaged as a Swift executable because the
-Virtualization.framework boundary is host-native. It reads one JSON request from
-stdin and writes one JSON response to stdout. See
+Firecracker and Apple VF both use executable supervisors for backend lifecycle
+work. Linux uses `microagent-firecracker-supervisor`; macOS uses the Swift
+`microagent-applevf-supervisor` because the Virtualization.framework boundary
+is host-native. Supervisors read one JSON request from stdin and write one JSON
+response to stdout. See [docs/protocol/index.md](docs/protocol/index.md),
+[docs/protocol/firecracker.md](docs/protocol/firecracker.md), and
 [docs/protocol/applevf.md](docs/protocol/applevf.md).
 
 ## Boundary

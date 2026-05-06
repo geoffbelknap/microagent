@@ -61,9 +61,11 @@ Lifecycle responses include an event:
 }
 ```
 
-States cover the full lifecycle: `prepared`, `running`, `stopped`, `killed`,
-`deleted`. Callers should treat these strings as the authoritative source of
-truth, not log scraping.
+States cover the full lifecycle: `unknown`, `prepared`, `starting`, `running`,
+`stopping`, `stopped`, and `failed`. Commands such as `kill` and `delete` still
+return lifecycle events, usually with state `stopped` and a `detail` field.
+Callers should treat these strings as the authoritative source of truth, not
+log scraping.
 
-See the [Apple VF supervisor protocol](/protocol/applevf/) for the wire-level
+See the [supervisor contract](/protocol/) for the shared request and response
 schema.

@@ -66,5 +66,4 @@ Use `make signed-supervisor` to produce an ad-hoc-signed build.
 ### Need structured output
 
 Every command supports `--json` (or `MICROAGENT_OUTPUT=json`). Scripts should
-consume JSON; the [Apple VF supervisor protocol](/protocol/applevf/)
-describes the shape.
+consume JSON; the [supervisor contract](/protocol/) describes the shape.

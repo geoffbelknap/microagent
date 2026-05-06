@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
@@ -12,13 +13,33 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
+	firecrackersupervisor "github.com/geoffbelknap/microagent-kit/pkg/supervisors/firecracker"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
+
+func TestMain(m *testing.M) {
+	if os.Getenv("GO_WANT_FIRECRACKER_SUPERVISOR_HELPER") == "1" {
+		var req vmkit.Request
+		if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
+			_ = json.NewEncoder(os.Stdout).Encode(vmkit.Response{OK: false, Backend: vmkit.BackendFirecracker, Error: err.Error()})
+			os.Exit(1)
+		}
+		resp, err := firecrackersupervisor.Supervisor{}.Do(context.Background(), req)
+		_ = json.NewEncoder(os.Stdout).Encode(resp)
+		if err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 func TestRunVersionAliases(t *testing.T) {
 	for _, args := range [][]string{{"version"}, {"--version"}, {"-v"}} {
@@ -700,6 +721,62 @@ func TestCreateDispatchKeepsLowLevelSupervisorCreate(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSupervisorSelectsSymmetricBackends(t *testing.T) {
+	firecracker, err := workspaceSupervisor(workspaceOptions{Backend: vmkit.BackendFirecracker})
+	if err != nil {
+		t.Fatalf("firecracker supervisor: %v", err)
+	}
+	executable, ok := firecracker.(vmkit.ExecutableSupervisor)
+	if !ok {
+		t.Fatalf("firecracker supervisor = %T, want vmkit.ExecutableSupervisor", firecracker)
+	}
+	if executable.Path != "microagent-firecracker-supervisor" {
+		t.Fatalf("firecracker supervisor path = %q", executable.Path)
+	}
+
+	appleVF, err := workspaceSupervisor(workspaceOptions{Backend: vmkit.BackendAppleVF, SupervisorPath: "/tmp/applevf"})
+	if err != nil {
+		t.Fatalf("apple vf supervisor: %v", err)
+	}
+	executable, ok = appleVF.(vmkit.ExecutableSupervisor)
+	if !ok {
+		t.Fatalf("apple vf supervisor = %T, want vmkit.ExecutableSupervisor", appleVF)
+	}
+	if executable.Path != "/tmp/applevf" {
+		t.Fatalf("apple vf supervisor path = %q", executable.Path)
+	}
+}
+
+func firecrackerSupervisorHelper(t *testing.T) string {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "microagent-firecracker-supervisor")
+	script := fmt.Sprintf("#!/usr/bin/env bash\nGO_WANT_FIRECRACKER_SUPERVISOR_HELPER=1 %q\n", executable)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func processStillActive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	if err := syscall.Kill(pid, 0); err != nil {
+		return err != syscall.ESRCH
+	}
+	if data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat")); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) >= 3 && fields[2] == "Z" {
+			return false
+		}
+	}
+	return true
+}
+
 func TestWorkspaceCommandRunsSetupBeforeExec(t *testing.T) {
 	command := workspaceCommand(workspaceOptions{
 		SetupCommands: []string{"apt-get update", "apt-get install -y git"},
@@ -1002,7 +1079,7 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"stop", "agent-1", "--state-dir", dir}, stdout)
+	err = run(t.Context(), []string{"stop", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -1016,11 +1093,7 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 	if state.Event.State != vmkit.StateStopped || state.PID != 0 {
 		t.Fatalf("state = %#v, want stopped with no pid", state)
 	}
-	active, err := processActive(cmd.Process.Pid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if active {
+	if processStillActive(cmd.Process.Pid) {
 		t.Fatalf("process %d still active", cmd.Process.Pid)
 	}
 }
@@ -1052,7 +1125,7 @@ func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"kill", "agent-1", "--state-dir", dir}, stdout)
+	err = run(t.Context(), []string{"kill", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -1095,7 +1168,7 @@ func TestFirecrackerDeleteRefusesRunningPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"delete", "agent-1", "--state-dir", dir}, stdout)
+	err = run(t.Context(), []string{"delete", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -1130,6 +1203,7 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 		"--kernel", kernel,
 		"--id", "agent-1",
 		"--state-dir", dir,
+		"--supervisor", firecrackerSupervisorHelper(t),
 	}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
@@ -1170,8 +1244,8 @@ func TestFirecrackerStatusReadsPreparedState(t *testing.T) {
 			CPUCount:   2,
 		},
 	}
-	if err := prepareFirecrackerWorkspace(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendFirecracker}, req); err != nil {
-		t.Fatalf("prepareFirecrackerWorkspace: %v", err)
+	if _, err := (firecrackersupervisor.Supervisor{Options: firecrackersupervisor.Options{Name: "research", StateDir: dir}}).Do(t.Context(), req); err != nil {
+		t.Fatalf("firecracker prepare: %v", err)
 	}
 	stdout, err := os.Create(filepath.Join(dir, "status.json"))
 	if err != nil {
@@ -1352,21 +1426,24 @@ func TestEnsureWorkspaceKernelInstallsDefaultKernel(t *testing.T) {
 }
 
 func TestFirecrackerGuestHaltedDetectsKernelShutdown(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor is linux-only")
+	}
 	dir := t.TempDir()
 	serialPath := filepath.Join(dir, "serial.log")
-	if firecrackerGuestHalted(serialPath) {
+	if firecrackersupervisor.GuestHalted(serialPath) {
 		t.Fatal("missing serial log reported halted")
 	}
 	if err := os.WriteFile(serialPath, []byte("[ 1.0 ] reboot: System halted\n"), 0o644); err != nil {
 		t.Fatalf("write serial log: %v", err)
 	}
-	if !firecrackerGuestHalted(serialPath) {
+	if !firecrackersupervisor.GuestHalted(serialPath) {
 		t.Fatal("system halt was not detected")
 	}
 	if err := os.WriteFile(serialPath, []byte("[ 1.0 ] reboot: Power down\n"), 0o644); err != nil {
 		t.Fatalf("write serial log: %v", err)
 	}
-	if !firecrackerGuestHalted(serialPath) {
+	if !firecrackersupervisor.GuestHalted(serialPath) {
 		t.Fatal("power down was not detected")
 	}
 }

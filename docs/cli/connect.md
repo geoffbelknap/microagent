@@ -20,7 +20,6 @@ in scripts.
 |---|---|
 | `--send <line>` | Write one line to the console and print new output |
 | `--state-dir <dir>` | State directory holding the workspace record |
-| `--supervisor <path>` | Override the Apple VF supervisor path |
 
 ## Examples
 

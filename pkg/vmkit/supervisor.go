@@ -8,11 +8,19 @@ import (
 	"os/exec"
 )
 
-type SupervisorClient struct {
+type Supervisor interface {
+	Do(ctx context.Context, req Request) (Response, error)
+}
+
+type ExecutableSupervisor struct {
 	Path string
 }
 
-func (c SupervisorClient) Do(ctx context.Context, req Request) (Response, error) {
+// SupervisorClient is kept as a compatibility alias for the executable
+// supervisor implementation.
+type SupervisorClient = ExecutableSupervisor
+
+func (c ExecutableSupervisor) Do(ctx context.Context, req Request) (Response, error) {
 	NormalizeConfig(req.Config)
 	if err := ValidateRequest(req); err != nil {
 		return Response{}, err
