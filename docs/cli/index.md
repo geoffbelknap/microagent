@@ -8,6 +8,7 @@ description: All microagent subcommands at a glance.
 | [`run`](/cli/run/) | Boot an image and run a command, then tear down |
 | [`create`](/cli/create/) | Create a named, persistent workspace |
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
+| [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |

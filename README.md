@@ -59,6 +59,12 @@ Clone a stopped workspace:
 microagent clone research research-copy
 ```
 
+Copy a file into a stopped workspace:
+
+```bash
+microagent cp ./config.json research:/etc/microagent/config.json
+```
+
 Check state, read the boot log, and remove the workspace:
 
 ```bash

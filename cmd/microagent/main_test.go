@@ -1038,6 +1038,184 @@ func TestRunCloneCommand(t *testing.T) {
 	}
 }
 
+func TestCopyWorkspaceFileToRootfs(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(source, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := copyWorkspaceFile(dir, debugfs, source, "research:/workspace/hello.txt")
+	if err != nil {
+		t.Fatalf("copyWorkspaceFile: %v", err)
+	}
+	if result.Direction != "to-workspace" || result.Disk != "rootfs" || result.Bytes != 5 {
+		t.Fatalf("result = %#v", result)
+	}
+	logData, err := os.ReadFile(filepath.Join(dir, "debugfs.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logText := string(logData)
+	if !strings.Contains(logText, "-w|-R|write|"+source+"|/workspace/hello.txt") {
+		t.Fatalf("debugfs log = %s", logText)
+	}
+}
+
+func TestCopyWorkspaceFileFromAttachedDisk(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	workspaceDir := filepath.Join(dir, "workspaces", "research")
+	diskPath := filepath.Join(workspaceDir, "disks", "workspace.ext4")
+	if err := os.MkdirAll(filepath.Dir(diskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(diskPath, []byte("disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+		Disks:     []workspaceDisk{{Name: "workspace", Path: diskPath, Mountpoint: "/workspace", Mode: "rw"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := copyWorkspaceFile(dir, debugfs, "research:workspace:/notes.txt", targetDir)
+	if err != nil {
+		t.Fatalf("copyWorkspaceFile: %v", err)
+	}
+	if result.Direction != "from-workspace" || result.Disk != "workspace" {
+		t.Fatalf("result = %#v", result)
+	}
+	targetPath := filepath.Join(targetDir, "notes.txt")
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "fake-dump" {
+		t.Fatalf("dumped data = %q", data)
+	}
+}
+
+func TestCopyWorkspaceFileRejectsActiveWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "active", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "active", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "active", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "active"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(source, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := copyWorkspaceFile(dir, debugfs, source, "active:/hello.txt")
+	if err == nil || !strings.Contains(err.Error(), "must be stopped") {
+		t.Fatalf("err = %v, want stopped validation", err)
+	}
+}
+
+func TestCopyWorkspaceFileRejectsTwoRemoteEndpoints(t *testing.T) {
+	_, err := copyWorkspaceFile(t.TempDir(), "debugfs", "a:/x", "b:/y")
+	if err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("err = %v, want endpoint validation", err)
+	}
+}
+
+func TestRunCPCommand(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(source, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "cp", "--debugfs", debugfs, "--state-dir", dir, source, "research:/hello.txt"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run cp: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"direction": "to-workspace"`) || !strings.Contains(string(data), `"workspace": "research"`) {
+		t.Fatalf("cp output = %s", data)
+	}
+}
+
+func fakeDebugFS(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "debugfs")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+log="` + filepath.Join(dir, "debugfs.log") + `"
+printf '%s\n' "$*" | tr ' ' '|' >> "$log"
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  if [[ "${args[$i]}" == "-R" ]]; then
+    cmd="${args[$((i+1))]}"
+    if [[ "$cmd" == dump\ * ]]; then
+      target="${cmd##* }"
+      printf fake-dump > "$target"
+    fi
+  fi
+done
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestCreateDispatchKeepsLowLevelSupervisorCreate(t *testing.T) {
 	if !shouldUseHighLevelCreate([]string{"research"}) {
 		t.Fatal("positional create should use high-level workspace create")

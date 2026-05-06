@@ -81,6 +81,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "clone" {
 		return runClone(args[1:], stdout)
 	}
+	if args[0] == "cp" {
+		return runCP(args[1:], stdout)
+	}
 	if args[0] == "ps" {
 		return runPS(args[1:], stdout)
 	}
@@ -741,6 +744,16 @@ type workspaceResult struct {
 	Response   vmkit.Response    `json:"response"`
 }
 
+type copyResult struct {
+	Workspace string `json:"workspace"`
+	Disk      string `json:"disk"`
+	Direction string `json:"direction"`
+	Source    string `json:"source"`
+	Target    string `json:"target"`
+	ImagePath string `json:"image_path"`
+	Bytes     int64  `json:"bytes,omitempty"`
+}
+
 type guestResult struct {
 	StartedAt string `json:"started_at"`
 	ExitedAt  string `json:"exited_at"`
@@ -906,6 +919,26 @@ func runClone(args []string, stdout *os.File) error {
 		return err
 	}
 	return writeWorkspaceResult(stdout, result)
+}
+
+func runCP(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	debugfsPath := defaultDebugFSPath()
+	fs := flag.NewFlagSet("cp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&debugfsPath, "debugfs", debugfsPath, "debugfs binary path")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: microagent cp <source> <target> [--state-dir <dir>]")
+	}
+	result, err := copyWorkspaceFile(opts.StateDir, debugfsPath, fs.Arg(0), fs.Arg(1))
+	if err != nil {
+		return err
+	}
+	return writeCopyResult(stdout, result)
 }
 
 func runProfiles(args []string, stdout *os.File) error {
@@ -2055,6 +2088,21 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	return nil
 }
 
+func writeCopyResult(stdout *os.File, result copyResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	fmt.Fprintf(stdout, "Disk: %s\n", result.Disk)
+	fmt.Fprintf(stdout, "Direction: %s\n", result.Direction)
+	fmt.Fprintf(stdout, "Source: %s\n", result.Source)
+	fmt.Fprintf(stdout, "Target: %s\n", result.Target)
+	if result.Bytes != 0 {
+		fmt.Fprintf(stdout, "Bytes: %d\n", result.Bytes)
+	}
+	return nil
+}
+
 func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, map[string]any{"workspaces": entries})
@@ -2174,6 +2222,230 @@ func readGuestResult(opts workspaceOptions) (guestResult, error) {
 func cleanupWorkspaceState(opts workspaceOptions) {
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, "workspaces", opts.Name))
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, opts.Name))
+}
+
+func copyWorkspaceFile(stateDir, debugfsPath, source, target string) (copyResult, error) {
+	sourceRemote, sourceIsRemote, err := parseRemoteCopyEndpoint(source)
+	if err != nil {
+		return copyResult{}, err
+	}
+	targetRemote, targetIsRemote, err := parseRemoteCopyEndpoint(target)
+	if err != nil {
+		return copyResult{}, err
+	}
+	if sourceIsRemote == targetIsRemote {
+		return copyResult{}, fmt.Errorf("exactly one cp endpoint must be workspace:path")
+	}
+	if sourceIsRemote {
+		return copyFromWorkspace(stateDir, debugfsPath, sourceRemote, target)
+	}
+	return copyToWorkspace(stateDir, debugfsPath, source, targetRemote)
+}
+
+type remoteCopyEndpoint struct {
+	Workspace string
+	Disk      string
+	Path      string
+	Raw       string
+}
+
+func parseRemoteCopyEndpoint(raw string) (remoteCopyEndpoint, bool, error) {
+	parts := strings.SplitN(raw, ":", 3)
+	if len(parts) < 2 {
+		return remoteCopyEndpoint{}, false, nil
+	}
+	if len(parts) == 2 {
+		workspace := strings.TrimSpace(parts[0])
+		path := parts[1]
+		if workspace == "" || !strings.HasPrefix(path, "/") {
+			return remoteCopyEndpoint{}, false, nil
+		}
+		if err := validateWorkspaceName(workspace); err != nil {
+			return remoteCopyEndpoint{}, true, err
+		}
+		if err := validateRemoteCopyPath(path); err != nil {
+			return remoteCopyEndpoint{}, true, err
+		}
+		return remoteCopyEndpoint{Workspace: workspace, Disk: "rootfs", Path: path, Raw: raw}, true, nil
+	}
+	workspace := strings.TrimSpace(parts[0])
+	disk := strings.TrimSpace(parts[1])
+	path := parts[2]
+	if workspace == "" || disk == "" || !strings.HasPrefix(path, "/") {
+		return remoteCopyEndpoint{}, false, nil
+	}
+	if err := validateWorkspaceName(workspace); err != nil {
+		return remoteCopyEndpoint{}, true, err
+	}
+	if err := validateDiskName(disk); err != nil {
+		return remoteCopyEndpoint{}, true, err
+	}
+	if err := validateRemoteCopyPath(path); err != nil {
+		return remoteCopyEndpoint{}, true, err
+	}
+	return remoteCopyEndpoint{Workspace: workspace, Disk: disk, Path: path, Raw: raw}, true, nil
+}
+
+func validateRemoteCopyPath(path string) error {
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("workspace path must be absolute: %s", path)
+	}
+	if path == "/" || strings.HasSuffix(path, "/") {
+		return fmt.Errorf("workspace path must name a file: %s", path)
+	}
+	if strings.ContainsAny(path, "\x00\n\r") {
+		return fmt.Errorf("workspace path contains unsupported characters")
+	}
+	if strings.Contains(path, " ") || strings.Contains(path, "\t") {
+		return fmt.Errorf("workspace path must not contain whitespace")
+	}
+	return nil
+}
+
+func validateDiskName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("disk name is required")
+	}
+	if strings.ContainsAny(name, `/\:`) || name == "." || name == ".." {
+		return fmt.Errorf("invalid disk name: %s", name)
+	}
+	return nil
+}
+
+func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, localTarget string) (copyResult, error) {
+	if err := ensureWorkspaceCloneable(stateDir, remote.Workspace); err != nil {
+		return copyResult{}, err
+	}
+	imagePath, err := workspaceImagePath(stateDir, remote)
+	if err != nil {
+		return copyResult{}, err
+	}
+	target, err := localCopyTarget(localTarget, filepath.Base(remote.Path))
+	if err != nil {
+		return copyResult{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return copyResult{}, err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".microagent-cp-*")
+	if err != nil {
+		return copyResult{}, err
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return copyResult{}, err
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := runDebugFS(debugfsPath, imagePath, false, "dump "+remote.Path+" "+tmpPath); err != nil {
+		return copyResult{}, err
+	}
+	info, err := os.Stat(tmpPath)
+	if err != nil {
+		return copyResult{}, err
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		return copyResult{}, err
+	}
+	cleanup = false
+	return copyResult{
+		Workspace: remote.Workspace,
+		Disk:      remote.Disk,
+		Direction: "from-workspace",
+		Source:    remote.Raw,
+		Target:    target,
+		ImagePath: imagePath,
+		Bytes:     info.Size(),
+	}, nil
+}
+
+func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCopyEndpoint) (copyResult, error) {
+	if err := ensureWorkspaceCloneable(stateDir, remote.Workspace); err != nil {
+		return copyResult{}, err
+	}
+	info, err := os.Stat(localSource)
+	if err != nil {
+		return copyResult{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return copyResult{}, fmt.Errorf("source must be a regular file: %s", localSource)
+	}
+	if strings.ContainsAny(localSource, "\x00\n\r\t ") {
+		return copyResult{}, fmt.Errorf("local source path must not contain whitespace")
+	}
+	imagePath, err := workspaceImagePath(stateDir, remote)
+	if err != nil {
+		return copyResult{}, err
+	}
+	if err := runDebugFS(debugfsPath, imagePath, true, "write "+localSource+" "+remote.Path); err != nil {
+		return copyResult{}, err
+	}
+	return copyResult{
+		Workspace: remote.Workspace,
+		Disk:      remote.Disk,
+		Direction: "to-workspace",
+		Source:    localSource,
+		Target:    remote.Raw,
+		ImagePath: imagePath,
+		Bytes:     info.Size(),
+	}, nil
+}
+
+func workspaceImagePath(stateDir string, remote remoteCopyEndpoint) (string, error) {
+	if remote.Disk == "" || remote.Disk == "rootfs" {
+		path := filepath.Join(stateDir, "workspaces", remote.Workspace, "rootfs.ext4")
+		if _, err := os.Stat(path); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
+	manifest, err := readWorkspaceManifest(stateDir, remote.Workspace)
+	if err != nil {
+		return "", err
+	}
+	for _, disk := range manifest.Disks {
+		if disk.Name == remote.Disk {
+			if _, err := os.Stat(disk.Path); err != nil {
+				return "", err
+			}
+			return disk.Path, nil
+		}
+	}
+	return "", fmt.Errorf("workspace %s has no disk %q", remote.Workspace, remote.Disk)
+}
+
+func localCopyTarget(target, fallbackName string) (string, error) {
+	if strings.TrimSpace(target) == "" {
+		return "", fmt.Errorf("local target is required")
+	}
+	if strings.ContainsAny(target, "\x00\n\r") {
+		return "", fmt.Errorf("local target path contains unsupported characters")
+	}
+	if info, err := os.Stat(target); err == nil && info.IsDir() {
+		return filepath.Join(target, fallbackName), nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	return target, nil
+}
+
+func runDebugFS(debugfsPath, imagePath string, write bool, command string) error {
+	args := []string{}
+	if write {
+		args = append(args, "-w")
+	}
+	args = append(args, "-R", command, imagePath)
+	cmd := exec.Command(debugfsPath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("debugfs %s: %w: %s", command, err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func cloneWorkspace(stateDir, source, target string) (workspaceResult, error) {
@@ -2572,6 +2844,16 @@ func defaultMke2fsPath() string {
 	return "mke2fs"
 }
 
+func defaultDebugFSPath() string {
+	if path, err := exec.LookPath("debugfs"); err == nil {
+		return path
+	}
+	if _, err := os.Stat("/opt/homebrew/opt/e2fsprogs/sbin/debugfs"); err == nil {
+		return "/opt/homebrew/opt/e2fsprogs/sbin/debugfs"
+	}
+	return "debugfs"
+}
+
 func defaultGuestInitPath(arch string) string {
 	executable, err := os.Executable()
 	if err != nil {
@@ -2952,6 +3234,7 @@ func reorderFlagArgs(args []string) []string {
 		"-rootfs":      true,
 		"-disk":        true,
 		"-bundle":      true,
+		"-debugfs":     true,
 		"-profile":     true,
 		"-state-dir":   true,
 		"-url":         true,
@@ -3150,6 +3433,7 @@ Commands:
   run                  Run a command
   create               Create a workspace
   clone                Clone a stopped workspace
+  cp                   Copy files into or out of a stopped workspace
   start                Start a workspace
   connect              Open the workspace console
   ps                   List workspaces
@@ -3182,6 +3466,7 @@ Options:
   -env KEY=VALUE        Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -debugfs <path>       debugfs binary path
   -kernel <path>        Custom kernel path
   -rootfs <path>        Rootfs image path
   -state-dir <dir>      State directory
