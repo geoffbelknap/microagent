@@ -681,6 +681,194 @@ func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	}
 }
 
+func TestWriteWorkspaceProcessStateAppendsEventHistory(t *testing.T) {
+	dir := t.TempDir()
+	req := vmkit.Request{
+		Command: "inspect",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendAppleVF,
+		},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	opts := workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StatePrepared, 0, ""); err != nil {
+		t.Fatalf("write prepared state: %v", err)
+	}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateHalted, 0, ""); err != nil {
+		t.Fatalf("write halted state: %v", err)
+	}
+	var events []workspaceEventFile
+	data, err := os.ReadFile(filepath.Join(dir, "research", "events.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].State != vmkit.StatePrepared || events[1].State != vmkit.StateHalted {
+		t.Fatalf("events = %#v, want prepared then halted", events)
+	}
+}
+
+func TestStatusReportsVerificationDivergence(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	kernelPath := filepath.Join(dir, "Image")
+	rootfsPath := filepath.Join(dir, "workspaces", "research", "rootfs.ext4")
+	initPath := filepath.Join(dir, "microagent-init")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kernelPath, []byte("kernel-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(initPath, []byte("init-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Backend:       vmkit.BackendFirecracker,
+		KernelPath:    kernelPath,
+		GuestInitPath: initPath,
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+	}
+	result := workspaceResult{
+		Workspace:  "research",
+		RootfsPath: rootfsPath,
+		Image: rootfs.Provenance{
+			ImageRef:    "docker.io/library/busybox:1.36",
+			ResolvedRef: "docker.io/library/busybox@sha256:abc",
+			Digest:      "sha256:abc",
+		},
+	}
+	verification, err := buildWorkspaceVerification(opts, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Verification = &verification
+	if err := writeWorkspaceManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: kernelPath,
+			RootfsPath: rootfsPath,
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StatePrepared, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs-v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Verification == nil || resp.Verification.OK {
+		t.Fatalf("verification = %#v, want divergence", resp.Verification)
+	}
+	if len(resp.Verification.Divergence) != 1 || resp.Verification.Divergence[0].Artifact != "rootfs" {
+		t.Fatalf("divergence = %#v, want rootfs mismatch", resp.Verification.Divergence)
+	}
+	if resp.Verification.ImageDigest != "sha256:abc" || resp.Verification.Kernel.SHA256 == "" || resp.Verification.Rootfs.RecordedSHA256 == "" {
+		t.Fatalf("verification details missing: %#v", resp.Verification)
+	}
+}
+
+func TestStatusReportsReadinessSignals(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	serialInput := serialInputPath(dir, "research")
+	if err := os.MkdirAll(filepath.Dir(serialInput), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(serialInput, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(resultPath(workspaceOptions{StateDir: dir, Name: "research"}), []byte(`{"started_at":"2026-05-02T00:00:00Z","exited_at":"2026-05-02T00:00:01Z","exit_code":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Readiness == nil {
+		t.Fatal("readiness missing")
+	}
+	if !resp.Readiness.GuestReady.Ready || !resp.Readiness.ShellReady.Ready || !resp.Readiness.ResultReady.Ready {
+		t.Fatalf("readiness = %#v, want all ready", resp.Readiness)
+	}
+}
+
 func TestRunDeleteRemovesSavedWorkspaceState(t *testing.T) {
 	dir := t.TempDir()
 	supervisor := filepath.Join(dir, "supervisor")
@@ -2422,6 +2610,52 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 	}
 	if state.Event.State != vmkit.StateStopped || state.PID != 0 {
 		t.Fatalf("state = %#v, want stopped with no pid", state)
+	}
+	if processStillActive(cmd.Process.Pid) {
+		t.Fatalf("process %d still active", cmd.Process.Pid)
+	}
+}
+
+func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := writeWorkspaceProcessState(
+		workspaceOptions{StateDir: dir, Name: "agent-1"},
+		req,
+		vmkit.StateRunning,
+		cmd.Process.Pid,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"halt", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run halt: %v", err)
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "agent-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateHalted || state.PID != 0 {
+		t.Fatalf("state = %#v, want halted with no pid", state)
 	}
 	if processStillActive(cmd.Process.Pid) {
 		t.Fatalf("process %d still active", cmd.Process.Pid)

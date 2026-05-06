@@ -9,8 +9,20 @@ microagent status --name <name> [--state-dir <dir>]
 ```
 
 `status` reads the state file for one workspace and prints the latest event:
-identity, state (`prepared`, `running`, `stopped`, `killed`, `deleted`), and
+identity, state (`prepared`, `running`, `halted`, `stopped`, `failed`), and
 backend.
+
+With `--json`, named workspaces also include a `verification` block. It reports
+the recorded OCI image reference/digest and current SHA-256 values for the
+kernel, rootfs, and injected init binary. If a current hash differs from the
+recorded value, `verification.ok` is false and `verification.divergence`
+contains machine-readable mismatch records.
+
+JSON status also includes `readiness`:
+
+- `guestReady` is true after the workspace reaches a started runtime state.
+- `shellReady` is true when a running workspace has console input available.
+- `resultReady` is true when the guest result file has been delivered.
 
 ## Flags
 

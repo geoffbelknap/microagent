@@ -16,6 +16,22 @@ func TestValidateConfigAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestValidateRequestAcceptsHaltWithStateDir(t *testing.T) {
+	req := Request{
+		Command: "halt",
+		Identity: &Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      RoleWorkload,
+			Backend:   BackendFirecracker,
+		},
+		Config: &Config{StateDir: "/tmp/state"},
+	}
+	if err := ValidateRequest(req); err != nil {
+		t.Fatalf("ValidateRequest rejected halt: %v", err)
+	}
+}
+
 func TestValidateConfigRejectsDuplicateVsockPorts(t *testing.T) {
 	cfg := &Config{
 		KernelPath: "/tmp/kernel",

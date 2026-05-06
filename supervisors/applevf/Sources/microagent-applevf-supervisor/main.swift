@@ -20,6 +20,7 @@ enum VMState: String, Codable {
     case starting
     case running
     case stopped
+    case halted
     case failed
 }
 
@@ -112,6 +113,7 @@ struct Response: Codable {
 
 let backendName = "apple-vf"
 let eventFileName = "event.json"
+let eventsFileName = "events.json"
 let configFileName = "config.json"
 let runtimeFileName = "runtime.json"
 let serialLogFileName = "serial.log"
@@ -220,6 +222,8 @@ func handle(_ request: Request) throws -> Response {
         return Response(ok: true, backend: backendName, event: event)
     case "stop":
         return try stateOnly(request, state: .stopped, detail: nil)
+    case "halt":
+        return try stateOnly(request, state: .halted, detail: nil)
     case "kill":
         return try stateOnly(request, state: .stopped, detail: "forced")
     case "delete":
@@ -438,7 +442,21 @@ func writeState(event: Event, config: Config) throws {
     let directory = runtimeDirectory(identity: event.identity, stateDir: config.stateDir)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     try encoder.encode(event).write(to: eventPath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
+    try appendEvent(event: event, stateDir: config.stateDir)
     try encoder.encode(config).write(to: configPath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
+}
+
+func appendEvent(event: Event, stateDir: String) throws {
+    let path = runtimeDirectory(identity: event.identity, stateDir: stateDir).appendingPathComponent(eventsFileName)
+    var events: [Event] = []
+    if FileManager.default.fileExists(atPath: path.path) {
+        let data = try Data(contentsOf: path)
+        if !data.isEmpty {
+            events = try decoder.decode([Event].self, from: data)
+        }
+    }
+    events.append(event)
+    try encoder.encode(events).write(to: path, options: .atomic)
 }
 
 func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?) throws {

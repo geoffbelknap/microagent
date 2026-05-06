@@ -28,6 +28,7 @@ const (
 	StateRunning  VMState = "running"
 	StateStopping VMState = "stopping"
 	StateStopped  VMState = "stopped"
+	StateHalted   VMState = "halted"
 	StateFailed   VMState = "failed"
 )
 
@@ -116,15 +117,56 @@ type KernelSupport struct {
 	Error        string `json:"error,omitempty"`
 }
 
+type VerifiedArtifact struct {
+	Path           string `json:"path,omitempty"`
+	SHA256         string `json:"sha256,omitempty"`
+	RecordedSHA256 string `json:"recordedSHA256,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+type VerificationDivergence struct {
+	Artifact string `json:"artifact"`
+	Field    string `json:"field,omitempty"`
+	Expected string `json:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type RuntimeVerification struct {
+	OK          bool                     `json:"ok"`
+	ImageRef    string                   `json:"imageRef,omitempty"`
+	ResolvedRef string                   `json:"resolvedRef,omitempty"`
+	ImageDigest string                   `json:"imageDigest,omitempty"`
+	Kernel      *VerifiedArtifact        `json:"kernel,omitempty"`
+	Rootfs      *VerifiedArtifact        `json:"rootfs,omitempty"`
+	Init        *VerifiedArtifact        `json:"init,omitempty"`
+	Divergence  []VerificationDivergence `json:"divergence,omitempty"`
+}
+
+type ReadinessSignal struct {
+	Ready      bool       `json:"ready"`
+	ObservedAt *time.Time `json:"observedAt,omitempty"`
+	Detail     string     `json:"detail,omitempty"`
+	Error      string     `json:"error,omitempty"`
+}
+
+type RuntimeReadiness struct {
+	GuestReady  ReadinessSignal `json:"guestReady"`
+	ShellReady  ReadinessSignal `json:"shellReady"`
+	ResultReady ReadinessSignal `json:"resultReady"`
+}
+
 type Response struct {
-	OK            bool           `json:"ok"`
-	Backend       string         `json:"backend,omitempty"`
-	Event         *Event         `json:"event,omitempty"`
-	Host          *HostSupport   `json:"host,omitempty"`
-	Kernel        *KernelSupport `json:"kernel,omitempty"`
-	RestartPolicy string         `json:"restartPolicy,omitempty"`
-	Network       *NetworkConfig `json:"network,omitempty"`
-	Error         string         `json:"error,omitempty"`
+	OK            bool                 `json:"ok"`
+	Backend       string               `json:"backend,omitempty"`
+	Event         *Event               `json:"event,omitempty"`
+	Host          *HostSupport         `json:"host,omitempty"`
+	Kernel        *KernelSupport       `json:"kernel,omitempty"`
+	Verification  *RuntimeVerification `json:"verification,omitempty"`
+	Readiness     *RuntimeReadiness    `json:"readiness,omitempty"`
+	RestartPolicy string               `json:"restartPolicy,omitempty"`
+	Network       *NetworkConfig       `json:"network,omitempty"`
+	Error         string               `json:"error,omitempty"`
 }
 
 func NormalizeConfig(config *Config) {
@@ -153,7 +195,7 @@ func ValidateRequest(req Request) error {
 		if err := ValidateConfig(req.Config); err != nil {
 			return err
 		}
-	case "inspect", "stop", "kill", "delete":
+	case "inspect", "halt", "stop", "kill", "delete":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}

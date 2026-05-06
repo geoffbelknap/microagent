@@ -99,10 +99,17 @@ Linux has one backend: Firecracker. macOS has one backend: Apple VF. The
 validation, not as a user-facing backend selector.
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
-`status`, `stop`, `kill`, and `delete`. Backend supervisors record state files
-and emit lifecycle events. Firecracker records process IDs so `stop` can send a
-graceful signal and `kill` can send a hard kill. Both backends support
-interactive `connect`; `logs` remains available for captured serial output.
+`status`, `halt`, `stop`, `kill`, and `delete`. Backend supervisors record
+state files and append lifecycle events to `events.json`. `halt` is the clean,
+disk-preserving shutdown path; `stop` remains the graceful stop command and
+`kill` sends a hard kill. Both backends support interactive `connect`; `logs`
+remains available for captured serial output.
+
+Named workspace manifests also record runtime verification metadata: image
+digest, kernel hash, rootfs hash, and injected init hash. `microagent status
+--json` recomputes current hashes and reports structured divergence.
+Status JSON also reports `guestReady`, `shellReady`, and `resultReady` so
+callers can sequence work without polling serial logs or guessing from files.
 
 ## Build
 
@@ -257,12 +264,12 @@ microagent logs research
 Stop and remove a workspace:
 
 ```bash
-microagent stop research
+microagent halt research
 microagent delete research
 ```
 
 For Firecracker, `delete` refuses to remove state while the recorded VM process
-is still running. Use `stop` or `kill` first.
+is still running. Use `halt`, `stop`, or `kill` first.
 
 Prepare a workspace from an existing rootfs with the lower-level request form:
 

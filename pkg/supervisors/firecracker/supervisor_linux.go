@@ -4,6 +4,7 @@ package firecracker
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/json"
@@ -59,10 +60,12 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return startProcess(context.Background(), opts, req, true)
 	case "inspect":
 		return inspectWorkspace(opts)
+	case "halt":
+		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateHalted)
 	case "stop":
-		return stopWorkspace(ctx, opts, req, syscall.SIGTERM)
+		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateStopped)
 	case "kill":
-		return stopWorkspace(ctx, opts, req, syscall.SIGKILL)
+		return stopWorkspace(ctx, opts, req, syscall.SIGKILL, vmkit.StateStopped)
 	case "delete":
 		if err := ensureCanDelete(opts); err != nil {
 			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
@@ -432,7 +435,7 @@ func openSerialInputFIFO(opts Options) (*os.File, error) {
 	return file, nil
 }
 
-func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal syscall.Signal) (vmkit.Response, error) {
+func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal syscall.Signal, finalState vmkit.VMState) (vmkit.Response, error) {
 	state, err := readRuntimeState(opts)
 	if err != nil {
 		return vmkit.Response{}, err
@@ -442,10 +445,10 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 			_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 		}
 		cleanupTransientNetworkDevices(state.NetworkDevices)
-		if err := writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateStopped, 0, ""); err != nil {
+		if err := writeProcessState(opts, runtimeStateRequest(req, state), finalState, 0, ""); err != nil {
 			return vmkit.Response{}, err
 		}
-		return eventResponse(req, vmkit.StateStopped, ""), nil
+		return eventResponse(req, finalState, ""), nil
 	}
 	active, err := processActive(state.PID)
 	if err != nil {
@@ -467,10 +470,10 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 	}
 	cleanupTransientNetworkDevices(state.NetworkDevices)
-	if err := writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateStopped, 0, ""); err != nil {
+	if err := writeProcessState(opts, runtimeStateRequest(req, state), finalState, 0, ""); err != nil {
 		return vmkit.Response{}, err
 	}
-	return eventResponse(req, vmkit.StateStopped, ""), nil
+	return eventResponse(req, finalState, ""), nil
 }
 
 func ensureCanDelete(opts Options) error {
@@ -857,6 +860,9 @@ func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, s
 	if err := writeJSONFile(filepath.Join(dir, "event.json"), fileEvent); err != nil {
 		return err
 	}
+	if err := appendEvent(filepath.Join(dir, "events.json"), fileEvent); err != nil {
+		return err
+	}
 	runtime := runtimeState{
 		Event:           fileEvent,
 		Config:          *req.Config,
@@ -872,6 +878,21 @@ func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, s
 		runtime.StartedAt = now.Format(time.RFC3339)
 	}
 	return writeJSONFile(filepath.Join(dir, "runtime.json"), runtime)
+}
+
+func appendEvent(path string, event eventFile) error {
+	var events []eventFile
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil && len(bytes.TrimSpace(data)) != 0 {
+		if err := json.Unmarshal(data, &events); err != nil {
+			return err
+		}
+	}
+	events = append(events, event)
+	return writeJSONFile(path, events)
 }
 
 func runtimeStateRequest(req vmkit.Request, state runtimeState) vmkit.Request {

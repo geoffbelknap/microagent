@@ -12,6 +12,7 @@ description: All microagent subcommands at a glance.
 | [`network`](/cli/network/) | Inspect workspace network mode and port forwards |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
+| [`halt`](/cli/halt/) | Clean disk-preserving shutdown |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |

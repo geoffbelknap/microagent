@@ -64,6 +64,7 @@ forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
 | `run` | Start in foreground | identity and full config |
 | `console` | Attach to a running console | identity and full config |
 | `inspect` | Read latest state | identity and `config.stateDir` |
+| `halt` | Clean disk-preserving shutdown | identity and `config.stateDir` |
 | `stop` | Graceful stop | identity and `config.stateDir` |
 | `kill` | Hard stop | identity and `config.stateDir` |
 | `delete` | Remove backend runtime state | identity and `config.stateDir` |
@@ -83,9 +84,46 @@ forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
     },
     "state": "prepared",
     "observedAt": "2026-05-02T00:00:00Z"
+  },
+  "verification": {
+    "ok": true,
+    "imageRef": "docker.io/library/busybox:1.36",
+    "resolvedRef": "docker.io/library/busybox@sha256:...",
+    "imageDigest": "sha256:...",
+    "kernel": {
+      "path": "/tmp/Image",
+      "sha256": "..."
+    },
+    "rootfs": {
+      "path": "/tmp/rootfs.ext4",
+      "sha256": "...",
+      "recordedSHA256": "..."
+    }
+  },
+  "readiness": {
+    "guestReady": {
+      "ready": true,
+      "observedAt": "2026-05-02T00:00:00Z",
+      "detail": "workspace reached runtime state running"
+    },
+    "shellReady": {
+      "ready": true,
+      "detail": "console input is available"
+    },
+    "resultReady": {
+      "ready": false
+    }
   }
 }
 ```
+
+For named workspace status responses, `verification` compares current runtime
+artifacts with the values recorded when the workspace was created. If a hash no
+longer matches, `verification.ok` is false and `verification.divergence`
+contains entries with `artifact`, `field`, `expected`, and `actual`.
+
+`readiness` gives consumers explicit guest, shell, and result readiness signals.
+Each signal has `ready` plus optional `observedAt`, `detail`, and `error`.
 
 Host responses use `host` instead of `event`.
 
@@ -106,7 +144,9 @@ Host responses use `host` instead of `event`.
 ```
 
 Valid states are `unknown`, `prepared`, `starting`, `running`, `stopping`,
-`stopped`, and `failed`.
+`halted`, `stopped`, and `failed`. `halted` is a terminal runtime state where
+the VM process is gone but the workspace disk, identity, and event history are
+preserved for a later `start`.
 
 ## Backend Pages
 

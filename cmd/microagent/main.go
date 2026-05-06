@@ -103,7 +103,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
 	}
-	if args[0] == "status" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
+	if args[0] == "status" || args[0] == "halt" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
 		if hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 		}
@@ -696,7 +696,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		req.Command = "start"
 		return req, nil
-	case "status", "stop", "kill", "delete":
+	case "status", "halt", "stop", "kill", "delete":
 		req, err := stateRequestFromFlagsOrJSON(command, jsonPath, args, identity, config)
 		if err != nil {
 			return vmkit.Request{}, err
@@ -739,6 +739,7 @@ type workspaceOptions struct {
 	Keep            bool
 	PrepareForStart bool
 	SerialInput     bool
+	Verification    *vmkit.RuntimeVerification
 }
 
 type workspaceSpec struct {
@@ -774,30 +775,32 @@ type workspaceDisk struct {
 }
 
 type workspaceManifest struct {
-	Name      string          `json:"name"`
-	Profile   string          `json:"profile,omitempty"`
-	Restart   string          `json:"restart"`
-	Resources resourceConfig  `json:"resources"`
-	Network   networkSpec     `json:"network,omitempty"`
-	Disks     []workspaceDisk `json:"disks,omitempty"`
+	Name         string                     `json:"name"`
+	Profile      string                     `json:"profile,omitempty"`
+	Restart      string                     `json:"restart"`
+	Resources    resourceConfig             `json:"resources"`
+	Network      networkSpec                `json:"network,omitempty"`
+	Disks        []workspaceDisk            `json:"disks,omitempty"`
+	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
 }
 
 type workspaceResult struct {
-	Workspace  string            `json:"workspace"`
-	StateDir   string            `json:"state_dir"`
-	Profile    string            `json:"profile,omitempty"`
-	Restart    string            `json:"restart"`
-	Resources  resourceConfig    `json:"resources"`
-	Network    networkSpec       `json:"network,omitempty"`
-	RootfsPath string            `json:"rootfs_path"`
-	KernelPath string            `json:"kernel_path"`
-	Disks      []workspaceDisk   `json:"disks,omitempty"`
-	SerialPath string            `json:"serial_path,omitempty"`
-	SerialLog  string            `json:"serial_log,omitempty"`
-	FinalState string            `json:"final_state,omitempty"`
-	Result     *guestResult      `json:"result,omitempty"`
-	Image      rootfs.Provenance `json:"image"`
-	Response   vmkit.Response    `json:"response"`
+	Workspace    string                     `json:"workspace"`
+	StateDir     string                     `json:"state_dir"`
+	Profile      string                     `json:"profile,omitempty"`
+	Restart      string                     `json:"restart"`
+	Resources    resourceConfig             `json:"resources"`
+	Network      networkSpec                `json:"network,omitempty"`
+	RootfsPath   string                     `json:"rootfs_path"`
+	KernelPath   string                     `json:"kernel_path"`
+	Disks        []workspaceDisk            `json:"disks,omitempty"`
+	SerialPath   string                     `json:"serial_path,omitempty"`
+	SerialLog    string                     `json:"serial_log,omitempty"`
+	FinalState   string                     `json:"final_state,omitempty"`
+	Result       *guestResult               `json:"result,omitempty"`
+	Image        rootfs.Provenance          `json:"image"`
+	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	Response     vmkit.Response             `json:"response"`
 }
 
 type copyResult struct {
@@ -1003,6 +1006,12 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 		return err
 	}
 	result.Disks = disks
+	verification, err := buildWorkspaceVerification(opts, result)
+	if err != nil {
+		return err
+	}
+	opts.Verification = &verification
+	result.Verification = &verification
 	if err := writeWorkspaceManifest(opts); err != nil {
 		return err
 	}
@@ -2036,7 +2045,7 @@ func waitForSupervisedWorkspace(ctx context.Context, opts workspaceOptions, inte
 		}
 		if resp.Event != nil {
 			switch resp.Event.State {
-			case vmkit.StateStopped, vmkit.StateFailed:
+			case vmkit.StateHalted, vmkit.StateStopped, vmkit.StateFailed:
 				return resp.Event.State, nil
 			}
 		}
@@ -2051,7 +2060,7 @@ func waitForSupervisedWorkspace(ctx context.Context, opts workspaceOptions, inte
 func shouldRestartWorkspace(policy string, state vmkit.VMState) bool {
 	switch normalizeRestartPolicy(policy) {
 	case "always":
-		return state == vmkit.StateStopped || state == vmkit.StateFailed
+		return state == vmkit.StateHalted || state == vmkit.StateStopped || state == vmkit.StateFailed
 	case "on-failure":
 		return state == vmkit.StateFailed
 	default:
@@ -2084,6 +2093,12 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		return err
 	}
 	result.Disks = disks
+	verification, err := buildWorkspaceVerification(opts, result)
+	if err != nil {
+		return err
+	}
+	opts.Verification = &verification
+	result.Verification = &verification
 	if err := writeWorkspaceManifest(opts); err != nil {
 		return err
 	}
@@ -2712,12 +2727,13 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 		return err
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), workspaceManifest{
-		Name:      opts.Name,
-		Profile:   opts.Profile,
-		Restart:   normalizeRestartPolicy(opts.RestartPolicy),
-		Resources: workspaceResources(opts),
-		Network:   networkSpecFromConfig(opts.Network),
-		Disks:     opts.Disks,
+		Name:         opts.Name,
+		Profile:      opts.Profile,
+		Restart:      normalizeRestartPolicy(opts.RestartPolicy),
+		Resources:    workspaceResources(opts),
+		Network:      networkSpecFromConfig(opts.Network),
+		Disks:        opts.Disks,
+		Verification: opts.Verification,
 	})
 }
 
@@ -2962,11 +2978,234 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 		resp.RestartPolicy = nonEmpty(manifest.Restart, defaultRestartPolicy)
 		network := networkConfigFromSpec(manifest.Network)
 		resp.Network = &network
+		resp.Verification = workspaceVerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest)
 	}
+	readiness := workspaceReadinessForStatus(opts, eventFile)
+	resp.Readiness = &readiness
 	if errorText != "" {
 		resp.Error = errorText
 	}
 	return resp
+}
+
+func buildWorkspaceVerification(opts workspaceOptions, result workspaceResult) (vmkit.RuntimeVerification, error) {
+	verification := vmkit.RuntimeVerification{
+		OK:          true,
+		ImageRef:    result.Image.ImageRef,
+		ResolvedRef: result.Image.ResolvedRef,
+		ImageDigest: result.Image.Digest,
+		Kernel:      recordedArtifact(opts.KernelPath),
+		Rootfs:      recordedArtifact(result.RootfsPath),
+	}
+	if opts.GuestInitPath != "" {
+		if info, err := os.Stat(opts.GuestInitPath); err == nil && !info.IsDir() {
+			verification.Init = recordedArtifact(opts.GuestInitPath)
+		}
+	}
+	for _, artifact := range []struct {
+		name     string
+		artifact *vmkit.VerifiedArtifact
+	}{
+		{name: "kernel", artifact: verification.Kernel},
+		{name: "rootfs", artifact: verification.Rootfs},
+		{name: "init", artifact: verification.Init},
+	} {
+		if artifact.artifact != nil && artifact.artifact.Error != "" {
+			verification.OK = false
+			verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{
+				Artifact: artifact.name,
+				Error:    artifact.artifact.Error,
+			})
+		}
+	}
+	if !verification.OK {
+		return verification, fmt.Errorf("record workspace verification: %s", verification.Divergence[0].Error)
+	}
+	return verification, nil
+}
+
+func recordedArtifact(path string) *vmkit.VerifiedArtifact {
+	artifact := &vmkit.VerifiedArtifact{Path: path}
+	if strings.TrimSpace(path) == "" {
+		artifact.Error = "path is empty"
+		return artifact
+	}
+	sum, err := fileSHA256(path)
+	if err != nil {
+		artifact.Error = err.Error()
+		return artifact
+	}
+	artifact.SHA256 = sum
+	return artifact
+}
+
+func workspaceVerificationForStatus(opts workspaceOptions, name string, manifest workspaceManifest) *vmkit.RuntimeVerification {
+	recorded := manifest.Verification
+	if recorded == nil {
+		if _, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name}); err != nil {
+			return nil
+		}
+	}
+	verification := vmkit.RuntimeVerification{OK: true}
+	if recorded != nil {
+		verification.ImageRef = recorded.ImageRef
+		verification.ResolvedRef = recorded.ResolvedRef
+		verification.ImageDigest = recorded.ImageDigest
+	}
+	kernelPath, rootfsPath := "", ""
+	if state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name}); err == nil {
+		kernelPath = state.Config.KernelPath
+		rootfsPath = state.Config.RootfsPath
+	}
+	if kernelPath == "" && recorded != nil && recorded.Kernel != nil {
+		kernelPath = recorded.Kernel.Path
+	}
+	if rootfsPath == "" && recorded != nil && recorded.Rootfs != nil {
+		rootfsPath = recorded.Rootfs.Path
+	}
+	if rootfsPath == "" {
+		rootfsPath = filepath.Join(opts.StateDir, "workspaces", name, "rootfs.ext4")
+	}
+	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification)
+	verification.Rootfs = currentArtifact("rootfs", rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification)
+	if recorded != nil && recorded.Init != nil {
+		verification.Init = currentArtifact("init", recorded.Init.Path, recorded.Init, &verification)
+	}
+	verification.OK = len(verification.Divergence) == 0
+	return &verification
+}
+
+func recordedArtifactFor(recorded *vmkit.RuntimeVerification, name string) *vmkit.VerifiedArtifact {
+	if recorded == nil {
+		return nil
+	}
+	switch name {
+	case "kernel":
+		return recorded.Kernel
+	case "rootfs":
+		return recorded.Rootfs
+	case "init":
+		return recorded.Init
+	default:
+		return nil
+	}
+}
+
+func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification) *vmkit.VerifiedArtifact {
+	artifact := &vmkit.VerifiedArtifact{Path: path}
+	if recorded != nil {
+		artifact.RecordedSHA256 = recorded.SHA256
+		if artifact.Path == "" {
+			artifact.Path = recorded.Path
+		}
+	}
+	if strings.TrimSpace(artifact.Path) == "" {
+		artifact.Error = "path is empty"
+		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{Artifact: name, Error: artifact.Error})
+		return artifact
+	}
+	sum, err := fileSHA256(artifact.Path)
+	if err != nil {
+		artifact.Error = err.Error()
+		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{Artifact: name, Error: err.Error()})
+		return artifact
+	}
+	artifact.SHA256 = sum
+	if artifact.RecordedSHA256 != "" && artifact.RecordedSHA256 != artifact.SHA256 {
+		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{
+			Artifact: name,
+			Field:    "sha256",
+			Expected: artifact.RecordedSHA256,
+			Actual:   artifact.SHA256,
+		})
+	}
+	return artifact
+}
+
+func workspaceReadinessForStatus(opts workspaceOptions, event workspaceEventFile) vmkit.RuntimeReadiness {
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: event.Identity.RuntimeID})
+	if err == nil {
+		return workspaceReadinessFromRuntime(state)
+	}
+	readiness := vmkit.RuntimeReadiness{}
+	if event.State == vmkit.StateRunning || event.State == vmkit.StateHalted || event.State == vmkit.StateStopped {
+		readiness.GuestReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: parseOptionalTime(event.ObservedAt),
+			Detail:     "workspace reached runtime state " + string(event.State),
+		}
+	}
+	if _, statErr := os.Stat(resultPath(workspaceOptions{StateDir: opts.StateDir, Name: event.Identity.RuntimeID})); statErr == nil {
+		readiness.ResultReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: fileModTime(resultPath(workspaceOptions{StateDir: opts.StateDir, Name: event.Identity.RuntimeID})),
+			Detail:     "guest result is available",
+		}
+	}
+	return readiness
+}
+
+func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeReadiness {
+	readiness := vmkit.RuntimeReadiness{}
+	if state.StartedAt != "" || state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateHalted || state.Event.State == vmkit.StateStopped {
+		readiness.GuestReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: firstTime(state.StartedAt, state.Event.ObservedAt),
+			Detail:     "workspace reached runtime state " + string(state.Event.State),
+		}
+	}
+	if state.Event.State == vmkit.StateRunning && state.SerialInputPath != "" {
+		if _, err := os.Stat(state.SerialInputPath); err == nil {
+			readiness.ShellReady = vmkit.ReadinessSignal{
+				Ready:      true,
+				ObservedAt: fileModTime(state.SerialInputPath),
+				Detail:     "console input is available",
+			}
+		} else if !os.IsNotExist(err) {
+			readiness.ShellReady = vmkit.ReadinessSignal{Error: err.Error()}
+		}
+	}
+	path := resultPath(workspaceOptions{StateDir: state.Config.StateDir, Name: state.Event.Identity.RuntimeID})
+	if _, err := os.Stat(path); err == nil {
+		readiness.ResultReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: fileModTime(path),
+			Detail:     "guest result is available",
+		}
+	} else if !os.IsNotExist(err) {
+		readiness.ResultReady = vmkit.ReadinessSignal{Error: err.Error()}
+	}
+	return readiness
+}
+
+func firstTime(values ...string) *time.Time {
+	for _, value := range values {
+		if parsed := parseOptionalTime(value); parsed != nil {
+			return parsed
+		}
+	}
+	return nil
+}
+
+func parseOptionalTime(value string) *time.Time {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return &parsed
+		}
+	}
+	return nil
+}
+
+func fileModTime(path string) *time.Time {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	mod := info.ModTime().UTC()
+	return &mod
 }
 
 func writeWorkspaceProcessState(opts workspaceOptions, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {
@@ -2992,6 +3231,9 @@ func writeWorkspaceProcessState(opts workspaceOptions, req vmkit.Request, state 
 	if err := writeJSONFile(filepath.Join(dir, "event.json"), fileEvent); err != nil {
 		return err
 	}
+	if err := appendWorkspaceEvent(filepath.Join(dir, "events.json"), fileEvent); err != nil {
+		return err
+	}
 	updatedAt := time.Now().UTC()
 	runtimeState := workspaceRuntimeState{
 		Event:           fileEvent,
@@ -3005,7 +3247,23 @@ func writeWorkspaceProcessState(opts workspaceOptions, req vmkit.Request, state 
 	if state == vmkit.StateStarting || state == vmkit.StateRunning {
 		runtimeState.StartedAt = updatedAt.Format(time.RFC3339)
 	}
+	runtimeState.Readiness = workspaceReadinessFromRuntime(runtimeState)
 	return writeJSONFile(filepath.Join(dir, "runtime.json"), runtimeState)
+}
+
+func appendWorkspaceEvent(path string, event workspaceEventFile) error {
+	var events []workspaceEventFile
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err == nil && len(bytes.TrimSpace(data)) != 0 {
+		if err := json.Unmarshal(data, &events); err != nil {
+			return err
+		}
+	}
+	events = append(events, event)
+	return writeJSONFile(path, events)
 }
 
 type workspaceEventFile struct {
@@ -3016,14 +3274,15 @@ type workspaceEventFile struct {
 }
 
 type workspaceRuntimeState struct {
-	Event           workspaceEventFile `json:"event"`
-	Config          vmkit.Config       `json:"config"`
-	PID             int                `json:"pid,omitempty"`
-	SerialLogPath   string             `json:"serialLogPath"`
-	SerialInputPath string             `json:"serialInputPath,omitempty"`
-	StartedAt       string             `json:"startedAt,omitempty"`
-	UpdatedAt       string             `json:"updatedAt"`
-	Error           string             `json:"error,omitempty"`
+	Event           workspaceEventFile     `json:"event"`
+	Config          vmkit.Config           `json:"config"`
+	PID             int                    `json:"pid,omitempty"`
+	SerialLogPath   string                 `json:"serialLogPath"`
+	SerialInputPath string                 `json:"serialInputPath,omitempty"`
+	StartedAt       string                 `json:"startedAt,omitempty"`
+	UpdatedAt       string                 `json:"updatedAt"`
+	Readiness       vmkit.RuntimeReadiness `json:"readiness,omitempty"`
+	Error           string                 `json:"error,omitempty"`
 }
 
 func writeJSONFile(path string, value any) error {
@@ -3161,6 +3420,16 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 		}
 		if resp.Network != nil && resp.Network.Mode != "" {
 			fmt.Fprintf(stdout, "Network: %s\n", resp.Network.Mode)
+		}
+		if resp.Verification != nil {
+			fmt.Fprintf(stdout, "Verification: %s\n", humanOK(resp.Verification.OK))
+		}
+		if resp.Readiness != nil {
+			fmt.Fprintf(stdout, "Readiness: guest=%s shell=%s result=%s\n",
+				humanReady(resp.Readiness.GuestReady.Ready),
+				humanReady(resp.Readiness.ShellReady.Ready),
+				humanReady(resp.Readiness.ResultReady.Ready),
+			)
 		}
 		if resp.Event.Detail != "" {
 			fmt.Fprintf(stdout, "Detail: %s\n", resp.Event.Detail)
@@ -3370,6 +3639,13 @@ func humanOK(ok bool) string {
 		return "ok"
 	}
 	return "failed"
+}
+
+func humanReady(ready bool) string {
+	if ready {
+		return "ready"
+	}
+	return "not-ready"
 }
 
 func availability(ok bool) string {
@@ -3797,7 +4073,7 @@ func ensureWorkspaceCloneable(stateDir, name string) error {
 
 func cloneableState(name string, state vmkit.VMState) error {
 	switch state {
-	case "", vmkit.StateUnknown, vmkit.StatePrepared, vmkit.StateStopped:
+	case "", vmkit.StateUnknown, vmkit.StatePrepared, vmkit.StateHalted, vmkit.StateStopped:
 		return nil
 	default:
 		return fmt.Errorf("workspace %s must be stopped before cloning; current state is %s", name, state)
@@ -5154,6 +5430,7 @@ Commands:
   profiles             List resource profiles
   images               List or prune local image records
   perf                 Measure workspace performance
+  halt                 Halt a workspace and preserve disk state
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace
