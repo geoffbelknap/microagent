@@ -273,8 +273,8 @@ func ValidateNetworkConfig(network NetworkConfig) error {
 		if protocol == "" {
 			protocol = "tcp"
 		}
-		if protocol != "tcp" && protocol != "udp" {
-			return fmt.Errorf("network port forward %d protocol must be tcp or udp", i)
+		if protocol != "tcp" {
+			return fmt.Errorf("network port forward %d protocol must be tcp", i)
 		}
 		if forward.HostPort == 0 {
 			return fmt.Errorf("network port forward %d hostPort must be positive", i)

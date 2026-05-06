@@ -483,6 +483,19 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 	}
 }
 
+func TestRequestForCommandRejectsUnsupportedPortForwardProtocol(t *testing.T) {
+	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--publish", "127.0.0.1:8080:80/udp",
+	}))
+	if err == nil {
+		t.Fatal("requestForCommand accepted udp port forward")
+	}
+}
+
 func TestRequestForCommandParsesDisk(t *testing.T) {
 	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",

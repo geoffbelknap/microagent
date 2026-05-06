@@ -56,6 +56,18 @@ func TestValidateNetworkConfigRejectsInvalidMode(t *testing.T) {
 	}
 }
 
+func TestValidateNetworkConfigRejectsUnsupportedPortForwardProtocol(t *testing.T) {
+	cfg := NetworkConfig{
+		Mode: "nat",
+		PortForwards: []PortForward{
+			{Protocol: "udp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
+		},
+	}
+	if err := ValidateNetworkConfig(cfg); err == nil {
+		t.Fatal("ValidateNetworkConfig accepted udp port forward")
+	}
+}
+
 func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
 	cfg := NetworkConfig{
 		Mode: "nat",

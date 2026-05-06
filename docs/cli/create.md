@@ -30,7 +30,7 @@ first.
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
 | `--network <mode>` | Network mode: `nat`, `isolated`, or `bridged` |
-| `--publish <mapping>` | Declarative host port forward, `[host:]hostPort:guestPort[/tcp\|udp]`. Repeatable |
+| `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |

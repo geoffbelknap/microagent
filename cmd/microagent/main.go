@@ -658,7 +658,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	networkMode := fs.String("network", defaultNetworkMode, "Network mode: nat, isolated, or bridged")
-	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp|udp]")
+	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
 	}
@@ -1749,7 +1749,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
 	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: nat, isolated, or bridged")
 	var publishFlags multiFlag
-	fs.Var(&publishFlags, "publish", "Forward host[:hostPort]:guestPort[/tcp|udp]")
+	fs.Var(&publishFlags, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
@@ -2203,9 +2203,6 @@ func rootfsPortForwards(forwards []vmkit.PortForward) []rootfs.PortForward {
 	}
 	out := make([]rootfs.PortForward, 0, len(forwards))
 	for _, forward := range forwards {
-		if normalizeNetworkConfig(vmkit.NetworkConfig{PortForwards: []vmkit.PortForward{forward}}).PortForwards[0].Protocol != "tcp" {
-			continue
-		}
 		out = append(out, rootfs.PortForward{
 			Protocol:  "tcp",
 			HostPort:  forward.HostPort,
@@ -4442,7 +4439,7 @@ func parsePortForward(raw string) (vmkit.PortForward, error) {
 		hostPortText = parts[1]
 		guestPortText = parts[2]
 	default:
-		return vmkit.PortForward{}, fmt.Errorf("publish mapping must be [host:]hostPort:guestPort[/tcp|udp]")
+		return vmkit.PortForward{}, fmt.Errorf("publish mapping must be [host:]hostPort:guestPort[/tcp]")
 	}
 	hostPort, err := strconv.ParseUint(strings.TrimSpace(hostPortText), 10, 16)
 	if err != nil || hostPort == 0 {
