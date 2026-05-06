@@ -11,6 +11,7 @@ cleanup() {
   rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
+trap 'status=$?; echo "applevf supervisor lifecycle smoke failed at line $LINENO with status $status" >&2; exit "$status"' ERR
 
 touch "$KERNEL" "$ROOTFS"
 
@@ -161,20 +162,103 @@ if result.get("backend") != "apple-vf" or result.get("exitCode") != 0 or result.
     raise SystemExit(body)
 PY
 
-quarantine_response="$(request_state_only quarantine | "$SUPERVISOR")"
-assert_response "$quarantine_response" true quarantined
-python3 - "$quarantine_response" "$STATE_DIR/agent-smoke/events.json" <<'PY'
+ACK="$STATE_DIR/agent-smoke/quarantine.ack.json"
+READY="$STATE_DIR/agent-smoke/quarantine.fake-ready"
+python3 - "$ACK" "$READY" <<'PY' &
 import json
+import signal
+import sys
+import time
+
+ack, ready = sys.argv[1:]
+
+def acknowledge(_signum, _frame):
+    with open(ack, "w", encoding="utf-8") as handle:
+        json.dump({"ok": True}, handle)
+        handle.write("\n")
+
+def terminate(_signum, _frame):
+    raise SystemExit(0)
+
+signal.signal(signal.SIGUSR1, acknowledge)
+signal.signal(signal.SIGTERM, terminate)
+with open(ready, "w", encoding="utf-8") as handle:
+    handle.write("ready\n")
+while True:
+    time.sleep(1)
+PY
+fake_pid="$!"
+trap 'kill "$fake_pid" 2>/dev/null || true; cleanup' EXIT
+deadline="$((SECONDS + 5))"
+while [ ! -f "$READY" ]; do
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "fake quarantine runtime did not become signal-ready" >&2
+    exit 1
+  fi
+  sleep 1
+done
+python3 - "$STATE_DIR/agent-smoke" "$fake_pid" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+runtime_dir, pid = sys.argv[1], int(sys.argv[2])
+with open(os.path.join(runtime_dir, "config.json"), "r", encoding="utf-8") as handle:
+    config = json.load(handle)
+with open(os.path.join(runtime_dir, "event.json"), "r", encoding="utf-8") as handle:
+    event = json.load(handle)
+event["state"] = "running"
+event["detail"] = "serial=" + os.path.join(runtime_dir, "serial.log")
+event["observedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+runtime = {
+    "event": event,
+    "config": config,
+    "pid": pid,
+    "serialLogPath": os.path.join(runtime_dir, "serial.log"),
+    "serialInputPath": os.path.join(runtime_dir, "serial.in"),
+    "startedAt": event["observedAt"],
+    "updatedAt": event["observedAt"],
+}
+with open(os.path.join(runtime_dir, "event.json"), "w", encoding="utf-8") as handle:
+    json.dump(event, handle)
+    handle.write("\n")
+with open(os.path.join(runtime_dir, "runtime.json"), "w", encoding="utf-8") as handle:
+    json.dump(runtime, handle)
+    handle.write("\n")
+PY
+
+quarantine_response_path="$STATE_DIR/quarantine-response.json"
+quarantine_error_path="$STATE_DIR/quarantine.err"
+if ! request_state_only quarantine | "$SUPERVISOR" >"$quarantine_response_path" 2>"$quarantine_error_path"; then
+  echo "quarantine command failed" >&2
+  cat "$quarantine_response_path" >&2 || true
+  cat "$quarantine_error_path" >&2 || true
+  exit 1
+fi
+quarantine_response="$(cat "$quarantine_response_path")"
+assert_response "$quarantine_response" true quarantined
+python3 - "$quarantine_response" "$STATE_DIR/agent-smoke/events.json" "$STATE_DIR/agent-smoke/runtime.json" "$fake_pid" <<'PY'
+import json
+import os
 import sys
 
 body = json.loads(sys.argv[1])
-if ((body.get("event") or {}).get("detail")) != "host-side network and mediation severed":
+if ((body.get("event") or {}).get("detail")) != "host-side network, mediation, and serial input severed":
     raise SystemExit(body)
 with open(sys.argv[2], "r", encoding="utf-8") as handle:
     states = [event["state"] for event in json.load(handle)]
 for expected in ("prepared", "quarantined"):
     if expected not in states:
         raise SystemExit(states)
+with open(sys.argv[3], "r", encoding="utf-8") as handle:
+    runtime = json.load(handle)
+if runtime.get("pid") != int(sys.argv[4]):
+    raise SystemExit(runtime)
+try:
+    os.kill(int(sys.argv[4]), 0)
+except ProcessLookupError:
+    raise SystemExit("quarantine stopped the runtime process")
 PY
 
 if start_quarantined_response="$(request start | "$SUPERVISOR" 2>/dev/null)"; then
@@ -193,6 +277,7 @@ PY
 
 halt_response="$(request_state_only halt | "$SUPERVISOR")"
 assert_response "$halt_response" true halted
+wait "$fake_pid" 2>/dev/null || true
 
 stop_response="$(request_state_only stop | "$SUPERVISOR")"
 assert_response "$stop_response" true stopped

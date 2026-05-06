@@ -74,6 +74,12 @@ state that preserves disk state and event history while severing host-side
 network and mediation paths. A quarantined workspace must be halted, stopped,
 or killed before it can be started again.
 
+For a running workspace, `quarantine` is handled inside the live Apple VF
+supervisor process. The command process sends a control signal and waits for an
+acknowledgement before recording `quarantined`. The live supervisor detaches
+network attachments, removes virtio-vsock listeners, closes published TCP
+listeners, and removes serial input without stopping the VM process.
+
 ### Disks
 
 Extra disks are optional. `mode` must be `ro` or `rw`. The supervisor
@@ -117,7 +123,9 @@ proxies the stream to the requested guest TCP port.
 ```
 
 Required mediation fails closed: `failClosed` must be `true`, and enabled
-mediation must declare a port and target.
+mediation must declare a port and `host:port` target. The supervisor installs
+mediation as a guest-to-host virtio-vsock listener and forwards accepted
+connections to that target.
 
 ## Response
 
