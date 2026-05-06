@@ -11,6 +11,9 @@ microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--ready-timeout
 it writes one line to the console and prints any new output, which is useful
 in scripts.
 
+In interactive mode, press `Ctrl-]` to detach from the console without stopping
+the workspace.
+
 `connect` is supported by Apple VF only. For Firecracker workspaces, use
 [`logs`](/cli/logs/) for serial output.
 

@@ -39,6 +39,7 @@ const (
 	defaultWorkspaceProfile    = "small"
 	defaultRestartPolicy       = "never"
 	defaultNetworkMode         = "nat"
+	consoleDetachByte          = byte(0x1d) // Ctrl-]
 )
 
 func main() {
@@ -4407,14 +4408,19 @@ func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 	for {
 		n, readErr := src.Read(buffer)
 		if n > 0 {
-			chunk := bytes.ReplaceAll(buffer[:n], []byte("\n"), []byte("\r"))
-			written, writeErr := dst.Write(chunk)
-			total += int64(written)
+			chunk := buffer[:n]
+			if idx := bytes.IndexByte(chunk, consoleDetachByte); idx >= 0 {
+				written, writeErr := writeConsoleInputChunk(dst, chunk[:idx])
+				total += written
+				if writeErr != nil {
+					return total, writeErr
+				}
+				return total, nil
+			}
+			written, writeErr := writeConsoleInputChunk(dst, chunk)
+			total += written
 			if writeErr != nil {
 				return total, writeErr
-			}
-			if written != len(chunk) {
-				return total, io.ErrShortWrite
 			}
 		}
 		if readErr != nil {
@@ -4424,6 +4430,21 @@ func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 			return total, readErr
 		}
 	}
+}
+
+func writeConsoleInputChunk(dst io.Writer, chunk []byte) (int64, error) {
+	if len(chunk) == 0 {
+		return 0, nil
+	}
+	normalized := bytes.ReplaceAll(chunk, []byte("\n"), []byte("\r"))
+	written, err := dst.Write(normalized)
+	if err != nil {
+		return int64(written), err
+	}
+	if written != len(normalized) {
+		return int64(written), io.ErrShortWrite
+	}
+	return int64(written), nil
 }
 
 func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, publishes []string) (vmkit.Request, error) {

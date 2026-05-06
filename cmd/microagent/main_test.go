@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -1954,6 +1955,28 @@ func TestWaitForConsoleReadyUsesSerialPrompt(t *testing.T) {
 	}
 	if err := waitForConsoleReady(t.Context(), logPath, time.Second); err != nil {
 		t.Fatalf("waitForConsoleReady: %v", err)
+	}
+}
+
+func TestCopyConsoleInputNormalizesNewlines(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyConsoleInput(&dst, strings.NewReader("echo ready\n"))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	if written != int64(len("echo ready\r")) || dst.String() != "echo ready\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyConsoleInputDetachesOnCtrlBracket(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyConsoleInput(&dst, strings.NewReader("echo before\n"+string([]byte{consoleDetachByte})+"echo after\n"))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	if written != int64(len("echo before\r")) || dst.String() != "echo before\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
 	}
 }
 
