@@ -13,6 +13,7 @@ the host: Firecracker on Linux, Apple VF on macOS.
 | `make smoke` | Default per-host smoke suite |
 | `make smoke-rootfs` | OCI image to ext4 rootfs conversion |
 | `make smoke-firecracker` | Linux KVM Firecracker boot |
+| `make smoke-firecracker-console` | Linux KVM Firecracker console parity gate |
 | `make smoke-workspace` | HostOS workspace lifecycle |
 | `make smoke-boot` | Boot a Linux VM end-to-end (Apple VF) |
 
@@ -57,6 +58,17 @@ non-KVM check is:
 ```bash
 make check-kernel-config-amd64
 ```
+
+## Firecracker console parity gate
+
+```bash
+make smoke-firecracker-console
+```
+
+This is a Linux amd64 KVM target for the remaining Firecracker console parity
+work. It is intentionally not included in `make smoke` yet. Until Firecracker
+serial input support is implemented, the target fails with the exact console
+contract that must pass before parity is considered complete.
 
 ## Apple VF boot smoke
 

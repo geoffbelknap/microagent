@@ -53,3 +53,27 @@ Persistent workspace disks live under:
 - Requires the `firecracker` binary on `PATH`, under packaged `libexec`, or
   through `MICROAGENT_FIRECRACKER`.
 - Does not support interactive `connect`; use `microagent logs`.
+
+## Console Parity Target
+
+Firecracker console parity is not complete until it matches the Apple VF
+operator-facing contract:
+
+- `microagent connect <name> --send "echo CONNECT_READY"` reaches a running
+  guest shell and prints `CONNECT_READY`.
+- interactive `microagent connect <name>` waits for the guest shell readiness
+  gate by default.
+- `Ctrl-]` detaches without stopping the workspace.
+- errors clearly distinguish "guest shell is not ready" from "console input is
+  unavailable".
+- serial output remains inspectable through `microagent logs`.
+
+The tracking gate is:
+
+```bash
+make smoke-firecracker-console
+```
+
+That target is intentionally not part of default smoke yet because it requires
+Linux amd64 with KVM and currently fails until Firecracker serial input support
+is implemented.
