@@ -1177,6 +1177,15 @@ func runImages(args []string, stdout *os.File) error {
 			return err
 		}
 		return writeImageRecord(stdout, record)
+	case "rm", "remove", "rmi":
+		if fs.NArg() != 2 {
+			return fmt.Errorf("usage: microagent images rm <image> [--delete] [--state-dir <dir>]")
+		}
+		result, err := removeImageRecords(opts.StateDir, fs.Arg(1), *deleteFiles)
+		if err != nil {
+			return err
+		}
+		return writeImagePruneResult(stdout, result)
 	case "prune":
 		if fs.NArg() != 1 {
 			return fmt.Errorf("usage: microagent images prune [--state-dir <dir>]")
@@ -4090,6 +4099,58 @@ func tagImageRecord(stateDir, source, target string) (imageRecord, error) {
 
 func imageMatchesRef(image imageRecord, ref string) bool {
 	return image.ImageRef == ref || image.ResolvedRef == ref || image.Digest == ref
+}
+
+func removeImageRecords(stateDir, ref string, deleteFiles bool) (imagePruneResult, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return imagePruneResult{}, fmt.Errorf("image reference is required")
+	}
+	idx, err := readImageIndex(stateDir)
+	if err != nil {
+		return imagePruneResult{}, err
+	}
+	result := imagePruneResult{}
+	var matched []imageRecord
+	keptPaths := map[string]bool{}
+	for _, image := range idx.Images {
+		if imageMatchesRef(image, ref) {
+			matched = append(matched, image)
+			continue
+		}
+		result.Kept = append(result.Kept, image)
+		if image.OutputPath != "" {
+			keptPaths[filepath.Clean(image.OutputPath)] = true
+		}
+	}
+	if len(matched) == 0 {
+		return imagePruneResult{}, fmt.Errorf("image %q not found", ref)
+	}
+	deletedPaths := map[string]bool{}
+	for _, image := range matched {
+		cleanPath := filepath.Clean(image.OutputPath)
+		if deleteFiles && image.OutputPath != "" && imagePathInRootfsStore(stateDir, cleanPath) && !keptPaths[cleanPath] {
+			if deletedPaths[cleanPath] {
+				result.Deleted = append(result.Deleted, image)
+				continue
+			}
+			if err := os.Remove(cleanPath); err == nil {
+				deletedPaths[cleanPath] = true
+				result.Deleted = append(result.Deleted, image)
+				continue
+			} else if !os.IsNotExist(err) {
+				return imagePruneResult{}, err
+			}
+		}
+		result.Removed = append(result.Removed, image)
+	}
+	sortImageRecords(result.Kept)
+	sortImageRecords(result.Removed)
+	sortImageRecords(result.Deleted)
+	if err := writeImageIndex(stateDir, imageIndex{Images: result.Kept}); err != nil {
+		return imagePruneResult{}, err
+	}
+	return result, nil
 }
 
 func findImageRecord(stateDir, ref string, platform rootfs.Platform) (imageRecord, error) {

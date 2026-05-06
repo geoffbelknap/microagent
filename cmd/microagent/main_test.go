@@ -1282,6 +1282,74 @@ func TestImagesTagCreatesAlias(t *testing.T) {
 	}
 }
 
+func TestImagesRemoveAliasKeepsSharedBaseline(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
+		if err := upsertImageRecord(dir, imageRecord{
+			ImageRef:    ref,
+			ResolvedRef: "docker.io/library/busybox@sha256:abc",
+			Digest:      "sha256:abc",
+			Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+			OutputPath:  rootfsPath,
+			SizeBytes:   6,
+			LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := removeImageRecords(dir, "local/busybox:baseline", true)
+	if err != nil {
+		t.Fatalf("removeImageRecords: %v", err)
+	}
+	if len(removed.Removed) != 1 || len(removed.Deleted) != 0 || len(removed.Kept) != 1 {
+		t.Fatalf("removed = %#v", removed)
+	}
+	if _, err := os.Stat(rootfsPath); err != nil {
+		t.Fatalf("baseline was removed: %v", err)
+	}
+}
+
+func TestImagesRemoveDigestDeletesUnsharedBaseline(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
+		if err := upsertImageRecord(dir, imageRecord{
+			ImageRef:    ref,
+			ResolvedRef: "docker.io/library/busybox@sha256:abc",
+			Digest:      "sha256:abc",
+			Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+			OutputPath:  rootfsPath,
+			SizeBytes:   6,
+			LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := removeImageRecords(dir, "sha256:abc", true)
+	if err != nil {
+		t.Fatalf("removeImageRecords: %v", err)
+	}
+	if len(removed.Deleted) != 2 || len(removed.Removed) != 0 || len(removed.Kept) != 0 {
+		t.Fatalf("removed = %#v", removed)
+	}
+	if _, err := os.Stat(rootfsPath); !os.IsNotExist(err) {
+		t.Fatalf("baseline still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
 func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
