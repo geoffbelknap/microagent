@@ -9,6 +9,7 @@ description: All microagent subcommands at a glance.
 | [`create`](/cli/create/) | Create a named, persistent workspace |
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
+| [`network`](/cli/network/) | Inspect workspace network mode and port forwards |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
 | [`stop`](/cli/stop/) | Graceful shutdown |

@@ -93,6 +93,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "logs" || args[0] == "log" {
 		return runLogs(args[1:], stdout)
 	}
+	if args[0] == "network" {
+		return runNetwork(args[1:], stdout)
+	}
 	if args[0] == "status" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
 		if hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
@@ -794,6 +797,14 @@ type copyResult struct {
 	Bytes     int64  `json:"bytes,omitempty"`
 }
 
+type workspaceNetworkResult struct {
+	Workspace string               `json:"workspace"`
+	State     string               `json:"state,omitempty"`
+	Backend   string               `json:"backend,omitempty"`
+	Network   vmkit.NetworkConfig  `json:"network"`
+	Runtime   *vmkit.NetworkConfig `json:"runtime,omitempty"`
+}
+
 type guestResult struct {
 	StartedAt string `json:"started_at"`
 	ExitedAt  string `json:"exited_at"`
@@ -1029,6 +1040,28 @@ func runLogs(args []string, stdout *os.File) error {
 	}
 	_, err = stdout.Write(data)
 	return err
+}
+
+func runNetwork(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("network", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent network <name> [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	result, err := inspectWorkspaceNetwork(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	return writeNetworkResult(stdout, result)
 }
 
 func runWorkspaceStateCommand(ctx context.Context, command string, args []string, stdout *os.File) error {
@@ -2621,6 +2654,44 @@ func writeCopyResult(stdout *os.File, result copyResult) error {
 	return nil
 }
 
+func writeNetworkResult(stdout *os.File, result workspaceNetworkResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	if result.State != "" {
+		fmt.Fprintf(stdout, "State: %s\n", result.State)
+	}
+	if result.Backend != "" {
+		fmt.Fprintf(stdout, "Backend: %s\n", result.Backend)
+	}
+	writeNetworkConfig(stdout, "Network", result.Network)
+	if result.Runtime != nil {
+		writeNetworkConfig(stdout, "Runtime network", *result.Runtime)
+	}
+	return nil
+}
+
+func writeNetworkConfig(stdout *os.File, label string, network vmkit.NetworkConfig) {
+	fmt.Fprintf(stdout, "%s: %s\n", label, network.Mode)
+	if network.IP != "" {
+		fmt.Fprintf(stdout, "IP: %s\n", network.IP)
+	}
+	if len(network.DNS) != 0 {
+		fmt.Fprintf(stdout, "DNS: %s\n", strings.Join(network.DNS, ", "))
+	}
+	if len(network.Routes) != 0 {
+		fmt.Fprintf(stdout, "Routes: %s\n", strings.Join(network.Routes, ", "))
+	}
+	for _, forward := range network.PortForwards {
+		host := forward.Host
+		if host == "" {
+			host = "*"
+		}
+		fmt.Fprintf(stdout, "Forward: %s %s:%d -> :%d\n", forward.Protocol, host, forward.HostPort, forward.GuestPort)
+	}
+}
+
 func writeSuperviseResult(stdout *os.File, result superviseResult) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, result)
@@ -3211,6 +3282,29 @@ func workspaceListEntryFor(stateDir, name string) workspaceListEntry {
 		entry.SerialPath = ""
 	}
 	return entry
+}
+
+func inspectWorkspaceNetwork(stateDir, name string) (workspaceNetworkResult, error) {
+	manifest, err := readWorkspaceManifest(stateDir, name)
+	if err != nil {
+		return workspaceNetworkResult{}, err
+	}
+	result := workspaceNetworkResult{
+		Workspace: name,
+		Network:   networkConfigFromSpec(manifest.Network),
+	}
+	if state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: stateDir, Name: name}); err == nil {
+		result.State = string(state.Event.State)
+		result.Backend = state.Event.Identity.Backend
+		if state.Config.Network != nil {
+			runtimeNetwork := normalizeNetworkConfig(*state.Config.Network)
+			result.Runtime = &runtimeNetwork
+		}
+	} else if event, eventErr := readWorkspaceEvent(workspaceOptions{StateDir: stateDir, Name: name}); eventErr == nil {
+		result.State = string(event.State)
+		result.Backend = event.Identity.Backend
+	}
+	return result, nil
 }
 
 func validateWorkspaceName(name string) error {
@@ -4058,6 +4152,7 @@ Commands:
   create               Create a workspace
   clone                Clone a stopped workspace
   cp                   Copy files into or out of a stopped workspace
+  network              Inspect workspace network config
   start                Start a workspace
   supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
