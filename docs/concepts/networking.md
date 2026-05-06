@@ -24,6 +24,10 @@ Port forwards are declared with repeatable `--publish` flags:
 microagent create research --publish 127.0.0.1:8080:80/tcp
 ```
 
+For TCP forwards, guest init records a `hostForwards` entry and listens on a
+guest vsock port matching the declared host port. Backend supervisors own the
+host-side listener that connects host TCP to that guest vsock port.
+
 The same shape is available in `microagent.yaml`:
 
 ```yaml

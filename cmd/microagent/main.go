@@ -2158,6 +2158,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		SizeMiB:        opts.SizeMiB,
 		Env:            opts.Env,
 		Mounts:         workspaceMounts(opts.Disks),
+		HostForwards:   rootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
@@ -2194,6 +2195,24 @@ func workspaceMounts(disks []workspaceDisk) []rootfs.Mount {
 		})
 	}
 	return mounts
+}
+
+func rootfsPortForwards(forwards []vmkit.PortForward) []rootfs.PortForward {
+	if len(forwards) == 0 {
+		return nil
+	}
+	out := make([]rootfs.PortForward, 0, len(forwards))
+	for _, forward := range forwards {
+		if normalizeNetworkConfig(vmkit.NetworkConfig{PortForwards: []vmkit.PortForward{forward}}).PortForwards[0].Protocol != "tcp" {
+			continue
+		}
+		out = append(out, rootfs.PortForward{
+			Protocol:  "tcp",
+			HostPort:  forward.HostPort,
+			GuestPort: forward.GuestPort,
+		})
+	}
+	return out
 }
 
 func virtioBlockDevice(index int) string {
@@ -4006,7 +4025,7 @@ func workspaceCommand(opts workspaceOptions) string {
 		lines = append(lines, execCommand)
 	}
 	if opts.PrepareForStart {
-		lines = append(lines, resetGuestConfigCommand(shellCommand(opts.Entrypoint), opts.Env, 0, workspaceMounts(opts.Disks)))
+		lines = append(lines, resetGuestConfigCommand(shellCommand(opts.Entrypoint), opts.Env, 0, workspaceMounts(opts.Disks), rootfsPortForwards(opts.Network.PortForwards)))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -4021,20 +4040,22 @@ func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
 	return shellCommand(workspaceCommand(opts)), opts.ResultPort
 }
 
-func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount) string {
+func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward) string {
 	if command == nil {
 		command = []string{}
 	}
 	data, err := json.Marshal(struct {
-		Command []string       `json:"command"`
-		Env     []string       `json:"env,omitempty"`
-		Port    uint32         `json:"port"`
-		Mounts  []rootfs.Mount `json:"mounts,omitempty"`
+		Command      []string             `json:"command"`
+		Env          []string             `json:"env,omitempty"`
+		Port         uint32               `json:"port"`
+		Mounts       []rootfs.Mount       `json:"mounts,omitempty"`
+		HostForwards []rootfs.PortForward `json:"hostForwards,omitempty"`
 	}{
-		Command: command,
-		Env:     envList(env),
-		Port:    port,
-		Mounts:  mounts,
+		Command:      command,
+		Env:          envList(env),
+		Port:         port,
+		Mounts:       mounts,
+		HostForwards: forwards,
 	})
 	if err != nil {
 		panic(err)

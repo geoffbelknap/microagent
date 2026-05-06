@@ -24,11 +24,12 @@ const resultConnectTimeout = 15 * time.Second
 const tcpVsockListenersEnv = "MICROAGENT_VSOCK_TCP_LISTENERS"
 
 type config struct {
-	Command []string `json:"command"`
-	Env     []string `json:"env,omitempty"`
-	Port    uint32   `json:"port"`
-	Mode    string   `json:"mode,omitempty"`
-	Mounts  []mount  `json:"mounts,omitempty"`
+	Command      []string      `json:"command"`
+	Env          []string      `json:"env,omitempty"`
+	Port         uint32        `json:"port"`
+	Mode         string        `json:"mode,omitempty"`
+	Mounts       []mount       `json:"mounts,omitempty"`
+	HostForwards []hostForward `json:"hostForwards,omitempty"`
 }
 
 type mount struct {
@@ -70,6 +71,15 @@ func run() int {
 		return code
 	}
 	if err := startTCPVsockBridges(cfg.Env); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
+	if err := startHostForwards(cfg.HostForwards); err != nil {
 		code = 127
 		res.Error = err.Error()
 		fmt.Fprintln(os.Stderr, err)
@@ -153,6 +163,12 @@ type tcpVsockBridge struct {
 	Port   uint32
 }
 
+type hostForward struct {
+	Protocol  string `json:"protocol"`
+	HostPort  uint16 `json:"hostPort"`
+	GuestPort uint16 `json:"guestPort"`
+}
+
 func startTCPVsockBridges(env []string) error {
 	specs, err := parseTCPVsockBridges(envValue(env, tcpVsockListenersEnv))
 	if err != nil {
@@ -169,6 +185,31 @@ func startTCPVsockBridges(env []string) error {
 			return fmt.Errorf("listen %s for vsock bridge: %w", spec.Listen, err)
 		}
 		go serveTCPVsockBridge(listener, spec.Port)
+	}
+	return nil
+}
+
+func startHostForwards(forwards []hostForward) error {
+	for _, forward := range forwards {
+		if forward.Protocol != "" && forward.Protocol != "tcp" {
+			return fmt.Errorf("host forward protocol must be tcp")
+		}
+		if forward.HostPort == 0 || forward.GuestPort == 0 {
+			return fmt.Errorf("host forward ports must be positive")
+		}
+		fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+		if err != nil {
+			return fmt.Errorf("open vsock listener for host port %d: %w", forward.HostPort, err)
+		}
+		if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(forward.HostPort)}); err != nil {
+			_ = unix.Close(fd)
+			return fmt.Errorf("bind vsock listener for host port %d: %w", forward.HostPort, err)
+		}
+		if err := unix.Listen(fd, 128); err != nil {
+			_ = unix.Close(fd)
+			return fmt.Errorf("listen on vsock host port %d: %w", forward.HostPort, err)
+		}
+		go serveHostForward(fd, forward.GuestPort)
 	}
 	return nil
 }
@@ -260,6 +301,42 @@ func proxyTCPToHostVsock(conn net.Conn, port uint32) {
 		return
 	}
 	defer file.Close()
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(file, conn)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(conn, file)
+		done <- struct{}{}
+	}()
+	<-done
+}
+
+func serveHostForward(fd int, guestPort uint16) {
+	for {
+		connFD, _, err := unix.Accept(fd)
+		if err != nil {
+			_ = unix.Close(fd)
+			return
+		}
+		go proxyHostVsockToGuestTCP(connFD, guestPort)
+	}
+}
+
+func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
+	file := os.NewFile(uintptr(fd), "host-forward-vsock")
+	if file == nil {
+		_ = unix.Close(fd)
+		return
+	}
+	defer file.Close()
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(int(guestPort)), 10*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "connect guest tcp port %d: %v\n", guestPort, err)
+		return
+	}
+	defer conn.Close()
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(file, conn)

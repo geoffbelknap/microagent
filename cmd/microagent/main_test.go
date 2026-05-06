@@ -1748,6 +1748,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 		SetupCommands:   []string{"echo setup"},
 		Env:             map[string]string{"AGENCY_AGENT_NAME": "research"},
 		Disks:           []workspaceDisk{{Name: "constraints", Path: "/tmp/constraints.ext4", Mountpoint: "/config", Mode: "ro"}},
+		Network:         vmkit.NetworkConfig{Mode: defaultNetworkMode, PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}},
 		ResultPort:      1024,
 		PrepareForStart: true,
 	})
@@ -1757,6 +1758,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	if !strings.Contains(command, `> /etc/microagent/run.json`) ||
 		!strings.Contains(command, `"command":["/bin/sh","-lc","/app/entrypoint.sh"]`) ||
 		!strings.Contains(command, `"mountpoint":"/config"`) ||
+		!strings.Contains(command, `"hostPort":8080`) ||
 		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) {
 		t.Fatalf("workspaceCommand missing guest config reset: %q", command)
 	}
