@@ -164,12 +164,29 @@ PY
 
 ACK="$STATE_DIR/agent-smoke/quarantine.ack.json"
 READY="$STATE_DIR/agent-smoke/quarantine.fake-ready"
-(
-  trap 'printf "{\"ok\":true}\n" > "$ACK"' USR1
-  trap 'exit 0' TERM
-  printf "ready\n" > "$READY"
-  while true; do sleep 1; done
-) &
+python3 - "$ACK" "$READY" <<'PY' &
+import json
+import signal
+import sys
+import time
+
+ack, ready = sys.argv[1:]
+
+def acknowledge(_signum, _frame):
+    with open(ack, "w", encoding="utf-8") as handle:
+        json.dump({"ok": True}, handle)
+        handle.write("\n")
+
+def terminate(_signum, _frame):
+    raise SystemExit(0)
+
+signal.signal(signal.SIGUSR1, acknowledge)
+signal.signal(signal.SIGTERM, terminate)
+with open(ready, "w", encoding="utf-8") as handle:
+    handle.write("ready\n")
+while True:
+    time.sleep(1)
+PY
 fake_pid="$!"
 trap 'kill "$fake_pid" 2>/dev/null || true; cleanup' EXIT
 deadline="$((SECONDS + 5))"
