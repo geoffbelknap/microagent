@@ -28,5 +28,6 @@ higher-level control stay outside this project.
 - [CLI reference](cli/index.md) — every subcommand.
 - [Protocol](protocol/index.md) — shared supervisor protocol and backend notes.
 - [Library](library/go.md) — exported Go package surface.
-- [Operations](operations/smoke-tests.md) — smoke tests, troubleshooting.
+- [Operations](operations/smoke-tests.md) — release process, smoke tests,
+  troubleshooting.
 - [Security](security.md) — trust boundary and reporting.
