@@ -11,6 +11,7 @@ cleanup() {
   rm -rf "$STATE_DIR"
 }
 trap cleanup EXIT
+trap 'status=$?; echo "applevf supervisor lifecycle smoke failed at line $LINENO with status $status" >&2; exit "$status"' ERR
 
 touch "$KERNEL" "$ROOTFS"
 
@@ -177,7 +178,7 @@ while [ ! -f "$READY" ]; do
     echo "fake quarantine runtime did not become signal-ready" >&2
     exit 1
   fi
-  sleep 0.05
+  sleep 1
 done
 python3 - "$STATE_DIR/agent-smoke" "$fake_pid" <<'PY'
 import json
