@@ -113,6 +113,19 @@ forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
     "resultReady": {
       "ready": false
     }
+  },
+  "result": {
+    "identity": {
+      "requestID": "req-1",
+      "runtimeID": "agent-1",
+      "role": "workload",
+      "backend": "firecracker"
+    },
+    "backend": "firecracker",
+    "resultPath": "/tmp/microagent/agent-1/result.json",
+    "startedAt": "2026-05-02T00:00:00Z",
+    "completedAt": "2026-05-02T00:00:01Z",
+    "exitCode": 0
   }
 }
 ```
@@ -124,6 +137,11 @@ contains entries with `artifact`, `field`, `expected`, and `actual`.
 
 `readiness` gives consumers explicit guest, shell, and result readiness signals.
 Each signal has `ready` plus optional `observedAt`, `detail`, and `error`.
+
+When the guest result channel has completed, status responses may include
+`result`. The result is structured separately from serial logs and carries
+identity, backend, result path, start/completion timestamps, exit code, stdout,
+stderr, and guest-reported error.
 
 Host responses use `host` instead of `event`.
 

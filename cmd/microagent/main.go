@@ -103,6 +103,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
 	}
+	if args[0] == "result" {
+		return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
+	}
 	if args[0] == "status" || args[0] == "halt" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
 		if hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
@@ -1654,6 +1657,13 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		}
 		return writeResponse(stdout, resp)
 	}
+	if command == "result" {
+		resp, err := inspectWorkspaceResult(workspaceOpts)
+		if err != nil {
+			return err
+		}
+		return writeResultResponse(stdout, resp)
+	}
 	resp, err := dispatchWorkspaceRequest(ctx, workspaceOpts, req)
 	if err != nil {
 		if resp.Error == "" {
@@ -2982,10 +2992,57 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 	}
 	readiness := workspaceReadinessForStatus(opts, eventFile)
 	resp.Readiness = &readiness
+	if result, err := readRuntimeResult(opts, eventFile.Identity); err == nil {
+		resp.Result = &result
+	}
 	if errorText != "" {
 		resp.Error = errorText
 	}
 	return resp
+}
+
+func inspectWorkspaceResult(opts workspaceOptions) (vmkit.Response, error) {
+	resp, err := inspectWorkspaceState(opts)
+	if err != nil {
+		return resp, err
+	}
+	if resp.Event == nil {
+		err := fmt.Errorf("workspace %s has no state event", opts.Name)
+		resp.OK = false
+		resp.Error = err.Error()
+		return resp, err
+	}
+	result, resultErr := readRuntimeResult(opts, resp.Event.Identity)
+	if resultErr != nil {
+		err := fmt.Errorf("workspace %s result is not ready: %w", opts.Name, resultErr)
+		resp.OK = false
+		resp.Error = err.Error()
+		return resp, err
+	}
+	resp.Result = &result
+	return resp, nil
+}
+
+func readRuntimeResult(opts workspaceOptions, identity vmkit.Identity) (vmkit.RuntimeResult, error) {
+	guest, err := readGuestResult(opts)
+	if err != nil {
+		return vmkit.RuntimeResult{}, err
+	}
+	backend := opts.Backend
+	if backend == "" {
+		backend = identity.Backend
+	}
+	return vmkit.RuntimeResult{
+		Identity:    identity,
+		Backend:     backend,
+		ResultPath:  resultPath(opts),
+		StartedAt:   guest.StartedAt,
+		CompletedAt: guest.ExitedAt,
+		ExitCode:    guest.ExitCode,
+		Stdout:      guest.Stdout,
+		Stderr:      guest.Stderr,
+		Error:       guest.Error,
+	}, nil
 }
 
 func buildWorkspaceVerification(opts workspaceOptions, result workspaceResult) (vmkit.RuntimeVerification, error) {
@@ -3431,9 +3488,60 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 				humanReady(resp.Readiness.ResultReady.Ready),
 			)
 		}
+		if resp.Result != nil {
+			fmt.Fprintf(stdout, "Exit code: %d\n", resp.Result.ExitCode)
+			if resp.Result.CompletedAt != "" {
+				fmt.Fprintf(stdout, "Completed: %s\n", resp.Result.CompletedAt)
+			}
+		}
 		if resp.Event.Detail != "" {
 			fmt.Fprintf(stdout, "Detail: %s\n", resp.Event.Detail)
 		}
+	}
+	if resp.Error != "" {
+		fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
+	}
+	return nil
+}
+
+func writeResultResponse(stdout *os.File, resp vmkit.Response) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, resp)
+	}
+	if resp.Result == nil {
+		if resp.Error != "" {
+			fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
+		}
+		return nil
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", resp.Result.Identity.RuntimeID)
+	if resp.Result.Backend != "" {
+		fmt.Fprintf(stdout, "Backend: %s\n", resp.Result.Backend)
+	}
+	fmt.Fprintf(stdout, "Exit code: %d\n", resp.Result.ExitCode)
+	if resp.Result.StartedAt != "" {
+		fmt.Fprintf(stdout, "Started: %s\n", resp.Result.StartedAt)
+	}
+	if resp.Result.CompletedAt != "" {
+		fmt.Fprintf(stdout, "Completed: %s\n", resp.Result.CompletedAt)
+	}
+	if resp.Result.ResultPath != "" {
+		fmt.Fprintf(stdout, "Result: %s\n", resp.Result.ResultPath)
+	}
+	if strings.TrimSpace(resp.Result.Stdout) != "" {
+		fmt.Fprintf(stdout, "\n%s", resp.Result.Stdout)
+		if !strings.HasSuffix(resp.Result.Stdout, "\n") {
+			fmt.Fprintln(stdout)
+		}
+	}
+	if strings.TrimSpace(resp.Result.Stderr) != "" {
+		fmt.Fprintf(stdout, "\nStderr:\n%s", resp.Result.Stderr)
+		if !strings.HasSuffix(resp.Result.Stderr, "\n") {
+			fmt.Fprintln(stdout)
+		}
+	}
+	if resp.Result.Error != "" {
+		fmt.Fprintf(stdout, "Result error: %s\n", resp.Result.Error)
 	}
 	if resp.Error != "" {
 		fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
@@ -5426,6 +5534,7 @@ Commands:
   connect              Open the workspace console
   ps                   List workspaces
   status               Show workspace state
+  result               Show structured workspace result
   logs                 Show workspace logs
   profiles             List resource profiles
   images               List or prune local image records

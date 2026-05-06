@@ -156,6 +156,18 @@ type RuntimeReadiness struct {
 	ResultReady ReadinessSignal `json:"resultReady"`
 }
 
+type RuntimeResult struct {
+	Identity    Identity `json:"identity"`
+	Backend     string   `json:"backend,omitempty"`
+	ResultPath  string   `json:"resultPath,omitempty"`
+	StartedAt   string   `json:"startedAt,omitempty"`
+	CompletedAt string   `json:"completedAt,omitempty"`
+	ExitCode    int      `json:"exitCode"`
+	Stdout      string   `json:"stdout,omitempty"`
+	Stderr      string   `json:"stderr,omitempty"`
+	Error       string   `json:"error,omitempty"`
+}
+
 type Response struct {
 	OK            bool                 `json:"ok"`
 	Backend       string               `json:"backend,omitempty"`
@@ -164,6 +176,7 @@ type Response struct {
 	Kernel        *KernelSupport       `json:"kernel,omitempty"`
 	Verification  *RuntimeVerification `json:"verification,omitempty"`
 	Readiness     *RuntimeReadiness    `json:"readiness,omitempty"`
+	Result        *RuntimeResult       `json:"result,omitempty"`
 	RestartPolicy string               `json:"restartPolicy,omitempty"`
 	Network       *NetworkConfig       `json:"network,omitempty"`
 	Error         string               `json:"error,omitempty"`

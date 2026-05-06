@@ -17,6 +17,7 @@ description: All microagent subcommands at a glance.
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |
 | [`status`](/cli/status/) | Show workspace state |
+| [`result`](/cli/result/) | Show structured workspace result |
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
 | [`connect`](/cli/connect/) | Open the workspace console |

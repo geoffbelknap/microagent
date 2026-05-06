@@ -24,6 +24,9 @@ JSON status also includes `readiness`:
 - `shellReady` is true when a running workspace has console input available.
 - `resultReady` is true when the guest result file has been delivered.
 
+When a result is ready, `status --json` includes the same structured `result`
+payload returned by [`microagent result`](/cli/result/).
+
 ## Flags
 
 | Flag | Description |
