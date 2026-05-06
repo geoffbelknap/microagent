@@ -16,8 +16,12 @@ Current backend support is narrower than the full enum:
 
 | Backend | Supported mode today |
 |---|---|
-| Apple VF | `nat` and `isolated`; `bridged` is implemented but requires an Apple-allowed `com.apple.vm.networking` entitlement and `network.interface`; `--publish` fails closed |
+| Apple VF | `nat` and `isolated`; `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement; `--publish` fails closed |
 | Firecracker | `nat` plus live TCP `--publish`; `isolated` and `bridged` fail closed in the supervisor |
+
+Apple puts native Apple VF bridged networking behind the restricted
+`com.apple.vm.networking` entitlement. Open-source builds cannot self-sign that
+entitlement, and running the supervisor with `sudo` does not change the check.
 
 Create records the mode:
 
@@ -49,9 +53,9 @@ network:
 ```
 
 For bridged Apple VF workspaces, declare the host interface identifier or
-display name. The supervisor must be signed with the restricted
-`com.apple.vm.networking` entitlement; ad-hoc local builds fail closed before
-start.
+display name. The supervisor also needs Apple's restricted
+`com.apple.vm.networking` entitlement. Local ad-hoc builds fail closed before
+start with an error that names the Apple restriction.
 
 ```yaml
 network:

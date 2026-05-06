@@ -115,8 +115,9 @@ spec.
 Restart policies are enforced by [`supervise`](/cli/supervise/).
 
 On Apple VF, `bridged` also requires a supervisor signed with Apple's
-`com.apple.vm.networking` entitlement. Ad-hoc local supervisors fail closed
-with a clear error.
+restricted `com.apple.vm.networking` entitlement. Open-source builds cannot
+self-sign that entitlement, and `sudo` does not bypass the check. Local ad-hoc
+supervisors fail closed with a clear error.
 
 Attach an existing ext4 disk:
 

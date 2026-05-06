@@ -85,10 +85,11 @@ devices:
 
 `bridged` requires `config.network.interface`, matched against the Apple VF
 bridged interface identifier or localized display name. It also requires the
-supervisor process to be signed with the restricted `com.apple.vm.networking`
-entitlement. Ad-hoc local builds fail closed during `check` with a clear
-entitlement error. Apple VF port forwards are not implemented yet; requests
-with `network.portForwards` fail closed.
+supervisor process to have Apple's restricted `com.apple.vm.networking`
+entitlement. Open-source builds cannot self-sign that entitlement, and `sudo`
+does not bypass the check. Local ad-hoc builds fail closed during `check` with
+a clear entitlement error. Apple VF port forwards are not implemented yet;
+requests with `network.portForwards` fail closed.
 
 ## Response
 

@@ -349,8 +349,11 @@ func validateNetworkConfig(_ network: NetworkConfig?) throws {
     #if canImport(Virtualization)
     if mode == "bridged" {
         if #available(macOS 13.0, *) {
+            // This code path is valid Virtualization.framework usage, but Apple
+            // gates it behind a restricted entitlement that open-source projects
+            // cannot self-sign into existence. Local sudo does not help.
             guard hasEntitlement("com.apple.vm.networking") else {
-                throw ProtocolError.invalid("Apple VF bridged networking requires a supervisor signed with com.apple.vm.networking")
+                throw ProtocolError.invalid("Apple VF bridged networking is blocked by Apple's restricted com.apple.vm.networking entitlement. Open-source builds cannot self-sign it, and sudo will not bypass the check.")
             }
             _ = try bridgedInterface(named: network.interface)
         }

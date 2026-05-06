@@ -82,8 +82,10 @@ Recorded Firecracker performance:
 - Implement real `isolated` and `bridged` networking for Firecracker instead
   of treating them as reserved intent.
 - Implement Apple VF `--publish`.
-- Decide release signing/provisioning for Apple VF bridged networking, which
-  requires the restricted `com.apple.vm.networking` entitlement.
+- Decide release signing/provisioning or public unsupported status for Apple VF
+  bridged networking. Apple gates it behind the restricted
+  `com.apple.vm.networking` entitlement, which open-source builds cannot
+  self-sign.
 - Add terminal resize propagation for interactive console sessions. The current
   parity target is attach, send, readiness, detach, and logs.
 - Consider a future schema split between host console capability and per-runtime
