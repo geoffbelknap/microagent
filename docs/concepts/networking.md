@@ -80,8 +80,9 @@ network:
 For bridged Firecracker workspaces, `interface` must name an existing Linux
 bridge. The supervisor creates a transient TAP device, attaches it to that
 bridge, configures the generated `firecracker.json` network device, and removes
-the TAP when the workspace stops, is killed, or is deleted. Missing `iproute2`,
-missing privileges, non-bridge interfaces, and TAP setup failures fail closed.
+the TAP when the workspace is quarantined, stops, is killed, or is deleted.
+Missing `iproute2`, missing privileges, non-bridge interfaces, and TAP setup
+failures fail closed.
 
 ```yaml
 network:

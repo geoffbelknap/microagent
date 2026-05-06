@@ -9,13 +9,13 @@ backend selector.
 
 | Backend | Host OS | Supervisor | `connect` | Process model |
 |---|---|---|---|---|
-| `firecracker` | Linux | Go executable supervisor (`microagent-firecracker-supervisor`) | supported | Supervisor records VM PID; `stop` sends SIGTERM, `kill` sends SIGKILL |
+| `firecracker` | Linux | Go executable supervisor (`microagent-firecracker-supervisor`) | supported | Supervisor records VM PID; `quarantine` preserves it, `stop` sends SIGTERM, `kill` sends SIGKILL |
 | `apple-vf` | macOS | Swift executable supervisor (`microagent-applevf-supervisor`) | supported | One supervisor invocation per request |
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
-`status`, `stop`, `kill`, `delete`. Both record state files and emit
-lifecycle events. Firecracker and Apple VF share the same executable
-supervisor-shaped request/response boundary.
+`status`, `halt`, `quarantine`, `stop`, `kill`, `delete`. Both record state
+files and emit lifecycle events. Firecracker and Apple VF share the same
+executable supervisor-shaped request/response boundary.
 
 ## Firecracker (Linux)
 

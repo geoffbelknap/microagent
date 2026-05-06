@@ -13,7 +13,8 @@ The supervisor:
 - starts `firecracker --no-api --config-file ...`
 - records runtime state and PID under `config.stateDir`
 - emits `vmkit.Response` lifecycle events
-- sends `SIGTERM` for `stop` and `SIGKILL` for `kill`
+- sends `SIGTERM` for `stop`, `SIGKILL` for `kill`, and does not signal the VM
+  process for `quarantine`
 
 ## Process Model
 
@@ -40,7 +41,7 @@ Important files include:
 | `firecracker.json` | generated Firecracker config |
 | `serial.log` | guest serial output |
 | `serial.in` | console input FIFO for running workspaces |
-| transient `magtap*` device | TAP created for bridged mode and removed on stop/kill/delete |
+| transient `magtap*` device | TAP created for bridged mode and removed on quarantine/stop/kill/delete |
 
 Persistent workspace disks live under:
 
@@ -74,9 +75,17 @@ the supervisor starts the VM.
 `bridged` creates a deterministic transient TAP device, attaches it to the
 requested Linux bridge, and writes a Firecracker `network-interfaces` entry
 using that TAP. The TAP name is recorded in `runtime.json` while running and is
-deleted on `stop`, `kill`, or `delete`. Missing `network.interface`, a
+deleted on `quarantine`, `stop`, `kill`, or `delete`. Missing
+`network.interface`, a
 nonexistent interface, a non-bridge interface, missing `iproute2`, missing
 permissions, or TAP setup failure all fail closed with explicit errors.
+
+## Quarantine
+
+Firecracker quarantine preserves the recorded VM PID and does not signal the VM
+process. It terminates the host-side port-forwarder, removes transient network
+devices, unlinks the workspace vsock socket, and records the state as
+`quarantined` in `event.json`, `runtime.json`, and `events.json`.
 
 ## Console
 

@@ -106,7 +106,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "result" {
 		return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 	}
-	if args[0] == "status" || args[0] == "halt" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
+	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
 		if hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 		}
@@ -699,7 +699,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		req.Command = "start"
 		return req, nil
-	case "status", "halt", "stop", "kill", "delete":
+	case "status", "halt", "quarantine", "stop", "kill", "delete":
 		req, err := stateRequestFromFlagsOrJSON(command, jsonPath, args, identity, config)
 		if err != nil {
 			return vmkit.Request{}, err
@@ -2072,7 +2072,7 @@ func waitForSupervisedWorkspace(ctx context.Context, opts workspaceOptions, inte
 		}
 		if resp.Event != nil {
 			switch resp.Event.State {
-			case vmkit.StateHalted, vmkit.StateStopped, vmkit.StateFailed:
+			case vmkit.StateHalted, vmkit.StateQuarantined, vmkit.StateStopped, vmkit.StateFailed:
 				return resp.Event.State, nil
 			}
 		}
@@ -3328,7 +3328,7 @@ func workspaceReadinessForStatus(opts workspaceOptions, event workspaceEventFile
 		return workspaceReadinessFromRuntime(state)
 	}
 	readiness := vmkit.RuntimeReadiness{}
-	if event.State == vmkit.StateRunning || event.State == vmkit.StateHalted || event.State == vmkit.StateStopped {
+	if event.State == vmkit.StateRunning || event.State == vmkit.StateHalted || event.State == vmkit.StateStopped || event.State == vmkit.StateQuarantined {
 		readiness.GuestReady = vmkit.ReadinessSignal{
 			Ready:      true,
 			ObservedAt: parseOptionalTime(event.ObservedAt),
@@ -3347,7 +3347,7 @@ func workspaceReadinessForStatus(opts workspaceOptions, event workspaceEventFile
 
 func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeReadiness {
 	readiness := vmkit.RuntimeReadiness{}
-	if state.StartedAt != "" || state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateHalted || state.Event.State == vmkit.StateStopped {
+	if state.StartedAt != "" || state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateHalted || state.Event.State == vmkit.StateStopped || state.Event.State == vmkit.StateQuarantined {
 		readiness.GuestReady = vmkit.ReadinessSignal{
 			Ready:      true,
 			ObservedAt: firstTime(state.StartedAt, state.Event.ObservedAt),
@@ -3459,7 +3459,7 @@ func writeWorkspaceProcessState(opts workspaceOptions, req vmkit.Request, state 
 		UpdatedAt:       updatedAt.Format(time.RFC3339),
 		Error:           errorText,
 	}
-	if state == vmkit.StateStarting || state == vmkit.StateRunning {
+	if state == vmkit.StateStarting || state == vmkit.StateRunning || state == vmkit.StateQuarantined {
 		runtimeState.StartedAt = updatedAt.Format(time.RFC3339)
 	}
 	runtimeState.Readiness = workspaceReadinessFromRuntime(runtimeState)
@@ -5752,6 +5752,7 @@ Commands:
   images               List or prune local image records
   perf                 Measure workspace performance
   halt                 Halt a workspace and preserve disk state
+  quarantine           Sever host-side network and mediation
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace

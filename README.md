@@ -99,11 +99,13 @@ Linux has one backend: Firecracker. macOS has one backend: Apple VF. The
 validation, not as a user-facing backend selector.
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
-`status`, `halt`, `stop`, `kill`, and `delete`. Backend supervisors record
-state files and append lifecycle events to `events.json`. `halt` is the clean,
-disk-preserving shutdown path; `stop` remains the graceful stop command and
-`kill` sends a hard kill. Both backends support interactive `connect`; `logs`
-remains available for captured serial output.
+`status`, `halt`, `quarantine`, `stop`, `kill`, and `delete`. Backend
+supervisors record state files and append lifecycle events to `events.json`.
+`halt` is the clean, disk-preserving shutdown path; `quarantine` severs
+host-side network and mediation without discarding disk state or event history;
+`stop` remains the graceful stop command and `kill` sends a hard kill. Both
+backends support interactive `connect`; `logs` remains available for captured
+serial output.
 
 Named workspace manifests also record runtime verification metadata: image
 digest, kernel hash, rootfs hash, and injected init hash. `microagent status
@@ -265,6 +267,12 @@ Show boot logs:
 
 ```bash
 microagent logs research
+```
+
+Quarantine a workspace:
+
+```bash
+microagent quarantine research
 ```
 
 Stop and remove a workspace:

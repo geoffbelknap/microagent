@@ -92,11 +92,13 @@ Lifecycle responses include an event:
 ```
 
 States cover the full lifecycle: `unknown`, `prepared`, `starting`, `running`,
-`stopping`, `halted`, `stopped`, and `failed`. `halted` means the workspace was
-cleanly stopped with disk state and identity preserved for a later `start`.
+`stopping`, `halted`, `quarantined`, `stopped`, and `failed`. `halted` means
+the workspace was cleanly stopped with disk state and identity preserved for a
+later `start`. `quarantined` means host-side network, mediation, and side
+effect paths were severed while preserving disk state and event history.
 Commands such as `kill` and `delete` still return lifecycle events, usually
-with state `stopped` and a `detail` field. Callers should treat these strings
-as the authoritative source of truth, not log scraping.
+with state `stopped` and a `detail` field. Callers should treat these strings as
+the authoritative source of truth, not log scraping.
 
 Each state write updates `<state-dir>/<runtimeID>/event.json` with the latest
 event and appends the same record to `<state-dir>/<runtimeID>/events.json`.

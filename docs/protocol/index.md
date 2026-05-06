@@ -75,6 +75,7 @@ consumers should treat it as closed by default.
 | `console` | Attach to a running console | identity and full config |
 | `inspect` | Read latest state | identity and `config.stateDir` |
 | `halt` | Clean disk-preserving shutdown | identity and `config.stateDir` |
+| `quarantine` | Sever host-side network and mediation without stopping the guest | identity and `config.stateDir` |
 | `stop` | Graceful stop | identity and `config.stateDir` |
 | `kill` | Hard stop | identity and `config.stateDir` |
 | `delete` | Remove backend runtime state | identity and `config.stateDir` |
@@ -210,9 +211,11 @@ Host responses use `host` instead of `event`.
 ```
 
 Valid states are `unknown`, `prepared`, `starting`, `running`, `stopping`,
-`halted`, `stopped`, and `failed`. `halted` is a terminal runtime state where
-the VM process is gone but the workspace disk, identity, and event history are
-preserved for a later `start`.
+`halted`, `quarantined`, `stopped`, and `failed`. `halted` is a terminal
+runtime state where the VM process is gone but the workspace disk, identity,
+and event history are preserved for a later `start`. `quarantined` preserves
+disk state and event history while severing host-side network, mediation, and
+side-effect paths.
 
 ## Backend Pages
 

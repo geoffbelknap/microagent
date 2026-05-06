@@ -22,14 +22,15 @@ const (
 type VMState string
 
 const (
-	StateUnknown  VMState = "unknown"
-	StatePrepared VMState = "prepared"
-	StateStarting VMState = "starting"
-	StateRunning  VMState = "running"
-	StateStopping VMState = "stopping"
-	StateStopped  VMState = "stopped"
-	StateHalted   VMState = "halted"
-	StateFailed   VMState = "failed"
+	StateUnknown     VMState = "unknown"
+	StatePrepared    VMState = "prepared"
+	StateStarting    VMState = "starting"
+	StateRunning     VMState = "running"
+	StateStopping    VMState = "stopping"
+	StateStopped     VMState = "stopped"
+	StateHalted      VMState = "halted"
+	StateQuarantined VMState = "quarantined"
+	StateFailed      VMState = "failed"
 )
 
 type Identity struct {
@@ -233,7 +234,7 @@ func ValidateRequest(req Request) error {
 		if err := ValidateConfig(req.Config); err != nil {
 			return err
 		}
-	case "inspect", "halt", "stop", "kill", "delete":
+	case "inspect", "halt", "quarantine", "stop", "kill", "delete":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}

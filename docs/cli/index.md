@@ -13,6 +13,7 @@ description: All microagent subcommands at a glance.
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
 | [`halt`](/cli/halt/) | Clean disk-preserving shutdown |
+| [`quarantine`](/cli/quarantine/) | Sever host-side network and mediation |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |

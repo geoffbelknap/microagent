@@ -9,7 +9,7 @@ microagent status --name <name> [--state-dir <dir>]
 ```
 
 `status` reads the state file for one workspace and prints the latest event:
-identity, state (`prepared`, `running`, `halted`, `stopped`, `failed`), and
+identity, state (`prepared`, `running`, `halted`, `quarantined`, `stopped`, `failed`), and
 backend.
 
 With `--json`, named workspaces also include a `verification` block. It reports

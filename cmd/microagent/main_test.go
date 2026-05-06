@@ -383,6 +383,11 @@ func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 			wantCommand: "stop",
 		},
 		{
+			name:        "quarantine",
+			args:        []string{"quarantine", "agent-1", "--state-dir", "/tmp/state"},
+			wantCommand: "quarantine",
+		},
+		{
 			name:        "kill",
 			args:        []string{"kill", "agent-1", "--state-dir", "/tmp/state"},
 			wantCommand: "kill",
@@ -720,6 +725,9 @@ func TestWriteWorkspaceProcessStateAppendsEventHistory(t *testing.T) {
 	if err := writeWorkspaceProcessState(opts, req, vmkit.StateHalted, 0, ""); err != nil {
 		t.Fatalf("write halted state: %v", err)
 	}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateQuarantined, 0, ""); err != nil {
+		t.Fatalf("write quarantined state: %v", err)
+	}
 	var events []workspaceEventFile
 	data, err := os.ReadFile(filepath.Join(dir, "research", "events.json"))
 	if err != nil {
@@ -728,8 +736,8 @@ func TestWriteWorkspaceProcessStateAppendsEventHistory(t *testing.T) {
 	if err := json.Unmarshal(data, &events); err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 2 || events[0].State != vmkit.StatePrepared || events[1].State != vmkit.StateHalted {
-		t.Fatalf("events = %#v, want prepared then halted", events)
+	if len(events) != 3 || events[0].State != vmkit.StatePrepared || events[1].State != vmkit.StateHalted || events[2].State != vmkit.StateQuarantined {
+		t.Fatalf("events = %#v, want prepared, halted, then quarantined", events)
 	}
 }
 
@@ -2918,6 +2926,52 @@ func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
 	}
 	if processStillActive(cmd.Process.Pid) {
 		t.Fatalf("process %d still active", cmd.Process.Pid)
+	}
+}
+
+func TestFirecrackerQuarantinePreservesRecordedPID(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := writeWorkspaceProcessState(
+		workspaceOptions{StateDir: dir, Name: "agent-1"},
+		req,
+		vmkit.StateRunning,
+		cmd.Process.Pid,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"quarantine", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run quarantine: %v", err)
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "agent-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateQuarantined || state.PID != cmd.Process.Pid {
+		t.Fatalf("state = %#v, want quarantined with preserved pid", state)
+	}
+	if !processStillActive(cmd.Process.Pid) {
+		t.Fatalf("process %d was stopped by quarantine", cmd.Process.Pid)
 	}
 }
 

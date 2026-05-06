@@ -62,6 +62,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return inspectWorkspace(opts)
 	case "halt":
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateHalted)
+	case "quarantine":
+		return quarantineWorkspace(opts, req)
 	case "stop":
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateStopped)
 	case "kill":
@@ -474,6 +476,22 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		return vmkit.Response{}, err
 	}
 	return eventResponse(req, finalState, ""), nil
+}
+
+func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error) {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if state.PortForwardPID != 0 {
+		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
+	}
+	cleanupTransientNetworkDevices(state.NetworkDevices)
+	_ = os.Remove(vsockSocketPath(opts))
+	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeStateRequest(req, state), vmkit.StateQuarantined, state.PID, 0, nil, ""); err != nil {
+		return vmkit.Response{}, err
+	}
+	return eventResponse(req, vmkit.StateQuarantined, ""), nil
 }
 
 func ensureCanDelete(opts Options) error {

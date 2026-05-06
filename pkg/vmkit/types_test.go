@@ -32,6 +32,22 @@ func TestValidateRequestAcceptsHaltWithStateDir(t *testing.T) {
 	}
 }
 
+func TestValidateRequestAcceptsQuarantineWithStateDir(t *testing.T) {
+	req := Request{
+		Command: "quarantine",
+		Identity: &Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      RoleWorkload,
+			Backend:   BackendFirecracker,
+		},
+		Config: &Config{StateDir: "/tmp/state"},
+	}
+	if err := ValidateRequest(req); err != nil {
+		t.Fatalf("ValidateRequest rejected quarantine: %v", err)
+	}
+}
+
 func TestValidateConfigRejectsDuplicateVsockPorts(t *testing.T) {
 	cfg := &Config{
 		KernelPath: "/tmp/kernel",
