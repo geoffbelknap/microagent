@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-firecracker-workspace.XXXXXX")"
 CLI="$STATE_DIR/microagent"
+SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
 GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
 CONNECT_RESULT="$STATE_DIR/connect.txt"
 IMAGE="docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
@@ -54,10 +55,12 @@ export GOCACHE="$STATE_DIR/gocache"
 export GOMODCACHE="$STATE_DIR/gomodcache"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 export MICROAGENT_FIRECRACKER="$firecracker"
+export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
 
 (
   cd "$ROOT"
   go build -o "$CLI" ./cmd/microagent
+  go build -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 

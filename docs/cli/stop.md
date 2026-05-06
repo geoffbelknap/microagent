@@ -15,7 +15,7 @@ recorded VM process; on Apple VF it asks the supervisor to stop the VM.
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record |
-| `--supervisor <path>` | Override the Apple VF supervisor path |
+| `--supervisor <path>` | Override the active backend supervisor path |
 
 ## Example
 

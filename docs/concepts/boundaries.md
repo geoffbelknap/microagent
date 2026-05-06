@@ -12,8 +12,9 @@ boundary. Other systems own policy, identity, and intent.
 - OCI image to ext4 rootfs builds
 - Identity in requests and state files
 - State changes as JSON
-- Firecracker supervisor (in-process Go)
-- Apple Virtualization.framework supervisor protocol (Swift executable)
+- Backend supervisor boundary
+- Firecracker supervisor implementation (Go executable)
+- Apple Virtualization.framework supervisor implementation (Swift executable)
 - State files and cleanup
 - Host/guest wiring such as vsock listeners
 

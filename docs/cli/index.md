@@ -25,12 +25,13 @@ description: All microagent subcommands at a glance.
 - `--json` — print JSON output
 - `--text` — print human-readable output
 - `--output <json|text>` — select output format
-- `--supervisor <path>` — override the Apple VF supervisor path
-  (`MICROAGENT_APPLEVF_SUPERVISOR` works too)
+- `--supervisor <path>` — override the active backend supervisor path
+  (`MICROAGENT_APPLEVF_SUPERVISOR` and
+  `MICROAGENT_FIRECRACKER_SUPERVISOR` work too)
 
 ## Output
 
 All commands return structured output. With `--json` (or
 `MICROAGENT_OUTPUT=json`), the response matches the shape documented in the
-[Apple VF supervisor protocol](/protocol/applevf/). Scripts should consume
-JSON; humans get the text format by default.
+[supervisor contract](/protocol/). Scripts should consume JSON; humans get the
+text format by default.

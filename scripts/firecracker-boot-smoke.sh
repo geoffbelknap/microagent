@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-firecracker-smoke.XXXXXX")"
 CLI="$STATE_DIR/microagent"
+SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
 GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
 RESULT="$STATE_DIR/result.json"
 EXPECTED_OUTPUT="microagent-firecracker-boot-smoke"
@@ -50,10 +51,12 @@ export GOCACHE="$STATE_DIR/gocache"
 export GOMODCACHE="$STATE_DIR/gomodcache"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 export MICROAGENT_FIRECRACKER="$firecracker"
+export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
 
 (
   cd "$ROOT"
   go build -o "$CLI" ./cmd/microagent
+  go build -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 

@@ -18,7 +18,7 @@ backend.
 |---|---|
 | `--name <name>` | Workspace name (also accepted as positional) |
 | `--state-dir <dir>` | State directory holding the workspace record |
-| `--supervisor <path>` | Override the Apple VF supervisor path |
+| `--supervisor <path>` | Override the active backend supervisor path |
 | `--json` | Print structured JSON output |
 
 ## Examples

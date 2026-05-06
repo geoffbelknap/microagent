@@ -17,9 +17,9 @@ In practice that means:
 - The rootfs is whatever OCI image the caller specified. Pin by digest in
   production. `microagent rootfs build` rejects mutable tag references
   unless you pass `--allow-mutable`.
-- The supervisor on macOS is whichever binary is on PATH (or pointed to by
-  `--supervisor` / `MICROAGENT_APPLEVF_SUPERVISOR`). Use signed builds in
-  production.
+- The backend supervisor is whichever binary is on PATH (or pointed to by
+  `--supervisor`, `MICROAGENT_APPLEVF_SUPERVISOR`, or
+  `MICROAGENT_FIRECRACKER_SUPERVISOR`). Use signed builds in production.
 
 ## Reporting
 

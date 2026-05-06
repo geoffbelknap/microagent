@@ -14,8 +14,8 @@ higher-level control stay outside this project.
 - New here? [Install](getting-started/install.md), then
   [run your first VM](getting-started/first-vm.md).
 - Need the CLI surface? Jump to the [CLI reference](cli/index.md).
-- Integrating? Read the [architecture overview](concepts/architecture.md) and
-  the [Apple VF supervisor protocol](protocol/applevf.md).
+- Integrating? Read the [architecture overview](concepts/architecture.md), the
+  [supervisor contract](protocol/index.md), and the [Go library](library/go.md).
 
 ## Sections
 
@@ -24,6 +24,7 @@ higher-level control stay outside this project.
 - [Concepts](concepts/architecture.md) — architecture, backends, boundaries,
   state and identity.
 - [CLI reference](cli/index.md) — every subcommand.
-- [Protocol](protocol/applevf.md) — Apple VF supervisor JSON protocol.
+- [Protocol](protocol/index.md) — shared supervisor contract and backend notes.
+- [Library](library/go.md) — exported Go package surface.
 - [Operations](operations/smoke-tests.md) — smoke tests, troubleshooting.
 - [Security](security.md) — trust boundary and reporting.

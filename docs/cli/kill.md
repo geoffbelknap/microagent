@@ -16,7 +16,7 @@ terminate the VM immediately. Use it when `stop` doesn't return.
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record |
-| `--supervisor <path>` | Override the Apple VF supervisor path |
+| `--supervisor <path>` | Override the active backend supervisor path |
 
 ## Example
 

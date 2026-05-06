@@ -31,7 +31,7 @@ scratch state (unless `--keep` is set).
 | `--timeout <seconds>` | Maximum wall-clock time before kill |
 | `--keep` | Keep state after the command exits |
 | `--mke2fs <path>` | mke2fs binary path |
-| `--supervisor <path>` | Override the Apple VF supervisor path |
+| `--supervisor <path>` | Override the active backend supervisor path |
 
 ## Examples
 

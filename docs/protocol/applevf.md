@@ -3,8 +3,8 @@ title: Apple VF supervisor protocol
 description: One JSON request in, one JSON response out.
 ---
 
-Microagent uses the supervisor concept for backend lifecycle work. The Apple
-VF supervisor is packaged as a standalone executable,
+Microagent uses the supervisor concept for backend lifecycle work. The Apple VF
+supervisor is packaged as a standalone executable,
 `microagent-applevf-supervisor`, so non-Swift callers can cross the
 Virtualization.framework boundary through a narrow JSON protocol.
 
@@ -12,6 +12,10 @@ Virtualization.framework boundary through a narrow JSON protocol.
 JSON response to stdout, and exits. Diagnostics go to stderr. Exit code `0`
 means the response has `"ok": true`. Nonzero exit means the response has
 `"ok": false` or the request could not be decoded.
+
+For the backend-independent command list and response shape, see
+[Supervisor contract](/protocol/). This page only covers the executable
+Apple VF process boundary.
 
 ## Request
 
@@ -47,7 +51,9 @@ means the response has `"ok": true`. Nonzero exit means the response has
 - `host`
 - `check`
 - `prepare`
+- `run`
 - `start`
+- `console`
 - `inspect`
 - `stop`
 - `kill`
@@ -55,7 +61,7 @@ means the response has `"ok": true`. Nonzero exit means the response has
 
 `host` does not require `identity` or `config`. `inspect`, `stop`, `kill`,
 and `delete` require `identity` and `config.stateDir`. `check`, `prepare`,
-and `start` require the full config.
+`start`, `run`, and `console` require the full config.
 
 ### Disks
 
