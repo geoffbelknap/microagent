@@ -50,6 +50,7 @@ Validated Linux gates:
 | `scripts/go-test.sh` | pass |
 | `scripts/firecracker-console-parity-smoke.sh` | pass |
 | `scripts/firecracker-publish-smoke.sh` | pass |
+| `scripts/firecracker-network-mode-smoke.sh` | pass; `nat` boots, `isolated` boots without guest `eth0`, isolated `--publish` fails closed, bridged fails closed without a configured Linux bridge |
 | `scripts/firecracker-workspace-smoke.sh` | pass |
 | `scripts/firecracker-boot-smoke.sh` | pass |
 | `make smoke` | pass |
@@ -66,7 +67,7 @@ Recorded Firecracker performance:
 
 | Feature | Apple VF | Firecracker | State |
 |---|---|---|---|
-| Networking | `nat`, `isolated`, and entitlement-gated explicit-interface `bridged`; `--publish` fails closed | `nat` plus live TCP `--publish`; `isolated` and `bridged` fail closed | Partial |
+| Networking | `nat`, `isolated`, and entitlement-gated explicit-interface `bridged`; `--publish` fails closed | `nat` plus live TCP `--publish`; `isolated`; Linux-bridge-backed `bridged` with transient TAP setup | Partial |
 | File transfer | `microagent cp` in/out of stopped rootfs and attached disks | same CLI semantics | Ready |
 | Console ergonomics | interactive `connect`, `--send`, readiness errors, clean detach | interactive `connect`, `--send`, readiness errors, clean detach | Ready, except resize |
 | Cloning | stopped workspace/template clone | stopped workspace/template clone | Ready |
@@ -79,8 +80,8 @@ Recorded Firecracker performance:
 
 ## Remaining Work
 
-- Implement real `isolated` and `bridged` networking for Firecracker instead
-  of treating them as reserved intent.
+- Validate Firecracker network mode smoke on the Linux KVM host and record the
+  final SHA/results for this slice.
 - Implement Apple VF `--publish`.
 - Decide release signing/provisioning or public unsupported status for Apple VF
   bridged networking. Apple gates it behind the restricted

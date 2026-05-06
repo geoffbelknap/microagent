@@ -20,6 +20,7 @@ self-hosted Linux runners labeled `kvm`, or directly on a Linux host with
 | `make smoke-firecracker` | Linux KVM Firecracker boot |
 | `make smoke-firecracker-console` | Linux KVM Firecracker console parity |
 | `make smoke-firecracker-publish` | Linux KVM Firecracker TCP publish |
+| `make smoke-firecracker-network` | Linux KVM Firecracker network modes |
 | `make smoke-applevf-network` | macOS Apple VF network mode validation |
 | `make smoke-workspace` | HostOS workspace lifecycle |
 | `make smoke-boot` | Boot a Linux VM end-to-end (Apple VF) |
@@ -85,6 +86,18 @@ make smoke-firecracker-publish
 This Linux amd64 KVM target verifies that `--publish` forwards a host TCP
 listener into a running Firecracker workspace. It checks both a minimal TCP
 responder and a BusyBox HTTP server.
+
+## Firecracker network mode smoke
+
+```bash
+make smoke-firecracker-network
+```
+
+This Linux amd64 KVM target verifies that Firecracker `nat` boots, `isolated`
+boots without a guest `eth0`, `isolated` rejects `--publish`, and bridged mode
+fails closed when no Linux bridge is configured. To exercise a live bridged
+boot, set `MICROAGENT_FIRECRACKER_BRIDGE_INTERFACE` inside the script
+environment to an existing Linux bridge name.
 
 ## Apple VF boot smoke
 

@@ -5,6 +5,7 @@ package firecracker
 import (
 	"bufio"
 	"context"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,10 +95,17 @@ func validateFirecrackerConfig(config *vmkit.Config) error {
 	if mode == "" {
 		mode = "nat"
 	}
-	if mode != "nat" {
-		return fmt.Errorf("firecracker network.mode %q is unsupported; use nat", mode)
+	switch mode {
+	case "nat", "isolated":
+		return nil
+	case "bridged":
+		if strings.TrimSpace(config.Network.Interface) == "" {
+			return fmt.Errorf("firecracker network.interface is required for bridged mode")
+		}
+		return validateLinuxBridge(strings.TrimSpace(config.Network.Interface))
+	default:
+		return fmt.Errorf("firecracker network.mode %q is unsupported; use nat, isolated, or bridged", mode)
 	}
-	return nil
 }
 
 func hostResponse(opts Options) (vmkit.Response, error) {
@@ -190,10 +198,11 @@ func packagedFirecrackerPath() string {
 }
 
 type config struct {
-	BootSource bootSource    `json:"boot-source"`
-	Drives     []drive       `json:"drives"`
-	Machine    machineConfig `json:"machine-config"`
-	Vsock      *vsockConfig  `json:"vsock,omitempty"`
+	BootSource        bootSource         `json:"boot-source"`
+	Drives            []drive            `json:"drives"`
+	Machine           machineConfig      `json:"machine-config"`
+	Vsock             *vsockConfig       `json:"vsock,omitempty"`
+	NetworkInterfaces []networkInterface `json:"network-interfaces,omitempty"`
 }
 
 type bootSource struct {
@@ -220,6 +229,12 @@ type vsockConfig struct {
 	UDSPath  string `json:"uds_path"`
 }
 
+type networkInterface struct {
+	IfaceID     string `json:"iface_id"`
+	GuestMAC    string `json:"guest_mac"`
+	HostDevName string `json:"host_dev_name"`
+}
+
 type eventFile struct {
 	Identity   vmkit.Identity `json:"identity"`
 	State      vmkit.VMState  `json:"state"`
@@ -227,16 +242,24 @@ type eventFile struct {
 	ObservedAt string         `json:"observedAt"`
 }
 
+type transientNetworkDevice struct {
+	Name      string `json:"name"`
+	Mode      string `json:"mode"`
+	Interface string `json:"interface,omitempty"`
+	Created   bool   `json:"created"`
+}
+
 type runtimeState struct {
-	Event           eventFile    `json:"event"`
-	Config          vmkit.Config `json:"config"`
-	PID             int          `json:"pid,omitempty"`
-	PortForwardPID  int          `json:"portForwardPid,omitempty"`
-	SerialLogPath   string       `json:"serialLogPath"`
-	SerialInputPath string       `json:"serialInputPath,omitempty"`
-	StartedAt       string       `json:"startedAt,omitempty"`
-	UpdatedAt       string       `json:"updatedAt"`
-	Error           string       `json:"error,omitempty"`
+	Event           eventFile                `json:"event"`
+	Config          vmkit.Config             `json:"config"`
+	PID             int                      `json:"pid,omitempty"`
+	PortForwardPID  int                      `json:"portForwardPid,omitempty"`
+	NetworkDevices  []transientNetworkDevice `json:"networkDevices,omitempty"`
+	SerialLogPath   string                   `json:"serialLogPath"`
+	SerialInputPath string                   `json:"serialInputPath,omitempty"`
+	StartedAt       string                   `json:"startedAt,omitempty"`
+	UpdatedAt       string                   `json:"updatedAt"`
+	Error           string                   `json:"error,omitempty"`
 }
 
 func prepareWorkspace(opts Options, req vmkit.Request) error {
@@ -267,21 +290,30 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		path = resolved
 	}
+	networkDevices, err := prepareNetworkForStart(opts, req.Config)
+	if err != nil {
+		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+		return failedResponse(req, err.Error()), err
+	}
 	if err := writeConfig(opts, req); err != nil {
+		cleanupTransientNetworkDevices(networkDevices)
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
 	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o755); err != nil {
+		cleanupTransientNetworkDevices(networkDevices)
 		return vmkit.Response{}, err
 	}
 	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
+		cleanupTransientNetworkDevices(networkDevices)
 		return vmkit.Response{}, err
 	}
 	var serialInput *os.File
 	if req.Config.SerialInput {
 		input, inputErr := openSerialInputFIFO(opts)
 		if inputErr != nil {
+			cleanupTransientNetworkDevices(networkDevices)
 			_ = serialLog.Close()
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, inputErr.Error())
 			return failedResponse(req, inputErr.Error()), inputErr
@@ -298,6 +330,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 	if err := cmd.Start(); err != nil {
+		cleanupTransientNetworkDevices(networkDevices)
 		if serialInput != nil {
 			_ = serialInput.Close()
 		}
@@ -305,8 +338,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
-	if err := writeProcessState(opts, req, vmkit.StateRunning, cmd.Process.Pid, ""); err != nil {
+	if err := writeProcessStateWithForwarderAndNetwork(opts, req, vmkit.StateRunning, cmd.Process.Pid, 0, networkDevices, ""); err != nil {
 		_ = cmd.Process.Kill()
+		cleanupTransientNetworkDevices(networkDevices)
 		if serialInput != nil {
 			_ = serialInput.Close()
 		}
@@ -318,6 +352,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		pid, err := startPortForwarderProcess(opts)
 		if err != nil {
 			_ = cmd.Process.Kill()
+			cleanupTransientNetworkDevices(networkDevices)
 			if serialInput != nil {
 				_ = serialInput.Close()
 			}
@@ -326,9 +361,10 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return failedResponse(req, err.Error()), err
 		}
 		portForwardPID = pid
-		if err := writeProcessStateWithForwarder(opts, req, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, ""); err != nil {
+		if err := writeProcessStateWithForwarderAndNetwork(opts, req, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, networkDevices, ""); err != nil {
 			_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 			_ = cmd.Process.Kill()
+			cleanupTransientNetworkDevices(networkDevices)
 			if serialInput != nil {
 				_ = serialInput.Close()
 			}
@@ -356,6 +392,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		state = vmkit.StateFailed
 		errorText = waitErr.Error()
 	}
+	cleanupTransientNetworkDevices(networkDevices)
 	if closeErr != nil && errorText == "" {
 		state = vmkit.StateFailed
 		errorText = closeErr.Error()
@@ -404,6 +441,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		if state.PortForwardPID != 0 {
 			_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 		}
+		cleanupTransientNetworkDevices(state.NetworkDevices)
 		if err := writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateStopped, 0, ""); err != nil {
 			return vmkit.Response{}, err
 		}
@@ -428,6 +466,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	if state.PortForwardPID != 0 {
 		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 	}
+	cleanupTransientNetworkDevices(state.NetworkDevices)
 	if err := writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateStopped, 0, ""); err != nil {
 		return vmkit.Response{}, err
 	}
@@ -476,6 +515,9 @@ func writeConfig(opts Options, req vmkit.Request) error {
 			UDSPath:  vsockSocketPath(opts),
 		}
 	}
+	if iface, ok := firecrackerNetworkInterface(opts, req.Config); ok {
+		cfg.NetworkInterfaces = append(cfg.NetworkInterfaces, iface)
+	}
 	for _, disk := range req.Config.Disks {
 		cfg.Drives = append(cfg.Drives, drive{
 			DriveID:      disk.Name,
@@ -502,6 +544,135 @@ func needsVsock(config *vmkit.Config) bool {
 
 func hasPortForwards(config *vmkit.Config) bool {
 	return config != nil && config.Network != nil && len(config.Network.PortForwards) != 0
+}
+
+func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInterface, bool) {
+	if networkMode(config) != "bridged" {
+		return networkInterface{}, false
+	}
+	return networkInterface{
+		IfaceID:     "eth0",
+		GuestMAC:    firecrackerGuestMAC(opts.Name),
+		HostDevName: tapName(opts),
+	}, true
+}
+
+func networkMode(config *vmkit.Config) string {
+	if config == nil || config.Network == nil || strings.TrimSpace(config.Network.Mode) == "" {
+		return "nat"
+	}
+	return strings.TrimSpace(config.Network.Mode)
+}
+
+func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, error) {
+	if networkMode(config) != "bridged" {
+		return nil, nil
+	}
+	bridge := strings.TrimSpace(config.Network.Interface)
+	if err := validateLinuxBridge(bridge); err != nil {
+		return nil, err
+	}
+	if _, err := exec.LookPath("ip"); err != nil {
+		return nil, fmt.Errorf("firecracker bridged networking requires iproute2 'ip': %w", err)
+	}
+	device := transientNetworkDevice{Name: tapName(opts), Mode: "tap", Interface: bridge, Created: true}
+	if err := createBridgeTap(device.Name, bridge); err != nil {
+		return nil, err
+	}
+	return []transientNetworkDevice{device}, nil
+}
+
+func validateLinuxBridge(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("firecracker network.interface is required for bridged mode")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\x00") || len(name) > 15 {
+		return fmt.Errorf("firecracker bridged network.interface %q is not a valid Linux interface name", name)
+	}
+	if _, err := os.Stat(filepath.Join("/sys/class/net", name)); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("firecracker bridged network.interface %q does not exist", name)
+		}
+		return fmt.Errorf("inspect firecracker bridged network.interface %q: %w", name, err)
+	}
+	if _, err := os.Stat(filepath.Join("/sys/class/net", name, "bridge")); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("firecracker bridged network.interface %q must be a Linux bridge", name)
+		}
+		return fmt.Errorf("inspect firecracker bridged network.interface %q bridge state: %w", name, err)
+	}
+	return nil
+}
+
+func createBridgeTap(tap, bridge string) error {
+	if err := runIP("tuntap", "add", "dev", tap, "mode", "tap"); err != nil {
+		return fmt.Errorf("create firecracker tap %q: %w", tap, err)
+	}
+	if err := runIP("link", "set", tap, "master", bridge); err != nil {
+		_ = deleteTap(tap)
+		return fmt.Errorf("attach firecracker tap %q to bridge %q: %w", tap, bridge, err)
+	}
+	if err := runIP("link", "set", tap, "up"); err != nil {
+		_ = deleteTap(tap)
+		return fmt.Errorf("bring firecracker tap %q up: %w", tap, err)
+	}
+	return nil
+}
+
+func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
+	for _, device := range devices {
+		if device.Created && device.Name != "" && device.Mode == "tap" {
+			_ = deleteTap(device.Name)
+		}
+	}
+}
+
+func deleteTap(name string) error {
+	return runIP("link", "delete", name)
+}
+
+func runIP(args ...string) error {
+	cmd := exec.Command("ip", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(out))
+		if text == "" {
+			return err
+		}
+		return fmt.Errorf("%w: %s", err, text)
+	}
+	return nil
+}
+
+func tapName(opts Options) string {
+	seed := opts.Name
+	if seed == "" {
+		seed = opts.StateDir
+	}
+	sum := sha1.Sum([]byte(seed))
+	return "magtap" + hexPrefix(sum[:], 8)
+}
+
+func firecrackerGuestMAC(name string) string {
+	sum := sha1.Sum([]byte(name))
+	return fmt.Sprintf("06:00:%02x:%02x:%02x:%02x", sum[0], sum[1], sum[2], sum[3])
+}
+
+func hexPrefix(data []byte, n int) string {
+	const digits = "0123456789abcdef"
+	if n > len(data)*2 {
+		n = len(data) * 2
+	}
+	out := make([]byte, n)
+	for i := 0; i < n; i++ {
+		b := data[i/2]
+		if i%2 == 0 {
+			out[i] = digits[b>>4]
+		} else {
+			out[i] = digits[b&0x0f]
+		}
+	}
+	return string(out)
 }
 
 func startPortForwarderProcess(opts Options) (int, error) {
@@ -665,6 +836,10 @@ func writeProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid
 }
 
 func writeProcessStateWithForwarder(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID int, errorText string) error {
+	return writeProcessStateWithForwarderAndNetwork(opts, req, state, pid, portForwardPID, nil, errorText)
+}
+
+func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID int, networkDevices []transientNetworkDevice, errorText string) error {
 	if req.Identity == nil || req.Config == nil {
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
@@ -687,6 +862,7 @@ func writeProcessStateWithForwarder(opts Options, req vmkit.Request, state vmkit
 		Config:          *req.Config,
 		PID:             pid,
 		PortForwardPID:  portForwardPID,
+		NetworkDevices:  append([]transientNetworkDevice{}, networkDevices...),
 		SerialLogPath:   serialLogPath(opts),
 		SerialInputPath: serialInputPath(opts),
 		UpdatedAt:       now.Format(time.RFC3339),
@@ -899,6 +1075,9 @@ func vsockSocketPath(opts Options) string {
 }
 
 func cleanupWorkspaceState(opts Options) {
+	if state, err := readRuntimeState(opts); err == nil {
+		cleanupTransientNetworkDevices(state.NetworkDevices)
+	}
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, "workspaces", opts.Name))
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, opts.Name))
 }

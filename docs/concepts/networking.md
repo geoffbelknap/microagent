@@ -17,7 +17,7 @@ Current backend support is narrower than the full enum:
 | Backend | Supported mode today |
 |---|---|
 | Apple VF | `nat` and `isolated`; `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement; `--publish` fails closed |
-| Firecracker | `nat` plus live TCP `--publish`; `isolated` and `bridged` fail closed in the supervisor |
+| Firecracker | `nat` plus live TCP `--publish`; `isolated`; `bridged` through a host Linux bridge |
 
 Apple puts native Apple VF bridged networking behind the restricted
 `com.apple.vm.networking` entitlement. Open-source builds cannot self-sign that
@@ -61,6 +61,18 @@ start with an error that names the Apple restriction.
 network:
   mode: bridged
   interface: en0
+```
+
+For bridged Firecracker workspaces, `interface` must name an existing Linux
+bridge. The supervisor creates a transient TAP device, attaches it to that
+bridge, configures the generated `firecracker.json` network device, and removes
+the TAP when the workspace stops, is killed, or is deleted. Missing `iproute2`,
+missing privileges, non-bridge interfaces, and TAP setup failures fail closed.
+
+```yaml
+network:
+  mode: bridged
+  interface: br0
 ```
 
 For isolated workspaces, port forwards are invalid because no guest network is
