@@ -7,7 +7,7 @@ description: List or prune local image records.
 microagent images pull <image> [--state-dir <dir>]
 microagent images list [--state-dir <dir>]
 microagent images tag <source> <target> [--state-dir <dir>]
-microagent images prune [--state-dir <dir>]
+microagent images prune [--delete] [--state-dir <dir>]
 ```
 
 `images` reads Microagent's local image index. Successful workspace rootfs
@@ -21,10 +21,12 @@ platform, rootfs path, size, and last-used time.
 | `pull` | Build and record a reusable local rootfs from an OCI image |
 | `list` | Show locally recorded images |
 | `tag` | Add another local name for an existing image record |
-| `prune` | Remove records whose rootfs path no longer exists |
+| `prune` | Remove stale records, and optionally delete reusable local rootfs baselines |
 
-`prune` updates only the image index. It does not delete active workspace
-rootfs files.
+By default, `prune` updates only the image index by removing records whose
+rootfs path no longer exists. With `--delete`, it also deletes reusable rootfs
+baselines under the local image store and removes every record pointing to
+those files. It does not delete workspace-owned rootfs files.
 
 `tag` resolves `<source>` against the recorded image reference, resolved
 reference, or digest. It creates another index record pointing at the same
@@ -44,6 +46,12 @@ OCI image so their init config is baked into the rootfs.
 | `--mke2fs <path>` | mke2fs binary path |
 | `--guest-init <path>` | Guest init binary path |
 
+## Prune Flags
+
+| Flag | Description |
+|---|---|
+| `--delete` | Delete reusable image-store rootfs files and their records |
+
 ## Examples
 
 ```bash
@@ -52,6 +60,7 @@ microagent images list
 microagent images tag sha256:abc local/ubuntu:baseline
 microagent create research --image local/ubuntu:baseline
 microagent images prune --json
+microagent images prune --delete --json
 ```
 
 ## Related

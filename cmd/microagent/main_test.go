@@ -1171,12 +1171,78 @@ func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
 	if err := os.Remove(rootfsPath); err != nil {
 		t.Fatal(err)
 	}
-	pruned, err := pruneImageRecords(dir)
+	pruned, err := pruneImageRecords(dir, false)
 	if err != nil {
 		t.Fatalf("pruneImageRecords: %v", err)
 	}
 	if len(pruned.Removed) != 1 || len(pruned.Kept) != 0 {
 		t.Fatalf("pruned = %#v", pruned)
+	}
+}
+
+func TestImagesPruneDeleteRemovesReusableBaselines(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
+		if err := upsertImageRecord(dir, imageRecord{
+			ImageRef:    ref,
+			ResolvedRef: "docker.io/library/busybox@sha256:abc",
+			Digest:      "sha256:abc",
+			Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+			OutputPath:  rootfsPath,
+			SizeBytes:   6,
+			LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruned, err := pruneImageRecords(dir, true)
+	if err != nil {
+		t.Fatalf("pruneImageRecords: %v", err)
+	}
+	if len(pruned.Deleted) != 2 || len(pruned.Kept) != 0 || len(pruned.Removed) != 0 {
+		t.Fatalf("pruned = %#v", pruned)
+	}
+	if _, err := os.Stat(rootfsPath); !os.IsNotExist(err) {
+		t.Fatalf("rootfs still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestImagesPruneDeleteKeepsWorkspaceRootfs(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "workspaces", "research", "rootfs.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertImageRecord(dir, imageRecord{
+		ImageRef:    "docker.io/library/busybox:1.36",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  rootfsPath,
+		SizeBytes:   6,
+		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := pruneImageRecords(dir, true)
+	if err != nil {
+		t.Fatalf("pruneImageRecords: %v", err)
+	}
+	if len(pruned.Kept) != 1 || len(pruned.Deleted) != 0 || len(pruned.Removed) != 0 {
+		t.Fatalf("pruned = %#v", pruned)
+	}
+	if _, err := os.Stat(rootfsPath); err != nil {
+		t.Fatalf("workspace rootfs was removed: %v", err)
 	}
 }
 

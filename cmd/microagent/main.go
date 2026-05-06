@@ -861,6 +861,7 @@ type imageRecord struct {
 
 type imagePruneResult struct {
 	Removed []imageRecord `json:"removed"`
+	Deleted []imageRecord `json:"deleted,omitempty"`
 	Kept    []imageRecord `json:"kept"`
 }
 
@@ -1133,6 +1134,7 @@ func runImages(args []string, stdout *os.File) error {
 	sizeMiB := fs.Int64("size-mib", rootfs.DefaultSizeMiB, "Rootfs image size in MiB")
 	mke2fsPath := fs.String("mke2fs", defaultMke2fsPath(), "mke2fs binary path")
 	guestInitPath := fs.String("guest-init", defaultGuestInitPath(*arch), "Guest init path")
+	deleteFiles := fs.Bool("delete", false, "Delete reusable local image rootfs files during prune")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -1179,7 +1181,7 @@ func runImages(args []string, stdout *os.File) error {
 		if fs.NArg() != 1 {
 			return fmt.Errorf("usage: microagent images prune [--state-dir <dir>]")
 		}
-		result, err := pruneImageRecords(opts.StateDir)
+		result, err := pruneImageRecords(opts.StateDir, *deleteFiles)
 		if err != nil {
 			return err
 		}
@@ -4126,16 +4128,34 @@ func listImageRecords(stateDir string) ([]imageRecord, error) {
 	return images, nil
 }
 
-func pruneImageRecords(stateDir string) (imagePruneResult, error) {
+func pruneImageRecords(stateDir string, deleteFiles bool) (imagePruneResult, error) {
 	idx, err := readImageIndex(stateDir)
 	if err != nil {
 		return imagePruneResult{}, err
 	}
 	result := imagePruneResult{}
+	deletedPaths := map[string]bool{}
 	for _, image := range idx.Images {
 		if image.OutputPath == "" {
 			result.Kept = append(result.Kept, image)
 			continue
+		}
+		cleanPath := filepath.Clean(image.OutputPath)
+		if deleteFiles && imagePathInRootfsStore(stateDir, cleanPath) {
+			if deletedPaths[cleanPath] {
+				result.Deleted = append(result.Deleted, image)
+				continue
+			}
+			if err := os.Remove(cleanPath); err == nil {
+				deletedPaths[cleanPath] = true
+				result.Deleted = append(result.Deleted, image)
+				continue
+			} else if os.IsNotExist(err) {
+				result.Removed = append(result.Removed, image)
+				continue
+			} else {
+				return imagePruneResult{}, err
+			}
 		}
 		if _, err := os.Stat(image.OutputPath); err == nil {
 			result.Kept = append(result.Kept, image)
@@ -4147,10 +4167,27 @@ func pruneImageRecords(stateDir string) (imagePruneResult, error) {
 	}
 	sortImageRecords(result.Kept)
 	sortImageRecords(result.Removed)
+	sortImageRecords(result.Deleted)
 	if err := writeImageIndex(stateDir, imageIndex{Images: result.Kept}); err != nil {
 		return imagePruneResult{}, err
 	}
 	return result, nil
+}
+
+func imagePathInRootfsStore(stateDir, path string) bool {
+	storeDir, err := filepath.Abs(filepath.Join(stateDir, "images", "rootfs"))
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(storeDir, absPath)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func sortImageRecords(images []imageRecord) {
