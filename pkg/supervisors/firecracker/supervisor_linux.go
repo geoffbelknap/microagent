@@ -161,6 +161,7 @@ type config struct {
 	BootSource bootSource    `json:"boot-source"`
 	Drives     []drive       `json:"drives"`
 	Machine    machineConfig `json:"machine-config"`
+	Vsock      *vsockConfig  `json:"vsock,omitempty"`
 }
 
 type bootSource struct {
@@ -179,6 +180,12 @@ type machineConfig struct {
 	VCPUCount  int  `json:"vcpu_count"`
 	MemSizeMiB int  `json:"mem_size_mib"`
 	SMT        bool `json:"smt"`
+}
+
+type vsockConfig struct {
+	VsockID  string `json:"vsock_id"`
+	GuestCID uint32 `json:"guest_cid"`
+	UDSPath  string `json:"uds_path"`
 }
 
 type eventFile struct {
@@ -352,6 +359,13 @@ func writeConfig(opts Options, req vmkit.Request) error {
 		}},
 		Machine: machineConfig{VCPUCount: req.Config.CPUCount, MemSizeMiB: req.Config.MemoryMiB},
 	}
+	if needsVsock(req.Config) {
+		cfg.Vsock = &vsockConfig{
+			VsockID:  "vsock0",
+			GuestCID: 3,
+			UDSPath:  vsockSocketPath(opts),
+		}
+	}
 	for _, disk := range req.Config.Disks {
 		cfg.Drives = append(cfg.Drives, drive{
 			DriveID:      disk.Name,
@@ -364,6 +378,16 @@ func writeConfig(opts Options, req vmkit.Request) error {
 		return err
 	}
 	return writeJSONFile(configPath(opts), cfg)
+}
+
+func needsVsock(config *vmkit.Config) bool {
+	if config == nil {
+		return false
+	}
+	if len(config.VsockListeners) != 0 {
+		return true
+	}
+	return config.Network != nil && len(config.Network.PortForwards) != 0
 }
 
 func inspectWorkspace(opts Options) (vmkit.Response, error) {
@@ -614,6 +638,10 @@ func serialLogPath(opts Options) string {
 
 func serialInputPath(opts Options) string {
 	return filepath.Join(opts.StateDir, opts.Name, "serial.in")
+}
+
+func vsockSocketPath(opts Options) string {
+	return filepath.Join(opts.StateDir, opts.Name, "vsock.sock")
 }
 
 func cleanupWorkspaceState(opts Options) {

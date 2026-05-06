@@ -2227,6 +2227,7 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 		"--kernel", kernel,
 		"--id", "agent-1",
 		"--state-dir", dir,
+		"--vsock", "1024=127.0.0.1:8200",
 		"--supervisor", firecrackerSupervisorHelper(t),
 	}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
@@ -2244,6 +2245,13 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "agent-1", "firecracker.json")); err != nil {
 		t.Fatalf("firecracker config missing: %v", err)
+	}
+	configData, err := os.ReadFile(filepath.Join(dir, "agent-1", "firecracker.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(configData), `"vsock_id": "vsock0"`) || !strings.Contains(string(configData), `"guest_cid": 3`) {
+		t.Fatalf("firecracker config missing vsock: %s", configData)
 	}
 }
 
