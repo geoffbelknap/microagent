@@ -10,6 +10,7 @@ description: All microagent subcommands at a glance.
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
 | [`start`](/cli/start/) | Boot a stopped workspace |
+| [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |

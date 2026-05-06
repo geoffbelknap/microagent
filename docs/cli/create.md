@@ -102,6 +102,8 @@ When `microagent.yaml` or `microagent.yml` exists in the current directory,
 `microagent create` reads it automatically. CLI flags override fields from the
 spec.
 
+Restart policies are enforced by [`supervise`](/cli/supervise/).
+
 Attach an existing ext4 disk:
 
 ```bash

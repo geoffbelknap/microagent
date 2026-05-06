@@ -787,6 +787,26 @@ func TestParseWorkspaceOptionsRejectsInvalidRestartPolicy(t *testing.T) {
 	}
 }
 
+func TestShouldRestartWorkspace(t *testing.T) {
+	tests := []struct {
+		policy string
+		state  vmkit.VMState
+		want   bool
+	}{
+		{policy: "never", state: vmkit.StateFailed, want: false},
+		{policy: "on-failure", state: vmkit.StateFailed, want: true},
+		{policy: "on-failure", state: vmkit.StateStopped, want: false},
+		{policy: "always", state: vmkit.StateStopped, want: true},
+		{policy: "always", state: vmkit.StateFailed, want: true},
+		{policy: "always", state: vmkit.StateRunning, want: false},
+	}
+	for _, tt := range tests {
+		if got := shouldRestartWorkspace(tt.policy, tt.state); got != tt.want {
+			t.Fatalf("shouldRestartWorkspace(%q, %q) = %v, want %v", tt.policy, tt.state, got, tt.want)
+		}
+	}
+}
+
 func TestParseWorkspaceOptionsRejectsUnknownProfile(t *testing.T) {
 	_, err := parseWorkspaceOptions("create", []string{"research", "--profile", "huge"})
 	if err == nil || !strings.Contains(err.Error(), "unknown resource profile") {
@@ -977,6 +997,10 @@ func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := writeWorkspaceManifest(workspaceOptions{
 		StateDir:      dir,
 		Name:          "research",
@@ -1028,6 +1052,86 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": T
 	}
 	if manifest.Restart != "always" {
 		t.Fatalf("restart = %q", manifest.Restart)
+	}
+}
+
+func TestSuperviseWorkspaceOptionsUseManifestPolicy(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "medium",
+		RestartPolicy: "on-failure",
+		MemoryMiB:     2048,
+		CPUCount:      2,
+		SizeMiB:       8192,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := superviseWorkspaceOptions(t.Context(), superviseOptions{
+		StateDir:       dir,
+		Name:           "research",
+		Backend:        vmkit.BackendAppleVF,
+		Architecture:   "arm64",
+		KernelPath:     kernelPath,
+		KernelExplicit: true,
+		SupervisorPath: "/tmp/supervisor",
+	})
+	if err != nil {
+		t.Fatalf("superviseWorkspaceOptions: %v", err)
+	}
+	if opts.RestartPolicy != "on-failure" || opts.MemoryMiB != 2048 || opts.CPUCount != 2 {
+		t.Fatalf("opts = %#v", opts)
+	}
+}
+
+func TestSuperviseWorkspaceSkipsNeverPolicy(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := superviseWorkspace(t.Context(), superviseOptions{
+		StateDir:       dir,
+		Name:           "research",
+		Backend:        vmkit.BackendAppleVF,
+		Architecture:   "arm64",
+		KernelPath:     kernelPath,
+		KernelExplicit: true,
+		SupervisorPath: "/tmp/supervisor",
+	})
+	if err != nil {
+		t.Fatalf("superviseWorkspace: %v", err)
+	}
+	if result.Policy != "never" || !result.Stopped || result.Restarts != 0 {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

@@ -103,6 +103,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "start" && hasPositionalWorkspaceName(args[1:]) {
 		return runStartWorkspace(ctx, args[1:], stdout)
 	}
+	if args[0] == "supervise" {
+		return runSupervise(ctx, args[1:], stdout)
+	}
 	if args[0] == "create" && shouldUseHighLevelCreate(args[1:]) {
 		return runHighLevelCreate(ctx, args[1:], stdout)
 	}
@@ -1269,6 +1272,198 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	return err
 }
 
+type superviseOptions struct {
+	StateDir       string
+	SupervisorPath string
+	Backend        string
+	Architecture   string
+	KernelPath     string
+	KernelExplicit bool
+	Name           string
+	Interval       time.Duration
+	MaxRestarts    int
+}
+
+type superviseResult struct {
+	Workspace  string `json:"workspace"`
+	Policy     string `json:"policy"`
+	Restarts   int    `json:"restarts"`
+	FinalState string `json:"final_state,omitempty"`
+	Stopped    bool   `json:"stopped"`
+}
+
+func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
+	opts := superviseOptions{
+		StateDir:       defaultStateDir(),
+		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		Backend:        hostBackend(),
+		Architecture:   defaultGuestArch(),
+		Interval:       time.Second,
+	}
+	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	opts.KernelExplicit = hasFlagValue(args, "kernel")
+	fs := flag.NewFlagSet("supervise", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
+	intervalSeconds := fs.Int("interval", int(opts.Interval.Seconds()), "Seconds between state checks")
+	fs.IntVar(&opts.MaxRestarts, "max-restarts", 0, "Maximum restarts; 0 means unlimited")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent supervise <name> [--state-dir <dir>]")
+	}
+	if *intervalSeconds <= 0 {
+		return fmt.Errorf("supervise interval must be positive")
+	}
+	if opts.MaxRestarts < 0 {
+		return fmt.Errorf("supervise max-restarts must not be negative")
+	}
+	opts.Interval = time.Duration(*intervalSeconds) * time.Second
+	opts.Name = fs.Arg(0)
+	if err := validateWorkspaceName(opts.Name); err != nil {
+		return err
+	}
+	result, err := superviseWorkspace(ctx, opts)
+	if result.Workspace != "" {
+		if encodeErr := writeSuperviseResult(stdout, result); encodeErr != nil {
+			return encodeErr
+		}
+	}
+	return err
+}
+
+func superviseWorkspace(ctx context.Context, opts superviseOptions) (superviseResult, error) {
+	workspaceOpts, err := superviseWorkspaceOptions(ctx, opts)
+	if err != nil {
+		return superviseResult{}, err
+	}
+	policy := normalizeRestartPolicy(workspaceOpts.RestartPolicy)
+	if policy == "never" {
+		return superviseResult{Workspace: opts.Name, Policy: policy, Stopped: true}, nil
+	}
+	result := superviseResult{Workspace: opts.Name, Policy: policy}
+	for {
+		req := workspaceRequest(workspaceOpts, "run", filepath.Join(workspaceOpts.StateDir, "workspaces", workspaceOpts.Name, "rootfs.ext4"))
+		resp, err := startWorkspaceDetached(workspaceOpts, req)
+		if err != nil {
+			result.FinalState = string(vmkit.StateFailed)
+			if !shouldRestartWorkspace(policy, vmkit.StateFailed) {
+				result.Stopped = true
+				return result, err
+			}
+			result.Restarts++
+			if opts.MaxRestarts > 0 && result.Restarts >= opts.MaxRestarts {
+				result.Stopped = true
+				return result, nil
+			}
+			continue
+		} else if resp.Event != nil {
+			result.FinalState = string(resp.Event.State)
+		}
+		state, waitErr := waitForSupervisedWorkspace(ctx, workspaceOpts, opts.Interval)
+		result.FinalState = string(state)
+		if waitErr != nil {
+			result.Stopped = true
+			return result, waitErr
+		}
+		if !shouldRestartWorkspace(policy, state) {
+			result.Stopped = true
+			return result, nil
+		}
+		result.Restarts++
+		if opts.MaxRestarts > 0 && result.Restarts >= opts.MaxRestarts {
+			result.Stopped = true
+			return result, nil
+		}
+	}
+}
+
+func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (workspaceOptions, error) {
+	workspaceOpts := workspaceOptions{
+		Name:           opts.Name,
+		Backend:        opts.Backend,
+		Architecture:   opts.Architecture,
+		KernelPath:     opts.KernelPath,
+		KernelExplicit: opts.KernelExplicit,
+		StateDir:       opts.StateDir,
+		SupervisorPath: opts.SupervisorPath,
+		Profile:        defaultWorkspaceProfile,
+		RestartPolicy:  defaultRestartPolicy,
+		MemoryMiB:      defaultWorkspaceMemoryMiB,
+		CPUCount:       defaultWorkspaceCPUCount,
+		SizeMiB:        rootfs.DefaultSizeMiB,
+		SerialInput:    opts.Backend == vmkit.BackendAppleVF,
+	}
+	manifest, err := readWorkspaceManifest(opts.StateDir, opts.Name)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	if manifest.Profile != "" {
+		workspaceOpts.Profile = manifest.Profile
+	}
+	workspaceOpts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
+	if manifest.Resources.MemoryMiB != 0 {
+		workspaceOpts.MemoryMiB = manifest.Resources.MemoryMiB
+	}
+	if manifest.Resources.CPUCount != 0 {
+		workspaceOpts.CPUCount = manifest.Resources.CPUCount
+	}
+	if manifest.Resources.SizeMiB != 0 {
+		workspaceOpts.SizeMiB = manifest.Resources.SizeMiB
+	}
+	workspaceOpts.Disks = manifest.Disks
+	if err := validateRestartPolicy(workspaceOpts.RestartPolicy); err != nil {
+		return workspaceOptions{}, err
+	}
+	rootfsPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4")
+	if _, err := os.Stat(rootfsPath); err != nil {
+		return workspaceOptions{}, err
+	}
+	if err := ensureWorkspaceKernel(ctx, &workspaceOpts); err != nil {
+		return workspaceOptions{}, err
+	}
+	return workspaceOpts, nil
+}
+
+func waitForSupervisedWorkspace(ctx context.Context, opts workspaceOptions, interval time.Duration) (vmkit.VMState, error) {
+	for {
+		resp, err := inspectWorkspace(ctx, opts)
+		if err != nil {
+			if resp.Event != nil {
+				return resp.Event.State, err
+			}
+			return vmkit.StateUnknown, err
+		}
+		if resp.Event != nil {
+			switch resp.Event.State {
+			case vmkit.StateStopped, vmkit.StateFailed:
+				return resp.Event.State, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return vmkit.StateUnknown, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
+}
+
+func shouldRestartWorkspace(policy string, state vmkit.VMState) bool {
+	switch normalizeRestartPolicy(policy) {
+	case "always":
+		return state == vmkit.StateStopped || state == vmkit.StateFailed
+	case "on-failure":
+		return state == vmkit.StateFailed
+	default:
+		return false
+	}
+}
+
 func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) error {
 	opts, err := parseWorkspaceOptions("create", args)
 	if err != nil {
@@ -2317,6 +2512,19 @@ func writeCopyResult(stdout *os.File, result copyResult) error {
 	fmt.Fprintf(stdout, "Target: %s\n", result.Target)
 	if result.Bytes != 0 {
 		fmt.Fprintf(stdout, "Bytes: %d\n", result.Bytes)
+	}
+	return nil
+}
+
+func writeSuperviseResult(stdout *os.File, result superviseResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	fmt.Fprintf(stdout, "Policy: %s\n", result.Policy)
+	fmt.Fprintf(stdout, "Restarts: %d\n", result.Restarts)
+	if result.FinalState != "" {
+		fmt.Fprintf(stdout, "Final state: %s\n", result.FinalState)
 	}
 	return nil
 }
@@ -3484,6 +3692,8 @@ func reorderFlagArgs(args []string) []string {
 		"-size-mib":      true,
 		"-timeout":       true,
 		"-ready-timeout": true,
+		"-interval":      true,
+		"-max-restarts":  true,
 		"-result-port":   true,
 		"-send":          true,
 	}
@@ -3669,6 +3879,7 @@ Commands:
   clone                Clone a stopped workspace
   cp                   Copy files into or out of a stopped workspace
   start                Start a workspace
+  supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
   ps                   List workspaces
   status               Show workspace state
