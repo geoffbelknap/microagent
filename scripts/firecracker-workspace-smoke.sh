@@ -105,7 +105,7 @@ if "$CLI" connect connect-smoke --state-dir "$STATE_DIR/connect" --send "echo CO
   echo "firecracker connect unexpectedly succeeded" >&2
   exit 1
 fi
-grep -q "firecracker connect is not supported" "$STATE_DIR/connect.err"
+grep -q "console input is not ready" "$STATE_DIR/connect.err"
 "$CLI" logs connect-smoke --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-logs.txt"
 "$CLI" ps --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-ps.json"
 

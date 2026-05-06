@@ -1,6 +1,6 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test smoke smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-workspace smoke-applevf-vsock release-check signed-supervisor smoke-boot
+.PHONY: test smoke smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-workspace smoke-applevf-vsock release-check signed-supervisor smoke-boot
 
 test:
 	go test ./...
@@ -31,6 +31,9 @@ smoke-firecracker:
 
 smoke-firecracker-console:
 	scripts/firecracker-console-parity-smoke.sh
+
+smoke-firecracker-publish:
+	scripts/firecracker-publish-smoke.sh
 
 smoke-workspace:
 ifeq ($(UNAME_S),Darwin)
