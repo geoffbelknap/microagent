@@ -23,7 +23,7 @@ the workspace.
 |---|---|
 | `--send <line>` | Write one line to the console and print new output |
 | `--timeout <seconds>` | Seconds to wait for output after `--send` |
-| `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before `--send`; `0` disables |
+| `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before attaching or sending; `0` disables |
 | `--state-dir <dir>` | State directory holding the workspace record |
 
 ## Examples
@@ -41,9 +41,9 @@ microagent connect research --send "cat /etc/os-release"
 microagent connect research --send "cat /workspace/status; uname -m"
 ```
 
-With `--send`, `connect` waits for the console FIFO and, by default, for a
-basic shell prompt before writing. If the guest shell is not ready, it exits
-with an error that points to [`logs`](/cli/logs/).
+`connect` waits for the console FIFO and, by default, for a basic shell prompt
+before attaching or writing. If the guest shell is not ready, it exits with an
+error that points to [`logs`](/cli/logs/).
 
 ## Related
 

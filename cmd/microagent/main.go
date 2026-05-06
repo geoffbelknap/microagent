@@ -1432,14 +1432,14 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name}); err == nil && state.Event.Identity.Backend == vmkit.BackendFirecracker {
 		return fmt.Errorf("firecracker connect is not supported; use microagent logs")
 	}
+	if *readyTimeoutSeconds < 0 {
+		return fmt.Errorf("connect ready-timeout must not be negative")
+	}
 	inputPath := serialInputPath(opts.StateDir, name)
 	logPath := filepath.Join(opts.StateDir, name, "serial.log")
 	if strings.TrimSpace(*send) != "" {
 		if *timeoutSeconds < 0 {
 			return fmt.Errorf("connect timeout must not be negative")
-		}
-		if *readyTimeoutSeconds < 0 {
-			return fmt.Errorf("connect ready-timeout must not be negative")
 		}
 		if err := waitForPath(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second); err != nil {
 			return fmt.Errorf("console input is not ready for workspace %s: %w", name, err)
@@ -1472,6 +1472,11 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if err := waitForPath(ctx, inputPath, 0); err != nil {
 		return fmt.Errorf("console input is not ready for workspace %s: %w", name, err)
+	}
+	if *readyTimeoutSeconds > 0 {
+		if err := waitForConsoleReady(ctx, logPath, time.Duration(*readyTimeoutSeconds)*time.Second); err != nil {
+			return fmt.Errorf("guest shell is not ready for workspace %s: %w; check microagent logs %s", name, err, name)
+		}
 	}
 	input, err := openFIFOForWrite(ctx, inputPath, 0)
 	if err != nil {

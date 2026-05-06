@@ -1958,6 +1958,22 @@ func TestWaitForConsoleReadyUsesSerialPrompt(t *testing.T) {
 	}
 }
 
+func TestRunConnectRejectsNegativeReadyTimeoutForInteractive(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "connect.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runConnect(t.Context(), []string{"research", "--state-dir", dir, "--ready-timeout", "-1"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "ready-timeout must not be negative") {
+		t.Fatalf("runConnect err = %v", err)
+	}
+}
+
 func TestCopyConsoleInputNormalizesNewlines(t *testing.T) {
 	var dst bytes.Buffer
 	written, err := copyConsoleInput(&dst, strings.NewReader("echo ready\n"))
