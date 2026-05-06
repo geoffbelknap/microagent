@@ -228,7 +228,15 @@ with open(os.path.join(runtime_dir, "runtime.json"), "w", encoding="utf-8") as h
     handle.write("\n")
 PY
 
-quarantine_response="$(request_state_only quarantine | "$SUPERVISOR")"
+quarantine_response_path="$STATE_DIR/quarantine-response.json"
+quarantine_error_path="$STATE_DIR/quarantine.err"
+if ! request_state_only quarantine | "$SUPERVISOR" >"$quarantine_response_path" 2>"$quarantine_error_path"; then
+  echo "quarantine command failed" >&2
+  cat "$quarantine_response_path" >&2 || true
+  cat "$quarantine_error_path" >&2 || true
+  exit 1
+fi
+quarantine_response="$(cat "$quarantine_response_path")"
 assert_response "$quarantine_response" true quarantined
 python3 - "$quarantine_response" "$STATE_DIR/agent-smoke/events.json" "$STATE_DIR/agent-smoke/runtime.json" "$fake_pid" <<'PY'
 import json
