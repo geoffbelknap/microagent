@@ -30,6 +30,11 @@ rootfs files.
 reference, or digest. It creates another index record pointing at the same
 local rootfs path.
 
+For clean workspace baselines, `create` reuses a pulled or tagged image record
+when the workspace has no setup commands, entrypoint, env overrides, or
+attached disks. Workspaces that need guest config are rebuilt from the source
+OCI image so their init config is baked into the rootfs.
+
 ## Pull Flags
 
 | Flag | Description |
@@ -45,6 +50,7 @@ local rootfs path.
 microagent images pull docker.io/library/ubuntu:24.04
 microagent images list
 microagent images tag sha256:abc local/ubuntu:baseline
+microagent create research --image local/ubuntu:baseline
 microagent images prune --json
 ```
 

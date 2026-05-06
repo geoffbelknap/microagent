@@ -2074,6 +2074,13 @@ func normalizeRestartPolicy(policy string) string {
 	return strings.TrimSpace(policy)
 }
 
+func canUseImageBaseline(opts workspaceOptions) bool {
+	return opts.PrepareForStart &&
+		!workspaceHasGuestCommand(opts) &&
+		len(opts.Disks) == 0 &&
+		len(opts.Env) == 0
+}
+
 func normalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
 	network.Mode = strings.TrimSpace(network.Mode)
 	if network.Mode == "" {
@@ -2118,6 +2125,24 @@ func networkConfigPtr(network vmkit.NetworkConfig) *vmkit.NetworkConfig {
 func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspaceResult, error) {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
+	if canUseImageBaseline(opts) {
+		if record, err := findImageRecord(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture}); err == nil {
+			if err := copyFile(record.OutputPath, rootfsPath, 0o644); err != nil {
+				return workspaceResult{}, err
+			}
+			return workspaceResult{
+				Workspace:  opts.Name,
+				StateDir:   opts.StateDir,
+				Profile:    opts.Profile,
+				Restart:    opts.RestartPolicy,
+				Resources:  workspaceResources(opts),
+				Network:    networkSpecFromConfig(opts.Network),
+				RootfsPath: rootfsPath,
+				KernelPath: opts.KernelPath,
+				Image:      provenanceFromImageRecord(record, rootfsPath),
+			}, nil
+		}
+	}
 	command, resultPort := workspaceBuildCommandAndPort(opts)
 	req := rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
@@ -3551,6 +3576,19 @@ func imageRecordFromProvenance(provenance rootfs.Provenance) imageRecord {
 	}
 }
 
+func provenanceFromImageRecord(record imageRecord, outputPath string) rootfs.Provenance {
+	return rootfs.Provenance{
+		ImageRef:     record.ImageRef,
+		ResolvedRef:  record.ResolvedRef,
+		Digest:       record.Digest,
+		Platform:     record.Platform,
+		OutputPath:   outputPath,
+		SizeBytes:    record.SizeBytes,
+		Builder:      "microagent-image-store",
+		BuilderPhase: "copy-baseline",
+	}
+}
+
 func recordImageProvenance(stateDir string, provenance rootfs.Provenance) error {
 	if provenance.ImageRef == "" || provenance.Digest == "" {
 		return nil
@@ -3610,6 +3648,32 @@ func tagImageRecord(stateDir, source, target string) (imageRecord, error) {
 
 func imageMatchesRef(image imageRecord, ref string) bool {
 	return image.ImageRef == ref || image.ResolvedRef == ref || image.Digest == ref
+}
+
+func findImageRecord(stateDir, ref string, platform rootfs.Platform) (imageRecord, error) {
+	idx, err := readImageIndex(stateDir)
+	if err != nil {
+		return imageRecord{}, err
+	}
+	for _, image := range idx.Images {
+		if !imageMatchesRef(image, ref) {
+			continue
+		}
+		if platform.OS != "" && image.Platform.OS != "" && image.Platform.OS != platform.OS {
+			continue
+		}
+		if platform.Architecture != "" && image.Platform.Architecture != "" && image.Platform.Architecture != platform.Architecture {
+			continue
+		}
+		if image.OutputPath == "" {
+			continue
+		}
+		if _, err := os.Stat(image.OutputPath); err != nil {
+			continue
+		}
+		return image, nil
+	}
+	return imageRecord{}, fmt.Errorf("image %q not found", ref)
 }
 
 func listImageRecords(stateDir string) ([]imageRecord, error) {

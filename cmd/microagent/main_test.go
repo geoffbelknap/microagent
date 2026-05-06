@@ -1792,6 +1792,54 @@ func TestWorkspaceBuildCommandKeepsSetupResultPort(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceRootfsUsesPulledBaseline(t *testing.T) {
+	dir := t.TempDir()
+	baseline := filepath.Join(dir, "images", "rootfs", "baseline.ext4")
+	if err := os.MkdirAll(filepath.Dir(baseline), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(baseline, []byte("baseline"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertImageRecord(dir, imageRecord{
+		ImageRef:    "local/busybox:baseline",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  baseline,
+		SizeBytes:   8,
+		LastUsedAt:  "2026-05-06T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := createWorkspaceRootfs(t.Context(), workspaceOptions{
+		StateDir:        dir,
+		Name:            "research",
+		ImageRef:        "local/busybox:baseline",
+		Architecture:    "arm64",
+		Profile:         "small",
+		RestartPolicy:   "never",
+		Network:         vmkit.NetworkConfig{Mode: defaultNetworkMode},
+		MemoryMiB:       512,
+		CPUCount:        2,
+		SizeMiB:         1024,
+		PrepareForStart: true,
+	})
+	if err != nil {
+		t.Fatalf("createWorkspaceRootfs: %v", err)
+	}
+	data, err := os.ReadFile(result.RootfsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "baseline" {
+		t.Fatalf("rootfs = %q", data)
+	}
+	if result.Image.BuilderPhase != "copy-baseline" {
+		t.Fatalf("image provenance = %#v", result.Image)
+	}
+}
+
 func TestDefaultGuestInitPathResolvesHomebrewSymlink(t *testing.T) {
 	dir := t.TempDir()
 	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.14", "bin")
