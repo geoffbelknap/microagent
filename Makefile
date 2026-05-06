@@ -1,6 +1,6 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test smoke smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-vsock release-check signed-supervisor smoke-boot
+.PHONY: test smoke smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check signed-supervisor smoke-boot
 
 test:
 	go test ./...
@@ -15,6 +15,7 @@ ifeq ($(UNAME_S),Darwin)
 	scripts/cli-lifecycle-smoke.sh
 	scripts/cli-workspace-smoke.sh
 	scripts/applevf-network-mode-smoke.sh
+	scripts/applevf-publish-smoke.sh
 	scripts/applevf-workspace-connect-smoke.sh
 else ifeq ($(UNAME_S),Linux)
 	scripts/firecracker-workspace-smoke.sh
@@ -55,6 +56,9 @@ endif
 
 smoke-applevf-network: signed-supervisor
 	scripts/applevf-network-mode-smoke.sh
+
+smoke-applevf-publish: signed-supervisor
+	scripts/applevf-publish-smoke.sh
 
 smoke-applevf-vsock: signed-supervisor
 	scripts/applevf-vsock-diagnostic-smoke.sh

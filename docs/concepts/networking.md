@@ -16,7 +16,7 @@ Current backend support is narrower than the full enum:
 
 | Backend | Supported mode today |
 |---|---|
-| Apple VF | `nat` and `isolated`; `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement; `--publish` fails closed |
+| Apple VF | `nat`, `isolated`, and TCP `--publish`; `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement |
 | Firecracker | `nat` plus live TCP `--publish`; `isolated`; `bridged` through a host Linux bridge |
 
 Apple puts native Apple VF bridged networking behind the restricted
@@ -35,10 +35,9 @@ Port forwards are declared with repeatable `--publish` flags:
 microagent create research --publish 127.0.0.1:8080:80/tcp
 ```
 
-For TCP forwards on Firecracker, guest init records a `hostForwards` entry and
-listens on a guest vsock port matching the declared host port. The Firecracker
-supervisor owns the host-side listener that connects host TCP to that guest
-vsock port. Apple VF `--publish` still needs backend work.
+For TCP forwards, guest init records a `hostForwards` entry and listens on a
+guest vsock port matching the declared host port. Backend supervisors own the
+host-side listener that connects host TCP to that guest vsock port.
 
 The same shape is available in `microagent.yaml`:
 

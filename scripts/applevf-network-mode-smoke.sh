@@ -129,7 +129,7 @@ PY
   BRIDGE_RESULT="interface $BRIDGE_IFACE"
 fi
 
-PUBLISH_ERROR="$(python3 - "$KERNEL" "$ROOTFS" "$STATE_DIR" <<'PY' | "$SUPERVISOR" || true
+PUBLISH_RESPONSE="$(python3 - "$KERNEL" "$ROOTFS" "$STATE_DIR" <<'PY' | "$SUPERVISOR"
 import json
 import sys
 kernel, rootfs, state = sys.argv[1:]
@@ -154,13 +154,12 @@ print(json.dumps({
 PY
 )"
 
-python3 - "$PUBLISH_ERROR" <<'PY'
+python3 - "$PUBLISH_RESPONSE" <<'PY'
 import json
 import sys
 resp = json.loads(sys.argv[1])
-err = resp.get("error", "")
-if "Apple VF network.portForwards are not implemented" not in err:
-    raise SystemExit(f"unexpected publish error: {err}")
+if not resp.get("ok"):
+    raise SystemExit(resp)
 PY
 
 echo "Apple VF network mode smoke passed; bridged $BRIDGE_RESULT"

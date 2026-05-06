@@ -27,7 +27,8 @@ console=interactive
 |---|---|
 | `make smoke` | pass |
 | `make smoke-boot` | pass |
-| `make smoke-applevf-network` | pass; `nat` and `isolated` accepted, Apple VF `--publish` fails closed, bridged is entitlement-gated |
+| `make smoke-applevf-network` | pass; `nat`, `isolated`, and Apple VF `--publish` accepted, bridged is entitlement-gated |
+| `make smoke-applevf-publish` | pass; TCP and BusyBox HTTP publish |
 | `MICROAGENT_APPLEVF_BOOT_NETWORK_MODE=isolated scripts/applevf-boot-smoke.sh` | pass |
 | `microagent perf boot` | one successful iteration, `1952 ms` |
 | `microagent perf footprint perf-steady-applevf` | `20080 KiB` RSS |
@@ -67,7 +68,7 @@ Recorded Firecracker performance:
 
 | Feature | Apple VF | Firecracker | State |
 |---|---|---|---|
-| Networking | `nat`, `isolated`, and entitlement-gated explicit-interface `bridged`; `--publish` fails closed | `nat` plus live TCP `--publish`; `isolated`; Linux-bridge-backed `bridged` with transient TAP setup | Partial |
+| Networking | `nat`, TCP `--publish`, `isolated`, and entitlement-gated explicit-interface `bridged` | `nat` plus live TCP `--publish`; `isolated`; Linux-bridge-backed `bridged` with transient TAP setup | Ready, except Apple entitlement |
 | File transfer | `microagent cp` in/out of stopped rootfs and attached disks | same CLI semantics | Ready |
 | Console ergonomics | interactive `connect`, `--send`, readiness errors, clean detach | interactive `connect`, `--send`, readiness errors, clean detach | Ready, except resize |
 | Cloning | stopped workspace/template clone | stopped workspace/template clone | Ready |
@@ -75,14 +76,11 @@ Recorded Firecracker performance:
 | Resource management | named profiles and exact resource config | named profiles and exact resource config | Ready |
 | Diagnostics | `doctor` and `host` report backend, arch, virtualization, supervisor, kernel, vsock, console capability | same, with KVM/vhost-vsock and Firecracker binary checks | Ready |
 | Image management | pull, tag, list, remove, prune, OCI rootfs build, templates | same CLI surface | Ready |
-| Declarative spec | `microagent.yaml` covers image, resources, restart, network intent, mounts, setup, publish declarations | same parsing and validation | Ready, except backend networking gaps |
+| Declarative spec | `microagent.yaml` covers image, resources, restart, network intent, mounts, setup, publish declarations | same parsing and validation | Ready |
 | Measured performance | local boot, footprint, steady numbers recorded | Linux boot, footprint, steady numbers recorded | Ready |
 
 ## Remaining Work
 
-- Validate Firecracker network mode smoke on the Linux KVM host and record the
-  final SHA/results for this slice.
-- Implement Apple VF `--publish`.
 - Decide release signing/provisioning or public unsupported status for Apple VF
   bridged networking. Apple gates it behind the restricted
   `com.apple.vm.networking` entitlement, which open-source builds cannot

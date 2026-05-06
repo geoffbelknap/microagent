@@ -22,6 +22,7 @@ self-hosted Linux runners labeled `kvm`, or directly on a Linux host with
 | `make smoke-firecracker-publish` | Linux KVM Firecracker TCP publish |
 | `make smoke-firecracker-network` | Linux KVM Firecracker network modes |
 | `make smoke-applevf-network` | macOS Apple VF network mode validation |
+| `make smoke-applevf-publish` | macOS Apple VF TCP publish |
 | `make smoke-workspace` | HostOS workspace lifecycle |
 | `make smoke-boot` | Boot a Linux VM end-to-end (Apple VF) |
 
@@ -109,3 +110,13 @@ make smoke-boot
 The smoke looks for the kernel at
 `~/.microagent/kernels/apple-vf/arm64/Image`. The older
 `~/.microagent/kernels/apple-vf/Image` path still works.
+
+## Apple VF publish smoke
+
+```bash
+make smoke-applevf-publish
+```
+
+This macOS Apple silicon target verifies that `--publish` forwards a host TCP
+listener into a running Apple VF workspace. It checks both a minimal TCP
+responder and a BusyBox HTTP server.

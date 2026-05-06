@@ -88,8 +88,11 @@ bridged interface identifier or localized display name. It also requires the
 supervisor process to have Apple's restricted `com.apple.vm.networking`
 entitlement. Open-source builds cannot self-sign that entitlement, and `sudo`
 does not bypass the check. Local ad-hoc builds fail closed during `check` with
-a clear entitlement error. Apple VF port forwards are not implemented yet;
-requests with `network.portForwards` fail closed.
+a clear entitlement error.
+
+Port forwards are supported for TCP. The supervisor listens on the requested
+host address and port, connects to the guest over virtio-vsock, and guest init
+proxies the stream to the requested guest TCP port.
 
 ## Response
 

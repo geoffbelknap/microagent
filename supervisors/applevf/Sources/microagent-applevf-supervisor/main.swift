@@ -343,9 +343,6 @@ func validateNetworkConfig(_ network: NetworkConfig?) throws {
     default:
         throw ProtocolError.invalid("network.mode must be nat, isolated, or bridged")
     }
-    if !(network.portForwards ?? []).isEmpty {
-        throw ProtocolError.invalid("Apple VF network.portForwards are not implemented")
-    }
     #if canImport(Virtualization)
     if mode == "bridged" {
         if #available(macOS 13.0, *) {
@@ -573,6 +570,118 @@ final class SocketListenerHandle {
 }
 
 @available(macOS 13.0, *)
+final class TCPPublishForwarder: @unchecked Sendable {
+    private let socketDevice: VZVirtioSocketDevice
+    private let listenerFDs: [Int32]
+    private let lock = NSLock()
+    private var connections: [VZVirtioSocketConnection] = []
+
+    init(socketDevice: VZVirtioSocketDevice, forwards: [PortForward]) throws {
+        self.socketDevice = socketDevice
+        var opened: [Int32] = []
+        do {
+            for forward in forwards {
+                opened.append(try listenTCP(forward))
+            }
+        } catch {
+            for fd in opened {
+                close(fd)
+            }
+            throw error
+        }
+        self.listenerFDs = opened
+        for (idx, forward) in forwards.enumerated() {
+            let fd = opened[idx]
+            Thread.detachNewThread {
+                self.acceptLoop(listenerFD: fd, guestVsockPort: UInt32(forward.hostPort))
+            }
+        }
+    }
+
+    deinit {
+        for fd in listenerFDs {
+            close(fd)
+        }
+    }
+
+    private func acceptLoop(listenerFD: Int32, guestVsockPort: UInt32) {
+        while true {
+            let tcpFD = accept(listenerFD, nil, nil)
+            if tcpFD < 0 {
+                return
+            }
+            connectTCP(tcpFD, toGuestVsockPort: guestVsockPort)
+        }
+    }
+
+    private func connectTCP(_ tcpFD: Int32, toGuestVsockPort guestVsockPort: UInt32) {
+        let semaphore = DispatchSemaphore(value: 0)
+        let resultBox = SocketConnectionResult()
+        DispatchQueue.main.async {
+            self.socketDevice.connect(toPort: guestVsockPort) { result in
+                if case .success(let connection) = result {
+                    resultBox.connection = connection
+                }
+                semaphore.signal()
+            }
+        }
+        if semaphore.wait(timeout: .now() + 10) == .timedOut {
+            close(tcpFD)
+            return
+        }
+        guard let connection = resultBox.connection else {
+            close(tcpFD)
+            return
+        }
+        retain(connection)
+        let vsockFD = connection.fileDescriptor
+        Thread.detachNewThread {
+            copyFD(from: tcpFD, to: vsockFD)
+            shutdown(vsockFD, SHUT_WR)
+            close(tcpFD)
+            connection.close()
+        }
+        Thread.detachNewThread {
+            copyFD(from: vsockFD, to: tcpFD)
+            shutdown(tcpFD, SHUT_WR)
+            connection.close()
+            self.release(connection)
+        }
+    }
+
+    private func retain(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.append(connection)
+        lock.unlock()
+    }
+
+    private func release(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.removeAll { $0 === connection }
+        lock.unlock()
+    }
+}
+
+@available(macOS 13.0, *)
+final class SocketConnectionResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: VZVirtioSocketConnection?
+
+    var connection: VZVirtioSocketConnection? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        set {
+            lock.lock()
+            stored = newValue
+            lock.unlock()
+        }
+    }
+}
+
+@available(macOS 13.0, *)
 final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
     private let path: String
     private var connections: [VZVirtioSocketConnection] = []
@@ -675,6 +784,7 @@ func runVM(_ request: Request) throws {
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
         let socketListeners = installSocketListeners(vm: vm, config: config)
+        let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
@@ -693,7 +803,7 @@ func runVM(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketListeners)) {
+        withExtendedLifetime((delegate, socketListeners, publishForwarder)) {
             CFRunLoopRun()
         }
     } else {
@@ -719,6 +829,7 @@ func runConsole(_ request: Request) throws {
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
         let socketListeners = installSocketListeners(vm: vm, config: config)
+        let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
@@ -737,7 +848,7 @@ func runConsole(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketListeners)) {
+        withExtendedLifetime((delegate, socketListeners, publishForwarder)) {
             CFRunLoopRun()
         }
     } else {
@@ -768,6 +879,58 @@ func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [SocketList
         handles.append(SocketListenerHandle(listener: listener, delegate: delegate))
     }
     return handles
+}
+
+@available(macOS 13.0, *)
+func installTCPPublishForwarder(vm: VZVirtualMachine, config: Config) throws -> TCPPublishForwarder? {
+    let forwards = config.network?.portForwards ?? []
+    if forwards.isEmpty {
+        return nil
+    }
+    guard let socket = vm.socketDevices.first as? VZVirtioSocketDevice else {
+        throw ProtocolError.invalid("Apple VF publish requires a virtio socket device")
+    }
+    return try TCPPublishForwarder(socketDevice: socket, forwards: forwards)
+}
+
+func listenTCP(_ forward: PortForward) throws -> Int32 {
+    if forward.protocolName != "" && forward.protocolName != "tcp" {
+        throw ProtocolError.invalid("publish protocol must be tcp")
+    }
+    let host = (forward.host ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let bindHost = host.isEmpty ? "0.0.0.0" : (host == "localhost" ? "127.0.0.1" : host)
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    if fd < 0 {
+        throw ProtocolError.invalid("open published tcp socket failed with errno \(errno)")
+    }
+    var yes: Int32 = 1
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+    var addr = sockaddr_in()
+    #if os(macOS)
+    addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = forward.hostPort.bigEndian
+    guard inet_pton(AF_INET, bindHost, &addr.sin_addr) == 1 else {
+        close(fd)
+        throw ProtocolError.invalid("publish host \(bindHost) must be an IPv4 address or localhost")
+    }
+    let bindResult = withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+    }
+    if bindResult != 0 {
+        let saved = errno
+        close(fd)
+        throw ProtocolError.invalid("listen \(bindHost):\(forward.hostPort) failed with errno \(saved)")
+    }
+    if listen(fd, 128) != 0 {
+        let saved = errno
+        close(fd)
+        throw ProtocolError.invalid("listen \(bindHost):\(forward.hostPort) failed with errno \(saved)")
+    }
+    return fd
 }
 
 func dialTCP(_ target: TCPHostPort) -> Int32 {
@@ -867,7 +1030,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
         }
         vmConfig.serialPorts = [serial]
     }
-    if !(config.vsockListeners ?? []).isEmpty {
+    if !(config.vsockListeners ?? []).isEmpty || !(config.network?.portForwards ?? []).isEmpty {
         vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
     }
     return vmConfig

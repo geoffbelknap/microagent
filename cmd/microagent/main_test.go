@@ -503,8 +503,8 @@ func TestRequestForCommandRejectsIsolatedPublish(t *testing.T) {
 	}
 }
 
-func TestRequestForCommandRejectsAppleVFPublish(t *testing.T) {
-	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+func TestRequestForCommandAcceptsAppleVFPublish(t *testing.T) {
+	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -512,8 +512,11 @@ func TestRequestForCommandRejectsAppleVFPublish(t *testing.T) {
 		"--backend", vmkit.BackendAppleVF,
 		"--publish", "127.0.0.1:8080:80/tcp",
 	}))
-	if err == nil {
-		t.Fatal("requestForCommand accepted apple-vf publish")
+	if err != nil {
+		t.Fatalf("requestForCommand: %v", err)
+	}
+	if req.Config == nil || req.Config.Network == nil || len(req.Config.Network.PortForwards) != 1 {
+		t.Fatalf("network = %#v", req.Config.Network)
 	}
 }
 

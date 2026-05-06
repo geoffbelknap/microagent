@@ -2249,9 +2249,6 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
 		return workspaceOptions{}, err
 	}
-	if err := validateBackendNetworkConfig(opts.Backend, opts.Network); err != nil {
-		return workspaceOptions{}, err
-	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if specExplicit && specPath == "" {
 		return workspaceOptions{}, fmt.Errorf("%s requires --file path", command)
@@ -4835,21 +4832,8 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 	if err := vmkit.ValidateNetworkConfig(network); err != nil {
 		return vmkit.Request{}, err
 	}
-	if err := validateBackendNetworkConfig(identity.Backend, network); err != nil {
-		return vmkit.Request{}, err
-	}
 	config.Network = &network
 	return vmkit.Request{Identity: &identity, Config: &config}, nil
-}
-
-func validateBackendNetworkConfig(backend string, network vmkit.NetworkConfig) error {
-	switch backend {
-	case vmkit.BackendAppleVF:
-		if len(network.PortForwards) != 0 {
-			return fmt.Errorf("apple-vf network.portForwards are not implemented")
-		}
-	}
-	return nil
 }
 
 func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config) (vmkit.Request, error) {
