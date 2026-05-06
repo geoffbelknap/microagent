@@ -69,6 +69,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "host" {
 		return runHost(ctx, args[1:], stdout)
 	}
+	if args[0] == "contract" {
+		return runContract(args[1:], stdout)
+	}
 	if args[0] == "doctor" {
 		return runDoctor(ctx, args[1:], stdout)
 	}
@@ -151,6 +154,18 @@ type doctorOptions struct {
 	Backend        string
 	Arch           string
 	SupervisorPath string
+}
+
+func runContract(args []string, stdout *os.File) error {
+	fs := flag.NewFlagSet("contract", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: microagent contract")
+	}
+	return writeRuntimeContract(stdout, vmkit.NewRuntimeContract())
 }
 
 func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
@@ -3619,6 +3634,21 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 	return nil
 }
 
+func writeRuntimeContract(stdout *os.File, contract vmkit.RuntimeContract) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, contract)
+	}
+	fmt.Fprintf(stdout, "Contract: %s\n", contract.Version)
+	fmt.Fprintf(stdout, "Backends: %s\n", strings.Join(contract.Backends, ", "))
+	fmt.Fprintf(stdout, "Commands: %s\n", strings.Join(contractItemNames(contract.Commands), ", "))
+	fmt.Fprintf(stdout, "States: %s\n", strings.Join(contractStateNames(contract.States), ", "))
+	fmt.Fprintf(stdout, "Readiness: %s\n", strings.Join(contractItemNames(contract.ReadinessSignals), ", "))
+	fmt.Fprintf(stdout, "Result: %s\n", strings.Join(contractItemNames(contract.ResultFields), ", "))
+	fmt.Fprintf(stdout, "Artifacts: %s\n", strings.Join(contractItemNames(contract.ArtifactChannels), ", "))
+	fmt.Fprintf(stdout, "Mediation: %s\n", contract.Mediation.Primitive)
+	return nil
+}
+
 func writeResponse(stdout *os.File, resp vmkit.Response) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, resp)
@@ -3671,6 +3701,22 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 		fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
 	}
 	return nil
+}
+
+func contractItemNames(items []vmkit.ContractItem) []string {
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Name)
+	}
+	return names
+}
+
+func contractStateNames(states []vmkit.ContractState) []string {
+	names := make([]string, 0, len(states))
+	for _, state := range states {
+		names = append(names, string(state.Name))
+	}
+	return names
 }
 
 func writeResultResponse(stdout *os.File, resp vmkit.Response) error {
@@ -5756,6 +5802,7 @@ Commands:
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace
+  contract             Show backend-neutral runtime contract
   host                 Report host capabilities
   doctor               Check the host
   rootfs build         Build a rootfs from an OCI image

@@ -206,6 +206,41 @@ func TestHostCommandReportsFirecrackerDiagnosticsWithoutFailing(t *testing.T) {
 	}
 }
 
+func TestContractCommandReportsBackendNeutralRuntimeContract(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "contract.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"contract"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run contract: %v", err)
+	}
+	var contract vmkit.RuntimeContract
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatal(err)
+	}
+	if contract.Version != "agent-runtime.v1" {
+		t.Fatalf("version = %q", contract.Version)
+	}
+	if !stringSliceContains(contract.Backends, vmkit.BackendAppleVF) || !stringSliceContains(contract.Backends, vmkit.BackendFirecracker) {
+		t.Fatalf("backends = %#v", contract.Backends)
+	}
+	if !contractItemSliceContains(contract.Commands, "quarantine") || !contractItemSliceContains(contract.ReadinessSignals, "mediationReady") || !contractItemSliceContains(contract.ResultFields, "exitCode") {
+		t.Fatalf("contract = %#v", contract)
+	}
+}
+
 func TestAugmentHostSupportReportsAppleVFConsole(t *testing.T) {
 	resp := vmkit.Response{Backend: vmkit.BackendAppleVF}
 	augmentHostSupport(&resp, doctorOptions{Backend: vmkit.BackendAppleVF, Arch: "arm64", SupervisorPath: "/tmp/supervisor"})
@@ -3337,4 +3372,22 @@ func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	return fs
+}
+
+func contractItemSliceContains(items []vmkit.ContractItem, name string) bool {
+	for _, item := range items {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

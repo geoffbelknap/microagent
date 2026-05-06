@@ -17,6 +17,9 @@ Firecracker and Apple VF use the same protocol:
 The CLI chooses the active host backend and sends the request to that
 supervisor.
 
+Use [`microagent contract --json`](/cli/contract/) for the versioned
+backend-neutral runtime contract that Firecracker and Apple VF share.
+
 ## Request
 
 ```json
@@ -223,3 +226,5 @@ side-effect paths.
   executable implementation.
 - [Apple VF supervisor](/protocol/applevf/) documents the macOS executable
   protocol.
+- [Runtime parity contract](/protocol/runtime-contract/) documents the shared
+  agent-runtime semantics.

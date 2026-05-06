@@ -16,7 +16,8 @@ higher-level control stay outside this project.
 - Need the CLI surface? Jump to the [CLI reference](cli/index.md).
 - Integrating? Read the [architecture overview](concepts/architecture.md),
   [networking](concepts/networking.md), the [supervisor protocol](protocol/index.md),
-  and the [Go library](library/go.md).
+  the [runtime parity contract](protocol/runtime-contract.md), and the
+  [Go library](library/go.md).
 
 ## Sections
 
