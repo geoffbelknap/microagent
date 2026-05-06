@@ -7,6 +7,7 @@ CLI="$STATE_DIR/microagent"
 SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
 GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
 CONNECT_RESULT="$STATE_DIR/connect.txt"
+ARTIFACT_DIR="$STATE_DIR/artifacts"
 IMAGE="docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
 EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0"
 
@@ -57,11 +58,47 @@ export GOFLAGS="${GOFLAGS:-} -modcacherw"
 export MICROAGENT_FIRECRACKER="$firecracker"
 export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
 
+wait_for_status_ready() {
+  workspace="$1"
+  state_dir="$2"
+  output="$3"
+  deadline="$((SECONDS + 30))"
+  while true; do
+    "$CLI" status "$workspace" --state-dir "$state_dir" >"$output"
+    if python3 - "$output" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    status = json.load(f)
+event = status.get("event") or {}
+readiness = status.get("readiness") or {}
+if event.get("state") == "running" and readiness.get("guestReady", {}).get("ready") and readiness.get("shellReady", {}).get("ready"):
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
+      return 0
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "workspace $workspace did not become ready" >&2
+      cat "$output" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 (
   cd "$ROOT"
   go build -o "$CLI" ./cmd/microagent
   go build -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
-  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+  (
+    export GOOS=linux
+    export GOARCH=amd64
+    export CGO_ENABLED=0
+    go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+  )
 )
 
 "$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
@@ -171,6 +208,114 @@ if start["response"]["event"]["state"] != "running":
     raise SystemExit(start)
 if stop["event"]["state"] != "stopped":
     raise SystemExit(stop)
+if delete["event"]["state"] != "stopped":
+    raise SystemExit(delete)
+PY
+
+"$CLI" create substrate-smoke \
+  --image "$IMAGE" \
+  --arch amd64 \
+  --kernel "$kernel_path" \
+  --guest-init "$GUEST_INIT" \
+  --state-dir "$STATE_DIR/substrate" \
+  --size-mib 128 \
+  --result-port 1024 \
+  --output report=/report.json >"$STATE_DIR/substrate-create.json"
+
+"$CLI" start substrate-smoke --state-dir "$STATE_DIR/substrate" --kernel "$kernel_path" >"$STATE_DIR/substrate-start.json"
+wait_for_status_ready substrate-smoke "$STATE_DIR/substrate" "$STATE_DIR/substrate-status-running.json"
+"$CLI" connect substrate-smoke --state-dir "$STATE_DIR/substrate" --send "printf substrate-live > /preserved.txt; printf '{\"ok\":true,\"phase\":\"running\"}' > /report.json; sync" --timeout 5 >"$STATE_DIR/substrate-write.txt"
+"$CLI" artifacts substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifacts.json"
+"$CLI" halt substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-halt.json"
+"$CLI" status substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-status-halted.json"
+mkdir -p "$ARTIFACT_DIR/running"
+"$CLI" artifacts get substrate-smoke report "$ARTIFACT_DIR/running" --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifact-get-running.json"
+"$CLI" start substrate-smoke --state-dir "$STATE_DIR/substrate" --kernel "$kernel_path" >"$STATE_DIR/substrate-resume.json"
+wait_for_status_ready substrate-smoke "$STATE_DIR/substrate" "$STATE_DIR/substrate-status-resumed.json"
+"$CLI" connect substrate-smoke --state-dir "$STATE_DIR/substrate" --send "cat /preserved.txt; printf '{\"ok\":true,\"phase\":\"resumed\"}' > /report.json; sync" --timeout 5 >"$STATE_DIR/substrate-resume-read.txt"
+"$CLI" quarantine substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-quarantine.json"
+"$CLI" status substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-status-quarantined.json"
+if "$CLI" start substrate-smoke --state-dir "$STATE_DIR/substrate" --kernel "$kernel_path" >"$STATE_DIR/substrate-start-quarantined.json" 2>"$STATE_DIR/substrate-start-quarantined.err"; then
+  echo "start succeeded while Firecracker workspace was quarantined" >&2
+  exit 1
+fi
+"$CLI" halt substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-halt-quarantined.json"
+mkdir -p "$ARTIFACT_DIR/resumed"
+"$CLI" artifacts get substrate-smoke report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifact-get-resumed.json"
+
+python3 - "$STATE_DIR" <<'PY'
+import json
+import os
+import sys
+
+state_dir = sys.argv[1]
+
+def read_json(name):
+    with open(os.path.join(state_dir, name), "r", encoding="utf-8") as f:
+        return json.load(f)
+
+create = read_json("substrate-create.json")
+start = read_json("substrate-start.json")
+running = read_json("substrate-status-running.json")
+artifacts = read_json("substrate-artifacts.json")
+artifact_running = read_json("substrate-artifact-get-running.json")
+halt = read_json("substrate-halt.json")
+halted = read_json("substrate-status-halted.json")
+resume = read_json("substrate-resume.json")
+resumed = read_json("substrate-status-resumed.json")
+artifact_resumed = read_json("substrate-artifact-get-resumed.json")
+quarantine = read_json("substrate-quarantine.json")
+quarantined = read_json("substrate-status-quarantined.json")
+
+if create["response"]["event"]["state"] != "prepared":
+    raise SystemExit(create)
+if start["response"]["event"]["state"] != "running":
+    raise SystemExit(start)
+if running["event"]["state"] != "running":
+    raise SystemExit(running)
+if not running["verification"]["ok"]:
+    raise SystemExit(running)
+if not running["readiness"]["guestReady"]["ready"] or not running["readiness"]["shellReady"]["ready"]:
+    raise SystemExit(running)
+if artifacts["artifacts"]["egress"][0]["name"] != "report":
+    raise SystemExit(artifacts)
+if artifact_running["artifact"] != "report" or artifact_running["disk"] != "rootfs":
+    raise SystemExit(artifact_running)
+with open(os.path.join(state_dir, "artifacts", "running", "report.json"), "r", encoding="utf-8") as f:
+    if json.load(f) != {"ok": True, "phase": "running"}:
+        raise SystemExit("running artifact mismatch")
+if halt["event"]["state"] != "halted" or halted["event"]["state"] != "halted":
+    raise SystemExit(halted)
+if resume["response"]["event"]["state"] != "running" or resumed["event"]["state"] != "running":
+    raise SystemExit(resumed)
+if "substrate-live" not in open(os.path.join(state_dir, "substrate-resume-read.txt"), "r", encoding="utf-8", errors="replace").read():
+    raise SystemExit("preserved rootfs marker was not visible after resume")
+if artifact_resumed["artifact"] != "report" or artifact_resumed["disk"] != "rootfs":
+    raise SystemExit(artifact_resumed)
+with open(os.path.join(state_dir, "artifacts", "resumed", "report.json"), "r", encoding="utf-8") as f:
+    if json.load(f) != {"ok": True, "phase": "resumed"}:
+        raise SystemExit("resumed artifact mismatch")
+if quarantine["event"]["state"] != "quarantined" or quarantined["event"]["state"] != "quarantined":
+    raise SystemExit(quarantined)
+if quarantined["readiness"]["guestReady"]["ready"] is not True:
+    raise SystemExit(quarantined)
+with open(os.path.join(state_dir, "substrate", "substrate-smoke", "events.json"), "r", encoding="utf-8") as f:
+    states = [event["state"] for event in json.load(f)]
+for expected in ("prepared", "running", "halted", "quarantined"):
+    if expected not in states:
+        raise SystemExit(states)
+if states.count("running") < 2:
+    raise SystemExit(states)
+PY
+
+"$CLI" delete substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-delete.json"
+
+python3 - "$STATE_DIR/substrate-delete.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    delete = json.load(f)
 if delete["event"]["state"] != "stopped":
     raise SystemExit(delete)
 PY
