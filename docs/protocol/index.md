@@ -32,10 +32,25 @@ the active host backend's supervisor.
     "rootfsPath": "/tmp/rootfs.ext4",
     "stateDir": "/tmp/microagent",
     "memoryMiB": 512,
-    "cpuCount": 2
+    "cpuCount": 2,
+    "network": {
+      "mode": "nat",
+      "portForwards": [
+        {
+          "protocol": "tcp",
+          "host": "127.0.0.1",
+          "hostPort": 8080,
+          "guestPort": 80
+        }
+      ]
+    }
   }
 }
 ```
+
+`config.network.mode` is declarative and must be `nat`, `isolated`, or
+`bridged`. Port forwards use `protocol`, optional `host`, `hostPort`, and
+`guestPort`.
 
 ## Commands
 

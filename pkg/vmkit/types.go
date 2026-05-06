@@ -47,6 +47,7 @@ type Config struct {
 	CPUCount       int             `json:"cpuCount,omitempty"`
 	Disks          []Disk          `json:"disks,omitempty"`
 	VsockListeners []VsockListener `json:"vsockListeners,omitempty"`
+	Network        *NetworkConfig  `json:"network,omitempty"`
 	SerialInput    bool            `json:"serialInput,omitempty"`
 }
 
@@ -60,6 +61,21 @@ type Disk struct {
 type VsockListener struct {
 	Port   uint32 `json:"port"`
 	Target string `json:"target"`
+}
+
+type NetworkConfig struct {
+	Mode         string        `json:"mode" yaml:"mode"`
+	PortForwards []PortForward `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
+	DNS          []string      `json:"dns,omitempty" yaml:"dns,omitempty"`
+	Routes       []string      `json:"routes,omitempty" yaml:"routes,omitempty"`
+	IP           string        `json:"ip,omitempty" yaml:"ip,omitempty"`
+}
+
+type PortForward struct {
+	Protocol  string `json:"protocol" yaml:"protocol"`
+	Host      string `json:"host,omitempty" yaml:"host,omitempty"`
+	HostPort  uint16 `json:"hostPort" yaml:"hostPort"`
+	GuestPort uint16 `json:"guestPort" yaml:"guestPort"`
 }
 
 type Request struct {
@@ -106,6 +122,7 @@ type Response struct {
 	Host          *HostSupport   `json:"host,omitempty"`
 	Kernel        *KernelSupport `json:"kernel,omitempty"`
 	RestartPolicy string         `json:"restartPolicy,omitempty"`
+	Network       *NetworkConfig `json:"network,omitempty"`
 	Error         string         `json:"error,omitempty"`
 }
 
@@ -231,6 +248,45 @@ func ValidateConfig(config *Config) error {
 		if strings.TrimSpace(listener.Target) == "" {
 			return fmt.Errorf("vsock listener %d target is required", listener.Port)
 		}
+	}
+	if config.Network != nil {
+		if err := ValidateNetworkConfig(*config.Network); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ValidateNetworkConfig(network NetworkConfig) error {
+	mode := strings.TrimSpace(network.Mode)
+	if mode == "" {
+		mode = "nat"
+	}
+	switch mode {
+	case "nat", "isolated", "bridged":
+	default:
+		return fmt.Errorf("network.mode must be nat, isolated, or bridged")
+	}
+	hostPorts := map[string]bool{}
+	for i, forward := range network.PortForwards {
+		protocol := strings.TrimSpace(forward.Protocol)
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		if protocol != "tcp" && protocol != "udp" {
+			return fmt.Errorf("network port forward %d protocol must be tcp or udp", i)
+		}
+		if forward.HostPort == 0 {
+			return fmt.Errorf("network port forward %d hostPort must be positive", i)
+		}
+		if forward.GuestPort == 0 {
+			return fmt.Errorf("network port forward %d guestPort must be positive", i)
+		}
+		key := fmt.Sprintf("%s/%s/%d", protocol, strings.TrimSpace(forward.Host), forward.HostPort)
+		if hostPorts[key] {
+			return fmt.Errorf("duplicate network host port %d", forward.HostPort)
+		}
+		hostPorts[key] = true
 	}
 	return nil
 }

@@ -29,6 +29,8 @@ first.
 | `--state-dir <dir>` | State directory |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
+| `--network <mode>` | Network mode: `nat`, `isolated`, or `bridged` |
+| `--publish <mapping>` | Declarative host port forward, `[host:]hostPort:guestPort[/tcp\|udp]`. Repeatable |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
@@ -87,6 +89,13 @@ resources:
   memoryMiB: 2048
   cpuCount: 2
   sizeMiB: 8192
+network:
+  mode: nat
+  forwards:
+    - host: 127.0.0.1
+      hostPort: 8080
+      guestPort: 80
+      protocol: tcp
 disks:
   - name: workspace
     path: /tmp/workspace.ext4

@@ -38,6 +38,7 @@ const (
 	defaultWorkspaceCPUCount   = 2
 	defaultWorkspaceProfile    = "small"
 	defaultRestartPolicy       = "never"
+	defaultNetworkMode         = "nat"
 )
 
 func main() {
@@ -634,6 +635,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	var identity vmkit.Identity
 	var config vmkit.Config
 	var vsocks multiFlag
+	var publishes multiFlag
 	var disks multiFlag
 	fs.StringVar(&jsonPath, "json", "", "Read request JSON from path, or '-' for stdin")
 	fs.BoolVar(&dryRun, "dry-run", false, "Validate without writing state")
@@ -649,6 +651,8 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.IntVar(&config.CPUCount, "cpus", 2, "CPU count")
 	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
+	networkMode := fs.String("network", defaultNetworkMode, "Network mode: nat, isolated, or bridged")
+	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp|udp]")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
 	}
@@ -660,7 +664,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return vmkit.Request{Command: "host"}, nil
 	case "create":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -671,7 +675,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return req, nil
 	case "start":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -708,6 +712,7 @@ type workspaceOptions struct {
 	MemoryMiB       int
 	CPUCount        int
 	SizeMiB         int64
+	Network         vmkit.NetworkConfig
 	Timeout         time.Duration
 	ResultPort      uint32
 	Disks           []workspaceDisk
@@ -730,8 +735,17 @@ type workspaceSpec struct {
 	Setup      []string          `yaml:"setup"`
 	Env        map[string]string `yaml:"env"`
 	Resources  resourceConfig    `yaml:"resources"`
+	Network    networkSpec       `yaml:"network"`
 	Disks      []workspaceDisk   `yaml:"disks"`
 	Bundles    []workspaceDisk   `yaml:"bundles"`
+}
+
+type networkSpec struct {
+	Mode         string              `json:"mode,omitempty" yaml:"mode,omitempty"`
+	PortForwards []vmkit.PortForward `json:"port_forwards,omitempty" yaml:"forwards,omitempty"`
+	DNS          []string            `json:"dns,omitempty" yaml:"dns,omitempty"`
+	Routes       []string            `json:"routes,omitempty" yaml:"routes,omitempty"`
+	IP           string              `json:"ip,omitempty" yaml:"ip,omitempty"`
 }
 
 type workspaceDisk struct {
@@ -748,6 +762,7 @@ type workspaceManifest struct {
 	Profile   string          `json:"profile,omitempty"`
 	Restart   string          `json:"restart"`
 	Resources resourceConfig  `json:"resources"`
+	Network   networkSpec     `json:"network,omitempty"`
 	Disks     []workspaceDisk `json:"disks,omitempty"`
 }
 
@@ -757,6 +772,7 @@ type workspaceResult struct {
 	Profile    string            `json:"profile,omitempty"`
 	Restart    string            `json:"restart"`
 	Resources  resourceConfig    `json:"resources"`
+	Network    networkSpec       `json:"network,omitempty"`
 	RootfsPath string            `json:"rootfs_path"`
 	KernelPath string            `json:"kernel_path"`
 	Disks      []workspaceDisk   `json:"disks,omitempty"`
@@ -793,6 +809,7 @@ type workspaceListEntry struct {
 	Backend    string `json:"backend,omitempty"`
 	Profile    string `json:"profile,omitempty"`
 	Restart    string `json:"restart,omitempty"`
+	Network    string `json:"network,omitempty"`
 	ObservedAt string `json:"observed_at,omitempty"`
 	RootfsPath string `json:"rootfs_path,omitempty"`
 	SerialPath string `json:"serial_path,omitempty"`
@@ -1168,6 +1185,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		Backend:        hostBackend(),
 		Architecture:   defaultGuestArch(),
 		Profile:        defaultWorkspaceProfile,
+		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		StateDir:       defaultStateDir(),
 		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
 		SerialInput:    false,
@@ -1231,6 +1249,9 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		if manifest.Restart != "" {
 			opts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
 		}
+		if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" {
+			opts.Network = networkConfigFromSpec(manifest.Network)
+		}
 		if manifest.Resources.MemoryMiB != 0 && !memoryExplicit {
 			opts.MemoryMiB = manifest.Resources.MemoryMiB
 		}
@@ -1260,6 +1281,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		Profile:    opts.Profile,
 		Restart:    opts.RestartPolicy,
 		Resources:  workspaceResources(opts),
+		Network:    networkSpecFromConfig(opts.Network),
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
 		Disks:      opts.Disks,
@@ -1394,6 +1416,7 @@ func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (work
 		SupervisorPath: opts.SupervisorPath,
 		Profile:        defaultWorkspaceProfile,
 		RestartPolicy:  defaultRestartPolicy,
+		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		MemoryMiB:      defaultWorkspaceMemoryMiB,
 		CPUCount:       defaultWorkspaceCPUCount,
 		SizeMiB:        rootfs.DefaultSizeMiB,
@@ -1407,6 +1430,9 @@ func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (work
 		workspaceOpts.Profile = manifest.Profile
 	}
 	workspaceOpts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
+	if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" {
+		workspaceOpts.Network = networkConfigFromSpec(manifest.Network)
+	}
 	if manifest.Resources.MemoryMiB != 0 {
 		workspaceOpts.MemoryMiB = manifest.Resources.MemoryMiB
 	}
@@ -1548,6 +1574,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		Architecture:  defaultGuestArch(),
 		Profile:       defaultWorkspaceProfile,
 		RestartPolicy: defaultRestartPolicy,
+		Network:       vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		Timeout:       2 * time.Minute,
 		ResultPort:    1024,
 	}
@@ -1590,6 +1617,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
+	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: nat, isolated, or bridged")
+	var publishFlags multiFlag
+	fs.Var(&publishFlags, "publish", "Forward host[:hostPort]:guestPort[/tcp|udp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
@@ -1624,6 +1654,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	opts.Disks = append(opts.Disks, disks...)
 	opts.Disks = append(opts.Disks, bundles...)
+	published, err := parsePortForwardMappings(publishFlags)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.Network.PortForwards = append(opts.Network.PortForwards, published...)
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		if command == "create" {
@@ -1640,6 +1675,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.RestartPolicy = normalizeRestartPolicy(opts.RestartPolicy)
+	opts.Network = normalizeNetworkConfig(opts.Network)
+	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
+		return workspaceOptions{}, err
+	}
 	if specExplicit && specPath == "" {
 		return workspaceOptions{}, fmt.Errorf("%s requires --file path", command)
 	}
@@ -1730,6 +1769,15 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 	if spec.Resources.SizeMiB != 0 && !sizeExplicit {
 		opts.SizeMiB = spec.Resources.SizeMiB
 		opts.SpecSize = true
+	}
+	if spec.Network.Mode != "" || len(spec.Network.PortForwards) != 0 || len(spec.Network.DNS) != 0 || len(spec.Network.Routes) != 0 || spec.Network.IP != "" {
+		opts.Network = vmkit.NetworkConfig{
+			Mode:         spec.Network.Mode,
+			PortForwards: append([]vmkit.PortForward{}, spec.Network.PortForwards...),
+			DNS:          append([]string{}, spec.Network.DNS...),
+			Routes:       append([]string{}, spec.Network.Routes...),
+			IP:           spec.Network.IP,
+		}
 	}
 	if strings.TrimSpace(spec.Entrypoint) != "" {
 		opts.Entrypoint = spec.Entrypoint
@@ -1896,6 +1944,47 @@ func normalizeRestartPolicy(policy string) string {
 	return strings.TrimSpace(policy)
 }
 
+func normalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
+	network.Mode = strings.TrimSpace(network.Mode)
+	if network.Mode == "" {
+		network.Mode = defaultNetworkMode
+	}
+	for i := range network.PortForwards {
+		network.PortForwards[i].Protocol = strings.TrimSpace(network.PortForwards[i].Protocol)
+		if network.PortForwards[i].Protocol == "" {
+			network.PortForwards[i].Protocol = "tcp"
+		}
+		network.PortForwards[i].Host = strings.TrimSpace(network.PortForwards[i].Host)
+	}
+	return network
+}
+
+func networkSpecFromConfig(network vmkit.NetworkConfig) networkSpec {
+	network = normalizeNetworkConfig(network)
+	return networkSpec{
+		Mode:         network.Mode,
+		PortForwards: append([]vmkit.PortForward{}, network.PortForwards...),
+		DNS:          append([]string{}, network.DNS...),
+		Routes:       append([]string{}, network.Routes...),
+		IP:           network.IP,
+	}
+}
+
+func networkConfigFromSpec(spec networkSpec) vmkit.NetworkConfig {
+	return normalizeNetworkConfig(vmkit.NetworkConfig{
+		Mode:         spec.Mode,
+		PortForwards: append([]vmkit.PortForward{}, spec.PortForwards...),
+		DNS:          append([]string{}, spec.DNS...),
+		Routes:       append([]string{}, spec.Routes...),
+		IP:           spec.IP,
+	})
+}
+
+func networkConfigPtr(network vmkit.NetworkConfig) *vmkit.NetworkConfig {
+	normalized := normalizeNetworkConfig(network)
+	return &normalized
+}
+
 func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspaceResult, error) {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
@@ -1923,6 +2012,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Profile:    opts.Profile,
 		Restart:    opts.RestartPolicy,
 		Resources:  workspaceResources(opts),
+		Network:    networkSpecFromConfig(opts.Network),
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
 		Image:      provenance,
@@ -2004,6 +2094,7 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 		Profile:   opts.Profile,
 		Restart:   normalizeRestartPolicy(opts.RestartPolicy),
 		Resources: workspaceResources(opts),
+		Network:   networkSpecFromConfig(opts.Network),
 		Disks:     opts.Disks,
 	})
 }
@@ -2051,6 +2142,7 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 			CPUCount:       opts.CPUCount,
 			Disks:          disks,
 			VsockListeners: listeners,
+			Network:        networkConfigPtr(opts.Network),
 			SerialInput:    opts.SerialInput,
 		},
 	}
@@ -2063,6 +2155,10 @@ func workspaceOptionsFromRequest(req vmkit.Request, supervisorPath string) (work
 	if req.Config == nil {
 		return workspaceOptions{}, fmt.Errorf("config is required")
 	}
+	network := vmkit.NetworkConfig{Mode: defaultNetworkMode}
+	if req.Config.Network != nil {
+		network = normalizeNetworkConfig(*req.Config.Network)
+	}
 	return workspaceOptions{
 		Name:           req.Identity.RuntimeID,
 		Backend:        req.Identity.Backend,
@@ -2072,6 +2168,7 @@ func workspaceOptionsFromRequest(req vmkit.Request, supervisorPath string) (work
 		RestartPolicy:  defaultRestartPolicy,
 		MemoryMiB:      req.Config.MemoryMiB,
 		CPUCount:       req.Config.CPUCount,
+		Network:        network,
 		Disks:          configDisksToWorkspaceDisks(req.Config.Disks),
 	}, nil
 }
@@ -2241,6 +2338,8 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 	resp := vmkit.Response{OK: eventFile.State != vmkit.StateFailed, Backend: backend, Event: &event}
 	if manifest, err := readWorkspaceManifest(opts.StateDir, eventFile.Identity.RuntimeID); err == nil {
 		resp.RestartPolicy = nonEmpty(manifest.Restart, defaultRestartPolicy)
+		network := networkConfigFromSpec(manifest.Network)
+		resp.Network = &network
 	}
 	if errorText != "" {
 		resp.Error = errorText
@@ -2438,6 +2537,9 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 		if resp.RestartPolicy != "" {
 			fmt.Fprintf(stdout, "Restart: %s\n", resp.RestartPolicy)
 		}
+		if resp.Network != nil && resp.Network.Mode != "" {
+			fmt.Fprintf(stdout, "Network: %s\n", resp.Network.Mode)
+		}
 		if resp.Event.Detail != "" {
 			fmt.Fprintf(stdout, "Detail: %s\n", resp.Event.Detail)
 		}
@@ -2466,6 +2568,9 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	}
 	if result.Restart != "" {
 		fmt.Fprintf(stdout, "Restart: %s\n", result.Restart)
+	}
+	if result.Network.Mode != "" {
+		fmt.Fprintf(stdout, "Network: %s\n", result.Network.Mode)
 	}
 	if result.Resources.MemoryMiB != 0 || result.Resources.CPUCount != 0 || result.Resources.SizeMiB != 0 {
 		fmt.Fprintf(stdout, "Resources: memory=%dMiB cpus=%d", result.Resources.MemoryMiB, result.Resources.CPUCount)
@@ -2537,9 +2642,9 @@ func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 		fmt.Fprintln(stdout, "No workspaces.")
 		return nil
 	}
-	fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %s\n", "NAME", "STATE", "BACKEND", "PROFILE", "RESTART")
+	fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %-10s %s\n", "NAME", "STATE", "BACKEND", "PROFILE", "NETWORK", "RESTART")
 	for _, entry := range entries {
-		fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %s\n", entry.Name, entry.State, entry.Backend, entry.Profile, entry.Restart)
+		fmt.Fprintf(stdout, "%-24s %-12s %-12s %-12s %-10s %s\n", entry.Name, entry.State, entry.Backend, entry.Profile, entry.Network, entry.Restart)
 	}
 	return nil
 }
@@ -2933,6 +3038,7 @@ func cloneWorkspace(stateDir, source, target string) (workspaceResult, error) {
 		Profile:    manifest.Profile,
 		Restart:    nonEmpty(manifest.Restart, defaultRestartPolicy),
 		Resources:  manifest.Resources,
+		Network:    manifest.Network,
 		RootfsPath: filepath.Join(targetWorkspaceDir, "rootfs.ext4"),
 		Disks:      manifest.Disks,
 		Response: vmkit.Response{
@@ -3096,6 +3202,7 @@ func workspaceListEntryFor(stateDir, name string) workspaceListEntry {
 	if manifest, err := readWorkspaceManifest(stateDir, name); err == nil {
 		entry.Profile = manifest.Profile
 		entry.Restart = nonEmpty(manifest.Restart, defaultRestartPolicy)
+		entry.Network = networkConfigFromSpec(manifest.Network).Mode
 	}
 	if _, err := os.Stat(entry.RootfsPath); os.IsNotExist(err) {
 		entry.RootfsPath = ""
@@ -3603,7 +3710,7 @@ func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 	}
 }
 
-func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string) (vmkit.Request, error) {
+func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, publishes []string) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
 			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
@@ -3624,6 +3731,10 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 	if err != nil {
 		return vmkit.Request{}, err
 	}
+	portForwards, err := parsePortForwardMappings(publishes)
+	if err != nil {
+		return vmkit.Request{}, err
+	}
 	for _, disk := range parsedDisks {
 		config.Disks = append(config.Disks, vmkit.Disk{
 			Name:       disk.Name,
@@ -3633,6 +3744,11 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 		})
 	}
 	config.VsockListeners = listeners
+	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, PortForwards: portForwards})
+	if err := vmkit.ValidateNetworkConfig(network); err != nil {
+		return vmkit.Request{}, err
+	}
+	config.Network = &network
 	return vmkit.Request{Identity: &identity, Config: &config}, nil
 }
 
@@ -3677,6 +3793,8 @@ func reorderFlagArgs(args []string) []string {
 		"-debugfs":       true,
 		"-profile":       true,
 		"-restart":       true,
+		"-network":       true,
+		"-publish":       true,
 		"-state-dir":     true,
 		"-url":           true,
 		"-from":          true,
@@ -3770,6 +3888,68 @@ func parseVsockMappings(raw []string) ([]vmkit.VsockListener, error) {
 		listeners = append(listeners, listener)
 	}
 	return listeners, nil
+}
+
+func parsePortForward(raw string) (vmkit.PortForward, error) {
+	protocol := "tcp"
+	if before, after, ok := strings.Cut(raw, "/"); ok {
+		raw = before
+		protocol = strings.TrimSpace(after)
+	}
+	parts := strings.Split(raw, ":")
+	var host string
+	var hostPortText string
+	var guestPortText string
+	switch len(parts) {
+	case 2:
+		hostPortText = parts[0]
+		guestPortText = parts[1]
+	case 3:
+		host = parts[0]
+		hostPortText = parts[1]
+		guestPortText = parts[2]
+	default:
+		return vmkit.PortForward{}, fmt.Errorf("publish mapping must be [host:]hostPort:guestPort[/tcp|udp]")
+	}
+	hostPort, err := strconv.ParseUint(strings.TrimSpace(hostPortText), 10, 16)
+	if err != nil || hostPort == 0 {
+		return vmkit.PortForward{}, fmt.Errorf("publish host port must be a positive uint16")
+	}
+	guestPort, err := strconv.ParseUint(strings.TrimSpace(guestPortText), 10, 16)
+	if err != nil || guestPort == 0 {
+		return vmkit.PortForward{}, fmt.Errorf("publish guest port must be a positive uint16")
+	}
+	forward := vmkit.PortForward{
+		Protocol:  protocol,
+		Host:      strings.TrimSpace(host),
+		HostPort:  uint16(hostPort),
+		GuestPort: uint16(guestPort),
+	}
+	if err := vmkit.ValidateNetworkConfig(vmkit.NetworkConfig{Mode: defaultNetworkMode, PortForwards: []vmkit.PortForward{forward}}); err != nil {
+		return vmkit.PortForward{}, err
+	}
+	return normalizeNetworkConfig(vmkit.NetworkConfig{PortForwards: []vmkit.PortForward{forward}}).PortForwards[0], nil
+}
+
+func parsePortForwardMappings(raw []string) ([]vmkit.PortForward, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	forwards := make([]vmkit.PortForward, 0, len(raw))
+	seen := map[string]bool{}
+	for _, entry := range raw {
+		forward, err := parsePortForward(entry)
+		if err != nil {
+			return nil, err
+		}
+		key := fmt.Sprintf("%s/%s/%d", forward.Protocol, forward.Host, forward.HostPort)
+		if seen[key] {
+			return nil, fmt.Errorf("duplicate published host port %s", entry)
+		}
+		seen[key] = true
+		forwards = append(forwards, forward)
+	}
+	return forwards, nil
 }
 
 func parseWorkspaceDisks(values []string, bundle bool) ([]workspaceDisk, error) {

@@ -14,8 +14,9 @@ higher-level control stay outside this project.
 - New here? [Install](getting-started/install.md), then
   [run your first VM](getting-started/first-vm.md).
 - Need the CLI surface? Jump to the [CLI reference](cli/index.md).
-- Integrating? Read the [architecture overview](concepts/architecture.md), the
-  [supervisor contract](protocol/index.md), and the [Go library](library/go.md).
+- Integrating? Read the [architecture overview](concepts/architecture.md),
+  [networking](concepts/networking.md), the [supervisor contract](protocol/index.md),
+  and the [Go library](library/go.md).
 
 ## Sections
 

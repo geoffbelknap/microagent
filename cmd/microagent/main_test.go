@@ -456,6 +456,33 @@ func TestRequestForCommandParsesVsock(t *testing.T) {
 	}
 }
 
+func TestRequestForCommandParsesNetwork(t *testing.T) {
+	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--network", "isolated",
+		"--publish", "127.0.0.1:8080:80/tcp",
+	}))
+	if err != nil {
+		t.Fatalf("requestForCommand: %v", err)
+	}
+	if req.Config.Network == nil {
+		t.Fatal("network config is nil")
+	}
+	if req.Config.Network.Mode != "isolated" {
+		t.Fatalf("network mode = %q, want isolated", req.Config.Network.Mode)
+	}
+	if len(req.Config.Network.PortForwards) != 1 {
+		t.Fatalf("port forwards len = %d, want 1", len(req.Config.Network.PortForwards))
+	}
+	forward := req.Config.Network.PortForwards[0]
+	if forward.Host != "127.0.0.1" || forward.HostPort != 8080 || forward.GuestPort != 80 || forward.Protocol != "tcp" {
+		t.Fatalf("forward = %#v", forward)
+	}
+}
+
 func TestRequestForCommandParsesDisk(t *testing.T) {
 	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",
@@ -863,6 +890,17 @@ resources:
   memoryMiB: 3072
   cpuCount: 3
   sizeMiB: 12288
+network:
+  mode: nat
+  forwards:
+    - host: 127.0.0.1
+      hostPort: 8080
+      guestPort: 80
+      protocol: tcp
+  dns:
+    - 1.1.1.1
+  routes:
+    - 0.0.0.0/0
 disks:
   - name: workspace
     path: /tmp/workspace.ext4
@@ -892,6 +930,9 @@ bundles:
 	}
 	if opts.MemoryMiB != 3072 || opts.CPUCount != 3 || opts.SizeMiB != 12288 {
 		t.Fatalf("resources = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+	if opts.Network.Mode != "nat" || len(opts.Network.PortForwards) != 1 || opts.Network.PortForwards[0].HostPort != 8080 || len(opts.Network.DNS) != 1 {
+		t.Fatalf("network = %#v", opts.Network)
 	}
 	if len(opts.Disks) != 2 || opts.Disks[0].Name != "workspace" || opts.Disks[1].Name != "config" || !opts.Disks[1].Bundle {
 		t.Fatalf("disks = %#v", opts.Disks)

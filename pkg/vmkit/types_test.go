@@ -49,3 +49,22 @@ func TestValidateConfigRejectsBadDiskMode(t *testing.T) {
 		t.Fatal("ValidateConfig accepted bad disk mode")
 	}
 }
+
+func TestValidateNetworkConfigRejectsInvalidMode(t *testing.T) {
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "open"}); err == nil {
+		t.Fatal("ValidateNetworkConfig accepted invalid mode")
+	}
+}
+
+func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
+	cfg := NetworkConfig{
+		Mode: "nat",
+		PortForwards: []PortForward{
+			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
+			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 8080},
+		},
+	}
+	if err := ValidateNetworkConfig(cfg); err == nil {
+		t.Fatal("ValidateNetworkConfig accepted duplicate host ports")
+	}
+}
