@@ -27,6 +27,8 @@ scratch state (unless `--keep` is set).
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
+| `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
+| `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |

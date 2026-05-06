@@ -44,6 +44,13 @@ supervisor.
           "guestPort": 80
         }
       ]
+    },
+    "mediation": {
+      "enabled": true,
+      "required": true,
+      "port": 2048,
+      "target": "127.0.0.1:9900",
+      "failClosed": true
     }
   }
 }
@@ -52,6 +59,9 @@ supervisor.
 `config.network.mode` is declarative and must be `nat`, `isolated`, or
 `bridged`. Bridged backends may require `config.network.interface`. Port
 forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
+`config.mediation` declares the Body-to-host control-plane channel. Required
+mediation must set `failClosed: true`; if the channel is unavailable or broken,
+consumers should treat it as closed by default.
 
 ## Commands
 
@@ -112,6 +122,11 @@ forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
     },
     "resultReady": {
       "ready": false
+    },
+    "mediationReady": {
+      "ready": true,
+      "observedAt": "2026-05-02T00:00:00Z",
+      "detail": "mediation required=true failClosed=true port=2048 target=127.0.0.1:9900"
     }
   },
   "result": {
@@ -144,6 +159,13 @@ forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
         "kind": "output"
       }
     ]
+  },
+  "mediation": {
+    "enabled": true,
+    "required": true,
+    "port": 2048,
+    "target": "127.0.0.1:9900",
+    "failClosed": true
   }
 }
 ```
@@ -153,8 +175,13 @@ artifacts with the values recorded when the workspace was created. If a hash no
 longer matches, `verification.ok` is false and `verification.divergence`
 contains entries with `artifact`, `field`, `expected`, and `actual`.
 
-`readiness` gives consumers explicit guest, shell, and result readiness signals.
-Each signal has `ready` plus optional `observedAt`, `detail`, and `error`.
+`readiness` gives consumers explicit guest, shell, result, and mediation
+readiness signals. Each signal has `ready` plus optional `observedAt`, `detail`,
+and `error`.
+
+`mediation` reports the declared guest-to-host vsock channel separately from
+ordinary networking and logs. It is the stable path between the guest Body and
+the host enforcer/orchestrator.
 
 When the guest result channel has completed, status responses may include
 `result`. The result is structured separately from serial logs and carries

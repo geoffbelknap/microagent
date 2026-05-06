@@ -554,6 +554,13 @@ func TestRequestForCommandParsesDisk(t *testing.T) {
 }
 
 func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
+	mediation := vmkit.MediationConfig{
+		Enabled:    true,
+		Required:   true,
+		Port:       2048,
+		Target:     "127.0.0.1:9900",
+		FailClosed: true,
+	}
 	req := workspaceRequest(workspaceOptions{
 		Name:           "agent-1",
 		Backend:        "apple-vf",
@@ -562,12 +569,19 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		CPUCount:       2,
 		ResultPort:     1024,
 		VsockListeners: []vmkit.VsockListener{{Port: 3128, Target: "127.0.0.1:19000"}},
+		Mediation:      &mediation,
 	}, "run", "/tmp/rootfs.ext4")
-	if len(req.Config.VsockListeners) != 2 {
-		t.Fatalf("VsockListeners len = %d, want 2", len(req.Config.VsockListeners))
+	if len(req.Config.VsockListeners) != 3 {
+		t.Fatalf("VsockListeners len = %d, want 3", len(req.Config.VsockListeners))
 	}
 	if req.Config.VsockListeners[1].Port != 3128 || req.Config.VsockListeners[1].Target != "127.0.0.1:19000" {
 		t.Fatalf("enforcer listener = %#v", req.Config.VsockListeners[1])
+	}
+	if req.Config.VsockListeners[2].Port != 2048 || req.Config.VsockListeners[2].Target != "127.0.0.1:9900" {
+		t.Fatalf("mediation listener = %#v", req.Config.VsockListeners[2])
+	}
+	if req.Config.Mediation == nil || !req.Config.Mediation.Required || !req.Config.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", req.Config.Mediation)
 	}
 }
 
@@ -1169,6 +1183,43 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsAcceptsMediation(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--mediation", "2048=127.0.0.1:9900",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Mediation == nil || !opts.Mediation.Enabled || !opts.Mediation.Required || !opts.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", opts.Mediation)
+	}
+	if opts.Mediation.Port != 2048 || opts.Mediation.Target != "127.0.0.1:9900" {
+		t.Fatalf("mediation endpoint = %#v", opts.Mediation)
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsOptionalMediation(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--mediation", "2048=127.0.0.1:9900",
+		"--mediation-optional",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Mediation == nil || !opts.Mediation.Enabled || opts.Mediation.Required || opts.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", opts.Mediation)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsOptionalMediationWithoutMapping(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{"research", "--mediation-optional"})
+	if err == nil || !strings.Contains(err.Error(), "requires --mediation") {
+		t.Fatalf("err = %v, want mediation mapping error", err)
+	}
+}
+
 func TestParseWorkspaceOptionsReadsSpecFile(t *testing.T) {
 	dir := t.TempDir()
 	specPath := filepath.Join(dir, "microagent.yaml")
@@ -1198,6 +1249,12 @@ network:
     - 1.1.1.1
   routes:
     - 0.0.0.0/0
+mediation:
+  enabled: true
+  required: true
+  port: 2048
+  target: 127.0.0.1:9900
+  failClosed: true
 disks:
   - name: workspace
     path: /tmp/workspace.ext4
@@ -1233,6 +1290,9 @@ outputs:
 	}
 	if opts.Network.Mode != "nat" || len(opts.Network.PortForwards) != 1 || opts.Network.PortForwards[0].HostPort != 8080 || len(opts.Network.DNS) != 1 {
 		t.Fatalf("network = %#v", opts.Network)
+	}
+	if opts.Mediation == nil || !opts.Mediation.Required || opts.Mediation.Port != 2048 || opts.Mediation.Target != "127.0.0.1:9900" {
+		t.Fatalf("mediation = %#v", opts.Mediation)
 	}
 	if len(opts.Disks) != 2 || opts.Disks[0].Name != "workspace" || opts.Disks[1].Name != "config" || !opts.Disks[1].Bundle {
 		t.Fatalf("disks = %#v", opts.Disks)
@@ -1825,6 +1885,73 @@ func TestStatusReportsDeclaredArtifacts(t *testing.T) {
 	}
 	if resp.Artifacts.Egress[0].Name != "report" || resp.Artifacts.Egress[0].Path != "/workspace/report.json" {
 		t.Fatalf("egress = %#v", resp.Artifacts.Egress[0])
+	}
+}
+
+func TestStatusReportsMediationReadiness(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	mediation := vmkit.MediationConfig{
+		Enabled:    true,
+		Required:   true,
+		Port:       2048,
+		Target:     "127.0.0.1:9900",
+		FailClosed: true,
+	}
+	opts := workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Mediation:     &mediation,
+	}
+	if err := writeWorkspaceManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			Mediation:  &mediation,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Mediation == nil || !resp.Mediation.Required || !resp.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", resp.Mediation)
+	}
+	if resp.Readiness == nil || !resp.Readiness.MediationReady.Ready {
+		t.Fatalf("readiness = %#v", resp.Readiness)
+	}
+	if !strings.Contains(resp.Readiness.MediationReady.Detail, "port=2048") {
+		t.Fatalf("mediation detail = %q", resp.Readiness.MediationReady.Detail)
 	}
 }
 

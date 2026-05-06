@@ -21,6 +21,12 @@ resources:
   memoryMiB: 2048
   cpuCount: 2
   sizeMiB: 8192
+mediation:
+  enabled: true
+  required: true
+  port: 2048
+  target: 127.0.0.1:9900
+  failClosed: true
 disks:
   - name: workspace
     path: /tmp/workspace.ext4
@@ -65,6 +71,12 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `resources.memoryMiB` | Memory override |
 | `resources.cpuCount` | CPU override |
 | `resources.sizeMiB` | Rootfs disk size override |
+| `mediation` | Guest-to-host vsock mediation channel contract |
+| `mediation.enabled` | Enables the mediation declaration |
+| `mediation.required` | Requires the channel for workspace startup |
+| `mediation.port` | Guest vsock port used by the Body |
+| `mediation.target` | Host address and port for the enforcer/orchestrator |
+| `mediation.failClosed` | Treats a required channel break as closed by default |
 | `disks` | Existing ext4 disks to attach |
 | `bundles` | Tar bundles to build into ext4 disks and attach |
 | `outputs` | Declared output artifact paths inside the workspace |

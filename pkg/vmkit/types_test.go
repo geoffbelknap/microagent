@@ -49,6 +49,38 @@ func TestValidateConfigRejectsDuplicateVsockPorts(t *testing.T) {
 	}
 }
 
+func TestValidateConfigAcceptsMediation(t *testing.T) {
+	cfg := &Config{
+		KernelPath: "/tmp/kernel",
+		RootfsPath: "/tmp/rootfs.ext4",
+		StateDir:   "/tmp/state",
+		Mediation: &MediationConfig{
+			Enabled:    true,
+			Required:   true,
+			Port:       2048,
+			Target:     "127.0.0.1:9900",
+			FailClosed: true,
+		},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("ValidateConfig rejected mediation: %v", err)
+	}
+}
+
+func TestValidateMediationConfigRejectsIncompleteRequiredChannel(t *testing.T) {
+	tests := []MediationConfig{
+		{Required: true, Port: 2048, Target: "127.0.0.1:9900", FailClosed: true},
+		{Enabled: true, Required: true, Target: "127.0.0.1:9900", FailClosed: true},
+		{Enabled: true, Required: true, Port: 2048, FailClosed: true},
+		{Enabled: true, Required: true, Port: 2048, Target: "127.0.0.1:9900"},
+	}
+	for _, mediation := range tests {
+		if err := ValidateMediationConfig(mediation); err == nil {
+			t.Fatalf("ValidateMediationConfig accepted %#v", mediation)
+		}
+	}
+}
+
 func TestValidateConfigRejectsBadDiskMode(t *testing.T) {
 	cfg := &Config{
 		KernelPath: "/tmp/kernel",

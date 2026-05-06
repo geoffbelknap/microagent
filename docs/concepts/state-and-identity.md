@@ -69,6 +69,8 @@ work without polling files or serial logs:
 - **`guestReady`** — the workspace reached a started runtime state.
 - **`shellReady`** — the workspace is running and console input is available.
 - **`resultReady`** — the guest result file exists.
+- **`mediationReady`** — a declared mediation channel is ready for a running
+  workspace.
 
 Each signal carries `ready`, optional `observedAt`, and optional detail/error
 fields.

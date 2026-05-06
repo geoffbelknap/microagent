@@ -542,6 +542,9 @@ func needsVsock(config *vmkit.Config) bool {
 	if len(config.VsockListeners) != 0 {
 		return true
 	}
+	if config.Mediation != nil && config.Mediation.Enabled {
+		return true
+	}
 	return config.Network != nil && len(config.Network.PortForwards) != 0
 }
 
@@ -910,6 +913,7 @@ func runtimeStateRequest(req vmkit.Request, state runtimeState) vmkit.Request {
 		req.Config.CPUCount = state.Config.CPUCount
 		req.Config.Disks = state.Config.Disks
 		req.Config.VsockListeners = state.Config.VsockListeners
+		req.Config.Mediation = state.Config.Mediation
 		req.Config.Network = state.Config.Network
 		req.Config.SerialInput = state.Config.SerialInput
 	}

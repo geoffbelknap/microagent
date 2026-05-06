@@ -731,6 +731,7 @@ type workspaceOptions struct {
 	CPUCount        int
 	SizeMiB         int64
 	Network         vmkit.NetworkConfig
+	Mediation       *vmkit.MediationConfig
 	Timeout         time.Duration
 	ResultPort      uint32
 	Disks           []workspaceDisk
@@ -747,18 +748,19 @@ type workspaceOptions struct {
 }
 
 type workspaceSpec struct {
-	Name       string            `yaml:"name"`
-	ImageRef   string            `yaml:"image"`
-	Profile    string            `yaml:"profile"`
-	Restart    string            `yaml:"restart"`
-	Entrypoint string            `yaml:"entrypoint"`
-	Setup      []string          `yaml:"setup"`
-	Env        map[string]string `yaml:"env"`
-	Resources  resourceConfig    `yaml:"resources"`
-	Network    networkSpec       `yaml:"network"`
-	Disks      []workspaceDisk   `yaml:"disks"`
-	Bundles    []workspaceDisk   `yaml:"bundles"`
-	Outputs    []workspaceOutput `yaml:"outputs"`
+	Name       string                `yaml:"name"`
+	ImageRef   string                `yaml:"image"`
+	Profile    string                `yaml:"profile"`
+	Restart    string                `yaml:"restart"`
+	Entrypoint string                `yaml:"entrypoint"`
+	Setup      []string              `yaml:"setup"`
+	Env        map[string]string     `yaml:"env"`
+	Resources  resourceConfig        `yaml:"resources"`
+	Network    networkSpec           `yaml:"network"`
+	Mediation  vmkit.MediationConfig `yaml:"mediation"`
+	Disks      []workspaceDisk       `yaml:"disks"`
+	Bundles    []workspaceDisk       `yaml:"bundles"`
+	Outputs    []workspaceOutput     `yaml:"outputs"`
 }
 
 type networkSpec struct {
@@ -795,6 +797,7 @@ type workspaceManifest struct {
 	Restart      string                     `json:"restart"`
 	Resources    resourceConfig             `json:"resources"`
 	Network      networkSpec                `json:"network,omitempty"`
+	Mediation    *vmkit.MediationConfig     `json:"mediation,omitempty"`
 	Disks        []workspaceDisk            `json:"disks,omitempty"`
 	Artifacts    workspaceArtifacts         `json:"artifacts,omitempty"`
 	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
@@ -2229,6 +2232,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
 	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: nat, isolated, or bridged")
 	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
+	mediationMapping := ""
+	fs.StringVar(&mediationMapping, "mediation", "", "Required mediation vsock mapping port=host:port")
+	mediationOptional := false
+	fs.BoolVar(&mediationOptional, "mediation-optional", false, "Allow workspace to run if mediation is unavailable")
 	var publishFlags multiFlag
 	fs.Var(&publishFlags, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
@@ -2275,6 +2282,15 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.Network.PortForwards = append(opts.Network.PortForwards, published...)
+	if strings.TrimSpace(mediationMapping) != "" {
+		mediation, err := parseMediationMapping(mediationMapping, mediationOptional)
+		if err != nil {
+			return workspaceOptions{}, err
+		}
+		opts.Mediation = &mediation
+	} else if mediationOptional {
+		return workspaceOptions{}, fmt.Errorf("%s requires --mediation with --mediation-optional", command)
+	}
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		if command == "create" {
@@ -2395,6 +2411,13 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 			Routes:       append([]string{}, spec.Network.Routes...),
 			IP:           spec.Network.IP,
 		}
+	}
+	if spec.Mediation.Enabled || spec.Mediation.Required || spec.Mediation.Port != 0 || strings.TrimSpace(spec.Mediation.Target) != "" || spec.Mediation.FailClosed {
+		mediation := normalizeMediationConfig(spec.Mediation)
+		if err := vmkit.ValidateMediationConfig(mediation); err != nil {
+			return err
+		}
+		opts.Mediation = &mediation
 	}
 	if strings.TrimSpace(spec.Entrypoint) != "" {
 		opts.Entrypoint = spec.Entrypoint
@@ -2852,6 +2875,7 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 		Restart:      normalizeRestartPolicy(opts.RestartPolicy),
 		Resources:    workspaceResources(opts),
 		Network:      networkSpecFromConfig(opts.Network),
+		Mediation:    opts.Mediation,
 		Disks:        opts.Disks,
 		Artifacts:    workspaceArtifactsFromOptions(opts),
 		Verification: opts.Verification,
@@ -2876,6 +2900,9 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 		listeners = []vmkit.VsockListener{{Port: opts.ResultPort, Target: resultPath(opts)}}
 	}
 	listeners = append(listeners, opts.VsockListeners...)
+	if opts.Mediation != nil && opts.Mediation.Enabled {
+		listeners = append(listeners, vmkit.VsockListener{Port: opts.Mediation.Port, Target: opts.Mediation.Target})
+	}
 	disks := make([]vmkit.Disk, 0, len(opts.Disks))
 	for _, disk := range opts.Disks {
 		disks = append(disks, vmkit.Disk{
@@ -2901,6 +2928,7 @@ func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.R
 			CPUCount:       opts.CPUCount,
 			Disks:          disks,
 			VsockListeners: listeners,
+			Mediation:      opts.Mediation,
 			Network:        networkConfigPtr(opts.Network),
 			SerialInput:    opts.SerialInput,
 		},
@@ -2928,6 +2956,7 @@ func workspaceOptionsFromRequest(req vmkit.Request, supervisorPath string) (work
 		MemoryMiB:      req.Config.MemoryMiB,
 		CPUCount:       req.Config.CPUCount,
 		Network:        network,
+		Mediation:      req.Config.Mediation,
 		Disks:          configDisksToWorkspaceDisks(req.Config.Disks),
 	}, nil
 }
@@ -3099,6 +3128,7 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 		resp.RestartPolicy = nonEmpty(manifest.Restart, defaultRestartPolicy)
 		network := networkConfigFromSpec(manifest.Network)
 		resp.Network = &network
+		resp.Mediation = manifest.Mediation
 		artifacts := runtimeArtifactsFromManifest(manifest.Artifacts)
 		resp.Artifacts = &artifacts
 		resp.Verification = workspaceVerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest)
@@ -3345,7 +3375,22 @@ func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeRea
 	} else if !os.IsNotExist(err) {
 		readiness.ResultReady = vmkit.ReadinessSignal{Error: err.Error()}
 	}
+	if state.Config.Mediation != nil && state.Config.Mediation.Enabled {
+		readiness.MediationReady = mediationReadiness(*state.Config.Mediation, state.Event.State, firstTime(state.StartedAt, state.Event.ObservedAt))
+	}
 	return readiness
+}
+
+func mediationReadiness(mediation vmkit.MediationConfig, state vmkit.VMState, observedAt *time.Time) vmkit.ReadinessSignal {
+	signal := vmkit.ReadinessSignal{
+		Ready:      state == vmkit.StateRunning,
+		ObservedAt: observedAt,
+		Detail:     fmt.Sprintf("mediation required=%t failClosed=%t port=%d target=%s", mediation.Required, mediation.FailClosed, mediation.Port, mediation.Target),
+	}
+	if !signal.Ready && mediation.Required {
+		signal.Error = "required mediation is not ready"
+	}
+	return signal
 }
 
 func firstTime(values ...string) *time.Time {
@@ -3591,14 +3636,22 @@ func writeResponse(stdout *os.File, resp vmkit.Response) error {
 		if resp.Network != nil && resp.Network.Mode != "" {
 			fmt.Fprintf(stdout, "Network: %s\n", resp.Network.Mode)
 		}
+		if resp.Mediation != nil && resp.Mediation.Enabled {
+			fmt.Fprintf(stdout, "Mediation: required=%t failClosed=%t port=%d target=%s\n", resp.Mediation.Required, resp.Mediation.FailClosed, resp.Mediation.Port, resp.Mediation.Target)
+		}
 		if resp.Verification != nil {
 			fmt.Fprintf(stdout, "Verification: %s\n", humanOK(resp.Verification.OK))
 		}
 		if resp.Readiness != nil {
-			fmt.Fprintf(stdout, "Readiness: guest=%s shell=%s result=%s\n",
+			mediation := "disabled"
+			if resp.Mediation != nil && resp.Mediation.Enabled {
+				mediation = humanReady(resp.Readiness.MediationReady.Ready)
+			}
+			fmt.Fprintf(stdout, "Readiness: guest=%s shell=%s result=%s mediation=%s\n",
 				humanReady(resp.Readiness.GuestReady.Ready),
 				humanReady(resp.Readiness.ShellReady.Ready),
 				humanReady(resp.Readiness.ResultReady.Ready),
+				mediation,
 			)
 		}
 		if resp.Artifacts != nil {
@@ -5392,6 +5445,7 @@ func reorderFlagArgs(args []string) []string {
 		"-restart":           true,
 		"-network":           true,
 		"-network-interface": true,
+		"-mediation":         true,
 		"-publish":           true,
 		"-state-dir":         true,
 		"-url":               true,
@@ -5487,6 +5541,35 @@ func parseVsockMappings(raw []string) ([]vmkit.VsockListener, error) {
 		listeners = append(listeners, listener)
 	}
 	return listeners, nil
+}
+
+func parseMediationMapping(raw string, optional bool) (vmkit.MediationConfig, error) {
+	listener, err := parseVsock(raw)
+	if err != nil {
+		return vmkit.MediationConfig{}, fmt.Errorf("mediation %w", err)
+	}
+	mediation := vmkit.MediationConfig{
+		Enabled:    true,
+		Required:   !optional,
+		Port:       listener.Port,
+		Target:     listener.Target,
+		FailClosed: !optional,
+	}
+	if err := vmkit.ValidateMediationConfig(mediation); err != nil {
+		return vmkit.MediationConfig{}, err
+	}
+	return mediation, nil
+}
+
+func normalizeMediationConfig(mediation vmkit.MediationConfig) vmkit.MediationConfig {
+	mediation.Target = strings.TrimSpace(mediation.Target)
+	if mediation.Port != 0 || mediation.Target != "" || mediation.Required || mediation.FailClosed {
+		mediation.Enabled = true
+	}
+	if mediation.Required {
+		mediation.FailClosed = true
+	}
+	return mediation
 }
 
 func parsePortForward(raw string) (vmkit.PortForward, error) {
@@ -5764,6 +5847,8 @@ Options:
   -network <mode>       Network mode: nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
+  -mediation p=host:port Required mediation vsock mapping
+  -mediation-optional Allow workspace to run if mediation is unavailable
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
@@ -5796,6 +5881,8 @@ Options:
   -network <mode>       Network mode: nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
+  -mediation p=host:port Required mediation vsock mapping
+  -mediation-optional Allow workspace to run if mediation is unavailable
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size

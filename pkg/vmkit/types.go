@@ -41,15 +41,16 @@ type Identity struct {
 }
 
 type Config struct {
-	KernelPath     string          `json:"kernelPath"`
-	RootfsPath     string          `json:"rootfsPath"`
-	StateDir       string          `json:"stateDir"`
-	MemoryMiB      int             `json:"memoryMiB,omitempty"`
-	CPUCount       int             `json:"cpuCount,omitempty"`
-	Disks          []Disk          `json:"disks,omitempty"`
-	VsockListeners []VsockListener `json:"vsockListeners,omitempty"`
-	Network        *NetworkConfig  `json:"network,omitempty"`
-	SerialInput    bool            `json:"serialInput,omitempty"`
+	KernelPath     string           `json:"kernelPath"`
+	RootfsPath     string           `json:"rootfsPath"`
+	StateDir       string           `json:"stateDir"`
+	MemoryMiB      int              `json:"memoryMiB,omitempty"`
+	CPUCount       int              `json:"cpuCount,omitempty"`
+	Disks          []Disk           `json:"disks,omitempty"`
+	VsockListeners []VsockListener  `json:"vsockListeners,omitempty"`
+	Mediation      *MediationConfig `json:"mediation,omitempty"`
+	Network        *NetworkConfig   `json:"network,omitempty"`
+	SerialInput    bool             `json:"serialInput,omitempty"`
 }
 
 type Disk struct {
@@ -62,6 +63,14 @@ type Disk struct {
 type VsockListener struct {
 	Port   uint32 `json:"port"`
 	Target string `json:"target"`
+}
+
+type MediationConfig struct {
+	Enabled    bool   `json:"enabled" yaml:"enabled"`
+	Required   bool   `json:"required" yaml:"required"`
+	Port       uint32 `json:"port,omitempty" yaml:"port,omitempty"`
+	Target     string `json:"target,omitempty" yaml:"target,omitempty"`
+	FailClosed bool   `json:"failClosed" yaml:"failClosed"`
 }
 
 type NetworkConfig struct {
@@ -151,9 +160,10 @@ type ReadinessSignal struct {
 }
 
 type RuntimeReadiness struct {
-	GuestReady  ReadinessSignal `json:"guestReady"`
-	ShellReady  ReadinessSignal `json:"shellReady"`
-	ResultReady ReadinessSignal `json:"resultReady"`
+	GuestReady     ReadinessSignal `json:"guestReady"`
+	ShellReady     ReadinessSignal `json:"shellReady"`
+	ResultReady    ReadinessSignal `json:"resultReady"`
+	MediationReady ReadinessSignal `json:"mediationReady"`
 }
 
 type RuntimeResult struct {
@@ -191,6 +201,7 @@ type Response struct {
 	Readiness     *RuntimeReadiness    `json:"readiness,omitempty"`
 	Result        *RuntimeResult       `json:"result,omitempty"`
 	Artifacts     *RuntimeArtifacts    `json:"artifacts,omitempty"`
+	Mediation     *MediationConfig     `json:"mediation,omitempty"`
 	RestartPolicy string               `json:"restartPolicy,omitempty"`
 	Network       *NetworkConfig       `json:"network,omitempty"`
 	Error         string               `json:"error,omitempty"`
@@ -323,6 +334,30 @@ func ValidateConfig(config *Config) error {
 		if err := ValidateNetworkConfig(*config.Network); err != nil {
 			return err
 		}
+	}
+	if config.Mediation != nil {
+		if err := ValidateMediationConfig(*config.Mediation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ValidateMediationConfig(mediation MediationConfig) error {
+	if !mediation.Enabled && !mediation.Required && mediation.Port == 0 && strings.TrimSpace(mediation.Target) == "" && !mediation.FailClosed {
+		return nil
+	}
+	if !mediation.Enabled {
+		return errors.New("mediation.enabled must be true when mediation is configured")
+	}
+	if mediation.Port == 0 {
+		return errors.New("mediation.port must be positive")
+	}
+	if strings.TrimSpace(mediation.Target) == "" {
+		return errors.New("mediation.target is required")
+	}
+	if mediation.Required && !mediation.FailClosed {
+		return errors.New("required mediation must fail closed")
 	}
 	return nil
 }

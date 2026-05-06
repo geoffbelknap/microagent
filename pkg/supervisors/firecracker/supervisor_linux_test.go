@@ -230,6 +230,46 @@ func TestWriteConfigAddsBridgedNetworkInterface(t *testing.T) {
 	}
 }
 
+func TestWriteConfigAddsVsockForMediation(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   opts.StateDir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+			Mediation: &vmkit.MediationConfig{
+				Enabled:    true,
+				Required:   true,
+				Port:       2048,
+				Target:     "127.0.0.1:9900",
+				FailClosed: true,
+			},
+		},
+	}
+	if err := writeConfig(opts, req); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+	var cfg config
+	data, err := os.ReadFile(configPath(opts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Vsock == nil || cfg.Vsock.GuestCID != 3 || cfg.Vsock.UDSPath == "" {
+		t.Fatalf("vsock = %#v", cfg.Vsock)
+	}
+}
+
 func TestWriteConfigOmitsNetworkInterfaceForIsolated(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
 	req := vmkit.Request{

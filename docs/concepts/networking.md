@@ -39,6 +39,21 @@ For TCP forwards, guest init records a `hostForwards` entry and listens on a
 guest vsock port matching the declared host port. Backend supervisors own the
 host-side listener that connects host TCP to that guest vsock port.
 
+## Mediation channel
+
+Mediation is a distinct guest-to-host vsock contract for Body calls into the
+host control plane. Declare it with:
+
+```bash
+microagent create research --mediation 2048=127.0.0.1:9900
+```
+
+By default the channel is required and fail-closed. The request, manifest,
+status response, and readiness block preserve the same structured declaration:
+`enabled`, `required`, `port`, `target`, and `failClosed`. Use
+`--mediation-optional` only for development paths where the workspace may boot
+without the host-side mediator.
+
 The same shape is available in `microagent.yaml`:
 
 ```yaml

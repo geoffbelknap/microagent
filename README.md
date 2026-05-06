@@ -110,6 +110,8 @@ digest, kernel hash, rootfs hash, and injected init hash. `microagent status
 --json` recomputes current hashes and reports structured divergence.
 Status JSON also reports `guestReady`, `shellReady`, and `resultReady` so
 callers can sequence work without polling serial logs or guessing from files.
+Declare the mediation channel with `--mediation port=host:port`; it is recorded
+as a required fail-closed vsock contract and reported in readiness/status.
 Use `microagent result <name> --json` to read the structured completion payload
 without scraping logs.
 Declare output artifacts with `--output name=/guest/path`; status/result JSON

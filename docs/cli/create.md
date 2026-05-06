@@ -33,6 +33,8 @@ first.
 | `--network <mode>` | Network mode: `nat`, `isolated`, or `bridged` |
 | `--network-interface <if>` | Host interface identifier or display name for bridged mode |
 | `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
+| `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
+| `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
