@@ -152,9 +152,6 @@ make signed-supervisor
 make smoke-boot
 ```
 
-See [docs/operations/smoke-tests.md](docs/operations/smoke-tests.md) for host
-requirements, expected kernel SHAs, and per-backend smoke targets.
-
 ## CLI
 
 Check the host:
