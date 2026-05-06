@@ -16,6 +16,7 @@ self-hosted Linux runners labeled `kvm`, or directly on a Linux host with
 | Target | What it covers |
 |---|---|
 | `make smoke` | Default per-host smoke suite |
+| `make smoke-contract` | Backend-neutral runtime contract, status, result, readiness, artifacts |
 | `make smoke-rootfs` | OCI image to ext4 rootfs conversion |
 | `make smoke-firecracker` | Linux KVM Firecracker boot |
 | `make smoke-firecracker-console` | Linux KVM Firecracker console parity |
@@ -25,6 +26,18 @@ self-hosted Linux runners labeled `kvm`, or directly on a Linux host with
 | `make smoke-applevf-publish` | macOS Apple VF TCP publish |
 | `make smoke-workspace` | HostOS workspace lifecycle |
 | `make smoke-boot` | Boot a Linux VM end-to-end (Apple VF) |
+
+## Runtime contract smoke
+
+```bash
+make smoke-contract
+```
+
+This smoke does not boot a VM. It builds the CLI, validates
+`microagent contract --json`, synthesizes a persisted workspace state, and then
+checks `status`, `result`, `artifacts`, and `artifacts get`. It is intended to
+catch regressions in the structured runtime surface before backend-specific live
+VM smokes run.
 
 ## Firecracker boot smoke
 
