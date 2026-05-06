@@ -63,7 +63,7 @@ virtualization:
 - `go vet ./...`
 - `go test -race ./...`
 - `make smoke-contract`
-- internal Markdown link checks when the helper is present
+- internal Markdown link and CLI docs checks when the helpers are present
 - shell syntax checks for scripts
 - `shellcheck` when installed
 - `govulncheck` when the Go tool can download it
