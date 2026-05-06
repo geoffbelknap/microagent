@@ -1082,6 +1082,42 @@ func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
 	}
 }
 
+func TestImagesTagCreatesAlias(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertImageRecord(dir, imageRecord{
+		ImageRef:    "docker.io/library/busybox:1.36",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  rootfsPath,
+		SizeBytes:   6,
+		LastUsedAt:  "2026-05-06T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tagged, err := tagImageRecord(dir, "sha256:abc", "local/busybox:baseline")
+	if err != nil {
+		t.Fatalf("tagImageRecord: %v", err)
+	}
+	if tagged.ImageRef != "local/busybox:baseline" || tagged.OutputPath != rootfsPath {
+		t.Fatalf("tagged = %#v", tagged)
+	}
+	images, err := listImageRecords(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 2 {
+		t.Fatalf("images len = %d, want 2: %#v", len(images), images)
+	}
+}
+
 func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {

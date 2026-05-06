@@ -860,6 +860,15 @@ type imagePruneResult struct {
 	Kept    []imageRecord `json:"kept"`
 }
 
+type imagePullOptions struct {
+	StateDir      string
+	ImageRef      string
+	Architecture  string
+	SizeMiB       int64
+	Mke2fsPath    string
+	GuestInitPath string
+}
+
 var resourceProfiles = []resourceProfile{
 	{
 		Name:        "tiny",
@@ -1043,11 +1052,19 @@ func runProfiles(args []string, stdout *os.File) error {
 
 func runImages(args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	guestInitExplicit := hasFlagValue(args, "guest-init")
 	fs := flag.NewFlagSet("images", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	arch := fs.String("arch", defaultGuestArch(), "Image architecture")
+	sizeMiB := fs.Int64("size-mib", rootfs.DefaultSizeMiB, "Rootfs image size in MiB")
+	mke2fsPath := fs.String("mke2fs", defaultMke2fsPath(), "mke2fs binary path")
+	guestInitPath := fs.String("guest-init", defaultGuestInitPath(*arch), "Guest init path")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
+	}
+	if !guestInitExplicit {
+		*guestInitPath = defaultGuestInitPath(*arch)
 	}
 	if fs.NArg() == 0 || fs.Arg(0) == "list" {
 		if fs.NArg() > 1 {
@@ -1060,6 +1077,31 @@ func runImages(args []string, stdout *os.File) error {
 		return writeImageList(stdout, images)
 	}
 	switch fs.Arg(0) {
+	case "pull":
+		if fs.NArg() != 2 {
+			return fmt.Errorf("usage: microagent images pull <image> [--state-dir <dir>]")
+		}
+		record, err := pullImage(context.Background(), imagePullOptions{
+			StateDir:      opts.StateDir,
+			ImageRef:      fs.Arg(1),
+			Architecture:  *arch,
+			SizeMiB:       *sizeMiB,
+			Mke2fsPath:    *mke2fsPath,
+			GuestInitPath: *guestInitPath,
+		})
+		if err != nil {
+			return err
+		}
+		return writeImageRecord(stdout, record)
+	case "tag":
+		if fs.NArg() != 3 {
+			return fmt.Errorf("usage: microagent images tag <source> <target> [--state-dir <dir>]")
+		}
+		record, err := tagImageRecord(opts.StateDir, fs.Arg(1), fs.Arg(2))
+		if err != nil {
+			return err
+		}
+		return writeImageRecord(stdout, record)
 	case "prune":
 		if fs.NArg() != 1 {
 			return fmt.Errorf("usage: microagent images prune [--state-dir <dir>]")
@@ -2801,6 +2843,31 @@ func writeImageList(stdout *os.File, images []imageRecord) error {
 	return nil
 }
 
+func writeImageRecord(stdout *os.File, record imageRecord) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, record)
+	}
+	fmt.Fprintf(stdout, "Image: %s\n", record.ImageRef)
+	if record.ResolvedRef != "" {
+		fmt.Fprintf(stdout, "Resolved: %s\n", record.ResolvedRef)
+	}
+	if record.Digest != "" {
+		fmt.Fprintf(stdout, "Digest: %s\n", record.Digest)
+	}
+	platform := record.Platform.OS + "/" + record.Platform.Architecture
+	if record.Platform.Variant != "" {
+		platform += "/" + record.Platform.Variant
+	}
+	fmt.Fprintf(stdout, "Platform: %s\n", platform)
+	if record.OutputPath != "" {
+		fmt.Fprintf(stdout, "Rootfs: %s\n", record.OutputPath)
+	}
+	if record.SizeBytes != 0 {
+		fmt.Fprintf(stdout, "Size: %d\n", record.SizeBytes)
+	}
+	return nil
+}
+
 func writeImagePruneResult(stdout *os.File, result imagePruneResult) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, result)
@@ -3423,15 +3490,57 @@ func writeImageIndex(stateDir string, idx imageIndex) error {
 	return writeJSONFile(imageIndexPath(stateDir), idx)
 }
 
-func recordImageProvenance(stateDir string, provenance rootfs.Provenance) error {
-	if provenance.ImageRef == "" || provenance.Digest == "" {
-		return nil
+func pullImage(ctx context.Context, opts imagePullOptions) (imageRecord, error) {
+	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
+	if opts.ImageRef == "" {
+		return imageRecord{}, fmt.Errorf("image reference is required")
 	}
-	idx, err := readImageIndex(stateDir)
+	if opts.Architecture == "" {
+		opts.Architecture = defaultGuestArch()
+	}
+	if opts.SizeMiB == 0 {
+		opts.SizeMiB = rootfs.DefaultSizeMiB
+	}
+	if opts.SizeMiB < 0 {
+		return imageRecord{}, fmt.Errorf("size-mib must not be negative")
+	}
+	if opts.Mke2fsPath == "" {
+		opts.Mke2fsPath = defaultMke2fsPath()
+	}
+	if opts.GuestInitPath == "" {
+		opts.GuestInitPath = defaultGuestInitPath(opts.Architecture)
+	}
+	outputPath := imageRootfsPath(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
+	provenance, err := rootfs.NewBuilder().Build(ctx, rootfs.BuildRequest{
+		ImageRef:       opts.ImageRef,
+		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
+		OutputPath:     outputPath,
+		InitPath:       rootfs.DefaultInitPath,
+		InitBinaryPath: opts.GuestInitPath,
+		NoImageCommand: true,
+		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
+		Mke2fsPath:     opts.Mke2fsPath,
+		SizeMiB:        opts.SizeMiB,
+		AllowMutable:   true,
+	})
 	if err != nil {
-		return err
+		return imageRecord{}, err
 	}
-	record := imageRecord{
+	record := imageRecordFromProvenance(provenance)
+	if err := upsertImageRecord(opts.StateDir, record); err != nil {
+		return imageRecord{}, err
+	}
+	return record, nil
+}
+
+func imageRootfsPath(stateDir, imageRef string, platform rootfs.Platform) string {
+	sum := sha256.Sum256([]byte(imageRef + "\x00" + platform.OS + "\x00" + platform.Architecture + "\x00" + platform.Variant))
+	name := hex.EncodeToString(sum[:])[:24] + ".ext4"
+	return filepath.Join(stateDir, "images", "rootfs", name)
+}
+
+func imageRecordFromProvenance(provenance rootfs.Provenance) imageRecord {
+	return imageRecord{
 		ImageRef:    provenance.ImageRef,
 		ResolvedRef: provenance.ResolvedRef,
 		Digest:      provenance.Digest,
@@ -3440,9 +3549,23 @@ func recordImageProvenance(stateDir string, provenance rootfs.Provenance) error 
 		SizeBytes:   provenance.SizeBytes,
 		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
+}
+
+func recordImageProvenance(stateDir string, provenance rootfs.Provenance) error {
+	if provenance.ImageRef == "" || provenance.Digest == "" {
+		return nil
+	}
+	return upsertImageRecord(stateDir, imageRecordFromProvenance(provenance))
+}
+
+func upsertImageRecord(stateDir string, record imageRecord) error {
+	idx, err := readImageIndex(stateDir)
+	if err != nil {
+		return err
+	}
 	replaced := false
 	for i, existing := range idx.Images {
-		if existing.Digest == record.Digest && existing.Platform == record.Platform {
+		if existing.ImageRef == record.ImageRef && existing.Platform == record.Platform {
 			idx.Images[i] = record
 			replaced = true
 			break
@@ -3453,6 +3576,40 @@ func recordImageProvenance(stateDir string, provenance rootfs.Provenance) error 
 	}
 	sortImageRecords(idx.Images)
 	return writeImageIndex(stateDir, idx)
+}
+
+func tagImageRecord(stateDir, source, target string) (imageRecord, error) {
+	source = strings.TrimSpace(source)
+	target = strings.TrimSpace(target)
+	if source == "" {
+		return imageRecord{}, fmt.Errorf("source image is required")
+	}
+	if target == "" {
+		return imageRecord{}, fmt.Errorf("target image is required")
+	}
+	if strings.ContainsAny(target, "\x00\n\r") {
+		return imageRecord{}, fmt.Errorf("target image contains unsupported characters")
+	}
+	idx, err := readImageIndex(stateDir)
+	if err != nil {
+		return imageRecord{}, err
+	}
+	for _, image := range idx.Images {
+		if imageMatchesRef(image, source) {
+			tagged := image
+			tagged.ImageRef = target
+			tagged.LastUsedAt = time.Now().UTC().Format(time.RFC3339)
+			if err := upsertImageRecord(stateDir, tagged); err != nil {
+				return imageRecord{}, err
+			}
+			return tagged, nil
+		}
+	}
+	return imageRecord{}, fmt.Errorf("image %q not found", source)
+}
+
+func imageMatchesRef(image imageRecord, ref string) bool {
+	return image.ImageRef == ref || image.ResolvedRef == ref || image.Digest == ref
 }
 
 func listImageRecords(stateDir string) ([]imageRecord, error) {
