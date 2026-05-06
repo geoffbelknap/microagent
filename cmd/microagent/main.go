@@ -74,6 +74,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "profiles" {
 		return runProfiles(args[1:], stdout)
 	}
+	if args[0] == "images" {
+		return runImages(args[1:], stdout)
+	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
@@ -838,6 +841,25 @@ type resourceProfile struct {
 	Resources   resourceConfig `json:"resources"`
 }
 
+type imageIndex struct {
+	Images []imageRecord `json:"images"`
+}
+
+type imageRecord struct {
+	ImageRef    string          `json:"image_ref"`
+	ResolvedRef string          `json:"resolved_ref,omitempty"`
+	Digest      string          `json:"digest,omitempty"`
+	Platform    rootfs.Platform `json:"platform"`
+	OutputPath  string          `json:"output_path,omitempty"`
+	SizeBytes   int64           `json:"size_bytes,omitempty"`
+	LastUsedAt  string          `json:"last_used_at"`
+}
+
+type imagePruneResult struct {
+	Removed []imageRecord `json:"removed"`
+	Kept    []imageRecord `json:"kept"`
+}
+
 var resourceProfiles = []resourceProfile{
 	{
 		Name:        "tiny",
@@ -1017,6 +1039,39 @@ func runProfiles(args []string, stdout *os.File) error {
 		)
 	}
 	return nil
+}
+
+func runImages(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("images", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() == 0 || fs.Arg(0) == "list" {
+		if fs.NArg() > 1 {
+			return fmt.Errorf("usage: microagent images list [--state-dir <dir>]")
+		}
+		images, err := listImageRecords(opts.StateDir)
+		if err != nil {
+			return err
+		}
+		return writeImageList(stdout, images)
+	}
+	switch fs.Arg(0) {
+	case "prune":
+		if fs.NArg() != 1 {
+			return fmt.Errorf("usage: microagent images prune [--state-dir <dir>]")
+		}
+		result, err := pruneImageRecords(opts.StateDir)
+		if err != nil {
+			return err
+		}
+		return writeImagePruneResult(stdout, result)
+	default:
+		return fmt.Errorf("unknown images command: %s", fs.Arg(0))
+	}
 }
 
 func runLogs(args []string, stdout *os.File) error {
@@ -2039,7 +2094,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		AllowMutable:   true,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
-	return workspaceResult{
+	result := workspaceResult{
 		Workspace:  opts.Name,
 		StateDir:   opts.StateDir,
 		Profile:    opts.Profile,
@@ -2049,7 +2104,14 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
 		Image:      provenance,
-	}, err
+	}
+	if err != nil {
+		return result, err
+	}
+	if err := recordImageProvenance(opts.StateDir, provenance); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func workspaceMounts(disks []workspaceDisk) []rootfs.Mount {
@@ -2720,6 +2782,34 @@ func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 	return nil
 }
 
+func writeImageList(stdout *os.File, images []imageRecord) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"images": images})
+	}
+	if len(images) == 0 {
+		fmt.Fprintln(stdout, "No images.")
+		return nil
+	}
+	fmt.Fprintf(stdout, "%-48s %-72s %-16s %-10s %s\n", "IMAGE", "DIGEST", "PLATFORM", "SIZE", "LAST USED")
+	for _, image := range images {
+		platform := image.Platform.OS + "/" + image.Platform.Architecture
+		if image.Platform.Variant != "" {
+			platform += "/" + image.Platform.Variant
+		}
+		fmt.Fprintf(stdout, "%-48s %-72s %-16s %-10d %s\n", image.ImageRef, image.Digest, platform, image.SizeBytes, image.LastUsedAt)
+	}
+	return nil
+}
+
+func writeImagePruneResult(stdout *os.File, result imagePruneResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Removed: %d\n", len(result.Removed))
+	fmt.Fprintf(stdout, "Kept: %d\n", len(result.Kept))
+	return nil
+}
+
 func humanOK(ok bool) string {
 	if ok {
 		return "ok"
@@ -3305,6 +3395,113 @@ func inspectWorkspaceNetwork(stateDir, name string) (workspaceNetworkResult, err
 		result.Backend = event.Identity.Backend
 	}
 	return result, nil
+}
+
+func imageIndexPath(stateDir string) string {
+	return filepath.Join(stateDir, "images", "index.json")
+}
+
+func readImageIndex(stateDir string) (imageIndex, error) {
+	data, err := os.ReadFile(imageIndexPath(stateDir))
+	if os.IsNotExist(err) {
+		return imageIndex{}, nil
+	}
+	if err != nil {
+		return imageIndex{}, err
+	}
+	var idx imageIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return imageIndex{}, err
+	}
+	return idx, nil
+}
+
+func writeImageIndex(stateDir string, idx imageIndex) error {
+	if err := os.MkdirAll(filepath.Dir(imageIndexPath(stateDir)), 0o755); err != nil {
+		return err
+	}
+	return writeJSONFile(imageIndexPath(stateDir), idx)
+}
+
+func recordImageProvenance(stateDir string, provenance rootfs.Provenance) error {
+	if provenance.ImageRef == "" || provenance.Digest == "" {
+		return nil
+	}
+	idx, err := readImageIndex(stateDir)
+	if err != nil {
+		return err
+	}
+	record := imageRecord{
+		ImageRef:    provenance.ImageRef,
+		ResolvedRef: provenance.ResolvedRef,
+		Digest:      provenance.Digest,
+		Platform:    provenance.Platform,
+		OutputPath:  provenance.OutputPath,
+		SizeBytes:   provenance.SizeBytes,
+		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	replaced := false
+	for i, existing := range idx.Images {
+		if existing.Digest == record.Digest && existing.Platform == record.Platform {
+			idx.Images[i] = record
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		idx.Images = append(idx.Images, record)
+	}
+	sortImageRecords(idx.Images)
+	return writeImageIndex(stateDir, idx)
+}
+
+func listImageRecords(stateDir string) ([]imageRecord, error) {
+	idx, err := readImageIndex(stateDir)
+	if err != nil {
+		return nil, err
+	}
+	images := append([]imageRecord{}, idx.Images...)
+	sortImageRecords(images)
+	return images, nil
+}
+
+func pruneImageRecords(stateDir string) (imagePruneResult, error) {
+	idx, err := readImageIndex(stateDir)
+	if err != nil {
+		return imagePruneResult{}, err
+	}
+	result := imagePruneResult{}
+	for _, image := range idx.Images {
+		if image.OutputPath == "" {
+			result.Kept = append(result.Kept, image)
+			continue
+		}
+		if _, err := os.Stat(image.OutputPath); err == nil {
+			result.Kept = append(result.Kept, image)
+		} else if os.IsNotExist(err) {
+			result.Removed = append(result.Removed, image)
+		} else {
+			return imagePruneResult{}, err
+		}
+	}
+	sortImageRecords(result.Kept)
+	sortImageRecords(result.Removed)
+	if err := writeImageIndex(stateDir, imageIndex{Images: result.Kept}); err != nil {
+		return imagePruneResult{}, err
+	}
+	return result, nil
+}
+
+func sortImageRecords(images []imageRecord) {
+	sort.Slice(images, func(i, j int) bool {
+		if images[i].ImageRef != images[j].ImageRef {
+			return images[i].ImageRef < images[j].ImageRef
+		}
+		if images[i].Platform.Architecture != images[j].Platform.Architecture {
+			return images[i].Platform.Architecture < images[j].Platform.Architecture
+		}
+		return images[i].Digest < images[j].Digest
+	})
 }
 
 func validateWorkspaceName(name string) error {
@@ -4160,6 +4357,7 @@ Commands:
   status               Show workspace state
   logs                 Show workspace logs
   profiles             List resource profiles
+  images               List or prune local image records
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace

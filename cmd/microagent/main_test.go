@@ -1030,6 +1030,58 @@ func TestRunProfilesPrintsExactConfigs(t *testing.T) {
 	}
 }
 
+func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "workspaces", "research", "rootfs.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordImageProvenance(dir, rootfs.Provenance{
+		ImageRef:    "docker.io/library/busybox:1.36",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  rootfsPath,
+		SizeBytes:   6,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "images.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runImages([]string{"list", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runImages list: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"digest": "sha256:abc"`) {
+		t.Fatalf("images output = %s", data)
+	}
+	if err := os.Remove(rootfsPath); err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := pruneImageRecords(dir)
+	if err != nil {
+		t.Fatalf("pruneImageRecords: %v", err)
+	}
+	if len(pruned.Removed) != 1 || len(pruned.Kept) != 0 {
+		t.Fatalf("pruned = %#v", pruned)
+	}
+}
+
 func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
