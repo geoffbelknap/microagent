@@ -28,7 +28,6 @@ scripts/firecracker-console-parity-smoke.sh
 scripts/firecracker-publish-smoke.sh
 scripts/firecracker-workspace-smoke.sh
 scripts/firecracker-boot-smoke.sh
-scripts/linux-parity-handoff-strict.sh
 make smoke
 ```
 
@@ -41,7 +40,6 @@ make smoke
 | `scripts/firecracker-publish-smoke.sh` | pass |
 | `scripts/firecracker-workspace-smoke.sh` | pass |
 | `scripts/firecracker-boot-smoke.sh` | pass |
-| `scripts/linux-parity-handoff-strict.sh` | pass |
 | `make smoke` | pass |
 
 The Firecracker boot smoke verified kernel SHA:

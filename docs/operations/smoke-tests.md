@@ -9,7 +9,7 @@ the host: Firecracker on Linux, Apple VF on macOS.
 The normal GitHub CI workflow keeps unit tests separate from live KVM gates.
 Live Firecracker parity runs through the manual `Live Linux Parity` workflow on
 self-hosted Linux runners labeled `kvm`, or directly on a Linux host with
-`scripts/linux-parity-handoff-strict.sh`.
+`make smoke`.
 
 ## Suites
 
