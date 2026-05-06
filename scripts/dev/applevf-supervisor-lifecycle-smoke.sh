@@ -162,13 +162,23 @@ if result.get("backend") != "apple-vf" or result.get("exitCode") != 0 or result.
 PY
 
 ACK="$STATE_DIR/agent-smoke/quarantine.ack.json"
+READY="$STATE_DIR/agent-smoke/quarantine.fake-ready"
 (
   trap 'printf "{\"ok\":true}\n" > "$ACK"' USR1
   trap 'exit 0' TERM
+  printf "ready\n" > "$READY"
   while true; do sleep 1; done
 ) &
 fake_pid="$!"
 trap 'kill "$fake_pid" 2>/dev/null || true; cleanup' EXIT
+deadline="$((SECONDS + 5))"
+while [ ! -f "$READY" ]; do
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "fake quarantine runtime did not become signal-ready" >&2
+    exit 1
+  fi
+  sleep 0.05
+done
 python3 - "$STATE_DIR/agent-smoke" "$fake_pid" <<'PY'
 import json
 import os
