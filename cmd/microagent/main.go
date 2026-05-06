@@ -97,6 +97,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "cp" {
 		return runCP(args[1:], stdout)
 	}
+	if args[0] == "artifacts" {
+		return runArtifacts(args[1:], stdout)
+	}
 	if args[0] == "ps" {
 		return runPS(args[1:], stdout)
 	}
@@ -839,6 +842,7 @@ type workspaceResult struct {
 }
 
 type copyResult struct {
+	Artifact  string `json:"artifact,omitempty"`
 	Workspace string `json:"workspace"`
 	Disk      string `json:"disk"`
 	Direction string `json:"direction"`
@@ -846,6 +850,11 @@ type copyResult struct {
 	Target    string `json:"target"`
 	ImagePath string `json:"image_path"`
 	Bytes     int64  `json:"bytes,omitempty"`
+}
+
+type artifactsResult struct {
+	Workspace string                 `json:"workspace"`
+	Artifacts vmkit.RuntimeArtifacts `json:"artifacts"`
 }
 
 type workspaceNetworkResult struct {
@@ -1143,6 +1152,55 @@ func runCP(args []string, stdout *os.File) error {
 		return fmt.Errorf("usage: microagent cp <source> <target> [--state-dir <dir>]")
 	}
 	result, err := copyWorkspaceFile(opts.StateDir, debugfsPath, fs.Arg(0), fs.Arg(1))
+	if err != nil {
+		return err
+	}
+	return writeCopyResult(stdout, result)
+}
+
+func runArtifacts(args []string, stdout *os.File) error {
+	if len(args) > 0 && args[0] == "get" {
+		return runArtifactGet(args[1:], stdout)
+	}
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("artifacts", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent artifacts <name> [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	result, err := workspaceArtifactsResult(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	return writeArtifactsResult(stdout, result)
+}
+
+func runArtifactGet(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	debugfsPath := defaultDebugFSPath()
+	fs := flag.NewFlagSet("artifacts get", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&debugfsPath, "debugfs", debugfsPath, "debugfs binary path")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 3 {
+		return fmt.Errorf("usage: microagent artifacts get <name> <artifact> <target> [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	result, err := getWorkspaceArtifact(opts.StateDir, debugfsPath, name, fs.Arg(1), fs.Arg(2))
 	if err != nil {
 		return err
 	}
@@ -3869,12 +3927,31 @@ func writeCopyResult(stdout *os.File, result copyResult) error {
 		return writeJSON(stdout, result)
 	}
 	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	if result.Artifact != "" {
+		fmt.Fprintf(stdout, "Artifact: %s\n", result.Artifact)
+	}
 	fmt.Fprintf(stdout, "Disk: %s\n", result.Disk)
 	fmt.Fprintf(stdout, "Direction: %s\n", result.Direction)
 	fmt.Fprintf(stdout, "Source: %s\n", result.Source)
 	fmt.Fprintf(stdout, "Target: %s\n", result.Target)
 	if result.Bytes != 0 {
 		fmt.Fprintf(stdout, "Bytes: %d\n", result.Bytes)
+	}
+	return nil
+}
+
+func writeArtifactsResult(stdout *os.File, result artifactsResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	fmt.Fprintf(stdout, "Ingress: %d\n", len(result.Artifacts.Ingress))
+	for _, artifact := range result.Artifacts.Ingress {
+		fmt.Fprintf(stdout, "  %s %s %s\n", artifact.Name, artifact.Kind, artifact.Mountpoint)
+	}
+	fmt.Fprintf(stdout, "Egress: %d\n", len(result.Artifacts.Egress))
+	for _, artifact := range result.Artifacts.Egress {
+		fmt.Fprintf(stdout, "  %s %s\n", artifact.Name, artifact.Path)
 	}
 	return nil
 }
@@ -4139,6 +4216,78 @@ func copyWorkspaceFile(stateDir, debugfsPath, source, target string) (copyResult
 		return copyFromWorkspace(stateDir, debugfsPath, sourceRemote, target)
 	}
 	return copyToWorkspace(stateDir, debugfsPath, source, targetRemote)
+}
+
+func workspaceArtifactsResult(stateDir, name string) (artifactsResult, error) {
+	manifest, err := readWorkspaceManifest(stateDir, name)
+	if err != nil {
+		return artifactsResult{}, err
+	}
+	return artifactsResult{
+		Workspace: name,
+		Artifacts: runtimeArtifactsFromManifest(manifest.Artifacts),
+	}, nil
+}
+
+func getWorkspaceArtifact(stateDir, debugfsPath, name, artifactName, target string) (copyResult, error) {
+	manifest, err := readWorkspaceManifest(stateDir, name)
+	if err != nil {
+		return copyResult{}, err
+	}
+	output, err := findWorkspaceOutput(manifest.Artifacts.Egress, artifactName)
+	if err != nil {
+		return copyResult{}, err
+	}
+	remote := outputRemoteEndpoint(name, output, manifest.Disks)
+	result, err := copyFromWorkspace(stateDir, debugfsPath, remote, target)
+	if err != nil {
+		return copyResult{}, err
+	}
+	result.Artifact = output.Name
+	return result, nil
+}
+
+func findWorkspaceOutput(outputs []workspaceOutput, name string) (workspaceOutput, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return workspaceOutput{}, fmt.Errorf("artifact name is required")
+	}
+	for _, output := range outputs {
+		if output.Name == name {
+			return output, nil
+		}
+	}
+	return workspaceOutput{}, fmt.Errorf("output artifact %q is not declared", name)
+}
+
+func outputRemoteEndpoint(workspace string, output workspaceOutput, disks []workspaceDisk) remoteCopyEndpoint {
+	disk := "rootfs"
+	path := output.Path
+	longestMount := ""
+	for _, candidate := range disks {
+		mount := strings.TrimRight(candidate.Mountpoint, "/")
+		if mount == "" {
+			continue
+		}
+		if output.Path == mount || strings.HasPrefix(output.Path, mount+"/") {
+			if len(mount) > len(longestMount) {
+				longestMount = mount
+				disk = candidate.Name
+				path = strings.TrimPrefix(output.Path, mount)
+				if path == "" {
+					path = "/"
+				}
+			}
+		}
+	}
+	if path == "" || !strings.HasPrefix(path, "/") {
+		path = "/" + strings.TrimLeft(path, "/")
+	}
+	raw := workspace + ":" + path
+	if disk != "rootfs" {
+		raw = workspace + ":" + disk + ":" + path
+	}
+	return remoteCopyEndpoint{Workspace: workspace, Disk: disk, Path: path, Raw: raw}
 }
 
 type remoteCopyEndpoint struct {
@@ -5827,6 +5976,7 @@ Commands:
   create               Create a workspace
   clone                Clone a stopped workspace
   cp                   Copy files into or out of a stopped workspace
+  artifacts            List or retrieve declared workspace artifacts
   network              Inspect workspace network config
   start                Start a workspace
   supervise            Run host restart supervision for a workspace

@@ -29,7 +29,8 @@ payload returned by [`microagent result`](/cli/result/).
 
 Named workspaces also include `artifacts` when inputs or outputs were declared.
 `artifacts.ingress` lists attached bundle inputs, and `artifacts.egress` lists
-declared output paths.
+declared output paths. Use [`artifacts get`](/cli/artifacts/) to retrieve a
+declared output by name without entering the workspace.
 
 ## Flags
 

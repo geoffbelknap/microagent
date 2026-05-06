@@ -194,6 +194,9 @@ stderr, and guest-reported error.
 
 `artifacts` reports declared input bundles and output paths. These declarations
 are persisted with the workspace manifest and are independent of serial logs.
+The CLI `artifacts get` command retrieves declared egress artifacts by name
+from the rootfs or matching attached disk mountpoint without entering the
+workspace.
 
 Host responses use `host` instead of `event`.
 

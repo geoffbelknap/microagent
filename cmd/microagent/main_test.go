@@ -2029,6 +2029,211 @@ func TestStatusReportsDeclaredArtifacts(t *testing.T) {
 	}
 }
 
+func TestArtifactsCommandListsDeclaredArtifacts(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Disks: []workspaceDisk{{
+			Name:       "config",
+			SourcePath: "/tmp/config.tar",
+			Path:       filepath.Join(dir, "workspaces", "research", "config.ext4"),
+			Mountpoint: "/config",
+			Mode:       "ro",
+			Bundle:     true,
+		}},
+		Outputs: []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "artifacts.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"artifacts", "research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run artifacts: %v", err)
+	}
+	var result artifactsResult
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Workspace != "research" || len(result.Artifacts.Ingress) != 1 || len(result.Artifacts.Egress) != 1 {
+		t.Fatalf("artifacts = %#v", result)
+	}
+	if result.Artifacts.Egress[0].Name != "report" || result.Artifacts.Egress[0].Path != "/workspace/report.json" {
+		t.Fatalf("egress = %#v", result.Artifacts.Egress[0])
+	}
+}
+
+func TestArtifactGetCopiesDeclaredRootfsOutput(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	workspaceDir := filepath.Join(dir, "workspaces", "research")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+		Outputs:   []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := getWorkspaceArtifact(dir, debugfs, "research", "report", targetDir)
+	if err != nil {
+		t.Fatalf("getWorkspaceArtifact: %v", err)
+	}
+	if result.Artifact != "report" || result.Disk != "rootfs" || result.Direction != "from-workspace" {
+		t.Fatalf("result = %#v", result)
+	}
+	if data, err := os.ReadFile(filepath.Join(targetDir, "report.json")); err != nil || string(data) != "fake-dump" {
+		t.Fatalf("artifact data = %q err=%v", data, err)
+	}
+}
+
+func TestArtifactGetMapsOutputUnderAttachedDiskMount(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	workspaceDir := filepath.Join(dir, "workspaces", "research")
+	diskPath := filepath.Join(workspaceDir, "disks", "workspace.ext4")
+	if err := os.MkdirAll(filepath.Dir(diskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(diskPath, []byte("disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+		Disks:     []workspaceDisk{{Name: "workspace", Path: diskPath, Mountpoint: "/workspace", Mode: "rw"}},
+		Outputs:   []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := getWorkspaceArtifact(dir, debugfs, "research", "report", targetDir)
+	if err != nil {
+		t.Fatalf("getWorkspaceArtifact: %v", err)
+	}
+	if result.Disk != "workspace" || result.Source != "research:workspace:/report.json" {
+		t.Fatalf("result = %#v", result)
+	}
+	logData, err := os.ReadFile(filepath.Join(dir, "debugfs.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "-R|dump|/report.json|") {
+		t.Fatalf("debugfs log = %s", logData)
+	}
+}
+
+func TestRunArtifactGetCommand(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	workspaceDir := filepath.Join(dir, "workspaces", "research")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+		Outputs:   []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"artifacts", "get", "research", "report", targetDir, "--state-dir", dir, "--debugfs", debugfs}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run artifacts get: %v", err)
+	}
+	var result copyResult
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Artifact != "report" || result.Workspace != "research" || result.Direction != "from-workspace" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestArtifactGetRejectsUndeclaredOutput(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := getWorkspaceArtifact(dir, "debugfs", "research", "missing", filepath.Join(dir, "out"))
+	if err == nil || !strings.Contains(err.Error(), "not declared") {
+		t.Fatalf("err = %v, want undeclared artifact error", err)
+	}
+}
+
 func TestStatusReportsMediationReadiness(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })

@@ -17,7 +17,7 @@ Both backends expose the same public runtime primitives:
 | States | `prepared`, `starting`, `running`, `halted`, `quarantined`, `stopped`, `failed` |
 | Readiness | `guestReady`, `shellReady`, `resultReady`, `mediationReady` |
 | Result | `identity`, `backend`, `resultPath`, `startedAt`, `completedAt`, `exitCode`, `stdout`, `stderr`, `error` |
-| Artifacts | `ingress`, `egress` |
+| Artifacts | `ingress`, `egress`; declared egress artifacts are retrievable by name without entering the workspace |
 | Mediation | `enabled`, `required`, `port`, `target`, `failClosed` |
 | Verification | image digest, kernel hash, rootfs hash, init hash, divergence entries |
 

@@ -81,7 +81,7 @@ func NewRuntimeContract() RuntimeContract {
 		},
 		ArtifactChannels: []ContractItem{
 			{Name: "ingress", Description: "declared input bundles mounted into the workspace"},
-			{Name: "egress", Description: "declared output paths retrievable without entering the workspace"},
+			{Name: "egress", Description: "declared output paths retrievable by name without entering the workspace"},
 		},
 		Mediation: ContractMediation{
 			Primitive:    "guest-to-host vsock contract for Body calls into the enforcer/orchestrator",
