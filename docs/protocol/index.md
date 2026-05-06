@@ -81,7 +81,10 @@ Host responses use `host` instead of `event`.
     "backend": "firecracker",
     "architecture": "amd64",
     "binaryPath": "/usr/local/bin/firecracker",
-    "kvmAvailable": true
+    "kvmAvailable": true,
+    "vsockAvailable": true,
+    "consoleAvailable": false,
+    "consoleMode": "serial-log"
   }
 }
 ```

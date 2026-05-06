@@ -71,6 +71,10 @@ struct HostSupport: Codable {
     var architecture: String
     var frameworkAvailable: Bool
     var virtualizationSupported: Bool
+    var supervisorPath: String?
+    var supervisorAvailable: Bool?
+    var consoleAvailable: Bool?
+    var consoleMode: String?
 }
 
 struct Response: Codable {
@@ -329,7 +333,11 @@ func hostSupport() -> HostSupport {
         backend: backendName,
         architecture: hostArchitecture(),
         frameworkAvailable: available,
-        virtualizationSupported: supported
+        virtualizationSupported: supported,
+        supervisorPath: currentExecutablePath(),
+        supervisorAvailable: true,
+        consoleAvailable: true,
+        consoleMode: "interactive"
     )
 }
 

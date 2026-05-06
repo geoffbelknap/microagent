@@ -62,6 +62,7 @@ microagent clone research research-copy
 Check state, read the boot log, and remove the workspace:
 
 ```bash
+microagent host
 microagent ps
 microagent profiles
 microagent status --name research

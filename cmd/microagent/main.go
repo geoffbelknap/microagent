@@ -62,6 +62,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "kernel" {
 		return runKernel(ctx, args[1:], stdout)
 	}
+	if args[0] == "host" {
+		return runHost(ctx, args[1:], stdout)
+	}
 	if args[0] == "doctor" {
 		return runDoctor(ctx, args[1:], stdout)
 	}
@@ -152,6 +155,27 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	return err
 }
 
+func runHost(ctx context.Context, args []string, stdout *os.File) error {
+	opts := doctorOptions{
+		Backend:        hostBackend(),
+		Arch:           defaultGuestArch(),
+		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+	}
+	fs := flag.NewFlagSet("host", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected host argument: %s", fs.Arg(0))
+	}
+	resp, _ := doctorResponse(ctx, opts)
+	return writeDoctorResponse(stdout, resp)
+}
+
 func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, error) {
 	switch opts.Backend {
 	case vmkit.BackendAppleVF:
@@ -160,9 +184,15 @@ func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, er
 			resp.Backend = opts.Backend
 		}
 		resp.Kernel = defaultKernelSupport(opts.Backend, opts.Arch)
+		if err != nil && resp.Error == "" {
+			resp.Error = err.Error()
+		}
+		augmentHostSupport(&resp, opts)
 		return resp, err
 	case vmkit.BackendFirecracker:
-		return firecrackerDoctorResponse(opts.Backend, opts.Arch, resolveFirecrackerPath, os.Stat, firecrackerVersion)
+		resp, err := firecrackerDoctorResponse(opts.Backend, opts.Arch, resolveFirecrackerPath, os.Stat, firecrackerVersion)
+		augmentHostSupport(&resp, opts)
+		return resp, err
 	default:
 		resp := vmkit.Response{
 			OK:      false,
@@ -170,7 +200,35 @@ func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, er
 			Kernel:  defaultKernelSupport(opts.Backend, opts.Arch),
 			Error:   fmt.Sprintf("unsupported backend: %s", opts.Backend),
 		}
+		augmentHostSupport(&resp, opts)
 		return resp, fmt.Errorf("%s", resp.Error)
+	}
+}
+
+func augmentHostSupport(resp *vmkit.Response, opts doctorOptions) {
+	if resp.Host == nil {
+		resp.Host = &vmkit.HostSupport{
+			Backend:      opts.Backend,
+			Architecture: opts.Arch,
+		}
+	}
+	if resp.Host.Backend == "" {
+		resp.Host.Backend = opts.Backend
+	}
+	if resp.Host.Architecture == "" {
+		resp.Host.Architecture = opts.Arch
+	}
+	switch opts.Backend {
+	case vmkit.BackendAppleVF:
+		resp.Host.SupervisorPath = nonEmpty(opts.SupervisorPath, "microagent-applevf-supervisor")
+		resp.Host.SupervisorAvailable = resp.Error == ""
+		resp.Host.ConsoleAvailable = true
+		resp.Host.ConsoleMode = "interactive"
+	case vmkit.BackendFirecracker:
+		resp.Host.SupervisorPath = firecrackerSupervisorPath(workspaceOptions{SupervisorPath: opts.SupervisorPath})
+		resp.Host.SupervisorAvailable = true
+		resp.Host.ConsoleAvailable = false
+		resp.Host.ConsoleMode = "serial-log"
 	}
 }
 
@@ -196,6 +254,8 @@ func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (strin
 	if _, err := stat("/dev/vhost-vsock"); err == nil {
 		host.VsockAvailable = true
 	}
+	host.ConsoleAvailable = false
+	host.ConsoleMode = "serial-log"
 	resp := vmkit.Response{
 		OK:      len(issues) == 0,
 		Backend: backend,
@@ -1886,6 +1946,15 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 	fmt.Fprintf(stdout, "Status: %s\n", humanOK(resp.OK))
 	if resp.Host != nil {
 		fmt.Fprintf(stdout, "Host: %s", nonEmpty(resp.Host.Architecture, "unknown"))
+		if resp.Host.SupervisorPath != "" {
+			fmt.Fprintf(stdout, ", supervisor=%s", resp.Host.SupervisorPath)
+		}
+		if resp.Host.SupervisorAvailable {
+			fmt.Fprint(stdout, ", supervisor available")
+		}
+		if resp.Host.FrameworkAvailable {
+			fmt.Fprint(stdout, ", framework available")
+		}
 		if resp.Host.VirtualizationSupported {
 			fmt.Fprint(stdout, ", virtualization supported")
 		}
@@ -1894,6 +1963,11 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 		}
 		if resp.Host.VsockAvailable {
 			fmt.Fprint(stdout, ", vsock available")
+		}
+		fmt.Fprintln(stdout)
+		fmt.Fprintf(stdout, "Console: %s", availability(resp.Host.ConsoleAvailable))
+		if resp.Host.ConsoleMode != "" {
+			fmt.Fprintf(stdout, " (%s)", resp.Host.ConsoleMode)
 		}
 		fmt.Fprintln(stdout)
 	}
@@ -2001,6 +2075,13 @@ func humanOK(ok bool) string {
 		return "ok"
 	}
 	return "failed"
+}
+
+func availability(ok bool) string {
+	if ok {
+		return "available"
+	}
+	return "unavailable"
 }
 
 func nonEmpty(value, fallback string) string {
@@ -3078,6 +3159,7 @@ Commands:
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace
+  host                 Report host capabilities
   doctor               Check the host
   rootfs build         Build a rootfs from an OCI image
   version              Print the version

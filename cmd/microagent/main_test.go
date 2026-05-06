@@ -146,6 +146,9 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 	if !resp.Host.VirtualizationSupported || !resp.Host.KVMAvailable || !resp.Host.VsockAvailable {
 		t.Fatalf("Host support = %+v", resp.Host)
 	}
+	if resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "serial-log" {
+		t.Fatalf("Console support = %+v", resp.Host)
+	}
 }
 
 func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
@@ -170,6 +173,49 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "firecracker binary not found") || !strings.Contains(resp.Error, "/dev/kvm") {
 		t.Fatalf("Error = %q", resp.Error)
+	}
+}
+
+func TestHostCommandReportsFirecrackerDiagnosticsWithoutFailing(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "host.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "host", "--backend", vmkit.BackendFirecracker, "--arch", "amd64"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run host: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"backend": "firecracker"`) ||
+		!strings.Contains(text, `"kernel"`) ||
+		!strings.Contains(text, `"consoleAvailable": false`) ||
+		!strings.Contains(text, `"consoleMode": "serial-log"`) {
+		t.Fatalf("host output = %s", data)
+	}
+}
+
+func TestAugmentHostSupportReportsAppleVFConsole(t *testing.T) {
+	resp := vmkit.Response{Backend: vmkit.BackendAppleVF}
+	augmentHostSupport(&resp, doctorOptions{Backend: vmkit.BackendAppleVF, Arch: "arm64", SupervisorPath: "/tmp/supervisor"})
+	if resp.Host == nil {
+		t.Fatal("Host is nil")
+	}
+	if resp.Host.SupervisorPath != "/tmp/supervisor" || !resp.Host.SupervisorAvailable {
+		t.Fatalf("supervisor support = %+v", resp.Host)
+	}
+	if !resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "interactive" {
+		t.Fatalf("console support = %+v", resp.Host)
 	}
 }
 

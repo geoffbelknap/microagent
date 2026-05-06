@@ -49,6 +49,7 @@ Persistent workspace disks live under:
 ## Limitations
 
 - Requires Linux with `/dev/kvm`.
+- Uses `/dev/vhost-vsock` for guest-to-host vsock support.
 - Requires the `firecracker` binary on `PATH`, under packaged `libexec`, or
   through `MICROAGENT_FIRECRACKER`.
 - Does not support interactive `connect`; use `microagent logs`.

@@ -80,10 +80,14 @@ type HostSupport struct {
 	Architecture            string `json:"architecture"`
 	FrameworkAvailable      bool   `json:"frameworkAvailable"`
 	VirtualizationSupported bool   `json:"virtualizationSupported"`
+	SupervisorPath          string `json:"supervisorPath,omitempty"`
+	SupervisorAvailable     bool   `json:"supervisorAvailable,omitempty"`
 	BinaryPath              string `json:"binaryPath,omitempty"`
 	BinaryVersion           string `json:"binaryVersion,omitempty"`
 	KVMAvailable            bool   `json:"kvmAvailable,omitempty"`
 	VsockAvailable          bool   `json:"vsockAvailable,omitempty"`
+	ConsoleAvailable        bool   `json:"consoleAvailable"`
+	ConsoleMode             string `json:"consoleMode,omitempty"`
 }
 
 type KernelSupport struct {

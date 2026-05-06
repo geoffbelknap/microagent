@@ -98,7 +98,11 @@ Host responses use `host` instead of `event`:
     "backend": "apple-vf",
     "architecture": "arm64",
     "frameworkAvailable": true,
-    "virtualizationSupported": true
+    "virtualizationSupported": true,
+    "supervisorPath": "/usr/local/bin/microagent-applevf-supervisor",
+    "supervisorAvailable": true,
+    "consoleAvailable": true,
+    "consoleMode": "interactive"
   }
 }
 ```
