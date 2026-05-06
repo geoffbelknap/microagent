@@ -6,12 +6,14 @@ description: Measure workspace performance.
 ```text
 microagent perf boot [flags]
 microagent perf footprint <name> [flags]
+microagent perf steady <name> [flags]
 ```
 
 `perf` runs repeatable local measurements and reports structured results. The
 `boot` creates disposable workspaces, waits for a guest command to complete,
 and reports per-iteration duration plus min/avg/max. `footprint` reports the
 host resident set size for the recorded backend process of a running workspace.
+`steady` samples that RSS over time for steady-state overhead reporting.
 
 ## Commands
 
@@ -19,6 +21,7 @@ host resident set size for the recorded backend process of a running workspace.
 |---|---|
 | `boot` | Measure disposable workspace boot time |
 | `footprint` | Report host process RSS for a running workspace |
+| `steady` | Sample host process RSS over time |
 
 ## `boot` Flags
 
@@ -37,6 +40,14 @@ host resident set size for the recorded backend process of a running workspace.
 
 | Flag | Description |
 |---|---|
+| `--state-dir <dir>` | State directory |
+
+## `steady` Flags
+
+| Flag | Description |
+|---|---|
+| `--duration <seconds>` | Sampling duration. Defaults to 10 |
+| `--interval <seconds>` | Sampling interval. Defaults to 1 |
 | `--state-dir <dir>` | State directory |
 
 ## Examples
@@ -60,4 +71,10 @@ Report host RSS for a running workspace:
 
 ```bash
 microagent --json perf footprint research
+```
+
+Sample steady-state RSS for one minute:
+
+```bash
+microagent --json perf steady research --duration 60 --interval 5
 ```

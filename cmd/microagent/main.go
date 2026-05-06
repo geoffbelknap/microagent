@@ -918,6 +918,30 @@ type perfFootprintReport struct {
 	State     string `json:"state"`
 }
 
+type perfSteadyReport struct {
+	Benchmark       string          `json:"benchmark"`
+	Workspace       string          `json:"workspace"`
+	Backend         string          `json:"backend"`
+	PID             int             `json:"pid"`
+	State           string          `json:"state"`
+	DurationSeconds int             `json:"duration_seconds"`
+	IntervalSeconds int             `json:"interval_seconds"`
+	Samples         []perfRSSSample `json:"samples"`
+	Summary         perfRSSSummary  `json:"summary"`
+}
+
+type perfRSSSample struct {
+	At     string `json:"at"`
+	RSSKiB int64  `json:"rss_kib"`
+}
+
+type perfRSSSummary struct {
+	Count  int   `json:"count"`
+	MinKiB int64 `json:"min_kib"`
+	AvgKiB int64 `json:"avg_kib"`
+	MaxKiB int64 `json:"max_kib"`
+}
+
 var resourceProfiles = []resourceProfile{
 	{
 		Name:        "tiny",
@@ -1175,6 +1199,8 @@ func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 		return runPerfBoot(ctx, args[1:], stdout)
 	case "footprint":
 		return runPerfFootprint(args[1:], stdout)
+	case "steady":
+		return runPerfSteady(ctx, args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown perf command: %s", args[0])
 	}
@@ -1388,6 +1414,124 @@ func writePerfFootprintReport(stdout *os.File, report perfFootprintReport) error
 	fmt.Fprintf(stdout, "State: %s\n", report.State)
 	fmt.Fprintf(stdout, "PID: %d\n", report.PID)
 	fmt.Fprintf(stdout, "RSS KiB: %d\n", report.RSSKiB)
+	return nil
+}
+
+func runPerfSteady(ctx context.Context, args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	durationSeconds := 10
+	intervalSeconds := 1
+	fs := flag.NewFlagSet("perf steady", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.IntVar(&durationSeconds, "duration", durationSeconds, "Sampling duration in seconds")
+	fs.IntVar(&intervalSeconds, "interval", intervalSeconds, "Sampling interval in seconds")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent perf steady <name> [--state-dir <dir>]")
+	}
+	if durationSeconds <= 0 {
+		return fmt.Errorf("perf steady duration must be positive")
+	}
+	if intervalSeconds <= 0 {
+		return fmt.Errorf("perf steady interval must be positive")
+	}
+	if intervalSeconds > durationSeconds {
+		return fmt.Errorf("perf steady interval must be less than or equal to duration")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name})
+	if err != nil {
+		return err
+	}
+	if state.PID <= 0 {
+		return fmt.Errorf("workspace %s does not have a running process pid", name)
+	}
+	samples, err := sampleProcessRSS(ctx, state.PID, time.Duration(durationSeconds)*time.Second, time.Duration(intervalSeconds)*time.Second)
+	if err != nil {
+		return err
+	}
+	report := perfSteadyReport{
+		Benchmark:       "steady",
+		Workspace:       name,
+		Backend:         state.Event.Identity.Backend,
+		PID:             state.PID,
+		State:           string(state.Event.State),
+		DurationSeconds: durationSeconds,
+		IntervalSeconds: intervalSeconds,
+		Samples:         samples,
+		Summary:         summarizeRSSSamples(samples),
+	}
+	return writePerfSteadyReport(stdout, report)
+}
+
+func sampleProcessRSS(ctx context.Context, pid int, duration, interval time.Duration) ([]perfRSSSample, error) {
+	if duration <= 0 {
+		return nil, fmt.Errorf("duration must be positive")
+	}
+	if interval <= 0 {
+		return nil, fmt.Errorf("interval must be positive")
+	}
+	deadline := time.Now().Add(duration)
+	samples := []perfRSSSample{}
+	for {
+		rssKiB, err := processRSSKiB(pid)
+		if err != nil {
+			return nil, err
+		}
+		samples = append(samples, perfRSSSample{At: time.Now().UTC().Format(time.RFC3339Nano), RSSKiB: rssKiB})
+		if !time.Now().Before(deadline) {
+			return samples, nil
+		}
+		sleep := interval
+		if remaining := time.Until(deadline); remaining < sleep {
+			sleep = remaining
+		}
+		timer := time.NewTimer(sleep)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func summarizeRSSSamples(samples []perfRSSSample) perfRSSSummary {
+	summary := perfRSSSummary{Count: len(samples)}
+	if len(samples) == 0 {
+		return summary
+	}
+	var total int64
+	for i, sample := range samples {
+		if i == 0 || sample.RSSKiB < summary.MinKiB {
+			summary.MinKiB = sample.RSSKiB
+		}
+		if sample.RSSKiB > summary.MaxKiB {
+			summary.MaxKiB = sample.RSSKiB
+		}
+		total += sample.RSSKiB
+	}
+	summary.AvgKiB = total / int64(len(samples))
+	return summary
+}
+
+func writePerfSteadyReport(stdout *os.File, report perfSteadyReport) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, report)
+	}
+	fmt.Fprintf(stdout, "Benchmark: %s\n", report.Benchmark)
+	fmt.Fprintf(stdout, "Workspace: %s\n", report.Workspace)
+	fmt.Fprintf(stdout, "Backend: %s\n", report.Backend)
+	fmt.Fprintf(stdout, "State: %s\n", report.State)
+	fmt.Fprintf(stdout, "PID: %d\n", report.PID)
+	fmt.Fprintf(stdout, "Samples: %d\n", report.Summary.Count)
+	fmt.Fprintf(stdout, "RSS KiB: min=%d avg=%d max=%d\n", report.Summary.MinKiB, report.Summary.AvgKiB, report.Summary.MaxKiB)
 	return nil
 }
 
@@ -4640,6 +4784,7 @@ func reorderFlagArgs(args []string) []string {
 		"-size-mib":      true,
 		"-timeout":       true,
 		"-ready-timeout": true,
+		"-duration":      true,
 		"-interval":      true,
 		"-max-restarts":  true,
 		"-result-port":   true,
@@ -4945,6 +5090,7 @@ Measure workspace performance.
 Commands:
   boot                 Measure disposable workspace boot time
   footprint            Report host process RSS for a running workspace
+  steady               Sample host process RSS over time
 
 Boot options:
   -image <ref>          OCI image; defaults to the small BusyBox baseline
@@ -4957,6 +5103,11 @@ Boot options:
   -supervisor <path>    Override the supervisor path
 
 Footprint options:
+  -state-dir <dir>      State directory
+
+Steady options:
+  -duration <seconds>   Sampling duration
+  -interval <seconds>   Sampling interval
   -state-dir <dir>      State directory
 `)
 }

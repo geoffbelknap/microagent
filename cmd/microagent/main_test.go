@@ -1101,6 +1101,33 @@ func TestRunPerfFootprintRequiresRunningPID(t *testing.T) {
 	}
 }
 
+func TestSummarizeRSSSamples(t *testing.T) {
+	summary := summarizeRSSSamples([]perfRSSSample{
+		{RSSKiB: 40},
+		{RSSKiB: 20},
+		{RSSKiB: 30},
+	})
+	if summary.Count != 3 || summary.MinKiB != 20 || summary.AvgKiB != 30 || summary.MaxKiB != 40 {
+		t.Fatalf("summary = %#v", summary)
+	}
+}
+
+func TestRunPerfSteadyRejectsInvalidSampling(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "steady.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerf(t.Context(), []string{"steady", "research", "--duration", "1", "--interval", "2", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "interval must be less than or equal to duration") {
+		t.Fatalf("runPerf err = %v", err)
+	}
+}
+
 func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
