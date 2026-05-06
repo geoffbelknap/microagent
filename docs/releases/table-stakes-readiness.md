@@ -4,11 +4,11 @@ description: Readiness record for the first microagent-kit table-stakes feature 
 ---
 
 This note records the feature state after the Firecracker Linux parity pass and
-the local Apple VF validation pass. The validated base before this note was:
+the local Apple VF validation pass. The final validated revision was:
 
 ```text
 branch=main
-sha=ba9b4a1b8037a12dc45c7280958fe9f4d6efba24
+sha=fa860de4b06948a77809c4a757ec74dc52ace4d8
 ```
 
 ## Apple VF Host
@@ -40,9 +40,19 @@ the installed Apple VF arm64 kernel, and the `small` profile.
 
 ## Firecracker Validation
 
-Firecracker Linux parity was validated separately on Ubuntu 24.04.4 LTS with
-Firecracker v1.15.1. The full record is in
+Firecracker Linux parity was validated separately from
+`8dbdcf84fd833620b90a8a8e530cc580681e0928` to
+`fa860de4b06948a77809c4a757ec74dc52ace4d8`. The full earlier record is in
 [`firecracker-linux-parity-readiness.md`](./firecracker-linux-parity-readiness.md).
+
+```text
+distro=Ubuntu 24.04.4 LTS
+kernel=6.8.0-110-generic
+arch=x86_64
+/dev/kvm=present
+/dev/vhost-vsock=present
+firecracker=Firecracker v1.15.1
+```
 
 Validated Linux gates:
 
@@ -51,24 +61,27 @@ Validated Linux gates:
 | `scripts/go-test.sh` | pass |
 | `scripts/firecracker-console-parity-smoke.sh` | pass |
 | `scripts/firecracker-publish-smoke.sh` | pass |
-| `scripts/firecracker-network-mode-smoke.sh` | pass; `nat` boots, `isolated` boots without guest `eth0`, isolated `--publish` fails closed, bridged fails closed without a configured Linux bridge |
+| `scripts/firecracker-network-mode-smoke.sh` | pass; `nat` boots, `isolated` boots without guest `eth0`, isolated `--publish` fails closed, bridged reports `host-prerequisite-not-configured` without a configured Linux bridge |
 | `scripts/firecracker-workspace-smoke.sh` | pass |
 | `scripts/firecracker-boot-smoke.sh` | pass |
 | `make smoke` | pass |
+
+The Linux handoff helper is intentionally absent from `main`; it was removed
+from the public repository in `ba9b4a1`.
 
 Recorded Firecracker performance:
 
 | Command | Result |
 |---|---|
-| `microagent perf boot` | one successful iteration, `18693 ms` |
-| `microagent perf footprint perf-steady3` | `67640 KiB` RSS |
-| `microagent perf steady perf-steady3 --duration 5 --interval 1` | min/avg/max `67640/67640/67640 KiB` RSS |
+| `microagent perf boot` | one successful iteration, `18746 ms` |
+| `microagent perf footprint perf-main-20260506` | `67736 KiB` RSS |
+| `microagent perf steady perf-main-20260506 --duration 5 --interval 1` | 6 samples, min/avg/max `67736/67736/67736 KiB` RSS |
 
 ## Feature Matrix
 
 | Feature | Apple VF | Firecracker | State |
 |---|---|---|---|
-| Networking | `nat`, TCP `--publish`, `isolated`, and entitlement-gated explicit-interface `bridged` | `nat` plus live TCP `--publish`; `isolated`; Linux-bridge-backed `bridged` with transient TAP setup | Ready, except Apple entitlement |
+| Networking | `nat`, TCP `--publish`, `isolated`, and entitlement-gated explicit-interface `bridged` | `nat` plus live TCP `--publish`; `isolated`; Linux-bridge-backed `bridged` with transient TAP setup | Ready, with Apple bridged unsupported in public builds |
 | File transfer | `microagent cp` in/out of stopped rootfs and attached disks | same CLI semantics | Ready |
 | Console ergonomics | interactive `connect`, `--send`, readiness errors, clean detach | interactive `connect`, `--send`, readiness errors, clean detach | Ready, except resize |
 | Cloning | stopped workspace/template clone | stopped workspace/template clone | Ready |
@@ -79,12 +92,12 @@ Recorded Firecracker performance:
 | Declarative spec | `microagent.yaml` covers image, resources, restart, network intent, mounts, setup, publish declarations | same parsing and validation | Ready |
 | Measured performance | local boot, footprint, steady numbers recorded | Linux boot, footprint, steady numbers recorded | Ready |
 
-## Remaining Work
+## Post-Release Follow-Ups
 
-- Decide release signing/provisioning or public unsupported status for Apple VF
-  bridged networking. Apple gates it behind the restricted
-  `com.apple.vm.networking` entitlement, which open-source builds cannot
-  self-sign.
+- Apple VF bridged networking is implemented behind Apple's restricted
+  `com.apple.vm.networking` entitlement. Public open-source builds should report
+  it as unsupported because Apple does not allow projects to self-sign that
+  entitlement.
 - Add terminal resize propagation for interactive console sessions. The current
   parity target is attach, send, readiness, detach, and logs.
 - Consider a future schema split between host console capability and per-runtime
