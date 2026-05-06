@@ -1,0 +1,29 @@
+name: Deploy docs site
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/**
+      - .github/workflows/deploy-docs-site.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trigger-cloudflare-pages:
+    name: Trigger Cloudflare Pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger docs.microagent.sh rebuild
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$DEPLOY_HOOK_URL" ]; then
+            echo "CLOUDFLARE_PAGES_DEPLOY_HOOK_URL is not configured" >&2
+            exit 1
+          fi
+
+          curl -fsS -X POST "$DEPLOY_HOOK_URL"
