@@ -7,6 +7,7 @@ description: All microagent subcommands at a glance.
 |---|---|
 | [`run`](/cli/run/) | Boot an image and run a command, then tear down |
 | [`create`](/cli/create/) | Create a named, persistent workspace |
+| [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
@@ -15,6 +16,7 @@ description: All microagent subcommands at a glance.
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
 | [`connect`](/cli/connect/) | Open the workspace console (Apple VF) |
+| `profiles` | List exact named resource profiles |
 | [`doctor`](/cli/doctor/) | Check the host for backend support |
 | [`rootfs`](/cli/rootfs/) | Build a rootfs from an OCI image |
 | [`kernel`](/cli/kernel/) | Install or verify a custom kernel |

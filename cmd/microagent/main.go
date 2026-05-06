@@ -34,6 +34,8 @@ const (
 	defaultWorkspaceImageAMD64 = "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
 	defaultWorkspaceImageOther = "docker.io/library/busybox:1.36.1"
 	defaultWorkspaceMemoryMiB  = 512
+	defaultWorkspaceCPUCount   = 2
+	defaultWorkspaceProfile    = "small"
 )
 
 func main() {
@@ -63,12 +65,18 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "doctor" {
 		return runDoctor(ctx, args[1:], stdout)
 	}
+	if args[0] == "profiles" {
+		return runProfiles(args[1:], stdout)
+	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
 	if args[0] == "create" && wantsHelp(args[1:]) {
 		printCreateHelp(stdout)
 		return nil
+	}
+	if args[0] == "clone" {
+		return runClone(args[1:], stdout)
 	}
 	if args[0] == "ps" {
 		return runPS(args[1:], stdout)
@@ -620,6 +628,7 @@ type workspaceOptions struct {
 	Entrypoint      string
 	SetupCommands   []string
 	Env             map[string]string
+	Profile         string
 	Backend         string
 	KernelPath      string
 	StateDir        string
@@ -650,13 +659,17 @@ type workspaceDisk struct {
 }
 
 type workspaceManifest struct {
-	Name  string          `json:"name"`
-	Disks []workspaceDisk `json:"disks,omitempty"`
+	Name      string          `json:"name"`
+	Profile   string          `json:"profile,omitempty"`
+	Resources resourceConfig  `json:"resources"`
+	Disks     []workspaceDisk `json:"disks,omitempty"`
 }
 
 type workspaceResult struct {
 	Workspace  string            `json:"workspace"`
 	StateDir   string            `json:"state_dir"`
+	Profile    string            `json:"profile,omitempty"`
+	Resources  resourceConfig    `json:"resources"`
 	RootfsPath string            `json:"rootfs_path"`
 	KernelPath string            `json:"kernel_path"`
 	Disks      []workspaceDisk   `json:"disks,omitempty"`
@@ -681,9 +694,45 @@ type workspaceListEntry struct {
 	Name       string `json:"name"`
 	State      string `json:"state"`
 	Backend    string `json:"backend,omitempty"`
+	Profile    string `json:"profile,omitempty"`
 	ObservedAt string `json:"observed_at,omitempty"`
 	RootfsPath string `json:"rootfs_path,omitempty"`
 	SerialPath string `json:"serial_path,omitempty"`
+}
+
+type resourceConfig struct {
+	MemoryMiB int   `json:"memory_mib"`
+	CPUCount  int   `json:"cpu_count"`
+	SizeMiB   int64 `json:"size_mib,omitempty"`
+}
+
+type resourceProfile struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Resources   resourceConfig `json:"resources"`
+}
+
+var resourceProfiles = []resourceProfile{
+	{
+		Name:        "tiny",
+		Description: "smoke tests and very small shells",
+		Resources:   resourceConfig{MemoryMiB: 256, CPUCount: 1, SizeMiB: 512},
+	},
+	{
+		Name:        "small",
+		Description: "default lightweight workspace",
+		Resources:   resourceConfig{MemoryMiB: defaultWorkspaceMemoryMiB, CPUCount: defaultWorkspaceCPUCount, SizeMiB: rootfs.DefaultSizeMiB},
+	},
+	{
+		Name:        "medium",
+		Description: "package installs and normal agent work",
+		Resources:   resourceConfig{MemoryMiB: 2048, CPUCount: 2, SizeMiB: 8192},
+	},
+	{
+		Name:        "large",
+		Description: "heavier builds and larger workspaces",
+		Resources:   resourceConfig{MemoryMiB: 4096, CPUCount: 4, SizeMiB: 16384},
+	},
 }
 
 func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
@@ -771,6 +820,57 @@ func runPS(args []string, stdout *os.File) error {
 		return err
 	}
 	return writeWorkspaceList(stdout, entries)
+}
+
+func runClone(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("clone", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: microagent clone <source> <target> [--state-dir <dir>]")
+	}
+	source := fs.Arg(0)
+	target := fs.Arg(1)
+	if err := validateWorkspaceName(source); err != nil {
+		return err
+	}
+	if err := validateWorkspaceName(target); err != nil {
+		return err
+	}
+	result, err := cloneWorkspace(opts.StateDir, source, target)
+	if err != nil {
+		return err
+	}
+	return writeWorkspaceResult(stdout, result)
+}
+
+func runProfiles(args []string, stdout *os.File) error {
+	fs := flag.NewFlagSet("profiles", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected profiles argument: %s", fs.Arg(0))
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"profiles": resourceProfiles})
+	}
+	fmt.Fprintf(stdout, "%-10s %-10s %-6s %-10s %s\n", "NAME", "MEMORY", "CPUS", "DISK", "DESCRIPTION")
+	for _, profile := range resourceProfiles {
+		fmt.Fprintf(stdout, "%-10s %-10d %-6d %-10d %s\n",
+			profile.Name,
+			profile.Resources.MemoryMiB,
+			profile.Resources.CPUCount,
+			profile.Resources.SizeMiB,
+			profile.Description,
+		)
+	}
+	return nil
 }
 
 func runLogs(args []string, stdout *os.File) error {
@@ -934,14 +1034,19 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
+	profileExplicit := hasFlagValue(args, "profile")
+	memoryExplicit := hasFlagValue(args, "memory")
+	cpusExplicit := hasFlagValue(args, "cpus")
 	opts := workspaceOptions{
 		Backend:        hostBackend(),
 		Architecture:   defaultGuestArch(),
-		MemoryMiB:      defaultWorkspaceMemoryMiB,
-		CPUCount:       2,
+		Profile:        defaultWorkspaceProfile,
 		StateDir:       defaultStateDir(),
 		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
 		SerialInput:    false,
+	}
+	if err := applyResourceProfile(&opts, false, false, false); err != nil {
+		return err
 	}
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	kernelExplicit := hasFlagValue(args, "kernel")
@@ -952,6 +1057,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	var vsocks multiFlag
@@ -983,18 +1089,46 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if _, err := os.Stat(rootfsPath); err != nil {
 		return err
 	}
+	requestedProfile := opts.Profile
 	manifest, err := readWorkspaceManifest(opts.StateDir, opts.Name)
+	manifestLoaded := false
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	if err == nil {
+		manifestLoaded = true
 		opts.Disks = manifest.Disks
+		if manifest.Profile != "" {
+			opts.Profile = manifest.Profile
+		}
+		if manifest.Resources.MemoryMiB != 0 && !memoryExplicit {
+			opts.MemoryMiB = manifest.Resources.MemoryMiB
+		}
+		if manifest.Resources.CPUCount != 0 && !cpusExplicit {
+			opts.CPUCount = manifest.Resources.CPUCount
+		}
+		if manifest.Resources.SizeMiB != 0 {
+			opts.SizeMiB = manifest.Resources.SizeMiB
+		}
+	}
+	if profileExplicit || !manifestLoaded {
+		if profileExplicit {
+			opts.Profile = requestedProfile
+		}
+		if err := applyResourceProfile(&opts, memoryExplicit, cpusExplicit, true); err != nil {
+			return err
+		}
+	}
+	if err := validateResourceConfig(resourceConfig{MemoryMiB: opts.MemoryMiB, CPUCount: opts.CPUCount}, false); err != nil {
+		return err
 	}
 	req := workspaceRequest(opts, "run", rootfsPath)
 	resp, err := startWorkspaceDetached(opts, req)
 	result := workspaceResult{
 		Workspace:  opts.Name,
 		StateDir:   opts.StateDir,
+		Profile:    opts.Profile,
+		Resources:  workspaceResources(opts),
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
 		Disks:      opts.Disks,
@@ -1082,14 +1216,18 @@ type stateCommandOptions struct {
 
 func parseWorkspaceOptions(command string, args []string) (workspaceOptions, error) {
 	kernelExplicit := hasFlagValue(args, "kernel")
+	memoryExplicit := hasFlagValue(args, "memory")
+	cpusExplicit := hasFlagValue(args, "cpus")
+	sizeExplicit := hasFlagValue(args, "size-mib")
 	opts := workspaceOptions{
 		Backend:      hostBackend(),
 		Architecture: defaultGuestArch(),
-		MemoryMiB:    defaultWorkspaceMemoryMiB,
-		CPUCount:     2,
-		SizeMiB:      rootfs.DefaultSizeMiB,
+		Profile:      defaultWorkspaceProfile,
 		Timeout:      2 * time.Minute,
 		ResultPort:   1024,
+	}
+	if err := applyResourceProfile(&opts, false, false, false); err != nil {
+		return workspaceOptions{}, err
 	}
 	opts.StateDir = defaultStateDir()
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
@@ -1118,6 +1256,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.GuestInitPath, "guest-init", opts.GuestInitPath, "Guest init path")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
@@ -1163,6 +1302,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
 	opts.KernelExplicit = kernelExplicit
+	if err := applyResourceProfile(&opts, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
+		return workspaceOptions{}, err
+	}
+	if err := validateResourceConfig(workspaceResources(opts), true); err != nil {
+		return workspaceOptions{}, err
+	}
 	if timeoutSeconds <= 0 {
 		return workspaceOptions{}, fmt.Errorf("%s timeout must be positive", command)
 	}
@@ -1197,6 +1342,66 @@ func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
 	})
 }
 
+func applyResourceProfile(opts *workspaceOptions, memoryExplicit, cpusExplicit, sizeExplicit bool) error {
+	profile, ok := lookupResourceProfile(opts.Profile)
+	if !ok {
+		return fmt.Errorf("unknown resource profile %q; choose one of: %s", opts.Profile, strings.Join(resourceProfileNames(), ", "))
+	}
+	opts.Profile = profile.Name
+	if !memoryExplicit {
+		opts.MemoryMiB = profile.Resources.MemoryMiB
+	}
+	if !cpusExplicit {
+		opts.CPUCount = profile.Resources.CPUCount
+	}
+	if !sizeExplicit {
+		opts.SizeMiB = profile.Resources.SizeMiB
+	}
+	return nil
+}
+
+func lookupResourceProfile(name string) (resourceProfile, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, profile := range resourceProfiles {
+		if profile.Name == name {
+			return profile, true
+		}
+	}
+	return resourceProfile{}, false
+}
+
+func resourceProfileNames() []string {
+	names := make([]string, 0, len(resourceProfiles))
+	for _, profile := range resourceProfiles {
+		names = append(names, profile.Name)
+	}
+	return names
+}
+
+func workspaceResources(opts workspaceOptions) resourceConfig {
+	return resourceConfig{
+		MemoryMiB: opts.MemoryMiB,
+		CPUCount:  opts.CPUCount,
+		SizeMiB:   opts.SizeMiB,
+	}
+}
+
+func validateResourceConfig(resources resourceConfig, requireDisk bool) error {
+	if resources.MemoryMiB <= 0 {
+		return fmt.Errorf("memory must be positive")
+	}
+	if resources.CPUCount <= 0 {
+		return fmt.Errorf("cpus must be positive")
+	}
+	if requireDisk && resources.SizeMiB <= 0 {
+		return fmt.Errorf("size-mib must be positive")
+	}
+	if resources.SizeMiB < 0 {
+		return fmt.Errorf("size-mib must not be negative")
+	}
+	return nil
+}
+
 func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspaceResult, error) {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
@@ -1221,6 +1426,8 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 	return workspaceResult{
 		Workspace:  opts.Name,
 		StateDir:   opts.StateDir,
+		Profile:    opts.Profile,
+		Resources:  workspaceResources(opts),
 		RootfsPath: rootfsPath,
 		KernelPath: opts.KernelPath,
 		Image:      provenance,
@@ -1298,8 +1505,10 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 		return err
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), workspaceManifest{
-		Name:  opts.Name,
-		Disks: opts.Disks,
+		Name:      opts.Name,
+		Profile:   opts.Profile,
+		Resources: workspaceResources(opts),
+		Disks:     opts.Disks,
 	})
 }
 
@@ -1735,6 +1944,16 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	if result.RootfsPath != "" {
 		fmt.Fprintf(stdout, "Rootfs: %s\n", result.RootfsPath)
 	}
+	if result.Profile != "" {
+		fmt.Fprintf(stdout, "Profile: %s\n", result.Profile)
+	}
+	if result.Resources.MemoryMiB != 0 || result.Resources.CPUCount != 0 || result.Resources.SizeMiB != 0 {
+		fmt.Fprintf(stdout, "Resources: memory=%dMiB cpus=%d", result.Resources.MemoryMiB, result.Resources.CPUCount)
+		if result.Resources.SizeMiB != 0 {
+			fmt.Fprintf(stdout, " disk=%dMiB", result.Resources.SizeMiB)
+		}
+		fmt.Fprintln(stdout)
+	}
 	if result.KernelPath != "" {
 		fmt.Fprintf(stdout, "Kernel: %s\n", result.KernelPath)
 	}
@@ -1770,9 +1989,9 @@ func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 		fmt.Fprintln(stdout, "No workspaces.")
 		return nil
 	}
-	fmt.Fprintf(stdout, "%-24s %-12s %s\n", "NAME", "STATE", "BACKEND")
+	fmt.Fprintf(stdout, "%-24s %-12s %-12s %s\n", "NAME", "STATE", "BACKEND", "PROFILE")
 	for _, entry := range entries {
-		fmt.Fprintf(stdout, "%-24s %-12s %s\n", entry.Name, entry.State, entry.Backend)
+		fmt.Fprintf(stdout, "%-24s %-12s %-12s %s\n", entry.Name, entry.State, entry.Backend, entry.Profile)
 	}
 	return nil
 }
@@ -1876,6 +2095,173 @@ func cleanupWorkspaceState(opts workspaceOptions) {
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, opts.Name))
 }
 
+func cloneWorkspace(stateDir, source, target string) (workspaceResult, error) {
+	sourceWorkspaceDir := filepath.Join(stateDir, "workspaces", source)
+	targetWorkspaceDir := filepath.Join(stateDir, "workspaces", target)
+	if _, err := os.Stat(sourceWorkspaceDir); err != nil {
+		return workspaceResult{}, err
+	}
+	if _, err := os.Stat(targetWorkspaceDir); err == nil {
+		return workspaceResult{}, fmt.Errorf("target workspace %q already exists", target)
+	} else if !os.IsNotExist(err) {
+		return workspaceResult{}, err
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, target)); err == nil {
+		return workspaceResult{}, fmt.Errorf("target workspace state %q already exists", target)
+	} else if !os.IsNotExist(err) {
+		return workspaceResult{}, err
+	}
+	if err := ensureWorkspaceCloneable(stateDir, source); err != nil {
+		return workspaceResult{}, err
+	}
+	manifest, err := readWorkspaceManifest(stateDir, source)
+	if err != nil {
+		return workspaceResult{}, err
+	}
+	if err := copyDirectory(sourceWorkspaceDir, targetWorkspaceDir); err != nil {
+		_ = os.RemoveAll(targetWorkspaceDir)
+		return workspaceResult{}, err
+	}
+	manifest.Name = target
+	manifest.Disks = rewriteClonedDiskPaths(manifest.Disks, sourceWorkspaceDir, targetWorkspaceDir)
+	if err := writeJSONFile(filepath.Join(targetWorkspaceDir, "workspace.json"), manifest); err != nil {
+		_ = os.RemoveAll(targetWorkspaceDir)
+		return workspaceResult{}, err
+	}
+	event := workspaceEventFile{
+		Identity: vmkit.Identity{
+			RequestID: newRequestID(),
+			RuntimeID: target,
+			Role:      vmkit.RoleWorkload,
+			Backend:   hostBackend(),
+		},
+		State:      vmkit.StatePrepared,
+		Detail:     "cloned_from=" + source,
+		ObservedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := os.MkdirAll(filepath.Join(stateDir, target), 0o755); err != nil {
+		_ = os.RemoveAll(targetWorkspaceDir)
+		return workspaceResult{}, err
+	}
+	if err := writeJSONFile(filepath.Join(stateDir, target, "event.json"), event); err != nil {
+		_ = os.RemoveAll(targetWorkspaceDir)
+		_ = os.RemoveAll(filepath.Join(stateDir, target))
+		return workspaceResult{}, err
+	}
+	return workspaceResult{
+		Workspace:  target,
+		StateDir:   stateDir,
+		Profile:    manifest.Profile,
+		Resources:  manifest.Resources,
+		RootfsPath: filepath.Join(targetWorkspaceDir, "rootfs.ext4"),
+		Disks:      manifest.Disks,
+		Response: vmkit.Response{
+			OK:      true,
+			Backend: event.Identity.Backend,
+			Event: &vmkit.Event{
+				Identity:   event.Identity,
+				State:      event.State,
+				Detail:     event.Detail,
+				ObservedAt: time.Now().UTC(),
+			},
+		},
+	}, nil
+}
+
+func ensureWorkspaceCloneable(stateDir, name string) error {
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: stateDir, Name: name})
+	if os.IsNotExist(err) {
+		event, eventErr := readWorkspaceEvent(workspaceOptions{StateDir: stateDir, Name: name})
+		if os.IsNotExist(eventErr) {
+			return nil
+		}
+		if eventErr != nil {
+			return eventErr
+		}
+		return cloneableState(name, event.State)
+	}
+	if err != nil {
+		event, eventErr := readWorkspaceEvent(workspaceOptions{StateDir: stateDir, Name: name})
+		if os.IsNotExist(eventErr) {
+			return err
+		}
+		if eventErr != nil {
+			return err
+		}
+		return cloneableState(name, event.State)
+	}
+	return cloneableState(name, state.Event.State)
+}
+
+func cloneableState(name string, state vmkit.VMState) error {
+	switch state {
+	case "", vmkit.StateUnknown, vmkit.StatePrepared, vmkit.StateStopped:
+		return nil
+	default:
+		return fmt.Errorf("workspace %s must be stopped before cloning; current state is %s", name, state)
+	}
+}
+
+func rewriteClonedDiskPaths(disks []workspaceDisk, sourceWorkspaceDir, targetWorkspaceDir string) []workspaceDisk {
+	if len(disks) == 0 {
+		return nil
+	}
+	out := make([]workspaceDisk, 0, len(disks))
+	sourceWorkspaceDir = filepath.Clean(sourceWorkspaceDir)
+	for _, disk := range disks {
+		if rel, err := filepath.Rel(sourceWorkspaceDir, disk.Path); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != ".." {
+			disk.Path = filepath.Join(targetWorkspaceDir, rel)
+		}
+		out = append(out, disk)
+	}
+	return out
+}
+
+func copyDirectory(source, target string) error {
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		targetPath := filepath.Join(target, rel)
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(targetPath, info.Mode().Perm())
+		}
+		if info.Mode()&os.ModeType != 0 {
+			return fmt.Errorf("cannot clone special file %s", path)
+		}
+		return copyFile(path, targetPath, info.Mode().Perm())
+	})
+}
+
+func copyFile(source, target string, mode os.FileMode) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
+}
+
 func listWorkspaces(stateDir string) ([]workspaceListEntry, error) {
 	names := map[string]bool{}
 	workspaceRoot := filepath.Join(stateDir, "workspaces")
@@ -1926,6 +2312,9 @@ func workspaceListEntryFor(stateDir, name string) workspaceListEntry {
 			entry.Backend = event.Identity.Backend
 			entry.ObservedAt = event.ObservedAt.UTC().Format(time.RFC3339)
 		}
+	}
+	if manifest, err := readWorkspaceManifest(stateDir, name); err == nil {
+		entry.Profile = manifest.Profile
 	}
 	if _, err := os.Stat(entry.RootfsPath); os.IsNotExist(err) {
 		entry.RootfsPath = ""
@@ -2482,6 +2871,7 @@ func reorderFlagArgs(args []string) []string {
 		"-rootfs":      true,
 		"-disk":        true,
 		"-bundle":      true,
+		"-profile":     true,
 		"-state-dir":   true,
 		"-url":         true,
 		"-from":        true,
@@ -2678,11 +3068,13 @@ func printHelp(stdout *os.File) {
 Commands:
   run                  Run a command
   create               Create a workspace
+  clone                Clone a stopped workspace
   start                Start a workspace
   connect              Open the workspace console
   ps                   List workspaces
   status               Show workspace state
   logs                 Show workspace logs
+  profiles             List resource profiles
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace
@@ -2711,6 +3103,7 @@ Options:
   -kernel <path>        Custom kernel path
   -rootfs <path>        Rootfs image path
   -state-dir <dir>      State directory
+  -profile <name>       Resource profile: tiny, small, medium, or large
   -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
   -cpus <n>             CPU count
   -vsock p=host:port    Add a vsock mapping
@@ -2733,6 +3126,7 @@ Options:
   -name <name>          Workspace name; generated when omitted
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
+  -profile <name>       Resource profile: tiny, small, medium, or large
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
@@ -2758,6 +3152,7 @@ Options:
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
+  -profile <name>       Resource profile: tiny, small, medium, or large
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size

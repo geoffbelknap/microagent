@@ -689,6 +689,53 @@ func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing
 	}
 }
 
+func TestParseWorkspaceOptionsAppliesResourceProfile(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--profile", "medium",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Profile != "medium" || opts.MemoryMiB != 2048 || opts.CPUCount != 2 || opts.SizeMiB != 8192 {
+		t.Fatalf("profile resources = profile %q memory %d cpus %d size %d", opts.Profile, opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+}
+
+func TestParseWorkspaceOptionsLetsExplicitResourcesOverrideProfile(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--profile", "large",
+		"--memory", "3072",
+		"--cpus", "3",
+		"--size-mib", "12288",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Profile != "large" || opts.MemoryMiB != 3072 || opts.CPUCount != 3 || opts.SizeMiB != 12288 {
+		t.Fatalf("resources = profile %q memory %d cpus %d size %d", opts.Profile, opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsUnknownProfile(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{"research", "--profile", "huge"})
+	if err == nil || !strings.Contains(err.Error(), "unknown resource profile") {
+		t.Fatalf("err = %v, want unknown profile", err)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsInvalidResources(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{"research", "--memory", "0"})
+	if err == nil || !strings.Contains(err.Error(), "memory must be positive") {
+		t.Fatalf("err = %v, want memory validation", err)
+	}
+	_, err = parseWorkspaceOptions("create", []string{"research", "--size-mib", "0"})
+	if err == nil || !strings.Contains(err.Error(), "size-mib must be positive") {
+		t.Fatalf("err = %v, want size validation", err)
+	}
+}
+
 func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
@@ -706,6 +753,242 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	}
 	if opts.Disks[1].Name != "constraints" || !opts.Disks[1].Bundle || opts.Disks[1].Mode != "ro" {
 		t.Fatalf("bundle = %#v", opts.Disks[1])
+	}
+}
+
+func TestRunProfilesPrintsExactConfigs(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "profiles.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "profiles"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run profiles: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"name": "medium"`) ||
+		!strings.Contains(text, `"memory_mib": 2048`) ||
+		!strings.Contains(text, `"size_mib": 8192`) {
+		t.Fatalf("profiles output = %s", data)
+	}
+}
+
+func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "medium",
+		MemoryMiB: 2048,
+		CPUCount:  2,
+		SizeMiB:   8192,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := filepath.Join(dir, "supervisor")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "running", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{
+		"start",
+		"research",
+		"--state-dir", dir,
+		"--backend", vmkit.BackendAppleVF,
+		"--supervisor", supervisor,
+		"--kernel", filepath.Join(dir, "Image"),
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run start: %v", err)
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "research"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Config.MemoryMiB != 2048 || state.Config.CPUCount != 2 {
+		t.Fatalf("runtime config = memory %d cpus %d", state.Config.MemoryMiB, state.Config.CPUCount)
+	}
+}
+
+func TestCloneWorkspaceCopiesStoppedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	sourceDir := filepath.Join(dir, "workspaces", "template")
+	if err := os.MkdirAll(filepath.Join(sourceDir, "disks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "disks", "workspace.ext4"), []byte("disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "template",
+		Profile:   "medium",
+		MemoryMiB: 2048,
+		CPUCount:  2,
+		SizeMiB:   8192,
+		Disks: []workspaceDisk{{
+			Name:       "workspace",
+			Path:       filepath.Join(sourceDir, "disks", "workspace.ext4"),
+			Mountpoint: "/workspace",
+			Mode:       "rw",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "template", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "template"}, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	result, err := cloneWorkspace(dir, "template", "copy")
+	if err != nil {
+		t.Fatalf("cloneWorkspace: %v", err)
+	}
+	if result.Workspace != "copy" || result.Profile != "medium" || result.Resources.MemoryMiB != 2048 {
+		t.Fatalf("clone result = %#v", result)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "workspaces", "copy", "rootfs.ext4")); err != nil || string(data) != "rootfs" {
+		t.Fatalf("cloned rootfs = %q err=%v", data, err)
+	}
+	manifest, err := readWorkspaceManifest(dir, "copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Name != "copy" {
+		t.Fatalf("manifest name = %q", manifest.Name)
+	}
+	wantDiskPath := filepath.Join(dir, "workspaces", "copy", "disks", "workspace.ext4")
+	if len(manifest.Disks) != 1 || manifest.Disks[0].Path != wantDiskPath {
+		t.Fatalf("manifest disks = %#v, want path %q", manifest.Disks, wantDiskPath)
+	}
+	event, err := readWorkspaceEvent(workspaceOptions{StateDir: dir, Name: "copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.State != vmkit.StatePrepared || !strings.Contains(event.Detail, "template") {
+		t.Fatalf("event = %#v", event)
+	}
+}
+
+func TestCloneWorkspaceRejectsActiveSource(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "active", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "active", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "active", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "active"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cloneWorkspace(dir, "active", "copy")
+	if err == nil || !strings.Contains(err.Error(), "must be stopped") {
+		t.Fatalf("err = %v, want stopped validation", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "workspaces", "copy")); !os.IsNotExist(statErr) {
+		t.Fatalf("target was created despite failed clone: %v", statErr)
+	}
+}
+
+func TestCloneWorkspaceRejectsEventOnlyActiveSource(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "active", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "active", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	event := workspaceEventFile{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "active", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		State:      vmkit.StateRunning,
+		ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC).Format(time.RFC3339),
+	}
+	if err := writeJSONFile(filepath.Join(dir, "active", "event.json"), event); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cloneWorkspace(dir, "active", "copy")
+	if err == nil || !strings.Contains(err.Error(), "must be stopped") {
+		t.Fatalf("err = %v, want stopped validation", err)
+	}
+}
+
+func TestRunCloneCommand(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "template"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "template", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "template", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "clone", "template", "copy", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run clone: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"workspace": "copy"`) || !strings.Contains(string(data), `"state": "prepared"`) {
+		t.Fatalf("clone output = %s", data)
 	}
 }
 

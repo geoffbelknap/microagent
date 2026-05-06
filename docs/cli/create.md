@@ -26,6 +26,7 @@ first.
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory |
+| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
@@ -42,10 +43,20 @@ Create a workspace:
 microagent create \
   --name research \
   --image docker.io/library/ubuntu:24.04 \
-  --size-mib 2048 \
-  --memory 1024 \
-  --cpus 2
+  --profile medium
 ```
+
+Profiles expand to exact configs and are stored with the workspace:
+
+| Profile | Memory MiB | CPUs | Disk MiB |
+|---|---:|---:|---:|
+| `tiny` | 256 | 1 | 512 |
+| `small` | 512 | 2 | 1024 |
+| `medium` | 2048 | 2 | 8192 |
+| `large` | 4096 | 4 | 16384 |
+
+Use `--memory`, `--cpus`, or `--size-mib` with a profile to override a single
+value while keeping the profile name in the workspace record.
 
 With setup commands:
 

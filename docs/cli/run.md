@@ -25,6 +25,7 @@ scratch state (unless `--keep` is set).
 | `--name <name>` | Workspace name; generated when omitted |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
@@ -41,6 +42,15 @@ Run a single command:
 microagent run \
   --image docker.io/library/ubuntu:24.04 \
   --exec "uname -a"
+```
+
+Run with a named resource profile:
+
+```bash
+microagent run \
+  --image docker.io/library/ubuntu:24.04 \
+  --profile medium \
+  --exec "apt-get update"
 ```
 
 Run setup commands first:

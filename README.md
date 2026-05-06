@@ -41,9 +41,7 @@ Or create a named workspace:
 microagent create \
   --name research \
   --image docker.io/library/ubuntu:24.04 \
-  --size-mib 2048 \
-  --memory 1024 \
-  --cpus 2 \
+  --profile medium \
   --setup "mkdir -p /workspace" \
   --setup "echo ready > /workspace/status"
 ```
@@ -55,10 +53,17 @@ microagent start research
 microagent connect research --send "cat /etc/os-release; cat /workspace/status; uname -m"
 ```
 
+Clone a stopped workspace:
+
+```bash
+microagent clone research research-copy
+```
+
 Check state, read the boot log, and remove the workspace:
 
 ```bash
 microagent ps
+microagent profiles
 microagent status --name research
 microagent logs research
 microagent stop research
