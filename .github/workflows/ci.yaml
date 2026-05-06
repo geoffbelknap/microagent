@@ -70,6 +70,9 @@ jobs:
       - name: Check Markdown links
         run: python3 scripts/dev/markdown-link-check.py
 
+      - name: Check CLI docs
+        run: python3 scripts/dev/cli-docs-check.py
+
       - name: Check shell syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 

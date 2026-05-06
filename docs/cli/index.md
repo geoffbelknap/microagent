@@ -23,7 +23,7 @@ description: All microagent subcommands at a glance.
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
 | [`connect`](/cli/connect/) | Open the workspace console |
-| `profiles` | List exact named resource profiles |
+| [`profiles`](/cli/profiles/) | List exact named resource profiles |
 | [`images`](/cli/images/) | List or prune local image records |
 | [`perf`](/cli/perf/) | Measure workspace boot performance |
 | [`contract`](/cli/contract/) | Print the backend-neutral runtime contract |
