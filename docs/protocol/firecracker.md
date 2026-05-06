@@ -3,7 +3,7 @@ title: Firecracker supervisor
 description: Linux backend lifecycle through the executable Go supervisor.
 ---
 
-The Firecracker backend uses the same executable supervisor contract as Apple
+The Firecracker backend uses the same executable supervisor protocol as Apple
 VF. The supervisor is packaged as `microagent-firecracker-supervisor`.
 
 The supervisor:
@@ -80,7 +80,7 @@ permissions, or TAP setup failure all fail closed with explicit errors.
 
 ## Console
 
-Firecracker matches the Apple VF operator-facing console contract:
+Firecracker matches the Apple VF operator-facing console behavior:
 
 - `microagent connect <name> --send "echo CONNECT_READY"` reaches a running
   guest shell and prints `CONNECT_READY`.

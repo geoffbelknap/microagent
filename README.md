@@ -1,6 +1,6 @@
 # microagent-kit
 
-`microagent-kit` provides the tools needed to run AI Agent workspaces in microVMs.
+`microagent-kit` provides the tools needed to run AI agent workspaces in microVMs.
 
 The command-line tool is `microagent`. Each host OS has one VM backend:
 Firecracker on Linux and Apple Virtualization.framework on macOS. Each backend
@@ -96,7 +96,7 @@ microagent delete research
 
 Linux has one backend: Firecracker. macOS has one backend: Apple VF. The
 `--backend` flag exists for lower-level request compatibility and backend
-smoke tests, not as a user-facing backend selector.
+validation, not as a user-facing backend selector.
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
 `status`, `stop`, `kill`, and `delete`. Backend supervisors record state files
@@ -113,53 +113,32 @@ go build ./cmd/microagent-firecracker-supervisor              # Linux only
 swift build --package-path supervisors/applevf --disable-sandbox  # macOS only
 ```
 
-Run the smokes:
+Run the smoke suite for your host backend:
 
 ```bash
 make smoke
 ```
 
-`make smoke` runs the feature smoke suite for the HostOS backend: Firecracker
-on Linux, Apple VF on macOS.
+`make smoke` runs Firecracker checks on Linux and Apple VF checks on macOS.
+These boot real VMs, so run them on a host with the right virtualization access.
 
-Run the OCI rootfs smoke:
+Run targeted smokes when you are working in one area:
 
 ```bash
 make smoke-rootfs
-```
-
-Run the Linux Firecracker boot smoke outside sandboxed environments so KVM,
-network, and Microagent state paths are visible:
-
-```bash
 make smoke-firecracker
-```
-
-Run only the HostOS workspace lifecycle smoke:
-
-```bash
+make smoke-firecracker-console
+make smoke-firecracker-publish
+make smoke-firecracker-network
+make smoke-applevf-network
+make smoke-applevf-publish
 make smoke-workspace
-```
-
-See [docs/operations/smoke-tests.md](docs/operations/smoke-tests.md) for the
-expected kernel SHA, output, and host requirements.
-The boot-proven release note is in
-[docs/releases/firecracker-amd64-boot-proven.md](docs/releases/firecracker-amd64-boot-proven.md).
-
-Build and ad-hoc sign the Apple VF supervisor:
-
-```bash
 make signed-supervisor
-```
-
-Boot a Linux VM:
-
-```bash
 make smoke-boot
 ```
 
-The boot smoke looks for the kernel at `~/.microagent/kernels/apple-vf/arm64/Image`.
-The older `~/.microagent/kernels/apple-vf/Image` path still works.
+See [docs/operations/smoke-tests.md](docs/operations/smoke-tests.md) for host
+requirements, expected kernel SHAs, and per-backend smoke targets.
 
 ## CLI
 

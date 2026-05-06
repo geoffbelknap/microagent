@@ -1,6 +1,6 @@
 # microagent-kit
 
-Go CLI/library plus backend supervisors for running Linux workspaces inside
+Go CLI/library plus backend supervisors for running Linux workspaces in
 microVMs.
 
 ## Scope
@@ -10,7 +10,7 @@ This repository owns the VM pieces:
 - create, start, status, stop, kill, and delete commands
 - rootfs builds from OCI images
 - guest metadata and identity propagation
-- serial, block-device, and vsock wiring
+- serial console, block-device, network, and vsock wiring
 - cleanup and state files
 - Firecracker supervisor
 - Apple Virtualization.framework supervisor protocol

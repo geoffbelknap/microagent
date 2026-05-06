@@ -167,4 +167,4 @@ microagent create --json request.json
 
 - [`start`](/cli/start/), [`stop`](/cli/stop/), [`delete`](/cli/delete/)
 - [State and identity](/concepts/state-and-identity/)
-- [Supervisor contract](/protocol/)
+- [Supervisor protocol](/protocol/)

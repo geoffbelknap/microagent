@@ -1,20 +1,21 @@
 ---
-title: Supervisor contract
-description: The shared request and response shape used by backend supervisors.
+title: Supervisor protocol
+description: The JSON request and response format used by backend supervisors.
 ---
 
-Microagent treats backend lifecycle work as a supervisor contract. A supervisor
-accepts a `vmkit.Request`, performs one lifecycle command, and returns a
-`vmkit.Response`.
+Backend supervisors speak a small JSON protocol: one request in, one response
+out. A request names a lifecycle command such as `prepare`, `start`, or `stop`.
+The response reports whether it worked and, when the command changes VM state,
+includes a lifecycle event.
 
-Firecracker and Apple VF share this contract:
+Firecracker and Apple VF use the same protocol:
 
 - **Firecracker** implements it as `microagent-firecracker-supervisor`.
 - **Apple VF** implements it as the `microagent-applevf-supervisor`
   executable because Virtualization.framework is Swift-only.
 
-Both backend supervisors have the same executable wire protocol. The CLI uses
-the active host backend's supervisor.
+The CLI chooses the active host backend and sends the request to that
+supervisor.
 
 ## Request
 
@@ -107,7 +108,7 @@ Host responses use `host` instead of `event`.
 Valid states are `unknown`, `prepared`, `starting`, `running`, `stopping`,
 `stopped`, and `failed`.
 
-## Backend Notes
+## Backend Pages
 
 - [Firecracker supervisor](/protocol/firecracker/) documents the Linux
   executable implementation.

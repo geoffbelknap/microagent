@@ -79,4 +79,4 @@ attached.
 
 The network record is visible in JSON output from `create`, `start`, `status`,
 and `ps`. Backend-specific wiring is intentionally behind the supervisor
-contract; malformed port forwards fail closed before a request is sent.
+protocol; malformed port forwards fail closed before a request is sent.
