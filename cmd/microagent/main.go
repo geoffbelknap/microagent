@@ -666,6 +666,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	networkMode := fs.String("network", defaultNetworkMode, "Network mode: nat, isolated, or bridged")
+	networkInterface := fs.String("network-interface", "", "Host interface for bridged network mode")
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
@@ -678,7 +679,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return vmkit.Request{Command: "host"}, nil
 	case "create":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, publishes)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -689,7 +690,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return req, nil
 	case "start":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, publishes)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -756,6 +757,7 @@ type workspaceSpec struct {
 
 type networkSpec struct {
 	Mode         string              `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Interface    string              `json:"interface,omitempty" yaml:"interface,omitempty"`
 	PortForwards []vmkit.PortForward `json:"port_forwards,omitempty" yaml:"forwards,omitempty"`
 	DNS          []string            `json:"dns,omitempty" yaml:"dns,omitempty"`
 	Routes       []string            `json:"routes,omitempty" yaml:"routes,omitempty"`
@@ -2185,6 +2187,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
 	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: nat, isolated, or bridged")
+	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
 	var publishFlags multiFlag
 	fs.Var(&publishFlags, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
@@ -2244,6 +2247,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.RestartPolicy = normalizeRestartPolicy(opts.RestartPolicy)
 	opts.Network = normalizeNetworkConfig(opts.Network)
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
+		return workspaceOptions{}, err
+	}
+	if err := validateBackendNetworkConfig(opts.Backend, opts.Network); err != nil {
 		return workspaceOptions{}, err
 	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
@@ -2524,6 +2530,7 @@ func normalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
 	if network.Mode == "" {
 		network.Mode = defaultNetworkMode
 	}
+	network.Interface = strings.TrimSpace(network.Interface)
 	for i := range network.PortForwards {
 		network.PortForwards[i].Protocol = strings.TrimSpace(network.PortForwards[i].Protocol)
 		if network.PortForwards[i].Protocol == "" {
@@ -2538,6 +2545,7 @@ func networkSpecFromConfig(network vmkit.NetworkConfig) networkSpec {
 	network = normalizeNetworkConfig(network)
 	return networkSpec{
 		Mode:         network.Mode,
+		Interface:    network.Interface,
 		PortForwards: append([]vmkit.PortForward{}, network.PortForwards...),
 		DNS:          append([]string{}, network.DNS...),
 		Routes:       append([]string{}, network.Routes...),
@@ -2548,6 +2556,7 @@ func networkSpecFromConfig(network vmkit.NetworkConfig) networkSpec {
 func networkConfigFromSpec(spec networkSpec) vmkit.NetworkConfig {
 	return normalizeNetworkConfig(vmkit.NetworkConfig{
 		Mode:         spec.Mode,
+		Interface:    spec.Interface,
 		PortForwards: append([]vmkit.PortForward{}, spec.PortForwards...),
 		DNS:          append([]string{}, spec.DNS...),
 		Routes:       append([]string{}, spec.Routes...),
@@ -3257,6 +3266,9 @@ func writeNetworkResult(stdout *os.File, result workspaceNetworkResult) error {
 
 func writeNetworkConfig(stdout *os.File, label string, network vmkit.NetworkConfig) {
 	fmt.Fprintf(stdout, "%s: %s\n", label, network.Mode)
+	if network.Interface != "" {
+		fmt.Fprintf(stdout, "Interface: %s\n", network.Interface)
+	}
 	if network.IP != "" {
 		fmt.Fprintf(stdout, "IP: %s\n", network.IP)
 	}
@@ -4785,7 +4797,7 @@ func writeConsoleInputChunk(dst io.Writer, chunk []byte) (int64, error) {
 	return int64(written), nil
 }
 
-func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, publishes []string) (vmkit.Request, error) {
+func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, networkInterface string, publishes []string) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
 			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
@@ -4819,12 +4831,25 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 		})
 	}
 	config.VsockListeners = listeners
-	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, PortForwards: portForwards})
+	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, Interface: networkInterface, PortForwards: portForwards})
 	if err := vmkit.ValidateNetworkConfig(network); err != nil {
+		return vmkit.Request{}, err
+	}
+	if err := validateBackendNetworkConfig(identity.Backend, network); err != nil {
 		return vmkit.Request{}, err
 	}
 	config.Network = &network
 	return vmkit.Request{Identity: &identity, Config: &config}, nil
+}
+
+func validateBackendNetworkConfig(backend string, network vmkit.NetworkConfig) error {
+	switch backend {
+	case vmkit.BackendAppleVF:
+		if len(network.PortForwards) != 0 {
+			return fmt.Errorf("apple-vf network.portForwards are not implemented")
+		}
+	}
+	return nil
 }
 
 func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config) (vmkit.Request, error) {
@@ -4848,48 +4873,49 @@ func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identi
 
 func reorderFlagArgs(args []string) []string {
 	valueFlags := map[string]bool{
-		"-supervisor":    true,
-		"-json":          true,
-		"-id":            true,
-		"-name":          true,
-		"-image":         true,
-		"-exec":          true,
-		"-entrypoint":    true,
-		"-file":          true,
-		"-env":           true,
-		"-setup":         true,
-		"-request-id":    true,
-		"-role":          true,
-		"-backend":       true,
-		"-kernel":        true,
-		"-rootfs":        true,
-		"-disk":          true,
-		"-bundle":        true,
-		"-debugfs":       true,
-		"-profile":       true,
-		"-restart":       true,
-		"-network":       true,
-		"-publish":       true,
-		"-state-dir":     true,
-		"-url":           true,
-		"-from":          true,
-		"-sha256":        true,
-		"-out":           true,
-		"-path":          true,
-		"-memory":        true,
-		"-cpus":          true,
-		"-vsock":         true,
-		"-mke2fs":        true,
-		"-guest-init":    true,
-		"-arch":          true,
-		"-size-mib":      true,
-		"-timeout":       true,
-		"-ready-timeout": true,
-		"-duration":      true,
-		"-interval":      true,
-		"-max-restarts":  true,
-		"-result-port":   true,
-		"-send":          true,
+		"-supervisor":        true,
+		"-json":              true,
+		"-id":                true,
+		"-name":              true,
+		"-image":             true,
+		"-exec":              true,
+		"-entrypoint":        true,
+		"-file":              true,
+		"-env":               true,
+		"-setup":             true,
+		"-request-id":        true,
+		"-role":              true,
+		"-backend":           true,
+		"-kernel":            true,
+		"-rootfs":            true,
+		"-disk":              true,
+		"-bundle":            true,
+		"-debugfs":           true,
+		"-profile":           true,
+		"-restart":           true,
+		"-network":           true,
+		"-network-interface": true,
+		"-publish":           true,
+		"-state-dir":         true,
+		"-url":               true,
+		"-from":              true,
+		"-sha256":            true,
+		"-out":               true,
+		"-path":              true,
+		"-memory":            true,
+		"-cpus":              true,
+		"-vsock":             true,
+		"-mke2fs":            true,
+		"-guest-init":        true,
+		"-arch":              true,
+		"-size-mib":          true,
+		"-timeout":           true,
+		"-ready-timeout":     true,
+		"-duration":          true,
+		"-interval":          true,
+		"-max-restarts":      true,
+		"-result-port":       true,
+		"-send":              true,
 	}
 	var flags []string
 	var positional []string
@@ -5177,6 +5203,9 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
+  -network <mode>       Network mode: nat, isolated, or bridged
+  -network-interface <if>
+                         Host interface for bridged network mode
   -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
   -cpus <n>             CPU count
   -vsock p=host:port    Add a vsock mapping
@@ -5232,6 +5261,9 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
+  -network <mode>       Network mode: nat, isolated, or bridged
+  -network-interface <if>
+                         Host interface for bridged network mode
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
@@ -5260,6 +5292,9 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
+  -network <mode>       Network mode: nat, isolated, or bridged
+  -network-interface <if>
+                         Host interface for bridged network mode
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size

@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 #if canImport(Darwin)
 import Darwin
@@ -38,7 +39,31 @@ struct Config: Codable {
     var cpuCount: Int?
     var disks: [Disk]?
     var vsockListeners: [VsockListener]?
+    var network: NetworkConfig?
     var serialInput: Bool?
+}
+
+struct NetworkConfig: Codable {
+    var mode: String
+    var interface: String?
+    var portForwards: [PortForward]?
+    var dns: [String]?
+    var routes: [String]?
+    var ip: String?
+}
+
+struct PortForward: Codable {
+    var protocolName: String
+    var host: String?
+    var hostPort: UInt16
+    var guestPort: UInt16
+
+    enum CodingKeys: String, CodingKey {
+        case protocolName = "protocol"
+        case host
+        case hostPort
+        case guestPort
+    }
 }
 
 struct Disk: Codable {
@@ -301,9 +326,49 @@ func validatedConfig(_ config: Config?) throws -> Config {
             throw ProtocolError.invalid("vsock listener \(listener.port) target is required")
         }
     }
+    try validateNetworkConfig(config.network)
     try readableFile(config.kernelPath, name: "config.kernelPath")
     try readableFile(config.rootfsPath, name: "config.rootfsPath")
     return config
+}
+
+func validateNetworkConfig(_ network: NetworkConfig?) throws {
+    guard let network else {
+        return
+    }
+    let mode = normalizedNetworkMode(network)
+    switch mode {
+    case "nat", "isolated", "bridged":
+        break
+    default:
+        throw ProtocolError.invalid("network.mode must be nat, isolated, or bridged")
+    }
+    if !(network.portForwards ?? []).isEmpty {
+        throw ProtocolError.invalid("Apple VF network.portForwards are not implemented")
+    }
+    #if canImport(Virtualization)
+    if mode == "bridged" {
+        if #available(macOS 13.0, *) {
+            guard hasEntitlement("com.apple.vm.networking") else {
+                throw ProtocolError.invalid("Apple VF bridged networking requires a supervisor signed with com.apple.vm.networking")
+            }
+            _ = try bridgedInterface(named: network.interface)
+        }
+    }
+    #endif
+}
+
+func hasEntitlement(_ name: String) -> Bool {
+    guard let task = SecTaskCreateFromSelf(nil),
+          let value = SecTaskCopyValueForEntitlement(task, name as CFString, nil) else {
+        return false
+    }
+    return (value as? Bool) == true
+}
+
+func normalizedNetworkMode(_ network: NetworkConfig?) -> String {
+    let mode = network?.mode.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return mode.isEmpty ? "nat" : mode
 }
 
 func stateConfig(_ config: Config?) throws -> Config {
@@ -773,6 +838,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
         vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
     }
     vmConfig.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+    vmConfig.networkDevices = try networkDevices(for: config)
     if let serialMode {
         let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
         switch serialMode {
@@ -802,6 +868,53 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
         vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
     }
     return vmConfig
+}
+
+@available(macOS 13.0, *)
+func networkDevices(for config: Config) throws -> [VZVirtioNetworkDeviceConfiguration] {
+    switch normalizedNetworkMode(config.network) {
+    case "nat":
+        let device = VZVirtioNetworkDeviceConfiguration()
+        device.attachment = VZNATNetworkDeviceAttachment()
+        return [device]
+    case "isolated":
+        return []
+    case "bridged":
+        let device = VZVirtioNetworkDeviceConfiguration()
+        device.attachment = VZBridgedNetworkDeviceAttachment(interface: try bridgedInterface(named: config.network?.interface))
+        return [device]
+    default:
+        throw ProtocolError.invalid("network.mode must be nat, isolated, or bridged")
+    }
+}
+
+@available(macOS 13.0, *)
+func bridgedInterface(named rawName: String?) throws -> VZBridgedNetworkInterface {
+    let requested = rawName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let interfaces = VZBridgedNetworkInterface.networkInterfaces
+    guard !interfaces.isEmpty else {
+        throw ProtocolError.invalid("no bridged network interfaces are available")
+    }
+    if requested.isEmpty {
+        let available = bridgedInterfaceList(interfaces)
+        throw ProtocolError.invalid("network.interface is required for bridged mode; available interfaces: \(available)")
+    }
+    if let match = interfaces.first(where: { $0.identifier == requested || $0.localizedDisplayName == requested }) {
+        return match
+    }
+    let available = bridgedInterfaceList(interfaces)
+    throw ProtocolError.invalid("bridged network interface \(requested) was not found; available interfaces: \(available)")
+}
+
+@available(macOS 13.0, *)
+func bridgedInterfaceList(_ interfaces: [VZBridgedNetworkInterface]) -> String {
+    interfaces.map { iface in
+        let displayName = iface.localizedDisplayName ?? ""
+        if displayName.isEmpty {
+            return iface.identifier
+        }
+        return "\(iface.identifier)(\(displayName))"
+    }.joined(separator: ", ")
 }
 
 func configureRawTerminal(_ fileHandle: FileHandle) {

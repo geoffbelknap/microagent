@@ -65,6 +65,7 @@ type VsockListener struct {
 
 type NetworkConfig struct {
 	Mode         string        `json:"mode" yaml:"mode"`
+	Interface    string        `json:"interface,omitempty" yaml:"interface,omitempty"`
 	PortForwards []PortForward `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
 	DNS          []string      `json:"dns,omitempty" yaml:"dns,omitempty"`
 	Routes       []string      `json:"routes,omitempty" yaml:"routes,omitempty"`
@@ -266,6 +267,9 @@ func ValidateNetworkConfig(network NetworkConfig) error {
 	case "nat", "isolated", "bridged":
 	default:
 		return fmt.Errorf("network.mode must be nat, isolated, or bridged")
+	}
+	if mode == "isolated" && len(network.PortForwards) != 0 {
+		return fmt.Errorf("network.portForwards require nat or bridged mode")
 	}
 	hostPorts := map[string]bool{}
 	for i, forward := range network.PortForwards {

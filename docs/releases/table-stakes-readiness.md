@@ -27,6 +27,8 @@ console=interactive
 |---|---|
 | `make smoke` | pass |
 | `make smoke-boot` | pass |
+| `make smoke-applevf-network` | pass; `nat` and `isolated` accepted, Apple VF `--publish` fails closed, bridged is entitlement-gated |
+| `MICROAGENT_APPLEVF_BOOT_NETWORK_MODE=isolated scripts/applevf-boot-smoke.sh` | pass |
 | `microagent perf boot` | one successful iteration, `1952 ms` |
 | `microagent perf footprint perf-steady-applevf` | `20080 KiB` RSS |
 | `microagent perf steady perf-steady-applevf --duration 5 --interval 1` | min/avg/max `20080/20080/20080 KiB` RSS |
@@ -64,7 +66,7 @@ Recorded Firecracker performance:
 
 | Feature | Apple VF | Firecracker | State |
 |---|---|---|---|
-| Networking | `nat` manifest record; explicit backend networking and `--publish` still pending | `nat` plus live TCP `--publish`; `isolated` and `bridged` fail closed | Partial |
+| Networking | `nat`, `isolated`, and entitlement-gated explicit-interface `bridged`; `--publish` fails closed | `nat` plus live TCP `--publish`; `isolated` and `bridged` fail closed | Partial |
 | File transfer | `microagent cp` in/out of stopped rootfs and attached disks | same CLI semantics | Ready |
 | Console ergonomics | interactive `connect`, `--send`, readiness errors, clean detach | interactive `connect`, `--send`, readiness errors, clean detach | Ready, except resize |
 | Cloning | stopped workspace/template clone | stopped workspace/template clone | Ready |
@@ -77,10 +79,11 @@ Recorded Firecracker performance:
 
 ## Remaining Work
 
-- Implement real `isolated` and `bridged` networking for Apple VF and
-  Firecracker instead of treating them as reserved intent.
-- Implement Apple VF `--publish` and explicit Apple VF network device mode
-  wiring.
+- Implement real `isolated` and `bridged` networking for Firecracker instead
+  of treating them as reserved intent.
+- Implement Apple VF `--publish`.
+- Decide release signing/provisioning for Apple VF bridged networking, which
+  requires the restricted `com.apple.vm.networking` entitlement.
 - Add terminal resize propagation for interactive console sessions. The current
   parity target is attach, send, readiness, detach, and logs.
 - Consider a future schema split between host console capability and per-runtime

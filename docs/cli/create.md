@@ -30,6 +30,7 @@ first.
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
 | `--network <mode>` | Network mode: `nat`, `isolated`, or `bridged` |
+| `--network-interface <if>` | Host interface identifier or display name for bridged mode |
 | `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
@@ -112,6 +113,10 @@ When `microagent.yaml` or `microagent.yml` exists in the current directory,
 spec.
 
 Restart policies are enforced by [`supervise`](/cli/supervise/).
+
+On Apple VF, `bridged` also requires a supervisor signed with Apple's
+`com.apple.vm.networking` entitlement. Ad-hoc local supervisors fail closed
+with a clear error.
 
 Attach an existing ext4 disk:
 

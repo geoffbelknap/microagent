@@ -56,6 +56,18 @@ func TestValidateNetworkConfigRejectsInvalidMode(t *testing.T) {
 	}
 }
 
+func TestValidateNetworkConfigRejectsIsolatedPortForwards(t *testing.T) {
+	cfg := NetworkConfig{
+		Mode: "isolated",
+		PortForwards: []PortForward{
+			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
+		},
+	}
+	if err := ValidateNetworkConfig(cfg); err == nil {
+		t.Fatal("ValidateNetworkConfig accepted isolated port forward")
+	}
+}
+
 func TestValidateNetworkConfigRejectsUnsupportedPortForwardProtocol(t *testing.T) {
 	cfg := NetworkConfig{
 		Mode: "nat",

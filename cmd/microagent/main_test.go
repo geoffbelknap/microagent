@@ -463,7 +463,9 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
 		"--state-dir", "/tmp/state",
-		"--network", "isolated",
+		"--backend", vmkit.BackendFirecracker,
+		"--network", "bridged",
+		"--network-interface", "en0",
 		"--publish", "127.0.0.1:8080:80/tcp",
 	}))
 	if err != nil {
@@ -472,8 +474,11 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 	if req.Config.Network == nil {
 		t.Fatal("network config is nil")
 	}
-	if req.Config.Network.Mode != "isolated" {
-		t.Fatalf("network mode = %q, want isolated", req.Config.Network.Mode)
+	if req.Config.Network.Mode != "bridged" {
+		t.Fatalf("network mode = %q, want bridged", req.Config.Network.Mode)
+	}
+	if req.Config.Network.Interface != "en0" {
+		t.Fatalf("network interface = %q, want en0", req.Config.Network.Interface)
 	}
 	if len(req.Config.Network.PortForwards) != 1 {
 		t.Fatalf("port forwards len = %d, want 1", len(req.Config.Network.PortForwards))
@@ -481,6 +486,34 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 	forward := req.Config.Network.PortForwards[0]
 	if forward.Host != "127.0.0.1" || forward.HostPort != 8080 || forward.GuestPort != 80 || forward.Protocol != "tcp" {
 		t.Fatalf("forward = %#v", forward)
+	}
+}
+
+func TestRequestForCommandRejectsIsolatedPublish(t *testing.T) {
+	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--network", "isolated",
+		"--publish", "127.0.0.1:8080:80/tcp",
+	}))
+	if err == nil {
+		t.Fatal("requestForCommand accepted isolated publish")
+	}
+}
+
+func TestRequestForCommandRejectsAppleVFPublish(t *testing.T) {
+	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--backend", vmkit.BackendAppleVF,
+		"--publish", "127.0.0.1:8080:80/tcp",
+	}))
+	if err == nil {
+		t.Fatal("requestForCommand accepted apple-vf publish")
 	}
 }
 
@@ -929,7 +962,7 @@ bundles:
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath})
+	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath, "--backend", vmkit.BackendFirecracker})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}

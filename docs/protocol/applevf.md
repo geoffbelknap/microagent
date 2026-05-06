@@ -34,6 +34,9 @@ Apple VF process boundary.
     "stateDir": "/tmp/microagent",
     "memoryMiB": 512,
     "cpuCount": 2,
+    "network": {
+      "mode": "nat"
+    },
     "disks": [
       {
         "name": "config",
@@ -68,6 +71,24 @@ and `delete` require `identity` and `config.stateDir`. `check`, `prepare`,
 Extra disks are optional. `mode` must be `ro` or `rw`. The supervisor
 attaches them after the rootfs in request order; the guest init mounts them
 from `/dev/vdb` onward.
+
+### Network
+
+Apple VF maps `config.network.mode` to Virtualization.framework network
+devices:
+
+| Mode | Apple VF behavior |
+|---|---|
+| `nat` | Adds a `VZNATNetworkDeviceAttachment` |
+| `isolated` | Adds no network device |
+| `bridged` | Adds a `VZBridgedNetworkDeviceAttachment` |
+
+`bridged` requires `config.network.interface`, matched against the Apple VF
+bridged interface identifier or localized display name. It also requires the
+supervisor process to be signed with the restricted `com.apple.vm.networking`
+entitlement. Ad-hoc local builds fail closed during `check` with a clear
+entitlement error. Apple VF port forwards are not implemented yet; requests
+with `network.portForwards` fail closed.
 
 ## Response
 

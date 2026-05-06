@@ -49,8 +49,8 @@ the active host backend's supervisor.
 ```
 
 `config.network.mode` is declarative and must be `nat`, `isolated`, or
-`bridged`. Port forwards use `protocol`, optional `host`, `hostPort`, and
-`guestPort`.
+`bridged`. Bridged backends may require `config.network.interface`. Port
+forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
 
 ## Commands
 

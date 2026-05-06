@@ -7,11 +7,11 @@ description: Inspect workspace network intent and runtime network state.
 microagent network <name> [--state-dir <dir>]
 ```
 
-`network` reports the network mode, declared port forwards, DNS servers,
-routes, and IP information recorded for a workspace. The top-level `network`
-field comes from the persistent workspace manifest. When a workspace has a
-runtime state file, `runtime` shows the last network config recorded by the
-backend supervisor.
+`network` reports the network mode, bridged host interface, declared port
+forwards, DNS servers, routes, and IP information recorded for a workspace. The
+top-level `network` field comes from the persistent workspace manifest. When a
+workspace has a runtime state file, `runtime` shows the last network config
+recorded by the backend supervisor.
 
 ## Example
 

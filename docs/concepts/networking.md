@@ -9,18 +9,15 @@ The current CLI accepts these modes:
 | Mode | Meaning |
 |---|---|
 | `nat` | Default backend network mode |
-| `isolated` | Reserved mode for no external guest network |
-| `bridged` | Reserved mode for host-bridge attachment |
+| `isolated` | No guest network device |
+| `bridged` | Host bridge attachment; requires a backend-supported host interface |
 
 Current backend support is narrower than the full enum:
 
 | Backend | Supported mode today |
 |---|---|
-| Apple VF | `nat` record only; explicit NAT/isolated/bridged device behavior still needs backend work |
+| Apple VF | `nat` and `isolated`; `bridged` is implemented but requires an Apple-allowed `com.apple.vm.networking` entitlement and `network.interface`; `--publish` fails closed |
 | Firecracker | `nat` plus live TCP `--publish`; `isolated` and `bridged` fail closed in the supervisor |
-
-On Apple VF, non-`nat` modes are currently preserved as manifest intent only;
-they do not yet enforce guest isolation or attach a bridged host interface.
 
 Create records the mode:
 
@@ -50,6 +47,20 @@ network:
       guestPort: 80
       protocol: tcp
 ```
+
+For bridged Apple VF workspaces, declare the host interface identifier or
+display name. The supervisor must be signed with the restricted
+`com.apple.vm.networking` entitlement; ad-hoc local builds fail closed before
+start.
+
+```yaml
+network:
+  mode: bridged
+  interface: en0
+```
+
+For isolated workspaces, port forwards are invalid because no guest network is
+attached.
 
 The network record is visible in JSON output from `create`, `start`, `status`,
 and `ps`. Backend-specific wiring is intentionally behind the supervisor
