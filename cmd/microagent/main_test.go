@@ -147,7 +147,7 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 	if !resp.Host.VirtualizationSupported || !resp.Host.KVMAvailable || !resp.Host.VsockAvailable {
 		t.Fatalf("Host support = %+v", resp.Host)
 	}
-	if resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "serial-log" {
+	if !resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "interactive" {
 		t.Fatalf("Console support = %+v", resp.Host)
 	}
 }
@@ -200,8 +200,8 @@ func TestHostCommandReportsFirecrackerDiagnosticsWithoutFailing(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, `"backend": "firecracker"`) ||
 		!strings.Contains(text, `"kernel"`) ||
-		!strings.Contains(text, `"consoleAvailable": false`) ||
-		!strings.Contains(text, `"consoleMode": "serial-log"`) {
+		!strings.Contains(text, `"consoleAvailable": true`) ||
+		!strings.Contains(text, `"consoleMode": "interactive"`) {
 		t.Fatalf("host output = %s", data)
 	}
 }

@@ -61,7 +61,7 @@ the active host backend's supervisor.
 | `prepare` | Write backend state/config without booting | identity and full config |
 | `start` | Start a prepared workspace | identity and full config |
 | `run` | Start in foreground | identity and full config |
-| `console` | Attach to a running console | identity and full config; Apple VF only |
+| `console` | Attach to a running console | identity and full config |
 | `inspect` | Read latest state | identity and `config.stateDir` |
 | `stop` | Graceful stop | identity and `config.stateDir` |
 | `kill` | Hard stop | identity and `config.stateDir` |
@@ -98,8 +98,8 @@ Host responses use `host` instead of `event`.
     "binaryPath": "/usr/local/bin/firecracker",
     "kvmAvailable": true,
     "vsockAvailable": true,
-    "consoleAvailable": false,
-    "consoleMode": "serial-log"
+    "consoleAvailable": true,
+    "consoleMode": "interactive"
   }
 }
 ```

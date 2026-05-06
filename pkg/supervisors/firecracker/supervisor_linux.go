@@ -38,6 +38,9 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 	if err := vmkit.ValidateRequest(req); err != nil {
 		return vmkit.Response{}, err
 	}
+	if err := validateFirecrackerRequest(req); err != nil {
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+	}
 	opts := s.normalizedOptions(req)
 	switch req.Command {
 	case "host":
@@ -65,10 +68,36 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		}
 		cleanupWorkspaceState(opts)
 		return eventResponse(req, vmkit.StateStopped, ""), nil
+	case "console":
+		err := fmt.Errorf("firecracker supervisor console command is unsupported; use serial input FIFO")
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 	default:
 		err := fmt.Errorf("unknown firecracker command %q", req.Command)
 		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 	}
+}
+
+func validateFirecrackerRequest(req vmkit.Request) error {
+	switch req.Command {
+	case "check", "prepare", "start", "run", "console":
+		return validateFirecrackerConfig(req.Config)
+	default:
+		return nil
+	}
+}
+
+func validateFirecrackerConfig(config *vmkit.Config) error {
+	if config == nil || config.Network == nil {
+		return nil
+	}
+	mode := strings.TrimSpace(config.Network.Mode)
+	if mode == "" {
+		mode = "nat"
+	}
+	if mode != "nat" {
+		return fmt.Errorf("firecracker network.mode %q is unsupported; use nat", mode)
+	}
+	return nil
 }
 
 func hostResponse(opts Options) (vmkit.Response, error) {
@@ -88,8 +117,8 @@ func hostResponse(opts Options) (vmkit.Response, error) {
 			VirtualizationSupported: fileExists("/dev/kvm"),
 			KVMAvailable:            fileExists("/dev/kvm"),
 			VsockAvailable:          fileExists("/dev/vhost-vsock"),
-			ConsoleAvailable:        false,
-			ConsoleMode:             "serial-log",
+			ConsoleAvailable:        true,
+			ConsoleMode:             "interactive",
 		},
 		Kernel: &vmkit.KernelSupport{
 			Backend:      vmkit.BackendFirecracker,
@@ -249,23 +278,38 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	if err != nil {
 		return vmkit.Response{}, err
 	}
+	var serialInput *os.File
 	if req.Config.SerialInput {
-		_ = serialLog.Close()
-		return vmkit.Response{}, fmt.Errorf("firecracker serial input is not supported")
+		input, inputErr := openSerialInputFIFO(opts)
+		if inputErr != nil {
+			_ = serialLog.Close()
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, inputErr.Error())
+			return failedResponse(req, inputErr.Error()), inputErr
+		}
+		serialInput = input
 	}
 	cmd := exec.CommandContext(ctx, path, "--no-api", "--config-file", configPath(opts))
 	cmd.Stdout = serialLog
 	cmd.Stderr = serialLog
+	if serialInput != nil {
+		cmd.Stdin = serialInput
+	}
 	if detached {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 	if err := cmd.Start(); err != nil {
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
 		_ = serialLog.Close()
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
 	if err := writeProcessState(opts, req, vmkit.StateRunning, cmd.Process.Pid, ""); err != nil {
 		_ = cmd.Process.Kill()
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
 		_ = serialLog.Close()
 		return vmkit.Response{}, err
 	}
@@ -274,6 +318,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		pid, err := startPortForwarderProcess(opts)
 		if err != nil {
 			_ = cmd.Process.Kill()
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
 			_ = serialLog.Close()
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
@@ -282,16 +329,26 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		if err := writeProcessStateWithForwarder(opts, req, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, ""); err != nil {
 			_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 			_ = cmd.Process.Kill()
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
 			_ = serialLog.Close()
 			return vmkit.Response{}, err
 		}
 	}
 	if detached {
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
 		_ = serialLog.Close()
 		_ = cmd.Process.Release()
 		return eventResponse(req, vmkit.StateRunning, ""), nil
 	}
 	waitErr := waitForeground(ctx, cmd, serialLogPath(opts), opts.Timeout)
+	inputCloseErr := error(nil)
+	if serialInput != nil {
+		inputCloseErr = serialInput.Close()
+	}
 	closeErr := serialLog.Close()
 	state := vmkit.StateStopped
 	errorText := ""
@@ -303,13 +360,39 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		state = vmkit.StateFailed
 		errorText = closeErr.Error()
 	}
-	if err := writeProcessState(opts, req, state, 0, errorText); err != nil && waitErr == nil && closeErr == nil {
+	if inputCloseErr != nil && errorText == "" {
+		state = vmkit.StateFailed
+		errorText = inputCloseErr.Error()
+	}
+	if err := writeProcessState(opts, req, state, 0, errorText); err != nil && waitErr == nil && closeErr == nil && inputCloseErr == nil {
 		return vmkit.Response{}, err
 	}
 	if errorText != "" {
 		return failedResponse(req, errorText), fmt.Errorf("%s", errorText)
 	}
 	return eventResponse(req, vmkit.StateStopped, ""), nil
+}
+
+func openSerialInputFIFO(opts Options) (*os.File, error) {
+	path := serialInputPath(opts)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if err := syscall.Mkfifo(path, 0o600); err != nil && !os.IsExist(err) {
+		return nil, fmt.Errorf("create firecracker serial input fifo: %w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		return nil, fmt.Errorf("firecracker serial input path is not a fifo: %s", path)
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open firecracker serial input fifo: %w", err)
+	}
+	return file, nil
 }
 
 func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal syscall.Signal) (vmkit.Response, error) {
@@ -473,6 +556,7 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 			}
 			return fmt.Errorf("listen %s: %w", addr, err)
 		}
+		fmt.Fprintf(os.Stderr, "forward tcp %s to guest port %d via vsock port %d\n", addr, forward.GuestPort, forward.HostPort)
 		listeners = append(listeners, listener)
 		go servePortForward(listener, vsockSocketPath(opts), uint32(forward.HostPort))
 	}
@@ -487,6 +571,7 @@ func servePortForward(listener net.Listener, udsPath string, guestPort uint32) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "accept published tcp connection: %v\n", err)
 			return
 		}
 		go proxyTCPToGuestVsock(conn, udsPath, guestPort)
@@ -497,18 +582,26 @@ func proxyTCPToGuestVsock(conn net.Conn, udsPath string, guestPort uint32) {
 	defer conn.Close()
 	vsock, reader, err := dialGuestVsock(udsPath, guestPort)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "connect guest vsock port %d: %v\n", guestPort, err)
 		return
 	}
 	defer vsock.Close()
 	done := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(vsock, conn)
+		if _, err := io.Copy(vsock, conn); err != nil {
+			fmt.Fprintf(os.Stderr, "copy published tcp to guest vsock port %d: %v\n", guestPort, err)
+		}
+		closeWriteConn(vsock)
 		done <- struct{}{}
 	}()
 	go func() {
-		_, _ = io.Copy(conn, reader)
+		if _, err := io.Copy(conn, reader); err != nil {
+			fmt.Fprintf(os.Stderr, "copy guest vsock port %d to published tcp: %v\n", guestPort, err)
+		}
+		closeWriteConn(conn)
 		done <- struct{}{}
 	}()
+	<-done
 	<-done
 }
 
@@ -532,6 +625,15 @@ func dialGuestVsock(udsPath string, guestPort uint32) (net.Conn, *bufio.Reader, 
 		return nil, nil, fmt.Errorf("firecracker vsock connect failed: %s", strings.TrimSpace(ack))
 	}
 	return conn, reader, nil
+}
+
+func closeWriteConn(conn net.Conn) {
+	type closeWriter interface {
+		CloseWrite() error
+	}
+	if writer, ok := conn.(closeWriter); ok {
+		_ = writer.CloseWrite()
+	}
 }
 
 func inspectWorkspace(opts Options) (vmkit.Response, error) {

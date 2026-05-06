@@ -1,6 +1,6 @@
 ---
 title: microagent connect
-description: Open the workspace console (Apple VF only).
+description: Open the workspace console.
 ---
 
 ```text
@@ -14,8 +14,8 @@ in scripts.
 In interactive mode, press `Ctrl-]` to detach from the console without stopping
 the workspace.
 
-`connect` is supported by Apple VF only. For Firecracker workspaces, use
-[`logs`](/cli/logs/) for serial output.
+`connect` is supported by Apple VF and Firecracker. [`logs`](/cli/logs/)
+remains available for captured serial output.
 
 ## Flags
 

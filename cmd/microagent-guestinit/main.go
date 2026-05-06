@@ -113,8 +113,13 @@ func run() int {
 			_ = sendResult(cfg.Port, res)
 			return code
 		}
-		if err := syscall.Exec("/bin/sh", []string{"sh", "-i"}, guestEnv(cfg.Env)); err != nil {
-			code = 127
+		cmd := exec.Command("/bin/sh", "-i")
+		cmd.Env = guestEnv(cfg.Env)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			code = exitCode(err)
 			res.Error = err.Error()
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -190,6 +195,11 @@ func startTCPVsockBridges(env []string) error {
 }
 
 func startHostForwards(forwards []hostForward) error {
+	if len(forwards) > 0 {
+		if err := bringUpLoopback(); err != nil {
+			return err
+		}
+	}
 	for _, forward := range forwards {
 		if forward.Protocol != "" && forward.Protocol != "tcp" {
 			return fmt.Errorf("host forward protocol must be tcp")
@@ -304,12 +314,15 @@ func proxyTCPToHostVsock(conn net.Conn, port uint32) {
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(file, conn)
+		closeWriteFile(file)
 		done <- struct{}{}
 	}()
 	go func() {
 		_, _ = io.Copy(conn, file)
+		closeWriteConn(conn)
 		done <- struct{}{}
 	}()
+	<-done
 	<-done
 }
 
@@ -317,6 +330,7 @@ func serveHostForward(fd int, guestPort uint16) {
 	for {
 		connFD, _, err := unix.Accept(fd)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "accept host forward vsock for guest tcp port %d: %v\n", guestPort, err)
 			_ = unix.Close(fd)
 			return
 		}
@@ -339,14 +353,34 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 	defer conn.Close()
 	done := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(file, conn)
+		if _, err := io.Copy(file, conn); err != nil {
+			fmt.Fprintf(os.Stderr, "copy guest tcp port %d to host forward vsock: %v\n", guestPort, err)
+		}
+		closeWriteFile(file)
 		done <- struct{}{}
 	}()
 	go func() {
-		_, _ = io.Copy(conn, file)
+		if _, err := io.Copy(conn, file); err != nil {
+			fmt.Fprintf(os.Stderr, "copy host forward vsock to guest tcp port %d: %v\n", guestPort, err)
+		}
+		closeWriteConn(conn)
 		done <- struct{}{}
 	}()
 	<-done
+	<-done
+}
+
+func closeWriteConn(conn net.Conn) {
+	type closeWriter interface {
+		CloseWrite() error
+	}
+	if writer, ok := conn.(closeWriter); ok {
+		_ = writer.CloseWrite()
+	}
+}
+
+func closeWriteFile(file *os.File) {
+	_ = unix.Shutdown(int(file.Fd()), unix.SHUT_WR)
 }
 
 func dialHostVsock(port uint32, timeout time.Duration) (int, error) {

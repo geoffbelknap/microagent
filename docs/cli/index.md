@@ -18,7 +18,7 @@ description: All microagent subcommands at a glance.
 | [`status`](/cli/status/) | Show workspace state |
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
-| [`connect`](/cli/connect/) | Open the workspace console (Apple VF) |
+| [`connect`](/cli/connect/) | Open the workspace console |
 | `profiles` | List exact named resource profiles |
 | [`images`](/cli/images/) | List or prune local image records |
 | [`perf`](/cli/perf/) | Measure workspace boot performance |

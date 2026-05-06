@@ -246,9 +246,13 @@ func augmentHostSupport(resp *vmkit.Response, opts doctorOptions) {
 	case vmkit.BackendFirecracker:
 		resp.Host.SupervisorPath = firecrackerSupervisorPath(workspaceOptions{SupervisorPath: opts.SupervisorPath})
 		resp.Host.SupervisorAvailable = true
-		resp.Host.ConsoleAvailable = false
-		resp.Host.ConsoleMode = "serial-log"
+		resp.Host.ConsoleAvailable = true
+		resp.Host.ConsoleMode = "interactive"
 	}
+}
+
+func backendSupportsConsoleInput(backend string) bool {
+	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendFirecracker
 }
 
 func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (string, error), stat func(string) (os.FileInfo, error), binaryVersion func(string) string) (vmkit.Response, error) {
@@ -273,8 +277,8 @@ func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (strin
 	if _, err := stat("/dev/vhost-vsock"); err == nil {
 		host.VsockAvailable = true
 	}
-	host.ConsoleAvailable = false
-	host.ConsoleMode = "serial-log"
+	host.ConsoleAvailable = true
+	host.ConsoleMode = "interactive"
 	resp := vmkit.Response{
 		OK:      len(issues) == 0,
 		Backend: backend,
@@ -1672,9 +1676,6 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	if state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name}); err == nil && state.Event.Identity.Backend == vmkit.BackendFirecracker {
-		return fmt.Errorf("firecracker connect is not supported; use microagent logs")
-	}
 	if *readyTimeoutSeconds < 0 {
 		return fmt.Errorf("connect ready-timeout must not be negative")
 	}
@@ -1746,14 +1747,15 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	profileExplicit := hasFlagValue(args, "profile")
 	memoryExplicit := hasFlagValue(args, "memory")
 	cpusExplicit := hasFlagValue(args, "cpus")
+	backend := hostBackend()
 	opts := workspaceOptions{
-		Backend:        hostBackend(),
+		Backend:        backend,
 		Architecture:   defaultGuestArch(),
 		Profile:        defaultWorkspaceProfile,
 		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		StateDir:       defaultStateDir(),
 		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
-		SerialInput:    false,
+		SerialInput:    backendSupportsConsoleInput(backend),
 	}
 	if err := applyResourceProfile(&opts, false, false, false); err != nil {
 		return err
@@ -1775,7 +1777,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
-	opts.SerialInput = opts.Backend == vmkit.BackendAppleVF
+	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent start <name> [--state-dir <dir>]")
 	}
@@ -1985,7 +1987,7 @@ func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (work
 		MemoryMiB:      defaultWorkspaceMemoryMiB,
 		CPUCount:       defaultWorkspaceCPUCount,
 		SizeMiB:        rootfs.DefaultSizeMiB,
-		SerialInput:    opts.Backend == vmkit.BackendAppleVF,
+		SerialInput:    backendSupportsConsoleInput(opts.Backend),
 	}
 	manifest, err := readWorkspaceManifest(opts.StateDir, opts.Name)
 	if err != nil {
@@ -2244,6 +2246,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
 		return workspaceOptions{}, err
 	}
+	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if specExplicit && specPath == "" {
 		return workspaceOptions{}, fmt.Errorf("%s requires --file path", command)
 	}

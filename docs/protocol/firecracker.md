@@ -39,6 +39,7 @@ Important files include:
 | `runtime.json` | latest structured lifecycle state |
 | `firecracker.json` | generated Firecracker config |
 | `serial.log` | guest serial output |
+| `serial.in` | console input FIFO for running workspaces |
 
 Persistent workspace disks live under:
 
@@ -52,12 +53,16 @@ Persistent workspace disks live under:
 - Uses `/dev/vhost-vsock` for guest-to-host vsock support.
 - Requires the `firecracker` binary on `PATH`, under packaged `libexec`, or
   through `MICROAGENT_FIRECRACKER`.
-- Does not support interactive `connect`; use `microagent logs`.
+- Supports interactive `microagent connect`; use `microagent logs` to review
+  captured serial output.
+- Firecracker `network.mode` must be `nat`; unsupported modes fail closed at
+  the supervisor boundary.
+- The supervisor does not implement a direct `console` command. The CLI uses
+  the Firecracker serial input FIFO for `microagent connect`.
 
-## Console Parity Target
+## Console
 
-Firecracker console parity is not complete until it matches the Apple VF
-operator-facing contract:
+Firecracker matches the Apple VF operator-facing console contract:
 
 - `microagent connect <name> --send "echo CONNECT_READY"` reaches a running
   guest shell and prints `CONNECT_READY`.
@@ -68,12 +73,15 @@ operator-facing contract:
   unavailable".
 - serial output remains inspectable through `microagent logs`.
 
-The tracking gate is:
+The console gate is:
 
 ```bash
 make smoke-firecracker-console
 ```
 
-That target is intentionally not part of default smoke yet because it requires
-Linux amd64 with KVM and currently fails until Firecracker serial input support
-is implemented.
+That target requires Linux amd64 with KVM and is part of the Linux `make smoke`
+suite.
+
+`consoleAvailable` in host reports describes backend capability. A prepared
+workspace still reports "console input is not ready" until it has been started
+and the runtime serial input FIFO exists.

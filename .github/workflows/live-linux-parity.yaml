@@ -1,0 +1,32 @@
+name: Live Linux Parity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firecracker-parity:
+    name: Firecracker parity
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - kvm
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.mod
+
+      - name: Host facts
+        run: scripts/linux-host-facts.sh
+
+      - name: Strict Firecracker parity handoff
+        run: scripts/linux-parity-handoff-strict.sh
