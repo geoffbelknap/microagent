@@ -14,7 +14,7 @@ description: All microagent subcommands at a glance.
 | [`status`](/cli/status/) | Show workspace state |
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
-| [`connect`](/cli/connect/) | Open the workspace console (Apple VF) |
+| [`connect`](/cli/connect/) | Open the workspace console |
 | [`doctor`](/cli/doctor/) | Check the host for backend support |
 | [`rootfs`](/cli/rootfs/) | Build a rootfs from an OCI image |
 | [`kernel`](/cli/kernel/) | Install or verify a custom kernel |

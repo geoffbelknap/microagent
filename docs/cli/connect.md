@@ -1,6 +1,6 @@
 ---
 title: microagent connect
-description: Open the workspace console (Apple VF only).
+description: Open the workspace console.
 ---
 
 ```text
@@ -11,8 +11,8 @@ microagent connect <name> [--send "<line>"] [--state-dir <dir>]
 it writes one line to the console and prints any new output, which is useful
 in scripts.
 
-`connect` is supported by Apple VF only. For Firecracker workspaces, use
-[`logs`](/cli/logs/) for serial output.
+Use [`logs`](/cli/logs/) when you only need to read serial output without
+opening the console.
 
 ## Flags
 

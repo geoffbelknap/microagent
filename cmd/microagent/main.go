@@ -876,9 +876,6 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	if state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name}); err == nil && state.Event.Identity.Backend == vmkit.BackendFirecracker {
-		return fmt.Errorf("firecracker connect is not supported; use microagent logs")
-	}
 	inputPath := serialInputPath(opts.StateDir, name)
 	logPath := filepath.Join(opts.StateDir, name, "serial.log")
 	if strings.TrimSpace(*send) != "" {
@@ -959,7 +956,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
-	opts.SerialInput = opts.Backend == vmkit.BackendAppleVF
+	opts.SerialInput = true
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent start <name> [--state-dir <dir>]")
 	}

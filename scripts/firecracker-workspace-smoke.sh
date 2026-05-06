@@ -101,39 +101,41 @@ PY
   --result-port 0 >"$STATE_DIR/connect-create.json"
 
 "$CLI" status connect-smoke --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-status-prepared.json"
-if "$CLI" connect connect-smoke --state-dir "$STATE_DIR/connect" --send "echo CONNECT_READY" >"$CONNECT_RESULT" 2>"$STATE_DIR/connect.err"; then
-  echo "firecracker connect unexpectedly succeeded" >&2
-  exit 1
-fi
-grep -q "firecracker connect is not supported" "$STATE_DIR/connect.err"
+"$CLI" start connect-smoke --state-dir "$STATE_DIR/connect" --kernel "$kernel_path" >"$STATE_DIR/connect-start.json"
+"$CLI" connect connect-smoke --state-dir "$STATE_DIR/connect" --send "echo CONNECT_READY" --timeout 5 >"$CONNECT_RESULT" 2>"$STATE_DIR/connect.err"
 "$CLI" logs connect-smoke --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-logs.txt"
 "$CLI" ps --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-ps.json"
 
-python3 - "$STATE_DIR/connect-create.json" "$CONNECT_RESULT" "$STATE_DIR/connect-logs.txt" "$STATE_DIR/connect-ps.json" <<'PY'
+python3 - "$STATE_DIR/connect-create.json" "$STATE_DIR/connect-start.json" "$CONNECT_RESULT" "$STATE_DIR/connect-logs.txt" "$STATE_DIR/connect-ps.json" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     create = json.load(f)
 with open(sys.argv[2], "r", encoding="utf-8", errors="replace") as f:
-    connect = f.read()
+    start = json.load(f)
 with open(sys.argv[3], "r", encoding="utf-8", errors="replace") as f:
+    connect = f.read()
+with open(sys.argv[4], "r", encoding="utf-8", errors="replace") as f:
     logs = f.read()
-with open(sys.argv[4], "r", encoding="utf-8") as f:
+with open(sys.argv[5], "r", encoding="utf-8") as f:
     ps = json.load(f)
 
 if create["response"]["backend"] != "firecracker":
     raise SystemExit(create)
 if create["response"]["event"]["state"] != "prepared":
     raise SystemExit(create)
-if connect.strip():
+if start["response"]["event"]["state"] != "running":
+    raise SystemExit(start)
+if "CONNECT_READY" not in connect:
     raise SystemExit(connect)
-if "Running Firecracker" in logs:
-    raise SystemExit("logs should be empty for a prepared-only workspace")
+if "CONNECT_READY" not in logs:
+    raise SystemExit(logs)
 if not any(entry["name"] == "connect-smoke" for entry in ps["workspaces"]):
     raise SystemExit(ps)
 PY
 
+"$CLI" stop connect-smoke --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-stop.json"
 "$CLI" delete connect-smoke --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-delete.json"
 test ! -e "$STATE_DIR/connect/connect-smoke"
 test ! -e "$STATE_DIR/connect/workspaces/connect-smoke"

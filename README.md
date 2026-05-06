@@ -70,10 +70,9 @@ Linux has one backend: Firecracker. macOS has one backend: Apple VF. The
 validation, not as a user-facing backend selector.
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
-`status`, `stop`, `kill`, and `delete`. Backend supervisors record state files
-and emit lifecycle events. Firecracker records process IDs so `stop` can send a
-graceful signal and `kill` can send a hard kill. Firecracker does not support
-interactive `connect`; use `logs` for serial output.
+`connect`, `status`, `stop`, `kill`, and `delete`. Backend supervisors record
+state files and emit lifecycle events. Firecracker records process IDs so
+`stop` can send a graceful signal and `kill` can send a hard kill.
 
 ## Build
 
@@ -193,9 +192,6 @@ Open its console:
 ```bash
 microagent connect research
 ```
-
-`connect` is supported by Apple VF. Firecracker workspaces currently expose
-serial output through `logs`.
 
 For scripts, send one line and print any new console output:
 

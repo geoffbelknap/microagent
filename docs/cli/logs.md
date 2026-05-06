@@ -7,9 +7,8 @@ description: Show boot/serial output for a workspace.
 microagent logs <name> [--state-dir <dir>]
 ```
 
-`logs` prints the captured serial console output for a workspace. On
-Firecracker this is the primary way to see guest output, since `connect` is
-not available.
+`logs` prints the captured serial console output for a workspace. Use
+[`connect`](/cli/connect/) when you need an interactive console.
 
 ## Flags
 
@@ -25,4 +24,4 @@ microagent logs research
 
 ## Related
 
-- [`connect`](/cli/connect/) for an interactive console (Apple VF only)
+- [`connect`](/cli/connect/) for an interactive console

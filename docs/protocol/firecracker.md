@@ -51,4 +51,4 @@ Persistent workspace disks live under:
 - Requires Linux with `/dev/kvm`.
 - Requires the `firecracker` binary on `PATH`, under packaged `libexec`, or
   through `MICROAGENT_FIRECRACKER`.
-- Does not support interactive `connect`; use `microagent logs`.
+- `connect` uses the workspace serial input FIFO and captured serial log.

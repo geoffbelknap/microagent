@@ -23,8 +23,8 @@ exist in the state directory (default `~/.microagent/`).
 microagent start research
 ```
 
-After it's running, open a console with [`connect`](/cli/connect/) on Apple
-VF, or read serial output with [`logs`](/cli/logs/).
+After it's running, open a console with [`connect`](/cli/connect/), or read
+serial output with [`logs`](/cli/logs/).
 
 ## Related
 

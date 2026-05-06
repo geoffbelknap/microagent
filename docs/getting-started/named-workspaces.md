@@ -47,8 +47,8 @@ For scripts, send one line and capture new console output:
 microagent connect research --send "cat /workspace/status"
 ```
 
-`connect` is supported on Apple VF only. For Firecracker workspaces, use
-[`logs`](/cli/logs/) for serial output.
+Use [`logs`](/cli/logs/) when you only need to read serial output without
+opening the console.
 
 ## Inspect
 

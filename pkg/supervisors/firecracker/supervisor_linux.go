@@ -235,32 +235,49 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	if err != nil {
 		return vmkit.Response{}, err
 	}
+	var serialInput *os.File
 	if req.Config.SerialInput {
-		_ = serialLog.Close()
-		return vmkit.Response{}, fmt.Errorf("firecracker serial input is not supported")
+		serialInput, err = openSerialInput(serialInputPath(opts))
+		if err != nil {
+			_ = serialLog.Close()
+			return vmkit.Response{}, err
+		}
 	}
 	cmd := exec.CommandContext(ctx, path, "--no-api", "--config-file", configPath(opts))
+	cmd.Stdin = serialInput
 	cmd.Stdout = serialLog
 	cmd.Stderr = serialLog
 	if detached {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 	if err := cmd.Start(); err != nil {
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
 		_ = serialLog.Close()
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
 	if err := writeProcessState(opts, req, vmkit.StateRunning, cmd.Process.Pid, ""); err != nil {
 		_ = cmd.Process.Kill()
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
 		_ = serialLog.Close()
 		return vmkit.Response{}, err
 	}
 	if detached {
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
 		_ = serialLog.Close()
 		_ = cmd.Process.Release()
 		return eventResponse(req, vmkit.StateRunning, ""), nil
 	}
 	waitErr := waitForeground(ctx, cmd, serialLogPath(opts), opts.Timeout)
+	if serialInput != nil {
+		_ = serialInput.Close()
+	}
 	closeErr := serialLog.Close()
 	state := vmkit.StateStopped
 	errorText := ""
@@ -361,6 +378,31 @@ func writeConfig(opts Options, req vmkit.Request) error {
 		return err
 	}
 	return writeJSONFile(configPath(opts), cfg)
+}
+
+func openSerialInput(path string) (*os.File, error) {
+	if err := prepareSerialInput(path); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_RDWR, 0)
+}
+
+func prepareSerialInput(path string) error {
+	info, err := os.Lstat(path)
+	if err == nil {
+		if info.Mode()&os.ModeNamedPipe != 0 {
+			return nil
+		}
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("replace serial input path: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect serial input path: %w", err)
+	}
+	if err := syscall.Mkfifo(path, 0o600); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("create serial input FIFO: %w", err)
+	}
+	return nil
 }
 
 func inspectWorkspace(opts Options) (vmkit.Response, error) {
