@@ -4,8 +4,8 @@ description: One backend per host OS. Same lifecycle surface, different mechanic
 ---
 
 Microagent has one backend per host OS. The `--backend` flag exists for
-lower-level request compatibility and backend validation, not as a user-facing
-backend selector.
+lower-level request compatibility and backend validation, not for normal
+backend selection.
 
 | Backend | Host OS | Supervisor | `connect` | Process model |
 |---|---|---|---|---|

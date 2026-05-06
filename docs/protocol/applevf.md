@@ -13,7 +13,7 @@ JSON response to stdout, and exits. Diagnostics go to stderr. Exit code `0`
 means the response has `"ok": true`. Nonzero exit means the response has
 `"ok": false` or the request could not be decoded.
 
-For the backend-independent command list and response shape, see
+For the shared command list and response shape, see
 [Supervisor protocol](/protocol/). This page only covers the executable
 Apple VF process boundary.
 

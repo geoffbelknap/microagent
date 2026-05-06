@@ -7,7 +7,7 @@ description: Run AI agent workspaces in microVMs.
 inside microVMs. Each host OS uses one backend: Firecracker on Linux, Apple
 Virtualization.framework on macOS. Microagent owns the kernel, the OCI-to-disk
 conversion, and the VM lifecycle. Identity, policy, credentials, and
-higher-level control stay outside this project.
+control-plane decisions stay outside this project.
 
 ## Where to start
 

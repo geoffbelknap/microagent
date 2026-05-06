@@ -9,8 +9,7 @@ The tap formula builds the CLI, guest init binary, and backend supervisor from
 the tagged source revision, then Homebrew builds bottles from the formula PR.
 
 This repository does not currently publish platform binary assets for each
-`microagent-kit` tag. The Homebrew tap is the operator-facing distribution
-path.
+`microagent-kit` tag. The Homebrew tap is the distribution path operators use.
 
 ## Version Flow
 
@@ -78,7 +77,7 @@ macOS.
 
 ## Tap Formula Expectations
 
-The Homebrew formula should continue to:
+The Homebrew formula should:
 
 - build `microagent` with `-X main.version=#{version}`
 - build Linux `microagent-guestinit` for the host CPU family
@@ -90,6 +89,6 @@ The Homebrew formula should continue to:
 
 ## Release Notes
 
-Keep user-facing release notes short and concrete. Record operator validation
+Keep release notes short and concrete. Record operator validation
 details under [`docs/releases/`](../releases/) when a release proves a new
 backend, kernel, or lifecycle capability.

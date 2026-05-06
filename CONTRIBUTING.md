@@ -56,7 +56,7 @@ supervisor built and signed as described in the docs.
 - Keep changes narrowly scoped.
 - Include docs updates when command output, runtime semantics, or operator
   workflows change.
-- Prefer structured outputs and tests over log scraping.
+- Prefer JSON/API outputs and tests over log scraping.
 - Do not widen this project into policy, orchestration, credential mediation,
   image signing, image scanning, or LLM/tool execution.
 - Call out any live smoke tests that could not be run.

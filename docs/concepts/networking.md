@@ -12,7 +12,7 @@ The current CLI accepts these modes:
 | `isolated` | No guest network device |
 | `bridged` | Host bridge attachment; requires a backend-supported host interface |
 
-Current backend support is narrower than the full enum:
+Current backend support is narrower than the declared enum:
 
 | Backend | Supported mode today |
 |---|---|
@@ -49,7 +49,7 @@ microagent create research --mediation 2048=127.0.0.1:9900
 ```
 
 By default the channel is required and fail-closed. The request, manifest,
-status response, and readiness block preserve the same structured declaration:
+status response, and readiness block carry the same declaration:
 `enabled`, `required`, `port`, `target`, and `failClosed`. Use
 `--mediation-optional` only for development paths where the workspace may boot
 without the host-side mediator.

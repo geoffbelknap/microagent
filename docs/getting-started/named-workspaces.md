@@ -54,7 +54,7 @@ to review captured serial output.
 
 ```bash
 microagent ps                       # list all workspaces
-microagent status --name research   # full state for one
+microagent status --name research   # one workspace
 microagent logs research            # boot/serial output
 ```
 

@@ -1,6 +1,6 @@
 # Changelog
 
-Notable user-facing changes should be recorded here.
+Record notable user-visible changes here.
 
 This project uses concise release notes rather than exhaustive commit logs.
 Group entries under an upcoming version heading until a release is cut.
