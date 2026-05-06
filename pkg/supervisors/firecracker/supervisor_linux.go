@@ -3,10 +3,13 @@
 package firecracker
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -199,6 +202,7 @@ type runtimeState struct {
 	Event           eventFile    `json:"event"`
 	Config          vmkit.Config `json:"config"`
 	PID             int          `json:"pid,omitempty"`
+	PortForwardPID  int          `json:"portForwardPid,omitempty"`
 	SerialLogPath   string       `json:"serialLogPath"`
 	SerialInputPath string       `json:"serialInputPath,omitempty"`
 	StartedAt       string       `json:"startedAt,omitempty"`
@@ -265,6 +269,23 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = serialLog.Close()
 		return vmkit.Response{}, err
 	}
+	portForwardPID := 0
+	if detached && hasPortForwards(req.Config) {
+		pid, err := startPortForwarderProcess(opts)
+		if err != nil {
+			_ = cmd.Process.Kill()
+			_ = serialLog.Close()
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
+		portForwardPID = pid
+		if err := writeProcessStateWithForwarder(opts, req, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, ""); err != nil {
+			_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
+			_ = cmd.Process.Kill()
+			_ = serialLog.Close()
+			return vmkit.Response{}, err
+		}
+	}
 	if detached {
 		_ = serialLog.Close()
 		_ = cmd.Process.Release()
@@ -297,6 +318,9 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		return vmkit.Response{}, err
 	}
 	if state.PID == 0 {
+		if state.PortForwardPID != 0 {
+			_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
+		}
 		if err := writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateStopped, 0, ""); err != nil {
 			return vmkit.Response{}, err
 		}
@@ -317,6 +341,9 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 			_ = writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateFailed, state.PID, errorText)
 			return failedResponse(req, errorText), err
 		}
+	}
+	if state.PortForwardPID != 0 {
+		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 	}
 	if err := writeProcessState(opts, runtimeStateRequest(req, state), vmkit.StateStopped, 0, ""); err != nil {
 		return vmkit.Response{}, err
@@ -390,6 +417,123 @@ func needsVsock(config *vmkit.Config) bool {
 	return config.Network != nil && len(config.Network.PortForwards) != 0
 }
 
+func hasPortForwards(config *vmkit.Config) bool {
+	return config != nil && config.Network != nil && len(config.Network.PortForwards) != 0
+}
+
+func startPortForwarderProcess(opts Options) (int, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+	logPath := filepath.Join(opts.StateDir, opts.Name, "port-forward.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return 0, err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return 0, err
+	}
+	cmd := exec.Command(executable, "--port-forwarder", "--state-dir", opts.StateDir, "--name", opts.Name)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	_ = logFile.Close()
+	return pid, nil
+}
+
+func RunPortForwarder(ctx context.Context, opts Options) error {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return err
+	}
+	if state.Config.Network == nil || len(state.Config.Network.PortForwards) == 0 {
+		return nil
+	}
+	listeners := make([]net.Listener, 0, len(state.Config.Network.PortForwards))
+	for _, forward := range state.Config.Network.PortForwards {
+		if forward.Protocol != "" && forward.Protocol != "tcp" {
+			continue
+		}
+		host := strings.TrimSpace(forward.Host)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		addr := net.JoinHostPort(host, strconv.Itoa(int(forward.HostPort)))
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			for _, open := range listeners {
+				_ = open.Close()
+			}
+			return fmt.Errorf("listen %s: %w", addr, err)
+		}
+		listeners = append(listeners, listener)
+		go servePortForward(listener, vsockSocketPath(opts), uint32(forward.HostPort))
+	}
+	<-ctx.Done()
+	for _, listener := range listeners {
+		_ = listener.Close()
+	}
+	return ctx.Err()
+}
+
+func servePortForward(listener net.Listener, udsPath string, guestPort uint32) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go proxyTCPToGuestVsock(conn, udsPath, guestPort)
+	}
+}
+
+func proxyTCPToGuestVsock(conn net.Conn, udsPath string, guestPort uint32) {
+	defer conn.Close()
+	vsock, reader, err := dialGuestVsock(udsPath, guestPort)
+	if err != nil {
+		return
+	}
+	defer vsock.Close()
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(vsock, conn)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(conn, reader)
+		done <- struct{}{}
+	}()
+	<-done
+}
+
+func dialGuestVsock(udsPath string, guestPort uint32) (net.Conn, *bufio.Reader, error) {
+	conn, err := net.DialTimeout("unix", udsPath, 10*time.Second)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := fmt.Fprintf(conn, "CONNECT %d\n", guestPort); err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	reader := bufio.NewReader(conn)
+	ack, err := reader.ReadString('\n')
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
+	if !strings.HasPrefix(ack, "OK ") {
+		_ = conn.Close()
+		return nil, nil, fmt.Errorf("firecracker vsock connect failed: %s", strings.TrimSpace(ack))
+	}
+	return conn, reader, nil
+}
+
 func inspectWorkspace(opts Options) (vmkit.Response, error) {
 	state, err := readRuntimeState(opts)
 	if err != nil {
@@ -415,6 +559,10 @@ func responseFromEvent(file eventFile, errorText string) vmkit.Response {
 }
 
 func writeProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {
+	return writeProcessStateWithForwarder(opts, req, state, pid, 0, errorText)
+}
+
+func writeProcessStateWithForwarder(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID int, errorText string) error {
 	if req.Identity == nil || req.Config == nil {
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
@@ -436,6 +584,7 @@ func writeProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid
 		Event:           fileEvent,
 		Config:          *req.Config,
 		PID:             pid,
+		PortForwardPID:  portForwardPID,
 		SerialLogPath:   serialLogPath(opts),
 		SerialInputPath: serialInputPath(opts),
 		UpdatedAt:       now.Format(time.RFC3339),
@@ -461,6 +610,9 @@ func runtimeStateRequest(req vmkit.Request, state runtimeState) vmkit.Request {
 		req.Config.MemoryMiB = state.Config.MemoryMiB
 		req.Config.CPUCount = state.Config.CPUCount
 		req.Config.Disks = state.Config.Disks
+		req.Config.VsockListeners = state.Config.VsockListeners
+		req.Config.Network = state.Config.Network
+		req.Config.SerialInput = state.Config.SerialInput
 	}
 	return req
 }

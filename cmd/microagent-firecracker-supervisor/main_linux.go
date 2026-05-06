@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 
@@ -21,6 +22,18 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout *os.File) error {
+	if len(args) > 0 && args[0] == "--port-forwarder" {
+		fs := flag.NewFlagSet("port-forwarder", flag.ContinueOnError)
+		stateDir := fs.String("state-dir", "", "State directory")
+		name := fs.String("name", "", "Workspace name")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *stateDir == "" || *name == "" {
+			return fmt.Errorf("usage: microagent-firecracker-supervisor --port-forwarder --state-dir <dir> --name <name>")
+		}
+		return firecrackersupervisor.RunPortForwarder(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
+	}
 	req, err := readRequest(args)
 	if err != nil {
 		resp := vmkit.Response{OK: false, Backend: vmkit.BackendFirecracker, Error: err.Error()}
