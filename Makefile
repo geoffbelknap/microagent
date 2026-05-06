@@ -1,6 +1,6 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test smoke smoke-contract smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check signed-supervisor smoke-boot
+.PHONY: test smoke smoke-contract smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
 
 test:
 	go test ./...
@@ -67,7 +67,11 @@ smoke-applevf-publish: signed-supervisor
 smoke-applevf-vsock: signed-supervisor
 	scripts/dev/applevf-vsock-diagnostic-smoke.sh
 
-release-check: test smoke smoke-rootfs
+release-check:
+	scripts/dev/release-check.sh
+
+release-check-live:
+	scripts/dev/release-check.sh --live
 
 signed-supervisor:
 	scripts/dev/applevf-supervisor-build.sh

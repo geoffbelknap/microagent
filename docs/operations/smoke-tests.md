@@ -6,6 +6,8 @@ description: Lifecycle and boot smokes for both backends.
 The Makefile drives all smoke suites. `make smoke` selects the right one for
 the host: Firecracker on Linux, Apple VF on macOS.
 
+For the full pre-release flow, see [Release process](release.md).
+
 The normal GitHub CI workflow keeps unit tests separate from live KVM gates.
 Live Firecracker parity runs through the manual `Live Linux Parity` workflow on
 self-hosted Linux runners labeled `kvm`, or directly on a Linux host with
