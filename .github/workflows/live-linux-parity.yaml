@@ -26,22 +26,22 @@ jobs:
           cache-dependency-path: go.mod
 
       - name: Host facts
-        run: scripts/linux-host-facts.sh
+        run: scripts/dev/linux-host-facts.sh
 
       - name: Go tests
-        run: scripts/go-test.sh
+        run: scripts/dev/go-test.sh
 
       - name: Firecracker console parity
-        run: scripts/firecracker-console-parity-smoke.sh
+        run: scripts/dev/firecracker-console-parity-smoke.sh
 
       - name: Firecracker publish parity
-        run: scripts/firecracker-publish-smoke.sh
+        run: scripts/dev/firecracker-publish-smoke.sh
 
       - name: Firecracker network modes
-        run: scripts/firecracker-network-mode-smoke.sh
+        run: scripts/dev/firecracker-network-mode-smoke.sh
 
       - name: Firecracker workspace lifecycle
-        run: scripts/firecracker-workspace-smoke.sh
+        run: scripts/dev/firecracker-workspace-smoke.sh
 
       - name: Firecracker boot
-        run: scripts/firecracker-boot-smoke.sh
+        run: scripts/dev/firecracker-boot-smoke.sh

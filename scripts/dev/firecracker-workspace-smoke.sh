@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-firecracker-workspace.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"

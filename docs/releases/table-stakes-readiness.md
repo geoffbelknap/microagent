@@ -29,7 +29,7 @@ console=interactive
 | `make smoke-boot` | pass |
 | `make smoke-applevf-network` | pass; `nat`, `isolated`, and Apple VF `--publish` accepted, bridged is entitlement-gated |
 | `make smoke-applevf-publish` | pass; TCP and BusyBox HTTP publish |
-| `MICROAGENT_APPLEVF_BOOT_NETWORK_MODE=isolated scripts/applevf-boot-smoke.sh` | pass |
+| `MICROAGENT_APPLEVF_BOOT_NETWORK_MODE=isolated scripts/dev/applevf-boot-smoke.sh` | pass |
 | `microagent perf boot` | one successful iteration, `1952 ms` |
 | `microagent perf footprint perf-steady-applevf` | `20080 KiB` RSS |
 | `microagent perf steady perf-steady-applevf --duration 5 --interval 1` | min/avg/max `20080/20080/20080 KiB` RSS |
@@ -58,12 +58,12 @@ Validated Linux gates:
 
 | Gate | Result |
 |---|---|
-| `scripts/go-test.sh` | pass |
-| `scripts/firecracker-console-parity-smoke.sh` | pass |
-| `scripts/firecracker-publish-smoke.sh` | pass |
-| `scripts/firecracker-network-mode-smoke.sh` | pass; `nat` boots, `isolated` boots without guest `eth0`, isolated `--publish` fails closed, bridged reports `host-prerequisite-not-configured` without a configured Linux bridge |
-| `scripts/firecracker-workspace-smoke.sh` | pass |
-| `scripts/firecracker-boot-smoke.sh` | pass |
+| `scripts/dev/go-test.sh` | pass |
+| `scripts/dev/firecracker-console-parity-smoke.sh` | pass |
+| `scripts/dev/firecracker-publish-smoke.sh` | pass |
+| `scripts/dev/firecracker-network-mode-smoke.sh` | pass; `nat` boots, `isolated` boots without guest `eth0`, isolated `--publish` fails closed, bridged reports `host-prerequisite-not-configured` without a configured Linux bridge |
+| `scripts/dev/firecracker-workspace-smoke.sh` | pass |
+| `scripts/dev/firecracker-boot-smoke.sh` | pass |
 | `make smoke` | pass |
 
 The Linux handoff helper is intentionally absent from `main`; it was removed

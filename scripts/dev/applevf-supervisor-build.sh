@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUPERVISOR_DIR="$ROOT/supervisors/applevf"
 SUPERVISOR_BIN="$SUPERVISOR_DIR/.build/release/microagent-applevf-supervisor"
 ENTITLEMENTS="$SUPERVISOR_DIR/microagent-applevf-supervisor.entitlements"
