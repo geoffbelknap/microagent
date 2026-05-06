@@ -4,7 +4,7 @@ description: Open the workspace console (Apple VF only).
 ---
 
 ```text
-microagent connect <name> [--send "<line>"] [--state-dir <dir>]
+microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--ready-timeout <seconds>]
 ```
 
 `connect` opens an interactive serial console for a workspace. With `--send`
@@ -19,6 +19,8 @@ in scripts.
 | Flag | Description |
 |---|---|
 | `--send <line>` | Write one line to the console and print new output |
+| `--timeout <seconds>` | Seconds to wait for output after `--send` |
+| `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before `--send`; `0` disables |
 | `--state-dir <dir>` | State directory holding the workspace record |
 
 ## Examples
@@ -35,6 +37,10 @@ Script-friendly:
 microagent connect research --send "cat /etc/os-release"
 microagent connect research --send "cat /workspace/status; uname -m"
 ```
+
+With `--send`, `connect` waits for the console FIFO and, by default, for a
+basic shell prompt before writing. If the guest shell is not ready, it exits
+with an error that points to [`logs`](/cli/logs/).
 
 ## Related
 

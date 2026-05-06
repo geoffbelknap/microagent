@@ -1075,6 +1075,7 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	send := fs.String("send", "", "Write text to the console and exit")
 	timeoutSeconds := fs.Int("timeout", 2, "Seconds to wait for output after --send")
+	readyTimeoutSeconds := fs.Int("ready-timeout", 10, "Seconds to wait for a shell prompt before --send; 0 disables")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -1094,13 +1095,21 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		if *timeoutSeconds < 0 {
 			return fmt.Errorf("connect timeout must not be negative")
 		}
+		if *readyTimeoutSeconds < 0 {
+			return fmt.Errorf("connect ready-timeout must not be negative")
+		}
 		if err := waitForPath(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second); err != nil {
-			return err
+			return fmt.Errorf("console input is not ready for workspace %s: %w", name, err)
+		}
+		if *readyTimeoutSeconds > 0 {
+			if err := waitForConsoleReady(ctx, logPath, time.Duration(*readyTimeoutSeconds)*time.Second); err != nil {
+				return fmt.Errorf("guest shell is not ready for workspace %s: %w; check microagent logs %s", name, err, name)
+			}
 		}
 		before := fileSize(logPath)
 		input, err := openFIFOForWrite(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second)
 		if err != nil {
-			return err
+			return fmt.Errorf("open console input for workspace %s: %w", name, err)
 		}
 		text := *send
 		text = strings.ReplaceAll(text, "\n", "\r")
@@ -1119,11 +1128,11 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		return tailFile(tailCtx, logPath, stdout, before)
 	}
 	if err := waitForPath(ctx, inputPath, 0); err != nil {
-		return err
+		return fmt.Errorf("console input is not ready for workspace %s: %w", name, err)
 	}
 	input, err := openFIFOForWrite(ctx, inputPath, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("open console input for workspace %s: %w", name, err)
 	}
 	defer input.Close()
 	tailCtx, cancel := context.WithCancel(ctx)
@@ -3391,41 +3400,42 @@ func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identi
 
 func reorderFlagArgs(args []string) []string {
 	valueFlags := map[string]bool{
-		"-supervisor":  true,
-		"-json":        true,
-		"-id":          true,
-		"-name":        true,
-		"-image":       true,
-		"-exec":        true,
-		"-entrypoint":  true,
-		"-file":        true,
-		"-env":         true,
-		"-setup":       true,
-		"-request-id":  true,
-		"-role":        true,
-		"-backend":     true,
-		"-kernel":      true,
-		"-rootfs":      true,
-		"-disk":        true,
-		"-bundle":      true,
-		"-debugfs":     true,
-		"-profile":     true,
-		"-state-dir":   true,
-		"-url":         true,
-		"-from":        true,
-		"-sha256":      true,
-		"-out":         true,
-		"-path":        true,
-		"-memory":      true,
-		"-cpus":        true,
-		"-vsock":       true,
-		"-mke2fs":      true,
-		"-guest-init":  true,
-		"-arch":        true,
-		"-size-mib":    true,
-		"-timeout":     true,
-		"-result-port": true,
-		"-send":        true,
+		"-supervisor":    true,
+		"-json":          true,
+		"-id":            true,
+		"-name":          true,
+		"-image":         true,
+		"-exec":          true,
+		"-entrypoint":    true,
+		"-file":          true,
+		"-env":           true,
+		"-setup":         true,
+		"-request-id":    true,
+		"-role":          true,
+		"-backend":       true,
+		"-kernel":        true,
+		"-rootfs":        true,
+		"-disk":          true,
+		"-bundle":        true,
+		"-debugfs":       true,
+		"-profile":       true,
+		"-state-dir":     true,
+		"-url":           true,
+		"-from":          true,
+		"-sha256":        true,
+		"-out":           true,
+		"-path":          true,
+		"-memory":        true,
+		"-cpus":          true,
+		"-vsock":         true,
+		"-mke2fs":        true,
+		"-guest-init":    true,
+		"-arch":          true,
+		"-size-mib":      true,
+		"-timeout":       true,
+		"-ready-timeout": true,
+		"-result-port":   true,
+		"-send":          true,
 	}
 	var flags []string
 	var positional []string

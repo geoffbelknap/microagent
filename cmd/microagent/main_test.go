@@ -1518,6 +1518,34 @@ func TestWorkspaceHasGuestCommand(t *testing.T) {
 	}
 }
 
+func TestConsoleLooksReady(t *testing.T) {
+	tests := []struct {
+		output string
+		want   bool
+	}{
+		{output: "microagent login:", want: true},
+		{output: "root@vm:/# ", want: true},
+		{output: "user@vm:~$ ", want: true},
+		{output: "booting kernel", want: false},
+	}
+	for _, tt := range tests {
+		if got := consoleLooksReady(tt.output); got != tt.want {
+			t.Fatalf("consoleLooksReady(%q) = %v, want %v", tt.output, got, tt.want)
+		}
+	}
+}
+
+func TestWaitForConsoleReadyUsesSerialPrompt(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "serial.log")
+	if err := os.WriteFile(logPath, []byte("boot\n/ # "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForConsoleReady(t.Context(), logPath, time.Second); err != nil {
+		t.Fatalf("waitForConsoleReady: %v", err)
+	}
+}
+
 func TestRunPSListsWorkspaces(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
