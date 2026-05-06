@@ -10,7 +10,7 @@ microagent result <name> [--state-dir <dir>]
 `result` reads the guest result channel for one workspace. It returns the
 machine-readable completion payload separately from serial logs.
 
-With `--json`, the response includes `result` with identity, backend, result
+With the global `--json` flag, the response includes `result` with identity, backend, result
 path, start/completion timestamps, exit code, stdout, stderr, and failure
 error when the guest reported one.
 
@@ -20,12 +20,12 @@ error when the guest reported one.
 |---|---|
 | `--name <name>` | Workspace name (also accepted as positional) |
 | `--state-dir <dir>` | State directory holding the workspace record |
-| `--json` | Print structured JSON output |
+| `--json` | Global flag before `result`; print structured JSON output |
 
 ## Example
 
 ```bash
-microagent result research --json
+microagent --json result research
 ```
 
 ## Related

@@ -16,7 +16,7 @@ recorded by the backend supervisor.
 ## Example
 
 ```bash
-microagent network research --json
+microagent --json network research
 ```
 
 ```json

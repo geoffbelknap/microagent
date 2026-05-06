@@ -71,8 +71,8 @@ microagent images list
 microagent images tag sha256:abc local/ubuntu:baseline
 microagent images rm local/ubuntu:baseline
 microagent create research --image local/ubuntu:baseline
-microagent images prune --json
-microagent images prune --delete --json
+microagent --json images prune
+microagent --json images prune --delete
 ```
 
 ## Related

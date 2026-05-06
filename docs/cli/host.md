@@ -19,7 +19,7 @@ vsock support, and console mode. It uses the same probes as
 | `--backend <name>` | Backend override (`apple-vf` or `firecracker`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the active backend supervisor path |
-| `--json` | Print structured JSON output |
+| `--json` | Global flag before `host`; print structured JSON output |
 
 ## Console Modes
 
@@ -36,7 +36,7 @@ runtime console input endpoint.
 
 ```bash
 microagent host
-microagent host --json
+microagent --json host
 ```
 
 ## Related

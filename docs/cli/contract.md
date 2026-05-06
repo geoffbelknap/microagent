@@ -4,7 +4,7 @@ description: Print the backend-neutral agent runtime contract.
 ---
 
 ```text
-microagent contract [--json]
+microagent [--json] contract
 ```
 
 `contract` reports the runtime semantics that Firecracker and Apple VF must
@@ -17,7 +17,7 @@ tests.
 ## Example
 
 ```bash
-microagent contract --json
+microagent --json contract
 ```
 
 ## Related

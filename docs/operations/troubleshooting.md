@@ -52,6 +52,9 @@ microagent create \
   --json request.json
 ```
 
+Here `create --json <path>` reads request JSON. For structured command output,
+place the global output flag before the subcommand.
+
 Use `make signed-supervisor` to produce an ad-hoc-signed build.
 
 ### Default kernel missing
@@ -65,5 +68,6 @@ Use `make signed-supervisor` to produce an ad-hoc-signed build.
 
 ### Need structured output
 
-Every command supports `--json` (or `MICROAGENT_OUTPUT=json`). Scripts should
+Every command supports the global `--json` flag before the subcommand (or
+`MICROAGENT_OUTPUT=json`). Scripts should
 consume JSON; the [supervisor protocol](/protocol/) describes the shape.

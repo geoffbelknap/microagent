@@ -8,7 +8,7 @@ the local Apple VF validation pass. The final validated revision was:
 
 ```text
 branch=main
-sha=fa860de4b06948a77809c4a757ec74dc52ace4d8
+sha=6a2a433a25824903a0d6b541d55f752d48bf0f5c
 ```
 
 ## Apple VF Host
@@ -47,7 +47,7 @@ Firecracker Linux parity was validated separately from
 
 ```text
 distro=Ubuntu 24.04.4 LTS
-kernel=6.8.0-110-generic
+kernel=6.8.0-111-generic
 arch=x86_64
 /dev/kvm=present
 /dev/vhost-vsock=present
@@ -65,6 +65,7 @@ Validated Linux gates:
 | `scripts/dev/firecracker-workspace-smoke.sh` | pass |
 | `scripts/dev/firecracker-boot-smoke.sh` | pass |
 | `make smoke` | pass |
+| `make smoke-rootfs` | pass |
 
 The Linux handoff helper is intentionally absent from `main`; it was removed
 from the public repository in `ba9b4a1`.
@@ -91,6 +92,10 @@ Recorded Firecracker performance:
 | Image management | pull, tag, list, remove, prune, OCI rootfs build, templates | same CLI surface | Ready |
 | Declarative spec | `microagent.yaml` covers image, resources, restart, network intent, mounts, setup, publish declarations | same parsing and validation | Ready |
 | Measured performance | local boot, footprint, steady numbers recorded | Linux boot, footprint, steady numbers recorded | Ready |
+| Quarantine | live supervisor closes host-side network, vsock, mediation, publish, and serial input paths while preserving state | VM PID is preserved while host-side publish, vsock, mediation, and transient network paths are severed | Ready |
+| Runtime verification | image digest plus kernel, rootfs, and injected init hash records surfaced in status | same status shape and divergence reporting | Ready |
+| Structured runtime surface | lifecycle events, readiness, result, and artifact declarations in JSON responses | same response fields and contract | Ready |
+| Halt/restart | clean disk-state restart; no memory pause/resume semantics | same disk-state restart semantics | Ready |
 
 ## Post-Release Follow-Ups
 

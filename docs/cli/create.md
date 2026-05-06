@@ -41,7 +41,7 @@ first.
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the active backend supervisor path |
 | `--dry-run` | Validate config without creating |
-| `--json <path\|->` | Read a [request JSON](/protocol/applevf/) from a file or stdin |
+| `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
 
 ## Examples
 
@@ -164,6 +164,13 @@ Use request JSON:
 
 ```bash
 microagent create --json request.json
+```
+
+For JSON output from the create command, put the global flag before the
+subcommand:
+
+```bash
+microagent --json create research --image docker.io/library/ubuntu:24.04
 ```
 
 ## Related

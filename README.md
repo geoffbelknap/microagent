@@ -88,7 +88,7 @@ Check state, read the boot log, and remove the workspace:
 microagent host
 microagent ps
 microagent profiles
-microagent status --name research
+microagent --json status --name research
 microagent logs research
 microagent stop research
 microagent delete research
@@ -114,7 +114,7 @@ Status JSON also reports `guestReady`, `shellReady`, and `resultReady` so
 callers can sequence work without polling serial logs or guessing from files.
 Declare the mediation channel with `--mediation port=host:port`; it is recorded
 as a required fail-closed vsock contract and reported in readiness/status.
-Use `microagent result <name> --json` to read the structured completion payload
+Use `microagent --json result <name>` to read the structured completion payload
 without scraping logs.
 Declare output artifacts with `--output name=/guest/path`; status/result JSON
 then reports them under `artifacts.egress`.
@@ -260,7 +260,7 @@ microagent ps
 Show workspace state:
 
 ```bash
-microagent status --name research
+microagent --json status --name research
 ```
 
 Show boot logs:
@@ -317,6 +317,10 @@ Use request JSON:
 microagent create --json request.json
 ```
 
+This `create --json <path>` form reads request JSON. For structured command
+output, place the global output flag before the command, for example
+`microagent --json status research`.
+
 Request JSON:
 
 ```json
@@ -337,7 +341,8 @@ Request JSON:
 }
 ```
 
-Use `--json` when scripts need structured output.
+Place `--json` before the command when scripts need structured output, for
+example `microagent --json status research`.
 
 Delete state:
 

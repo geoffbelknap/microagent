@@ -3,7 +3,7 @@ title: Runtime parity contract
 description: Backend-neutral agent runtime semantics shared by Firecracker and Apple VF.
 ---
 
-`microagent contract --json` is the machine-readable source for the shared
+`microagent --json contract` is the machine-readable source for the shared
 runtime contract. It exists so agent-runtime builders can depend on one set of
 semantics across Firecracker and Apple VF.
 
@@ -44,7 +44,7 @@ must be halted, stopped, or killed before `start` boots it again from disk.
 ## Contract Command
 
 ```bash
-microagent contract --json
+microagent --json contract
 ```
 
 The output is versioned as `agent-runtime.v1`. Consumers should use the JSON
