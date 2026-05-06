@@ -24,10 +24,8 @@ control-plane decisions stay outside this project.
 - [Getting started](getting-started/install.md) — install, first VM, named
   workspaces.
 - [Concepts](concepts/architecture.md) — architecture, backends, boundaries,
-  state and identity.
+  networking, state and identity.
 - [CLI reference](cli/index.md) — every subcommand.
 - [Protocol](protocol/index.md) — shared supervisor protocol and backend notes.
 - [Library](library/go.md) — exported Go package surface.
-- [Operations](operations/smoke-tests.md) — release process, smoke tests,
-  troubleshooting.
 - [Security](security.md) — trust boundary and reporting.

@@ -28,7 +28,8 @@ executable supervisor-shaped request/response boundary.
   running. Use `stop` or `kill` first.
 - Supports interactive `connect` and `connect --send`. Use
   [`logs`](/cli/logs/) when you only need captured serial output.
-- Default kernel SHA is pinned. See [Smoke tests](/operations/smoke-tests/).
+- Default kernel SHA is pinned and checked by the smoke targets in the root
+  `Makefile`.
 
 ## Apple VF (macOS)
 
