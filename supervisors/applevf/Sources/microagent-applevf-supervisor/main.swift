@@ -21,6 +21,7 @@ enum VMState: String, Codable {
     case running
     case stopped
     case halted
+    case quarantined
     case failed
 }
 
@@ -40,8 +41,17 @@ struct Config: Codable {
     var cpuCount: Int?
     var disks: [Disk]?
     var vsockListeners: [VsockListener]?
+    var mediation: MediationConfig?
     var network: NetworkConfig?
     var serialInput: Bool?
+}
+
+struct MediationConfig: Codable {
+    var enabled: Bool
+    var required: Bool
+    var port: UInt32?
+    var target: String?
+    var failClosed: Bool
 }
 
 struct NetworkConfig: Codable {
@@ -103,12 +113,60 @@ struct HostSupport: Codable {
     var consoleMode: String?
 }
 
+struct ReadinessSignal: Codable {
+    var ready: Bool? = nil
+    var observedAt: Date? = nil
+    var detail: String? = nil
+    var error: String? = nil
+}
+
+struct RuntimeReadiness: Codable {
+    var guestReady: ReadinessSignal
+    var shellReady: ReadinessSignal
+    var resultReady: ReadinessSignal
+    var mediationReady: ReadinessSignal
+}
+
+struct RuntimeResult: Codable {
+    var identity: Identity
+    var backend: String?
+    var resultPath: String?
+    var startedAt: String?
+    var completedAt: String?
+    var exitCode: Int
+    var stdout: String?
+    var stderr: String?
+    var error: String?
+}
+
+struct GuestResult: Codable {
+    var startedAt: String?
+    var exitedAt: String?
+    var exitCode: Int
+    var stdout: String?
+    var stderr: String?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case startedAt = "started_at"
+        case exitedAt = "exited_at"
+        case exitCode = "exit_code"
+        case stdout
+        case stderr
+        case error
+    }
+}
+
 struct Response: Codable {
     var ok: Bool
-    var backend: String?
-    var event: Event?
-    var host: HostSupport?
-    var error: String?
+    var backend: String? = nil
+    var event: Event? = nil
+    var host: HostSupport? = nil
+    var readiness: RuntimeReadiness? = nil
+    var result: RuntimeResult? = nil
+    var mediation: MediationConfig? = nil
+    var network: NetworkConfig? = nil
+    var error: String? = nil
 }
 
 let backendName = "apple-vf"
@@ -133,6 +191,7 @@ struct RuntimeState: Codable {
     var serialInputPath: String?
     var startedAt: Date?
     var updatedAt: Date
+    var readiness: RuntimeReadiness?
     var error: String?
 }
 
@@ -183,10 +242,12 @@ func handle(_ request: Request) throws -> Response {
         let config = try validatedConfig(request.config)
         let event = Event(identity: identity, state: .prepared, detail: nil, observedAt: Date())
         try writeState(event: event, config: config)
-        return Response(ok: true, backend: backendName, event: event)
+        try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
+        return response(event: event, config: config, error: nil)
     case "start":
         let identity = try validatedIdentity(request.identity)
         let config = try validatedConfig(request.config)
+        try ensureCanStart(identity: identity, stateDir: config.stateDir)
         let support = hostSupport()
         guard support.frameworkAvailable && support.virtualizationSupported else {
             return Response(ok: false, backend: backendName, error: "Apple Virtualization is not available on this host")
@@ -209,7 +270,7 @@ func handle(_ request: Request) throws -> Response {
         process.standardError = supervisorLog
         try process.run()
         try writeRuntimeState(event: event, config: config, pid: process.processIdentifier, error: nil)
-        return Response(ok: true, backend: backendName, event: event)
+        return response(event: event, config: config, error: nil)
     case "inspect":
         let identity = try validatedIdentity(request.identity)
         let config = try stateConfig(request.config)
@@ -217,18 +278,22 @@ func handle(_ request: Request) throws -> Response {
         if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), !processAlive(runtime.pid), event.state == .starting || event.state == .running {
             event = Event(identity: event.identity, state: .stopped, detail: event.detail, observedAt: Date())
             try writeState(event: event, config: runtime.config)
-            try writeRuntimeState(event: event, config: runtime.config, pid: runtime.pid, error: runtime.error)
+            try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: runtime.error)
         }
-        return Response(ok: true, backend: backendName, event: event)
+        let runtimeConfig = try readRuntimeState(identity: identity, stateDir: config.stateDir)?.config ?? config
+        return response(event: event, config: runtimeConfig, error: nil)
     case "stop":
         return try stateOnly(request, state: .stopped, detail: nil)
     case "halt":
         return try stateOnly(request, state: .halted, detail: nil)
+    case "quarantine":
+        return try stateOnly(request, state: .quarantined, detail: "host-side network and mediation severed")
     case "kill":
         return try stateOnly(request, state: .stopped, detail: "forced")
     case "delete":
         let identity = try validatedIdentity(request.identity)
         let config = try stateConfig(request.config)
+        try ensureCanDelete(identity: identity, stateDir: config.stateDir)
         let dir = runtimeDirectory(identity: identity, stateDir: config.stateDir)
         if FileManager.default.fileExists(atPath: dir.path) {
             try FileManager.default.removeItem(at: dir)
@@ -244,16 +309,18 @@ func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Re
     let config = try stateConfig(request.config)
     let event = Event(identity: identity, state: state, detail: detail, observedAt: Date())
     if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), processAlive(runtime.pid), let pid = runtime.pid {
-        let signal = detail == "forced" ? SIGKILL : SIGTERM
+        let signal = detail == "forced" || state == .quarantined ? SIGKILL : SIGTERM
         if kill(pid, signal) != 0 && errno != ESRCH {
             throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
         }
         try writeState(event: event, config: runtime.config)
-        try writeRuntimeState(event: event, config: runtime.config, pid: runtime.pid, error: nil)
+        try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: nil)
+        return response(event: event, config: runtime.config, error: nil)
     } else {
         try writeState(event: event, config: config)
+        try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
+        return response(event: event, config: config, error: nil)
     }
-    return Response(ok: true, backend: backendName, event: event)
 }
 
 func validatedIdentity(_ identity: Identity?) throws -> Identity {
@@ -331,9 +398,25 @@ func validatedConfig(_ config: Config?) throws -> Config {
         }
     }
     try validateNetworkConfig(config.network)
+    try validateMediationConfig(config.mediation)
     try readableFile(config.kernelPath, name: "config.kernelPath")
     try readableFile(config.rootfsPath, name: "config.rootfsPath")
     return config
+}
+
+func validateMediationConfig(_ mediation: MediationConfig?) throws {
+    guard let mediation, mediation.enabled else {
+        return
+    }
+    if mediation.required && !mediation.failClosed {
+        throw ProtocolError.invalid("required mediation must set failClosed=true")
+    }
+    if mediation.port == nil || mediation.port == 0 {
+        throw ProtocolError.invalid("mediation.port is required when mediation is enabled")
+    }
+    if (mediation.target ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        throw ProtocolError.invalid("mediation.target is required when mediation is enabled")
+    }
 }
 
 func validateNetworkConfig(_ network: NetworkConfig?) throws {
@@ -383,6 +466,29 @@ func stateConfig(_ config: Config?) throws -> Config {
         throw ProtocolError.invalid("config.stateDir is required")
     }
     return config
+}
+
+func ensureCanStart(identity: Identity, stateDir: String) throws {
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: stateDir) else {
+        return
+    }
+    switch runtime.event.state {
+    case .unknown, .prepared, .halted, .stopped, .failed:
+        return
+    case .quarantined:
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is quarantined; halt, stop, or kill it before start")
+    case .starting, .running:
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is already \(runtime.event.state.rawValue)")
+    }
+}
+
+func ensureCanDelete(identity: Identity, stateDir: String) throws {
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: stateDir) else {
+        return
+    }
+    if processAlive(runtime.pid) {
+        throw ProtocolError.invalid("apple-vf workspace \(identity.runtimeID) is running; stop or kill it before delete")
+    }
 }
 
 func hostSupport() -> HostSupport {
@@ -438,6 +544,84 @@ func supervisorLogPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(supervisorLogFileName)
 }
 
+func resultPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("result.json")
+}
+
+func response(event: Event, config: Config, error: String?) -> Response {
+    var response = Response(
+        ok: event.state != .failed,
+        backend: backendName,
+        event: event,
+        host: nil,
+        readiness: readiness(event: event, config: config),
+        result: try? readRuntimeResult(identity: event.identity, stateDir: config.stateDir),
+        mediation: config.mediation,
+        network: config.network,
+        error: error
+    )
+    if let error, !error.isEmpty {
+        response.ok = false
+    }
+    return response
+}
+
+func readiness(event: Event, config: Config) -> RuntimeReadiness {
+    var readiness = RuntimeReadiness(
+        guestReady: ReadinessSignal(),
+        shellReady: ReadinessSignal(),
+        resultReady: ReadinessSignal(),
+        mediationReady: ReadinessSignal()
+    )
+    if event.state == .running || event.state == .halted || event.state == .stopped || event.state == .quarantined {
+        readiness.guestReady = ReadinessSignal(ready: true, observedAt: event.observedAt, detail: "workspace reached runtime state \(event.state.rawValue)", error: nil)
+    }
+    if event.state == .running, config.serialInput == true {
+        let path = serialInputPath(identity: event.identity, stateDir: config.stateDir)
+        if FileManager.default.fileExists(atPath: path.path) {
+            readiness.shellReady = ReadinessSignal(ready: true, observedAt: fileModTime(path), detail: "console input is available", error: nil)
+        }
+    }
+    let path = resultPath(identity: event.identity, stateDir: config.stateDir)
+    if FileManager.default.fileExists(atPath: path.path) {
+        readiness.resultReady = ReadinessSignal(ready: true, observedAt: fileModTime(path), detail: "guest result is available", error: nil)
+    }
+    if let mediation = config.mediation, mediation.enabled {
+        let ready = event.state == .running
+        readiness.mediationReady = ReadinessSignal(
+            ready: ready,
+            observedAt: event.observedAt,
+            detail: "mediation required=\(mediation.required) failClosed=\(mediation.failClosed) port=\(mediation.port ?? 0) target=\(mediation.target ?? "")",
+            error: !ready && mediation.required ? "required mediation is not ready" : nil
+        )
+    }
+    return readiness
+}
+
+func readRuntimeResult(identity: Identity, stateDir: String) throws -> RuntimeResult {
+    let path = resultPath(identity: identity, stateDir: stateDir)
+    let guest = try decoder.decode(GuestResult.self, from: Data(contentsOf: path))
+    return RuntimeResult(
+        identity: identity,
+        backend: backendName,
+        resultPath: path.path,
+        startedAt: guest.startedAt,
+        completedAt: guest.exitedAt,
+        exitCode: guest.exitCode,
+        stdout: guest.stdout,
+        stderr: guest.stderr,
+        error: guest.error
+    )
+}
+
+func fileModTime(_ url: URL) -> Date? {
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+          let modified = attributes[.modificationDate] as? Date else {
+        return nil
+    }
+    return modified
+}
+
 func writeState(event: Event, config: Config) throws {
     let directory = runtimeDirectory(identity: event.identity, stateDir: config.stateDir)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -460,14 +644,17 @@ func appendEvent(event: Event, stateDir: String) throws {
 }
 
 func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?) throws {
+    let previous = try? readRuntimeState(identity: event.identity, stateDir: config.stateDir)
+    let startedAt = event.state == .starting || event.state == .running ? Date() : previous?.startedAt
     let runtime = RuntimeState(
         event: event,
         config: config,
         pid: pid,
         serialLogPath: serialLogPath(identity: event.identity, stateDir: config.stateDir).path,
         serialInputPath: serialInputPath(identity: event.identity, stateDir: config.stateDir).path,
-        startedAt: event.state == .starting || event.state == .running ? Date() : nil,
+        startedAt: startedAt,
         updatedAt: Date(),
+        readiness: readiness(event: event, config: config),
         error: error
     )
     try encoder.encode(runtime).write(to: runtimePath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
