@@ -15,6 +15,12 @@ host-side port-forwarding, removes transient network devices, and unlinks the
 workspace vsock socket so mediation and other host-side vsock paths fail
 closed for new connections.
 
+On Apple VF, quarantine sends a control signal to the live supervisor process.
+The supervisor detaches Virtualization.framework network attachments, removes
+host-side vsock listeners including mediation, closes published TCP listeners,
+and removes the serial input FIFO. The VM process remains alive, and the
+recorded runtime PID is preserved in state.
+
 ## Flags
 
 | Flag | Description |

@@ -161,20 +161,68 @@ if result.get("backend") != "apple-vf" or result.get("exitCode") != 0 or result.
     raise SystemExit(body)
 PY
 
+ACK="$STATE_DIR/agent-smoke/quarantine.ack.json"
+(
+  trap 'printf "{\"ok\":true}\n" > "$ACK"' USR1
+  trap 'exit 0' TERM
+  while true; do sleep 1; done
+) &
+fake_pid="$!"
+trap 'kill "$fake_pid" 2>/dev/null || true; cleanup' EXIT
+python3 - "$STATE_DIR/agent-smoke" "$fake_pid" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+runtime_dir, pid = sys.argv[1], int(sys.argv[2])
+with open(os.path.join(runtime_dir, "config.json"), "r", encoding="utf-8") as handle:
+    config = json.load(handle)
+with open(os.path.join(runtime_dir, "event.json"), "r", encoding="utf-8") as handle:
+    event = json.load(handle)
+event["state"] = "running"
+event["detail"] = "serial=" + os.path.join(runtime_dir, "serial.log")
+event["observedAt"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+runtime = {
+    "event": event,
+    "config": config,
+    "pid": pid,
+    "serialLogPath": os.path.join(runtime_dir, "serial.log"),
+    "serialInputPath": os.path.join(runtime_dir, "serial.in"),
+    "startedAt": event["observedAt"],
+    "updatedAt": event["observedAt"],
+}
+with open(os.path.join(runtime_dir, "event.json"), "w", encoding="utf-8") as handle:
+    json.dump(event, handle)
+    handle.write("\n")
+with open(os.path.join(runtime_dir, "runtime.json"), "w", encoding="utf-8") as handle:
+    json.dump(runtime, handle)
+    handle.write("\n")
+PY
+
 quarantine_response="$(request_state_only quarantine | "$SUPERVISOR")"
 assert_response "$quarantine_response" true quarantined
-python3 - "$quarantine_response" "$STATE_DIR/agent-smoke/events.json" <<'PY'
+python3 - "$quarantine_response" "$STATE_DIR/agent-smoke/events.json" "$STATE_DIR/agent-smoke/runtime.json" "$fake_pid" <<'PY'
 import json
+import os
 import sys
 
 body = json.loads(sys.argv[1])
-if ((body.get("event") or {}).get("detail")) != "host-side network and mediation severed":
+if ((body.get("event") or {}).get("detail")) != "host-side network, mediation, and serial input severed":
     raise SystemExit(body)
 with open(sys.argv[2], "r", encoding="utf-8") as handle:
     states = [event["state"] for event in json.load(handle)]
 for expected in ("prepared", "quarantined"):
     if expected not in states:
         raise SystemExit(states)
+with open(sys.argv[3], "r", encoding="utf-8") as handle:
+    runtime = json.load(handle)
+if runtime.get("pid") != int(sys.argv[4]):
+    raise SystemExit(runtime)
+try:
+    os.kill(int(sys.argv[4]), 0)
+except ProcessLookupError:
+    raise SystemExit("quarantine stopped the runtime process")
 PY
 
 if start_quarantined_response="$(request start | "$SUPERVISOR" 2>/dev/null)"; then
@@ -193,6 +241,7 @@ PY
 
 halt_response="$(request_state_only halt | "$SUPERVISOR")"
 assert_response "$halt_response" true halted
+wait "$fake_pid" 2>/dev/null || true
 
 stop_response="$(request_state_only stop | "$SUPERVISOR")"
 assert_response "$stop_response" true stopped
