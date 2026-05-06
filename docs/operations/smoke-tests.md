@@ -13,7 +13,8 @@ the host: Firecracker on Linux, Apple VF on macOS.
 | `make smoke` | Default per-host smoke suite |
 | `make smoke-rootfs` | OCI image to ext4 rootfs conversion |
 | `make smoke-firecracker` | Linux KVM Firecracker boot |
-| `make smoke-firecracker-console` | Linux KVM Firecracker console parity gate |
+| `make smoke-firecracker-console` | Linux KVM Firecracker console parity |
+| `make smoke-firecracker-publish` | Linux KVM Firecracker TCP publish |
 | `make smoke-workspace` | HostOS workspace lifecycle |
 | `make smoke-boot` | Boot a Linux VM end-to-end (Apple VF) |
 
@@ -59,16 +60,24 @@ non-KVM check is:
 make check-kernel-config-amd64
 ```
 
-## Firecracker console parity gate
+## Firecracker console parity smoke
 
 ```bash
 make smoke-firecracker-console
 ```
 
-This is a Linux amd64 KVM target for the remaining Firecracker console parity
-work. It is intentionally not included in `make smoke` yet. Until Firecracker
-serial input support is implemented, the target fails with the exact console
-contract that must pass before parity is considered complete.
+This Linux amd64 KVM target verifies that `microagent connect` reaches a
+running Firecracker guest shell, `Ctrl-]` detaches without stopping the
+workspace, and serial output remains available through `microagent logs`.
+
+## Firecracker publish smoke
+
+```bash
+make smoke-firecracker-publish
+```
+
+This Linux amd64 KVM target verifies that `--publish` forwards a host TCP
+listener into a running Firecracker workspace.
 
 ## Apple VF boot smoke
 

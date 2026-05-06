@@ -101,8 +101,8 @@ smoke tests, not as a user-facing backend selector.
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
 `status`, `stop`, `kill`, and `delete`. Backend supervisors record state files
 and emit lifecycle events. Firecracker records process IDs so `stop` can send a
-graceful signal and `kill` can send a hard kill. Firecracker does not support
-interactive `connect`; use `logs` for serial output.
+graceful signal and `kill` can send a hard kill. Both backends support
+interactive `connect`; `logs` remains available for captured serial output.
 
 ## Build
 
@@ -248,8 +248,8 @@ Open its console:
 microagent connect research
 ```
 
-`connect` is supported by Apple VF. Firecracker workspaces currently expose
-serial output through `logs`.
+`connect` is supported by Apple VF and Firecracker. Press `Ctrl-]` to detach
+from an interactive console without stopping the workspace.
 
 For scripts, send one line and print any new console output:
 

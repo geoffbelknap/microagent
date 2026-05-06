@@ -17,6 +17,8 @@ ifeq ($(UNAME_S),Darwin)
 	scripts/applevf-workspace-connect-smoke.sh
 else ifeq ($(UNAME_S),Linux)
 	scripts/firecracker-workspace-smoke.sh
+	scripts/firecracker-console-parity-smoke.sh
+	scripts/firecracker-publish-smoke.sh
 	scripts/firecracker-boot-smoke.sh
 else
 	@echo "smoke is not supported on $(UNAME_S)" >&2
