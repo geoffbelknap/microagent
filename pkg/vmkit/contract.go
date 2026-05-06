@@ -44,7 +44,7 @@ func NewRuntimeContract() RuntimeContract {
 		Backends: []string{BackendAppleVF, BackendFirecracker},
 		Commands: []ContractItem{
 			{Name: "prepare", Description: "write backend state/config without booting"},
-			{Name: "start", Description: "start a prepared or halted workspace with preserved disk state"},
+			{Name: "start", Description: "start a prepared, halted, stopped, or failed workspace with preserved disk state; quarantined workspaces must be halted, stopped, or killed first"},
 			{Name: "run", Description: "start in foreground and report structured lifecycle state"},
 			{Name: "inspect", Description: "read latest structured state"},
 			{Name: "halt", Description: "clean disk-preserving shutdown; memory state is not preserved"},

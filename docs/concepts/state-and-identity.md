@@ -96,6 +96,9 @@ States cover the full lifecycle: `unknown`, `prepared`, `starting`, `running`,
 the workspace was cleanly stopped with disk state and identity preserved for a
 later `start`. `quarantined` means host-side network, mediation, and side
 effect paths were severed while preserving disk state and event history.
+`start` is disk-state resume from `prepared`, `halted`, `stopped`, or
+`failed`; `quarantined` must be explicitly halted, stopped, or killed before it
+can be started again.
 Commands such as `kill` and `delete` still return lifecycle events, usually
 with state `stopped` and a `detail` field. Callers should treat these strings as
 the authoritative source of truth, not log scraping.

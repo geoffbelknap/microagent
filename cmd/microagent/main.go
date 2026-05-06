@@ -1839,6 +1839,9 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	if err := ensureWorkspaceCanStart(opts.StateDir, opts.Name); err != nil {
+		return err
+	}
 	if !opts.KernelExplicit {
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
@@ -1912,6 +1915,44 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		return encodeErr
 	}
 	return err
+}
+
+func ensureWorkspaceCanStart(stateDir, name string) error {
+	state, pid, err := latestWorkspaceStartState(stateDir, name)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case "", vmkit.StateUnknown, vmkit.StatePrepared, vmkit.StateHalted, vmkit.StateStopped, vmkit.StateFailed:
+		return nil
+	case vmkit.StateQuarantined:
+		if pid > 0 {
+			return fmt.Errorf("workspace %s is quarantined with preserved pid %d; halt, stop, or kill it before start", name, pid)
+		}
+		return fmt.Errorf("workspace %s is quarantined; halt, stop, or kill it before start", name)
+	case vmkit.StateStarting, vmkit.StateRunning:
+		return fmt.Errorf("workspace %s is already %s", name, state)
+	default:
+		return fmt.Errorf("workspace %s cannot start from state %s", name, state)
+	}
+}
+
+func latestWorkspaceStartState(stateDir, name string) (vmkit.VMState, int, error) {
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: stateDir, Name: name})
+	if err == nil {
+		return state.Event.State, state.PID, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", 0, err
+	}
+	event, eventErr := readWorkspaceEvent(workspaceOptions{StateDir: stateDir, Name: name})
+	if eventErr == nil {
+		return event.State, 0, nil
+	}
+	if os.IsNotExist(eventErr) {
+		return "", 0, nil
+	}
+	return "", 0, eventErr
 }
 
 type superviseOptions struct {

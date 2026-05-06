@@ -29,12 +29,17 @@ Virtualization.framework process state. Public output remains the same:
 structured requests, responses, state events, readiness, results, artifact
 declarations, mediation declaration, and verification.
 
+`start` is disk-state resume. It may boot from `prepared`, `halted`,
+`stopped`, or `failed`; it must reject `starting` and `running`.
+
 `halt` is a clean disk-preserving shutdown. It is not memory pause/resume.
 
 `quarantine` preserves disk state and event history while severing host-side
 network, mediation, and side-effect paths. Firecracker can preserve the VM
 process PID while severing those host-side paths; another backend may use
 different mechanics, but the public state remains `quarantined`.
+Consumers must not treat `quarantined` as a normal stopped state. The workspace
+must be halted, stopped, or killed before `start` boots it again from disk.
 
 ## Contract Command
 

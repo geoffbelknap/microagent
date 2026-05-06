@@ -10,6 +10,14 @@ microagent start <name> [--state-dir <dir>]
 `start` boots a workspace that was previously created. The workspace must
 exist in the state directory (default `~/.microagent/`).
 
+Start is disk-state resume, not memory resume. It boots from the persisted
+workspace disk after `prepared`, `halted`, `stopped`, or `failed`. It rejects
+workspaces that are already `starting` or `running`.
+
+`quarantined` is intentionally distinct: host-side network, mediation, and
+side-effect paths were severed while the runtime may still exist. Run `halt`,
+`stop`, or `kill` first, then `start` from the preserved disk state.
+
 ## Flags
 
 | Flag | Description |

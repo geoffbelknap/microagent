@@ -1808,6 +1808,104 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": T
 	}
 }
 
+func TestStartRejectsQuarantinedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: kernelPath,
+			RootfsPath: filepath.Join(dir, "workspaces", "research", "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateQuarantined, 4242, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{
+		"start",
+		"research",
+		"--state-dir", dir,
+		"--backend", vmkit.BackendFirecracker,
+		"--kernel", kernelPath,
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "is quarantined with preserved pid 4242") {
+		t.Fatalf("err = %v, want quarantined start rejection", err)
+	}
+}
+
+func TestStartRejectsRunningWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendAppleVF,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureWorkspaceCanStart(dir, "research"); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("err = %v, want running start rejection", err)
+	}
+}
+
 func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
