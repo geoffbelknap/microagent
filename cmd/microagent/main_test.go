@@ -1071,6 +1071,36 @@ func TestSummarizePerfIterations(t *testing.T) {
 	}
 }
 
+func TestParseRSSKiB(t *testing.T) {
+	rss, err := parseRSSKiB([]byte("  12345\n"))
+	if err != nil {
+		t.Fatalf("parseRSSKiB: %v", err)
+	}
+	if rss != 12345 {
+		t.Fatalf("rss = %d", rss)
+	}
+	if _, err := parseRSSKiB([]byte("")); err == nil {
+		t.Fatal("parseRSSKiB accepted empty ps output")
+	}
+}
+
+func TestRunPerfFootprintRequiresRunningPID(t *testing.T) {
+	dir := t.TempDir()
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
+	stdoutPath := filepath.Join(dir, "footprint.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerfFootprint([]string{"research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "does not have a running process pid") {
+		t.Fatalf("runPerfFootprint err = %v", err)
+	}
+}
+
 func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })

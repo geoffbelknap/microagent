@@ -909,6 +909,15 @@ type perfSummary struct {
 	MaxMs int64 `json:"max_ms"`
 }
 
+type perfFootprintReport struct {
+	Benchmark string `json:"benchmark"`
+	Workspace string `json:"workspace"`
+	Backend   string `json:"backend"`
+	PID       int    `json:"pid"`
+	RSSKiB    int64  `json:"rss_kib"`
+	State     string `json:"state"`
+}
+
 var resourceProfiles = []resourceProfile{
 	{
 		Name:        "tiny",
@@ -1164,6 +1173,8 @@ func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 	switch args[0] {
 	case "boot":
 		return runPerfBoot(ctx, args[1:], stdout)
+	case "footprint":
+		return runPerfFootprint(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown perf command: %s", args[0])
 	}
@@ -1300,6 +1311,83 @@ func writePerfReport(stdout *os.File, report perfReport) error {
 		}
 		fmt.Fprintln(stdout)
 	}
+	return nil
+}
+
+func runPerfFootprint(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("perf footprint", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent perf footprint <name> [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name})
+	if err != nil {
+		return err
+	}
+	if state.PID <= 0 {
+		return fmt.Errorf("workspace %s does not have a running process pid", name)
+	}
+	rssKiB, err := processRSSKiB(state.PID)
+	if err != nil {
+		return err
+	}
+	report := perfFootprintReport{
+		Benchmark: "footprint",
+		Workspace: name,
+		Backend:   state.Event.Identity.Backend,
+		PID:       state.PID,
+		RSSKiB:    rssKiB,
+		State:     string(state.Event.State),
+	}
+	return writePerfFootprintReport(stdout, report)
+}
+
+func processRSSKiB(pid int) (int64, error) {
+	if pid <= 0 {
+		return 0, fmt.Errorf("pid must be positive")
+	}
+	output, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0, fmt.Errorf("inspect pid %d rss: %w", pid, err)
+	}
+	return parseRSSKiB(output)
+}
+
+func parseRSSKiB(output []byte) (int64, error) {
+	text := strings.TrimSpace(string(output))
+	if text == "" {
+		return 0, fmt.Errorf("process rss is unavailable")
+	}
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return 0, fmt.Errorf("process rss is unavailable")
+	}
+	rssKiB, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil || rssKiB < 0 {
+		return 0, fmt.Errorf("process rss is invalid: %q", fields[0])
+	}
+	return rssKiB, nil
+}
+
+func writePerfFootprintReport(stdout *os.File, report perfFootprintReport) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, report)
+	}
+	fmt.Fprintf(stdout, "Benchmark: %s\n", report.Benchmark)
+	fmt.Fprintf(stdout, "Workspace: %s\n", report.Workspace)
+	fmt.Fprintf(stdout, "Backend: %s\n", report.Backend)
+	fmt.Fprintf(stdout, "State: %s\n", report.State)
+	fmt.Fprintf(stdout, "PID: %d\n", report.PID)
+	fmt.Fprintf(stdout, "RSS KiB: %d\n", report.RSSKiB)
 	return nil
 }
 
@@ -4856,6 +4944,7 @@ Measure workspace performance.
 
 Commands:
   boot                 Measure disposable workspace boot time
+  footprint            Report host process RSS for a running workspace
 
 Boot options:
   -image <ref>          OCI image; defaults to the small BusyBox baseline
@@ -4866,6 +4955,9 @@ Boot options:
   -timeout <seconds>    Per-iteration timeout
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
+
+Footprint options:
+  -state-dir <dir>      State directory
 `)
 }
 

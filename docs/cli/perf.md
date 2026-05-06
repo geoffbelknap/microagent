@@ -5,17 +5,20 @@ description: Measure workspace performance.
 
 ```text
 microagent perf boot [flags]
+microagent perf footprint <name> [flags]
 ```
 
 `perf` runs repeatable local measurements and reports structured results. The
-first benchmark is `boot`, which creates disposable workspaces, waits for a
-guest command to complete, and reports per-iteration duration plus min/avg/max.
+`boot` creates disposable workspaces, waits for a guest command to complete,
+and reports per-iteration duration plus min/avg/max. `footprint` reports the
+host resident set size for the recorded backend process of a running workspace.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `boot` | Measure disposable workspace boot time |
+| `footprint` | Report host process RSS for a running workspace |
 
 ## `boot` Flags
 
@@ -29,6 +32,12 @@ guest command to complete, and reports per-iteration duration plus min/avg/max.
 | `--timeout <seconds>` | Per-iteration timeout |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the active backend supervisor path |
+
+## `footprint` Flags
+
+| Flag | Description |
+|---|---|
+| `--state-dir <dir>` | State directory |
 
 ## Examples
 
@@ -45,4 +54,10 @@ microagent --json perf boot \
   --image docker.io/library/ubuntu@sha256:<digest> \
   --profile tiny \
   --iterations 5
+```
+
+Report host RSS for a running workspace:
+
+```bash
+microagent --json perf footprint research
 ```
