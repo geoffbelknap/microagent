@@ -1,25 +1,8 @@
-# Security
+# Reporting a security issue
 
-`microagent-kit` starts Linux microVMs from host-side requests. Treat kernel
-images, root filesystems, and request files as executable input.
+Report security issues privately through GitHub's "Report a vulnerability" flow on the [microagent-kit repository](https://github.com/geoffbelknap/microagent-kit/security). Don't open public issues for security-sensitive reports.
 
-This repo does not make policy decisions, broker credentials, interpret audit
-records, sign images, generate SBOMs, or scan rootfs contents. Do those checks
-before handing Microagent a VM request.
-
-## Supported Versions
-
-Security fixes target the latest released version and `main`. Older releases
-may receive fixes when the patch is small and the affected version is still in
-active use.
-
-## Reporting
-
-Please report security issues privately through GitHub's "Report a
-vulnerability" flow for this repository. Do not open public issues for
-security-sensitive reports.
-
-Include:
+Include in your report:
 
 - the affected version or commit
 - host operating system and backend
@@ -28,5 +11,12 @@ Include:
 
 ## Response
 
-Maintainers will acknowledge reports as soon as practical, investigate with the
-reporter, and coordinate disclosure timing for confirmed vulnerabilities.
+Maintainers will acknowledge reports as soon as practical, investigate with the reporter, and coordinate disclosure timing for confirmed vulnerabilities.
+
+## Supported versions
+
+Security fixes target the latest released version and `main`. Older releases may receive fixes when the patch is small and the affected version is still in active use.
+
+## Trust boundary
+
+For what `microagent-kit` does and doesn't enforce — kernel verification, image pinning, supervisor signing — see [`docs/security.md`](docs/security.md).

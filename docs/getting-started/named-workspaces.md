@@ -26,7 +26,7 @@ The name can also be positional:
 microagent create research --image docker.io/library/ubuntu:24.04
 ```
 
-Microagent builds the rootfs once and records workspace metadata in the state
+`microagent` builds the rootfs once and records workspace metadata in the state
 directory. If the default kernel is missing, `create` installs it first.
 
 ## Start
@@ -47,7 +47,7 @@ For scripts, send one line and capture new console output:
 microagent connect research --send "cat /workspace/status"
 ```
 
-`connect` is supported on Apple VF and Firecracker. Use [`logs`](/cli/logs/)
+`connect` is supported on Apple VF and Firecracker. Use [`logs`](../cli/logs.md)
 to review captured serial output.
 
 ## Inspect
@@ -66,7 +66,7 @@ microagent delete research
 ```
 
 For Firecracker, `delete` refuses to remove state while the recorded VM
-process is still running. Use [`stop`](/cli/stop/) or [`kill`](/cli/kill/) first.
+process is still running. Use [`stop`](../cli/stop.md) or [`kill`](../cli/kill.md) first.
 
 ## Attach disks
 

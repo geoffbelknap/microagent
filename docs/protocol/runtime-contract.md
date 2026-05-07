@@ -21,13 +21,9 @@ Both backends expose the same public runtime primitives:
 | Mediation | `enabled`, `required`, `port`, `target`, `failClosed` |
 | Verification | image digest, kernel hash, rootfs hash, init hash, divergence entries |
 
-## Backend Rules
+## Backend rules
 
-Backend-specific mechanics stay behind supervisor boundaries. Firecracker may
-use PIDs, TAP devices, Unix sockets, and process groups; Apple VF may use
-Virtualization.framework process state. Public output remains the same:
-structured requests, responses, state events, readiness, results, artifact
-declarations, mediation declaration, and verification.
+Backend-specific mechanics stay behind supervisor boundaries. Firecracker may use PIDs, TAP devices, Unix sockets, and process groups; Apple VF may use Virtualization.framework process state. Public output stays the same across both: structured requests, responses, state events, readiness, results, artifact declarations, mediation declaration, and verification.
 
 `start` is disk-state resume. It may boot from `prepared`, `halted`,
 `stopped`, or `failed`; it must reject `starting` and `running`.
@@ -41,7 +37,7 @@ different mechanics, but the public state remains `quarantined`.
 Consumers must not treat `quarantined` as a normal stopped state. The workspace
 must be halted, stopped, or killed before `start` boots it again from disk.
 
-## Contract Command
+## Contract command
 
 ```bash
 microagent --json contract
@@ -52,6 +48,6 @@ fields instead of scraping documentation prose.
 
 ## Related
 
-- [Supervisor protocol](/protocol/)
-- [Firecracker supervisor](/protocol/firecracker/)
-- [Apple VF supervisor](/protocol/applevf/)
+- [Supervisor protocol](index.md)
+- [Firecracker supervisor](firecracker.md)
+- [Apple VF supervisor](applevf.md)

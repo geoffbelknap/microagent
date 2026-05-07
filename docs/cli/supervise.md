@@ -12,7 +12,7 @@ watching it while the command is running. When the workspace reaches a terminal
 state, the persisted restart policy decides whether `supervise` starts it
 again.
 
-## Restart Policies
+## Restart policies
 
 | Policy | Behavior |
 |---|---|
@@ -46,6 +46,6 @@ Stop the foreground `supervise` process to stop restart supervision.
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`start`](/cli/start/)
-- [`status`](/cli/status/)
+- [`create`](create.md)
+- [`start`](start.md)
+- [`status`](status.md)

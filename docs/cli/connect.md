@@ -14,7 +14,7 @@ in scripts.
 In interactive mode, press `Ctrl-]` to detach from the console without stopping
 the workspace.
 
-`connect` is supported by Apple VF and Firecracker. [`logs`](/cli/logs/)
+`connect` is supported by Apple VF and Firecracker. [`logs`](logs.md)
 remains available for captured serial output.
 
 ## Flags
@@ -43,7 +43,7 @@ microagent connect research --send "cat /workspace/status; uname -m"
 
 `connect` waits for the console FIFO and, by default, for a basic shell prompt
 before attaching or writing. If the guest shell is not ready, it exits with an
-error that points to [`logs`](/cli/logs/).
+error that points to [`logs`](logs.md).
 
 The host-level `consoleAvailable` field means the backend supports an
 interactive console on this machine. It is not a guarantee that a specific
@@ -52,4 +52,4 @@ readiness gate.
 
 ## Related
 
-- [`logs`](/cli/logs/), [`status`](/cli/status/)
+- [`logs`](logs.md), [`status`](status.md)

@@ -16,7 +16,7 @@ The supervisor:
 - sends `SIGTERM` for `stop`, `SIGKILL` for `kill`, and does not signal the VM
   process for `quarantine`
 
-## Process Model
+## Process model
 
 Firecracker itself is still a separate VM process. The supervisor executable is
 the Go implementation that owns its config, process group, state files, and

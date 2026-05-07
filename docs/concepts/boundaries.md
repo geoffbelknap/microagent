@@ -29,7 +29,7 @@ boundary. Other systems own policy, identity, and intent.
 - Credentials and grants
 - User experience
 
-Your program supplies identity and bridge targets. Microagent provides the
+Your program supplies identity and bridge targets. microagent-kit provides the
 kernel, rootfs conversion, VM state, and VM commands without taking over
 policy.
 

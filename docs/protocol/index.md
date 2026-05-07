@@ -17,7 +17,7 @@ Firecracker and Apple VF use the same protocol:
 The CLI chooses the active host backend and sends the request to that
 supervisor.
 
-Use [`microagent --json contract`](/cli/contract/) for the versioned
+Use [`microagent --json contract`](../cli/contract.md) for the versioned
 backend-neutral runtime contract that Firecracker and Apple VF share.
 
 ## Request
@@ -223,11 +223,39 @@ and event history are preserved for a later `start`. `quarantined` preserves
 disk state and event history while severing host-side network, mediation, and
 side-effect paths.
 
-## Backend Pages
+For the visual state machine — including which transitions `start`, `halt`, `quarantine`, `stop`, `kill`, and `delete` allow — see [State and identity](../concepts/state-and-identity.md).
 
-- [Firecracker supervisor](/protocol/firecracker/) documents the Linux
+## Field presence by command
+
+The kitchen-sink response above shows every block the protocol can carry. Most commands return a subset. This table is the source of truth for which fields you can rely on for which command:
+
+| Command | `event` | `host` | `verification` | `readiness` | `result` | `artifacts` | `mediation` |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `host` | — | ✓ | — | — | — | — | — |
+| `check` | ✓ | — | ✓ | — | — | — | declared |
+| `prepare` | ✓ | — | ✓ | — | — | declared | declared |
+| `start` / `run` | ✓ | — | ✓ | ✓ | conditional | declared | declared |
+| `console` | ✓ | — | — | — | — | — | — |
+| `inspect` | ✓ | — | ✓ | ✓ | conditional | declared | declared |
+| `halt` / `quarantine` / `stop` / `kill` / `delete` | ✓ | — | — | — | — | — | — |
+
+Reading the table:
+
+- **`event`** — present on every command except `host`. Carries identity, state, and `observedAt`.
+- **`host`** — only on the `host` command. Reports backend capability, virtualization availability, supervisor path, kernel and console status.
+- **`verification`** — present whenever the request touched the rootfs or runtime artifacts. Compares recorded vs current SHAs and reports any divergence.
+- **`readiness`** — present after `start` / `run` and on `inspect` of a running workspace. Carries `guestReady`, `shellReady`, `resultReady`, and `mediationReady`.
+- **`result`** — present when the guest result file has been delivered. *Conditional* means: included if it exists at the time of the response, omitted otherwise. Don't assume it's there.
+- **`artifacts`** — present whenever the workspace declared `bundles` or `outputs`. *Declared* means: included only if the workspace's manifest declares them.
+- **`mediation`** — present whenever the workspace declared a mediation channel.
+
+`ok` and `backend` appear on every response.
+
+## Backend pages
+
+- [Firecracker supervisor](firecracker.md) documents the Linux
   executable implementation.
-- [Apple VF supervisor](/protocol/applevf/) documents the macOS executable
+- [Apple VF supervisor](applevf.md) documents the macOS executable
   protocol.
-- [Runtime parity contract](/protocol/runtime-contract/) documents the shared
+- [Runtime parity contract](runtime-contract.md) documents the shared
   agent-runtime semantics.

@@ -11,7 +11,7 @@ microagent images rm <image> [--delete] [--state-dir <dir>]
 microagent images prune [--delete] [--state-dir <dir>]
 ```
 
-`images` reads Microagent's local image index. Successful workspace rootfs
+`images` reads the local image index. Successful workspace rootfs
 builds and `images pull` record the source image reference, resolved digest,
 platform, rootfs path, size, and last-used time.
 
@@ -42,7 +42,7 @@ when the workspace has no setup commands, entrypoint, env overrides, or
 attached disks. Workspaces that need guest config are rebuilt from the source
 OCI image so their init config is baked into the rootfs.
 
-## Pull Flags
+## Pull flags
 
 | Flag | Description |
 |---|---|
@@ -51,13 +51,13 @@ OCI image so their init config is baked into the rootfs.
 | `--mke2fs <path>` | mke2fs binary path |
 | `--guest-init <path>` | Guest init binary path |
 
-## Prune Flags
+## Prune flags
 
 | Flag | Description |
 |---|---|
 | `--delete` | Delete reusable image-store rootfs files and their records |
 
-## Remove Flags
+## Remove flags
 
 | Flag | Description |
 |---|---|
@@ -77,5 +77,5 @@ microagent --json images prune --delete
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`rootfs`](/cli/rootfs/)
+- [`create`](create.md)
+- [`rootfs`](rootfs.md)

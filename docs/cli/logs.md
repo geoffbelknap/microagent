@@ -9,7 +9,7 @@ microagent logs <name> [--state-dir <dir>]
 
 `logs` prints the captured serial console output for a workspace. It is useful
 for boot diagnostics and for reviewing output after an interactive
-[`connect`](/cli/connect/) session.
+[`connect`](connect.md) session.
 
 ## Flags
 
@@ -25,4 +25,4 @@ microagent logs research
 
 ## Related
 
-- [`connect`](/cli/connect/) for an interactive console
+- [`connect`](connect.md) for an interactive console

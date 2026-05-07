@@ -6,14 +6,14 @@ description: Trust boundary and reporting issues.
 ## Trust boundary
 
 `microagent-kit` treats the kernel, rootfs, and request files as **executable
-input**. Microagent does not sign images, scan layers, mediate credentials,
-or enforce policy — those concerns belong to the upstream system that calls
-`microagent`. See [Boundaries](/concepts/boundaries/) for the full list.
+input**. It does not sign images, scan layers, mediate credentials, or enforce
+policy — those concerns belong to the upstream system that calls `microagent`.
+See [Boundaries](concepts/boundaries.md) for the full list.
 
 That means:
 
 - The kernel that boots is whoever installed `~/.microagent/kernels/...`.
-  Verify with [`microagent kernel verify`](/cli/kernel/) when this matters.
+  Verify with [`microagent kernel verify`](cli/kernel.md) when this matters.
 - The rootfs is whatever OCI image the caller specified. Pin by digest in
   production. `microagent rootfs build` rejects mutable tag references
   unless you pass `--allow-mutable`.
@@ -23,10 +23,4 @@ That means:
 
 ## Reporting
 
-Report security issues privately via GitHub's "Report a vulnerability" flow
-on the [microagent-kit repo](https://github.com/geoffbelknap/microagent-kit/security).
-Do not file public issues for security problems.
-
-Security fixes target the latest released version and `main`. Older releases
-may receive fixes when the patch is small and the affected version is still in
-active use.
+For the disclosure flow, supported versions, and response expectations, see [`SECURITY.md`](https://github.com/geoffbelknap/microagent-kit/blob/main/SECURITY.md) at the repository root.

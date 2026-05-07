@@ -5,8 +5,8 @@ description: Run AI agent workspaces in microVMs.
 
 `microagent-kit` provides Go packages and the `microagent` CLI for running
 Linux workspaces inside microVMs. Each host OS uses one backend: Firecracker on
-Linux, Apple Virtualization.framework on macOS. Microagent owns the kernel, the
-OCI-to-disk conversion, and the VM lifecycle. Identity, policy, credentials,
+Linux, Apple Virtualization.framework on macOS. microagent-kit owns the kernel,
+the OCI-to-disk conversion, and the VM lifecycle. Identity, policy, credentials,
 and control-plane decisions stay outside this project.
 
 ## Where to start
@@ -25,8 +25,10 @@ and control-plane decisions stay outside this project.
 - [Getting started](getting-started/install.md) — install, first VM, named
   workspaces.
 - [Concepts](concepts/architecture.md) — architecture, backends, boundaries,
-  networking, state and identity.
+  networking, state and identity, [glossary](concepts/glossary.md).
 - [CLI reference](cli/index.md) — every subcommand.
 - [Protocol](protocol/index.md) — shared supervisor protocol and backend notes.
 - [Library](library/go.md) — exported Go package surface.
 - [Security](security.md) — trust boundary and reporting.
+- [Stability](stability.md) — what microagent-kit promises, what it doesn't.
+- [Troubleshooting](troubleshooting.md) — common failure modes, indexed by symptom.

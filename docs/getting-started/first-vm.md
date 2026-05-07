@@ -13,8 +13,8 @@ microagent run \
   --exec "uname -a"
 ```
 
-Microagent downloads the default kernel for the host backend the first time it
-needs one.
+`microagent` downloads the default kernel for the host backend the first time
+it needs one.
 
 ## Run setup commands first
 
@@ -37,15 +37,15 @@ microagent run \
   --kernel /tmp/Image
 ```
 
-Manage kernels explicitly with [`microagent kernel`](/cli/kernel/).
+Manage kernels explicitly with [`microagent kernel`](../cli/kernel.md).
 
 ## What just happened
 
-1. Microagent fetched the OCI image.
+1. `microagent` fetched the OCI image.
 2. It converted the image into an ext4 rootfs.
-3. It booted the VM via the host backend ([Firecracker or Apple VF](/concepts/backends/)).
+3. It booted the VM via the host backend ([Firecracker or Apple VF](../concepts/backends.md)).
 4. The guest init ran `--setup` then `--exec`.
-5. Microagent collected output, shut the VM down, and removed scratch state.
+5. `microagent` collected output, shut the VM down, and removed scratch state.
 
 To keep the workspace around so you can `start` and `stop` it on demand, see
-[Named workspaces](/getting-started/named-workspaces/) and [`create`](/cli/create/).
+[Named workspaces](named-workspaces.md) and [`create`](../cli/create.md).

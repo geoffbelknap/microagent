@@ -10,7 +10,7 @@ microagent doctor [--backend <name>] [--arch <arch>] [--supervisor <path>]
 `doctor` reports host support for the active backend and the default kernel
 status. Run it first when something isn't working.
 
-Use [`host`](/cli/host/) when you want the same information as an inspectable
+Use [`host`](host.md) when you want the same information as an inspectable
 capability report rather than a health check.
 
 ## What it checks
@@ -42,6 +42,6 @@ microagent --json doctor
 
 ## Related
 
-- [Backends](/concepts/backends/)
-- [`host`](/cli/host/)
-- [`kernel install`](/cli/kernel/)
+- [Backends](../concepts/backends.md)
+- [`host`](host.md)
+- [`kernel install`](kernel.md)

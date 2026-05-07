@@ -54,4 +54,4 @@ microagent create \
 
 ## Related
 
-- [`create`](/cli/create/), [`run`](/cli/run/)
+- [`create`](create.md), [`run`](run.md)

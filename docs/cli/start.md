@@ -37,9 +37,9 @@ microagent start research
 `start` reuses the resource config stored by `create`. Pass `--profile`,
 `--memory`, or `--cpus` only when you want a one-start override.
 
-After it's running, open a console with [`connect`](/cli/connect/) on Apple
-VF, or read serial output with [`logs`](/cli/logs/).
+After it's running, open a console with [`connect`](connect.md) on Apple
+VF, or read serial output with [`logs`](logs.md).
 
 ## Related
 
-- [`create`](/cli/create/), [`stop`](/cli/stop/), [`status`](/cli/status/)
+- [`create`](create.md), [`stop`](stop.md), [`status`](status.md)

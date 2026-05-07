@@ -22,6 +22,6 @@ microagent --json contract
 
 ## Related
 
-- [Runtime parity contract](/protocol/runtime-contract/)
-- [Supervisor protocol](/protocol/)
-- [Backends](/concepts/backends/)
+- [Runtime parity contract](../protocol/runtime-contract.md)
+- [Supervisor protocol](../protocol/index.md)
+- [Backends](../concepts/backends.md)

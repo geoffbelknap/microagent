@@ -8,14 +8,14 @@ microagent kernel install [--url <url>] [--from <path>] [--sha256 <sum>] [--out 
 microagent kernel verify  --path <path> --sha256 <sum>
 ```
 
-Most users can stick with `microagent run --image ...` and let Microagent
+Most users can stick with `microagent run --image ...` and let `microagent`
 download the default kernel automatically. `microagent kernel` is the manual
 escape hatch.
 
 ## `install`
 
-With no options, install Microagent's default kernel for the active backend
-and architecture.
+With no options, install the default kernel for the active backend and
+architecture.
 
 | Flag | Description |
 |---|---|
@@ -68,4 +68,4 @@ microagent kernel verify \
 
 ## Related
 
-- [`doctor`](/cli/doctor/), [Backends](/concepts/backends/)
+- [`doctor`](doctor.md), [Backends](../concepts/backends.md)
