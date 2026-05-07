@@ -118,6 +118,25 @@ The `field` and `expected` / `actual` values tell you which artifact diverged. C
 
 ## Networking
 
+### Firecracker `user` mode fails before start
+
+Linux `user` mode needs:
+
+- `pasta` installed (`apt install passt` on Debian/Ubuntu)
+- unprivileged user namespaces enabled
+- `/dev/net/tun` available to the user
+
+Fixes:
+
+- Install passt with your distro package manager.
+- Check `sysctl kernel.unprivileged_userns_clone` and
+  `cat /proc/sys/user/max_user_namespaces`; enable user namespaces if either is
+  disabled.
+- Check `/dev/net/tun` exists and is accessible.
+
+If the host cannot allow user namespaces, use explicit `--network nat` with the
+Firecracker supervisor capability setup instead.
+
 ### Apple VF `bridged` mode fails closed before start
 
 ```text

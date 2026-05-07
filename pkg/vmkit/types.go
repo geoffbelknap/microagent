@@ -119,6 +119,10 @@ type HostSupport struct {
 	VsockAvailable          bool   `json:"vsockAvailable,omitempty"`
 	ConsoleAvailable        bool   `json:"consoleAvailable"`
 	ConsoleMode             string `json:"consoleMode,omitempty"`
+	UserNetworkingAvailable bool   `json:"userNetworkingAvailable,omitempty"`
+	UserNetworkingBinary    string `json:"userNetworkingBinary,omitempty"`
+	UserNamespacesAvailable bool   `json:"userNamespacesAvailable,omitempty"`
+	TunAvailable            bool   `json:"tunAvailable,omitempty"`
 }
 
 type KernelSupport struct {
@@ -369,15 +373,15 @@ func ValidateMediationConfig(mediation MediationConfig) error {
 func ValidateNetworkConfig(network NetworkConfig) error {
 	mode := strings.TrimSpace(network.Mode)
 	if mode == "" {
-		mode = "nat"
+		mode = "user"
 	}
 	switch mode {
-	case "nat", "isolated", "bridged":
+	case "user", "nat", "isolated", "bridged":
 	default:
-		return fmt.Errorf("network.mode must be nat, isolated, or bridged")
+		return fmt.Errorf("network.mode must be user, nat, isolated, or bridged")
 	}
 	if mode == "isolated" && len(network.PortForwards) != 0 {
-		return fmt.Errorf("network.portForwards require nat or bridged mode")
+		return fmt.Errorf("network.portForwards require user, nat, or bridged mode")
 	}
 	hostPorts := map[string]bool{}
 	for i, forward := range network.PortForwards {

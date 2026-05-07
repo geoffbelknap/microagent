@@ -104,10 +104,10 @@ func validateFirecrackerConfig(config *vmkit.Config) error {
 	}
 	mode := strings.TrimSpace(config.Network.Mode)
 	if mode == "" {
-		mode = "nat"
+		mode = "user"
 	}
 	switch mode {
-	case "nat", "isolated":
+	case "user", "nat", "isolated":
 		return nil
 	case "bridged":
 		if strings.TrimSpace(config.Network.Interface) == "" {
@@ -115,7 +115,7 @@ func validateFirecrackerConfig(config *vmkit.Config) error {
 		}
 		return validateLinuxBridge(strings.TrimSpace(config.Network.Interface))
 	default:
-		return fmt.Errorf("firecracker network.mode %q is unsupported; use nat, isolated, or bridged", mode)
+		return fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, or bridged", mode)
 	}
 }
 
@@ -258,6 +258,7 @@ type transientNetworkDevice struct {
 	Mode      string `json:"mode"`
 	Interface string `json:"interface,omitempty"`
 	Created   bool   `json:"created"`
+	PID       int    `json:"pid,omitempty"`
 }
 
 type transientFirewallRule struct {
@@ -300,6 +301,9 @@ func prepareWorkspace(opts Options, req vmkit.Request) error {
 }
 
 func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached bool) (vmkit.Response, error) {
+	if networkMode(req.Config) == "user" && !insideUserNetworkNamespace() {
+		return startUserNetworkProcess(ctx, opts, req, detached)
+	}
 	path := opts.FirecrackerPath
 	if path == "" {
 		resolved, err := opts.ResolveFirecracker()
@@ -310,7 +314,8 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		path = resolved
 	}
 	_, needsNetworkCapabilities := firecrackerNetworkInterface(opts, req.Config)
-	if needsNetworkCapabilities {
+	needsAmbientNetworkCapabilities := needsNetworkCapabilities && networkMode(req.Config) != "user"
+	if needsAmbientNetworkCapabilities {
 		if err := ensureNetAdminInheritable(); err != nil {
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
@@ -357,7 +362,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	if serialInput != nil {
 		cmd.Stdin = serialInput
 	}
-	cmd.SysProcAttr = firecrackerSysProcAttr(detached, needsNetworkCapabilities)
+	cmd.SysProcAttr = firecrackerSysProcAttr(detached, needsAmbientNetworkCapabilities)
 	if err := cmd.Start(); err != nil {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -587,7 +592,7 @@ func writeConfig(opts Options, req vmkit.Request) error {
 
 func firecrackerBootArgs(config *vmkit.Config) string {
 	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init"}
-	if networkMode(config) == "nat" && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
+	if (networkMode(config) == "nat" || networkMode(config) == "user") && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
 		args = append(args,
 			"microagent_net_if=eth0",
 			"microagent_net_ip="+config.Network.IP,
@@ -619,7 +624,7 @@ func hasPortForwards(config *vmkit.Config) bool {
 
 func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInterface, bool) {
 	mode := networkMode(config)
-	if mode != "bridged" && mode != "nat" {
+	if mode != "bridged" && mode != "nat" && mode != "user" {
 		return networkInterface{}, false
 	}
 	return networkInterface{
@@ -653,7 +658,7 @@ func requestWithRuntimeNetwork(req vmkit.Request, runtimeNetwork *vmkit.NetworkC
 
 func networkMode(config *vmkit.Config) string {
 	if config == nil || config.Network == nil || strings.TrimSpace(config.Network.Mode) == "" {
-		return "nat"
+		return "user"
 	}
 	return strings.TrimSpace(config.Network.Mode)
 }
@@ -662,11 +667,13 @@ func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetw
 	switch networkMode(config) {
 	case "isolated":
 		return nil, nil, nil, nil
+	case "user":
+		return prepareUserNetworkForStart(opts, config)
 	case "nat":
 		return prepareNATForStart(opts, config)
 	case "bridged":
 	default:
-		return nil, nil, nil, fmt.Errorf("firecracker network.mode %q is unsupported; use nat, isolated, or bridged", networkMode(config))
+		return nil, nil, nil, fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, or bridged", networkMode(config))
 	}
 	bridge := strings.TrimSpace(config.Network.Interface)
 	if err := validateLinuxBridge(bridge); err != nil {
@@ -683,6 +690,24 @@ func prepareNATForStart(opts Options, config *vmkit.Config) ([]transientNetworkD
 	if err := requireIPv4Forwarding(); err != nil {
 		return nil, nil, nil, err
 	}
+	return prepareTAPNATForStart(opts, config, "nat")
+}
+
+func prepareUserNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+	if !insideUserNetworkNamespace() {
+		return nil, nil, nil, fmt.Errorf("firecracker user networking must run inside a pasta user network namespace")
+	}
+	if err := enableNamespaceIPv4Forwarding(); err != nil {
+		return nil, nil, nil, err
+	}
+	devices, rules, network, err := prepareTAPNATForStart(opts, config, "user")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return attachUserNetworkPID(devices), rules, network, nil
+}
+
+func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
 	subnetOctet, err := allocateNATSubnetOctet(opts)
 	if err != nil {
 		return nil, nil, nil, err
@@ -721,6 +746,7 @@ func prepareNATForStart(opts Options, config *vmkit.Config) ([]transientNetworkD
 		return nil, nil, nil, err
 	}
 	network := runtimeNetworkConfig(config, subnet, guestIP+"/29", hostIP)
+	network.Mode = mode
 	return cleanupDevices, rules, &network, nil
 }
 
@@ -813,6 +839,21 @@ func requireIPv4Forwarding() error {
 	}
 	if strings.TrimSpace(string(data)) != "1" {
 		return fmt.Errorf("firecracker nat networking requires net.ipv4.ip_forward=1 on the host")
+	}
+	return nil
+}
+
+func enableNamespaceIPv4Forwarding() error {
+	path := "/proc/sys/net/ipv4/ip_forward"
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("inspect net.ipv4.ip_forward for firecracker user networking: %w", err)
+	}
+	if strings.TrimSpace(string(data)) == "1" {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
+		return networkPrivilegeError("enable net.ipv4.ip_forward in firecracker user network namespace", err)
 	}
 	return nil
 }
@@ -966,6 +1007,9 @@ func alreadyExistsError(err error) bool {
 
 func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
 	for _, device := range devices {
+		if device.PID > 0 {
+			_ = syscall.Kill(device.PID, syscall.SIGTERM)
+		}
 		if device.Created && device.Name != "" && device.Mode == "tap" {
 			_ = deleteTap(device.Name)
 		}

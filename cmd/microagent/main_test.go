@@ -113,7 +113,7 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 		func() (string, error) { return "/usr/local/bin/firecracker", nil },
 		func(path string) (os.FileInfo, error) {
 			switch path {
-			case "/dev/kvm", "/dev/vhost-vsock":
+			case "/dev/kvm", "/dev/vhost-vsock", "/dev/net/tun":
 				return fakeFileInfo{name: filepath.Base(path)}, nil
 			default:
 				return nil, os.ErrNotExist

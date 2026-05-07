@@ -24,7 +24,7 @@ const (
 	DefaultWorkspaceCPUCount   = 2
 	DefaultWorkspaceProfile    = "small"
 	DefaultRestartPolicy       = "never"
-	DefaultNetworkMode         = "nat"
+	DefaultNetworkMode         = "user"
 	DefaultResultPort          = 1024
 	DefaultTimeout             = 2 * time.Minute
 )

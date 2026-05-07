@@ -3,11 +3,12 @@ title: Networking
 description: Declarative workspace network intent.
 ---
 
-Every workspace records its network intent in the manifest. The CLI accepts three modes:
+Every workspace records its network intent in the manifest. The CLI accepts four modes:
 
 | Mode | What it does |
 |---|---|
-| `nat` | Default. Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
+| `user` | Default on Linux. Unprivileged outbound IPv4 through pasta user-mode networking, plus declared TCP `--publish` forwards. |
+| `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
 | `isolated` | No guest network device. The body has no network access at all. |
 | `bridged` | Attach to a host bridge so the workspace gets its own L2 presence. Backend support varies. |
 
@@ -16,21 +17,21 @@ Backend support is narrower than the enum:
 | Backend | What works today |
 |---|---|
 | Apple VF | `nat`, `isolated`, and TCP `--publish`. `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement. |
-| Firecracker | `nat` through a transient TAP and nftables MASQUERADE, live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
+| Firecracker | `user` through pasta plus a namespace-local TAP, `nat` through a transient TAP and nftables MASQUERADE, live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
 
 Apple gates native bridged networking behind `com.apple.vm.networking`. Open-source builds can't self-sign that entitlement, and `sudo` doesn't bypass the check. If you need bridged on macOS, you sign with the entitlement; otherwise, use `nat`.
 
 ## Declaring the mode
 
 ```bash
-microagent create research --network nat
+microagent create research --network user
 ```
 
 Or in the spec:
 
 ```yaml
 network:
-  mode: nat
+  mode: user
   forwards:
     - host: 127.0.0.1
       hostPort: 8080
@@ -49,6 +50,23 @@ microagent create research --publish 127.0.0.1:8080:80/tcp
 Under the hood, the guest init listens on a vsock port matching the host port; the backend supervisor runs the host-side TCP listener and bridges connections to that vsock port. You don't have to configure either side — declaring the forward wires it up.
 
 Isolated workspaces reject port forwards before the request leaves the CLI: there's no guest network for them to reach.
+
+## User Networking on Firecracker
+
+Firecracker `user` mode is the default Linux networking mode. The supervisor
+re-execs itself under `pasta`, which creates an unprivileged user and network
+namespace. Inside that namespace the supervisor creates the Firecracker TAP,
+configures namespace-local nftables forwarding, and starts Firecracker. Pasta
+bridges the namespace to the host network with ordinary user sockets.
+
+Host requirements:
+
+- `pasta` installed (`apt install passt` on Debian/Ubuntu)
+- unprivileged user namespaces enabled
+- `/dev/net/tun` available to the user
+
+No `setcap`, host `ip_forward`, host bridge, or host firewall edits are needed
+for `user` mode.
 
 ## NAT on Firecracker
 

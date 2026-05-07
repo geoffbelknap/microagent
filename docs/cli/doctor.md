@@ -19,7 +19,9 @@ capability report rather than a health check.
   reachable, default kernel installed, interactive console available.
 - **Firecracker (Linux):** `firecracker` binary on PATH (or
   `MICROAGENT_FIRECRACKER`), `/dev/kvm` present, `/dev/vhost-vsock` present,
-  default kernel installed, interactive console available.
+  `/dev/net/tun` present, `pasta` available for user-mode networking,
+  unprivileged user namespaces enabled, default kernel installed, interactive
+  console available.
 
 On Linux, run `microagent doctor` outside sandboxed agent environments so KVM
 visibility is honest.

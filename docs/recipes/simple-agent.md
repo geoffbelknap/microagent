@@ -10,6 +10,8 @@ The workspace is fully described by [`examples/minimal-body/microagent.yaml`](ht
 ## What you'll need
 
 - microagent-kit installed and `microagent doctor` passing — see [install](../getting-started/install.md).
+- On Linux with Firecracker, `pasta` installed for the default unprivileged
+  network mode (`sudo apt install passt` on Debian/Ubuntu).
 - An Anthropic API key in `ANTHROPIC_API_KEY`. Sign up at [console.anthropic.com](https://console.anthropic.com) if you don't have one.
 
 ## Step 1 — create the workspace

@@ -57,7 +57,9 @@ Persistent workspace disks live under:
   through `MICROAGENT_FIRECRACKER`.
 - Supports interactive `microagent connect`; use `microagent logs` to review
   captured serial output.
-- Firecracker `network.mode` supports `nat`, `isolated`, and `bridged`.
+- Firecracker `network.mode` supports `user`, `nat`, `isolated`, and `bridged`.
+- Firecracker `user` requires `pasta`, unprivileged user namespaces, and
+  `/dev/net/tun`.
 - Firecracker `nat` requires nftables-capable kernel support, host IPv4
   forwarding, and permission to create TAP devices and edit firewall rules.
 - Firecracker `bridged` requires `network.interface` to name an existing Linux
@@ -66,6 +68,11 @@ Persistent workspace disks live under:
   the Firecracker serial input FIFO for `microagent connect`.
 
 ## Networking
+
+`user` re-execs the supervisor under `pasta`, which creates an unprivileged
+user and network namespace. Inside that namespace, the supervisor creates the
+Firecracker TAP, configures namespace-local forwarding, and starts Firecracker.
+Pasta bridges the namespace to the host network without host capabilities.
 
 `nat` creates a deterministic transient TAP device, allocates a private
 `10.43.x.0/29` subnet, assigns the host side to `10.43.x.1`, attaches the TAP

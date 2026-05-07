@@ -253,6 +253,12 @@ func TestValidateFirecrackerConfigAcceptsIsolatedNetworkMode(t *testing.T) {
 	}
 }
 
+func TestValidateFirecrackerConfigAcceptsUserNetworkMode(t *testing.T) {
+	if err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "user"}}); err != nil {
+		t.Fatalf("validateFirecrackerConfig user: %v", err)
+	}
+}
+
 func TestValidateFirecrackerConfigRejectsBridgedWithoutInterface(t *testing.T) {
 	err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "bridged"}})
 	if err == nil || !strings.Contains(err.Error(), "network.interface is required") {

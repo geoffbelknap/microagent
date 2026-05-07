@@ -30,7 +30,7 @@ first.
 | `--state-dir <dir>` | State directory |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `nat`, `isolated`, or `bridged` |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `bridged` |
 | `--network-interface <if>` | Host interface identifier or display name for bridged mode |
 | `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |

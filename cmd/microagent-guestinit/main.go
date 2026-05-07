@@ -56,6 +56,10 @@ func main() {
 }
 
 func run() int {
+	if err := mountGuestFilesystems(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
 	cfg, err := readConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -141,6 +145,33 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 	}
 	return code
+}
+
+type guestFilesystem struct {
+	Source string
+	Target string
+	FSType string
+	Flags  uintptr
+}
+
+var guestFilesystems = []guestFilesystem{
+	{Source: "proc", Target: "/proc", FSType: "proc", Flags: unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC},
+	{Source: "sysfs", Target: "/sys", FSType: "sysfs", Flags: unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC},
+	{Source: "devpts", Target: "/dev/pts", FSType: "devpts", Flags: unix.MS_NOSUID | unix.MS_NOEXEC},
+}
+
+var mountGuestFilesystem = unix.Mount
+
+func mountGuestFilesystems() error {
+	for _, fs := range guestFilesystems {
+		if err := os.MkdirAll(fs.Target, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", fs.Target, err)
+		}
+		if err := mountGuestFilesystem(fs.Source, fs.Target, fs.FSType, fs.Flags, ""); err != nil && !errors.Is(err, syscall.EBUSY) {
+			return fmt.Errorf("mount %s: %w", fs.Target, err)
+		}
+	}
+	return nil
 }
 
 func mountDisks(mounts []mount) error {

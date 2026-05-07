@@ -430,7 +430,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.IntVar(&config.CPUCount, "cpus", 2, "CPU count")
 	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
-	networkMode := fs.String("network", defaultNetworkMode, "Network mode: nat, isolated, or bridged")
+	networkMode := fs.String("network", defaultNetworkMode, "Network mode: user, nat, isolated, or bridged")
 	networkInterface := fs.String("network-interface", "", "Host interface for bridged network mode")
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
@@ -1665,7 +1665,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
-	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: nat, isolated, or bridged")
+	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: user, nat, isolated, or bridged")
 	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
 	mediationMapping := ""
 	fs.StringVar(&mediationMapping, "mediation", "", "Required mediation vsock mapping port=host:port")
@@ -5024,7 +5024,7 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
   -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
@@ -5083,7 +5083,7 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
   -mediation p=host:port Required mediation vsock mapping
@@ -5117,7 +5117,7 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
   -mediation p=host:port Required mediation vsock mapping
