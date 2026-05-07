@@ -1311,7 +1311,14 @@ bundles:
 outputs:
   - name: report
     path: /workspace/report.json
+files:
+  - src: ./body.py
+    dst: /app/body.py
+    mode: "0755"
 `
+	if err := os.WriteFile(filepath.Join(dir, "body.py"), []byte("print('ok')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1342,6 +1349,50 @@ outputs:
 	}
 	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "report" || opts.Outputs[0].Path != "/workspace/report.json" {
 		t.Fatalf("outputs = %#v", opts.Outputs)
+	}
+	if len(opts.Files) != 1 || opts.Files[0].SourcePath != filepath.Join(dir, "body.py") || opts.Files[0].Path != "/app/body.py" || opts.Files[0].Mode != "0755" {
+		t.Fatalf("files = %#v", opts.Files)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "body.py")
+	if err := os.WriteFile(srcPath, []byte("print('ok')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		spec string
+		want string
+	}{
+		{
+			name: "missing source",
+			spec: "name: bad\nfiles:\n  - src: ./missing.py\n    dst: /app/body.py\n",
+			want: "file src",
+		},
+		{
+			name: "relative dst",
+			spec: "name: bad\nfiles:\n  - src: ./body.py\n    dst: app/body.py\n",
+			want: "file dst must be absolute",
+		},
+		{
+			name: "duplicate dst",
+			spec: "name: bad\nfiles:\n  - src: ./body.py\n    dst: /app/body.py\n  - src: ./body.py\n    dst: /app/body.py\n",
+			want: "duplicate file dst",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			specPath := filepath.Join(dir, tt.name+".yaml")
+			if err := os.WriteFile(specPath, []byte(tt.spec), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := parseWorkspaceOptions("create", []string{"--file", specPath})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 

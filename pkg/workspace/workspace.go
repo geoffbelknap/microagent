@@ -36,6 +36,7 @@ type Options struct {
 	Entrypoint      string
 	SetupCommands   []string
 	Env             map[string]string
+	Files           []File
 	Profile         string
 	RestartPolicy   string
 	Backend         string
@@ -80,6 +81,7 @@ type Spec struct {
 	Disks      []Disk                `yaml:"disks"`
 	Bundles    []Disk                `yaml:"bundles"`
 	Outputs    []Output              `yaml:"outputs"`
+	Files      []File                `yaml:"files"`
 }
 
 type NetworkSpec struct {
@@ -103,6 +105,12 @@ type Disk struct {
 type Output struct {
 	Name string `json:"name" yaml:"name"`
 	Path string `json:"path" yaml:"path"`
+}
+
+type File struct {
+	SourcePath string `json:"source_path" yaml:"src"`
+	Path       string `json:"path" yaml:"dst"`
+	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty"`
 }
 
 type Artifacts struct {
@@ -469,6 +477,21 @@ func Mounts(disks []Disk) []rootfs.Mount {
 		})
 	}
 	return mounts
+}
+
+func RootfsFiles(files []File) []rootfs.File {
+	if len(files) == 0 {
+		return nil
+	}
+	out := make([]rootfs.File, 0, len(files))
+	for _, file := range files {
+		out = append(out, rootfs.File{
+			SourcePath: file.SourcePath,
+			Path:       file.Path,
+			Mode:       file.Mode,
+		})
+	}
+	return out
 }
 
 func VirtioBlockDevice(index int) string {

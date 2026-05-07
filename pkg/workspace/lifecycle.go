@@ -397,6 +397,7 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
 		Env:            opts.Env,
+		Files:          RootfsFiles(opts.Files),
 		Mounts:         Mounts(opts.Disks),
 		HostForwards:   RootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,

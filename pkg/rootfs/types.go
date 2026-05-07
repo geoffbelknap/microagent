@@ -2,6 +2,10 @@ package rootfs
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -29,11 +33,18 @@ type BuildRequest struct {
 	Mke2fsPath     string            `json:"mke2fs_path,omitempty"`
 	SizeMiB        int64             `json:"size_mib,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
+	Files          []File            `json:"files,omitempty"`
 	Mounts         []Mount           `json:"mounts,omitempty"`
 	HostForwards   []PortForward     `json:"host_forwards,omitempty"`
 	AllowMutable   bool              `json:"allow_mutable,omitempty"`
 	KeepStage      bool              `json:"keep_stage,omitempty"`
 	StageSnapshot  string            `json:"stage_snapshot,omitempty"`
+}
+
+type File struct {
+	SourcePath string `json:"source_path"`
+	Path       string `json:"path"`
+	Mode       string `json:"mode,omitempty"`
 }
 
 type Mount struct {
@@ -111,7 +122,67 @@ func ValidateRequest(req BuildRequest) error {
 	if req.SizeMiB < 0 {
 		return errors.New("size_mib must not be negative")
 	}
+	if err := ValidateFiles(req.Files); err != nil {
+		return err
+	}
 	return nil
+}
+
+func ValidateFiles(files []File) error {
+	seen := map[string]bool{}
+	for _, file := range files {
+		source := strings.TrimSpace(file.SourcePath)
+		if source == "" {
+			return errors.New("file src is required")
+		}
+		info, err := os.Stat(source)
+		if err != nil {
+			return fmt.Errorf("file src %q: %w", source, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("file src must be a regular file: %s", source)
+		}
+		target := strings.TrimSpace(file.Path)
+		if target == "" {
+			return fmt.Errorf("file dst is required for %s", source)
+		}
+		if !filepath.IsAbs(target) {
+			return fmt.Errorf("file dst must be absolute: %s", target)
+		}
+		if strings.ContainsRune(target, 0) {
+			return fmt.Errorf("file dst contains NUL")
+		}
+		clean := filepath.Clean(target)
+		if clean == string(os.PathSeparator) {
+			return fmt.Errorf("file dst must name a file: %s", target)
+		}
+		if seen[clean] {
+			return fmt.Errorf("duplicate file dst %q", clean)
+		}
+		seen[clean] = true
+		if strings.TrimSpace(file.Mode) != "" {
+			if _, err := parseFileMode(file.Mode); err != nil {
+				return fmt.Errorf("file %s mode: %w", target, err)
+			}
+		}
+	}
+	return nil
+}
+
+func parseFileMode(raw string) (os.FileMode, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, errors.New("mode is required")
+	}
+	value, err := strconv.ParseUint(raw, 8, 32)
+	if err != nil {
+		return 0, err
+	}
+	mode := os.FileMode(value)
+	if mode&^os.ModePerm != 0 {
+		return 0, fmt.Errorf("mode must be permission bits")
+	}
+	return mode, nil
 }
 
 func looksMutable(ref string) bool {
@@ -133,6 +204,11 @@ func NormalizeRequest(req BuildRequest) BuildRequest {
 	req.StateDir = strings.TrimSpace(req.StateDir)
 	req.Mke2fsPath = strings.TrimSpace(req.Mke2fsPath)
 	req.StageSnapshot = strings.TrimSpace(req.StageSnapshot)
+	for i := range req.Files {
+		req.Files[i].SourcePath = strings.TrimSpace(req.Files[i].SourcePath)
+		req.Files[i].Path = strings.TrimSpace(req.Files[i].Path)
+		req.Files[i].Mode = strings.TrimSpace(req.Files[i].Mode)
+	}
 	if req.Platform.OS == "" {
 		req.Platform.OS = "linux"
 	}
