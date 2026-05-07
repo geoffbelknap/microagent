@@ -9,19 +9,21 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent-kit/pkg/diagnostics"
+	"github.com/geoffbelknap/microagent-kit/pkg/imagecache"
+	"github.com/geoffbelknap/microagent-kit/pkg/kernel"
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,14 +33,14 @@ var (
 )
 
 const (
-	defaultWorkspaceImageArm64 = "docker.io/library/busybox@sha256:bd44eb136a95dcc8dc58995e43abc40a413f2e8e3d4a2aae6bccbe94686acb05"
-	defaultWorkspaceImageAMD64 = "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
-	defaultWorkspaceImageOther = "docker.io/library/busybox:1.36.1"
-	defaultWorkspaceMemoryMiB  = 512
-	defaultWorkspaceCPUCount   = 2
-	defaultWorkspaceProfile    = "small"
-	defaultRestartPolicy       = "never"
-	defaultNetworkMode         = "nat"
+	defaultWorkspaceImageArm64 = workspace.DefaultWorkspaceImageArm64
+	defaultWorkspaceImageAMD64 = workspace.DefaultWorkspaceImageAMD64
+	defaultWorkspaceImageOther = workspace.DefaultWorkspaceImageOther
+	defaultWorkspaceMemoryMiB  = workspace.DefaultWorkspaceMemoryMiB
+	defaultWorkspaceCPUCount   = workspace.DefaultWorkspaceCPUCount
+	defaultWorkspaceProfile    = workspace.DefaultWorkspaceProfile
+	defaultRestartPolicy       = workspace.DefaultRestartPolicy
+	defaultNetworkMode         = workspace.DefaultNetworkMode
 	consoleDetachByte          = byte(0x1d) // Ctrl-]
 )
 
@@ -217,146 +219,38 @@ func runHost(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, error) {
-	switch opts.Backend {
-	case vmkit.BackendAppleVF:
-		resp, err := vmkit.ExecutableSupervisor{Path: opts.SupervisorPath}.Do(ctx, vmkit.Request{Command: "host"})
-		if resp.Backend == "" {
-			resp.Backend = opts.Backend
-		}
-		resp.Kernel = defaultKernelSupport(opts.Backend, opts.Arch)
-		if err != nil && resp.Error == "" {
-			resp.Error = err.Error()
-		}
-		augmentHostSupport(&resp, opts)
-		return resp, err
-	case vmkit.BackendFirecracker:
-		resp, err := firecrackerDoctorResponse(opts.Backend, opts.Arch, resolveFirecrackerPath, os.Stat, firecrackerVersion)
-		augmentHostSupport(&resp, opts)
-		return resp, err
-	default:
-		resp := vmkit.Response{
-			OK:      false,
-			Backend: opts.Backend,
-			Kernel:  defaultKernelSupport(opts.Backend, opts.Arch),
-			Error:   fmt.Sprintf("unsupported backend: %s", opts.Backend),
-		}
-		augmentHostSupport(&resp, opts)
-		return resp, fmt.Errorf("%s", resp.Error)
-	}
+	return diagnostics.Check(ctx, diagnostics.Options{Backend: opts.Backend, Arch: opts.Arch, SupervisorPath: opts.SupervisorPath})
 }
 
 func augmentHostSupport(resp *vmkit.Response, opts doctorOptions) {
-	if resp.Host == nil {
-		resp.Host = &vmkit.HostSupport{
-			Backend:      opts.Backend,
-			Architecture: opts.Arch,
-		}
-	}
-	if resp.Host.Backend == "" {
-		resp.Host.Backend = opts.Backend
-	}
-	if resp.Host.Architecture == "" {
-		resp.Host.Architecture = opts.Arch
-	}
-	switch opts.Backend {
-	case vmkit.BackendAppleVF:
-		resp.Host.SupervisorPath = nonEmpty(opts.SupervisorPath, "microagent-applevf-supervisor")
-		resp.Host.SupervisorAvailable = resp.Error == ""
-		resp.Host.ConsoleAvailable = true
-		resp.Host.ConsoleMode = "interactive"
-	case vmkit.BackendFirecracker:
-		resp.Host.SupervisorPath = firecrackerSupervisorPath(workspaceOptions{SupervisorPath: opts.SupervisorPath})
-		resp.Host.SupervisorAvailable = true
-		resp.Host.ConsoleAvailable = true
-		resp.Host.ConsoleMode = "interactive"
-	}
+	diagnostics.AugmentHostSupport(resp, diagnostics.Options{Backend: opts.Backend, Arch: opts.Arch, SupervisorPath: opts.SupervisorPath})
 }
 
 func backendSupportsConsoleInput(backend string) bool {
-	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendFirecracker
+	return workspace.BackendSupportsConsoleInput(backend)
 }
 
 func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (string, error), stat func(string) (os.FileInfo, error), binaryVersion func(string) string) (vmkit.Response, error) {
-	host := &vmkit.HostSupport{
-		Backend:      backend,
-		Architecture: arch,
-	}
-	var issues []string
-	if path, err := resolveBinary(); err == nil {
-		host.BinaryPath = path
-		host.BinaryVersion = binaryVersion(path)
-		host.FrameworkAvailable = true
-	} else {
-		issues = append(issues, err.Error())
-	}
-	if _, err := stat("/dev/kvm"); err == nil {
-		host.KVMAvailable = true
-		host.VirtualizationSupported = true
-	} else {
-		issues = append(issues, "/dev/kvm is not available")
-	}
-	if _, err := stat("/dev/vhost-vsock"); err == nil {
-		host.VsockAvailable = true
-	}
-	host.ConsoleAvailable = true
-	host.ConsoleMode = "interactive"
-	resp := vmkit.Response{
-		OK:      len(issues) == 0,
-		Backend: backend,
-		Host:    host,
-		Kernel:  defaultKernelSupport(backend, arch),
-	}
-	if len(issues) > 0 {
-		resp.Error = strings.Join(issues, "; ")
-		return resp, fmt.Errorf("%s", resp.Error)
-	}
-	return resp, nil
+	return diagnostics.CheckFirecracker(
+		diagnostics.Options{Backend: backend, Arch: arch},
+		diagnostics.FirecrackerProbe{ResolveBinary: resolveBinary, Stat: stat, BinaryVersion: binaryVersion},
+	)
 }
 
 func resolveFirecrackerPath() (string, error) {
-	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER")); path != "" {
-		if _, err := os.Stat(path); err != nil {
-			return "", fmt.Errorf("MICROAGENT_FIRECRACKER is not usable: %s", err)
-		}
-		return path, nil
-	}
-	if path, err := exec.LookPath("firecracker"); err == nil {
-		return path, nil
-	}
-	if exe, err := os.Executable(); err == nil {
-		path := defaultFirecrackerPathFromExecutable(exe)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path, nil
-		}
-	}
-	return "", fmt.Errorf("firecracker binary not found")
+	return diagnostics.ResolveFirecrackerPath()
 }
 
 func defaultFirecrackerPathFromExecutable(executable string) string {
-	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
-		executable = resolved
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "libexec", "firecracker"))
+	return diagnostics.DefaultFirecrackerPathFromExecutable(executable)
 }
 
 func firecrackerVersion(path string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
-	if err != nil {
-		return ""
-	}
-	return firstOutputLine(string(output))
+	return diagnostics.FirecrackerVersion(path)
 }
 
 func firstOutputLine(output string) string {
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			return line
-		}
-	}
-	return ""
+	return diagnostics.FirstOutputLine(output)
 }
 
 func runKernel(ctx context.Context, args []string, stdout *os.File) error {
@@ -375,8 +269,8 @@ func runKernel(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error {
-	opts := kernelOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
-	opts.OutputPath = defaultWritableKernelPath(opts.Backend, opts.Architecture)
+	opts := kernel.InstallOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
+	opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	outputExplicit := hasFlagValue(args, "out")
 	fs := flag.NewFlagSet("kernel install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -393,37 +287,23 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 		return fmt.Errorf("unexpected kernel install argument: %s", fs.Arg(0))
 	}
 	if !outputExplicit || opts.OutputPath == "" {
-		opts.OutputPath = defaultWritableKernelPath(opts.Backend, opts.Architecture)
+		opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	}
-	if opts.URL == "" && opts.FromPath == "" && opts.SHA256 == "" {
-		kernel, ok := defaultKernel(opts.Backend, opts.Architecture)
-		if !ok {
-			return fmt.Errorf("no default kernel for %s/%s; use --url or --from", opts.Backend, opts.Architecture)
-		}
-		opts.URL = kernel.URL
-		opts.SHA256 = kernel.SHA256
-	}
-	if err := installKernel(ctx, opts); err != nil {
-		return err
-	}
-	sum, err := fileSHA256(opts.OutputPath)
+	result, err := kernel.Install(ctx, opts)
 	if err != nil {
 		return err
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(map[string]string{
-		"path":   opts.OutputPath,
-		"sha256": sum,
-	})
+	return enc.Encode(result)
 }
 
 func runKernelVerify(args []string, stdout *os.File) error {
-	opts := kernelOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
-	opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	opts := kernel.VerifyOptions{Backend: hostBackend(), Architecture: defaultGuestArch()}
+	opts.Path = defaultKernelPath(opts.Backend, opts.Architecture)
 	fs := flag.NewFlagSet("kernel verify", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	fs.StringVar(&opts.OutputPath, "path", opts.OutputPath, "Kernel path")
+	fs.StringVar(&opts.Path, "path", opts.Path, "Kernel path")
 	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
@@ -433,64 +313,13 @@ func runKernelVerify(args []string, stdout *os.File) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected kernel verify argument: %s", fs.Arg(0))
 	}
-	if opts.OutputPath == "" {
-		opts.OutputPath = defaultKernelPath(opts.Backend, opts.Architecture)
-	}
-	sum, err := fileSHA256(opts.OutputPath)
+	result, err := kernel.Verify(opts)
 	if err != nil {
 		return err
 	}
-	ok := opts.SHA256 == "" || strings.EqualFold(opts.SHA256, sum)
-	if !ok {
-		return fmt.Errorf("kernel sha256 = %s, want %s", sum, opts.SHA256)
-	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(map[string]any{
-		"ok":     true,
-		"path":   opts.OutputPath,
-		"sha256": sum,
-	})
-}
-
-type kernelOptions struct {
-	URL          string
-	FromPath     string
-	SHA256       string
-	OutputPath   string
-	Backend      string
-	Architecture string
-}
-
-type kernelManifestEntry struct {
-	Backend      string
-	Architecture string
-	URL          string
-	SHA256       string
-}
-
-var defaultKernels = []kernelManifestEntry{
-	{
-		Backend:      vmkit.BackendAppleVF,
-		Architecture: "arm64",
-		URL:          "https://github.com/geoffbelknap/microagent-kit/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-apple-vf-arm64",
-		SHA256:       "73fe78e51a8ce348e69311d376a02114440eee6b60bf2e91af54bdf2dfb405ec",
-	},
-	{
-		Backend:      vmkit.BackendFirecracker,
-		Architecture: "amd64",
-		URL:          "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r2/microagent-kernel-6.1.155-firecracker-amd64",
-		SHA256:       "4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0",
-	},
-}
-
-func defaultKernel(backend, arch string) (kernelManifestEntry, bool) {
-	for _, kernel := range defaultKernels {
-		if kernel.Backend == backend && kernel.Architecture == arch {
-			return kernel, true
-		}
-	}
-	return kernelManifestEntry{}, false
+	return enc.Encode(result)
 }
 
 func defaultKernelSupport(backend, arch string) *vmkit.KernelSupport {
@@ -522,102 +351,17 @@ func defaultKernelSupportForPath(backend, arch, path string) *vmkit.KernelSuppor
 	return support
 }
 
-func installKernel(ctx context.Context, opts kernelOptions) error {
-	if (opts.URL == "") == (opts.FromPath == "") {
-		return fmt.Errorf("kernel install requires exactly one of --url or --from")
-	}
-	if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(opts.OutputPath), ".kernel-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	if opts.FromPath != "" {
-		in, err := os.Open(opts.FromPath)
-		if err != nil {
-			_ = tmp.Close()
-			return err
-		}
-		_, err = io.Copy(tmp, in)
-		closeErr := in.Close()
-		if err != nil {
-			_ = tmp.Close()
-			return err
-		}
-		if closeErr != nil {
-			_ = tmp.Close()
-			return closeErr
-		}
-	} else {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, opts.URL, nil)
-		if err != nil {
-			_ = tmp.Close()
-			return err
-		}
-		if token := githubToken(); token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			_ = tmp.Close()
-			return err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			_ = tmp.Close()
-			return fmt.Errorf("download kernel: %s", resp.Status)
-		}
-		if _, err := io.Copy(tmp, resp.Body); err != nil {
-			_ = tmp.Close()
-			return err
-		}
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	sum, err := fileSHA256(tmpPath)
-	if err != nil {
-		return err
-	}
-	if opts.SHA256 != "" && !strings.EqualFold(opts.SHA256, sum) {
-		return fmt.Errorf("kernel sha256 = %s, want %s", sum, opts.SHA256)
-	}
-	if err := os.Chmod(tmpPath, 0o644); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, opts.OutputPath); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
-}
+type kernelManifestEntry = kernel.ManifestEntry
 
-func githubToken() string {
-	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
-		return token
-	}
-	return strings.TrimSpace(os.Getenv("GH_TOKEN"))
-}
+var defaultKernels = kernel.Defaults
 
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
+func defaultKernel(backend, arch string) (kernelManifestEntry, bool) {
+	for _, kernel := range defaultKernels {
+		if kernel.Backend == backend && kernel.Architecture == arch {
+			return kernel, true
+		}
 	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return kernelManifestEntry{}, false
 }
 
 func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
@@ -729,194 +473,35 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	}
 }
 
-type workspaceOptions struct {
-	Name            string
-	ImageRef        string
-	ExecCommand     string
-	Entrypoint      string
-	SetupCommands   []string
-	Env             map[string]string
-	Profile         string
-	RestartPolicy   string
-	Backend         string
-	KernelPath      string
-	StateDir        string
-	SupervisorPath  string
-	GuestInitPath   string
-	Mke2fsPath      string
-	Architecture    string
-	MemoryMiB       int
-	CPUCount        int
-	SizeMiB         int64
-	Network         vmkit.NetworkConfig
-	Mediation       *vmkit.MediationConfig
-	Timeout         time.Duration
-	ResultPort      uint32
-	Disks           []workspaceDisk
-	Outputs         []workspaceOutput
-	VsockListeners  []vmkit.VsockListener
-	KernelExplicit  bool
-	SpecMemory      bool
-	SpecCPU         bool
-	SpecSize        bool
-	Keep            bool
-	PrepareForStart bool
-	SerialInput     bool
-	Verification    *vmkit.RuntimeVerification
-}
+type workspaceOptions = workspace.Options
+type workspaceSpec = workspace.Spec
+type networkSpec = workspace.NetworkSpec
+type workspaceDisk = workspace.Disk
+type workspaceOutput = workspace.Output
+type workspaceArtifacts = workspace.Artifacts
+type workspaceManifest = workspace.Manifest
 
-type workspaceSpec struct {
-	Name       string                `yaml:"name"`
-	ImageRef   string                `yaml:"image"`
-	Profile    string                `yaml:"profile"`
-	Restart    string                `yaml:"restart"`
-	Entrypoint string                `yaml:"entrypoint"`
-	Setup      []string              `yaml:"setup"`
-	Env        map[string]string     `yaml:"env"`
-	Resources  resourceConfig        `yaml:"resources"`
-	Network    networkSpec           `yaml:"network"`
-	Mediation  vmkit.MediationConfig `yaml:"mediation"`
-	Disks      []workspaceDisk       `yaml:"disks"`
-	Bundles    []workspaceDisk       `yaml:"bundles"`
-	Outputs    []workspaceOutput     `yaml:"outputs"`
-}
+type workspaceResult = workspace.Result
 
-type networkSpec struct {
-	Mode         string              `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Interface    string              `json:"interface,omitempty" yaml:"interface,omitempty"`
-	PortForwards []vmkit.PortForward `json:"port_forwards,omitempty" yaml:"forwards,omitempty"`
-	DNS          []string            `json:"dns,omitempty" yaml:"dns,omitempty"`
-	Routes       []string            `json:"routes,omitempty" yaml:"routes,omitempty"`
-	IP           string              `json:"ip,omitempty" yaml:"ip,omitempty"`
-}
-
-type workspaceDisk struct {
-	Name       string `json:"name" yaml:"name"`
-	SourcePath string `json:"source_path,omitempty" yaml:"sourcePath,omitempty"`
-	Path       string `json:"path" yaml:"path"`
-	Mountpoint string `json:"mountpoint" yaml:"mountpoint"`
-	Mode       string `json:"mode" yaml:"mode"`
-	Bundle     bool   `json:"bundle,omitempty" yaml:"bundle,omitempty"`
-}
-
-type workspaceOutput struct {
-	Name string `json:"name" yaml:"name"`
-	Path string `json:"path" yaml:"path"`
-}
-
-type workspaceArtifacts struct {
-	Ingress []workspaceDisk   `json:"ingress,omitempty"`
-	Egress  []workspaceOutput `json:"egress,omitempty"`
-}
-
-type workspaceManifest struct {
-	Name         string                     `json:"name"`
-	Profile      string                     `json:"profile,omitempty"`
-	Restart      string                     `json:"restart"`
-	Resources    resourceConfig             `json:"resources"`
-	Network      networkSpec                `json:"network,omitempty"`
-	Mediation    *vmkit.MediationConfig     `json:"mediation,omitempty"`
-	Disks        []workspaceDisk            `json:"disks,omitempty"`
-	Artifacts    workspaceArtifacts         `json:"artifacts,omitempty"`
-	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
-}
-
-type workspaceResult struct {
-	Workspace    string                     `json:"workspace"`
-	StateDir     string                     `json:"state_dir"`
-	Profile      string                     `json:"profile,omitempty"`
-	Restart      string                     `json:"restart"`
-	Resources    resourceConfig             `json:"resources"`
-	Network      networkSpec                `json:"network,omitempty"`
-	RootfsPath   string                     `json:"rootfs_path"`
-	KernelPath   string                     `json:"kernel_path"`
-	Disks        []workspaceDisk            `json:"disks,omitempty"`
-	Artifacts    workspaceArtifacts         `json:"artifacts,omitempty"`
-	SerialPath   string                     `json:"serial_path,omitempty"`
-	SerialLog    string                     `json:"serial_log,omitempty"`
-	FinalState   string                     `json:"final_state,omitempty"`
-	Result       *guestResult               `json:"result,omitempty"`
-	Image        rootfs.Provenance          `json:"image"`
-	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
-	Response     vmkit.Response             `json:"response"`
-}
-
-type copyResult struct {
-	Artifact  string `json:"artifact,omitempty"`
-	Workspace string `json:"workspace"`
-	Disk      string `json:"disk"`
-	Direction string `json:"direction"`
-	Source    string `json:"source"`
-	Target    string `json:"target"`
-	ImagePath string `json:"image_path"`
-	Bytes     int64  `json:"bytes,omitempty"`
-}
+type copyResult = workspace.CopyResult
 
 type artifactsResult struct {
 	Workspace string                 `json:"workspace"`
 	Artifacts vmkit.RuntimeArtifacts `json:"artifacts"`
 }
 
-type workspaceNetworkResult struct {
-	Workspace string               `json:"workspace"`
-	State     string               `json:"state,omitempty"`
-	Backend   string               `json:"backend,omitempty"`
-	Network   vmkit.NetworkConfig  `json:"network"`
-	Runtime   *vmkit.NetworkConfig `json:"runtime,omitempty"`
-}
+type workspaceNetworkResult = workspace.NetworkStatus
 
-type guestResult struct {
-	StartedAt string `json:"started_at"`
-	ExitedAt  string `json:"exited_at"`
-	ExitCode  int    `json:"exit_code"`
-	Stdout    string `json:"stdout,omitempty"`
-	Stderr    string `json:"stderr,omitempty"`
-	Error     string `json:"error,omitempty"`
-}
+type guestResult = workspace.GuestResult
 
-type workspaceListEntry struct {
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	Backend    string `json:"backend,omitempty"`
-	Profile    string `json:"profile,omitempty"`
-	Restart    string `json:"restart,omitempty"`
-	Network    string `json:"network,omitempty"`
-	ObservedAt string `json:"observed_at,omitempty"`
-	RootfsPath string `json:"rootfs_path,omitempty"`
-	SerialPath string `json:"serial_path,omitempty"`
-}
+type workspaceListEntry = workspace.ListEntry
 
-type resourceConfig struct {
-	MemoryMiB int   `json:"memory_mib" yaml:"memoryMiB"`
-	CPUCount  int   `json:"cpu_count" yaml:"cpuCount"`
-	SizeMiB   int64 `json:"size_mib,omitempty" yaml:"sizeMiB,omitempty"`
-}
+type resourceConfig = workspace.Resources
+type resourceProfile = workspace.Profile
 
-type resourceProfile struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Resources   resourceConfig `json:"resources"`
-}
-
-type imageIndex struct {
-	Images []imageRecord `json:"images"`
-}
-
-type imageRecord struct {
-	ImageRef    string          `json:"image_ref"`
-	ResolvedRef string          `json:"resolved_ref,omitempty"`
-	Digest      string          `json:"digest,omitempty"`
-	Platform    rootfs.Platform `json:"platform"`
-	OutputPath  string          `json:"output_path,omitempty"`
-	SizeBytes   int64           `json:"size_bytes,omitempty"`
-	LastUsedAt  string          `json:"last_used_at"`
-}
-
-type imagePruneResult struct {
-	Removed []imageRecord `json:"removed"`
-	Deleted []imageRecord `json:"deleted,omitempty"`
-	Kept    []imageRecord `json:"kept"`
-}
+type imageIndex = imagecache.Index
+type imageRecord = imagecache.Record
+type imagePruneResult = imagecache.PruneResult
 
 type imagePullOptions struct {
 	StateDir      string
@@ -996,28 +581,7 @@ type perfRSSSummary struct {
 	MaxKiB int64 `json:"max_kib"`
 }
 
-var resourceProfiles = []resourceProfile{
-	{
-		Name:        "tiny",
-		Description: "smoke tests and very small shells",
-		Resources:   resourceConfig{MemoryMiB: 256, CPUCount: 1, SizeMiB: 512},
-	},
-	{
-		Name:        "small",
-		Description: "default lightweight workspace",
-		Resources:   resourceConfig{MemoryMiB: defaultWorkspaceMemoryMiB, CPUCount: defaultWorkspaceCPUCount, SizeMiB: rootfs.DefaultSizeMiB},
-	},
-	{
-		Name:        "medium",
-		Description: "package installs and normal agent work",
-		Resources:   resourceConfig{MemoryMiB: 2048, CPUCount: 2, SizeMiB: 8192},
-	},
-	{
-		Name:        "large",
-		Description: "heavier builds and larger workspaces",
-		Resources:   resourceConfig{MemoryMiB: 4096, CPUCount: 4, SizeMiB: 16384},
-	},
-}
+var resourceProfiles = workspace.Profiles
 
 func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
@@ -1037,57 +601,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
-	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
-		return err
-	}
-	disks, err := prepareWorkspaceDisks(ctx, opts)
-	if err != nil {
-		return err
-	}
-	opts.Disks = disks
-	result, err := createWorkspaceRootfs(ctx, opts)
-	if err != nil {
-		return err
-	}
-	result.Disks = disks
-	verification, err := buildWorkspaceVerification(opts, result)
-	if err != nil {
-		return err
-	}
-	opts.Verification = &verification
-	result.Verification = &verification
-	if err := writeWorkspaceManifest(opts); err != nil {
-		return err
-	}
-	req := workspaceRequest(opts, "run", result.RootfsPath)
-	resp, err := runWorkspaceForeground(ctx, opts, req)
-	if err != nil {
-		if resp.Error == "" {
-			return err
-		}
-	}
-	result.Response = resp
-	result.SerialPath = serialLogPath(opts)
-	if err == nil && resp.OK {
-		finalResp, waitErr := inspectWorkspace(ctx, opts)
-		if finalResp.Event != nil {
-			result.FinalState = string(finalResp.Event.State)
-			result.Response = finalResp
-		}
-		if serial, readErr := os.ReadFile(result.SerialPath); readErr == nil {
-			result.SerialLog = string(serial)
-		}
-		if guest, readErr := readGuestResult(opts); readErr == nil {
-			result.Result = &guest
-		}
-		if waitErr != nil {
-			return waitErr
-		}
-		if !opts.Keep {
-			cleanupWorkspaceState(opts)
-			result.SerialPath = ""
-		}
-	}
+	result, err := workspace.Run(ctx, opts)
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
@@ -1105,7 +619,7 @@ func runPS(args []string, stdout *os.File) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected ps argument: %s", fs.Arg(0))
 	}
-	entries, err := listWorkspaces(opts.StateDir)
+	entries, err := workspace.List(opts.StateDir)
 	if err != nil {
 		return err
 	}
@@ -1131,7 +645,7 @@ func runClone(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(target); err != nil {
 		return err
 	}
-	result, err := cloneWorkspace(opts.StateDir, source, target)
+	result, err := workspace.Clone(opts.StateDir, source, target)
 	if err != nil {
 		return err
 	}
@@ -1151,7 +665,7 @@ func runCP(args []string, stdout *os.File) error {
 	if fs.NArg() != 2 {
 		return fmt.Errorf("usage: microagent cp <source> <target> [--state-dir <dir>]")
 	}
-	result, err := copyWorkspaceFile(opts.StateDir, debugfsPath, fs.Arg(0), fs.Arg(1))
+	result, err := workspace.Copy(opts.StateDir, debugfsPath, fs.Arg(0), fs.Arg(1))
 	if err != nil {
 		return err
 	}
@@ -1176,10 +690,11 @@ func runArtifacts(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	result, err := workspaceArtifactsResult(opts.StateDir, name)
+	artifacts, err := workspace.ArtifactsFor(opts.StateDir, name)
 	if err != nil {
 		return err
 	}
+	result := artifactsResult{Workspace: name, Artifacts: artifacts}
 	return writeArtifactsResult(stdout, result)
 }
 
@@ -1200,7 +715,7 @@ func runArtifactGet(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	result, err := getWorkspaceArtifact(opts.StateDir, debugfsPath, name, fs.Arg(1), fs.Arg(2))
+	result, err := workspace.GetArtifact(opts.StateDir, debugfsPath, name, fs.Arg(1), fs.Arg(2))
 	if err != nil {
 		return err
 	}
@@ -1253,7 +768,7 @@ func runImages(args []string, stdout *os.File) error {
 		if fs.NArg() > 1 {
 			return fmt.Errorf("usage: microagent images list [--state-dir <dir>]")
 		}
-		images, err := listImageRecords(opts.StateDir)
+		images, err := imagecache.List(opts.StateDir)
 		if err != nil {
 			return err
 		}
@@ -1264,7 +779,7 @@ func runImages(args []string, stdout *os.File) error {
 		if fs.NArg() != 2 {
 			return fmt.Errorf("usage: microagent images pull <image> [--state-dir <dir>]")
 		}
-		record, err := pullImage(context.Background(), imagePullOptions{
+		record, err := imagecache.Pull(context.Background(), imagecache.PullOptions{
 			StateDir:      opts.StateDir,
 			ImageRef:      fs.Arg(1),
 			Architecture:  *arch,
@@ -1280,7 +795,7 @@ func runImages(args []string, stdout *os.File) error {
 		if fs.NArg() != 3 {
 			return fmt.Errorf("usage: microagent images tag <source> <target> [--state-dir <dir>]")
 		}
-		record, err := tagImageRecord(opts.StateDir, fs.Arg(1), fs.Arg(2))
+		record, err := imagecache.Tag(opts.StateDir, fs.Arg(1), fs.Arg(2))
 		if err != nil {
 			return err
 		}
@@ -1289,7 +804,7 @@ func runImages(args []string, stdout *os.File) error {
 		if fs.NArg() != 2 {
 			return fmt.Errorf("usage: microagent images rm <image> [--delete] [--state-dir <dir>]")
 		}
-		result, err := removeImageRecords(opts.StateDir, fs.Arg(1), *deleteFiles)
+		result, err := imagecache.Remove(opts.StateDir, fs.Arg(1), *deleteFiles)
 		if err != nil {
 			return err
 		}
@@ -1298,7 +813,7 @@ func runImages(args []string, stdout *os.File) error {
 		if fs.NArg() != 1 {
 			return fmt.Errorf("usage: microagent images prune [--state-dir <dir>]")
 		}
-		result, err := pruneImageRecords(opts.StateDir, *deleteFiles)
+		result, err := imagecache.Prune(opts.StateDir, *deleteFiles)
 		if err != nil {
 			return err
 		}
@@ -1669,7 +1184,7 @@ func runLogs(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	data, err := os.ReadFile(filepath.Join(opts.StateDir, name, "serial.log"))
+	data, err := workspace.ReadLogs(opts.StateDir, name)
 	if err != nil {
 		return err
 	}
@@ -1692,7 +1207,7 @@ func runNetwork(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	result, err := inspectWorkspaceNetwork(opts.StateDir, name)
+	result, err := workspace.Network(opts.StateDir, name)
 	if err != nil {
 		return err
 	}
@@ -1741,27 +1256,24 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	}
 	workspaceOpts := workspaceOptions{StateDir: opts.StateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath}
 	if command == "status" {
-		resp, err := inspectWorkspaceState(workspaceOpts)
+		resp, err := workspace.Status(workspaceOpts)
 		if err != nil {
 			return err
 		}
 		return writeResponse(stdout, resp)
 	}
 	if command == "result" {
-		resp, err := inspectWorkspaceResult(workspaceOpts)
+		resp, err := workspace.ResultStatus(workspaceOpts)
 		if err != nil {
 			return err
 		}
 		return writeResultResponse(stdout, resp)
 	}
-	resp, err := dispatchWorkspaceRequest(ctx, workspaceOpts, req)
+	resp, err := workspace.Control(ctx, workspaceOpts, req.Command)
 	if err != nil {
 		if resp.Error == "" {
 			return err
 		}
-	}
-	if command == "delete" && resp.OK {
-		cleanupWorkspaceState(workspaceOptions{StateDir: opts.StateDir, Name: name})
 	}
 	if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
@@ -1894,81 +1406,18 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	}
 	opts.Name = fs.Arg(0)
 	opts.KernelExplicit = kernelExplicit
+	opts.ProfileExplicit = profileExplicit
+	opts.SpecMemory = memoryExplicit
+	opts.SpecCPU = cpusExplicit
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
-	}
-	if err := ensureWorkspaceCanStart(opts.StateDir, opts.Name); err != nil {
-		return err
-	}
-	if !opts.KernelExplicit {
-		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
 	listeners, err := parseVsockMappings(vsocks)
 	if err != nil {
 		return err
 	}
 	opts.VsockListeners = listeners
-	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
-		return err
-	}
-	rootfsPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4")
-	if _, err := os.Stat(rootfsPath); err != nil {
-		return err
-	}
-	requestedProfile := opts.Profile
-	manifest, err := readWorkspaceManifest(opts.StateDir, opts.Name)
-	manifestLoaded := false
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err == nil {
-		manifestLoaded = true
-		opts.Disks = manifest.Disks
-		if manifest.Profile != "" {
-			opts.Profile = manifest.Profile
-		}
-		if manifest.Restart != "" {
-			opts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
-		}
-		if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" {
-			opts.Network = networkConfigFromSpec(manifest.Network)
-		}
-		if manifest.Resources.MemoryMiB != 0 && !memoryExplicit {
-			opts.MemoryMiB = manifest.Resources.MemoryMiB
-		}
-		if manifest.Resources.CPUCount != 0 && !cpusExplicit {
-			opts.CPUCount = manifest.Resources.CPUCount
-		}
-		if manifest.Resources.SizeMiB != 0 {
-			opts.SizeMiB = manifest.Resources.SizeMiB
-		}
-	}
-	if profileExplicit || !manifestLoaded {
-		if profileExplicit {
-			opts.Profile = requestedProfile
-		}
-		if err := applyResourceProfile(&opts, memoryExplicit, cpusExplicit, true); err != nil {
-			return err
-		}
-	}
-	if err := validateResourceConfig(resourceConfig{MemoryMiB: opts.MemoryMiB, CPUCount: opts.CPUCount}, false); err != nil {
-		return err
-	}
-	req := workspaceRequest(opts, "run", rootfsPath)
-	resp, err := startWorkspaceDetached(opts, req)
-	result := workspaceResult{
-		Workspace:  opts.Name,
-		StateDir:   opts.StateDir,
-		Profile:    opts.Profile,
-		Restart:    opts.RestartPolicy,
-		Resources:  workspaceResources(opts),
-		Network:    networkSpecFromConfig(opts.Network),
-		RootfsPath: rootfsPath,
-		KernelPath: opts.KernelPath,
-		Disks:      opts.Disks,
-		SerialPath: serialLogPath(opts),
-		Response:   resp,
-	}
+	result, err := workspace.Start(ctx, opts)
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
@@ -2013,25 +1462,8 @@ func latestWorkspaceStartState(stateDir, name string) (vmkit.VMState, int, error
 	return "", 0, eventErr
 }
 
-type superviseOptions struct {
-	StateDir       string
-	SupervisorPath string
-	Backend        string
-	Architecture   string
-	KernelPath     string
-	KernelExplicit bool
-	Name           string
-	Interval       time.Duration
-	MaxRestarts    int
-}
-
-type superviseResult struct {
-	Workspace  string `json:"workspace"`
-	Policy     string `json:"policy"`
-	Restarts   int    `json:"restarts"`
-	FinalState string `json:"final_state,omitempty"`
-	Stopped    bool   `json:"stopped"`
-}
+type superviseOptions = workspace.SuperviseOptions
+type superviseResult = workspace.SuperviseResult
 
 func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	opts := superviseOptions{
@@ -2069,7 +1501,7 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
-	result, err := superviseWorkspace(ctx, opts)
+	result, err := workspace.Supervise(ctx, opts)
 	if result.Workspace != "" {
 		if encodeErr := writeSuperviseResult(stdout, result); encodeErr != nil {
 			return encodeErr
@@ -2079,49 +1511,7 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func superviseWorkspace(ctx context.Context, opts superviseOptions) (superviseResult, error) {
-	workspaceOpts, err := superviseWorkspaceOptions(ctx, opts)
-	if err != nil {
-		return superviseResult{}, err
-	}
-	policy := normalizeRestartPolicy(workspaceOpts.RestartPolicy)
-	if policy == "never" {
-		return superviseResult{Workspace: opts.Name, Policy: policy, Stopped: true}, nil
-	}
-	result := superviseResult{Workspace: opts.Name, Policy: policy}
-	for {
-		req := workspaceRequest(workspaceOpts, "run", filepath.Join(workspaceOpts.StateDir, "workspaces", workspaceOpts.Name, "rootfs.ext4"))
-		resp, err := startWorkspaceDetached(workspaceOpts, req)
-		if err != nil {
-			result.FinalState = string(vmkit.StateFailed)
-			if !shouldRestartWorkspace(policy, vmkit.StateFailed) {
-				result.Stopped = true
-				return result, err
-			}
-			result.Restarts++
-			if opts.MaxRestarts > 0 && result.Restarts >= opts.MaxRestarts {
-				result.Stopped = true
-				return result, nil
-			}
-			continue
-		} else if resp.Event != nil {
-			result.FinalState = string(resp.Event.State)
-		}
-		state, waitErr := waitForSupervisedWorkspace(ctx, workspaceOpts, opts.Interval)
-		result.FinalState = string(state)
-		if waitErr != nil {
-			result.Stopped = true
-			return result, waitErr
-		}
-		if !shouldRestartWorkspace(policy, state) {
-			result.Stopped = true
-			return result, nil
-		}
-		result.Restarts++
-		if opts.MaxRestarts > 0 && result.Restarts >= opts.MaxRestarts {
-			result.Stopped = true
-			return result, nil
-		}
-	}
+	return workspace.Supervise(ctx, opts)
 }
 
 func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (workspaceOptions, error) {
@@ -2199,14 +1589,7 @@ func waitForSupervisedWorkspace(ctx context.Context, opts workspaceOptions, inte
 }
 
 func shouldRestartWorkspace(policy string, state vmkit.VMState) bool {
-	switch normalizeRestartPolicy(policy) {
-	case "always":
-		return state == vmkit.StateHalted || state == vmkit.StateStopped || state == vmkit.StateFailed
-	case "on-failure":
-		return state == vmkit.StateFailed
-	default:
-		return false
-	}
+	return workspace.ShouldRestart(policy, state)
 }
 
 func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) error {
@@ -2214,70 +1597,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil {
 		return err
 	}
-	opts.PrepareForStart = true
-	if opts.Name == "" {
-		return fmt.Errorf("create requires a name")
-	}
-	if err := validateWorkspaceName(opts.Name); err != nil {
-		return err
-	}
-	if err := ensureWorkspaceKernel(ctx, &opts); err != nil {
-		return err
-	}
-	disks, err := prepareWorkspaceDisks(ctx, opts)
-	if err != nil {
-		return err
-	}
-	opts.Disks = disks
-	result, err := createWorkspaceRootfs(ctx, opts)
-	if err != nil {
-		return err
-	}
-	result.Disks = disks
-	verification, err := buildWorkspaceVerification(opts, result)
-	if err != nil {
-		return err
-	}
-	opts.Verification = &verification
-	result.Verification = &verification
-	if err := writeWorkspaceManifest(opts); err != nil {
-		return err
-	}
-	if workspaceHasGuestCommand(opts) {
-		startReq := workspaceRequest(opts, "run", result.RootfsPath)
-		startResp, startErr := runWorkspaceForeground(ctx, opts, startReq)
-		result.Response = startResp
-		result.SerialPath = serialLogPath(opts)
-		if startErr != nil {
-			if startResp.Error == "" {
-				return startErr
-			}
-			return startErr
-		}
-		finalResp, waitErr := inspectWorkspace(ctx, opts)
-		if finalResp.Event != nil {
-			result.FinalState = string(finalResp.Event.State)
-			result.Response = finalResp
-		}
-		if serial, readErr := os.ReadFile(result.SerialPath); readErr == nil {
-			result.SerialLog = string(serial)
-		}
-		if guest, readErr := readGuestResult(opts); readErr == nil {
-			result.Result = &guest
-		}
-		if waitErr != nil {
-			return waitErr
-		}
-	} else {
-		req := workspaceRequest(opts, "prepare", result.RootfsPath)
-		resp, err := dispatchWorkspaceRequest(ctx, opts, req)
-		if err != nil {
-			if resp.Error == "" {
-				return err
-			}
-		}
-		result.Response = resp
-	}
+	result, err := workspace.Create(ctx, opts)
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
@@ -2458,15 +1778,16 @@ func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	kernel, ok := defaultKernel(opts.Backend, opts.Architecture)
+	defaultKernel, ok := defaultKernel(opts.Backend, opts.Architecture)
 	if !ok {
 		return fmt.Errorf("no default kernel for %s/%s; pass --kernel", opts.Backend, opts.Architecture)
 	}
-	return installKernel(ctx, kernelOptions{
-		URL:        kernel.URL,
-		SHA256:     kernel.SHA256,
+	_, err := kernel.Install(ctx, kernel.InstallOptions{
+		URL:        defaultKernel.URL,
+		SHA256:     defaultKernel.SHA256,
 		OutputPath: opts.KernelPath,
 	})
+	return err
 }
 
 func workspaceSpecPath(command string, args []string) string {
@@ -2675,79 +1996,31 @@ func mergeEnv(base, overrides map[string]string) map[string]string {
 }
 
 func applyResourceProfile(opts *workspaceOptions, memoryExplicit, cpusExplicit, sizeExplicit bool) error {
-	profile, ok := lookupResourceProfile(opts.Profile)
-	if !ok {
-		return fmt.Errorf("unknown resource profile %q; choose one of: %s", opts.Profile, strings.Join(resourceProfileNames(), ", "))
-	}
-	opts.Profile = profile.Name
-	if !memoryExplicit {
-		opts.MemoryMiB = profile.Resources.MemoryMiB
-	}
-	if !cpusExplicit {
-		opts.CPUCount = profile.Resources.CPUCount
-	}
-	if !sizeExplicit {
-		opts.SizeMiB = profile.Resources.SizeMiB
-	}
-	return nil
+	return workspace.ApplyProfile(opts, memoryExplicit, cpusExplicit, sizeExplicit)
 }
 
 func lookupResourceProfile(name string) (resourceProfile, bool) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	for _, profile := range resourceProfiles {
-		if profile.Name == name {
-			return profile, true
-		}
-	}
-	return resourceProfile{}, false
+	return workspace.LookupProfile(name)
 }
 
 func resourceProfileNames() []string {
-	names := make([]string, 0, len(resourceProfiles))
-	for _, profile := range resourceProfiles {
-		names = append(names, profile.Name)
-	}
-	return names
+	return workspace.ProfileNames()
 }
 
 func workspaceResources(opts workspaceOptions) resourceConfig {
-	return resourceConfig{
-		MemoryMiB: opts.MemoryMiB,
-		CPUCount:  opts.CPUCount,
-		SizeMiB:   opts.SizeMiB,
-	}
+	return workspace.ResourcesFromOptions(opts)
 }
 
 func validateResourceConfig(resources resourceConfig, requireDisk bool) error {
-	if resources.MemoryMiB <= 0 {
-		return fmt.Errorf("memory must be positive")
-	}
-	if resources.CPUCount <= 0 {
-		return fmt.Errorf("cpus must be positive")
-	}
-	if requireDisk && resources.SizeMiB <= 0 {
-		return fmt.Errorf("size-mib must be positive")
-	}
-	if resources.SizeMiB < 0 {
-		return fmt.Errorf("size-mib must not be negative")
-	}
-	return nil
+	return workspace.ValidateResources(resources, requireDisk)
 }
 
 func validateRestartPolicy(policy string) error {
-	switch normalizeRestartPolicy(policy) {
-	case "never", "on-failure", "always":
-		return nil
-	default:
-		return fmt.Errorf("restart policy must be never, on-failure, or always")
-	}
+	return workspace.ValidateRestartPolicy(policy)
 }
 
 func normalizeRestartPolicy(policy string) string {
-	if strings.TrimSpace(policy) == "" {
-		return defaultRestartPolicy
-	}
-	return strings.TrimSpace(policy)
+	return workspace.NormalizeRestartPolicy(policy)
 }
 
 func canUseImageBaseline(opts workspaceOptions) bool {
@@ -2758,90 +2031,35 @@ func canUseImageBaseline(opts workspaceOptions) bool {
 }
 
 func normalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
-	network.Mode = strings.TrimSpace(network.Mode)
-	if network.Mode == "" {
-		network.Mode = defaultNetworkMode
-	}
-	network.Interface = strings.TrimSpace(network.Interface)
-	for i := range network.PortForwards {
-		network.PortForwards[i].Protocol = strings.TrimSpace(network.PortForwards[i].Protocol)
-		if network.PortForwards[i].Protocol == "" {
-			network.PortForwards[i].Protocol = "tcp"
-		}
-		network.PortForwards[i].Host = strings.TrimSpace(network.PortForwards[i].Host)
-	}
-	return network
+	return workspace.NormalizeNetworkConfig(network)
 }
 
 func networkSpecFromConfig(network vmkit.NetworkConfig) networkSpec {
-	network = normalizeNetworkConfig(network)
-	return networkSpec{
-		Mode:         network.Mode,
-		Interface:    network.Interface,
-		PortForwards: append([]vmkit.PortForward{}, network.PortForwards...),
-		DNS:          append([]string{}, network.DNS...),
-		Routes:       append([]string{}, network.Routes...),
-		IP:           network.IP,
-	}
+	return workspace.NetworkSpecFromConfig(network)
 }
 
 func networkConfigFromSpec(spec networkSpec) vmkit.NetworkConfig {
-	return normalizeNetworkConfig(vmkit.NetworkConfig{
-		Mode:         spec.Mode,
-		Interface:    spec.Interface,
-		PortForwards: append([]vmkit.PortForward{}, spec.PortForwards...),
-		DNS:          append([]string{}, spec.DNS...),
-		Routes:       append([]string{}, spec.Routes...),
-		IP:           spec.IP,
-	})
+	return workspace.NetworkConfigFromSpec(spec)
 }
 
 func networkConfigPtr(network vmkit.NetworkConfig) *vmkit.NetworkConfig {
-	normalized := normalizeNetworkConfig(network)
-	return &normalized
+	return workspace.NetworkConfigPtr(network)
 }
 
 func workspaceArtifactsFromOptions(opts workspaceOptions) workspaceArtifacts {
-	artifacts := workspaceArtifacts{Egress: append([]workspaceOutput{}, opts.Outputs...)}
-	for _, disk := range opts.Disks {
-		if disk.Bundle {
-			artifacts.Ingress = append(artifacts.Ingress, disk)
-		}
-	}
-	return artifacts
+	return workspace.ArtifactsFromOptions(opts)
 }
 
 func runtimeArtifactsFromManifest(artifacts workspaceArtifacts) vmkit.RuntimeArtifacts {
-	result := vmkit.RuntimeArtifacts{}
-	for _, ingress := range artifacts.Ingress {
-		kind := "disk"
-		if ingress.Bundle {
-			kind = "bundle"
-		}
-		result.Ingress = append(result.Ingress, vmkit.ArtifactRef{
-			Name:       ingress.Name,
-			Path:       firstNonEmpty(ingress.SourcePath, ingress.Path),
-			Mountpoint: ingress.Mountpoint,
-			Mode:       ingress.Mode,
-			Kind:       kind,
-		})
-	}
-	for _, egress := range artifacts.Egress {
-		result.Egress = append(result.Egress, vmkit.ArtifactRef{
-			Name: egress.Name,
-			Path: egress.Path,
-			Kind: "output",
-		})
-	}
-	return result
+	return workspace.RuntimeArtifacts(artifacts)
 }
 
 func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspaceResult, error) {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
 	if canUseImageBaseline(opts) {
-		if record, err := findImageRecord(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture}); err == nil {
-			if err := copyFile(record.OutputPath, rootfsPath, 0o644); err != nil {
+		if record, err := imagecache.Find(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture}); err == nil {
+			if err := workspace.CopyFile(record.OutputPath, rootfsPath, 0o644); err != nil {
 				return workspaceResult{}, err
 			}
 			return workspaceResult{
@@ -2854,7 +2072,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 				RootfsPath: rootfsPath,
 				KernelPath: opts.KernelPath,
 				Artifacts:  workspaceArtifactsFromOptions(opts),
-				Image:      provenanceFromImageRecord(record, rootfsPath),
+				Image:      imagecache.Provenance(record, rootfsPath),
 			}, nil
 		}
 	}
@@ -2892,55 +2110,22 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 	if err != nil {
 		return result, err
 	}
-	if err := recordImageProvenance(opts.StateDir, provenance); err != nil {
+	if err := imagecache.RecordProvenance(opts.StateDir, provenance); err != nil {
 		return result, err
 	}
 	return result, nil
 }
 
 func workspaceMounts(disks []workspaceDisk) []rootfs.Mount {
-	if len(disks) == 0 {
-		return nil
-	}
-	mounts := make([]rootfs.Mount, 0, len(disks))
-	for idx, disk := range disks {
-		mounts = append(mounts, rootfs.Mount{
-			Device:     virtioBlockDevice(idx + 1),
-			Mountpoint: disk.Mountpoint,
-			Mode:       disk.Mode,
-		})
-	}
-	return mounts
+	return workspace.Mounts(disks)
 }
 
 func rootfsPortForwards(forwards []vmkit.PortForward) []rootfs.PortForward {
-	if len(forwards) == 0 {
-		return nil
-	}
-	out := make([]rootfs.PortForward, 0, len(forwards))
-	for _, forward := range forwards {
-		out = append(out, rootfs.PortForward{
-			Protocol:  "tcp",
-			HostPort:  forward.HostPort,
-			GuestPort: forward.GuestPort,
-		})
-	}
-	return out
+	return workspace.RootfsPortForwards(forwards)
 }
 
 func virtioBlockDevice(index int) string {
-	if index < 0 {
-		index = 0
-	}
-	name := ""
-	for {
-		name = string(rune('a'+(index%26))) + name
-		index = index/26 - 1
-		if index < 0 {
-			break
-		}
-	}
-	return "/dev/vd" + name
+	return workspace.VirtioBlockDevice(index)
 }
 
 func prepareWorkspaceDisks(ctx context.Context, opts workspaceOptions) ([]workspaceDisk, error) {
@@ -3009,115 +2194,27 @@ func readWorkspaceManifest(stateDir, name string) (workspaceManifest, error) {
 }
 
 func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.Request {
-	var listeners []vmkit.VsockListener
-	if opts.ResultPort != 0 {
-		listeners = []vmkit.VsockListener{{Port: opts.ResultPort, Target: resultPath(opts)}}
-	}
-	listeners = append(listeners, opts.VsockListeners...)
-	if opts.Mediation != nil && opts.Mediation.Enabled {
-		listeners = append(listeners, vmkit.VsockListener{Port: opts.Mediation.Port, Target: opts.Mediation.Target})
-	}
-	disks := make([]vmkit.Disk, 0, len(opts.Disks))
-	for _, disk := range opts.Disks {
-		disks = append(disks, vmkit.Disk{
-			Name:       disk.Name,
-			Path:       disk.Path,
-			Mountpoint: disk.Mountpoint,
-			Mode:       disk.Mode,
-		})
-	}
-	return vmkit.Request{
-		Command: command,
-		Identity: &vmkit.Identity{
-			RequestID: newRequestID(),
-			RuntimeID: opts.Name,
-			Role:      vmkit.RoleWorkload,
-			Backend:   opts.Backend,
-		},
-		Config: &vmkit.Config{
-			KernelPath:     opts.KernelPath,
-			RootfsPath:     rootfsPath,
-			StateDir:       opts.StateDir,
-			MemoryMiB:      opts.MemoryMiB,
-			CPUCount:       opts.CPUCount,
-			Disks:          disks,
-			VsockListeners: listeners,
-			Mediation:      opts.Mediation,
-			Network:        networkConfigPtr(opts.Network),
-			SerialInput:    opts.SerialInput,
-		},
-	}
+	return workspace.Request(opts, command, rootfsPath, newRequestID())
 }
 
 func workspaceOptionsFromRequest(req vmkit.Request, supervisorPath string) (workspaceOptions, error) {
-	if req.Identity == nil {
-		return workspaceOptions{}, fmt.Errorf("identity is required")
-	}
-	if req.Config == nil {
-		return workspaceOptions{}, fmt.Errorf("config is required")
-	}
-	network := vmkit.NetworkConfig{Mode: defaultNetworkMode}
-	if req.Config.Network != nil {
-		network = normalizeNetworkConfig(*req.Config.Network)
-	}
-	return workspaceOptions{
-		Name:           req.Identity.RuntimeID,
-		Backend:        req.Identity.Backend,
-		KernelPath:     req.Config.KernelPath,
-		StateDir:       req.Config.StateDir,
-		SupervisorPath: supervisorPath,
-		RestartPolicy:  defaultRestartPolicy,
-		MemoryMiB:      req.Config.MemoryMiB,
-		CPUCount:       req.Config.CPUCount,
-		Network:        network,
-		Mediation:      req.Config.Mediation,
-		Disks:          configDisksToWorkspaceDisks(req.Config.Disks),
-	}, nil
+	return workspace.OptionsFromRequest(req, supervisorPath)
 }
 
 func configDisksToWorkspaceDisks(disks []vmkit.Disk) []workspaceDisk {
-	if len(disks) == 0 {
-		return nil
-	}
-	out := make([]workspaceDisk, 0, len(disks))
-	for _, disk := range disks {
-		out = append(out, workspaceDisk{
-			Name:       disk.Name,
-			Path:       disk.Path,
-			Mountpoint: disk.Mountpoint,
-			Mode:       disk.Mode,
-		})
-	}
-	return out
+	return workspace.ConfigDisks(disks)
 }
 
 func workspaceSupervisor(opts workspaceOptions) (vmkit.Supervisor, error) {
-	switch opts.Backend {
-	case vmkit.BackendFirecracker:
-		return vmkit.ExecutableSupervisor{Path: firecrackerSupervisorPath(opts)}, nil
-	case vmkit.BackendAppleVF:
-		return vmkit.ExecutableSupervisor{Path: opts.SupervisorPath}, nil
-	default:
-		return nil, fmt.Errorf("unsupported backend: %s", opts.Backend)
-	}
+	return workspace.Supervisor(opts)
 }
 
 func firecrackerSupervisorPath(opts workspaceOptions) string {
-	if opts.SupervisorPath != "" {
-		return opts.SupervisorPath
-	}
-	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER_SUPERVISOR")); path != "" {
-		return path
-	}
-	return "microagent-firecracker-supervisor"
+	return workspace.FirecrackerSupervisorPath(opts)
 }
 
 func dispatchWorkspaceRequest(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
-	supervisor, err := workspaceSupervisor(opts)
-	if err != nil {
-		return vmkit.Response{Backend: opts.Backend, Error: err.Error()}, err
-	}
-	return supervisor.Do(ctx, req)
+	return workspace.Dispatch(ctx, opts, req)
 }
 
 func runWorkspaceForeground(ctx context.Context, opts workspaceOptions, req vmkit.Request) (vmkit.Response, error) {
@@ -3344,7 +2441,7 @@ func recordedArtifact(path string) *vmkit.VerifiedArtifact {
 		artifact.Error = "path is empty"
 		return artifact
 	}
-	sum, err := fileSHA256(path)
+	sum, err := workspace.FileSHA256(path)
 	if err != nil {
 		artifact.Error = err.Error()
 		return artifact
@@ -3418,7 +2515,7 @@ func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verifi
 		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{Artifact: name, Error: artifact.Error})
 		return artifact
 	}
-	sum, err := fileSHA256(artifact.Path)
+	sum, err := workspace.FileSHA256(artifact.Path)
 	if err != nil {
 		artifact.Error = err.Error()
 		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{Artifact: name, Error: err.Error()})
@@ -3595,24 +2692,8 @@ func appendWorkspaceEvent(path string, event workspaceEventFile) error {
 	return writeJSONFile(path, events)
 }
 
-type workspaceEventFile struct {
-	Identity   vmkit.Identity `json:"identity"`
-	State      vmkit.VMState  `json:"state"`
-	Detail     string         `json:"detail,omitempty"`
-	ObservedAt string         `json:"observedAt"`
-}
-
-type workspaceRuntimeState struct {
-	Event           workspaceEventFile     `json:"event"`
-	Config          vmkit.Config           `json:"config"`
-	PID             int                    `json:"pid,omitempty"`
-	SerialLogPath   string                 `json:"serialLogPath"`
-	SerialInputPath string                 `json:"serialInputPath,omitempty"`
-	StartedAt       string                 `json:"startedAt,omitempty"`
-	UpdatedAt       string                 `json:"updatedAt"`
-	Readiness       vmkit.RuntimeReadiness `json:"readiness,omitempty"`
-	Error           string                 `json:"error,omitempty"`
-}
+type workspaceEventFile = workspace.EventFile
+type workspaceRuntimeState = workspace.RuntimeState
 
 func writeJSONFile(path string, value any) error {
 	data, err := json.MarshalIndent(value, "", "  ")
@@ -5134,112 +4215,43 @@ func hasLowLevelCreateFlag(args []string) bool {
 }
 
 func hostBackend() string {
-	if runtime.GOOS == "darwin" {
-		return vmkit.BackendAppleVF
-	}
-	return vmkit.BackendFirecracker
+	return workspace.HostBackend()
 }
 
 func defaultGuestArch() string {
-	switch runtime.GOARCH {
-	case "amd64":
-		return "amd64"
-	case "arm64":
-		return "arm64"
-	default:
-		return runtime.GOARCH
-	}
+	return workspace.GuestArch()
 }
 
 func defaultWorkspaceImage(arch string) string {
-	switch strings.TrimSpace(arch) {
-	case "arm64", "aarch64":
-		return defaultWorkspaceImageArm64
-	case "amd64", "x86_64":
-		return defaultWorkspaceImageAMD64
-	default:
-		return defaultWorkspaceImageOther
-	}
+	return workspace.DefaultImage(arch)
 }
 
 func defaultStateDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return filepath.Join(os.TempDir(), "microagent")
-	}
-	return filepath.Join(home, ".microagent")
+	return workspace.StateDir()
 }
 
 func defaultKernelPath(backend, arch string) string {
-	writable := defaultWritableKernelPath(backend, arch)
-	if writable == "" {
-		return defaultPackagedKernelPath(backend, arch)
-	}
-	if _, err := os.Stat(writable); err == nil {
-		return writable
-	}
-	legacy := defaultLegacyKernelPath(backend)
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
-	}
-	packaged := defaultPackagedKernelPath(backend, arch)
-	if packaged != "" {
-		if _, err := os.Stat(packaged); err == nil {
-			return packaged
-		}
-	}
-	return writable
+	return workspace.KernelPath(backend, arch)
 }
 
 func defaultWritableKernelPath(backend, arch string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, ".microagent", "kernels", backend, arch, "Image")
+	return workspace.WritableKernelPath(backend, arch)
 }
 
 func defaultLegacyKernelPath(backend string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return ""
-	}
-	return filepath.Join(home, ".microagent", "kernels", backend, "Image")
+	return workspace.LegacyKernelPath(backend)
 }
 
 func defaultPackagedKernelPath(backend, arch string) string {
-	executable, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	return defaultPackagedKernelPathFromExecutable(executable, backend, arch)
+	return workspace.PackagedKernelPath(backend, arch)
 }
 
 func defaultPackagedKernelPathFromExecutable(executable, backend, arch string) string {
-	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
-		executable = resolved
-	}
-	dir := filepath.Dir(executable)
-	candidates := []string{
-		filepath.Join(filepath.Clean(filepath.Join(dir, "..", "libexec")), "kernels", backend, arch, "Image"),
-		filepath.Join(dir, "kernels", backend, arch, "Image"),
-	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
-		}
-	}
-	return candidates[0]
+	return workspace.PackagedKernelPathFromExecutable(executable, backend, arch)
 }
 
 func defaultMke2fsPath() string {
-	if path, err := exec.LookPath("mke2fs"); err == nil {
-		return path
-	}
-	if _, err := os.Stat("/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"); err == nil {
-		return "/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
-	}
-	return "mke2fs"
+	return workspace.Mke2fsPath()
 }
 
 func defaultDebugFSPath() string {
@@ -5253,31 +4265,11 @@ func defaultDebugFSPath() string {
 }
 
 func defaultGuestInitPath(arch string) string {
-	executable, err := os.Executable()
-	if err != nil {
-		return "microagent-guestinit"
-	}
-	return defaultGuestInitPathFromExecutable(executable, arch)
+	return workspace.GuestInitPath(arch)
 }
 
 func defaultGuestInitPathFromExecutable(executable, arch string) string {
-	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
-		executable = resolved
-	}
-	dir := filepath.Dir(executable)
-	libexecDir := filepath.Clean(filepath.Join(dir, "..", "libexec"))
-	candidates := []string{
-		filepath.Join(libexecDir, "microagent-guestinit-"+arch),
-		filepath.Join(libexecDir, "microagent-guestinit"),
-		filepath.Join(dir, "microagent-guestinit-"+arch),
-		filepath.Join(dir, "microagent-guestinit"),
-	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
-		}
-	}
-	return candidates[0]
+	return workspace.GuestInitPathFromExecutable(executable, arch)
 }
 
 func hasFlagValue(args []string, name string) bool {
@@ -5338,61 +4330,19 @@ func hasWorkspaceStateTarget(args []string) bool {
 }
 
 func shellCommand(command string) []string {
-	if strings.TrimSpace(command) == "" {
-		return nil
-	}
-	return []string{"/bin/sh", "-lc", command}
+	return workspace.ShellCommand(command)
 }
 
 func workspaceCommand(opts workspaceOptions) string {
-	var lines []string
-	for _, command := range opts.SetupCommands {
-		command = strings.TrimSpace(command)
-		if command != "" {
-			lines = append(lines, command)
-		}
-	}
-	execCommand := strings.TrimSpace(opts.ExecCommand)
-	if execCommand != "" {
-		lines = append(lines, execCommand)
-	}
-	if opts.PrepareForStart {
-		lines = append(lines, resetGuestConfigCommand(shellCommand(opts.Entrypoint), opts.Env, 0, workspaceMounts(opts.Disks), rootfsPortForwards(opts.Network.PortForwards)))
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return "set -eu\n" + strings.Join(lines, "\n")
+	return workspace.Command(opts)
 }
 
 func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
-	if opts.PrepareForStart && !workspaceHasGuestCommand(opts) {
-		return shellCommand(opts.Entrypoint), 0
-	}
-	return shellCommand(workspaceCommand(opts)), opts.ResultPort
+	return workspace.BuildCommandAndPort(opts)
 }
 
 func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward) string {
-	if command == nil {
-		command = []string{}
-	}
-	data, err := json.Marshal(struct {
-		Command      []string             `json:"command"`
-		Env          []string             `json:"env,omitempty"`
-		Port         uint32               `json:"port"`
-		Mounts       []rootfs.Mount       `json:"mounts,omitempty"`
-		HostForwards []rootfs.PortForward `json:"hostForwards,omitempty"`
-	}{
-		Command:      command,
-		Env:          envList(env),
-		Port:         port,
-		Mounts:       mounts,
-		HostForwards: forwards,
-	})
-	if err != nil {
-		panic(err)
-	}
-	return "printf '%s\\n' " + shellSingleQuote(string(data)) + " > /etc/microagent/run.json"
+	return workspace.ResetGuestConfigCommand(command, env, port, mounts, forwards)
 }
 
 func envList(env map[string]string) []string {
@@ -5414,22 +4364,11 @@ func envList(env map[string]string) []string {
 }
 
 func shellSingleQuote(value string) string {
-	if value == "" {
-		return "''"
-	}
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
+	return workspace.ShellSingleQuote(value)
 }
 
 func workspaceHasGuestCommand(opts workspaceOptions) bool {
-	if strings.TrimSpace(opts.ExecCommand) != "" {
-		return true
-	}
-	for _, command := range opts.SetupCommands {
-		if strings.TrimSpace(command) != "" {
-			return true
-		}
-	}
-	return false
+	return workspace.HasGuestCommand(opts)
 }
 
 func waitForPath(ctx context.Context, path string, timeout time.Duration) error {
