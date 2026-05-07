@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/google/nftables/expr"
 )
 
 func TestDialGuestVsockUsesFirecrackerConnectHandshake(t *testing.T) {
@@ -364,6 +365,69 @@ func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
 		!strings.Contains(bootArgs, "microagent_net_dns=1.1.1.1,8.8.8.8") {
 		t.Fatalf("boot args = %q", bootArgs)
 	}
+}
+
+func TestBuildNATFirewallRulesUsesNftablesExpressions(t *testing.T) {
+	rules, err := buildNATFirewallRules("magtap1234", "10.43.12.0/29")
+	if err != nil {
+		t.Fatalf("buildNATFirewallRules: %v", err)
+	}
+	if len(rules) != 3 {
+		t.Fatalf("rules = %#v", rules)
+	}
+	if rules[0].Table != nftMicroagentTable || rules[0].Chain != nftNATPostroutingChain || rules[0].Comment == "" {
+		t.Fatalf("nat rule metadata = %#v", rules[0].transientFirewallRule)
+	}
+	if !containsExpr[*expr.Masq](rules[0].Exprs) {
+		t.Fatalf("nat rule missing masquerade expression: %#v", rules[0].Exprs)
+	}
+	if rules[1].Chain != nftForwardChain || !containsVerdict(rules[1].Exprs, expr.VerdictAccept) {
+		t.Fatalf("forward rule = %#v", rules[1])
+	}
+	if !containsExpr[*expr.Ct](rules[2].Exprs) || !containsVerdict(rules[2].Exprs, expr.VerdictAccept) {
+		t.Fatalf("established forward rule = %#v", rules[2])
+	}
+}
+
+func TestFirecrackerNetworkSetupDoesNotExecIPOrIPTables(t *testing.T) {
+	data, err := os.ReadFile("supervisor_linux.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	for _, needle := range []string{
+		`exec.` + `Command("ip"`,
+		`exec.` + `CommandContext(ctx, "ip"`,
+		`exec.` + `LookPath("ip"`,
+		`exec.` + `Command("iptables"`,
+		`exec.` + `CommandContext(ctx, "iptables"`,
+		`exec.` + `LookPath("iptables"`,
+		`exec.` + `Command("xtables-nft-multi"`,
+		`exec.` + `LookPath("xtables-nft-multi"`,
+	} {
+		if strings.Contains(source, needle) {
+			t.Fatalf("firecracker network setup still shells out through %s", needle)
+		}
+	}
+}
+
+func containsExpr[T expr.Any](exprs []expr.Any) bool {
+	for _, candidate := range exprs {
+		if _, ok := candidate.(T); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func containsVerdict(exprs []expr.Any, kind expr.VerdictKind) bool {
+	for _, candidate := range exprs {
+		verdict, ok := candidate.(*expr.Verdict)
+		if ok && verdict.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWriteConfigAddsVsockForMediation(t *testing.T) {

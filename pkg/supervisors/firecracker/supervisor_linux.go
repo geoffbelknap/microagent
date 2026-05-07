@@ -22,6 +22,12 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/google/nftables"
+	"github.com/google/nftables/binaryutil"
+	"github.com/google/nftables/expr"
+	"github.com/google/nftables/userdata"
+	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 type Options struct {
@@ -255,9 +261,10 @@ type transientNetworkDevice struct {
 }
 
 type transientFirewallRule struct {
-	Table string   `json:"table"`
-	Chain string   `json:"chain"`
-	Args  []string `json:"args"`
+	Table   string   `json:"table"`
+	Chain   string   `json:"chain"`
+	Comment string   `json:"comment,omitempty"`
+	Args    []string `json:"args,omitempty"`
 }
 
 type runtimeState struct {
@@ -649,9 +656,6 @@ func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetw
 	if err := validateLinuxBridge(bridge); err != nil {
 		return nil, nil, nil, err
 	}
-	if _, err := exec.LookPath("ip"); err != nil {
-		return nil, nil, nil, fmt.Errorf("firecracker bridged networking requires iproute2 'ip': %w", err)
-	}
 	device := transientNetworkDevice{Name: tapName(opts), Mode: "tap", Interface: bridge, Created: true}
 	if err := createBridgeTap(device.Name, bridge); err != nil {
 		return nil, nil, nil, err
@@ -660,12 +664,6 @@ func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetw
 }
 
 func prepareNATForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
-	if _, err := exec.LookPath("ip"); err != nil {
-		return nil, nil, nil, fmt.Errorf("firecracker nat networking requires iproute2 'ip': %w", err)
-	}
-	if _, err := exec.LookPath("iptables"); err != nil {
-		return nil, nil, nil, fmt.Errorf("firecracker nat networking requires iptables: %w", err)
-	}
 	if err := requireIPv4Forwarding(); err != nil {
 		return nil, nil, nil, err
 	}
@@ -678,15 +676,25 @@ func prepareNATForStart(opts Options, config *vmkit.Config) ([]transientNetworkD
 	hostIP := fmt.Sprintf("10.43.%d.1", subnetOctet)
 	guestIP := fmt.Sprintf("10.43.%d.2", subnetOctet)
 	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: subnet, Created: true}
-	if err := runIP("tuntap", "add", "dev", tap, "mode", "tap"); err != nil {
+	if err := createTap(tap); err != nil {
 		return nil, nil, nil, networkPrivilegeError("create firecracker nat tap "+tap, err)
 	}
 	cleanupDevices := []transientNetworkDevice{device}
-	if err := runIP("addr", "add", hostIP+"/29", "dev", tap); err != nil {
+	link, err := netlink.LinkByName(tap)
+	if err != nil {
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, networkPrivilegeError("inspect firecracker nat tap "+tap, err)
+	}
+	addr, err := netlink.ParseAddr(hostIP + "/29")
+	if err != nil {
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, fmt.Errorf("parse firecracker nat tap address %s/29: %w", hostIP, err)
+	}
+	if err := netlink.AddrAdd(link, addr); err != nil && !alreadyExistsError(err) {
 		cleanupTransientNetworkDevices(cleanupDevices)
 		return nil, nil, nil, networkPrivilegeError("assign firecracker nat tap address "+hostIP, err)
 	}
-	if err := runIP("link", "set", tap, "up"); err != nil {
+	if err := netlink.LinkSetUp(link); err != nil {
 		cleanupTransientNetworkDevices(cleanupDevices)
 		return nil, nil, nil, networkPrivilegeError("bring firecracker nat tap up", err)
 	}
@@ -739,18 +747,47 @@ func validateLinuxBridge(name string) error {
 }
 
 func createBridgeTap(tap, bridge string) error {
-	if err := runIP("tuntap", "add", "dev", tap, "mode", "tap"); err != nil {
+	if err := createTap(tap); err != nil {
 		return networkPrivilegeError("create firecracker tap "+tap, err)
 	}
-	if err := runIP("link", "set", tap, "master", bridge); err != nil {
+	tapLink, err := netlink.LinkByName(tap)
+	if err != nil {
+		_ = deleteTap(tap)
+		return networkPrivilegeError("inspect firecracker tap "+tap, err)
+	}
+	bridgeLink, err := netlink.LinkByName(bridge)
+	if err != nil {
+		_ = deleteTap(tap)
+		return fmt.Errorf("inspect firecracker bridge %q: %w", bridge, err)
+	}
+	if err := netlink.LinkSetMaster(tapLink, bridgeLink); err != nil {
 		_ = deleteTap(tap)
 		return networkPrivilegeError(fmt.Sprintf("attach firecracker tap %q to bridge %q", tap, bridge), err)
 	}
-	if err := runIP("link", "set", tap, "up"); err != nil {
+	if err := netlink.LinkSetUp(tapLink); err != nil {
 		_ = deleteTap(tap)
 		return networkPrivilegeError("bring firecracker tap "+tap+" up", err)
 	}
 	return nil
+}
+
+func createTap(name string) error {
+	if link, err := netlink.LinkByName(name); err == nil {
+		if strings.HasPrefix(name, "magtap") {
+			if err := netlink.LinkDel(link); err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("network link %q already exists", name)
+		}
+	} else if !linkNotFoundError(err) {
+		return err
+	}
+	return netlink.LinkAdd(&netlink.Tuntap{
+		LinkAttrs: netlink.LinkAttrs{Name: name},
+		Mode:      netlink.TUNTAP_MODE_TAP,
+		Flags:     netlink.TUNTAP_DEFAULTS | netlink.TUNTAP_NO_PI,
+	})
 }
 
 func requireIPv4Forwarding() error {
@@ -766,30 +803,23 @@ func requireIPv4Forwarding() error {
 
 func allocateNATSubnetOctet(opts Options) (int, error) {
 	used := map[int]bool{}
-	entries, err := os.ReadDir("/sys/class/net")
+	links, err := netlink.LinkList()
 	if err != nil {
 		return 0, fmt.Errorf("list host network interfaces for nat subnet allocation: %w", err)
 	}
-	for _, entry := range entries {
-		name := entry.Name()
+	for _, link := range links {
+		name := link.Attrs().Name
 		if !strings.HasPrefix(name, "magtap") {
 			continue
 		}
-		out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+		addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
 		if err != nil {
 			continue
 		}
-		fields := strings.Fields(string(out))
-		for i, field := range fields {
-			if field != "inet" || i+1 >= len(fields) {
-				continue
-			}
-			ip, _, err := net.ParseCIDR(fields[i+1])
-			if err == nil && ip != nil {
-				v4 := ip.To4()
-				if len(v4) == net.IPv4len && v4[0] == 10 && v4[1] == 43 {
-					used[int(v4[2])] = true
-				}
+		for _, addr := range addrs {
+			v4 := addr.IP.To4()
+			if len(v4) == net.IPv4len && v4[0] == 10 && v4[1] == 43 {
+				used[int(v4[2])] = true
 			}
 		}
 	}
@@ -804,43 +834,118 @@ func allocateNATSubnetOctet(opts Options) (int, error) {
 	return 0, fmt.Errorf("no free firecracker nat subnet in 10.43.1.0/29 through 10.43.254.0/29")
 }
 
-func installNATFirewallRules(tap, subnet string) ([]transientFirewallRule, error) {
-	if err := ensureFirewallChain("nat", "MICROAGENT-NAT", "POSTROUTING"); err != nil {
-		return nil, err
-	}
-	if err := ensureFirewallChain("filter", "MICROAGENT-FWD", "FORWARD"); err != nil {
-		return nil, err
-	}
-	rules := []transientFirewallRule{
-		{Table: "nat", Chain: "MICROAGENT-NAT", Args: []string{"-s", subnet, "!", "-o", tap, "-j", "MASQUERADE"}},
-		{Table: "filter", Chain: "MICROAGENT-FWD", Args: []string{"-i", tap, "-s", subnet, "-j", "ACCEPT"}},
-		{Table: "filter", Chain: "MICROAGENT-FWD", Args: []string{"-o", tap, "-d", subnet, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"}},
-	}
-	for i, rule := range rules {
-		if err := runIPTables(append([]string{"-t", rule.Table, "-A", rule.Chain}, rule.Args...)...); err != nil {
-			cleanupTransientFirewallRules(rules[:i])
-			return rules[:i], networkPrivilegeError("configure firecracker nat firewall", err)
-		}
-	}
-	return rules, nil
+const (
+	nftMicroagentTable      = "microagent"
+	nftNATPostroutingChain  = "MICROAGENT-NAT-POSTROUTING"
+	nftForwardChain         = "MICROAGENT-FORWARD"
+	nftRuleCommentPrefix    = "microagent:"
+	nftRuleCommentSeparator = ":"
+)
+
+type nftFirewallRule struct {
+	transientFirewallRule
+	Exprs []expr.Any
 }
 
-func ensureFirewallChain(table, chain, parent string) error {
-	if err := runIPTables("-t", table, "-N", chain); err != nil && !alreadyExistsError(err) {
-		return networkPrivilegeError("create firecracker firewall chain "+chain, err)
+func installNATFirewallRules(tap, subnet string) ([]transientFirewallRule, error) {
+	nftRules, err := buildNATFirewallRules(tap, subnet)
+	if err != nil {
+		return nil, err
 	}
-	if err := runIPTables("-t", table, "-C", parent, "-j", chain); err == nil {
-		return nil
+	conn := &nftables.Conn{}
+	if err := ensureNATFirewallChains(conn); err != nil {
+		return nil, err
 	}
-	if err := runIPTables("-t", table, "-I", parent, "1", "-j", chain); err != nil {
-		return networkPrivilegeError("attach firecracker firewall chain "+chain, err)
+	table := microagentNFTTable()
+	transientRules := make([]transientFirewallRule, 0, len(nftRules))
+	for i, rule := range nftRules {
+		chain := &nftables.Chain{Name: rule.Chain, Table: table}
+		exists, err := nftRuleExists(conn, table, chain, rule.Comment)
+		if err != nil {
+			cleanupTransientFirewallRules(transientRules)
+			return transientRules, networkPrivilegeError("inspect firecracker nat firewall", err)
+		}
+		if !exists {
+			conn.AddRule(&nftables.Rule{
+				Table:    table,
+				Chain:    chain,
+				Exprs:    rule.Exprs,
+				UserData: nftRuleUserData(rule.Comment),
+			})
+			if err := conn.Flush(); err != nil {
+				cleanupTransientFirewallRules(transientRules)
+				return transientRules, networkPrivilegeError("configure firecracker nat firewall", err)
+			}
+		}
+		transientRules = append(transientRules, nftRules[i].transientFirewallRule)
+	}
+	return transientRules, nil
+}
+
+func buildNATFirewallRules(tap, subnet string) ([]nftFirewallRule, error) {
+	_, network, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return nil, fmt.Errorf("parse firecracker nat subnet %q: %w", subnet, err)
+	}
+	if network.IP.To4() == nil {
+		return nil, fmt.Errorf("firecracker nat subnet %q is not IPv4", subnet)
+	}
+	return []nftFirewallRule{
+		{
+			transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftNATPostroutingChain, Comment: nftRuleComment(tap, "masquerade")},
+			Exprs: append(append(ipv4SubnetMatchExprs(12, network),
+				&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+				&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: nftIfName(tap)},
+			), &expr.Masq{}),
+		},
+		{
+			transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftForwardChain, Comment: nftRuleComment(tap, "forward-out")},
+			Exprs:                 append(append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap), ipv4SubnetMatchExprs(12, network)...), &expr.Verdict{Kind: expr.VerdictAccept}),
+		},
+		{
+			transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftForwardChain, Comment: nftRuleComment(tap, "forward-established")},
+			Exprs:                 append(append(append(ifNameMatchExprs(expr.MetaKeyOIFNAME, tap), ipv4SubnetMatchExprs(16, network)...), establishedRelatedExprs()...), &expr.Verdict{Kind: expr.VerdictAccept}),
+		},
+	}, nil
+}
+
+func ensureNATFirewallChains(conn *nftables.Conn) error {
+	table := microagentNFTTable()
+	conn.CreateTable(table)
+	if err := conn.Flush(); err != nil {
+		return networkPrivilegeError("create firecracker nftables table "+nftMicroagentTable, err)
+	}
+	chains := []*nftables.Chain{
+		{
+			Name:     nftNATPostroutingChain,
+			Table:    table,
+			Type:     nftables.ChainTypeNAT,
+			Hooknum:  nftables.ChainHookPostrouting,
+			Priority: nftables.ChainPriorityNATSource,
+		},
+		{
+			Name:     nftForwardChain,
+			Table:    table,
+			Type:     nftables.ChainTypeFilter,
+			Hooknum:  nftables.ChainHookForward,
+			Priority: nftables.ChainPriorityFilter,
+		},
+	}
+	for _, chain := range chains {
+		if _, err := conn.ListChain(table, chain.Name); err == nil {
+			continue
+		}
+		conn.AddChain(chain)
+		if err := conn.Flush(); err != nil {
+			return networkPrivilegeError("create firecracker nftables chain "+chain.Name, err)
+		}
 	}
 	return nil
 }
 
 func alreadyExistsError(err error) bool {
 	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "chain already exists") || strings.Contains(text, "file exists")
+	return strings.Contains(text, "chain already exists") || strings.Contains(text, "file exists") || strings.Contains(text, "object already exists")
 }
 
 func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
@@ -854,41 +959,130 @@ func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
 func cleanupTransientFirewallRules(rules []transientFirewallRule) {
 	for i := len(rules) - 1; i >= 0; i-- {
 		rule := rules[i]
-		if rule.Table == "" || rule.Chain == "" || len(rule.Args) == 0 {
+		if rule.Table == "" || rule.Chain == "" || rule.Comment == "" {
 			continue
 		}
-		_ = runIPTables(append([]string{"-t", rule.Table, "-D", rule.Chain}, rule.Args...)...)
+		_ = deleteNFTFirewallRule(rule)
 	}
 }
 
 func deleteTap(name string) error {
-	return runIP("link", "delete", name)
+	link, err := netlink.LinkByName(name)
+	if err != nil {
+		if linkNotFoundError(err) {
+			return nil
+		}
+		return err
+	}
+	return netlink.LinkDel(link)
 }
 
-func runIP(args ...string) error {
-	cmd := exec.Command("ip", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		text := strings.TrimSpace(string(out))
-		if text == "" {
-			return err
-		}
-		return fmt.Errorf("%w: %s", err, text)
-	}
-	return nil
+func microagentNFTTable() *nftables.Table {
+	return &nftables.Table{Name: nftMicroagentTable, Family: nftables.TableFamilyINet}
 }
 
-func runIPTables(args ...string) error {
-	cmd := exec.Command("iptables", args...)
-	out, err := cmd.CombinedOutput()
+func nftRuleExists(conn *nftables.Conn, table *nftables.Table, chain *nftables.Chain, comment string) (bool, error) {
+	rules, err := conn.GetRules(table, chain)
 	if err != nil {
-		text := strings.TrimSpace(string(out))
-		if text == "" {
+		return false, err
+	}
+	for _, rule := range rules {
+		if nftRuleCommentFromUserData(rule.UserData) == comment {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func deleteNFTFirewallRule(rule transientFirewallRule) error {
+	conn := &nftables.Conn{}
+	table := &nftables.Table{Name: rule.Table, Family: nftables.TableFamilyINet}
+	chain := &nftables.Chain{Name: rule.Chain, Table: table}
+	rules, err := conn.GetRules(table, chain)
+	if err != nil {
+		return err
+	}
+	deleted := false
+	for _, candidate := range rules {
+		if nftRuleCommentFromUserData(candidate.UserData) != rule.Comment {
+			continue
+		}
+		if err := conn.DelRule(candidate); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: %s", err, text)
+		deleted = true
 	}
-	return nil
+	if !deleted {
+		return nil
+	}
+	return conn.Flush()
+}
+
+func nftRuleComment(tap, kind string) string {
+	return nftRuleCommentPrefix + tap + nftRuleCommentSeparator + kind
+}
+
+func nftRuleUserData(comment string) []byte {
+	return userdata.AppendString(nil, userdata.TypeComment, comment)
+}
+
+func nftRuleCommentFromUserData(data []byte) string {
+	comment, ok := userdata.GetString(data, userdata.TypeComment)
+	if !ok {
+		return ""
+	}
+	return comment
+}
+
+func nftIfName(name string) []byte {
+	data := make([]byte, 16)
+	copy(data, []byte(name+"\x00"))
+	return data
+}
+
+func ifNameMatchExprs(key expr.MetaKey, name string) []expr.Any {
+	return []expr.Any{
+		&expr.Meta{Key: key, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: nftIfName(name)},
+	}
+}
+
+func ipv4SubnetMatchExprs(offset uint32, network *net.IPNet) []expr.Any {
+	mask := []byte(network.Mask)
+	if len(mask) != net.IPv4len {
+		mask = []byte{255, 255, 255, 255}
+	}
+	networkIP := network.IP.To4()
+	masked := make([]byte, net.IPv4len)
+	for i := 0; i < net.IPv4len; i++ {
+		masked[i] = networkIP[i] & mask[i]
+	}
+	return []expr.Any{
+		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV4}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: offset, Len: net.IPv4len},
+		&expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: net.IPv4len, Mask: mask, Xor: []byte{0, 0, 0, 0}},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: masked},
+	}
+}
+
+func establishedRelatedExprs() []expr.Any {
+	return []expr.Any{
+		&expr.Ct{Register: 1, Key: expr.CtKeySTATE},
+		&expr.Bitwise{
+			SourceRegister: 1,
+			DestRegister:   1,
+			Len:            4,
+			Mask:           binaryutil.NativeEndian.PutUint32(expr.CtStateBitESTABLISHED | expr.CtStateBitRELATED),
+			Xor:            binaryutil.NativeEndian.PutUint32(0),
+		},
+		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: []byte{0, 0, 0, 0}},
+	}
+}
+
+func linkNotFoundError(err error) bool {
+	var notFound netlink.LinkNotFoundError
+	return errors.As(err, &notFound)
 }
 
 func networkPrivilegeError(action string, err error) error {

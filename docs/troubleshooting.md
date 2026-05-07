@@ -135,13 +135,11 @@ Fixes:
 
 Linux bridged mode needs:
 
-- `iproute2` installed (`ip` command available)
 - The named host interface to be an existing Linux bridge
 - Permission to create and attach a TAP device (typically `CAP_NET_ADMIN` or root)
 
 Fixes:
 
-- `sudo apt install iproute2` (or your distro's equivalent)
 - Create a bridge if you don't have one: `sudo ip link add br0 type bridge && sudo ip link set br0 up`
 - Run with sufficient privileges, or grant the supervisor capabilities via `setcap`
 
@@ -150,16 +148,15 @@ If your environment can't satisfy all three, use `nat` instead.
 ### Firecracker `nat` guest can't reach the internet
 
 Firecracker `nat` needs host routing and firewall support. The supervisor
-creates a TAP, assigns a `10.43.x.0/29` subnet, and installs iptables
+creates a TAP, assigns a `10.43.x.0/29` subnet, and installs nftables
 MASQUERADE/FORWARD rules. If any prerequisite is missing, startup should fail
 closed with a clear error; if outbound still fails, check the host:
 
 - `sysctl net.ipv4.ip_forward` must report `net.ipv4.ip_forward = 1`
-- `ip` and `iptables` must be installed
+- the host kernel must support nftables
 - the supervisor needs `CAP_NET_ADMIN` or equivalent privileges
 - host firewall managers such as `ufw` or `firewalld` must not block forwarding
-  from the `magtap*` device or remove the `MICROAGENT-NAT` /
-  `MICROAGENT-FWD` chain jumps
+  from the `magtap*` device or remove rules in the `inet microagent` table
 
 Use `microagent --json network <name>` to inspect the runtime IP, subnet,
 gateway, DNS, and route that were assigned to the guest.

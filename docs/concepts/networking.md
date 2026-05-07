@@ -16,7 +16,7 @@ Backend support is narrower than the enum:
 | Backend | What works today |
 |---|---|
 | Apple VF | `nat`, `isolated`, and TCP `--publish`. `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement. |
-| Firecracker | `nat` through a transient TAP and iptables MASQUERADE, live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
+| Firecracker | `nat` through a transient TAP and nftables MASQUERADE, live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
 
 Apple gates native bridged networking behind `com.apple.vm.networking`. Open-source builds can't self-sign that entitlement, and `sudo` doesn't bypass the check. If you need bridged on macOS, you sign with the entitlement; otherwise, use `nat`.
 
@@ -53,7 +53,7 @@ Isolated workspaces reject port forwards before the request leaves the CLI: ther
 ## NAT on Firecracker
 
 Firecracker `nat` mode creates a host-side TAP device, assigns a private
-`10.43.x.0/29` subnet, configures iptables MASQUERADE, and attaches the TAP as
+`10.43.x.0/29` subnet, configures nftables MASQUERADE, and attaches the TAP as
 the guest's `eth0`. Guest-init configures a static IPv4 address, installs the
 default route through the TAP gateway, and writes DNS resolvers. Outbound TCP
 and DNS work without a host bridge. Inbound remains closed unless you declare
@@ -61,15 +61,14 @@ specific TCP forwards with `--publish`.
 
 Host requirements:
 
-- `iproute2` installed (`ip` command available)
-- `iptables` installed
+- Linux kernel 4.4 or newer with nftables support
 - `net.ipv4.ip_forward=1`
-- permission to create TAP devices and edit iptables rules, typically root or
+- permission to create TAP devices and edit nftables rules, typically root or
   `CAP_NET_ADMIN` on the Firecracker supervisor binary
 
 The supervisor does not enable `ip_forward` for you because it is host-wide
 policy. If a requirement is missing, `nat` fails closed before booting the VM.
-Transient TAP devices and per-workspace iptables rules are removed on
+Transient TAP devices and per-workspace nftables rules are removed on
 `quarantine`, `stop`, `kill`, and `delete`.
 
 ## Bridged on Apple VF
@@ -94,7 +93,9 @@ network:
   interface: br0
 ```
 
-The supervisor creates a transient TAP device, attaches it to the bridge, writes the Firecracker network device config, and removes the TAP when the workspace is quarantined, stopped, killed, or deleted. Missing `iproute2`, missing privileges, non-bridge interfaces, and TAP setup failures all fail closed.
+The supervisor creates a transient TAP device, attaches it to the bridge, writes the Firecracker network device config, and removes the TAP when the workspace is quarantined, stopped, killed, or deleted. Missing privileges, non-bridge interfaces, and TAP setup failures all fail closed.
+The supervisor uses Linux netlink directly, so bridged mode does not require
+the `ip` command at runtime.
 
 ## Mediation channel
 

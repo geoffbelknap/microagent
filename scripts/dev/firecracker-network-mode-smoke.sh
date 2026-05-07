@@ -78,6 +78,34 @@ export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
+if [ "$(id -u)" -ne 0 ]; then
+  if ! command -v getcap >/dev/null 2>&1; then
+    echo "getcap is required to assert supervisor-only CAP_NET_ADMIN setup" >&2
+    exit 2
+  fi
+  supervisor_caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
+  if ! printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin'; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo -n setcap 'cap_net_admin+ep' "$SUPERVISOR" 2>/dev/null || true
+      supervisor_caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
+    fi
+  fi
+  if ! printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin'; then
+    echo "grant only the supervisor CAP_NET_ADMIN before running this smoke:" >&2
+    echo "  sudo setcap 'cap_net_admin+ep' $SUPERVISOR" >&2
+    exit 2
+  fi
+  for host_tool in ip iptables xtables-nft-multi; do
+    if tool_path="$(command -v "$host_tool" 2>/dev/null)"; then
+      tool_caps="$(getcap "$tool_path" 2>/dev/null || true)"
+      if printf '%s\n' "$tool_caps" | grep -q 'cap_net_admin'; then
+        echo "$host_tool has CAP_NET_ADMIN; remove that capability to verify supervisor-only networking privileges" >&2
+        exit 2
+      fi
+    fi
+  done
+fi
+
 "$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
