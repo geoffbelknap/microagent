@@ -12,7 +12,7 @@ and control-plane decisions stay outside this project.
 ## Where to start
 
 - New here? [Install](getting-started/install.md), then
-  [run your first VM](getting-started/first-vm.md).
+  [run your first agent workspace](getting-started/first-agent.md).
 - Building an orchestrator? Start with the [Go library](library/go.md).
 - Need the command-line tool? Jump to the [CLI reference](cli/index.md).
 - Integrating? Read the [architecture overview](concepts/architecture.md),
@@ -22,7 +22,7 @@ and control-plane decisions stay outside this project.
 
 ## Sections
 
-- [Getting started](getting-started/install.md) — install, first VM, named
+- [Getting started](getting-started/install.md) — install, first agent workspace, named
   workspaces.
 - [Concepts](concepts/architecture.md) — architecture, backends, boundaries,
   networking, state and identity, [glossary](concepts/glossary.md).
