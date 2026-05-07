@@ -13,7 +13,7 @@ JSON response to stdout, and exits. Diagnostics go to stderr. Exit code `0`
 means the response has `"ok": true`. Nonzero exit means the response has
 `"ok": false` or the request could not be decoded.
 
-For the backend-independent command list and response shape, see
+For the shared command list and response shape, see
 [Supervisor protocol](/protocol/). This page only covers the executable
 Apple VF process boundary.
 
@@ -34,6 +34,9 @@ Apple VF process boundary.
     "stateDir": "/tmp/microagent",
     "memoryMiB": 512,
     "cpuCount": 2,
+    "network": {
+      "mode": "nat"
+    },
     "disks": [
       {
         "name": "config",
@@ -55,19 +58,74 @@ Apple VF process boundary.
 - `start`
 - `console`
 - `inspect`
+- `halt`
+- `quarantine`
 - `stop`
 - `kill`
 - `delete`
 
-`host` does not require `identity` or `config`. `inspect`, `stop`, `kill`,
-and `delete` require `identity` and `config.stateDir`. `check`, `prepare`,
-`start`, `run`, and `console` require the full config.
+`host` does not require `identity` or `config`. `inspect`, `halt`,
+`quarantine`, `stop`, `kill`, and `delete` require `identity` and
+`config.stateDir`. `check`, `prepare`, `start`, `run`, and `console` require
+the full config.
+
+`halt` is a clean disk-preserving stop. `quarantine` is a distinct forensic
+state that preserves disk state and event history while severing host-side
+network and mediation paths. A quarantined workspace must be halted, stopped,
+or killed before it can be started again.
+
+For a running workspace, `quarantine` is handled inside the live Apple VF
+supervisor process. The command process sends a control signal and waits for an
+acknowledgement before recording `quarantined`. The live supervisor detaches
+network attachments, removes virtio-vsock listeners, closes published TCP
+listeners, and removes serial input without stopping the VM process.
 
 ### Disks
 
 Extra disks are optional. `mode` must be `ro` or `rw`. The supervisor
 attaches them after the rootfs in request order; the guest init mounts them
 from `/dev/vdb` onward.
+
+### Network
+
+Apple VF maps `config.network.mode` to Virtualization.framework network
+devices:
+
+| Mode | Apple VF behavior |
+|---|---|
+| `nat` | Adds a `VZNATNetworkDeviceAttachment` |
+| `isolated` | Adds no network device |
+| `bridged` | Adds a `VZBridgedNetworkDeviceAttachment` |
+
+`bridged` requires `config.network.interface`, matched against the Apple VF
+bridged interface identifier or localized display name. It also requires the
+supervisor process to have Apple's restricted `com.apple.vm.networking`
+entitlement. Open-source builds cannot self-sign that entitlement, and `sudo`
+does not bypass the check. Local ad-hoc builds fail closed during `check` with
+a clear entitlement error.
+
+Port forwards are supported for TCP. The supervisor listens on the requested
+host address and port, connects to the guest over virtio-vsock, and guest init
+proxies the stream to the requested guest TCP port.
+
+### Mediation
+
+`config.mediation` uses the backend-neutral shape:
+
+```json
+{
+  "enabled": true,
+  "required": true,
+  "port": 2048,
+  "target": "127.0.0.1:9900",
+  "failClosed": true
+}
+```
+
+Required mediation fails closed: `failClosed` must be `true`, and enabled
+mediation must declare a port and `host:port` target. The supervisor installs
+mediation as a guest-to-host virtio-vsock listener and forwards accepted
+connections to that target.
 
 ## Response
 
@@ -84,6 +142,12 @@ from `/dev/vdb` onward.
     },
     "state": "prepared",
     "observedAt": "2026-05-02T00:00:00Z"
+  },
+  "readiness": {
+    "guestReady": {},
+    "shellReady": {},
+    "resultReady": {},
+    "mediationReady": {}
   }
 }
 ```
@@ -98,7 +162,11 @@ Host responses use `host` instead of `event`:
     "backend": "apple-vf",
     "architecture": "arm64",
     "frameworkAvailable": true,
-    "virtualizationSupported": true
+    "virtualizationSupported": true,
+    "supervisorPath": "/usr/local/bin/microagent-applevf-supervisor",
+    "supervisorAvailable": true,
+    "consoleAvailable": true,
+    "consoleMode": "interactive"
   }
 }
 ```

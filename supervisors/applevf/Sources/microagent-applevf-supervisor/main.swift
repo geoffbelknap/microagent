@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 #if canImport(Darwin)
 import Darwin
@@ -19,6 +20,8 @@ enum VMState: String, Codable {
     case starting
     case running
     case stopped
+    case halted
+    case quarantined
     case failed
 }
 
@@ -38,7 +41,40 @@ struct Config: Codable {
     var cpuCount: Int?
     var disks: [Disk]?
     var vsockListeners: [VsockListener]?
+    var mediation: MediationConfig?
+    var network: NetworkConfig?
     var serialInput: Bool?
+}
+
+struct MediationConfig: Codable {
+    var enabled: Bool
+    var required: Bool
+    var port: UInt32?
+    var target: String?
+    var failClosed: Bool
+}
+
+struct NetworkConfig: Codable {
+    var mode: String
+    var interface: String?
+    var portForwards: [PortForward]?
+    var dns: [String]?
+    var routes: [String]?
+    var ip: String?
+}
+
+struct PortForward: Codable {
+    var protocolName: String
+    var host: String?
+    var hostPort: UInt16
+    var guestPort: UInt16
+
+    enum CodingKeys: String, CodingKey {
+        case protocolName = "protocol"
+        case host
+        case hostPort
+        case guestPort
+    }
 }
 
 struct Disk: Codable {
@@ -71,23 +107,78 @@ struct HostSupport: Codable {
     var architecture: String
     var frameworkAvailable: Bool
     var virtualizationSupported: Bool
+    var supervisorPath: String?
+    var supervisorAvailable: Bool?
+    var consoleAvailable: Bool?
+    var consoleMode: String?
+}
+
+struct ReadinessSignal: Codable {
+    var ready: Bool? = nil
+    var observedAt: Date? = nil
+    var detail: String? = nil
+    var error: String? = nil
+}
+
+struct RuntimeReadiness: Codable {
+    var guestReady: ReadinessSignal
+    var shellReady: ReadinessSignal
+    var resultReady: ReadinessSignal
+    var mediationReady: ReadinessSignal
+}
+
+struct RuntimeResult: Codable {
+    var identity: Identity
+    var backend: String?
+    var resultPath: String?
+    var startedAt: String?
+    var completedAt: String?
+    var exitCode: Int
+    var stdout: String?
+    var stderr: String?
+    var error: String?
+}
+
+struct GuestResult: Codable {
+    var startedAt: String?
+    var exitedAt: String?
+    var exitCode: Int
+    var stdout: String?
+    var stderr: String?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case startedAt = "started_at"
+        case exitedAt = "exited_at"
+        case exitCode = "exit_code"
+        case stdout
+        case stderr
+        case error
+    }
 }
 
 struct Response: Codable {
     var ok: Bool
-    var backend: String?
-    var event: Event?
-    var host: HostSupport?
-    var error: String?
+    var backend: String? = nil
+    var event: Event? = nil
+    var host: HostSupport? = nil
+    var readiness: RuntimeReadiness? = nil
+    var result: RuntimeResult? = nil
+    var mediation: MediationConfig? = nil
+    var network: NetworkConfig? = nil
+    var error: String? = nil
 }
 
 let backendName = "apple-vf"
 let eventFileName = "event.json"
+let eventsFileName = "events.json"
 let configFileName = "config.json"
 let runtimeFileName = "runtime.json"
 let serialLogFileName = "serial.log"
 let serialInputFileName = "serial.in"
 let supervisorLogFileName = "supervisor.log"
+let quarantineAckFileName = "quarantine.ack.json"
+let quarantineControlSignal = SIGUSR1
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
 let encoder = JSONEncoder()
@@ -102,6 +193,7 @@ struct RuntimeState: Codable {
     var serialInputPath: String?
     var startedAt: Date?
     var updatedAt: Date
+    var readiness: RuntimeReadiness?
     var error: String?
 }
 
@@ -152,10 +244,12 @@ func handle(_ request: Request) throws -> Response {
         let config = try validatedConfig(request.config)
         let event = Event(identity: identity, state: .prepared, detail: nil, observedAt: Date())
         try writeState(event: event, config: config)
-        return Response(ok: true, backend: backendName, event: event)
+        try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
+        return response(event: event, config: config, error: nil)
     case "start":
         let identity = try validatedIdentity(request.identity)
         let config = try validatedConfig(request.config)
+        try ensureCanStart(identity: identity, stateDir: config.stateDir)
         let support = hostSupport()
         guard support.frameworkAvailable && support.virtualizationSupported else {
             return Response(ok: false, backend: backendName, error: "Apple Virtualization is not available on this host")
@@ -178,7 +272,7 @@ func handle(_ request: Request) throws -> Response {
         process.standardError = supervisorLog
         try process.run()
         try writeRuntimeState(event: event, config: config, pid: process.processIdentifier, error: nil)
-        return Response(ok: true, backend: backendName, event: event)
+        return response(event: event, config: config, error: nil)
     case "inspect":
         let identity = try validatedIdentity(request.identity)
         let config = try stateConfig(request.config)
@@ -186,16 +280,22 @@ func handle(_ request: Request) throws -> Response {
         if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), !processAlive(runtime.pid), event.state == .starting || event.state == .running {
             event = Event(identity: event.identity, state: .stopped, detail: event.detail, observedAt: Date())
             try writeState(event: event, config: runtime.config)
-            try writeRuntimeState(event: event, config: runtime.config, pid: runtime.pid, error: runtime.error)
+            try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: runtime.error)
         }
-        return Response(ok: true, backend: backendName, event: event)
+        let runtimeConfig = try readRuntimeState(identity: identity, stateDir: config.stateDir)?.config ?? config
+        return response(event: event, config: runtimeConfig, error: nil)
     case "stop":
         return try stateOnly(request, state: .stopped, detail: nil)
+    case "halt":
+        return try stateOnly(request, state: .halted, detail: nil)
+    case "quarantine":
+        return try quarantine(request)
     case "kill":
         return try stateOnly(request, state: .stopped, detail: "forced")
     case "delete":
         let identity = try validatedIdentity(request.identity)
         let config = try stateConfig(request.config)
+        try ensureCanDelete(identity: identity, stateDir: config.stateDir)
         let dir = runtimeDirectory(identity: identity, stateDir: config.stateDir)
         if FileManager.default.fileExists(atPath: dir.path) {
             try FileManager.default.removeItem(at: dir)
@@ -204,6 +304,38 @@ func handle(_ request: Request) throws -> Response {
     default:
         throw ProtocolError.invalid("unknown command: \(request.command)")
     }
+}
+
+func quarantine(_ request: Request) throws -> Response {
+    let identity = try validatedIdentity(request.identity)
+    let config = try stateConfig(request.config)
+    let detail = "host-side network, mediation, and serial input severed"
+    let event = Event(identity: identity, state: .quarantined, detail: detail, observedAt: Date())
+    if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), processAlive(runtime.pid), let pid = runtime.pid {
+        let ack = quarantineAckPath(identity: identity, stateDir: runtime.config.stateDir)
+        try? FileManager.default.removeItem(at: ack)
+        if kill(pid, quarantineControlSignal) != 0 && errno != ESRCH {
+            throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
+        }
+        try waitForQuarantineAck(path: ack, timeout: 2.0)
+        try writeState(event: event, config: runtime.config)
+        try writeRuntimeState(event: event, config: runtime.config, pid: pid, error: nil)
+        return response(event: event, config: runtime.config, error: nil)
+    }
+    try writeState(event: event, config: config)
+    try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
+    return response(event: event, config: config, error: nil)
+}
+
+func waitForQuarantineAck(path: URL, timeout: TimeInterval) throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if FileManager.default.fileExists(atPath: path.path) {
+            return
+        }
+        usleep(20_000)
+    }
+    throw ProtocolError.invalid("apple-vf quarantine control did not acknowledge before timeout")
 }
 
 func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Response {
@@ -216,11 +348,13 @@ func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Re
             throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
         }
         try writeState(event: event, config: runtime.config)
-        try writeRuntimeState(event: event, config: runtime.config, pid: runtime.pid, error: nil)
+        try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: nil)
+        return response(event: event, config: runtime.config, error: nil)
     } else {
         try writeState(event: event, config: config)
+        try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
+        return response(event: event, config: config, error: nil)
     }
-    return Response(ok: true, backend: backendName, event: event)
 }
 
 func validatedIdentity(_ identity: Identity?) throws -> Identity {
@@ -297,9 +431,66 @@ func validatedConfig(_ config: Config?) throws -> Config {
             throw ProtocolError.invalid("vsock listener \(listener.port) target is required")
         }
     }
+    try validateNetworkConfig(config.network)
+    try validateMediationConfig(config.mediation)
     try readableFile(config.kernelPath, name: "config.kernelPath")
     try readableFile(config.rootfsPath, name: "config.rootfsPath")
     return config
+}
+
+func validateMediationConfig(_ mediation: MediationConfig?) throws {
+    guard let mediation, mediation.enabled else {
+        return
+    }
+    if mediation.required && !mediation.failClosed {
+        throw ProtocolError.invalid("required mediation must set failClosed=true")
+    }
+    if mediation.port == nil || mediation.port == 0 {
+        throw ProtocolError.invalid("mediation.port is required when mediation is enabled")
+    }
+    if (mediation.target ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        throw ProtocolError.invalid("mediation.target is required when mediation is enabled")
+    }
+    _ = try parseTCPHostPort(mediation.target ?? "")
+}
+
+func validateNetworkConfig(_ network: NetworkConfig?) throws {
+    guard let network else {
+        return
+    }
+    let mode = normalizedNetworkMode(network)
+    switch mode {
+    case "nat", "isolated", "bridged":
+        break
+    default:
+        throw ProtocolError.invalid("network.mode must be nat, isolated, or bridged")
+    }
+    #if canImport(Virtualization)
+    if mode == "bridged" {
+        if #available(macOS 13.0, *) {
+            // This code path is valid Virtualization.framework usage, but Apple
+            // gates it behind a restricted entitlement that open-source projects
+            // cannot self-sign into existence. Local sudo does not help.
+            guard hasEntitlement("com.apple.vm.networking") else {
+                throw ProtocolError.invalid("Apple VF bridged networking is blocked by Apple's restricted com.apple.vm.networking entitlement. Open-source builds cannot self-sign it, and sudo will not bypass the check.")
+            }
+            _ = try bridgedInterface(named: network.interface)
+        }
+    }
+    #endif
+}
+
+func hasEntitlement(_ name: String) -> Bool {
+    guard let task = SecTaskCreateFromSelf(nil),
+          let value = SecTaskCopyValueForEntitlement(task, name as CFString, nil) else {
+        return false
+    }
+    return (value as? Bool) == true
+}
+
+func normalizedNetworkMode(_ network: NetworkConfig?) -> String {
+    let mode = network?.mode.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return mode.isEmpty ? "nat" : mode
 }
 
 func stateConfig(_ config: Config?) throws -> Config {
@@ -310,6 +501,29 @@ func stateConfig(_ config: Config?) throws -> Config {
         throw ProtocolError.invalid("config.stateDir is required")
     }
     return config
+}
+
+func ensureCanStart(identity: Identity, stateDir: String) throws {
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: stateDir) else {
+        return
+    }
+    switch runtime.event.state {
+    case .unknown, .prepared, .halted, .stopped, .failed:
+        return
+    case .quarantined:
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is quarantined; halt, stop, or kill it before start")
+    case .starting, .running:
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is already \(runtime.event.state.rawValue)")
+    }
+}
+
+func ensureCanDelete(identity: Identity, stateDir: String) throws {
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: stateDir) else {
+        return
+    }
+    if processAlive(runtime.pid) {
+        throw ProtocolError.invalid("apple-vf workspace \(identity.runtimeID) is running; stop or kill it before delete")
+    }
 }
 
 func hostSupport() -> HostSupport {
@@ -329,7 +543,11 @@ func hostSupport() -> HostSupport {
         backend: backendName,
         architecture: hostArchitecture(),
         frameworkAvailable: available,
-        virtualizationSupported: supported
+        virtualizationSupported: supported,
+        supervisorPath: currentExecutablePath(),
+        supervisorAvailable: true,
+        consoleAvailable: true,
+        consoleMode: "interactive"
     )
 }
 
@@ -361,22 +579,121 @@ func supervisorLogPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(supervisorLogFileName)
 }
 
+func quarantineAckPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(quarantineAckFileName)
+}
+
+func resultPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("result.json")
+}
+
+func response(event: Event, config: Config, error: String?) -> Response {
+    var response = Response(
+        ok: event.state != .failed,
+        backend: backendName,
+        event: event,
+        host: nil,
+        readiness: readiness(event: event, config: config),
+        result: try? readRuntimeResult(identity: event.identity, stateDir: config.stateDir),
+        mediation: config.mediation,
+        network: config.network,
+        error: error
+    )
+    if let error, !error.isEmpty {
+        response.ok = false
+    }
+    return response
+}
+
+func readiness(event: Event, config: Config) -> RuntimeReadiness {
+    var readiness = RuntimeReadiness(
+        guestReady: ReadinessSignal(),
+        shellReady: ReadinessSignal(),
+        resultReady: ReadinessSignal(),
+        mediationReady: ReadinessSignal()
+    )
+    if event.state == .running || event.state == .halted || event.state == .stopped || event.state == .quarantined {
+        readiness.guestReady = ReadinessSignal(ready: true, observedAt: event.observedAt, detail: "workspace reached runtime state \(event.state.rawValue)", error: nil)
+    }
+    if event.state == .running, config.serialInput == true {
+        let path = serialInputPath(identity: event.identity, stateDir: config.stateDir)
+        if FileManager.default.fileExists(atPath: path.path) {
+            readiness.shellReady = ReadinessSignal(ready: true, observedAt: fileModTime(path), detail: "console input is available", error: nil)
+        }
+    }
+    let path = resultPath(identity: event.identity, stateDir: config.stateDir)
+    if FileManager.default.fileExists(atPath: path.path) {
+        readiness.resultReady = ReadinessSignal(ready: true, observedAt: fileModTime(path), detail: "guest result is available", error: nil)
+    }
+    if let mediation = config.mediation, mediation.enabled {
+        let ready = event.state == .running
+        readiness.mediationReady = ReadinessSignal(
+            ready: ready,
+            observedAt: event.observedAt,
+            detail: "mediation required=\(mediation.required) failClosed=\(mediation.failClosed) port=\(mediation.port ?? 0) target=\(mediation.target ?? "")",
+            error: !ready && mediation.required ? "required mediation is not ready" : nil
+        )
+    }
+    return readiness
+}
+
+func readRuntimeResult(identity: Identity, stateDir: String) throws -> RuntimeResult {
+    let path = resultPath(identity: identity, stateDir: stateDir)
+    let guest = try decoder.decode(GuestResult.self, from: Data(contentsOf: path))
+    return RuntimeResult(
+        identity: identity,
+        backend: backendName,
+        resultPath: path.path,
+        startedAt: guest.startedAt,
+        completedAt: guest.exitedAt,
+        exitCode: guest.exitCode,
+        stdout: guest.stdout,
+        stderr: guest.stderr,
+        error: guest.error
+    )
+}
+
+func fileModTime(_ url: URL) -> Date? {
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+          let modified = attributes[.modificationDate] as? Date else {
+        return nil
+    }
+    return modified
+}
+
 func writeState(event: Event, config: Config) throws {
     let directory = runtimeDirectory(identity: event.identity, stateDir: config.stateDir)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     try encoder.encode(event).write(to: eventPath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
+    try appendEvent(event: event, stateDir: config.stateDir)
     try encoder.encode(config).write(to: configPath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
 }
 
+func appendEvent(event: Event, stateDir: String) throws {
+    let path = runtimeDirectory(identity: event.identity, stateDir: stateDir).appendingPathComponent(eventsFileName)
+    var events: [Event] = []
+    if FileManager.default.fileExists(atPath: path.path) {
+        let data = try Data(contentsOf: path)
+        if !data.isEmpty {
+            events = try decoder.decode([Event].self, from: data)
+        }
+    }
+    events.append(event)
+    try encoder.encode(events).write(to: path, options: .atomic)
+}
+
 func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?) throws {
+    let previous = try? readRuntimeState(identity: event.identity, stateDir: config.stateDir)
+    let startedAt = event.state == .starting || event.state == .running ? Date() : previous?.startedAt
     let runtime = RuntimeState(
         event: event,
         config: config,
         pid: pid,
         serialLogPath: serialLogPath(identity: event.identity, stateDir: config.stateDir).path,
         serialInputPath: serialInputPath(identity: event.identity, stateDir: config.stateDir).path,
-        startedAt: event.state == .starting || event.state == .running ? Date() : nil,
+        startedAt: startedAt,
         updatedAt: Date(),
+        readiness: readiness(event: event, config: config),
         error: error
     )
     try encoder.encode(runtime).write(to: runtimePath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
@@ -487,18 +804,152 @@ final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
 
 @available(macOS 13.0, *)
 final class SocketListenerHandle {
+    let port: UInt32
     let listener: VZVirtioSocketListener
     let delegate: VZVirtioSocketListenerDelegate
 
-    init(listener: VZVirtioSocketListener, delegate: VZVirtioSocketListenerDelegate) {
+    init(port: UInt32, listener: VZVirtioSocketListener, delegate: VZVirtioSocketListenerDelegate) {
+        self.port = port
         self.listener = listener
         self.delegate = delegate
     }
 }
 
 @available(macOS 13.0, *)
+protocol QuarantineClosable {
+    func quarantineClose()
+}
+
+@available(macOS 13.0, *)
+final class TCPPublishForwarder: @unchecked Sendable {
+    private let socketDevice: VZVirtioSocketDevice
+    private var listenerFDs: [Int32]
+    private let lock = NSLock()
+    private var connections: [VZVirtioSocketConnection] = []
+
+    init(socketDevice: VZVirtioSocketDevice, forwards: [PortForward]) throws {
+        self.socketDevice = socketDevice
+        var opened: [Int32] = []
+        do {
+            for forward in forwards {
+                opened.append(try listenTCP(forward))
+            }
+        } catch {
+            for fd in opened {
+                close(fd)
+            }
+            throw error
+        }
+        self.listenerFDs = opened
+        for (idx, forward) in forwards.enumerated() {
+            let fd = opened[idx]
+            Thread.detachNewThread {
+                self.acceptLoop(listenerFD: fd, guestVsockPort: UInt32(forward.hostPort))
+            }
+        }
+    }
+
+    deinit {
+        quarantineClose()
+    }
+
+    func quarantineClose() {
+        lock.lock()
+        let fds = listenerFDs
+        listenerFDs = []
+        let retainedConnections = connections
+        connections = []
+        lock.unlock()
+        for fd in fds {
+            shutdown(fd, SHUT_RDWR)
+            close(fd)
+        }
+        for connection in retainedConnections {
+            connection.close()
+        }
+    }
+
+    private func acceptLoop(listenerFD: Int32, guestVsockPort: UInt32) {
+        while true {
+            let tcpFD = accept(listenerFD, nil, nil)
+            if tcpFD < 0 {
+                return
+            }
+            connectTCP(tcpFD, toGuestVsockPort: guestVsockPort)
+        }
+    }
+
+    private func connectTCP(_ tcpFD: Int32, toGuestVsockPort guestVsockPort: UInt32) {
+        let semaphore = DispatchSemaphore(value: 0)
+        let resultBox = SocketConnectionResult()
+        DispatchQueue.main.async {
+            self.socketDevice.connect(toPort: guestVsockPort) { result in
+                if case .success(let connection) = result {
+                    resultBox.connection = connection
+                }
+                semaphore.signal()
+            }
+        }
+        if semaphore.wait(timeout: .now() + 10) == .timedOut {
+            close(tcpFD)
+            return
+        }
+        guard let connection = resultBox.connection else {
+            close(tcpFD)
+            return
+        }
+        retain(connection)
+        let vsockFD = connection.fileDescriptor
+        Thread.detachNewThread {
+            copyFD(from: tcpFD, to: vsockFD)
+            shutdown(vsockFD, SHUT_WR)
+            close(tcpFD)
+            connection.close()
+        }
+        Thread.detachNewThread {
+            copyFD(from: vsockFD, to: tcpFD)
+            shutdown(tcpFD, SHUT_WR)
+            connection.close()
+            self.release(connection)
+        }
+    }
+
+    private func retain(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.append(connection)
+        lock.unlock()
+    }
+
+    private func release(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.removeAll { $0 === connection }
+        lock.unlock()
+    }
+}
+
+@available(macOS 13.0, *)
+final class SocketConnectionResult: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: VZVirtioSocketConnection?
+
+    var connection: VZVirtioSocketConnection? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        set {
+            lock.lock()
+            stored = newValue
+            lock.unlock()
+        }
+    }
+}
+
+@available(macOS 13.0, *)
 final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
     private let path: String
+    private let lock = NSLock()
     private var connections: [VZVirtioSocketConnection] = []
 
     init(path: String) {
@@ -506,10 +957,14 @@ final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unc
     }
 
     func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
-        connections.append(connection)
+        retain(connection)
         let fd = connection.fileDescriptor
         let path = self.path
         DispatchQueue.global(qos: .utility).async {
+            defer {
+                connection.close()
+                self.release(connection)
+            }
             var data = Data()
             var buffer = [UInt8](repeating: 0, count: 4096)
             while true {
@@ -524,6 +979,31 @@ final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unc
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }
         return true
+    }
+
+    private func retain(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.append(connection)
+        lock.unlock()
+    }
+
+    private func release(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.removeAll { $0 === connection }
+        lock.unlock()
+    }
+}
+
+@available(macOS 13.0, *)
+extension ResultSocketDelegate: QuarantineClosable {
+    func quarantineClose() {
+        lock.lock()
+        let retainedConnections = connections
+        connections = []
+        lock.unlock()
+        for connection in retainedConnections {
+            connection.close()
+        }
     }
 }
 
@@ -571,6 +1051,76 @@ final class TCPSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchec
         lock.unlock()
     }
 }
+
+@available(macOS 13.0, *)
+extension TCPSocketDelegate: QuarantineClosable {
+    func quarantineClose() {
+        lock.lock()
+        let retainedConnections = connections
+        connections = []
+        lock.unlock()
+        for connection in retainedConnections {
+            connection.close()
+        }
+    }
+}
+
+@available(macOS 13.0, *)
+final class QuarantineController {
+    private let identity: Identity
+    private let config: Config
+    private let vm: VZVirtualMachine
+    private let socketListeners: [SocketListenerHandle]
+    private let publishForwarder: TCPPublishForwarder?
+    private var source: DispatchSourceSignal?
+    private var quarantined = false
+
+    init(identity: Identity, config: Config, vm: VZVirtualMachine, socketListeners: [SocketListenerHandle], publishForwarder: TCPPublishForwarder?) {
+        self.identity = identity
+        self.config = config
+        self.vm = vm
+        self.socketListeners = socketListeners
+        self.publishForwarder = publishForwarder
+    }
+
+    func start() {
+        signal(quarantineControlSignal, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: quarantineControlSignal, queue: .main)
+        source.setEventHandler { [weak self] in
+            self?.quarantine()
+        }
+        source.resume()
+        self.source = source
+    }
+
+    private func quarantine() {
+        if !quarantined {
+            quarantined = true
+            for device in vm.networkDevices {
+                device.attachment = nil
+            }
+            if let socket = vm.socketDevices.first as? VZVirtioSocketDevice {
+                for handle in socketListeners {
+                    socket.removeSocketListener(forPort: handle.port)
+                    (handle.delegate as? QuarantineClosable)?.quarantineClose()
+                }
+            }
+            publishForwarder?.quarantineClose()
+            try? FileManager.default.removeItem(at: serialInputPath(identity: identity, stateDir: config.stateDir))
+        }
+        writeQuarantineAck()
+    }
+
+    private func writeQuarantineAck() {
+        let body: [String: String] = [
+            "runtimeID": identity.runtimeID,
+            "observedAt": ISO8601DateFormatter().string(from: Date())
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: quarantineAckPath(identity: identity, stateDir: config.stateDir), options: .atomic)
+        }
+    }
+}
 #endif
 
 func updateRuntime(identity: Identity, config: Config, state: VMState, error: String?) {
@@ -599,6 +1149,9 @@ func runVM(_ request: Request) throws {
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
         let socketListeners = installSocketListeners(vm: vm, config: config)
+        let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
+        let quarantineController = QuarantineController(identity: identity, config: config, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
+        quarantineController.start()
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
@@ -617,7 +1170,7 @@ func runVM(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketListeners)) {
+        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController)) {
             CFRunLoopRun()
         }
     } else {
@@ -643,6 +1196,9 @@ func runConsole(_ request: Request) throws {
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
         let socketListeners = installSocketListeners(vm: vm, config: config)
+        let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
+        let quarantineController = QuarantineController(identity: identity, config: config, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
+        quarantineController.start()
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
@@ -661,7 +1217,7 @@ func runConsole(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketListeners)) {
+        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController)) {
             CFRunLoopRun()
         }
     } else {
@@ -679,7 +1235,11 @@ func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [SocketList
         return []
     }
     var handles: [SocketListenerHandle] = []
-    for listenerConfig in config.vsockListeners ?? [] {
+    var listeners = config.vsockListeners ?? []
+    if let mediation = config.mediation, mediation.enabled, let port = mediation.port, let target = mediation.target {
+        listeners.append(VsockListener(port: port, target: target))
+    }
+    for listenerConfig in listeners {
         let listener = VZVirtioSocketListener()
         let delegate: VZVirtioSocketListenerDelegate
         if let target = try? parseTCPHostPort(listenerConfig.target) {
@@ -689,9 +1249,61 @@ func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [SocketList
         }
         listener.delegate = delegate
         socket.setSocketListener(listener, forPort: listenerConfig.port)
-        handles.append(SocketListenerHandle(listener: listener, delegate: delegate))
+        handles.append(SocketListenerHandle(port: listenerConfig.port, listener: listener, delegate: delegate))
     }
     return handles
+}
+
+@available(macOS 13.0, *)
+func installTCPPublishForwarder(vm: VZVirtualMachine, config: Config) throws -> TCPPublishForwarder? {
+    let forwards = config.network?.portForwards ?? []
+    if forwards.isEmpty {
+        return nil
+    }
+    guard let socket = vm.socketDevices.first as? VZVirtioSocketDevice else {
+        throw ProtocolError.invalid("Apple VF publish requires a virtio socket device")
+    }
+    return try TCPPublishForwarder(socketDevice: socket, forwards: forwards)
+}
+
+func listenTCP(_ forward: PortForward) throws -> Int32 {
+    if forward.protocolName != "" && forward.protocolName != "tcp" {
+        throw ProtocolError.invalid("publish protocol must be tcp")
+    }
+    let host = (forward.host ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let bindHost = host.isEmpty ? "0.0.0.0" : (host == "localhost" ? "127.0.0.1" : host)
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    if fd < 0 {
+        throw ProtocolError.invalid("open published tcp socket failed with errno \(errno)")
+    }
+    var yes: Int32 = 1
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, socklen_t(MemoryLayout<Int32>.size))
+    var addr = sockaddr_in()
+    #if os(macOS)
+    addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    #endif
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = forward.hostPort.bigEndian
+    guard inet_pton(AF_INET, bindHost, &addr.sin_addr) == 1 else {
+        close(fd)
+        throw ProtocolError.invalid("publish host \(bindHost) must be an IPv4 address or localhost")
+    }
+    let bindResult = withUnsafePointer(to: &addr) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        }
+    }
+    if bindResult != 0 {
+        let saved = errno
+        close(fd)
+        throw ProtocolError.invalid("listen \(bindHost):\(forward.hostPort) failed with errno \(saved)")
+    }
+    if listen(fd, 128) != 0 {
+        let saved = errno
+        close(fd)
+        throw ProtocolError.invalid("listen \(bindHost):\(forward.hostPort) failed with errno \(saved)")
+    }
+    return fd
 }
 
 func dialTCP(_ target: TCPHostPort) -> Int32 {
@@ -765,6 +1377,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
         vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
     }
     vmConfig.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+    vmConfig.networkDevices = try networkDevices(for: config)
     if let serialMode {
         let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
         switch serialMode {
@@ -790,10 +1403,57 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
         }
         vmConfig.serialPorts = [serial]
     }
-    if !(config.vsockListeners ?? []).isEmpty {
+    if !(config.vsockListeners ?? []).isEmpty || config.mediation?.enabled == true || !(config.network?.portForwards ?? []).isEmpty {
         vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
     }
     return vmConfig
+}
+
+@available(macOS 13.0, *)
+func networkDevices(for config: Config) throws -> [VZVirtioNetworkDeviceConfiguration] {
+    switch normalizedNetworkMode(config.network) {
+    case "nat":
+        let device = VZVirtioNetworkDeviceConfiguration()
+        device.attachment = VZNATNetworkDeviceAttachment()
+        return [device]
+    case "isolated":
+        return []
+    case "bridged":
+        let device = VZVirtioNetworkDeviceConfiguration()
+        device.attachment = VZBridgedNetworkDeviceAttachment(interface: try bridgedInterface(named: config.network?.interface))
+        return [device]
+    default:
+        throw ProtocolError.invalid("network.mode must be nat, isolated, or bridged")
+    }
+}
+
+@available(macOS 13.0, *)
+func bridgedInterface(named rawName: String?) throws -> VZBridgedNetworkInterface {
+    let requested = rawName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let interfaces = VZBridgedNetworkInterface.networkInterfaces
+    guard !interfaces.isEmpty else {
+        throw ProtocolError.invalid("no bridged network interfaces are available")
+    }
+    if requested.isEmpty {
+        let available = bridgedInterfaceList(interfaces)
+        throw ProtocolError.invalid("network.interface is required for bridged mode; available interfaces: \(available)")
+    }
+    if let match = interfaces.first(where: { $0.identifier == requested || $0.localizedDisplayName == requested }) {
+        return match
+    }
+    let available = bridgedInterfaceList(interfaces)
+    throw ProtocolError.invalid("bridged network interface \(requested) was not found; available interfaces: \(available)")
+}
+
+@available(macOS 13.0, *)
+func bridgedInterfaceList(_ interfaces: [VZBridgedNetworkInterface]) -> String {
+    interfaces.map { iface in
+        let displayName = iface.localizedDisplayName ?? ""
+        if displayName.isEmpty {
+            return iface.identifier
+        }
+        return "\(iface.identifier)(\(displayName))"
+    }.joined(separator: ", ")
 }
 
 func configureRawTerminal(_ fileHandle: FileHandle) {

@@ -7,8 +7,9 @@ description: Show boot/serial output for a workspace.
 microagent logs <name> [--state-dir <dir>]
 ```
 
-`logs` prints the captured serial console output for a workspace. Use
-[`connect`](/cli/connect/) when you need an interactive console.
+`logs` prints the captured serial console output for a workspace. It is useful
+for boot diagnostics and for reviewing output after an interactive
+[`connect`](/cli/connect/) session.
 
 ## Flags
 

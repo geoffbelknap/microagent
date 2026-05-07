@@ -133,7 +133,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 
 	provenance.BuilderPhase = "write-init"
 	command := buildCommand(req, imageConfig)
-	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts); err != nil {
+	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts, req.HostForwards); err != nil {
 		return provenance, err
 	}
 	if req.StageSnapshot != "" {
@@ -466,7 +466,7 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 	return nil
 }
 
-func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount) error {
+func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount, forwards []PortForward) error {
 	target, err := safeStagePath(stageDir, initPath)
 	if err != nil {
 		return err
@@ -478,7 +478,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		if err := copyFile(initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
-		return writeGuestRunConfig(stageDir, command, env, resultPort, mounts)
+		return writeGuestRunConfig(stageDir, command, env, resultPort, mounts, forwards)
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -499,13 +499,14 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 }
 
 type guestRunConfig struct {
-	Command []string `json:"command"`
-	Env     []string `json:"env,omitempty"`
-	Port    uint32   `json:"port"`
-	Mounts  []Mount  `json:"mounts,omitempty"`
+	Command      []string      `json:"command"`
+	Env          []string      `json:"env,omitempty"`
+	Port         uint32        `json:"port"`
+	Mounts       []Mount       `json:"mounts,omitempty"`
+	HostForwards []PortForward `json:"hostForwards,omitempty"`
 }
 
-func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32, mounts []Mount) error {
+func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32, mounts []Mount, forwards []PortForward) error {
 	target, err := safeStagePath(stageDir, "/etc/microagent/run.json")
 	if err != nil {
 		return err
@@ -513,7 +514,7 @@ func writeGuestRunConfig(stageDir string, command []string, env map[string]strin
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create guest config dir: %w", err)
 	}
-	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort, Mounts: mounts})
+	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort, Mounts: mounts, HostForwards: forwards})
 	if err != nil {
 		return err
 	}

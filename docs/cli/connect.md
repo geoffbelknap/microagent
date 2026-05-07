@@ -4,21 +4,26 @@ description: Open the workspace console.
 ---
 
 ```text
-microagent connect <name> [--send "<line>"] [--state-dir <dir>]
+microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--ready-timeout <seconds>]
 ```
 
 `connect` opens an interactive serial console for a workspace. With `--send`
 it writes one line to the console and prints any new output, which is useful
 in scripts.
 
-Use [`logs`](/cli/logs/) when you only need to read serial output without
-opening the console.
+In interactive mode, press `Ctrl-]` to detach from the console without stopping
+the workspace.
+
+`connect` is supported by Apple VF and Firecracker. [`logs`](/cli/logs/)
+remains available for captured serial output.
 
 ## Flags
 
 | Flag | Description |
 |---|---|
 | `--send <line>` | Write one line to the console and print new output |
+| `--timeout <seconds>` | Seconds to wait for output after `--send` |
+| `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before attaching or sending; `0` disables |
 | `--state-dir <dir>` | State directory holding the workspace record |
 
 ## Examples
@@ -35,6 +40,15 @@ Script-friendly:
 microagent connect research --send "cat /etc/os-release"
 microagent connect research --send "cat /workspace/status; uname -m"
 ```
+
+`connect` waits for the console FIFO and, by default, for a basic shell prompt
+before attaching or writing. If the guest shell is not ready, it exits with an
+error that points to [`logs`](/cli/logs/).
+
+The host-level `consoleAvailable` field means the backend supports an
+interactive console on this machine. It is not a guarantee that a specific
+workspace is ready for input; the workspace must be running and past the shell
+readiness gate.
 
 ## Related
 

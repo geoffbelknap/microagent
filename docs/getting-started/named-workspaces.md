@@ -35,7 +35,7 @@ directory. If the default kernel is missing, `create` installs it first.
 microagent start research
 ```
 
-## Connect (Apple VF)
+## Connect
 
 ```bash
 microagent connect research
@@ -47,14 +47,14 @@ For scripts, send one line and capture new console output:
 microagent connect research --send "cat /workspace/status"
 ```
 
-Use [`logs`](/cli/logs/) when you only need to read serial output without
-opening the console.
+`connect` is supported on Apple VF and Firecracker. Use [`logs`](/cli/logs/)
+to review captured serial output.
 
 ## Inspect
 
 ```bash
 microagent ps                       # list all workspaces
-microagent status --name research   # full state for one
+microagent status --name research   # one workspace
 microagent logs research            # boot/serial output
 ```
 

@@ -7,26 +7,25 @@ description: Run AI agent workspaces in microVMs.
 inside microVMs. Each host OS uses one backend: Firecracker on Linux, Apple
 Virtualization.framework on macOS. Microagent owns the kernel, the OCI-to-disk
 conversion, and the VM lifecycle. Identity, policy, credentials, and
-higher-level control stay outside this project.
+control-plane decisions stay outside this project.
 
 ## Where to start
 
 - New here? [Install](getting-started/install.md), then
   [run your first VM](getting-started/first-vm.md).
 - Need the CLI surface? Jump to the [CLI reference](cli/index.md).
-- Integrating? Read the [architecture overview](concepts/architecture.md), the
-  [supervisor protocol](protocol/index.md), and the [Go library](library/go.md).
+- Integrating? Read the [architecture overview](concepts/architecture.md),
+  [networking](concepts/networking.md), the [supervisor protocol](protocol/index.md),
+  the [runtime parity contract](protocol/runtime-contract.md), and the
+  [Go library](library/go.md).
 
 ## Sections
 
 - [Getting started](getting-started/install.md) — install, first VM, named
   workspaces.
 - [Concepts](concepts/architecture.md) — architecture, backends, boundaries,
-  state and identity.
+  networking, state and identity.
 - [CLI reference](cli/index.md) — every subcommand.
 - [Protocol](protocol/index.md) — shared supervisor protocol and backend notes.
 - [Library](library/go.md) — exported Go package surface.
-- [Operations](operations/troubleshooting.md) — troubleshooting.
-- [Development](development/smoke-tests.md) — maintainer checks for real VM
-  behavior.
 - [Security](security.md) — trust boundary and reporting.

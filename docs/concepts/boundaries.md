@@ -8,7 +8,8 @@ boundary. Other systems own policy, identity, and intent.
 
 ## In this repo
 
-- VM commands (`run`, `create`, `start`, `status`, `stop`, `kill`, `delete`)
+- VM commands (`run`, `create`, `start`, `status`, `halt`, `quarantine`,
+  `stop`, `kill`, `delete`)
 - OCI image to ext4 rootfs builds
 - Identity in requests and state files
 - State changes as JSON

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
 KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
 if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
@@ -9,6 +9,8 @@ if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
 fi
 IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
 ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
+NETWORK_MODE="${MICROAGENT_APPLEVF_BOOT_NETWORK_MODE:-nat}"
+NETWORK_INTERFACE="${MICROAGENT_APPLEVF_BOOT_NETWORK_INTERFACE:-}"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-boot.XXXXXX")"
 RESULT="$STATE_DIR/result.json"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
@@ -51,20 +53,28 @@ fi
   GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
-"$STATE_DIR/microagent" run \
-  --image "$IMAGE" \
-  --arch "$ARCH" \
-  --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}" \
-  --mke2fs "$MKE2FS" \
-  --exec "echo MICROAGENT_BOOT_OK; uname -m" \
-  --name boot-smoke \
-  --kernel "$KERNEL" \
-  --state-dir "$STATE_DIR" \
-  --memory "${MICROAGENT_APPLEVF_BOOT_MEMORY_MIB:-512}" \
-  --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}" \
-  --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}" \
-  --guest-init "$GUEST_INIT" \
-  --supervisor "$SUPERVISOR" >"$RESULT"
+RUN_ARGS=(
+  run
+  --image "$IMAGE"
+  --arch "$ARCH"
+  --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}"
+  --mke2fs "$MKE2FS"
+  --exec "echo MICROAGENT_BOOT_OK; uname -m"
+  --name boot-smoke
+  --kernel "$KERNEL"
+  --state-dir "$STATE_DIR"
+  --memory "${MICROAGENT_APPLEVF_BOOT_MEMORY_MIB:-512}"
+  --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}"
+  --network "$NETWORK_MODE"
+  --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}"
+  --guest-init "$GUEST_INIT"
+  --supervisor "$SUPERVISOR"
+)
+if [ -n "$NETWORK_INTERFACE" ]; then
+  RUN_ARGS+=(--network-interface "$NETWORK_INTERFACE")
+fi
+
+"$STATE_DIR/microagent" "${RUN_ARGS[@]}" >"$RESULT"
 
 python3 - "$RESULT" <<'PY'
 import json

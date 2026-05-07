@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -146,6 +147,9 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 	if !resp.Host.VirtualizationSupported || !resp.Host.KVMAvailable || !resp.Host.VsockAvailable {
 		t.Fatalf("Host support = %+v", resp.Host)
 	}
+	if !resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "interactive" {
+		t.Fatalf("Console support = %+v", resp.Host)
+	}
 }
 
 func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
@@ -170,6 +174,84 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "firecracker binary not found") || !strings.Contains(resp.Error, "/dev/kvm") {
 		t.Fatalf("Error = %q", resp.Error)
+	}
+}
+
+func TestHostCommandReportsFirecrackerDiagnosticsWithoutFailing(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "host.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "host", "--backend", vmkit.BackendFirecracker, "--arch", "amd64"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run host: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"backend": "firecracker"`) ||
+		!strings.Contains(text, `"kernel"`) ||
+		!strings.Contains(text, `"consoleAvailable": true`) ||
+		!strings.Contains(text, `"consoleMode": "interactive"`) {
+		t.Fatalf("host output = %s", data)
+	}
+}
+
+func TestContractCommandReportsBackendNeutralRuntimeContract(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "contract.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"contract"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run contract: %v", err)
+	}
+	var contract vmkit.RuntimeContract
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &contract); err != nil {
+		t.Fatal(err)
+	}
+	if contract.Version != "agent-runtime.v1" {
+		t.Fatalf("version = %q", contract.Version)
+	}
+	if !stringSliceContains(contract.Backends, vmkit.BackendAppleVF) || !stringSliceContains(contract.Backends, vmkit.BackendFirecracker) {
+		t.Fatalf("backends = %#v", contract.Backends)
+	}
+	if !contractItemSliceContains(contract.Commands, "quarantine") || !contractItemSliceContains(contract.ReadinessSignals, "mediationReady") || !contractItemSliceContains(contract.ResultFields, "exitCode") {
+		t.Fatalf("contract = %#v", contract)
+	}
+}
+
+func TestAugmentHostSupportReportsAppleVFConsole(t *testing.T) {
+	resp := vmkit.Response{Backend: vmkit.BackendAppleVF}
+	augmentHostSupport(&resp, doctorOptions{Backend: vmkit.BackendAppleVF, Arch: "arm64", SupervisorPath: "/tmp/supervisor"})
+	if resp.Host == nil {
+		t.Fatal("Host is nil")
+	}
+	if resp.Host.SupervisorPath != "/tmp/supervisor" || !resp.Host.SupervisorAvailable {
+		t.Fatalf("supervisor support = %+v", resp.Host)
+	}
+	if !resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "interactive" {
+		t.Fatalf("console support = %+v", resp.Host)
 	}
 }
 
@@ -336,6 +418,11 @@ func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 			wantCommand: "stop",
 		},
 		{
+			name:        "quarantine",
+			args:        []string{"quarantine", "agent-1", "--state-dir", "/tmp/state"},
+			wantCommand: "quarantine",
+		},
+		{
 			name:        "kill",
 			args:        []string{"kill", "agent-1", "--state-dir", "/tmp/state"},
 			wantCommand: "kill",
@@ -410,6 +497,82 @@ func TestRequestForCommandParsesVsock(t *testing.T) {
 	}
 }
 
+func TestRequestForCommandParsesNetwork(t *testing.T) {
+	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--backend", vmkit.BackendFirecracker,
+		"--network", "bridged",
+		"--network-interface", "en0",
+		"--publish", "127.0.0.1:8080:80/tcp",
+	}))
+	if err != nil {
+		t.Fatalf("requestForCommand: %v", err)
+	}
+	if req.Config.Network == nil {
+		t.Fatal("network config is nil")
+	}
+	if req.Config.Network.Mode != "bridged" {
+		t.Fatalf("network mode = %q, want bridged", req.Config.Network.Mode)
+	}
+	if req.Config.Network.Interface != "en0" {
+		t.Fatalf("network interface = %q, want en0", req.Config.Network.Interface)
+	}
+	if len(req.Config.Network.PortForwards) != 1 {
+		t.Fatalf("port forwards len = %d, want 1", len(req.Config.Network.PortForwards))
+	}
+	forward := req.Config.Network.PortForwards[0]
+	if forward.Host != "127.0.0.1" || forward.HostPort != 8080 || forward.GuestPort != 80 || forward.Protocol != "tcp" {
+		t.Fatalf("forward = %#v", forward)
+	}
+}
+
+func TestRequestForCommandRejectsIsolatedPublish(t *testing.T) {
+	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--network", "isolated",
+		"--publish", "127.0.0.1:8080:80/tcp",
+	}))
+	if err == nil {
+		t.Fatal("requestForCommand accepted isolated publish")
+	}
+}
+
+func TestRequestForCommandAcceptsAppleVFPublish(t *testing.T) {
+	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--backend", vmkit.BackendAppleVF,
+		"--publish", "127.0.0.1:8080:80/tcp",
+	}))
+	if err != nil {
+		t.Fatalf("requestForCommand: %v", err)
+	}
+	if req.Config == nil || req.Config.Network == nil || len(req.Config.Network.PortForwards) != 1 {
+		t.Fatalf("network = %#v", req.Config.Network)
+	}
+}
+
+func TestRequestForCommandRejectsUnsupportedPortForwardProtocol(t *testing.T) {
+	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--publish", "127.0.0.1:8080:80/udp",
+	}))
+	if err == nil {
+		t.Fatal("requestForCommand accepted udp port forward")
+	}
+}
+
 func TestRequestForCommandParsesDisk(t *testing.T) {
 	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",
@@ -431,6 +594,13 @@ func TestRequestForCommandParsesDisk(t *testing.T) {
 }
 
 func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
+	mediation := vmkit.MediationConfig{
+		Enabled:    true,
+		Required:   true,
+		Port:       2048,
+		Target:     "127.0.0.1:9900",
+		FailClosed: true,
+	}
 	req := workspaceRequest(workspaceOptions{
 		Name:           "agent-1",
 		Backend:        "apple-vf",
@@ -439,12 +609,19 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		CPUCount:       2,
 		ResultPort:     1024,
 		VsockListeners: []vmkit.VsockListener{{Port: 3128, Target: "127.0.0.1:19000"}},
+		Mediation:      &mediation,
 	}, "run", "/tmp/rootfs.ext4")
-	if len(req.Config.VsockListeners) != 2 {
-		t.Fatalf("VsockListeners len = %d, want 2", len(req.Config.VsockListeners))
+	if len(req.Config.VsockListeners) != 3 {
+		t.Fatalf("VsockListeners len = %d, want 3", len(req.Config.VsockListeners))
 	}
 	if req.Config.VsockListeners[1].Port != 3128 || req.Config.VsockListeners[1].Target != "127.0.0.1:19000" {
 		t.Fatalf("enforcer listener = %#v", req.Config.VsockListeners[1])
+	}
+	if req.Config.VsockListeners[2].Port != 2048 || req.Config.VsockListeners[2].Target != "127.0.0.1:9900" {
+		t.Fatalf("mediation listener = %#v", req.Config.VsockListeners[2])
+	}
+	if req.Config.Mediation == nil || !req.Config.Mediation.Required || !req.Config.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", req.Config.Mediation)
 	}
 }
 
@@ -530,6 +707,9 @@ func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, req, vmkit.StateRunning, 123, ""); err != nil {
 		t.Fatalf("writeWorkspaceProcessState: %v", err)
 	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", RestartPolicy: "always", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
 	stdoutPath := filepath.Join(dir, "stdout.json")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
@@ -550,8 +730,254 @@ func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"state": "running"`) {
+	if !strings.Contains(string(data), `"state": "running"`) || !strings.Contains(string(data), `"restartPolicy": "always"`) {
 		t.Fatalf("status output = %s", data)
+	}
+}
+
+func TestWriteWorkspaceProcessStateAppendsEventHistory(t *testing.T) {
+	dir := t.TempDir()
+	req := vmkit.Request{
+		Command: "inspect",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendAppleVF,
+		},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	opts := workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StatePrepared, 0, ""); err != nil {
+		t.Fatalf("write prepared state: %v", err)
+	}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateHalted, 0, ""); err != nil {
+		t.Fatalf("write halted state: %v", err)
+	}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StateQuarantined, 0, ""); err != nil {
+		t.Fatalf("write quarantined state: %v", err)
+	}
+	var events []workspaceEventFile
+	data, err := os.ReadFile(filepath.Join(dir, "research", "events.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 || events[0].State != vmkit.StatePrepared || events[1].State != vmkit.StateHalted || events[2].State != vmkit.StateQuarantined {
+		t.Fatalf("events = %#v, want prepared, halted, then quarantined", events)
+	}
+}
+
+func TestStatusReportsVerificationDivergence(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	kernelPath := filepath.Join(dir, "Image")
+	rootfsPath := filepath.Join(dir, "workspaces", "research", "rootfs.ext4")
+	initPath := filepath.Join(dir, "microagent-init")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kernelPath, []byte("kernel-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(initPath, []byte("init-v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Backend:       vmkit.BackendFirecracker,
+		KernelPath:    kernelPath,
+		GuestInitPath: initPath,
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+	}
+	result := workspaceResult{
+		Workspace:  "research",
+		RootfsPath: rootfsPath,
+		Image: rootfs.Provenance{
+			ImageRef:    "docker.io/library/busybox:1.36",
+			ResolvedRef: "docker.io/library/busybox@sha256:abc",
+			Digest:      "sha256:abc",
+		},
+	}
+	verification, err := buildWorkspaceVerification(opts, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Verification = &verification
+	if err := writeWorkspaceManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: kernelPath,
+			RootfsPath: rootfsPath,
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(opts, req, vmkit.StatePrepared, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs-v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Verification == nil || resp.Verification.OK {
+		t.Fatalf("verification = %#v, want divergence", resp.Verification)
+	}
+	if len(resp.Verification.Divergence) != 1 || resp.Verification.Divergence[0].Artifact != "rootfs" {
+		t.Fatalf("divergence = %#v, want rootfs mismatch", resp.Verification.Divergence)
+	}
+	if resp.Verification.ImageDigest != "sha256:abc" || resp.Verification.Kernel.SHA256 == "" || resp.Verification.Rootfs.RecordedSHA256 == "" {
+		t.Fatalf("verification details missing: %#v", resp.Verification)
+	}
+}
+
+func TestStatusReportsReadinessSignals(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	serialInput := serialInputPath(dir, "research")
+	if err := os.MkdirAll(filepath.Dir(serialInput), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(serialInput, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(resultPath(workspaceOptions{StateDir: dir, Name: "research"}), []byte(`{"started_at":"2026-05-02T00:00:00Z","exited_at":"2026-05-02T00:00:01Z","exit_code":0}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Readiness == nil {
+		t.Fatal("readiness missing")
+	}
+	if !resp.Readiness.GuestReady.Ready || !resp.Readiness.ShellReady.Ready || !resp.Readiness.ResultReady.Ready {
+		t.Fatalf("readiness = %#v, want all ready", resp.Readiness)
+	}
+	if resp.Result == nil || resp.Result.ExitCode != 0 || resp.Result.CompletedAt != "2026-05-02T00:00:01Z" {
+		t.Fatalf("result = %#v, want structured result", resp.Result)
+	}
+}
+
+func TestRunResultReportsStructuredResult(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	resultJSON := `{"started_at":"2026-05-02T00:00:00Z","exited_at":"2026-05-02T00:00:01Z","exit_code":7,"stdout":"done\n","stderr":"warn\n"}`
+	if err := os.WriteFile(resultPath(workspaceOptions{StateDir: dir, Name: "research"}), []byte(resultJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "result.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"result", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run result: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Result == nil {
+		t.Fatal("result missing")
+	}
+	if resp.Result.Identity.RuntimeID != "research" || resp.Result.ExitCode != 7 || resp.Result.Stdout != "done\n" || resp.Result.Stderr != "warn\n" {
+		t.Fatalf("result = %#v", resp.Result)
+	}
+	if resp.Result.ResultPath == "" || resp.Result.Backend != vmkit.BackendFirecracker {
+		t.Fatalf("result metadata = %#v", resp.Result)
 	}
 }
 
@@ -689,11 +1115,99 @@ func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing
 	}
 }
 
+func TestParseWorkspaceOptionsAppliesResourceProfile(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--profile", "medium",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Profile != "medium" || opts.MemoryMiB != 2048 || opts.CPUCount != 2 || opts.SizeMiB != 8192 {
+		t.Fatalf("profile resources = profile %q memory %d cpus %d size %d", opts.Profile, opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+}
+
+func TestParseWorkspaceOptionsLetsExplicitResourcesOverrideProfile(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--profile", "large",
+		"--memory", "3072",
+		"--cpus", "3",
+		"--size-mib", "12288",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Profile != "large" || opts.MemoryMiB != 3072 || opts.CPUCount != 3 || opts.SizeMiB != 12288 {
+		t.Fatalf("resources = profile %q memory %d cpus %d size %d", opts.Profile, opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsRestartPolicy(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--restart", "on-failure",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.RestartPolicy != "on-failure" {
+		t.Fatalf("RestartPolicy = %q", opts.RestartPolicy)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsInvalidRestartPolicy(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{"research", "--restart", "sometimes"})
+	if err == nil || !strings.Contains(err.Error(), "restart policy") {
+		t.Fatalf("err = %v, want restart validation", err)
+	}
+}
+
+func TestShouldRestartWorkspace(t *testing.T) {
+	tests := []struct {
+		policy string
+		state  vmkit.VMState
+		want   bool
+	}{
+		{policy: "never", state: vmkit.StateFailed, want: false},
+		{policy: "on-failure", state: vmkit.StateFailed, want: true},
+		{policy: "on-failure", state: vmkit.StateStopped, want: false},
+		{policy: "always", state: vmkit.StateStopped, want: true},
+		{policy: "always", state: vmkit.StateFailed, want: true},
+		{policy: "always", state: vmkit.StateRunning, want: false},
+	}
+	for _, tt := range tests {
+		if got := shouldRestartWorkspace(tt.policy, tt.state); got != tt.want {
+			t.Fatalf("shouldRestartWorkspace(%q, %q) = %v, want %v", tt.policy, tt.state, got, tt.want)
+		}
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsUnknownProfile(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{"research", "--profile", "huge"})
+	if err == nil || !strings.Contains(err.Error(), "unknown resource profile") {
+		t.Fatalf("err = %v, want unknown profile", err)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsInvalidResources(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{"research", "--memory", "0"})
+	if err == nil || !strings.Contains(err.Error(), "memory must be positive") {
+		t.Fatalf("err = %v, want memory validation", err)
+	}
+	_, err = parseWorkspaceOptions("create", []string{"research", "--size-mib", "0"})
+	if err == nil || !strings.Contains(err.Error(), "size-mib must be positive") {
+		t.Fatalf("err = %v, want size validation", err)
+	}
+}
+
 func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
 		"--disk", "workspace=/tmp/workspace.ext4:/workspace:rw",
 		"--bundle", "constraints=/tmp/constraints.tar:/config:ro",
+		"--output", "report=/workspace/report.json",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
@@ -707,6 +1221,1496 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	if opts.Disks[1].Name != "constraints" || !opts.Disks[1].Bundle || opts.Disks[1].Mode != "ro" {
 		t.Fatalf("bundle = %#v", opts.Disks[1])
 	}
+	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "report" || opts.Outputs[0].Path != "/workspace/report.json" {
+		t.Fatalf("outputs = %#v", opts.Outputs)
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsMediation(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--mediation", "2048=127.0.0.1:9900",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Mediation == nil || !opts.Mediation.Enabled || !opts.Mediation.Required || !opts.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", opts.Mediation)
+	}
+	if opts.Mediation.Port != 2048 || opts.Mediation.Target != "127.0.0.1:9900" {
+		t.Fatalf("mediation endpoint = %#v", opts.Mediation)
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsOptionalMediation(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--mediation", "2048=127.0.0.1:9900",
+		"--mediation-optional",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Mediation == nil || !opts.Mediation.Enabled || opts.Mediation.Required || opts.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", opts.Mediation)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsOptionalMediationWithoutMapping(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{"research", "--mediation-optional"})
+	if err == nil || !strings.Contains(err.Error(), "requires --mediation") {
+		t.Fatalf("err = %v, want mediation mapping error", err)
+	}
+}
+
+func TestParseWorkspaceOptionsReadsSpecFile(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "microagent.yaml")
+	spec := `
+name: research
+image: docker.io/library/ubuntu:24.04
+profile: medium
+restart: on-failure
+entrypoint: /app/start.sh
+setup:
+  - mkdir -p /workspace
+  - echo ready > /workspace/status
+env:
+  MICROAGENT_NAME: research
+resources:
+  memoryMiB: 3072
+  cpuCount: 3
+  sizeMiB: 12288
+network:
+  mode: nat
+  forwards:
+    - host: 127.0.0.1
+      hostPort: 8080
+      guestPort: 80
+      protocol: tcp
+  dns:
+    - 1.1.1.1
+  routes:
+    - 0.0.0.0/0
+mediation:
+  enabled: true
+  required: true
+  port: 2048
+  target: 127.0.0.1:9900
+  failClosed: true
+disks:
+  - name: workspace
+    path: /tmp/workspace.ext4
+    mountpoint: /workspace
+    mode: rw
+bundles:
+  - name: config
+    path: /tmp/config.tar
+    mountpoint: /config
+    mode: ro
+outputs:
+  - name: report
+    path: /workspace/report.json
+`
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath, "--backend", vmkit.BackendFirecracker})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "research" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "medium" || opts.RestartPolicy != "on-failure" {
+		t.Fatalf("identity/image/profile = %#v", opts)
+	}
+	if opts.Entrypoint != "/app/start.sh" || len(opts.SetupCommands) != 2 {
+		t.Fatalf("commands = entrypoint %q setup %#v", opts.Entrypoint, opts.SetupCommands)
+	}
+	if opts.Env["MICROAGENT_NAME"] != "research" {
+		t.Fatalf("env = %#v", opts.Env)
+	}
+	if opts.MemoryMiB != 3072 || opts.CPUCount != 3 || opts.SizeMiB != 12288 {
+		t.Fatalf("resources = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+	if opts.Network.Mode != "nat" || len(opts.Network.PortForwards) != 1 || opts.Network.PortForwards[0].HostPort != 8080 || len(opts.Network.DNS) != 1 {
+		t.Fatalf("network = %#v", opts.Network)
+	}
+	if opts.Mediation == nil || !opts.Mediation.Required || opts.Mediation.Port != 2048 || opts.Mediation.Target != "127.0.0.1:9900" {
+		t.Fatalf("mediation = %#v", opts.Mediation)
+	}
+	if len(opts.Disks) != 2 || opts.Disks[0].Name != "workspace" || opts.Disks[1].Name != "config" || !opts.Disks[1].Bundle {
+		t.Fatalf("disks = %#v", opts.Disks)
+	}
+	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "report" || opts.Outputs[0].Path != "/workspace/report.json" {
+		t.Fatalf("outputs = %#v", opts.Outputs)
+	}
+}
+
+func TestParseWorkspaceOptionsFlagsOverrideSpecFile(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "microagent.yaml")
+	spec := `
+name: from-spec
+image: docker.io/library/busybox:1.36
+profile: large
+env:
+  MODE: spec
+resources:
+  memoryMiB: 4096
+`
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := parseWorkspaceOptions("create", []string{
+		"--file", specPath,
+		"--name", "from-flag",
+		"--image", "docker.io/library/ubuntu:24.04",
+		"--profile", "small",
+		"--memory", "1536",
+		"--env", "MODE=flag",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "from-flag" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "small" {
+		t.Fatalf("overrides = name %q image %q profile %q", opts.Name, opts.ImageRef, opts.Profile)
+	}
+	if opts.MemoryMiB != 1536 || opts.CPUCount != 2 || opts.SizeMiB != rootfs.DefaultSizeMiB {
+		t.Fatalf("resources = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+	if opts.Env["MODE"] != "flag" {
+		t.Fatalf("env = %#v", opts.Env)
+	}
+}
+
+func TestParseWorkspaceOptionsFindsDefaultSpecFile(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if err := os.WriteFile(filepath.Join(dir, "microagent.yaml"), []byte("name: default-spec\nprofile: tiny\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := parseWorkspaceOptions("create", nil)
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "default-spec" || opts.Profile != "tiny" || opts.MemoryMiB != 256 {
+		t.Fatalf("opts = %#v", opts)
+	}
+}
+
+func TestRunProfilesPrintsExactConfigs(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "profiles.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "profiles"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run profiles: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"name": "medium"`) ||
+		!strings.Contains(text, `"memory_mib": 2048`) ||
+		!strings.Contains(text, `"size_mib": 8192`) {
+		t.Fatalf("profiles output = %s", data)
+	}
+}
+
+func TestPerfBootRejectsInvalidIterations(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "perf.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerf(t.Context(), []string{"boot", "--iterations", "0"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "iterations must be positive") {
+		t.Fatalf("runPerf err = %v", err)
+	}
+}
+
+func TestSummarizePerfIterations(t *testing.T) {
+	summary := summarizePerfIterations([]perfIteration{
+		{Name: "one", OK: true, DurationMs: 30},
+		{Name: "two", OK: true, DurationMs: 10},
+		{Name: "three", OK: true, DurationMs: 20},
+	})
+	if summary.Count != 3 || summary.MinMs != 10 || summary.AvgMs != 20 || summary.MaxMs != 30 {
+		t.Fatalf("summary = %#v", summary)
+	}
+}
+
+func TestParseRSSKiB(t *testing.T) {
+	rss, err := parseRSSKiB([]byte("  12345\n"))
+	if err != nil {
+		t.Fatalf("parseRSSKiB: %v", err)
+	}
+	if rss != 12345 {
+		t.Fatalf("rss = %d", rss)
+	}
+	if _, err := parseRSSKiB([]byte("")); err == nil {
+		t.Fatal("parseRSSKiB accepted empty ps output")
+	}
+}
+
+func TestRunPerfFootprintRequiresRunningPID(t *testing.T) {
+	dir := t.TempDir()
+	testFirecrackerRuntimeState(t, dir, "research", vmkit.StateStopped, 0)
+	stdoutPath := filepath.Join(dir, "footprint.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerfFootprint([]string{"research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "does not have a running process pid") {
+		t.Fatalf("runPerfFootprint err = %v", err)
+	}
+}
+
+func TestSummarizeRSSSamples(t *testing.T) {
+	summary := summarizeRSSSamples([]perfRSSSample{
+		{RSSKiB: 40},
+		{RSSKiB: 20},
+		{RSSKiB: 30},
+	})
+	if summary.Count != 3 || summary.MinKiB != 20 || summary.AvgKiB != 30 || summary.MaxKiB != 40 {
+		t.Fatalf("summary = %#v", summary)
+	}
+}
+
+func TestRunPerfSteadyRejectsInvalidSampling(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "steady.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPerf(t.Context(), []string{"steady", "research", "--duration", "1", "--interval", "2", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "interval must be less than or equal to duration") {
+		t.Fatalf("runPerf err = %v", err)
+	}
+}
+
+func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "workspaces", "research", "rootfs.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordImageProvenance(dir, rootfs.Provenance{
+		ImageRef:    "docker.io/library/busybox:1.36",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  rootfsPath,
+		SizeBytes:   6,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "images.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runImages([]string{"list", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runImages list: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"digest": "sha256:abc"`) {
+		t.Fatalf("images output = %s", data)
+	}
+	if err := os.Remove(rootfsPath); err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := pruneImageRecords(dir, false)
+	if err != nil {
+		t.Fatalf("pruneImageRecords: %v", err)
+	}
+	if len(pruned.Removed) != 1 || len(pruned.Kept) != 0 {
+		t.Fatalf("pruned = %#v", pruned)
+	}
+}
+
+func TestImagesPruneDeleteRemovesReusableBaselines(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
+		if err := upsertImageRecord(dir, imageRecord{
+			ImageRef:    ref,
+			ResolvedRef: "docker.io/library/busybox@sha256:abc",
+			Digest:      "sha256:abc",
+			Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+			OutputPath:  rootfsPath,
+			SizeBytes:   6,
+			LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pruned, err := pruneImageRecords(dir, true)
+	if err != nil {
+		t.Fatalf("pruneImageRecords: %v", err)
+	}
+	if len(pruned.Deleted) != 2 || len(pruned.Kept) != 0 || len(pruned.Removed) != 0 {
+		t.Fatalf("pruned = %#v", pruned)
+	}
+	if _, err := os.Stat(rootfsPath); !os.IsNotExist(err) {
+		t.Fatalf("rootfs still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestImagesPruneDeleteKeepsWorkspaceRootfs(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "workspaces", "research", "rootfs.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertImageRecord(dir, imageRecord{
+		ImageRef:    "docker.io/library/busybox:1.36",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  rootfsPath,
+		SizeBytes:   6,
+		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pruned, err := pruneImageRecords(dir, true)
+	if err != nil {
+		t.Fatalf("pruneImageRecords: %v", err)
+	}
+	if len(pruned.Kept) != 1 || len(pruned.Deleted) != 0 || len(pruned.Removed) != 0 {
+		t.Fatalf("pruned = %#v", pruned)
+	}
+	if _, err := os.Stat(rootfsPath); err != nil {
+		t.Fatalf("workspace rootfs was removed: %v", err)
+	}
+}
+
+func TestImagesTagCreatesAlias(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertImageRecord(dir, imageRecord{
+		ImageRef:    "docker.io/library/busybox:1.36",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  rootfsPath,
+		SizeBytes:   6,
+		LastUsedAt:  "2026-05-06T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tagged, err := tagImageRecord(dir, "sha256:abc", "local/busybox:baseline")
+	if err != nil {
+		t.Fatalf("tagImageRecord: %v", err)
+	}
+	if tagged.ImageRef != "local/busybox:baseline" || tagged.OutputPath != rootfsPath {
+		t.Fatalf("tagged = %#v", tagged)
+	}
+	images, err := listImageRecords(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 2 {
+		t.Fatalf("images len = %d, want 2: %#v", len(images), images)
+	}
+}
+
+func TestImagesRemoveAliasKeepsSharedBaseline(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
+		if err := upsertImageRecord(dir, imageRecord{
+			ImageRef:    ref,
+			ResolvedRef: "docker.io/library/busybox@sha256:abc",
+			Digest:      "sha256:abc",
+			Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+			OutputPath:  rootfsPath,
+			SizeBytes:   6,
+			LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := removeImageRecords(dir, "local/busybox:baseline", true)
+	if err != nil {
+		t.Fatalf("removeImageRecords: %v", err)
+	}
+	if len(removed.Removed) != 1 || len(removed.Deleted) != 0 || len(removed.Kept) != 1 {
+		t.Fatalf("removed = %#v", removed)
+	}
+	if _, err := os.Stat(rootfsPath); err != nil {
+		t.Fatalf("baseline was removed: %v", err)
+	}
+}
+
+func TestImagesRemoveDigestDeletesUnsharedBaseline(t *testing.T) {
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
+		if err := upsertImageRecord(dir, imageRecord{
+			ImageRef:    ref,
+			ResolvedRef: "docker.io/library/busybox@sha256:abc",
+			Digest:      "sha256:abc",
+			Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+			OutputPath:  rootfsPath,
+			SizeBytes:   6,
+			LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := removeImageRecords(dir, "sha256:abc", true)
+	if err != nil {
+		t.Fatalf("removeImageRecords: %v", err)
+	}
+	if len(removed.Deleted) != 2 || len(removed.Removed) != 0 || len(removed.Kept) != 0 {
+		t.Fatalf("removed = %#v", removed)
+	}
+	if _, err := os.Stat(rootfsPath); !os.IsNotExist(err) {
+		t.Fatalf("baseline still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "medium",
+		RestartPolicy: "always",
+		MemoryMiB:     2048,
+		CPUCount:      2,
+		SizeMiB:       8192,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := filepath.Join(dir, "supervisor")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "running", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`
+	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{
+		"start",
+		"research",
+		"--state-dir", dir,
+		"--backend", vmkit.BackendAppleVF,
+		"--supervisor", supervisor,
+		"--kernel", filepath.Join(dir, "Image"),
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run start: %v", err)
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "research"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Config.MemoryMiB != 2048 || state.Config.CPUCount != 2 {
+		t.Fatalf("runtime config = memory %d cpus %d", state.Config.MemoryMiB, state.Config.CPUCount)
+	}
+	manifest, err := readWorkspaceManifest(dir, "research")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Restart != "always" {
+		t.Fatalf("restart = %q", manifest.Restart)
+	}
+}
+
+func TestStartRejectsQuarantinedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: kernelPath,
+			RootfsPath: filepath.Join(dir, "workspaces", "research", "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateQuarantined, 4242, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{
+		"start",
+		"research",
+		"--state-dir", dir,
+		"--backend", vmkit.BackendFirecracker,
+		"--kernel", kernelPath,
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "is quarantined with preserved pid 4242") {
+		t.Fatalf("err = %v, want quarantined start rejection", err)
+	}
+}
+
+func TestStartRejectsRunningWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendAppleVF,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureWorkspaceCanStart(dir, "research"); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("err = %v, want running start rejection", err)
+	}
+}
+
+func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Network: vmkit.NetworkConfig{
+			Mode: "nat",
+			PortForwards: []vmkit.PortForward{
+				{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
+			},
+			DNS: []string{"1.1.1.1"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			Network:    &vmkit.NetworkConfig{Mode: "nat", IP: "192.168.64.2", Routes: []string{"0.0.0.0/0"}},
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "network.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runNetwork([]string{"research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runNetwork: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"hostPort": 8080`) || !strings.Contains(text, `"ip": "192.168.64.2"`) {
+		t.Fatalf("network output = %s", data)
+	}
+}
+
+func TestStatusReportsDeclaredArtifacts(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	opts := workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Disks: []workspaceDisk{{
+			Name:       "config",
+			SourcePath: "/tmp/config.tar",
+			Path:       filepath.Join(dir, "workspaces", "research", "config.ext4"),
+			Mountpoint: "/config",
+			Mode:       "ro",
+			Bundle:     true,
+		}},
+		Outputs: []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}
+	if err := writeWorkspaceManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StatePrepared, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Artifacts == nil || len(resp.Artifacts.Ingress) != 1 || len(resp.Artifacts.Egress) != 1 {
+		t.Fatalf("artifacts = %#v", resp.Artifacts)
+	}
+	if resp.Artifacts.Ingress[0].Name != "config" || resp.Artifacts.Ingress[0].Kind != "bundle" || resp.Artifacts.Ingress[0].Mountpoint != "/config" {
+		t.Fatalf("ingress = %#v", resp.Artifacts.Ingress[0])
+	}
+	if resp.Artifacts.Egress[0].Name != "report" || resp.Artifacts.Egress[0].Path != "/workspace/report.json" {
+		t.Fatalf("egress = %#v", resp.Artifacts.Egress[0])
+	}
+}
+
+func TestArtifactsCommandListsDeclaredArtifacts(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Disks: []workspaceDisk{{
+			Name:       "config",
+			SourcePath: "/tmp/config.tar",
+			Path:       filepath.Join(dir, "workspaces", "research", "config.ext4"),
+			Mountpoint: "/config",
+			Mode:       "ro",
+			Bundle:     true,
+		}},
+		Outputs: []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "artifacts.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"artifacts", "research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run artifacts: %v", err)
+	}
+	var result artifactsResult
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Workspace != "research" || len(result.Artifacts.Ingress) != 1 || len(result.Artifacts.Egress) != 1 {
+		t.Fatalf("artifacts = %#v", result)
+	}
+	if result.Artifacts.Egress[0].Name != "report" || result.Artifacts.Egress[0].Path != "/workspace/report.json" {
+		t.Fatalf("egress = %#v", result.Artifacts.Egress[0])
+	}
+}
+
+func TestArtifactGetCopiesDeclaredRootfsOutput(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	workspaceDir := filepath.Join(dir, "workspaces", "research")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+		Outputs:   []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := getWorkspaceArtifact(dir, debugfs, "research", "report", targetDir)
+	if err != nil {
+		t.Fatalf("getWorkspaceArtifact: %v", err)
+	}
+	if result.Artifact != "report" || result.Disk != "rootfs" || result.Direction != "from-workspace" {
+		t.Fatalf("result = %#v", result)
+	}
+	if data, err := os.ReadFile(filepath.Join(targetDir, "report.json")); err != nil || string(data) != "fake-dump" {
+		t.Fatalf("artifact data = %q err=%v", data, err)
+	}
+}
+
+func TestArtifactGetMapsOutputUnderAttachedDiskMount(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	workspaceDir := filepath.Join(dir, "workspaces", "research")
+	diskPath := filepath.Join(workspaceDir, "disks", "workspace.ext4")
+	if err := os.MkdirAll(filepath.Dir(diskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(diskPath, []byte("disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+		Disks:     []workspaceDisk{{Name: "workspace", Path: diskPath, Mountpoint: "/workspace", Mode: "rw"}},
+		Outputs:   []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := getWorkspaceArtifact(dir, debugfs, "research", "report", targetDir)
+	if err != nil {
+		t.Fatalf("getWorkspaceArtifact: %v", err)
+	}
+	if result.Disk != "workspace" || result.Source != "research:workspace:/report.json" {
+		t.Fatalf("result = %#v", result)
+	}
+	logData, err := os.ReadFile(filepath.Join(dir, "debugfs.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "-R|dump|/report.json|") {
+		t.Fatalf("debugfs log = %s", logData)
+	}
+}
+
+func TestRunArtifactGetCommand(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	workspaceDir := filepath.Join(dir, "workspaces", "research")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+		Outputs:   []workspaceOutput{{Name: "report", Path: "/workspace/report.json"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"artifacts", "get", "research", "report", targetDir, "--state-dir", dir, "--debugfs", debugfs}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run artifacts get: %v", err)
+	}
+	var result copyResult
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Artifact != "report" || result.Workspace != "research" || result.Direction != "from-workspace" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestArtifactGetRejectsUndeclaredOutput(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := getWorkspaceArtifact(dir, "debugfs", "research", "missing", filepath.Join(dir, "out"))
+	if err == nil || !strings.Contains(err.Error(), "not declared") {
+		t.Fatalf("err = %v, want undeclared artifact error", err)
+	}
+}
+
+func TestStatusReportsMediationReadiness(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	mediation := vmkit.MediationConfig{
+		Enabled:    true,
+		Required:   true,
+		Port:       2048,
+		Target:     "127.0.0.1:9900",
+		FailClosed: true,
+	}
+	opts := workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Mediation:     &mediation,
+	}
+	if err := writeWorkspaceManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			Mediation:  &mediation,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run status: %v", err)
+	}
+	var resp vmkit.Response
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Mediation == nil || !resp.Mediation.Required || !resp.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", resp.Mediation)
+	}
+	if resp.Readiness == nil || !resp.Readiness.MediationReady.Ready {
+		t.Fatalf("readiness = %#v", resp.Readiness)
+	}
+	if !strings.Contains(resp.Readiness.MediationReady.Detail, "port=2048") {
+		t.Fatalf("mediation detail = %q", resp.Readiness.MediationReady.Detail)
+	}
+}
+
+func TestSuperviseWorkspaceOptionsUseManifestPolicy(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "medium",
+		RestartPolicy: "on-failure",
+		MemoryMiB:     2048,
+		CPUCount:      2,
+		SizeMiB:       8192,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	opts, err := superviseWorkspaceOptions(t.Context(), superviseOptions{
+		StateDir:       dir,
+		Name:           "research",
+		Backend:        vmkit.BackendAppleVF,
+		Architecture:   "arm64",
+		KernelPath:     kernelPath,
+		KernelExplicit: true,
+		SupervisorPath: "/tmp/supervisor",
+	})
+	if err != nil {
+		t.Fatalf("superviseWorkspaceOptions: %v", err)
+	}
+	if opts.RestartPolicy != "on-failure" || opts.MemoryMiB != 2048 || opts.CPUCount != 2 {
+		t.Fatalf("opts = %#v", opts)
+	}
+}
+
+func TestSuperviseWorkspaceSkipsNeverPolicy(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := superviseWorkspace(t.Context(), superviseOptions{
+		StateDir:       dir,
+		Name:           "research",
+		Backend:        vmkit.BackendAppleVF,
+		Architecture:   "arm64",
+		KernelPath:     kernelPath,
+		KernelExplicit: true,
+		SupervisorPath: "/tmp/supervisor",
+	})
+	if err != nil {
+		t.Fatalf("superviseWorkspace: %v", err)
+	}
+	if result.Policy != "never" || !result.Stopped || result.Restarts != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestCloneWorkspaceCopiesStoppedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	sourceDir := filepath.Join(dir, "workspaces", "template")
+	if err := os.MkdirAll(filepath.Join(sourceDir, "disks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "disks", "workspace.ext4"), []byte("disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "template",
+		Profile:   "medium",
+		MemoryMiB: 2048,
+		CPUCount:  2,
+		SizeMiB:   8192,
+		Disks: []workspaceDisk{{
+			Name:       "workspace",
+			Path:       filepath.Join(sourceDir, "disks", "workspace.ext4"),
+			Mountpoint: "/workspace",
+			Mode:       "rw",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "template", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "template"}, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	result, err := cloneWorkspace(dir, "template", "copy")
+	if err != nil {
+		t.Fatalf("cloneWorkspace: %v", err)
+	}
+	if result.Workspace != "copy" || result.Profile != "medium" || result.Resources.MemoryMiB != 2048 {
+		t.Fatalf("clone result = %#v", result)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "workspaces", "copy", "rootfs.ext4")); err != nil || string(data) != "rootfs" {
+		t.Fatalf("cloned rootfs = %q err=%v", data, err)
+	}
+	manifest, err := readWorkspaceManifest(dir, "copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Name != "copy" {
+		t.Fatalf("manifest name = %q", manifest.Name)
+	}
+	wantDiskPath := filepath.Join(dir, "workspaces", "copy", "disks", "workspace.ext4")
+	if len(manifest.Disks) != 1 || manifest.Disks[0].Path != wantDiskPath {
+		t.Fatalf("manifest disks = %#v, want path %q", manifest.Disks, wantDiskPath)
+	}
+	event, err := readWorkspaceEvent(workspaceOptions{StateDir: dir, Name: "copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.State != vmkit.StatePrepared || !strings.Contains(event.Detail, "template") {
+		t.Fatalf("event = %#v", event)
+	}
+}
+
+func TestCloneWorkspaceRejectsActiveSource(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "active", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "active", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "active", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "active"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cloneWorkspace(dir, "active", "copy")
+	if err == nil || !strings.Contains(err.Error(), "must be stopped") {
+		t.Fatalf("err = %v, want stopped validation", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "workspaces", "copy")); !os.IsNotExist(statErr) {
+		t.Fatalf("target was created despite failed clone: %v", statErr)
+	}
+}
+
+func TestCloneWorkspaceRejectsEventOnlyActiveSource(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "active", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "active", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	event := workspaceEventFile{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "active", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		State:      vmkit.StateRunning,
+		ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC).Format(time.RFC3339),
+	}
+	if err := writeJSONFile(filepath.Join(dir, "active", "event.json"), event); err != nil {
+		t.Fatal(err)
+	}
+	_, err := cloneWorkspace(dir, "active", "copy")
+	if err == nil || !strings.Contains(err.Error(), "must be stopped") {
+		t.Fatalf("err = %v, want stopped validation", err)
+	}
+}
+
+func TestRunCloneCommand(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "template"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "template", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "template", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "clone", "template", "copy", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run clone: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"workspace": "copy"`) || !strings.Contains(string(data), `"state": "prepared"`) {
+		t.Fatalf("clone output = %s", data)
+	}
+}
+
+func TestCopyWorkspaceFileToRootfs(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(source, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := copyWorkspaceFile(dir, debugfs, source, "research:/workspace/hello.txt")
+	if err != nil {
+		t.Fatalf("copyWorkspaceFile: %v", err)
+	}
+	if result.Direction != "to-workspace" || result.Disk != "rootfs" || result.Bytes != 5 {
+		t.Fatalf("result = %#v", result)
+	}
+	logData, err := os.ReadFile(filepath.Join(dir, "debugfs.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logText := string(logData)
+	if !strings.Contains(logText, "-w|-R|write|"+source+"|/workspace/hello.txt") {
+		t.Fatalf("debugfs log = %s", logText)
+	}
+}
+
+func TestCopyWorkspaceFileFromAttachedDisk(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	workspaceDir := filepath.Join(dir, "workspaces", "research")
+	diskPath := filepath.Join(workspaceDir, "disks", "workspace.ext4")
+	if err := os.MkdirAll(filepath.Dir(diskPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspaceDir, "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(diskPath, []byte("disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:  dir,
+		Name:      "research",
+		Profile:   "small",
+		MemoryMiB: 512,
+		CPUCount:  2,
+		SizeMiB:   1024,
+		Disks:     []workspaceDisk{{Name: "workspace", Path: diskPath, Mountpoint: "/workspace", Mode: "rw"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(dir, "out")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := copyWorkspaceFile(dir, debugfs, "research:workspace:/notes.txt", targetDir)
+	if err != nil {
+		t.Fatalf("copyWorkspaceFile: %v", err)
+	}
+	if result.Direction != "from-workspace" || result.Disk != "workspace" {
+		t.Fatalf("result = %#v", result)
+	}
+	targetPath := filepath.Join(targetDir, "notes.txt")
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "fake-dump" {
+		t.Fatalf("dumped data = %q", data)
+	}
+}
+
+func TestCopyWorkspaceFileRejectsActiveWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "active"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "active", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "active", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "active", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "active"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(source, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := copyWorkspaceFile(dir, debugfs, source, "active:/hello.txt")
+	if err == nil || !strings.Contains(err.Error(), "must be stopped") {
+		t.Fatalf("err = %v, want stopped validation", err)
+	}
+}
+
+func TestCopyWorkspaceFileRejectsTwoRemoteEndpoints(t *testing.T) {
+	_, err := copyWorkspaceFile(t.TempDir(), "debugfs", "a:/x", "b:/y")
+	if err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("err = %v, want endpoint validation", err)
+	}
+}
+
+func TestRunCPCommand(t *testing.T) {
+	outputFormat = ""
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	debugfs := fakeDebugFS(t, dir)
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "hello.txt")
+	if err := os.WriteFile(source, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "cp", "--debugfs", debugfs, "--state-dir", dir, source, "research:/hello.txt"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run cp: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"direction": "to-workspace"`) || !strings.Contains(string(data), `"workspace": "research"`) {
+		t.Fatalf("cp output = %s", data)
+	}
+}
+
+func fakeDebugFS(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "debugfs")
+	script := `#!/usr/bin/env bash
+set -euo pipefail
+log="` + filepath.Join(dir, "debugfs.log") + `"
+printf '%s\n' "$*" | tr ' ' '|' >> "$log"
+args=("$@")
+for ((i=0; i<${#args[@]}; i++)); do
+  if [[ "${args[$i]}" == "-R" ]]; then
+    cmd="${args[$((i+1))]}"
+    if [[ "$cmd" == dump\ * ]]; then
+      target="${cmd##* }"
+      printf fake-dump > "$target"
+    fi
+  fi
+done
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestCreateDispatchKeepsLowLevelSupervisorCreate(t *testing.T) {
@@ -805,6 +2809,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 		SetupCommands:   []string{"echo setup"},
 		Env:             map[string]string{"AGENCY_AGENT_NAME": "research"},
 		Disks:           []workspaceDisk{{Name: "constraints", Path: "/tmp/constraints.ext4", Mountpoint: "/config", Mode: "ro"}},
+		Network:         vmkit.NetworkConfig{Mode: defaultNetworkMode, PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}},
 		ResultPort:      1024,
 		PrepareForStart: true,
 	})
@@ -814,6 +2819,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	if !strings.Contains(command, `> /etc/microagent/run.json`) ||
 		!strings.Contains(command, `"command":["/bin/sh","-lc","/app/entrypoint.sh"]`) ||
 		!strings.Contains(command, `"mountpoint":"/config"`) ||
+		!strings.Contains(command, `"hostPort":8080`) ||
 		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) {
 		t.Fatalf("workspaceCommand missing guest config reset: %q", command)
 	}
@@ -846,6 +2852,54 @@ func TestWorkspaceBuildCommandKeepsSetupResultPort(t *testing.T) {
 	joined := strings.Join(command, " ")
 	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, "/etc/microagent/run.json") {
 		t.Fatalf("command = %#v", command)
+	}
+}
+
+func TestCreateWorkspaceRootfsUsesPulledBaseline(t *testing.T) {
+	dir := t.TempDir()
+	baseline := filepath.Join(dir, "images", "rootfs", "baseline.ext4")
+	if err := os.MkdirAll(filepath.Dir(baseline), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(baseline, []byte("baseline"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertImageRecord(dir, imageRecord{
+		ImageRef:    "local/busybox:baseline",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  baseline,
+		SizeBytes:   8,
+		LastUsedAt:  "2026-05-06T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := createWorkspaceRootfs(t.Context(), workspaceOptions{
+		StateDir:        dir,
+		Name:            "research",
+		ImageRef:        "local/busybox:baseline",
+		Architecture:    "arm64",
+		Profile:         "small",
+		RestartPolicy:   "never",
+		Network:         vmkit.NetworkConfig{Mode: defaultNetworkMode},
+		MemoryMiB:       512,
+		CPUCount:        2,
+		SizeMiB:         1024,
+		PrepareForStart: true,
+	})
+	if err != nil {
+		t.Fatalf("createWorkspaceRootfs: %v", err)
+	}
+	data, err := os.ReadFile(result.RootfsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "baseline" {
+		t.Fatalf("rootfs = %q", data)
+	}
+	if result.Image.BuilderPhase != "copy-baseline" {
+		t.Fatalf("image provenance = %#v", result.Image)
 	}
 }
 
@@ -896,6 +2950,72 @@ func TestWorkspaceHasGuestCommand(t *testing.T) {
 	}
 }
 
+func TestConsoleLooksReady(t *testing.T) {
+	tests := []struct {
+		output string
+		want   bool
+	}{
+		{output: "microagent login:", want: true},
+		{output: "root@vm:/# ", want: true},
+		{output: "user@vm:~$ ", want: true},
+		{output: "booting kernel", want: false},
+	}
+	for _, tt := range tests {
+		if got := consoleLooksReady(tt.output); got != tt.want {
+			t.Fatalf("consoleLooksReady(%q) = %v, want %v", tt.output, got, tt.want)
+		}
+	}
+}
+
+func TestWaitForConsoleReadyUsesSerialPrompt(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "serial.log")
+	if err := os.WriteFile(logPath, []byte("boot\n/ # "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForConsoleReady(t.Context(), logPath, time.Second); err != nil {
+		t.Fatalf("waitForConsoleReady: %v", err)
+	}
+}
+
+func TestRunConnectRejectsNegativeReadyTimeoutForInteractive(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "connect.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runConnect(t.Context(), []string{"research", "--state-dir", dir, "--ready-timeout", "-1"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "ready-timeout must not be negative") {
+		t.Fatalf("runConnect err = %v", err)
+	}
+}
+
+func TestCopyConsoleInputNormalizesNewlines(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyConsoleInput(&dst, strings.NewReader("echo ready\n"))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	if written != int64(len("echo ready\r")) || dst.String() != "echo ready\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyConsoleInputDetachesOnCtrlBracket(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyConsoleInput(&dst, strings.NewReader("echo before\n"+string([]byte{consoleDetachByte})+"echo after\n"))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	if written != int64(len("echo before\r")) || dst.String() != "echo before\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
 func TestRunPSListsWorkspaces(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
@@ -917,6 +3037,9 @@ func TestRunPSListsWorkspaces(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", RestartPolicy: "on-failure", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
 	stdoutPath := filepath.Join(dir, "ps.json")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
@@ -933,7 +3056,7 @@ func TestRunPSListsWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), `"name": "research"`) || !strings.Contains(string(got), `"state": "stopped"`) {
+	if !strings.Contains(string(got), `"name": "research"`) || !strings.Contains(string(got), `"state": "stopped"`) || !strings.Contains(string(got), `"restart": "on-failure"`) {
 		t.Fatalf("ps output = %s", got)
 	}
 }
@@ -1098,6 +3221,98 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 	}
 }
 
+func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := writeWorkspaceProcessState(
+		workspaceOptions{StateDir: dir, Name: "agent-1"},
+		req,
+		vmkit.StateRunning,
+		cmd.Process.Pid,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"halt", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run halt: %v", err)
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "agent-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateHalted || state.PID != 0 {
+		t.Fatalf("state = %#v, want halted with no pid", state)
+	}
+	if processStillActive(cmd.Process.Pid) {
+		t.Fatalf("process %d still active", cmd.Process.Pid)
+	}
+}
+
+func TestFirecrackerQuarantinePreservesRecordedPID(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("darwin uses Apple VF")
+	}
+	dir := t.TempDir()
+	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := writeWorkspaceProcessState(
+		workspaceOptions{StateDir: dir, Name: "agent-1"},
+		req,
+		vmkit.StateRunning,
+		cmd.Process.Pid,
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"quarantine", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run quarantine: %v", err)
+	}
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: dir, Name: "agent-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateQuarantined || state.PID != cmd.Process.Pid {
+		t.Fatalf("state = %#v, want quarantined with preserved pid", state)
+	}
+	if !processStillActive(cmd.Process.Pid) {
+		t.Fatalf("process %d was stopped by quarantine", cmd.Process.Pid)
+	}
+}
+
 func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("darwin uses Apple VF")
@@ -1203,6 +3418,7 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 		"--kernel", kernel,
 		"--id", "agent-1",
 		"--state-dir", dir,
+		"--vsock", "1024=127.0.0.1:8200",
 		"--supervisor", firecrackerSupervisorHelper(t),
 	}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
@@ -1220,6 +3436,13 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "agent-1", "firecracker.json")); err != nil {
 		t.Fatalf("firecracker config missing: %v", err)
+	}
+	configData, err := os.ReadFile(filepath.Join(dir, "agent-1", "firecracker.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(configData), `"vsock_id": "vsock0"`) || !strings.Contains(string(configData), `"guest_cid": 3`) {
+		t.Fatalf("firecracker config missing vsock: %s", configData)
 	}
 }
 
@@ -1452,4 +3675,22 @@ func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	return fs
+}
+
+func contractItemSliceContains(items []vmkit.ContractItem, name string) bool {
+	for _, item := range items {
+		if item.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

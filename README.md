@@ -1,6 +1,6 @@
 # microagent-kit
 
-`microagent-kit` provides the tools needed to run AI Agent workspaces in microVMs.
+`microagent-kit` provides the tools needed to run AI agent workspaces in microVMs.
 
 The command-line tool is `microagent`. Each host OS has one VM backend:
 Firecracker on Linux and Apple Virtualization.framework on macOS. Each backend
@@ -10,10 +10,10 @@ packaged as `microagent-firecracker-supervisor`. Both are small JSON
 executables that Go, Python, Rust, Node, and shell scripts can call.
 
 Microagent provides the kernel, converts OCI images into VM disks, and starts
-the VM. Identity, policy, credentials, and higher-level control stay outside
+the VM. Identity, policy, credentials, and control-plane decisions stay outside
 this project.
 
-See [`docs/`](docs/) for the full guide and CLI reference.
+See [`docs/`](docs/) for the guide and CLI reference.
 
 Go callers can use `pkg/rootfs` for OCI-to-ext4 builds and `pkg/vmkit` for the
 shared supervisor request/response types. The high-level workspace lifecycle API
@@ -41,11 +41,26 @@ Or create a named workspace:
 microagent create \
   --name research \
   --image docker.io/library/ubuntu:24.04 \
-  --size-mib 2048 \
-  --memory 1024 \
-  --cpus 2 \
+  --profile medium \
   --setup "mkdir -p /workspace" \
   --setup "echo ready > /workspace/status"
+```
+
+Or put the workspace in source control:
+
+```yaml
+# microagent.yaml
+name: research
+image: docker.io/library/ubuntu:24.04
+profile: medium
+restart: on-failure
+setup:
+  - mkdir -p /workspace
+  - echo ready > /workspace/status
+```
+
+```bash
+microagent create
 ```
 
 Start it and run a command through the console:
@@ -55,11 +70,25 @@ microagent start research
 microagent connect research --send "cat /etc/os-release; cat /workspace/status; uname -m"
 ```
 
+Clone a stopped workspace:
+
+```bash
+microagent clone research research-copy
+```
+
+Copy a file into a stopped workspace:
+
+```bash
+microagent cp ./config.json research:/etc/microagent/config.json
+```
+
 Check state, read the boot log, and remove the workspace:
 
 ```bash
+microagent host
 microagent ps
-microagent status --name research
+microagent profiles
+microagent --json status --name research
 microagent logs research
 microagent stop research
 microagent delete research
@@ -67,12 +96,28 @@ microagent delete research
 
 Linux has one backend: Firecracker. macOS has one backend: Apple VF. The
 `--backend` flag exists for lower-level request compatibility and backend
-validation, not as a user-facing backend selector.
+validation, not for normal backend selection.
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
-`connect`, `status`, `stop`, `kill`, and `delete`. Backend supervisors record
-state files and emit lifecycle events. Firecracker records process IDs so
-`stop` can send a graceful signal and `kill` can send a hard kill.
+`status`, `halt`, `quarantine`, `stop`, `kill`, and `delete`. Backend
+supervisors record state files and append lifecycle events to `events.json`.
+`halt` is the clean, disk-preserving shutdown path; `quarantine` severs
+host-side network and mediation without discarding disk state or event history;
+`stop` remains the graceful stop command and `kill` sends a hard kill. Both
+backends support interactive `connect`; `logs` remains available for captured
+serial output.
+
+Named workspace manifests also record runtime verification metadata: image
+digest, kernel hash, rootfs hash, and injected init hash. `microagent status
+--json` recomputes current hashes and reports mismatches.
+Status JSON also reports `guestReady`, `shellReady`, and `resultReady` so
+callers can sequence work without polling serial logs or guessing from files.
+Declare the mediation channel with `--mediation port=host:port`; it is recorded
+as a required fail-closed vsock contract and reported in readiness/status.
+Use `microagent --json result <name>` to read the structured completion payload
+without scraping logs.
+Declare output artifacts with `--output name=/guest/path`; status/result JSON
+then reports them under `artifacts.egress`.
 
 ## Build
 
@@ -83,28 +128,29 @@ go build ./cmd/microagent-firecracker-supervisor              # Linux only
 swift build --package-path supervisors/applevf --disable-sandbox  # macOS only
 ```
 
-Build and ad-hoc sign the Apple VF supervisor:
-
-```bash
-make signed-supervisor
-```
-
-## Development
-
-Use the smoke targets when changing kernels, supervisors, rootfs conversion, or
-host backend behavior. They boot real VMs and need host virtualization access,
-so they are maintainer checks rather than normal install steps.
+Run the smoke suite for your host backend:
 
 ```bash
 make smoke
-make smoke-rootfs
-make smoke-firecracker
-make smoke-workspace
-make smoke-boot
 ```
 
-See [docs/development/smoke-tests.md](docs/development/smoke-tests.md) for host
-requirements and expected output.
+`make smoke` runs Firecracker checks on Linux and Apple VF checks on macOS.
+These boot real VMs, so run them on a host with the right virtualization access.
+
+Run targeted smokes when you are working in one area:
+
+```bash
+make smoke-rootfs
+make smoke-firecracker
+make smoke-firecracker-console
+make smoke-firecracker-publish
+make smoke-firecracker-network
+make smoke-applevf-network
+make smoke-applevf-publish
+make smoke-workspace
+make signed-supervisor
+make smoke-boot
+```
 
 ## CLI
 
@@ -193,6 +239,9 @@ Open its console:
 microagent connect research
 ```
 
+`connect` is supported by Apple VF and Firecracker. Press `Ctrl-]` to detach
+from an interactive console without stopping the workspace.
+
 For scripts, send one line and print any new console output:
 
 ```bash
@@ -208,7 +257,7 @@ microagent ps
 Show workspace state:
 
 ```bash
-microagent status --name research
+microagent --json status --name research
 ```
 
 Show boot logs:
@@ -217,15 +266,21 @@ Show boot logs:
 microagent logs research
 ```
 
+Quarantine a workspace:
+
+```bash
+microagent quarantine research
+```
+
 Stop and remove a workspace:
 
 ```bash
-microagent stop research
+microagent halt research
 microagent delete research
 ```
 
 For Firecracker, `delete` refuses to remove state while the recorded VM process
-is still running. Use `stop` or `kill` first.
+is still running. Use `halt`, `stop`, or `kill` first.
 
 Prepare a workspace from an existing rootfs with the lower-level request form:
 
@@ -259,6 +314,10 @@ Use request JSON:
 microagent create --json request.json
 ```
 
+This `create --json <path>` form reads request JSON. For JSON command output,
+place the global output flag before the command, for example
+`microagent --json status research`.
+
 Request JSON:
 
 ```json
@@ -279,7 +338,8 @@ Request JSON:
 }
 ```
 
-Use `--json` when scripts need structured output.
+Place `--json` before the command when scripts need structured output, for
+example `microagent --json status research`.
 
 Delete state:
 
@@ -337,3 +397,10 @@ your program
        -> Apple Virtualization.framework backend
        -> OCI image to ext4 rootfs builds
 ```
+
+## Project
+
+- Contributions: [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- Security: [`SECURITY.md`](SECURITY.md)
+- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+- License: [`Apache-2.0`](LICENSE)

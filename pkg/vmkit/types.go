@@ -22,13 +22,15 @@ const (
 type VMState string
 
 const (
-	StateUnknown  VMState = "unknown"
-	StatePrepared VMState = "prepared"
-	StateStarting VMState = "starting"
-	StateRunning  VMState = "running"
-	StateStopping VMState = "stopping"
-	StateStopped  VMState = "stopped"
-	StateFailed   VMState = "failed"
+	StateUnknown     VMState = "unknown"
+	StatePrepared    VMState = "prepared"
+	StateStarting    VMState = "starting"
+	StateRunning     VMState = "running"
+	StateStopping    VMState = "stopping"
+	StateStopped     VMState = "stopped"
+	StateHalted      VMState = "halted"
+	StateQuarantined VMState = "quarantined"
+	StateFailed      VMState = "failed"
 )
 
 type Identity struct {
@@ -40,14 +42,16 @@ type Identity struct {
 }
 
 type Config struct {
-	KernelPath     string          `json:"kernelPath"`
-	RootfsPath     string          `json:"rootfsPath"`
-	StateDir       string          `json:"stateDir"`
-	MemoryMiB      int             `json:"memoryMiB,omitempty"`
-	CPUCount       int             `json:"cpuCount,omitempty"`
-	Disks          []Disk          `json:"disks,omitempty"`
-	VsockListeners []VsockListener `json:"vsockListeners,omitempty"`
-	SerialInput    bool            `json:"serialInput,omitempty"`
+	KernelPath     string           `json:"kernelPath"`
+	RootfsPath     string           `json:"rootfsPath"`
+	StateDir       string           `json:"stateDir"`
+	MemoryMiB      int              `json:"memoryMiB,omitempty"`
+	CPUCount       int              `json:"cpuCount,omitempty"`
+	Disks          []Disk           `json:"disks,omitempty"`
+	VsockListeners []VsockListener  `json:"vsockListeners,omitempty"`
+	Mediation      *MediationConfig `json:"mediation,omitempty"`
+	Network        *NetworkConfig   `json:"network,omitempty"`
+	SerialInput    bool             `json:"serialInput,omitempty"`
 }
 
 type Disk struct {
@@ -60,6 +64,30 @@ type Disk struct {
 type VsockListener struct {
 	Port   uint32 `json:"port"`
 	Target string `json:"target"`
+}
+
+type MediationConfig struct {
+	Enabled    bool   `json:"enabled" yaml:"enabled"`
+	Required   bool   `json:"required" yaml:"required"`
+	Port       uint32 `json:"port,omitempty" yaml:"port,omitempty"`
+	Target     string `json:"target,omitempty" yaml:"target,omitempty"`
+	FailClosed bool   `json:"failClosed" yaml:"failClosed"`
+}
+
+type NetworkConfig struct {
+	Mode         string        `json:"mode" yaml:"mode"`
+	Interface    string        `json:"interface,omitempty" yaml:"interface,omitempty"`
+	PortForwards []PortForward `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
+	DNS          []string      `json:"dns,omitempty" yaml:"dns,omitempty"`
+	Routes       []string      `json:"routes,omitempty" yaml:"routes,omitempty"`
+	IP           string        `json:"ip,omitempty" yaml:"ip,omitempty"`
+}
+
+type PortForward struct {
+	Protocol  string `json:"protocol" yaml:"protocol"`
+	Host      string `json:"host,omitempty" yaml:"host,omitempty"`
+	HostPort  uint16 `json:"hostPort" yaml:"hostPort"`
+	GuestPort uint16 `json:"guestPort" yaml:"guestPort"`
 }
 
 type Request struct {
@@ -80,10 +108,14 @@ type HostSupport struct {
 	Architecture            string `json:"architecture"`
 	FrameworkAvailable      bool   `json:"frameworkAvailable"`
 	VirtualizationSupported bool   `json:"virtualizationSupported"`
+	SupervisorPath          string `json:"supervisorPath,omitempty"`
+	SupervisorAvailable     bool   `json:"supervisorAvailable,omitempty"`
 	BinaryPath              string `json:"binaryPath,omitempty"`
 	BinaryVersion           string `json:"binaryVersion,omitempty"`
 	KVMAvailable            bool   `json:"kvmAvailable,omitempty"`
 	VsockAvailable          bool   `json:"vsockAvailable,omitempty"`
+	ConsoleAvailable        bool   `json:"consoleAvailable"`
+	ConsoleMode             string `json:"consoleMode,omitempty"`
 }
 
 type KernelSupport struct {
@@ -95,13 +127,85 @@ type KernelSupport struct {
 	Error        string `json:"error,omitempty"`
 }
 
+type VerifiedArtifact struct {
+	Path           string `json:"path,omitempty"`
+	SHA256         string `json:"sha256,omitempty"`
+	RecordedSHA256 string `json:"recordedSHA256,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+type VerificationDivergence struct {
+	Artifact string `json:"artifact"`
+	Field    string `json:"field,omitempty"`
+	Expected string `json:"expected,omitempty"`
+	Actual   string `json:"actual,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type RuntimeVerification struct {
+	OK          bool                     `json:"ok"`
+	ImageRef    string                   `json:"imageRef,omitempty"`
+	ResolvedRef string                   `json:"resolvedRef,omitempty"`
+	ImageDigest string                   `json:"imageDigest,omitempty"`
+	Kernel      *VerifiedArtifact        `json:"kernel,omitempty"`
+	Rootfs      *VerifiedArtifact        `json:"rootfs,omitempty"`
+	Init        *VerifiedArtifact        `json:"init,omitempty"`
+	Divergence  []VerificationDivergence `json:"divergence,omitempty"`
+}
+
+type ReadinessSignal struct {
+	Ready      bool       `json:"ready"`
+	ObservedAt *time.Time `json:"observedAt,omitempty"`
+	Detail     string     `json:"detail,omitempty"`
+	Error      string     `json:"error,omitempty"`
+}
+
+type RuntimeReadiness struct {
+	GuestReady     ReadinessSignal `json:"guestReady"`
+	ShellReady     ReadinessSignal `json:"shellReady"`
+	ResultReady    ReadinessSignal `json:"resultReady"`
+	MediationReady ReadinessSignal `json:"mediationReady"`
+}
+
+type RuntimeResult struct {
+	Identity    Identity `json:"identity"`
+	Backend     string   `json:"backend,omitempty"`
+	ResultPath  string   `json:"resultPath,omitempty"`
+	StartedAt   string   `json:"startedAt,omitempty"`
+	CompletedAt string   `json:"completedAt,omitempty"`
+	ExitCode    int      `json:"exitCode"`
+	Stdout      string   `json:"stdout,omitempty"`
+	Stderr      string   `json:"stderr,omitempty"`
+	Error       string   `json:"error,omitempty"`
+}
+
+type ArtifactRef struct {
+	Name       string `json:"name"`
+	Path       string `json:"path,omitempty"`
+	Mountpoint string `json:"mountpoint,omitempty"`
+	Mode       string `json:"mode,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+}
+
+type RuntimeArtifacts struct {
+	Ingress []ArtifactRef `json:"ingress,omitempty"`
+	Egress  []ArtifactRef `json:"egress,omitempty"`
+}
+
 type Response struct {
-	OK      bool           `json:"ok"`
-	Backend string         `json:"backend,omitempty"`
-	Event   *Event         `json:"event,omitempty"`
-	Host    *HostSupport   `json:"host,omitempty"`
-	Kernel  *KernelSupport `json:"kernel,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	OK            bool                 `json:"ok"`
+	Backend       string               `json:"backend,omitempty"`
+	Event         *Event               `json:"event,omitempty"`
+	Host          *HostSupport         `json:"host,omitempty"`
+	Kernel        *KernelSupport       `json:"kernel,omitempty"`
+	Verification  *RuntimeVerification `json:"verification,omitempty"`
+	Readiness     *RuntimeReadiness    `json:"readiness,omitempty"`
+	Result        *RuntimeResult       `json:"result,omitempty"`
+	Artifacts     *RuntimeArtifacts    `json:"artifacts,omitempty"`
+	Mediation     *MediationConfig     `json:"mediation,omitempty"`
+	RestartPolicy string               `json:"restartPolicy,omitempty"`
+	Network       *NetworkConfig       `json:"network,omitempty"`
+	Error         string               `json:"error,omitempty"`
 }
 
 func NormalizeConfig(config *Config) {
@@ -130,7 +234,7 @@ func ValidateRequest(req Request) error {
 		if err := ValidateConfig(req.Config); err != nil {
 			return err
 		}
-	case "inspect", "stop", "kill", "delete":
+	case "inspect", "halt", "quarantine", "stop", "kill", "delete":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}
@@ -226,6 +330,72 @@ func ValidateConfig(config *Config) error {
 		if strings.TrimSpace(listener.Target) == "" {
 			return fmt.Errorf("vsock listener %d target is required", listener.Port)
 		}
+	}
+	if config.Network != nil {
+		if err := ValidateNetworkConfig(*config.Network); err != nil {
+			return err
+		}
+	}
+	if config.Mediation != nil {
+		if err := ValidateMediationConfig(*config.Mediation); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ValidateMediationConfig(mediation MediationConfig) error {
+	if !mediation.Enabled && !mediation.Required && mediation.Port == 0 && strings.TrimSpace(mediation.Target) == "" && !mediation.FailClosed {
+		return nil
+	}
+	if !mediation.Enabled {
+		return errors.New("mediation.enabled must be true when mediation is configured")
+	}
+	if mediation.Port == 0 {
+		return errors.New("mediation.port must be positive")
+	}
+	if strings.TrimSpace(mediation.Target) == "" {
+		return errors.New("mediation.target is required")
+	}
+	if mediation.Required && !mediation.FailClosed {
+		return errors.New("required mediation must fail closed")
+	}
+	return nil
+}
+
+func ValidateNetworkConfig(network NetworkConfig) error {
+	mode := strings.TrimSpace(network.Mode)
+	if mode == "" {
+		mode = "nat"
+	}
+	switch mode {
+	case "nat", "isolated", "bridged":
+	default:
+		return fmt.Errorf("network.mode must be nat, isolated, or bridged")
+	}
+	if mode == "isolated" && len(network.PortForwards) != 0 {
+		return fmt.Errorf("network.portForwards require nat or bridged mode")
+	}
+	hostPorts := map[string]bool{}
+	for i, forward := range network.PortForwards {
+		protocol := strings.TrimSpace(forward.Protocol)
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		if protocol != "tcp" {
+			return fmt.Errorf("network port forward %d protocol must be tcp", i)
+		}
+		if forward.HostPort == 0 {
+			return fmt.Errorf("network port forward %d hostPort must be positive", i)
+		}
+		if forward.GuestPort == 0 {
+			return fmt.Errorf("network port forward %d guestPort must be positive", i)
+		}
+		key := fmt.Sprintf("%s/%s/%d", protocol, strings.TrimSpace(forward.Host), forward.HostPort)
+		if hostPorts[key] {
+			return fmt.Errorf("duplicate network host port %d", forward.HostPort)
+		}
+		hostPorts[key] = true
 	}
 	return nil
 }

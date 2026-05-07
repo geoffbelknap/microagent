@@ -30,6 +30,7 @@ type BuildRequest struct {
 	SizeMiB        int64             `json:"size_mib,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 	Mounts         []Mount           `json:"mounts,omitempty"`
+	HostForwards   []PortForward     `json:"host_forwards,omitempty"`
 	AllowMutable   bool              `json:"allow_mutable,omitempty"`
 	KeepStage      bool              `json:"keep_stage,omitempty"`
 	StageSnapshot  string            `json:"stage_snapshot,omitempty"`
@@ -39,6 +40,12 @@ type Mount struct {
 	Device     string `json:"device"`
 	Mountpoint string `json:"mountpoint"`
 	Mode       string `json:"mode"`
+}
+
+type PortForward struct {
+	Protocol  string `json:"protocol"`
+	HostPort  uint16 `json:"hostPort"`
+	GuestPort uint16 `json:"guestPort"`
 }
 
 type BundleRequest struct {

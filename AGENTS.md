@@ -1,16 +1,17 @@
 # microagent-kit
 
-Go CLI/library plus backend supervisors for running Linux workspaces inside
+Go CLI/library plus backend supervisors for running Linux workspaces in
 microVMs.
 
 ## Scope
 
 This repository owns the VM pieces:
 
-- create, start, status, stop, kill, and delete commands
+- create, start, status, halt, quarantine, stop, kill, and delete commands
 - rootfs builds from OCI images
 - guest metadata and identity propagation
-- serial, block-device, and vsock wiring
+- serial console, block-device, network, and vsock wiring
+- readiness, structured results, declared artifacts, and event history
 - cleanup and state files
 - Firecracker supervisor
 - Apple Virtualization.framework supervisor protocol
@@ -30,6 +31,7 @@ This repository owns the VM pieces:
 - Keep public output structured and machine-readable.
 - Keep the Apple VF supervisor usable from Go, Python, Rust, Node, and shell scripts.
 - Treat state changes as API output, not log strings.
+- Keep halt, quarantine, readiness, result, artifact, and verification semantics backend-neutral.
 - Preserve explicit identity in requests, state files, and events.
 - Keep backend details behind supervisor boundaries.
 - Fail closed on invalid VM config.
@@ -38,4 +40,5 @@ This repository owns the VM pieces:
 ## Project boundary
 
 Other projects supply policy, audit meaning, identity, and user intent. This
-project owns kernels, rootfs conversion, VM commands, and state reporting.
+project owns kernels, rootfs conversion, VM commands, runtime verification, and
+state reporting.

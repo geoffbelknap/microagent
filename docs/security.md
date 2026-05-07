@@ -10,7 +10,7 @@ input**. Microagent does not sign images, scan layers, mediate credentials,
 or enforce policy — those concerns belong to the upstream system that calls
 `microagent`. See [Boundaries](/concepts/boundaries/) for the full list.
 
-In practice that means:
+That means:
 
 - The kernel that boots is whoever installed `~/.microagent/kernels/...`.
   Verify with [`microagent kernel verify`](/cli/kernel/) when this matters.
@@ -26,3 +26,7 @@ In practice that means:
 Report security issues privately via GitHub's "Report a vulnerability" flow
 on the [microagent-kit repo](https://github.com/geoffbelknap/microagent-kit/security).
 Do not file public issues for security problems.
+
+Security fixes target the latest released version and `main`. Older releases
+may receive fixes when the patch is small and the affected version is still in
+active use.

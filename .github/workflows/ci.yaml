@@ -10,7 +10,33 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  linux-go:
+    name: Linux Go checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.mod
+
+      - name: Test Go
+        run: go test ./...
+
+      - name: Vet Go
+        run: go vet ./...
+
+      - name: Race test Go
+        run: go test -race ./...
+
+      - name: Runtime contract smoke
+        run: make smoke-contract
+
+  macos-supervisor:
+    name: macOS supervisor checks
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -29,7 +55,45 @@ jobs:
         run: swift build --package-path supervisors/applevf --disable-sandbox
 
       - name: Smoke Apple VF supervisor lifecycle
-        run: scripts/applevf-supervisor-lifecycle-smoke.sh
+        run: scripts/dev/applevf-supervisor-lifecycle-smoke.sh
 
       - name: Smoke CLI lifecycle
-        run: scripts/cli-lifecycle-smoke.sh
+        run: scripts/dev/cli-lifecycle-smoke.sh
+
+  docs-and-scripts:
+    name: Docs and shell checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check Markdown links
+        run: python3 scripts/dev/markdown-link-check.py
+
+      - name: Check CLI docs
+        run: python3 scripts/dev/cli-docs-check.py
+
+      - name: Check shell syntax
+        run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Shellcheck scripts
+        run: find scripts -name '*.sh' -print0 | xargs -0 shellcheck
+
+  govulncheck:
+    name: Go vulnerability check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.mod
+
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
