@@ -95,7 +95,7 @@ PY
   --backend firecracker \
   --image "$IMAGE" \
   --arch amd64 \
-  --exec "echo NAT_READY" \
+  --exec "wget -qO- -T 10 http://example.com >/tmp/nat.out && echo NAT_OUTBOUND_READY || echo NAT_OUTBOUND_FAILED" \
   --kernel "$kernel_path" \
   --guest-init "$GUEST_INIT" \
   --state-dir "$STATE_DIR/nat-run" \
@@ -113,10 +113,15 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
     result = json.load(f)
 if result["response"]["event"]["state"] != "stopped":
     raise SystemExit(result)
-if "NAT_READY" not in result["serial_log"]:
+if "NAT_OUTBOUND_FAILED" in result["serial_log"]:
+    raise SystemExit(result["serial_log"])
+if "NAT_OUTBOUND_READY" not in result["serial_log"]:
     raise SystemExit(result["serial_log"])
 if result["network"]["mode"] != "nat":
     raise SystemExit(result["network"])
+runtime = ((result.get("response") or {}).get("network") or {})
+if runtime.get("mode") == "nat" and runtime.get("ip") == "":
+    raise SystemExit(runtime)
 PY
 
 if "$CLI" create isolated-publish \

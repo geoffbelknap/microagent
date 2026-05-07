@@ -121,6 +121,7 @@ printf 'got:%s\n' "$line"
 			StateDir:    dir,
 			MemoryMiB:   128,
 			CPUCount:    1,
+			Network:     &vmkit.NetworkConfig{Mode: "isolated"},
 			SerialInput: true,
 		},
 	}
@@ -316,6 +317,52 @@ func TestWriteConfigAddsBridgedNetworkInterface(t *testing.T) {
 	}
 	if cfg.NetworkInterfaces[0].IfaceID != "eth0" || cfg.NetworkInterfaces[0].HostDevName == "" || cfg.NetworkInterfaces[0].GuestMAC == "" {
 		t.Fatalf("network interface = %#v", cfg.NetworkInterfaces[0])
+	}
+}
+
+func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   opts.StateDir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+			Network: &vmkit.NetworkConfig{
+				Mode:    "nat",
+				IP:      "10.43.12.2/29",
+				Gateway: "10.43.12.1",
+				DNS:     []string{"1.1.1.1", "8.8.8.8"},
+			},
+		},
+	}
+	if err := writeConfig(opts, req); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+	var cfg config
+	data, err := os.ReadFile(configPath(opts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetworkInterfaces) != 1 {
+		t.Fatalf("network interfaces = %#v", cfg.NetworkInterfaces)
+	}
+	bootArgs := cfg.BootSource.BootArgs
+	if !strings.Contains(bootArgs, "microagent_net_if=eth0") ||
+		!strings.Contains(bootArgs, "microagent_net_ip=10.43.12.2/29") ||
+		!strings.Contains(bootArgs, "microagent_net_gw=10.43.12.1") ||
+		!strings.Contains(bootArgs, "microagent_net_dns=1.1.1.1,8.8.8.8") {
+		t.Fatalf("boot args = %q", bootArgs)
 	}
 }
 

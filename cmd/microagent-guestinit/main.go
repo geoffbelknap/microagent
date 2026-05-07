@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
@@ -62,6 +64,15 @@ func run() int {
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
 	if err := mountDisks(cfg.Mounts); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
+	if err := configureBootNetwork(); err != nil {
 		code = 127
 		res.Error = err.Error()
 		fmt.Fprintln(os.Stderr, err)
@@ -174,6 +185,13 @@ type hostForward struct {
 	GuestPort uint16 `json:"guestPort"`
 }
 
+type networkBootConfig struct {
+	Interface string
+	IP        string
+	Gateway   string
+	DNS       []string
+}
+
 func startTCPVsockBridges(env []string) error {
 	specs, err := parseTCPVsockBridges(envValue(env, tcpVsockListenersEnv))
 	if err != nil {
@@ -220,6 +238,227 @@ func startHostForwards(forwards []hostForward) error {
 			return fmt.Errorf("listen on vsock host port %d: %w", forward.HostPort, err)
 		}
 		go serveHostForward(fd, forward.GuestPort)
+	}
+	return nil
+}
+
+func configureBootNetwork() error {
+	cfg, err := readNetworkBootConfig()
+	if err != nil {
+		return err
+	}
+	if cfg.Interface == "" {
+		return nil
+	}
+	if err := bringUpLoopback(); err != nil {
+		return err
+	}
+	if err := configureStaticIPv4(cfg); err != nil {
+		return err
+	}
+	if len(cfg.DNS) != 0 {
+		if err := writeResolvConf(cfg.DNS); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readNetworkBootConfig() (networkBootConfig, error) {
+	data, err := os.ReadFile("/proc/cmdline")
+	if err != nil {
+		return networkBootConfig{}, fmt.Errorf("read kernel command line: %w", err)
+	}
+	values := map[string]string{}
+	for _, field := range strings.Fields(string(data)) {
+		key, value, ok := strings.Cut(field, "=")
+		if ok && strings.HasPrefix(key, "microagent_net_") {
+			values[key] = value
+		}
+	}
+	cfg := networkBootConfig{
+		Interface: values["microagent_net_if"],
+		IP:        values["microagent_net_ip"],
+		Gateway:   values["microagent_net_gw"],
+	}
+	if cfg.Interface == "" {
+		return cfg, nil
+	}
+	if cfg.IP == "" || cfg.Gateway == "" {
+		return networkBootConfig{}, fmt.Errorf("microagent network boot config requires ip and gateway")
+	}
+	for _, dns := range strings.Split(values["microagent_net_dns"], ",") {
+		dns = strings.TrimSpace(dns)
+		if dns != "" {
+			cfg.DNS = append(cfg.DNS, dns)
+		}
+	}
+	return cfg, nil
+}
+
+func configureStaticIPv4(cfg networkBootConfig) error {
+	iface, err := net.InterfaceByName(cfg.Interface)
+	if err != nil {
+		return fmt.Errorf("find guest network interface %s: %w", cfg.Interface, err)
+	}
+	ip, ipNet, err := net.ParseCIDR(cfg.IP)
+	if err != nil {
+		return fmt.Errorf("parse guest network ip %q: %w", cfg.IP, err)
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return fmt.Errorf("guest network ip %q must be IPv4", cfg.IP)
+	}
+	gateway := net.ParseIP(cfg.Gateway).To4()
+	if gateway == nil {
+		return fmt.Errorf("guest network gateway %q must be IPv4", cfg.Gateway)
+	}
+	if err := setInterfaceIPv4(cfg.Interface, ip4, net.IP(ipNet.Mask).To4()); err != nil {
+		return err
+	}
+	if err := setInterfaceUp(cfg.Interface); err != nil {
+		return err
+	}
+	if err := addDefaultRoute(iface.Index, gateway); err != nil && !os.IsExist(err) {
+		return err
+	}
+	return nil
+}
+
+func setInterfaceIPv4(name string, ip, mask net.IP) error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return fmt.Errorf("open control socket for %s: %w", name, err)
+	}
+	defer unix.Close(fd)
+	ifr, err := unix.NewIfreq(name)
+	if err != nil {
+		return fmt.Errorf("prepare address request for %s: %w", name, err)
+	}
+	if err := ifr.SetInet4Addr(ip); err != nil {
+		return fmt.Errorf("prepare IPv4 address for %s: %w", name, err)
+	}
+	if err := unix.IoctlIfreq(fd, unix.SIOCSIFADDR, ifr); err != nil {
+		return fmt.Errorf("set IPv4 address on %s: %w", name, err)
+	}
+	ifr, err = unix.NewIfreq(name)
+	if err != nil {
+		return fmt.Errorf("prepare netmask request for %s: %w", name, err)
+	}
+	if err := ifr.SetInet4Addr(mask); err != nil {
+		return fmt.Errorf("prepare IPv4 netmask for %s: %w", name, err)
+	}
+	if err := unix.IoctlIfreq(fd, unix.SIOCSIFNETMASK, ifr); err != nil {
+		return fmt.Errorf("set IPv4 netmask on %s: %w", name, err)
+	}
+	return nil
+}
+
+func setInterfaceUp(name string) error {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_DGRAM, 0)
+	if err != nil {
+		return fmt.Errorf("open control socket for %s: %w", name, err)
+	}
+	defer unix.Close(fd)
+	ifr, err := unix.NewIfreq(name)
+	if err != nil {
+		return fmt.Errorf("prepare flags request for %s: %w", name, err)
+	}
+	if err := unix.IoctlIfreq(fd, unix.SIOCGIFFLAGS, ifr); err != nil {
+		return fmt.Errorf("read flags for %s: %w", name, err)
+	}
+	ifr.SetUint16(ifr.Uint16() | unix.IFF_UP | unix.IFF_RUNNING)
+	if err := unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifr); err != nil {
+		return fmt.Errorf("bring %s up: %w", name, err)
+	}
+	return nil
+}
+
+func addDefaultRoute(ifindex int, gateway net.IP) error {
+	req := make([]byte, unix.SizeofNlMsghdr+unix.SizeofRtMsg)
+	header := (*unix.NlMsghdr)(unsafe.Pointer(&req[0]))
+	header.Type = unix.RTM_NEWROUTE
+	header.Flags = unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL
+	msg := (*unix.RtMsg)(unsafe.Pointer(&req[unix.SizeofNlMsghdr]))
+	msg.Family = unix.AF_INET
+	msg.Table = unix.RT_TABLE_MAIN
+	msg.Protocol = unix.RTPROT_BOOT
+	msg.Scope = unix.RT_SCOPE_UNIVERSE
+	msg.Type = unix.RTN_UNICAST
+	req = appendNetlinkAttr(req, unix.RTA_GATEWAY, gateway.To4())
+	ifIndexBytes := make([]byte, 4)
+	binary.NativeEndian.PutUint32(ifIndexBytes, uint32(ifindex))
+	req = appendNetlinkAttr(req, unix.RTA_OIF, ifIndexBytes)
+	header.Len = uint32(len(req))
+	return sendNetlinkRequest(req, "add default route")
+}
+
+func appendNetlinkAttr(msg []byte, attrType uint16, data []byte) []byte {
+	start := len(msg)
+	length := unix.SizeofRtAttr + len(data)
+	msg = append(msg, make([]byte, nlAlign(length))...)
+	attr := (*unix.RtAttr)(unsafe.Pointer(&msg[start]))
+	attr.Len = uint16(length)
+	attr.Type = attrType
+	copy(msg[start+unix.SizeofRtAttr:], data)
+	return msg
+}
+
+func sendNetlinkRequest(req []byte, action string) error {
+	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
+	if err != nil {
+		return fmt.Errorf("%s: open netlink socket: %w", action, err)
+	}
+	defer unix.Close(fd)
+	if err := unix.Sendto(fd, req, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return fmt.Errorf("%s: send netlink request: %w", action, err)
+	}
+	buf := make([]byte, 4096)
+	n, _, err := unix.Recvfrom(fd, buf, 0)
+	if err != nil {
+		return fmt.Errorf("%s: receive netlink ack: %w", action, err)
+	}
+	msgs, err := syscall.ParseNetlinkMessage(buf[:n])
+	if err != nil {
+		return fmt.Errorf("%s: parse netlink ack: %w", action, err)
+	}
+	for _, msg := range msgs {
+		if msg.Header.Type != unix.NLMSG_ERROR {
+			continue
+		}
+		if len(msg.Data) < 4 {
+			return fmt.Errorf("%s: short netlink error", action)
+		}
+		code := int32(binary.NativeEndian.Uint32(msg.Data[:4]))
+		if code == 0 {
+			return nil
+		}
+		errno := unix.Errno(-code)
+		if errno == unix.EEXIST {
+			return os.ErrExist
+		}
+		return fmt.Errorf("%s: %w", action, errno)
+	}
+	return nil
+}
+
+func nlAlign(length int) int {
+	return (length + unix.NLMSG_ALIGNTO - 1) & ^(unix.NLMSG_ALIGNTO - 1)
+}
+
+func writeResolvConf(dns []string) error {
+	var builder strings.Builder
+	for _, server := range dns {
+		ip := net.ParseIP(server)
+		if ip == nil {
+			return fmt.Errorf("invalid DNS server %q", server)
+		}
+		builder.WriteString("nameserver ")
+		builder.WriteString(server)
+		builder.WriteByte('\n')
+	}
+	if err := os.WriteFile("/etc/resolv.conf", []byte(builder.String()), 0o644); err != nil {
+		return fmt.Errorf("write /etc/resolv.conf: %w", err)
 	}
 	return nil
 }

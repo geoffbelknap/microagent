@@ -7,7 +7,7 @@ Every workspace records its network intent in the manifest. The CLI accepts thre
 
 | Mode | What it does |
 |---|---|
-| `nat` | Default. Outbound traffic via the backend's NAT, plus declared TCP `--publish` forwards. |
+| `nat` | Default. Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
 | `isolated` | No guest network device. The body has no network access at all. |
 | `bridged` | Attach to a host bridge so the workspace gets its own L2 presence. Backend support varies. |
 
@@ -16,7 +16,7 @@ Backend support is narrower than the enum:
 | Backend | What works today |
 |---|---|
 | Apple VF | `nat`, `isolated`, and TCP `--publish`. `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement. |
-| Firecracker | `nat` plus live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
+| Firecracker | `nat` through a transient TAP and iptables MASQUERADE, live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
 
 Apple gates native bridged networking behind `com.apple.vm.networking`. Open-source builds can't self-sign that entitlement, and `sudo` doesn't bypass the check. If you need bridged on macOS, you sign with the entitlement; otherwise, use `nat`.
 
@@ -49,6 +49,28 @@ microagent create research --publish 127.0.0.1:8080:80/tcp
 Under the hood, the guest init listens on a vsock port matching the host port; the backend supervisor runs the host-side TCP listener and bridges connections to that vsock port. You don't have to configure either side — declaring the forward wires it up.
 
 Isolated workspaces reject port forwards before the request leaves the CLI: there's no guest network for them to reach.
+
+## NAT on Firecracker
+
+Firecracker `nat` mode creates a host-side TAP device, assigns a private
+`10.43.x.0/29` subnet, configures iptables MASQUERADE, and attaches the TAP as
+the guest's `eth0`. Guest-init configures a static IPv4 address, installs the
+default route through the TAP gateway, and writes DNS resolvers. Outbound TCP
+and DNS work without a host bridge. Inbound remains closed unless you declare
+specific TCP forwards with `--publish`.
+
+Host requirements:
+
+- `iproute2` installed (`ip` command available)
+- `iptables` installed
+- `net.ipv4.ip_forward=1`
+- permission to create TAP devices and edit iptables rules, typically root or
+  `CAP_NET_ADMIN` on the Firecracker supervisor binary
+
+The supervisor does not enable `ip_forward` for you because it is host-wide
+policy. If a requirement is missing, `nat` fails closed before booting the VM.
+Transient TAP devices and per-workspace iptables rules are removed on
+`quarantine`, `stop`, `kill`, and `delete`.
 
 ## Bridged on Apple VF
 
@@ -99,4 +121,9 @@ For the architecture and a worked pattern, see [Wire up the mediation channel](.
 
 ## What's visible
 
-The network record appears in JSON output from `create`, `start`, `status`, and `ps`. Backend-specific wiring (TAP names, Firecracker config paths) stays behind the supervisor protocol — you don't see or configure it. Malformed port forwards fail closed before any request is sent.
+The network record appears in JSON output from `create`, `start`, `status`, and
+`ps`. `microagent --json network <name>` also shows the latest runtime network
+assignment, including Firecracker NAT IP, subnet, gateway, DNS, and route when
+present. Low-level wiring such as TAP names and Firecracker config paths stays
+behind the supervisor protocol. Malformed port forwards fail closed before any
+request is sent.

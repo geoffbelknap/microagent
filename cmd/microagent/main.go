@@ -2394,6 +2394,11 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 	if manifest, err := readWorkspaceManifest(opts.StateDir, eventFile.Identity.RuntimeID); err == nil {
 		resp.RestartPolicy = nonEmpty(manifest.Restart, defaultRestartPolicy)
 		network := networkConfigFromSpec(manifest.Network)
+		if state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: eventFile.Identity.RuntimeID}); err == nil && state.Config.Network != nil {
+			runtimeNetwork := normalizeNetworkConfig(*state.Config.Network)
+			runtimeNetwork.Runtime = nil
+			network.Runtime = &runtimeNetwork
+		}
 		resp.Network = &network
 		resp.Mediation = manifest.Mediation
 		artifacts := runtimeArtifactsFromManifest(manifest.Artifacts)

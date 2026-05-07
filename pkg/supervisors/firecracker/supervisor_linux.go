@@ -254,12 +254,19 @@ type transientNetworkDevice struct {
 	Created   bool   `json:"created"`
 }
 
+type transientFirewallRule struct {
+	Table string   `json:"table"`
+	Chain string   `json:"chain"`
+	Args  []string `json:"args"`
+}
+
 type runtimeState struct {
 	Event           eventFile                `json:"event"`
 	Config          vmkit.Config             `json:"config"`
 	PID             int                      `json:"pid,omitempty"`
 	PortForwardPID  int                      `json:"portForwardPid,omitempty"`
 	NetworkDevices  []transientNetworkDevice `json:"networkDevices,omitempty"`
+	FirewallRules   []transientFirewallRule  `json:"firewallRules,omitempty"`
 	SerialLogPath   string                   `json:"serialLogPath"`
 	SerialInputPath string                   `json:"serialInputPath,omitempty"`
 	StartedAt       string                   `json:"startedAt,omitempty"`
@@ -295,22 +302,26 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		path = resolved
 	}
-	networkDevices, err := prepareNetworkForStart(opts, req.Config)
+	networkDevices, firewallRules, runtimeNetwork, err := prepareNetworkForStart(opts, req.Config)
 	if err != nil {
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
-	if err := writeConfig(opts, req); err != nil {
+	runtimeReq := requestWithRuntimeNetwork(req, runtimeNetwork)
+	if err := writeConfig(opts, runtimeReq); err != nil {
+		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
 	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o755); err != nil {
+		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
 		return vmkit.Response{}, err
 	}
 	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
+		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
 		return vmkit.Response{}, err
 	}
@@ -318,6 +329,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	if req.Config.SerialInput {
 		input, inputErr := openSerialInputFIFO(opts)
 		if inputErr != nil {
+			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
 			_ = serialLog.Close()
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, inputErr.Error())
@@ -335,6 +347,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 	if err := cmd.Start(); err != nil {
+		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
 		if serialInput != nil {
 			_ = serialInput.Close()
@@ -343,8 +356,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
-	if err := writeProcessStateWithForwarderAndNetwork(opts, req, vmkit.StateRunning, cmd.Process.Pid, 0, networkDevices, ""); err != nil {
+	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, networkDevices, firewallRules, ""); err != nil {
 		_ = cmd.Process.Kill()
+		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
 		if serialInput != nil {
 			_ = serialInput.Close()
@@ -357,6 +371,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		pid, err := startPortForwarderProcess(opts)
 		if err != nil {
 			_ = cmd.Process.Kill()
+			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
 			if serialInput != nil {
 				_ = serialInput.Close()
@@ -366,9 +381,10 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return failedResponse(req, err.Error()), err
 		}
 		portForwardPID = pid
-		if err := writeProcessStateWithForwarderAndNetwork(opts, req, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, networkDevices, ""); err != nil {
+		if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, networkDevices, firewallRules, ""); err != nil {
 			_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 			_ = cmd.Process.Kill()
+			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
 			if serialInput != nil {
 				_ = serialInput.Close()
@@ -397,6 +413,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		state = vmkit.StateFailed
 		errorText = waitErr.Error()
 	}
+	cleanupTransientFirewallRules(firewallRules)
 	cleanupTransientNetworkDevices(networkDevices)
 	if closeErr != nil && errorText == "" {
 		state = vmkit.StateFailed
@@ -406,7 +423,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		state = vmkit.StateFailed
 		errorText = inputCloseErr.Error()
 	}
-	if err := writeProcessState(opts, req, state, 0, errorText); err != nil && waitErr == nil && closeErr == nil && inputCloseErr == nil {
+	if err := writeProcessState(opts, runtimeReq, state, 0, errorText); err != nil && waitErr == nil && closeErr == nil && inputCloseErr == nil {
 		return vmkit.Response{}, err
 	}
 	if errorText != "" {
@@ -446,6 +463,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		if state.PortForwardPID != 0 {
 			_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 		}
+		cleanupTransientFirewallRules(state.FirewallRules)
 		cleanupTransientNetworkDevices(state.NetworkDevices)
 		if err := writeProcessState(opts, runtimeStateRequest(req, state), finalState, 0, ""); err != nil {
 			return vmkit.Response{}, err
@@ -471,6 +489,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	if state.PortForwardPID != 0 {
 		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 	}
+	cleanupTransientFirewallRules(state.FirewallRules)
 	cleanupTransientNetworkDevices(state.NetworkDevices)
 	if err := writeProcessState(opts, runtimeStateRequest(req, state), finalState, 0, ""); err != nil {
 		return vmkit.Response{}, err
@@ -486,9 +505,10 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 	if state.PortForwardPID != 0 {
 		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 	}
+	cleanupTransientFirewallRules(state.FirewallRules)
 	cleanupTransientNetworkDevices(state.NetworkDevices)
 	_ = os.Remove(vsockSocketPath(opts))
-	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeStateRequest(req, state), vmkit.StateQuarantined, state.PID, 0, nil, ""); err != nil {
+	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeStateRequest(req, state), vmkit.StateQuarantined, state.PID, 0, nil, nil, ""); err != nil {
 		return vmkit.Response{}, err
 	}
 	return eventResponse(req, vmkit.StateQuarantined, ""), nil
@@ -519,7 +539,7 @@ func writeConfig(opts Options, req vmkit.Request) error {
 	cfg := config{
 		BootSource: bootSource{
 			KernelImagePath: req.Config.KernelPath,
-			BootArgs:        "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda rw init=/sbin/microagent-init",
+			BootArgs:        firecrackerBootArgs(req.Config),
 		},
 		Drives: []drive{{
 			DriveID:      "rootfs",
@@ -553,6 +573,21 @@ func writeConfig(opts Options, req vmkit.Request) error {
 	return writeJSONFile(configPath(opts), cfg)
 }
 
+func firecrackerBootArgs(config *vmkit.Config) string {
+	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init"}
+	if networkMode(config) == "nat" && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
+		args = append(args,
+			"microagent_net_if=eth0",
+			"microagent_net_ip="+config.Network.IP,
+			"microagent_net_gw="+config.Network.Gateway,
+		)
+		if len(config.Network.DNS) != 0 {
+			args = append(args, "microagent_net_dns="+strings.Join(config.Network.DNS, ","))
+		}
+	}
+	return strings.Join(args, " ")
+}
+
 func needsVsock(config *vmkit.Config) bool {
 	if config == nil {
 		return false
@@ -571,7 +606,8 @@ func hasPortForwards(config *vmkit.Config) bool {
 }
 
 func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInterface, bool) {
-	if networkMode(config) != "bridged" {
+	mode := networkMode(config)
+	if mode != "bridged" && mode != "nat" {
 		return networkInterface{}, false
 	}
 	return networkInterface{
@@ -581,6 +617,17 @@ func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInt
 	}, true
 }
 
+func requestWithRuntimeNetwork(req vmkit.Request, runtimeNetwork *vmkit.NetworkConfig) vmkit.Request {
+	if runtimeNetwork == nil {
+		return req
+	}
+	config := *req.Config
+	network := *runtimeNetwork
+	config.Network = &network
+	req.Config = &config
+	return req
+}
+
 func networkMode(config *vmkit.Config) string {
 	if config == nil || config.Network == nil || strings.TrimSpace(config.Network.Mode) == "" {
 		return "nat"
@@ -588,22 +635,85 @@ func networkMode(config *vmkit.Config) string {
 	return strings.TrimSpace(config.Network.Mode)
 }
 
-func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, error) {
-	if networkMode(config) != "bridged" {
-		return nil, nil
+func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+	switch networkMode(config) {
+	case "isolated":
+		return nil, nil, nil, nil
+	case "nat":
+		return prepareNATForStart(opts, config)
+	case "bridged":
+	default:
+		return nil, nil, nil, fmt.Errorf("firecracker network.mode %q is unsupported; use nat, isolated, or bridged", networkMode(config))
 	}
 	bridge := strings.TrimSpace(config.Network.Interface)
 	if err := validateLinuxBridge(bridge); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	if _, err := exec.LookPath("ip"); err != nil {
-		return nil, fmt.Errorf("firecracker bridged networking requires iproute2 'ip': %w", err)
+		return nil, nil, nil, fmt.Errorf("firecracker bridged networking requires iproute2 'ip': %w", err)
 	}
 	device := transientNetworkDevice{Name: tapName(opts), Mode: "tap", Interface: bridge, Created: true}
 	if err := createBridgeTap(device.Name, bridge); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	return []transientNetworkDevice{device}, nil
+	return []transientNetworkDevice{device}, nil, nil, nil
+}
+
+func prepareNATForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+	if _, err := exec.LookPath("ip"); err != nil {
+		return nil, nil, nil, fmt.Errorf("firecracker nat networking requires iproute2 'ip': %w", err)
+	}
+	if _, err := exec.LookPath("iptables"); err != nil {
+		return nil, nil, nil, fmt.Errorf("firecracker nat networking requires iptables: %w", err)
+	}
+	if err := requireIPv4Forwarding(); err != nil {
+		return nil, nil, nil, err
+	}
+	subnetOctet, err := allocateNATSubnetOctet(opts)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tap := tapName(opts)
+	subnet := fmt.Sprintf("10.43.%d.0/29", subnetOctet)
+	hostIP := fmt.Sprintf("10.43.%d.1", subnetOctet)
+	guestIP := fmt.Sprintf("10.43.%d.2", subnetOctet)
+	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: subnet, Created: true}
+	if err := runIP("tuntap", "add", "dev", tap, "mode", "tap"); err != nil {
+		return nil, nil, nil, networkPrivilegeError("create firecracker nat tap "+tap, err)
+	}
+	cleanupDevices := []transientNetworkDevice{device}
+	if err := runIP("addr", "add", hostIP+"/29", "dev", tap); err != nil {
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, networkPrivilegeError("assign firecracker nat tap address "+hostIP, err)
+	}
+	if err := runIP("link", "set", tap, "up"); err != nil {
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, networkPrivilegeError("bring firecracker nat tap up", err)
+	}
+	rules, err := installNATFirewallRules(tap, subnet)
+	if err != nil {
+		cleanupTransientFirewallRules(rules)
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, err
+	}
+	network := runtimeNetworkConfig(config, subnet, guestIP+"/29", hostIP)
+	return cleanupDevices, rules, &network, nil
+}
+
+func runtimeNetworkConfig(config *vmkit.Config, subnet, ip, gateway string) vmkit.NetworkConfig {
+	network := vmkit.NetworkConfig{Mode: "nat"}
+	if config != nil && config.Network != nil {
+		network = *config.Network
+	}
+	network.Mode = "nat"
+	network.IP = ip
+	network.Subnet = subnet
+	network.Gateway = gateway
+	if len(network.DNS) == 0 {
+		network.DNS = []string{"1.1.1.1", "8.8.8.8"}
+	}
+	network.Routes = []string{"0.0.0.0/0 via " + gateway}
+	return network
 }
 
 func validateLinuxBridge(name string) error {
@@ -630,17 +740,107 @@ func validateLinuxBridge(name string) error {
 
 func createBridgeTap(tap, bridge string) error {
 	if err := runIP("tuntap", "add", "dev", tap, "mode", "tap"); err != nil {
-		return fmt.Errorf("create firecracker tap %q: %w", tap, err)
+		return networkPrivilegeError("create firecracker tap "+tap, err)
 	}
 	if err := runIP("link", "set", tap, "master", bridge); err != nil {
 		_ = deleteTap(tap)
-		return fmt.Errorf("attach firecracker tap %q to bridge %q: %w", tap, bridge, err)
+		return networkPrivilegeError(fmt.Sprintf("attach firecracker tap %q to bridge %q", tap, bridge), err)
 	}
 	if err := runIP("link", "set", tap, "up"); err != nil {
 		_ = deleteTap(tap)
-		return fmt.Errorf("bring firecracker tap %q up: %w", tap, err)
+		return networkPrivilegeError("bring firecracker tap "+tap+" up", err)
 	}
 	return nil
+}
+
+func requireIPv4Forwarding() error {
+	data, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if err != nil {
+		return fmt.Errorf("inspect net.ipv4.ip_forward for firecracker nat networking: %w", err)
+	}
+	if strings.TrimSpace(string(data)) != "1" {
+		return fmt.Errorf("firecracker nat networking requires net.ipv4.ip_forward=1 on the host")
+	}
+	return nil
+}
+
+func allocateNATSubnetOctet(opts Options) (int, error) {
+	used := map[int]bool{}
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return 0, fmt.Errorf("list host network interfaces for nat subnet allocation: %w", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "magtap") {
+			continue
+		}
+		out, err := exec.Command("ip", "-o", "-4", "addr", "show", "dev", name).Output()
+		if err != nil {
+			continue
+		}
+		fields := strings.Fields(string(out))
+		for i, field := range fields {
+			if field != "inet" || i+1 >= len(fields) {
+				continue
+			}
+			ip, _, err := net.ParseCIDR(fields[i+1])
+			if err == nil && ip != nil {
+				v4 := ip.To4()
+				if len(v4) == net.IPv4len && v4[0] == 10 && v4[1] == 43 {
+					used[int(v4[2])] = true
+				}
+			}
+		}
+	}
+	sum := sha1.Sum([]byte(opts.Name + opts.StateDir))
+	start := int(sum[0])%254 + 1
+	for offset := 0; offset < 254; offset++ {
+		octet := ((start - 1 + offset) % 254) + 1
+		if !used[octet] {
+			return octet, nil
+		}
+	}
+	return 0, fmt.Errorf("no free firecracker nat subnet in 10.43.1.0/29 through 10.43.254.0/29")
+}
+
+func installNATFirewallRules(tap, subnet string) ([]transientFirewallRule, error) {
+	if err := ensureFirewallChain("nat", "MICROAGENT-NAT", "POSTROUTING"); err != nil {
+		return nil, err
+	}
+	if err := ensureFirewallChain("filter", "MICROAGENT-FWD", "FORWARD"); err != nil {
+		return nil, err
+	}
+	rules := []transientFirewallRule{
+		{Table: "nat", Chain: "MICROAGENT-NAT", Args: []string{"-s", subnet, "!", "-o", tap, "-j", "MASQUERADE"}},
+		{Table: "filter", Chain: "MICROAGENT-FWD", Args: []string{"-i", tap, "-s", subnet, "-j", "ACCEPT"}},
+		{Table: "filter", Chain: "MICROAGENT-FWD", Args: []string{"-o", tap, "-d", subnet, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"}},
+	}
+	for i, rule := range rules {
+		if err := runIPTables(append([]string{"-t", rule.Table, "-A", rule.Chain}, rule.Args...)...); err != nil {
+			cleanupTransientFirewallRules(rules[:i])
+			return rules[:i], networkPrivilegeError("configure firecracker nat firewall", err)
+		}
+	}
+	return rules, nil
+}
+
+func ensureFirewallChain(table, chain, parent string) error {
+	if err := runIPTables("-t", table, "-N", chain); err != nil && !alreadyExistsError(err) {
+		return networkPrivilegeError("create firecracker firewall chain "+chain, err)
+	}
+	if err := runIPTables("-t", table, "-C", parent, "-j", chain); err == nil {
+		return nil
+	}
+	if err := runIPTables("-t", table, "-I", parent, "1", "-j", chain); err != nil {
+		return networkPrivilegeError("attach firecracker firewall chain "+chain, err)
+	}
+	return nil
+}
+
+func alreadyExistsError(err error) bool {
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "chain already exists") || strings.Contains(text, "file exists")
 }
 
 func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
@@ -648,6 +848,16 @@ func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
 		if device.Created && device.Name != "" && device.Mode == "tap" {
 			_ = deleteTap(device.Name)
 		}
+	}
+}
+
+func cleanupTransientFirewallRules(rules []transientFirewallRule) {
+	for i := len(rules) - 1; i >= 0; i-- {
+		rule := rules[i]
+		if rule.Table == "" || rule.Chain == "" || len(rule.Args) == 0 {
+			continue
+		}
+		_ = runIPTables(append([]string{"-t", rule.Table, "-D", rule.Chain}, rule.Args...)...)
 	}
 }
 
@@ -666,6 +876,27 @@ func runIP(args ...string) error {
 		return fmt.Errorf("%w: %s", err, text)
 	}
 	return nil
+}
+
+func runIPTables(args ...string) error {
+	cmd := exec.Command("iptables", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		text := strings.TrimSpace(string(out))
+		if text == "" {
+			return err
+		}
+		return fmt.Errorf("%w: %s", err, text)
+	}
+	return nil
+}
+
+func networkPrivilegeError(action string, err error) error {
+	text := strings.ToLower(err.Error())
+	if errors.Is(err, syscall.EPERM) || strings.Contains(text, "operation not permitted") || strings.Contains(text, "permission denied") {
+		return fmt.Errorf("%s: firecracker nat and bridged networking require CAP_NET_ADMIN to create TAP devices and configure NAT; run with sufficient privileges, setcap cap_net_admin+ep on the supervisor binary, or use --network isolated if outbound network is not needed: %w", action, err)
+	}
+	return fmt.Errorf("%s: %w", action, err)
 }
 
 func tapName(opts Options) string {
@@ -860,10 +1091,10 @@ func writeProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid
 }
 
 func writeProcessStateWithForwarder(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID int, errorText string) error {
-	return writeProcessStateWithForwarderAndNetwork(opts, req, state, pid, portForwardPID, nil, errorText)
+	return writeProcessStateWithForwarderAndNetwork(opts, req, state, pid, portForwardPID, nil, nil, errorText)
 }
 
-func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID int, networkDevices []transientNetworkDevice, errorText string) error {
+func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID int, networkDevices []transientNetworkDevice, firewallRules []transientFirewallRule, errorText string) error {
 	if req.Identity == nil || req.Config == nil {
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
@@ -890,6 +1121,7 @@ func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, s
 		PID:             pid,
 		PortForwardPID:  portForwardPID,
 		NetworkDevices:  append([]transientNetworkDevice{}, networkDevices...),
+		FirewallRules:   append([]transientFirewallRule{}, firewallRules...),
 		SerialLogPath:   serialLogPath(opts),
 		SerialInputPath: serialInputPath(opts),
 		UpdatedAt:       now.Format(time.RFC3339),
@@ -1119,6 +1351,7 @@ func vsockSocketPath(opts Options) string {
 
 func cleanupWorkspaceState(opts Options) {
 	if state, err := readRuntimeState(opts); err == nil {
+		cleanupTransientFirewallRules(state.FirewallRules)
 		cleanupTransientNetworkDevices(state.NetworkDevices)
 	}
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, "workspaces", opts.Name))

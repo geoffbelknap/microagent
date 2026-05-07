@@ -91,6 +91,8 @@ type NetworkSpec struct {
 	DNS          []string            `json:"dns,omitempty" yaml:"dns,omitempty"`
 	Routes       []string            `json:"routes,omitempty" yaml:"routes,omitempty"`
 	IP           string              `json:"ip,omitempty" yaml:"ip,omitempty"`
+	Subnet       string              `json:"subnet,omitempty" yaml:"subnet,omitempty"`
+	Gateway      string              `json:"gateway,omitempty" yaml:"gateway,omitempty"`
 }
 
 type Disk struct {
@@ -383,6 +385,9 @@ func NormalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
 		network.Mode = DefaultNetworkMode
 	}
 	network.Interface = strings.TrimSpace(network.Interface)
+	network.IP = strings.TrimSpace(network.IP)
+	network.Subnet = strings.TrimSpace(network.Subnet)
+	network.Gateway = strings.TrimSpace(network.Gateway)
 	for i := range network.PortForwards {
 		network.PortForwards[i].Protocol = strings.TrimSpace(network.PortForwards[i].Protocol)
 		if network.PortForwards[i].Protocol == "" {
@@ -402,6 +407,8 @@ func NetworkSpecFromConfig(network vmkit.NetworkConfig) NetworkSpec {
 		DNS:          append([]string{}, network.DNS...),
 		Routes:       append([]string{}, network.Routes...),
 		IP:           network.IP,
+		Subnet:       network.Subnet,
+		Gateway:      network.Gateway,
 	}
 }
 
@@ -413,6 +420,8 @@ func NetworkConfigFromSpec(spec NetworkSpec) vmkit.NetworkConfig {
 		DNS:          append([]string{}, spec.DNS...),
 		Routes:       append([]string{}, spec.Routes...),
 		IP:           spec.IP,
+		Subnet:       spec.Subnet,
+		Gateway:      spec.Gateway,
 	})
 }
 

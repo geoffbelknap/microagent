@@ -147,6 +147,23 @@ Fixes:
 
 If your environment can't satisfy all three, use `nat` instead.
 
+### Firecracker `nat` guest can't reach the internet
+
+Firecracker `nat` needs host routing and firewall support. The supervisor
+creates a TAP, assigns a `10.43.x.0/29` subnet, and installs iptables
+MASQUERADE/FORWARD rules. If any prerequisite is missing, startup should fail
+closed with a clear error; if outbound still fails, check the host:
+
+- `sysctl net.ipv4.ip_forward` must report `net.ipv4.ip_forward = 1`
+- `ip` and `iptables` must be installed
+- the supervisor needs `CAP_NET_ADMIN` or equivalent privileges
+- host firewall managers such as `ufw` or `firewalld` must not block forwarding
+  from the `magtap*` device or remove the `MICROAGENT-NAT` /
+  `MICROAGENT-FWD` chain jumps
+
+Use `microagent --json network <name>` to inspect the runtime IP, subnet,
+gateway, DNS, and route that were assigned to the guest.
+
 ### Required mediation channel fails closed
 
 ```text

@@ -75,12 +75,15 @@ type MediationConfig struct {
 }
 
 type NetworkConfig struct {
-	Mode         string        `json:"mode" yaml:"mode"`
-	Interface    string        `json:"interface,omitempty" yaml:"interface,omitempty"`
-	PortForwards []PortForward `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
-	DNS          []string      `json:"dns,omitempty" yaml:"dns,omitempty"`
-	Routes       []string      `json:"routes,omitempty" yaml:"routes,omitempty"`
-	IP           string        `json:"ip,omitempty" yaml:"ip,omitempty"`
+	Mode         string         `json:"mode" yaml:"mode"`
+	Interface    string         `json:"interface,omitempty" yaml:"interface,omitempty"`
+	PortForwards []PortForward  `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
+	DNS          []string       `json:"dns,omitempty" yaml:"dns,omitempty"`
+	Routes       []string       `json:"routes,omitempty" yaml:"routes,omitempty"`
+	IP           string         `json:"ip,omitempty" yaml:"ip,omitempty"`
+	Subnet       string         `json:"subnet,omitempty" yaml:"subnet,omitempty"`
+	Gateway      string         `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	Runtime      *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
 }
 
 type PortForward struct {

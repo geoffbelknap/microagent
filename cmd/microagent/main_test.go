@@ -2013,6 +2013,64 @@ func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
 	}
 }
 
+func TestStatusReportsRuntimeNetworkAssignment(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Network:       vmkit.NetworkConfig{Mode: "nat"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			Network: &vmkit.NetworkConfig{
+				Mode:    "nat",
+				IP:      "10.43.12.2/29",
+				Subnet:  "10.43.12.0/29",
+				Gateway: "10.43.12.1",
+				DNS:     []string{"1.1.1.1", "8.8.8.8"},
+				Routes:  []string{"0.0.0.0/0 via 10.43.12.1"},
+			},
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "status.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runWorkspaceStateCommand(context.Background(), "status", []string{"research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"runtime"`) ||
+		!strings.Contains(string(data), `"ip": "10.43.12.2/29"`) ||
+		!strings.Contains(string(data), `"subnet": "10.43.12.0/29"`) {
+		t.Fatalf("status output = %s", data)
+	}
+}
+
 func TestStatusReportsDeclaredArtifacts(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })

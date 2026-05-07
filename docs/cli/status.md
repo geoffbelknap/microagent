@@ -24,6 +24,10 @@ JSON status also includes `readiness`:
 - `shellReady` is true when a running workspace has console input available.
 - `resultReady` is true when the guest result file has been delivered.
 
+JSON status includes declared network intent under `network`. When a backend
+records runtime assignment details, `network.runtime` contains the latest guest
+IP, subnet, gateway, DNS, and routes.
+
 When a result is ready, `microagent --json status` includes the same structured `result`
 payload returned by [`microagent result`](result.md).
 

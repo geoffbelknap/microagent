@@ -885,6 +885,11 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 	if manifest, err := ReadManifest(opts.StateDir, eventFile.Identity.RuntimeID); err == nil {
 		resp.RestartPolicy = firstNonEmpty(manifest.Restart, DefaultRestartPolicy)
 		network := NetworkConfigFromSpec(manifest.Network)
+		if state, err := ReadRuntimeState(Options{StateDir: opts.StateDir, Name: eventFile.Identity.RuntimeID}); err == nil && state.Config.Network != nil {
+			runtimeNetwork := NormalizeNetworkConfig(*state.Config.Network)
+			runtimeNetwork.Runtime = nil
+			network.Runtime = &runtimeNetwork
+		}
 		resp.Network = &network
 		resp.Mediation = manifest.Mediation
 		artifacts := RuntimeArtifacts(manifest.Artifacts)
