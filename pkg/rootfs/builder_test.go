@@ -97,6 +97,43 @@ func TestBuildCommandUsesImageCommandByDefault(t *testing.T) {
 	}
 }
 
+func TestWriteDeclaredFilesCopiesSourceIntoStage(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.sh")
+	if err := os.WriteFile(src, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDeclaredFiles(dir, []File{{SourcePath: src, Path: "/app/source.sh", Mode: "0700"}}); err != nil {
+		t.Fatalf("writeDeclaredFiles: %v", err)
+	}
+	target := filepath.Join(dir, "app", "source.sh")
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "#!/bin/sh\necho ok\n" {
+		t.Fatalf("target content = %q", data)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("mode = %#o, want 0700", info.Mode().Perm())
+	}
+}
+
+func TestWriteDeclaredFilesRejectsRelativeGuestPath(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.txt")
+	if err := os.WriteFile(src, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDeclaredFiles(dir, []File{{SourcePath: src, Path: "app/source.txt"}}); err == nil {
+		t.Fatal("expected relative guest path to be rejected")
+	}
+}
+
 func TestExtractLayerRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer

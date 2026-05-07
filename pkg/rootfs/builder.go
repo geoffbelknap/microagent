@@ -136,6 +136,10 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts, req.HostForwards); err != nil {
 		return provenance, err
 	}
+	provenance.BuilderPhase = "write-files"
+	if err := writeDeclaredFiles(stageDir, req.Files); err != nil {
+		return provenance, err
+	}
 	if req.StageSnapshot != "" {
 		provenance.BuilderPhase = "snapshot-stage"
 		if err := copyStage(stageDir, req.StageSnapshot); err != nil {
@@ -558,6 +562,56 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	return out.Close()
+}
+
+func writeDeclaredFiles(stageDir string, files []File) error {
+	for _, file := range files {
+		target, err := safeStagePath(stageDir, file.Path)
+		if err != nil {
+			return fmt.Errorf("file %s: %w", file.Path, err)
+		}
+		info, err := os.Stat(file.SourcePath)
+		if err != nil {
+			return fmt.Errorf("file src %q: %w", file.SourcePath, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("file src must be a regular file: %s", file.SourcePath)
+		}
+		mode := info.Mode().Perm() & 0o644
+		if strings.TrimSpace(file.Mode) != "" {
+			mode, err = parseFileMode(file.Mode)
+			if err != nil {
+				return fmt.Errorf("file %s mode: %w", file.Path, err)
+			}
+		}
+		if err := copyFileOverwrite(file.SourcePath, target, mode); err != nil {
+			return fmt.Errorf("copy file %s to %s: %w", file.SourcePath, file.Path, err)
+		}
+	}
+	return nil
+}
+
+func copyFileOverwrite(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(dst, mode)
 }
 
 func safeStagePath(stageDir, guestPath string) (string, error) {

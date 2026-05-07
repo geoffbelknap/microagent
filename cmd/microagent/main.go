@@ -478,6 +478,7 @@ type workspaceSpec = workspace.Spec
 type networkSpec = workspace.NetworkSpec
 type workspaceDisk = workspace.Disk
 type workspaceOutput = workspace.Output
+type workspaceFile = workspace.File
 type workspaceArtifacts = workspace.Artifacts
 type workspaceManifest = workspace.Manifest
 
@@ -1861,6 +1862,11 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 		opts.SetupCommands = append([]string{}, spec.Setup...)
 	}
 	opts.Env = mergeEnv(opts.Env, spec.Env)
+	files, err := validateWorkspaceFiles(spec.Files, filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	opts.Files = append(opts.Files, files...)
 	disks, err := workspaceSpecDisks(spec)
 	if err != nil {
 		return err
@@ -1981,6 +1987,54 @@ func validateWorkspaceOutput(output workspaceOutput) error {
 	return nil
 }
 
+func validateWorkspaceFiles(files []workspaceFile, baseDir string) ([]workspaceFile, error) {
+	seen := map[string]bool{}
+	validated := make([]workspaceFile, 0, len(files))
+	for _, file := range files {
+		file.SourcePath = strings.TrimSpace(file.SourcePath)
+		file.Path = strings.TrimSpace(file.Path)
+		file.Mode = strings.TrimSpace(file.Mode)
+		if file.SourcePath == "" {
+			return nil, fmt.Errorf("file src is required")
+		}
+		if !filepath.IsAbs(file.SourcePath) {
+			file.SourcePath = filepath.Join(baseDir, file.SourcePath)
+		}
+		info, err := os.Stat(file.SourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("file src %q: %w", file.SourcePath, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("file src must be a regular file: %s", file.SourcePath)
+		}
+		if file.Path == "" {
+			return nil, fmt.Errorf("file dst is required for %s", file.SourcePath)
+		}
+		if !filepath.IsAbs(file.Path) {
+			return nil, fmt.Errorf("file dst must be absolute: %s", file.Path)
+		}
+		if strings.ContainsRune(file.Path, 0) {
+			return nil, fmt.Errorf("file dst contains NUL")
+		}
+		cleanPath := filepath.Clean(file.Path)
+		if cleanPath == string(os.PathSeparator) {
+			return nil, fmt.Errorf("file dst must name a file: %s", file.Path)
+		}
+		if seen[cleanPath] {
+			return nil, fmt.Errorf("duplicate file dst %q", cleanPath)
+		}
+		seen[cleanPath] = true
+		file.Path = cleanPath
+		if file.Mode != "" {
+			if _, err := strconv.ParseUint(file.Mode, 8, 32); err != nil {
+				return nil, fmt.Errorf("file %s mode: %w", file.Path, err)
+			}
+		}
+		validated = append(validated, file)
+	}
+	return validated, nil
+}
+
 func mergeEnv(base, overrides map[string]string) map[string]string {
 	if len(base) == 0 && len(overrides) == 0 {
 		return nil
@@ -2026,6 +2080,7 @@ func normalizeRestartPolicy(policy string) string {
 func canUseImageBaseline(opts workspaceOptions) bool {
 	return opts.PrepareForStart &&
 		!workspaceHasGuestCommand(opts) &&
+		len(opts.Files) == 0 &&
 		len(opts.Disks) == 0 &&
 		len(opts.Env) == 0
 }
@@ -2090,6 +2145,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
 		Env:            opts.Env,
+		Files:          workspace.RootfsFiles(opts.Files),
 		Mounts:         workspaceMounts(opts.Disks),
 		HostForwards:   rootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,

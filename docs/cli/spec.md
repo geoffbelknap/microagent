@@ -4,7 +4,7 @@ description: Declarative workspace spec for reproducible creates.
 ---
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
-control. It is consumed by [`microagent create`](/cli/create/).
+control. It is consumed by [`microagent create`](create.md).
 
 ```yaml
 name: research
@@ -15,6 +15,10 @@ entrypoint: /app/start.sh
 setup:
   - mkdir -p /workspace
   - echo ready > /workspace/status
+files:
+  - src: ./body.py
+    dst: /app/body.py
+    mode: "0644"
 env:
   MICROAGENT_NAME: research
 resources:
@@ -67,6 +71,10 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `restart` | Restart policy: `never`, `on-failure`, or `always` |
 | `entrypoint` | Command to run when the workspace starts |
 | `setup` | Commands to run before first start |
+| `files` | Source files to copy into the workspace rootfs |
+| `files[].src` | Host path, relative to the spec file or absolute |
+| `files[].dst` | Absolute guest path to write |
+| `files[].mode` | Optional octal file mode string, such as `"0755"` |
 | `env` | Guest environment variables |
 | `resources.memoryMiB` | Memory override |
 | `resources.cpuCount` | CPU override |
@@ -83,6 +91,6 @@ microagent create --file microagent.yaml --name research-2 --profile large
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`profiles`](/cli/)
-- [`cp`](/cli/cp/)
+- [`create`](create.md)
+- [`profiles`](profiles.md)
+- [`cp`](cp.md)
