@@ -64,7 +64,7 @@ Host requirements:
 - Linux kernel 4.4 or newer with nftables support
 - `net.ipv4.ip_forward=1`
 - permission to create TAP devices and edit nftables rules, typically root or
-  `CAP_NET_ADMIN` on the Firecracker supervisor binary
+  `setcap cap_net_admin+eip <supervisor>` on the Firecracker supervisor binary
 
 The supervisor does not enable `ip_forward` for you because it is host-wide
 policy. If a requirement is missing, `nat` fails closed before booting the VM.

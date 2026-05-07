@@ -309,6 +309,13 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		path = resolved
 	}
+	_, needsNetworkCapabilities := firecrackerNetworkInterface(opts, req.Config)
+	if needsNetworkCapabilities {
+		if err := ensureNetAdminInheritable(); err != nil {
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
+	}
 	networkDevices, firewallRules, runtimeNetwork, err := prepareNetworkForStart(opts, req.Config)
 	if err != nil {
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
@@ -350,9 +357,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	if serialInput != nil {
 		cmd.Stdin = serialInput
 	}
-	if detached {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	cmd.SysProcAttr = firecrackerSysProcAttr(detached, needsNetworkCapabilities)
 	if err := cmd.Start(); err != nil {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -622,6 +627,17 @@ func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInt
 		GuestMAC:    firecrackerGuestMAC(opts.Name),
 		HostDevName: tapName(opts),
 	}, true
+}
+
+func firecrackerSysProcAttr(detached, needsNetworkCapabilities bool) *syscall.SysProcAttr {
+	if !detached && !needsNetworkCapabilities {
+		return nil
+	}
+	attr := &syscall.SysProcAttr{Setpgid: detached}
+	if needsNetworkCapabilities {
+		attr.AmbientCaps = []uintptr{uintptr(unix.CAP_NET_ADMIN)}
+	}
+	return attr
 }
 
 func requestWithRuntimeNetwork(req vmkit.Request, runtimeNetwork *vmkit.NetworkConfig) vmkit.Request {
@@ -1085,10 +1101,59 @@ func linkNotFoundError(err error) bool {
 	return errors.As(err, &notFound)
 }
 
+type processCapabilities struct {
+	Effective   uint64
+	Permitted   uint64
+	Inheritable uint64
+}
+
+var getProcessCapabilities = currentProcessCapabilities
+var getEffectiveUID = os.Geteuid
+
+func currentProcessCapabilities() (processCapabilities, error) {
+	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	data := [2]unix.CapUserData{}
+	if err := unix.Capget(&header, &data[0]); err != nil {
+		return processCapabilities{}, err
+	}
+	return processCapabilities{
+		Effective:   capabilityWords(data[0].Effective, data[1].Effective),
+		Permitted:   capabilityWords(data[0].Permitted, data[1].Permitted),
+		Inheritable: capabilityWords(data[0].Inheritable, data[1].Inheritable),
+	}, nil
+}
+
+func capabilityWords(low, high uint32) uint64 {
+	return uint64(low) | uint64(high)<<32
+}
+
+func ensureNetAdminInheritable() error {
+	if getEffectiveUID() == 0 {
+		return nil
+	}
+	caps, err := getProcessCapabilities()
+	if err != nil {
+		return fmt.Errorf("inspect firecracker supervisor capabilities: %w", err)
+	}
+	if hasCapability(caps.Effective, unix.CAP_NET_ADMIN) &&
+		hasCapability(caps.Permitted, unix.CAP_NET_ADMIN) &&
+		hasCapability(caps.Inheritable, unix.CAP_NET_ADMIN) {
+		return nil
+	}
+	return fmt.Errorf("firecracker nat and bridged networking require CAP_NET_ADMIN in the supervisor effective, permitted, and inheritable capability sets so Firecracker can inherit it; run as root, setcap cap_net_admin+eip on the supervisor binary, or use --network isolated if outbound network is not needed")
+}
+
+func hasCapability(caps uint64, capability int) bool {
+	if capability < 0 || capability >= 64 {
+		return false
+	}
+	return caps&(uint64(1)<<uint(capability)) != 0
+}
+
 func networkPrivilegeError(action string, err error) error {
 	text := strings.ToLower(err.Error())
 	if errors.Is(err, syscall.EPERM) || strings.Contains(text, "operation not permitted") || strings.Contains(text, "permission denied") {
-		return fmt.Errorf("%s: firecracker nat and bridged networking require CAP_NET_ADMIN to create TAP devices and configure NAT; run with sufficient privileges, setcap cap_net_admin+ep on the supervisor binary, or use --network isolated if outbound network is not needed: %w", action, err)
+		return fmt.Errorf("%s: firecracker nat and bridged networking require CAP_NET_ADMIN to create TAP devices, configure NAT, and let Firecracker attach the TAP; run as root, setcap cap_net_admin+eip on the supervisor binary, or use --network isolated if outbound network is not needed: %w", action, err)
 	}
 	return fmt.Errorf("%s: %w", action, err)
 }

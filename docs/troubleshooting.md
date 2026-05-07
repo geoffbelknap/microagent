@@ -136,12 +136,14 @@ Fixes:
 Linux bridged mode needs:
 
 - The named host interface to be an existing Linux bridge
-- Permission to create and attach a TAP device (typically `CAP_NET_ADMIN` or root)
+- Permission to create and attach a TAP device (typically root or
+  `setcap cap_net_admin+eip <supervisor>`)
 
 Fixes:
 
 - Create a bridge if you don't have one: `sudo ip link add br0 type bridge && sudo ip link set br0 up`
-- Run with sufficient privileges, or grant the supervisor capabilities via `setcap`
+- Run with sufficient privileges, or grant the supervisor capabilities with
+  `sudo setcap cap_net_admin+eip <supervisor>`
 
 If your environment can't satisfy all three, use `nat` instead.
 
@@ -154,7 +156,8 @@ closed with a clear error; if outbound still fails, check the host:
 
 - `sysctl net.ipv4.ip_forward` must report `net.ipv4.ip_forward = 1`
 - the host kernel must support nftables
-- the supervisor needs `CAP_NET_ADMIN` or equivalent privileges
+- the supervisor needs `CAP_NET_ADMIN` in its effective, permitted, and
+  inheritable sets: `sudo setcap cap_net_admin+eip <supervisor>`
 - host firewall managers such as `ufw` or `firewalld` must not block forwarding
   from the `magtap*` device or remove rules in the `inet microagent` table
 

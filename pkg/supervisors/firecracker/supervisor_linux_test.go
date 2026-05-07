@@ -17,6 +17,7 @@ import (
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 	"github.com/google/nftables/expr"
+	"golang.org/x/sys/unix"
 )
 
 func TestDialGuestVsockUsesFirecrackerConnectHandshake(t *testing.T) {
@@ -408,6 +409,64 @@ func TestFirecrackerNetworkSetupDoesNotExecIPOrIPTables(t *testing.T) {
 		if strings.Contains(source, needle) {
 			t.Fatalf("firecracker network setup still shells out through %s", needle)
 		}
+	}
+}
+
+func TestEnsureNetAdminInheritableRejectsMissingInheritable(t *testing.T) {
+	oldGetCaps := getProcessCapabilities
+	oldGetEUID := getEffectiveUID
+	t.Cleanup(func() {
+		getProcessCapabilities = oldGetCaps
+		getEffectiveUID = oldGetEUID
+	})
+	getEffectiveUID = func() int { return 1000 }
+	getProcessCapabilities = func() (processCapabilities, error) {
+		mask := uint64(1) << uint(unix.CAP_NET_ADMIN)
+		return processCapabilities{
+			Effective: mask,
+			Permitted: mask,
+		}, nil
+	}
+	err := ensureNetAdminInheritable()
+	if err == nil {
+		t.Fatal("ensureNetAdminInheritable accepted missing inheritable CAP_NET_ADMIN")
+	}
+	if !strings.Contains(err.Error(), "cap_net_admin+eip") || strings.Contains(err.Error(), "Operation not permitted") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEnsureNetAdminInheritableAcceptsEIP(t *testing.T) {
+	oldGetCaps := getProcessCapabilities
+	oldGetEUID := getEffectiveUID
+	t.Cleanup(func() {
+		getProcessCapabilities = oldGetCaps
+		getEffectiveUID = oldGetEUID
+	})
+	getEffectiveUID = func() int { return 1000 }
+	getProcessCapabilities = func() (processCapabilities, error) {
+		mask := uint64(1) << uint(unix.CAP_NET_ADMIN)
+		return processCapabilities{
+			Effective:   mask,
+			Permitted:   mask,
+			Inheritable: mask,
+		}, nil
+	}
+	if err := ensureNetAdminInheritable(); err != nil {
+		t.Fatalf("ensureNetAdminInheritable: %v", err)
+	}
+}
+
+func TestFirecrackerSysProcAttrAddsAmbientNetAdminOnlyForNetworkedVMs(t *testing.T) {
+	if attr := firecrackerSysProcAttr(false, false); attr != nil {
+		t.Fatalf("isolated attr = %#v", attr)
+	}
+	attr := firecrackerSysProcAttr(true, true)
+	if attr == nil || !attr.Setpgid {
+		t.Fatalf("networked detached attr = %#v", attr)
+	}
+	if len(attr.AmbientCaps) != 1 || attr.AmbientCaps[0] != uintptr(unix.CAP_NET_ADMIN) {
+		t.Fatalf("ambient caps = %#v", attr.AmbientCaps)
 	}
 }
 

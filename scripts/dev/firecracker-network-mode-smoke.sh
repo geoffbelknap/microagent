@@ -84,15 +84,15 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 2
   fi
   supervisor_caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
-  if ! printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin'; then
+  if ! printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin=eip'; then
     if command -v sudo >/dev/null 2>&1; then
-      sudo -n setcap 'cap_net_admin+ep' "$SUPERVISOR" 2>/dev/null || true
+      sudo -n setcap 'cap_net_admin+eip' "$SUPERVISOR" 2>/dev/null || true
       supervisor_caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
     fi
   fi
-  if ! printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin'; then
+  if ! printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin=eip'; then
     echo "grant only the supervisor CAP_NET_ADMIN before running this smoke:" >&2
-    echo "  sudo setcap 'cap_net_admin+ep' $SUPERVISOR" >&2
+    echo "  sudo setcap 'cap_net_admin+eip' $SUPERVISOR" >&2
     exit 2
   fi
   for host_tool in ip iptables xtables-nft-multi; do
@@ -118,6 +118,33 @@ if result.get("sha256") != sys.argv[2]:
 print(result["path"])
 PY
 )"
+
+if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  sudo -n setcap 'cap_net_admin+ep' "$SUPERVISOR"
+  "$CLI" run \
+    --backend firecracker \
+    --image "$IMAGE" \
+    --arch amd64 \
+    --exec "echo SHOULD_NOT_BOOT" \
+    --kernel "$kernel_path" \
+    --guest-init "$GUEST_INIT" \
+    --state-dir "$STATE_DIR/nat-missing-inheritable" \
+    --size-mib 128 \
+    --result-port 0 \
+    --timeout 30 \
+    --network nat >"$STATE_DIR/nat-missing-inheritable.json" 2>"$STATE_DIR/nat-missing-inheritable.err" || true
+  if ! grep -q 'cap_net_admin+eip' "$STATE_DIR/nat-missing-inheritable.json" "$STATE_DIR/nat-missing-inheritable.err"; then
+    echo "nat with cap_net_admin+ep did not fail with the inheritable capability error" >&2
+    cat "$STATE_DIR/nat-missing-inheritable.json" >&2
+    cat "$STATE_DIR/nat-missing-inheritable.err" >&2
+    exit 1
+  fi
+  if grep -q 'SHOULD_NOT_BOOT' "$STATE_DIR/nat-missing-inheritable.json" "$STATE_DIR/nat-missing-inheritable.err"; then
+    echo "nat with cap_net_admin+ep unexpectedly booted" >&2
+    exit 1
+  fi
+  sudo -n setcap 'cap_net_admin+eip' "$SUPERVISOR"
+fi
 
 "$CLI" run \
   --backend firecracker \
