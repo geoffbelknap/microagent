@@ -1,16 +1,19 @@
 ---
 title: Architecture
-description: How the CLI, vmkit core, and backend supervisors fit together.
+description: How the Go library, CLI, and backend supervisors fit together.
 ---
 
-`microagent` is a thin CLI on top of `pkg/vmkit`. `vmkit` builds requests,
-dispatches them through a backend supervisor, and writes back structured
-responses. Each host OS uses one backend.
+`microagent-kit` is a Go library with a CLI adapter. The library packages own
+workspace lifecycle, rootfs builds, kernel management, image cache management,
+diagnostics, shared request/response types, and backend supervisor dispatch.
+Each host OS uses one backend.
 
 ```text
-your program
-  └─ microagent (cmd/microagent)
-       └─ vmkit (pkg/vmkit)
+your orchestrator
+  └─ microagent-kit Go packages
+       ├─ workspace lifecycle, artifacts, logs, network, supervision
+       ├─ rootfs, kernel, image cache, diagnostics
+       └─ vmkit supervisor dispatch
             └─ backend supervisor
                  ├─ Firecracker supervisor (Linux, Go JSON exec)
                  └─ Apple VF supervisor (macOS, Swift JSON exec)
@@ -20,8 +23,14 @@ OCI image ──► pkg/rootfs ──► ext4 disk ──► VM
 
 ## Pieces
 
-- **`cmd/microagent`** — the CLI. Parses flags, builds a `vmkit.Request`,
-  hands it to the dispatcher, prints the `vmkit.Response`.
+- **`cmd/microagent`** — the CLI adapter. Parses flags, calls the Go packages,
+  and renders structured or human-readable output.
+- **`pkg/workspace`** — workspace lifecycle, manifests, state, results,
+  artifacts, logs, network, file copy, clone, and optional supervision loop.
+- **`pkg/kernel`** — default kernel manifest plus install, verify, and support
+  checks.
+- **`pkg/imagecache`** — reusable rootfs baseline cache and image index.
+- **`pkg/diagnostics`** — host/backend preflight checks and support summaries.
 - **`pkg/vmkit`** — request/response types and the supervisor interface. The
   shared shape both backends speak.
 - **`pkg/rootfs`** — OCI image to ext4 rootfs builder. Pulls layers via
@@ -36,18 +45,18 @@ OCI image ──► pkg/rootfs ──► ext4 disk ──► VM
 
 ## Lifecycle of a `microagent run`
 
-1. CLI parses flags into a `vmkit.Request` (kernel path, rootfs path, disks,
-   memory, CPUs, identity).
-2. If a kernel or rootfs is missing, vmkit triggers
-   [`pkg/rootfs`](https://github.com/geoffbelknap/microagent-kit/tree/main/pkg/rootfs)
-   or the kernel installer.
+1. The CLI parses flags into `pkg/workspace` options.
+2. `pkg/workspace` prepares disks, builds the rootfs with `pkg/rootfs`, records
+   verification, writes the manifest, and builds a `vmkit.Request`.
 3. The dispatcher selects the host backend.
-4. The backend supervisor executable handles lifecycle work.
+4. The backend supervisor executable handles VM lifecycle work.
 5. Guest init runs `--setup` then `--exec`.
 6. State changes are emitted as JSON events. State files live under
    `--state-dir` (default `~/.microagent/...`).
-7. On `--keep`, the workspace stays. Otherwise vmkit issues `stop` and
-   `delete` to clean up.
+7. On `--keep`, the workspace stays. Otherwise the workspace API cleans up
+   local state.
+
+Go callers can use the same package flow directly without invoking the CLI.
 
 ## Why Supervisors Are Executable
 
