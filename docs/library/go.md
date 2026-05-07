@@ -199,6 +199,6 @@ if err != nil {
 _ = resp
 ```
 
-The CLI may still contain presentation, flag parsing, smoke-test, and file-copy
-utilities, but Agency-facing workspace lifecycle behavior belongs in
-`pkg/workspace`.
+The CLI contains presentation, flag parsing, and terminal-oriented behavior.
+MicroVM orchestration and management capabilities are exposed through the Go
+packages.

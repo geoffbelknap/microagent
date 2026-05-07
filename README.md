@@ -1,13 +1,15 @@
 # microagent-kit
 
-`microagent-kit` provides the tools needed to run AI agent workspaces in microVMs.
+`microagent-kit` provides Go packages and command-line tools for running AI
+agent workspaces in microVMs.
 
-The command-line tool is `microagent`. Each host OS has one VM backend:
-Firecracker on Linux and Apple Virtualization.framework on macOS. Each backend
-has a supervisor that owns VM lifecycle state changes. The Apple VF supervisor
-is packaged as `microagent-applevf-supervisor`; the Firecracker supervisor is
-packaged as `microagent-firecracker-supervisor`. Both are small JSON
-executables that Go, Python, Rust, Node, and shell scripts can call.
+The command-line tool is `microagent`, and it is an adapter over the Go library
+packages. Each host OS has one VM backend: Firecracker on Linux and Apple
+Virtualization.framework on macOS. Each backend has a supervisor that owns VM
+lifecycle state changes. The Apple VF supervisor is packaged as
+`microagent-applevf-supervisor`; the Firecracker supervisor is packaged as
+`microagent-firecracker-supervisor`. Both are small JSON executables that Go,
+Python, Rust, Node, and shell scripts can call.
 
 Microagent provides the kernel, converts OCI images into VM disks, and starts
 the VM. Identity, policy, credentials, and control-plane decisions stay outside
@@ -15,9 +17,11 @@ this project.
 
 See [`docs/`](docs/) for the guide and CLI reference.
 
-Go callers can use `pkg/rootfs` for OCI-to-ext4 builds and `pkg/vmkit` for the
-shared supervisor request/response types. The high-level workspace lifecycle API
-is still implemented by the CLI. See [`docs/library/go.md`](docs/library/go.md).
+Go callers can use `pkg/workspace` for workspace lifecycle and management,
+`pkg/rootfs` for OCI-to-ext4 builds, `pkg/kernel` for kernel assets,
+`pkg/imagecache` for reusable rootfs baselines, `pkg/diagnostics` for host
+preflight checks, and `pkg/vmkit` for shared supervisor request/response types.
+See [`docs/library/go.md`](docs/library/go.md).
 
 ## Install
 
