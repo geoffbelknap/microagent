@@ -88,6 +88,15 @@ func run() int {
 		_ = sendResult(cfg.Port, res)
 		return code
 	}
+	if err := configureKernelDHCPDNS(); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
 	if err := startTCPVsockBridges(cfg.Env); err != nil {
 		code = 127
 		res.Error = err.Error()
@@ -199,6 +208,85 @@ func mountDisks(mounts []mount) error {
 		}
 	}
 	return nil
+}
+
+func configureKernelDHCPDNS() error {
+	if err := ensureProcMounted(); err != nil {
+		return err
+	}
+	cmdline, err := os.ReadFile("/proc/cmdline")
+	if err != nil || !cmdlineRequestsDHCP(string(cmdline)) {
+		return nil
+	}
+	pnp, err := os.ReadFile("/proc/net/pnp")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read kernel DHCP nameservers: %w", err)
+	}
+	nameservers := parseKernelPNPNameservers(string(pnp))
+	if len(nameservers) == 0 {
+		return nil
+	}
+	var resolv strings.Builder
+	resolv.WriteString("# written by microagent-init from kernel DHCP\n")
+	for _, nameserver := range nameservers {
+		resolv.WriteString("nameserver ")
+		resolv.WriteString(nameserver)
+		resolv.WriteByte('\n')
+	}
+	if err := os.MkdirAll("/etc", 0o755); err != nil {
+		return fmt.Errorf("create /etc for resolver config: %w", err)
+	}
+	if err := os.WriteFile("/etc/resolv.conf", []byte(resolv.String()), 0o644); err != nil {
+		return fmt.Errorf("write /etc/resolv.conf from kernel DHCP: %w", err)
+	}
+	return nil
+}
+
+func ensureProcMounted() error {
+	if _, err := os.Stat("/proc/cmdline"); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll("/proc", 0o555); err != nil {
+		return fmt.Errorf("create /proc: %w", err)
+	}
+	if err := unix.Mount("proc", "/proc", "proc", 0, ""); err != nil && err != unix.EBUSY {
+		return fmt.Errorf("mount /proc: %w", err)
+	}
+	return nil
+}
+
+func cmdlineRequestsDHCP(cmdline string) bool {
+	for _, field := range strings.Fields(cmdline) {
+		if field == "ip=dhcp" || field == "ip=on" || field == "ip=any" {
+			return true
+		}
+	}
+	return false
+}
+
+func parseKernelPNPNameservers(raw string) []string {
+	var nameservers []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "nameserver") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimPrefix(line, "#"))
+		if len(fields) < 2 || fields[0] != "nameserver" {
+			continue
+		}
+		ip := strings.TrimSpace(fields[1])
+		if net.ParseIP(ip) == nil || seen[ip] {
+			continue
+		}
+		seen[ip] = true
+		nameservers = append(nameservers, ip)
+	}
+	return nameservers
 }
 
 func guestEnv(extra []string) []string {
