@@ -176,6 +176,9 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 	if opts.StateDir == "" && req.Config != nil {
 		opts.StateDir = req.Config.StateDir
 	}
+	if opts.Timeout == 0 && req.Config != nil && req.Config.TimeoutSeconds > 0 {
+		opts.Timeout = time.Duration(req.Config.TimeoutSeconds) * time.Second
+	}
 	if opts.Timeout == 0 {
 		opts.Timeout = 5 * time.Minute
 	}
@@ -490,6 +493,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		}
 		cleanupTransientFirewallRules(state.FirewallRules)
 		cleanupTransientNetworkDevices(state.NetworkDevices)
+		cleanupUserNetworkProcess(opts)
 		if err := writeProcessState(opts, runtimeStateRequest(req, state), finalState, 0, ""); err != nil {
 			return vmkit.Response{}, err
 		}
@@ -516,6 +520,7 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	}
 	cleanupTransientFirewallRules(state.FirewallRules)
 	cleanupTransientNetworkDevices(state.NetworkDevices)
+	cleanupUserNetworkProcess(opts)
 	if err := writeProcessState(opts, runtimeStateRequest(req, state), finalState, 0, ""); err != nil {
 		return vmkit.Response{}, err
 	}
@@ -532,7 +537,9 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 	}
 	cleanupTransientFirewallRules(state.FirewallRules)
 	cleanupTransientNetworkDevices(state.NetworkDevices)
+	cleanupUserNetworkProcess(opts)
 	_ = os.Remove(vsockSocketPath(opts))
+	_ = os.Remove(serialInputPath(opts))
 	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeStateRequest(req, state), vmkit.StateQuarantined, state.PID, 0, nil, nil, ""); err != nil {
 		return vmkit.Response{}, err
 	}
@@ -548,6 +555,15 @@ func ensureCanDelete(opts Options) error {
 		return err
 	}
 	if state.PID == 0 {
+		if state.PortForwardPID != 0 {
+			active, err := processActive(state.PortForwardPID)
+			if err != nil {
+				return err
+			}
+			if active {
+				return fmt.Errorf("firecracker workspace %s port forwarder is running; stop or kill it before delete", opts.Name)
+			}
+		}
 		return nil
 	}
 	active, err := processActive(state.PID)
@@ -580,7 +596,7 @@ func writeConfig(opts Options, req vmkit.Request) error {
 		}
 		cfg.Vsock = &vsockConfig{
 			VsockID:  "vsock0",
-			GuestCID: 3,
+			GuestCID: firecrackerGuestCID(opts),
 			UDSPath:  vsockSocketPath(opts),
 		}
 	}
@@ -825,14 +841,8 @@ func createBridgeTap(tap, bridge string) error {
 }
 
 func createTap(name string) error {
-	if link, err := netlink.LinkByName(name); err == nil {
-		if strings.HasPrefix(name, "magtap") {
-			if err := netlink.LinkDel(link); err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("network link %q already exists", name)
-		}
+	if _, err := netlink.LinkByName(name); err == nil {
+		return fmt.Errorf("network link %q already exists", name)
 	} else if !linkNotFoundError(err) {
 		return err
 	}
@@ -1022,6 +1032,9 @@ func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
 			_ = syscall.Kill(device.PID, syscall.SIGTERM)
 		}
 		if device.Created && device.Name != "" && device.Mode == "tap" {
+			if !validMicroagentTapName(device.Name) {
+				continue
+			}
 			_ = deleteTap(device.Name)
 		}
 	}
@@ -1030,11 +1043,34 @@ func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
 func cleanupTransientFirewallRules(rules []transientFirewallRule) {
 	for i := len(rules) - 1; i >= 0; i-- {
 		rule := rules[i]
-		if rule.Table == "" || rule.Chain == "" || rule.Comment == "" {
+		if !validMicroagentFirewallRule(rule) {
 			continue
 		}
 		_ = deleteNFTFirewallRule(rule)
 	}
+}
+
+func validMicroagentTapName(name string) bool {
+	if !strings.HasPrefix(name, "magtap") || len(name) != len("magtap")+8 {
+		return false
+	}
+	for _, r := range strings.TrimPrefix(name, "magtap") {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+func validMicroagentFirewallRule(rule transientFirewallRule) bool {
+	if rule.Table != nftMicroagentTable || rule.Comment == "" {
+		return false
+	}
+	if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain {
+		return false
+	}
+	parts := strings.Split(rule.Comment, nftRuleCommentSeparator)
+	return len(parts) == 3 && parts[0] == strings.TrimSuffix(nftRuleCommentPrefix, nftRuleCommentSeparator) && validMicroagentTapName(parts[1])
 }
 
 func deleteTap(name string) error {
@@ -1195,7 +1231,7 @@ func ensureNetAdminInheritable() error {
 		hasCapability(caps.Inheritable, unix.CAP_NET_ADMIN) {
 		return nil
 	}
-	return fmt.Errorf("firecracker nat and bridged networking require CAP_NET_ADMIN in the supervisor effective, permitted, and inheritable capability sets so Firecracker can inherit it; run as root, setcap cap_net_admin+eip on the supervisor binary, or use --network isolated if outbound network is not needed")
+	return fmt.Errorf("firecracker nat and bridged networking require CAP_NET_ADMIN in the supervisor effective, permitted, and inheritable capability sets so Firecracker can inherit it; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, or use --network isolated if outbound network is not needed")
 }
 
 func hasCapability(caps uint64, capability int) bool {
@@ -1208,7 +1244,7 @@ func hasCapability(caps uint64, capability int) bool {
 func networkPrivilegeError(action string, err error) error {
 	text := strings.ToLower(err.Error())
 	if errors.Is(err, syscall.EPERM) || strings.Contains(text, "operation not permitted") || strings.Contains(text, "permission denied") {
-		return fmt.Errorf("%s: firecracker nat and bridged networking require CAP_NET_ADMIN to create TAP devices, configure NAT, and let Firecracker attach the TAP; run as root, setcap cap_net_admin+eip on the supervisor binary, or use --network isolated if outbound network is not needed: %w", action, err)
+		return fmt.Errorf("%s: firecracker nat and bridged networking require CAP_NET_ADMIN to create TAP devices, configure NAT, and let Firecracker attach the TAP; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, or use --network isolated if outbound network is not needed: %w", action, err)
 	}
 	return fmt.Errorf("%s: %w", action, err)
 }
@@ -1225,6 +1261,13 @@ func tapName(opts Options) string {
 func firecrackerGuestMAC(name string) string {
 	sum := sha1.Sum([]byte(name))
 	return fmt.Sprintf("06:00:%02x:%02x:%02x:%02x", sum[0], sum[1], sum[2], sum[3])
+}
+
+func firecrackerGuestCID(opts Options) uint32 {
+	seed := opts.Name + "\x00" + opts.StateDir
+	sum := sha1.Sum([]byte(seed))
+	value := uint32(sum[0])<<24 | uint32(sum[1])<<16 | uint32(sum[2])<<8 | uint32(sum[3])
+	return 3 + value%((1<<31)-3)
 }
 
 func hexPrefix(data []byte, n int) string {
@@ -1317,6 +1360,10 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 	}
 	set := &vsockListenerSet{}
 	for _, listener := range config.VsockListeners {
+		if !isAllowedVsockTarget(opts, listener.Target) {
+			set.Close()
+			return nil, fmt.Errorf("firecracker vsock listener %d target must be host:port or the workspace result path", listener.Port)
+		}
 		path := firecrackerGuestVsockPath(opts, listener.Port)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			set.Close()
@@ -1360,6 +1407,7 @@ func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
 }
 
 func handleGuestVsockConnection(conn net.Conn, target string) {
+	const maxResultBytes int64 = 16 * 1024 * 1024
 	defer conn.Close()
 	if tcpTarget, ok := parseTCPAddr(target); ok {
 		remote, err := net.Dial("tcp", tcpTarget)
@@ -1376,9 +1424,13 @@ func handleGuestVsockConnection(conn net.Conn, target string) {
 		closeWriteConn(conn)
 		return
 	}
-	data, err := io.ReadAll(conn)
+	data, err := io.ReadAll(io.LimitReader(conn, maxResultBytes+1))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read guest vsock result for %s: %v\n", target, err)
+		return
+	}
+	if int64(len(data)) > maxResultBytes {
+		fmt.Fprintf(os.Stderr, "guest vsock result for %s exceeded %d bytes\n", target, maxResultBytes)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -1388,6 +1440,13 @@ func handleGuestVsockConnection(conn net.Conn, target string) {
 	if err := os.WriteFile(target, data, 0o644); err != nil {
 		fmt.Fprintf(os.Stderr, "write result %s: %v\n", target, err)
 	}
+}
+
+func isAllowedVsockTarget(opts Options, target string) bool {
+	if _, ok := parseTCPAddr(target); ok {
+		return true
+	}
+	return target == filepath.Join(opts.StateDir, opts.Name, "result.json")
 }
 
 func parseTCPAddr(target string) (string, bool) {
@@ -1433,7 +1492,8 @@ func proxyTCPToGuestVsock(conn net.Conn, udsPath string, guestPort uint32) {
 		done <- struct{}{}
 	}()
 	<-done
-	<-done
+	_ = conn.Close()
+	_ = vsock.Close()
 }
 
 func dialGuestVsock(udsPath string, guestPort uint32) (net.Conn, *bufio.Reader, error) {
@@ -1539,6 +1599,7 @@ func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, s
 }
 
 func appendEvent(path string, event eventFile) error {
+	const maxEvents = 1024
 	var events []eventFile
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -1550,6 +1611,9 @@ func appendEvent(path string, event eventFile) error {
 		}
 	}
 	events = append(events, event)
+	if len(events) > maxEvents {
+		events = events[len(events)-maxEvents:]
+	}
 	return writeJSONFile(path, events)
 }
 
@@ -1571,6 +1635,7 @@ func runtimeStateRequest(req vmkit.Request, state runtimeState) vmkit.Request {
 		req.Config.Mediation = state.Config.Mediation
 		req.Config.Network = state.Config.Network
 		req.Config.SerialInput = state.Config.SerialInput
+		req.Config.TimeoutSeconds = state.Config.TimeoutSeconds
 	}
 	return req
 }

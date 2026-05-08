@@ -64,3 +64,18 @@ func TestRootfsPathIsStable(t *testing.T) {
 		t.Fatalf("paths differ: %q %q", a, b)
 	}
 }
+
+func TestPathInRootfsStoreRejectsSymlinkedParent(t *testing.T) {
+	dir := t.TempDir()
+	store := filepath.Join(dir, "images", "rootfs")
+	outside := t.TempDir()
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(store, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if PathInRootfsStore(dir, filepath.Join(store, "link", "victim.ext4")) {
+		t.Fatal("symlinked image-store parent was accepted")
+	}
+}

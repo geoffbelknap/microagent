@@ -474,7 +474,7 @@ func TestEnsureNetAdminInheritableRejectsMissingInheritable(t *testing.T) {
 	if err == nil {
 		t.Fatal("ensureNetAdminInheritable accepted missing inheritable CAP_NET_ADMIN")
 	}
-	if !strings.Contains(err.Error(), "cap_net_admin+eip") || strings.Contains(err.Error(), "Operation not permitted") {
+	if !strings.Contains(err.Error(), "effective, permitted, and inheritable") || strings.Contains(err.Error(), "Operation not permitted") {
 		t.Fatalf("err = %v", err)
 	}
 }

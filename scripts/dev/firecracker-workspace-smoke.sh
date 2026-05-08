@@ -122,10 +122,14 @@ import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     result = json.load(f)
-assert result["ok"] is True
-assert result["backend"] == "firecracker"
-assert result["host"]["kvmAvailable"] is True
-assert result["host"]["vsockAvailable"] is True
+if result["ok"] is not True:
+    raise SystemExit(result)
+if result["backend"] != "firecracker":
+    raise SystemExit(result)
+if result["host"]["kvmAvailable"] is not True:
+    raise SystemExit(result)
+if result["host"]["vsockAvailable"] is not True:
+    raise SystemExit(result)
 PY
 
 "$CLI" create connect-smoke \

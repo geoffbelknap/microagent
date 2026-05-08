@@ -148,12 +148,12 @@ Fixes:
 `bridged` mode needs both:
 
 - The named host interface to actually be a Linux bridge — not a regular interface, not loopback.
-- `CAP_NET_ADMIN` on the supervisor (`sudo setcap cap_net_admin+eip <supervisor>`) or root.
+- `CAP_NET_ADMIN` in the supervisor process and inherited by Firecracker, or root.
 
 Fixes:
 
 - Create a bridge if you don't have one: `sudo ip link add br0 type bridge && sudo ip link set br0 up`.
-- Set the cap on the supervisor binary, or run as root.
+- Run as root, or launch `microagent` from a wrapper that gives the supervisor process `CAP_NET_ADMIN` in its effective, permitted, and inheritable sets. A plain `setcap` on the supervisor binary is not enough on every distro because Firecracker also needs to inherit the capability.
 
 If neither prerequisite is reachable in your environment, use `--network user` (no privileges needed) or `--network nat`.
 
@@ -167,7 +167,8 @@ closed with a clear error; if outbound still fails, check the host:
 - `sysctl net.ipv4.ip_forward` must report `net.ipv4.ip_forward = 1`
 - the host kernel must support nftables
 - the supervisor needs `CAP_NET_ADMIN` in its effective, permitted, and
-  inheritable sets: `sudo setcap cap_net_admin+eip <supervisor>`
+  inheritable sets so Firecracker can inherit it. Run as root, or use a
+  capability-aware launcher; a plain `setcap` on the binary is not portable.
 - host firewall managers such as `ufw` or `firewalld` must not block forwarding
   from the `magtap*` device or remove rules in the `inet microagent` table
 

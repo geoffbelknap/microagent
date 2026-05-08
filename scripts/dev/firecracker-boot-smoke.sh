@@ -99,13 +99,20 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 expected_output = sys.argv[2]
 expected_kernel_sha = sys.argv[3]
 
-assert result["response"]["ok"] is True
-assert result["response"]["backend"] == "firecracker"
-assert result["final_state"] == "stopped"
-assert result["image"]["platform"]["architecture"] == "amd64"
-assert expected_output in result["serial_log"]
-assert "reboot: System halted" in result["serial_log"] or "reboot: Power down" in result["serial_log"]
-assert expected_kernel_sha
+if result["response"]["ok"] is not True:
+    raise SystemExit(result)
+if result["response"]["backend"] != "firecracker":
+    raise SystemExit(result)
+if result["final_state"] != "stopped":
+    raise SystemExit(result)
+if result["image"]["platform"]["architecture"] != "amd64":
+    raise SystemExit(result)
+if expected_output not in result["serial_log"]:
+    raise SystemExit(result["serial_log"])
+if "reboot: System halted" not in result["serial_log"] and "reboot: Power down" not in result["serial_log"]:
+    raise SystemExit(result["serial_log"])
+if not expected_kernel_sha:
+    raise SystemExit("missing expected kernel sha")
 PY
 
 echo "firecracker boot smoke passed"

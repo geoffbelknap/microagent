@@ -570,6 +570,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			Mediation:      opts.Mediation,
 			Network:        NetworkConfigPtr(opts.Network),
 			SerialInput:    opts.SerialInput,
+			TimeoutSeconds: int(opts.Timeout.Seconds()),
 		},
 	}
 }

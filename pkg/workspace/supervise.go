@@ -53,6 +53,12 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 				result.Stopped = true
 				return result, nil
 			}
+			select {
+			case <-ctx.Done():
+				result.Stopped = true
+				return result, ctx.Err()
+			case <-time.After(opts.Interval):
+			}
 			continue
 		} else if startResult.Response.Event != nil {
 			result.FinalState = string(startResult.Response.Event.State)
@@ -151,7 +157,7 @@ func supervisedOptions(opts SuperviseOptions) (Options, error) {
 		workspaceOpts.Profile = manifest.Profile
 	}
 	workspaceOpts.RestartPolicy = NormalizeRestartPolicy(manifest.Restart)
-	if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" {
+	if manifest.Network.Mode != "" || manifest.Network.Interface != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" {
 		workspaceOpts.Network = NetworkConfigFromSpec(manifest.Network)
 	}
 	if manifest.Resources.MemoryMiB != 0 {
@@ -164,6 +170,7 @@ func supervisedOptions(opts SuperviseOptions) (Options, error) {
 		workspaceOpts.SizeMiB = manifest.Resources.SizeMiB
 	}
 	workspaceOpts.Disks = manifest.Disks
+	workspaceOpts.Mediation = manifest.Mediation
 	if err := ValidateRestartPolicy(workspaceOpts.RestartPolicy); err != nil {
 		return Options{}, err
 	}

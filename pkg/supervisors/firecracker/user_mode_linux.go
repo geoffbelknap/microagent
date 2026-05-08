@@ -247,6 +247,31 @@ func userNetworkPastaPID() int {
 	return pid
 }
 
+func cleanupUserNetworkProcess(opts Options) {
+	pid := readPIDFile(userNetworkPIDPath(opts))
+	if pid == 0 {
+		return
+	}
+	active, err := processActive(pid)
+	if err == nil && active {
+		_ = signalProcessGroup(pid, syscall.SIGTERM)
+		_ = waitForProcessExit(context.Background(), pid, 2*time.Second)
+	}
+	_ = os.Remove(userNetworkPIDPath(opts))
+}
+
+func readPIDFile(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0
+	}
+	return pid
+}
+
 func attachUserNetworkPID(devices []transientNetworkDevice) []transientNetworkDevice {
 	pid := userNetworkPastaPID()
 	if pid == 0 {

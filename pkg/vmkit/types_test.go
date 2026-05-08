@@ -48,6 +48,38 @@ func TestValidateRequestAcceptsQuarantineWithStateDir(t *testing.T) {
 	}
 }
 
+func TestValidateRequestRejectsRuntimeIDTraversal(t *testing.T) {
+	req := Request{
+		Command: "delete",
+		Identity: &Identity{
+			RequestID: "req-1",
+			RuntimeID: "../victim",
+			Role:      RoleWorkload,
+			Backend:   BackendAppleVF,
+		},
+		Config: &Config{StateDir: "/tmp/state"},
+	}
+	if err := ValidateRequest(req); err == nil {
+		t.Fatal("ValidateRequest accepted runtimeID traversal")
+	}
+}
+
+func TestValidateRequestRejectsRuntimeIDPathSeparator(t *testing.T) {
+	req := Request{
+		Command: "delete",
+		Identity: &Identity{
+			RequestID: "req-1",
+			RuntimeID: "parent/child",
+			Role:      RoleWorkload,
+			Backend:   BackendAppleVF,
+		},
+		Config: &Config{StateDir: "/tmp/state"},
+	}
+	if err := ValidateRequest(req); err == nil {
+		t.Fatal("ValidateRequest accepted runtimeID path separator")
+	}
+}
+
 func TestValidateConfigRejectsDuplicateVsockPorts(t *testing.T) {
 	cfg := &Config{
 		KernelPath: "/tmp/kernel",

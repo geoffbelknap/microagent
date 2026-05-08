@@ -52,6 +52,7 @@ type Config struct {
 	Mediation      *MediationConfig `json:"mediation,omitempty"`
 	Network        *NetworkConfig   `json:"network,omitempty"`
 	SerialInput    bool             `json:"serialInput,omitempty"`
+	TimeoutSeconds int              `json:"timeoutSeconds,omitempty"`
 }
 
 type Disk struct {
@@ -264,6 +265,9 @@ func ValidateIdentity(identity *Identity) error {
 	if strings.TrimSpace(identity.RuntimeID) == "" {
 		return errors.New("identity.runtimeID is required")
 	}
+	if !SafeIdentifier(identity.RuntimeID) {
+		return fmt.Errorf("identity.runtimeID must be a safe basename: %s", identity.RuntimeID)
+	}
 	if identity.Role != RoleWorkload && identity.Role != RoleEnforcer {
 		return fmt.Errorf("identity.role must be %q or %q", RoleWorkload, RoleEnforcer)
 	}
@@ -271,6 +275,14 @@ func ValidateIdentity(identity *Identity) error {
 		return errors.New("identity.backend is required")
 	}
 	return nil
+}
+
+func SafeIdentifier(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "." || value == ".." {
+		return false
+	}
+	return !strings.ContainsAny(value, `/\`) && !strings.ContainsRune(value, 0)
 }
 
 func ValidateConfig(config *Config) error {
