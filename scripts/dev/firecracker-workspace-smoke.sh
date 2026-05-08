@@ -91,13 +91,13 @@ PY
 
 (
   cd "$ROOT"
-  go build -o "$CLI" ./cmd/microagent
-  go build -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
+  go build -buildvcs=false -o "$CLI" ./cmd/microagent
+  go build -buildvcs=false -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
   (
     export GOOS=linux
     export GOARCH=amd64
     export CGO_ENABLED=0
-    go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+    go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
   )
 )
 
@@ -146,7 +146,7 @@ if "$CLI" connect connect-smoke --state-dir "$STATE_DIR/connect" --send "echo CO
   echo "firecracker connect unexpectedly succeeded" >&2
   exit 1
 fi
-grep -q "console input is not ready" "$STATE_DIR/connect.err"
+grep -q "console input is unavailable in state prepared" "$STATE_DIR/connect.err"
 "$CLI" logs connect-smoke --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-logs.txt"
 "$CLI" ps --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-ps.json"
 

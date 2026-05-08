@@ -63,9 +63,9 @@ export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
 
 (
   cd "$ROOT"
-  go build -o "$CLI" ./cmd/microagent
-  go build -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
-  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+  go build -buildvcs=false -o "$CLI" ./cmd/microagent
+  go build -buildvcs=false -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
+  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
 "$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
@@ -94,7 +94,7 @@ if "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo SHOULD_NOT_
   echo "connect unexpectedly succeeded before the workspace was started" >&2
   exit 1
 fi
-grep -q "console input is not ready" "$STATE_DIR/prepared-connect.err"
+grep -q "console input is unavailable in state prepared" "$STATE_DIR/prepared-connect.err"
 
 "$CLI" start "$WORKSPACE" \
   --state-dir "$STATE_DIR" \

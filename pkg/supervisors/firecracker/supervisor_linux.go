@@ -265,6 +265,7 @@ type transientNetworkDevice struct {
 }
 
 type transientFirewallRule struct {
+	Family  string   `json:"family,omitempty"`
 	Table   string   `json:"table"`
 	Chain   string   `json:"chain"`
 	Comment string   `json:"comment,omitempty"`
@@ -555,6 +556,9 @@ func ensureCanDelete(opts Options) error {
 		return err
 	}
 	if state.PID == 0 {
+		if state.Event.State == vmkit.StateStarting || state.Event.State == vmkit.StateRunning {
+			return fmt.Errorf("firecracker workspace %s is running; stop or kill it before delete", opts.Name)
+		}
 		if state.PortForwardPID != 0 {
 			active, err := processActive(state.PortForwardPID)
 			if err != nil {
@@ -564,6 +568,11 @@ func ensureCanDelete(opts Options) error {
 				return fmt.Errorf("firecracker workspace %s port forwarder is running; stop or kill it before delete", opts.Name)
 			}
 		}
+		if active, err := userNetworkProcessActive(opts); err != nil {
+			return err
+		} else if active {
+			return fmt.Errorf("firecracker workspace %s user network process is running; stop or kill it before delete", opts.Name)
+		}
 		return nil
 	}
 	active, err := processActive(state.PID)
@@ -572,6 +581,11 @@ func ensureCanDelete(opts Options) error {
 	}
 	if active {
 		return fmt.Errorf("firecracker workspace %s is running; stop or kill it before delete", opts.Name)
+	}
+	if active, err := userNetworkProcessActive(opts); err != nil {
+		return err
+	} else if active {
+		return fmt.Errorf("firecracker workspace %s user network process is running; stop or kill it before delete", opts.Name)
 	}
 	return nil
 }
@@ -916,8 +930,11 @@ const (
 	nftMicroagentTable      = "microagent"
 	nftNATPostroutingChain  = "MICROAGENT-NAT-POSTROUTING"
 	nftForwardChain         = "MICROAGENT-FORWARD"
+	nftUFWFilterTable       = "filter"
+	nftUFWUserForwardChain  = "ufw-user-forward"
 	nftRuleCommentPrefix    = "microagent:"
 	nftRuleCommentSeparator = ":"
+	nftForwardPriority      = -1
 )
 
 type nftFirewallRule struct {
@@ -934,9 +951,9 @@ func installNATFirewallRules(tap, subnet string) ([]transientFirewallRule, error
 	if err := ensureNATFirewallChains(conn); err != nil {
 		return nil, err
 	}
-	table := microagentNFTTable()
 	transientRules := make([]transientFirewallRule, 0, len(nftRules))
 	for i, rule := range nftRules {
+		table := nftRuleTable(rule.transientFirewallRule)
 		chain := &nftables.Chain{Name: rule.Chain, Table: table}
 		exists, err := nftRuleExists(conn, table, chain, rule.Comment)
 		if err != nil {
@@ -956,6 +973,33 @@ func installNATFirewallRules(tap, subnet string) ([]transientFirewallRule, error
 			}
 		}
 		transientRules = append(transientRules, nftRules[i].transientFirewallRule)
+	}
+	ufwRules, err := buildUFWForwardRules(conn, tap, subnet)
+	if err != nil {
+		cleanupTransientFirewallRules(transientRules)
+		return transientRules, err
+	}
+	for _, rule := range ufwRules {
+		table := nftRuleTable(rule.transientFirewallRule)
+		chain := &nftables.Chain{Name: rule.Chain, Table: table}
+		exists, err := nftRuleExists(conn, table, chain, rule.Comment)
+		if err != nil {
+			cleanupTransientFirewallRules(transientRules)
+			return transientRules, networkPrivilegeError("inspect firecracker ufw forward firewall", err)
+		}
+		if !exists {
+			conn.AddRule(&nftables.Rule{
+				Table:    table,
+				Chain:    chain,
+				Exprs:    rule.Exprs,
+				UserData: nftRuleUserData(rule.Comment),
+			})
+			if err := conn.Flush(); err != nil {
+				cleanupTransientFirewallRules(transientRules)
+				return transientRules, networkPrivilegeError("configure firecracker ufw forward firewall", err)
+			}
+		}
+		transientRules = append(transientRules, rule.transientFirewallRule)
 	}
 	return transientRules, nil
 }
@@ -987,9 +1031,29 @@ func buildNATFirewallRules(tap, subnet string) ([]nftFirewallRule, error) {
 	}, nil
 }
 
+func buildUFWForwardRules(conn *nftables.Conn, tap, subnet string) ([]nftFirewallRule, error) {
+	table := &nftables.Table{Name: nftUFWFilterTable, Family: nftables.TableFamilyIPv4}
+	if _, err := conn.ListChain(table, nftUFWUserForwardChain); err != nil {
+		return nil, nil
+	}
+	_, network, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return nil, fmt.Errorf("parse firecracker nat subnet %q: %w", subnet, err)
+	}
+	if network.IP.To4() == nil {
+		return nil, fmt.Errorf("firecracker nat subnet %q is not IPv4", subnet)
+	}
+	return []nftFirewallRule{
+		{
+			transientFirewallRule: transientFirewallRule{Family: "ip", Table: nftUFWFilterTable, Chain: nftUFWUserForwardChain, Comment: nftRuleComment(tap, "ufw-forward-out")},
+			Exprs:                 append(append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap), ipv4SubnetMatchExprs(12, network)...), &expr.Verdict{Kind: expr.VerdictAccept}),
+		},
+	}, nil
+}
+
 func ensureNATFirewallChains(conn *nftables.Conn) error {
 	table := microagentNFTTable()
-	conn.CreateTable(table)
+	conn.AddTable(table)
 	if err := conn.Flush(); err != nil {
 		return networkPrivilegeError("create firecracker nftables table "+nftMicroagentTable, err)
 	}
@@ -1006,7 +1070,7 @@ func ensureNATFirewallChains(conn *nftables.Conn) error {
 			Table:    table,
 			Type:     nftables.ChainTypeFilter,
 			Hooknum:  nftables.ChainHookForward,
-			Priority: nftables.ChainPriorityFilter,
+			Priority: nftables.ChainPriorityRef(nftForwardPriority),
 		},
 	}
 	for _, chain := range chains {
@@ -1063,10 +1127,17 @@ func validMicroagentTapName(name string) bool {
 }
 
 func validMicroagentFirewallRule(rule transientFirewallRule) bool {
-	if rule.Table != nftMicroagentTable || rule.Comment == "" {
+	if rule.Comment == "" {
 		return false
 	}
-	if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain {
+	if rule.Table == nftMicroagentTable {
+		if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain {
+			return false
+		}
+	} else if rule.Family == "ip" && rule.Table == nftUFWFilterTable && rule.Chain == nftUFWUserForwardChain {
+		// microagent may add a tagged allow rule to UFW's user-forward chain
+		// so UFW does not drop packets accepted by microagent's own base chain.
+	} else {
 		return false
 	}
 	parts := strings.Split(rule.Comment, nftRuleCommentSeparator)
@@ -1088,6 +1159,14 @@ func microagentNFTTable() *nftables.Table {
 	return &nftables.Table{Name: nftMicroagentTable, Family: nftables.TableFamilyINet}
 }
 
+func nftRuleTable(rule transientFirewallRule) *nftables.Table {
+	family := nftables.TableFamilyINet
+	if rule.Family == "ip" {
+		family = nftables.TableFamilyIPv4
+	}
+	return &nftables.Table{Name: rule.Table, Family: family}
+}
+
 func nftRuleExists(conn *nftables.Conn, table *nftables.Table, chain *nftables.Chain, comment string) (bool, error) {
 	rules, err := conn.GetRules(table, chain)
 	if err != nil {
@@ -1103,7 +1182,7 @@ func nftRuleExists(conn *nftables.Conn, table *nftables.Table, chain *nftables.C
 
 func deleteNFTFirewallRule(rule transientFirewallRule) error {
 	conn := &nftables.Conn{}
-	table := &nftables.Table{Name: rule.Table, Family: nftables.TableFamilyINet}
+	table := nftRuleTable(rule)
 	chain := &nftables.Chain{Name: rule.Chain, Table: table}
 	rules, err := conn.GetRules(table, chain)
 	if err != nil {

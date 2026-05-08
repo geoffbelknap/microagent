@@ -10,12 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 )
@@ -433,6 +435,12 @@ func TestBuildNATFirewallRulesUsesNftablesExpressions(t *testing.T) {
 	}
 }
 
+func TestNATForwardChainPrecedesHostFilterChains(t *testing.T) {
+	if nftForwardPriority >= int(*nftables.ChainPriorityFilter) {
+		t.Fatalf("forward priority = %d, want before filter priority %d", nftForwardPriority, *nftables.ChainPriorityFilter)
+	}
+}
+
 func TestFirecrackerNetworkSetupDoesNotExecIPOrIPTables(t *testing.T) {
 	data, err := os.ReadFile("supervisor_linux.go")
 	if err != nil {
@@ -654,6 +662,71 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 	}
 	if state.Event.State != vmkit.StateQuarantined || state.PID != vmProcess.Process.Pid || state.PortForwardPID != 0 || len(state.NetworkDevices) != 0 {
 		t.Fatalf("state = %#v", state)
+	}
+}
+
+func TestEnsureCanDeleteRejectsRunningStateWithoutPID(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureCanDelete(opts); err == nil || !strings.Contains(err.Error(), "is running") {
+		t.Fatalf("ensureCanDelete error = %v, want running rejection", err)
+	}
+}
+
+func TestEnsureCanDeleteRejectsActiveUserNetworkProcess(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command: "stop",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	networkProcess := exec.Command("sleep", "30")
+	if err := networkProcess.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = networkProcess.Process.Kill()
+		_, _ = networkProcess.Process.Wait()
+	})
+	if err := os.WriteFile(userNetworkPIDPath(opts), []byte(strconv.Itoa(networkProcess.Process.Pid)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureCanDelete(opts); err == nil || !strings.Contains(err.Error(), "user network process is running") {
+		t.Fatalf("ensureCanDelete error = %v, want user network rejection", err)
 	}
 }
 

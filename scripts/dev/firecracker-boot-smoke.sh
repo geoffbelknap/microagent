@@ -55,9 +55,9 @@ export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
 
 (
   cd "$ROOT"
-  go build -o "$CLI" ./cmd/microagent
-  go build -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
-  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+  go build -buildvcs=false -o "$CLI" ./cmd/microagent
+  go build -buildvcs=false -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
+  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
 "$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"

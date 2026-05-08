@@ -79,9 +79,9 @@ export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
 
 (
   cd "$ROOT"
-  go build -o "$CLI" ./cmd/microagent
-  go build -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
-  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+  go build -buildvcs=false -o "$CLI" ./cmd/microagent
+  go build -buildvcs=false -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
+  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
 if caps="$(getcap "$SUPERVISOR" 2>/dev/null)" && [ -n "$caps" ]; then
@@ -124,10 +124,11 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
     result = json.load(f)
 if result["response"]["event"]["state"] != "stopped":
     raise SystemExit(result)
-if "USER_OUTBOUND_FAILED" in result["serial_log"]:
-    raise SystemExit(result["serial_log"])
-if "USER_OUTBOUND_READY" not in result["serial_log"]:
-    raise SystemExit(result["serial_log"])
+stdout = (result.get("result") or {}).get("stdout") or ""
+if "USER_OUTBOUND_FAILED" in stdout:
+    raise SystemExit(stdout)
+if "USER_OUTBOUND_READY" not in stdout:
+    raise SystemExit(stdout)
 if result["network"]["mode"] != "user":
     raise SystemExit(result["network"])
 PY
