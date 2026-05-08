@@ -125,6 +125,21 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 			}
 			return "Firecracker v1.15.1"
 		},
+		func(name string) (string, error) {
+			if name == "pasta" {
+				return "/usr/bin/pasta", nil
+			}
+			return "", os.ErrNotExist
+		},
+		func(path string) ([]byte, error) {
+			switch path {
+			case "/proc/sys/kernel/unprivileged_userns_clone":
+				return []byte("1\n"), nil
+			case "/proc/sys/user/max_user_namespaces":
+				return []byte("32768\n"), nil
+			}
+			return nil, os.ErrNotExist
+		},
 	)
 	if err != nil {
 		t.Fatalf("firecrackerDoctorResponse: %v", err)
@@ -159,6 +174,8 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 		func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
 		func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
 		func(string) string { return "" },
+		func(string) (string, error) { return "", os.ErrNotExist },
+		func(string) ([]byte, error) { return nil, os.ErrNotExist },
 	)
 	if err == nil {
 		t.Fatal("firecrackerDoctorResponse returned nil error")
