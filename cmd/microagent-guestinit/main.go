@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -56,6 +58,7 @@ func main() {
 }
 
 func run() int {
+	log.Println("microagent-init: starting")
 	if err := mountGuestFilesystems(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
@@ -104,6 +107,7 @@ func run() int {
 		return code
 	}
 	if len(cfg.Command) > 0 {
+		log.Printf("microagent-init: handing off to %v", cfg.Command)
 		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 		cmd.Env = guestEnv(cfg.Env)
 		var stdout, stderr bytes.Buffer
@@ -128,6 +132,7 @@ func run() int {
 			_ = sendResult(cfg.Port, res)
 			return code
 		}
+		log.Printf("microagent-init: handing off to %v", []string{"/bin/sh", "-i"})
 		cmd := exec.Command("/bin/sh", "-i")
 		cmd.Env = guestEnv(cfg.Env)
 		cmd.Stdin = os.Stdin
@@ -170,6 +175,7 @@ func mountGuestFilesystems() error {
 		if err := mountGuestFilesystem(fs.Source, fs.Target, fs.FSType, fs.Flags, ""); err != nil && !errors.Is(err, syscall.EBUSY) {
 			return fmt.Errorf("mount %s: %w", fs.Target, err)
 		}
+		log.Printf("microagent-init: mounted %s", fs.Target)
 	}
 	return nil
 }
@@ -278,9 +284,11 @@ func configureBootNetwork() error {
 	if err != nil {
 		return err
 	}
+	log.Printf("microagent-init: network = %+v", cfg)
 	if cfg.Interface == "" {
 		return nil
 	}
+	log.Printf("microagent-init: /sys/class/net = %v", listNetInterfaces())
 	if err := bringUpLoopback(); err != nil {
 		return err
 	}
@@ -291,6 +299,7 @@ func configureBootNetwork() error {
 		if err := writeResolvConf(cfg.DNS); err != nil {
 			return err
 		}
+		log.Println("microagent-init: resolv.conf written")
 	}
 	return nil
 }
@@ -300,6 +309,7 @@ func readNetworkBootConfig() (networkBootConfig, error) {
 	if err != nil {
 		return networkBootConfig{}, fmt.Errorf("read kernel command line: %w", err)
 	}
+	log.Printf("microagent-init: cmdline = %q", strings.TrimSpace(string(data)))
 	values := map[string]string{}
 	for _, field := range strings.Fields(string(data)) {
 		key, value, ok := strings.Cut(field, "=")
@@ -327,6 +337,19 @@ func readNetworkBootConfig() (networkBootConfig, error) {
 	return cfg, nil
 }
 
+func listNetInterfaces() []string {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return []string{"error: " + err.Error()}
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	return names
+}
+
 func configureStaticIPv4(cfg networkBootConfig) error {
 	iface, err := net.InterfaceByName(cfg.Interface)
 	if err != nil {
@@ -350,9 +373,11 @@ func configureStaticIPv4(cfg networkBootConfig) error {
 	if err := setInterfaceUp(cfg.Interface); err != nil {
 		return err
 	}
+	log.Printf("microagent-init: brought up %s", cfg.Interface)
 	if err := addDefaultRoute(iface.Index, gateway); err != nil && !os.IsExist(err) {
 		return err
 	}
+	log.Println("microagent-init: route configured")
 	return nil
 }
 
@@ -410,6 +435,7 @@ func addDefaultRoute(ifindex int, gateway net.IP) error {
 	header := (*unix.NlMsghdr)(unsafe.Pointer(&req[0]))
 	header.Type = unix.RTM_NEWROUTE
 	header.Flags = unix.NLM_F_REQUEST | unix.NLM_F_ACK | unix.NLM_F_CREATE | unix.NLM_F_EXCL
+	header.Seq = 1
 	msg := (*unix.RtMsg)(unsafe.Pointer(&req[unix.SizeofNlMsghdr]))
 	msg.Family = unix.AF_INET
 	msg.Table = unix.RT_TABLE_MAIN
@@ -420,8 +446,9 @@ func addDefaultRoute(ifindex int, gateway net.IP) error {
 	ifIndexBytes := make([]byte, 4)
 	binary.NativeEndian.PutUint32(ifIndexBytes, uint32(ifindex))
 	req = appendNetlinkAttr(req, unix.RTA_OIF, ifIndexBytes)
+	header = (*unix.NlMsghdr)(unsafe.Pointer(&req[0]))
 	header.Len = uint32(len(req))
-	return sendNetlinkRequest(req, "add default route")
+	return sendNetlinkRequest(req, header.Seq, "add default route")
 }
 
 func appendNetlinkAttr(msg []byte, attrType uint16, data []byte) []byte {
@@ -435,42 +462,61 @@ func appendNetlinkAttr(msg []byte, attrType uint16, data []byte) []byte {
 	return msg
 }
 
-func sendNetlinkRequest(req []byte, action string) error {
+func sendNetlinkRequest(req []byte, seq uint32, action string) error {
 	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE)
 	if err != nil {
 		return fmt.Errorf("%s: open netlink socket: %w", action, err)
 	}
 	defer unix.Close(fd)
+	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
+		return fmt.Errorf("%s: bind netlink socket: %w", action, err)
+	}
+	tv := unix.Timeval{Sec: 5}
+	if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &tv); err != nil {
+		return fmt.Errorf("%s: set netlink receive timeout: %w", action, err)
+	}
 	if err := unix.Sendto(fd, req, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return fmt.Errorf("%s: send netlink request: %w", action, err)
 	}
 	buf := make([]byte, 4096)
-	n, _, err := unix.Recvfrom(fd, buf, 0)
-	if err != nil {
-		return fmt.Errorf("%s: receive netlink ack: %w", action, err)
-	}
-	msgs, err := syscall.ParseNetlinkMessage(buf[:n])
-	if err != nil {
-		return fmt.Errorf("%s: parse netlink ack: %w", action, err)
-	}
-	for _, msg := range msgs {
-		if msg.Header.Type != unix.NLMSG_ERROR {
-			continue
+	for {
+		n, _, err := unix.Recvfrom(fd, buf, 0)
+		if err != nil {
+			if errors.Is(err, unix.EAGAIN) {
+				return fmt.Errorf("%s: timed out waiting for netlink ack", action)
+			}
+			return fmt.Errorf("%s: receive netlink ack: %w", action, err)
 		}
-		if len(msg.Data) < 4 {
-			return fmt.Errorf("%s: short netlink error", action)
+		msgs, err := syscall.ParseNetlinkMessage(buf[:n])
+		if err != nil {
+			return fmt.Errorf("%s: parse netlink ack: %w", action, err)
 		}
-		code := int32(binary.NativeEndian.Uint32(msg.Data[:4]))
-		if code == 0 {
+		for _, msg := range msgs {
+			if msg.Header.Seq != seq {
+				continue
+			}
+			switch msg.Header.Type {
+			case unix.NLMSG_DONE:
+				return nil
+			case unix.NLMSG_ERROR:
+				if len(msg.Data) < 4 {
+					return fmt.Errorf("%s: short netlink error", action)
+				}
+				code := int32(binary.NativeEndian.Uint32(msg.Data[:4]))
+				if code == 0 {
+					return nil
+				}
+				errno := unix.Errno(-code)
+				if errno == unix.EEXIST {
+					return os.ErrExist
+				}
+				return fmt.Errorf("%s: %w", action, errno)
+			}
+		}
+		if len(msgs) == 0 {
 			return nil
 		}
-		errno := unix.Errno(-code)
-		if errno == unix.EEXIST {
-			return os.ErrExist
-		}
-		return fmt.Errorf("%s: %w", action, errno)
 	}
-	return nil
 }
 
 func nlAlign(length int) int {

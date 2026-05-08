@@ -224,6 +224,43 @@ func TestServePortForwardUsesRequestedVsockPort(t *testing.T) {
 	}
 }
 
+func TestStartVsockListenersWritesGuestResult(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "demo"}
+	resultPath := filepath.Join(dir, "demo", "result.json")
+	set, err := startVsockListeners(opts, &vmkit.Config{
+		VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: resultPath}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	conn, err := net.Dial("unix", firecrackerGuestVsockPath(opts, 1024))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		data, err := os.ReadFile(resultPath)
+		if err == nil {
+			if string(data) != `{"ok":true}` {
+				t.Fatalf("result = %s", data)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("result not written: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestSerialInputFIFOUsesFIFOType(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
 	file, err := openSerialInputFIFO(opts)

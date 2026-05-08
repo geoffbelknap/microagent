@@ -1379,6 +1379,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		StateDir:       defaultStateDir(),
 		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		ResultPort:     workspace.DefaultResultPort,
 		SerialInput:    backendSupportsConsoleInput(backend),
 	}
 	if err := applyResourceProfile(&opts, false, false, false); err != nil {
@@ -1530,6 +1531,7 @@ func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (work
 		MemoryMiB:      defaultWorkspaceMemoryMiB,
 		CPUCount:       defaultWorkspaceCPUCount,
 		SizeMiB:        rootfs.DefaultSizeMiB,
+		ResultPort:     workspace.DefaultResultPort,
 		SerialInput:    backendSupportsConsoleInput(opts.Backend),
 	}
 	manifest, err := readWorkspaceManifest(opts.StateDir, opts.Name)

@@ -177,7 +177,7 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 		opts.StateDir = req.Config.StateDir
 	}
 	if opts.Timeout == 0 {
-		opts.Timeout = 2 * time.Minute
+		opts.Timeout = 5 * time.Minute
 	}
 	if opts.ResolveFirecracker == nil {
 		opts.ResolveFirecracker = ResolveBinary
@@ -333,6 +333,14 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
+	vsockListeners, err := startVsockListeners(opts, runtimeReq.Config)
+	if err != nil {
+		cleanupTransientFirewallRules(firewallRules)
+		cleanupTransientNetworkDevices(networkDevices)
+		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+		return failedResponse(req, err.Error()), err
+	}
+	defer vsockListeners.Close()
 	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o755); err != nil {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -567,6 +575,9 @@ func writeConfig(opts Options, req vmkit.Request) error {
 		Machine: machineConfig{VCPUCount: req.Config.CPUCount, MemSizeMiB: req.Config.MemoryMiB},
 	}
 	if needsVsock(req.Config) {
+		if err := os.Remove(vsockSocketPath(opts)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 		cfg.Vsock = &vsockConfig{
 			VsockID:  "vsock0",
 			GuestCID: 3,
@@ -1296,6 +1307,97 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 	return ctx.Err()
 }
 
+type vsockListenerSet struct {
+	listeners []net.Listener
+}
+
+func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet, error) {
+	if config == nil || len(config.VsockListeners) == 0 {
+		return &vsockListenerSet{}, nil
+	}
+	set := &vsockListenerSet{}
+	for _, listener := range config.VsockListeners {
+		path := firecrackerGuestVsockPath(opts, listener.Port)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			set.Close()
+			return nil, err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			set.Close()
+			return nil, err
+		}
+		unixListener, err := net.Listen("unix", path)
+		if err != nil {
+			set.Close()
+			return nil, fmt.Errorf("listen firecracker guest vsock port %d: %w", listener.Port, err)
+		}
+		set.listeners = append(set.listeners, unixListener)
+		go serveVsockListener(unixListener, listener)
+	}
+	return set, nil
+}
+
+func (s *vsockListenerSet) Close() {
+	if s == nil {
+		return
+	}
+	for _, listener := range s.listeners {
+		_ = listener.Close()
+		if unixListener, ok := listener.(*net.UnixListener); ok {
+			_ = os.Remove(unixListener.Addr().String())
+		}
+	}
+}
+
+func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go handleGuestVsockConnection(conn, config.Target)
+	}
+}
+
+func handleGuestVsockConnection(conn net.Conn, target string) {
+	defer conn.Close()
+	if tcpTarget, ok := parseTCPAddr(target); ok {
+		remote, err := net.Dial("tcp", tcpTarget)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "connect vsock target %s: %v\n", tcpTarget, err)
+			return
+		}
+		defer remote.Close()
+		go func() {
+			_, _ = io.Copy(remote, conn)
+			closeWriteConn(remote)
+		}()
+		_, _ = io.Copy(conn, remote)
+		closeWriteConn(conn)
+		return
+	}
+	data, err := io.ReadAll(conn)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read guest vsock result for %s: %v\n", target, err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "create result directory for %s: %v\n", target, err)
+		return
+	}
+	if err := os.WriteFile(target, data, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "write result %s: %v\n", target, err)
+	}
+}
+
+func parseTCPAddr(target string) (string, bool) {
+	host, port, err := net.SplitHostPort(target)
+	if err != nil || host == "" || port == "" {
+		return "", false
+	}
+	return net.JoinHostPort(host, port), true
+}
+
 func servePortForward(listener net.Listener, udsPath string, guestPort uint32) {
 	for {
 		conn, err := listener.Accept()
@@ -1650,6 +1752,10 @@ func serialInputPath(opts Options) string {
 
 func vsockSocketPath(opts Options) string {
 	return filepath.Join(opts.StateDir, opts.Name, "vsock.sock")
+}
+
+func firecrackerGuestVsockPath(opts Options, port uint32) string {
+	return fmt.Sprintf("%s_%d", vsockSocketPath(opts), port)
 }
 
 func cleanupWorkspaceState(opts Options) {

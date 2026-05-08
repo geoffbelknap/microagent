@@ -199,6 +199,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
+	if opts.ResultPort == 0 {
+		opts.ResultPort = DefaultResultPort
+	}
 	if err := EnsureCanStart(opts.StateDir, opts.Name); err != nil {
 		return Result{}, err
 	}
@@ -227,6 +230,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	}
 	rootfsPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4")
 	if _, err := os.Stat(rootfsPath); err != nil {
+		return Result{}, err
+	}
+	if err := os.Remove(ResultPath(opts.StateDir, opts.Name)); err != nil && !os.IsNotExist(err) {
 		return Result{}, err
 	}
 	resp, err := startDetached(opts, Request(opts, "run", rootfsPath, NewRequestID()))

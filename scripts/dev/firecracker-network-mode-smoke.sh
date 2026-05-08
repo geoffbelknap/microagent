@@ -12,6 +12,8 @@ EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a
 cleanup() {
   status="$?"
   if [ "$status" -eq 0 ] && [ -x "$CLI" ]; then
+    "$CLI" stop user-smoke --state-dir "$STATE_DIR/user" >/dev/null 2>&1 || true
+    "$CLI" delete user-smoke --state-dir "$STATE_DIR/user" >/dev/null 2>&1 || true
     "$CLI" stop isolated-smoke --state-dir "$STATE_DIR/isolated" >/dev/null 2>&1 || true
     "$CLI" delete isolated-smoke --state-dir "$STATE_DIR/isolated" >/dev/null 2>&1 || true
     "$CLI" stop bridged-smoke --state-dir "$STATE_DIR/bridged" >/dev/null 2>&1 || true
@@ -78,6 +80,14 @@ export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
+if command -v getcap >/dev/null 2>&1; then
+  supervisor_caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
+  if printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin'; then
+    echo "fresh supervisor unexpectedly has CAP_NET_ADMIN before user-mode smoke" >&2
+    exit 1
+  fi
+fi
+
 if [ "$(id -u)" -ne 0 ]; then
   if ! command -v getcap >/dev/null 2>&1; then
     echo "getcap is required to assert supervisor-only CAP_NET_ADMIN setup" >&2
@@ -118,6 +128,39 @@ if result.get("sha256") != sys.argv[2]:
 print(result["path"])
 PY
 )"
+
+"$CLI" run \
+  --backend firecracker \
+  --image "$IMAGE" \
+  --arch amd64 \
+  --exec "wget -qO- -T 10 http://example.com >/tmp/user.out && echo USER_OUTBOUND_READY || echo USER_OUTBOUND_FAILED" \
+  --kernel "$kernel_path" \
+  --guest-init "$GUEST_INIT" \
+  --state-dir "$STATE_DIR/user-run" \
+  --size-mib 128 \
+  --result-port 0 \
+  --timeout 30 \
+  --network user \
+  --keep >"$STATE_DIR/user.json"
+
+python3 - "$STATE_DIR/user.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    result = json.load(f)
+if result["response"]["event"]["state"] != "stopped":
+    raise SystemExit(result)
+if "USER_OUTBOUND_FAILED" in result["serial_log"]:
+    raise SystemExit(result["serial_log"])
+if "USER_OUTBOUND_READY" not in result["serial_log"]:
+    raise SystemExit(result["serial_log"])
+if result["network"]["mode"] != "user":
+    raise SystemExit(result["network"])
+runtime = ((result.get("response") or {}).get("network") or {})
+if runtime.get("mode") == "user" and runtime.get("ip") == "":
+    raise SystemExit(runtime)
+PY
 
 if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
   sudo -n setcap 'cap_net_admin+ep' "$SUPERVISOR"

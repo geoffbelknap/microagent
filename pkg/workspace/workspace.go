@@ -26,7 +26,7 @@ const (
 	DefaultRestartPolicy       = "never"
 	DefaultNetworkMode         = "user"
 	DefaultResultPort          = 1024
-	DefaultTimeout             = 2 * time.Minute
+	DefaultTimeout             = 5 * time.Minute
 )
 
 type Options struct {
@@ -669,7 +669,7 @@ func Command(opts Options) string {
 		lines = append(lines, execCommand)
 	}
 	if opts.PrepareForStart {
-		lines = append(lines, ResetGuestConfigCommand(ShellCommand(opts.Entrypoint), opts.Env, 0, Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards)))
+		lines = append(lines, ResetGuestConfigCommand(ShellCommand(opts.Entrypoint), opts.Env, opts.ResultPort, Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards)))
 	}
 	if len(lines) == 0 {
 		return ""

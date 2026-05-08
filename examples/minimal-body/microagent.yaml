@@ -1,8 +1,8 @@
 name: minimal-body
-image: python:3.13-slim
+image: docker.io/library/python:3.13-slim
 setup:
   - pip install --no-cache-dir 'pydantic>=2.0,<3' 'anthropic>=0.40'
-  - mkdir -p /app /agent
+  - mkdir -p /app /agent /workspace
 entrypoint: python /app/body.py
 files:
   - src: ./body.py

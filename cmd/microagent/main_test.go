@@ -2927,6 +2927,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(command, `> /etc/microagent/run.json`) ||
 		!strings.Contains(command, `"command":["/bin/sh","-lc","/app/entrypoint.sh"]`) ||
+		!strings.Contains(command, `"port":1024`) ||
 		!strings.Contains(command, `"mountpoint":"/config"`) ||
 		!strings.Contains(command, `"hostPort":8080`) ||
 		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) {
