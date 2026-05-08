@@ -771,7 +771,8 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 		done <- struct{}{}
 	}()
 	<-done
-	<-done
+	_ = conn.Close()
+	_ = file.Close()
 }
 
 func closeWriteConn(conn net.Conn) {

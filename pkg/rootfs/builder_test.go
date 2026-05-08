@@ -134,6 +134,55 @@ func TestWriteDeclaredFilesRejectsRelativeGuestPath(t *testing.T) {
 	}
 }
 
+func TestWriteInitDoesNotFollowStageSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "sbin")); err != nil {
+		t.Fatal(err)
+	}
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, nil, "", 0, nil, nil)
+	if err == nil {
+		t.Fatal("expected symlinked init parent to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "microagent-init")); !os.IsNotExist(err) {
+		t.Fatalf("init escaped stage or stat failed: %v", err)
+	}
+}
+
+func TestWriteDeclaredFilesDoesNotFollowStageSymlink(t *testing.T) {
+	dir := t.TempDir()
+	outside := t.TempDir()
+	src := filepath.Join(dir, "source.txt")
+	if err := os.WriteFile(src, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "app")); err != nil {
+		t.Fatal(err)
+	}
+	err := writeDeclaredFiles(dir, []File{{SourcePath: src, Path: "/app/source.txt"}})
+	if err == nil {
+		t.Fatal("expected symlinked file parent to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "source.txt")); !os.IsNotExist(err) {
+		t.Fatalf("declared file escaped stage or stat failed: %v", err)
+	}
+}
+
+func TestExtractLayerRejectsAbsoluteSymlinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: "app", Typeflag: tar.TypeSymlink, Linkname: "/tmp/outside", Mode: 0o777}); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
+		t.Fatal("expected absolute symlink target to be rejected")
+	}
+}
+
 func TestExtractLayerRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer

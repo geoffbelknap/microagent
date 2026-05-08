@@ -179,6 +179,8 @@ let serialInputFileName = "serial.in"
 let supervisorLogFileName = "supervisor.log"
 let quarantineAckFileName = "quarantine.ack.json"
 let quarantineControlSignal = SIGUSR1
+let maxSocketConnections = 128
+let maxResultSocketBytes = 16 * 1024 * 1024
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
 let encoder = JSONEncoder()
@@ -367,6 +369,9 @@ func validatedIdentity(_ identity: Identity?) throws -> Identity {
     if identity.runtimeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
         throw ProtocolError.invalid("identity.runtimeID is required")
     }
+    if !isSafeIdentifier(identity.runtimeID) {
+        throw ProtocolError.invalid("identity.runtimeID must be a safe basename")
+    }
     if identity.backend != backendName {
         throw ProtocolError.invalid("identity.backend must be \(backendName)")
     }
@@ -531,7 +536,7 @@ func hostSupport() -> HostSupport {
     let available = true
     let supported: Bool
     if #available(macOS 13.0, *) {
-        supported = true
+        supported = VZVirtualMachine.isSupported
     } else {
         supported = false
     }
@@ -553,6 +558,14 @@ func hostSupport() -> HostSupport {
 
 func runtimeDirectory(identity: Identity, stateDir: String) -> URL {
     URL(fileURLWithPath: stateDir).appendingPathComponent(identity.runtimeID, isDirectory: true)
+}
+
+func isSafeIdentifier(_ value: String) -> Bool {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty || trimmed == "." || trimmed == ".." {
+        return false
+    }
+    return !trimmed.contains("/") && !trimmed.contains("\\") && !trimmed.contains("\0")
 }
 
 func eventPath(identity: Identity, stateDir: String) -> URL {
@@ -670,6 +683,7 @@ func writeState(event: Event, config: Config) throws {
 }
 
 func appendEvent(event: Event, stateDir: String) throws {
+    let maxEvents = 1024
     let path = runtimeDirectory(identity: event.identity, stateDir: stateDir).appendingPathComponent(eventsFileName)
     var events: [Event] = []
     if FileManager.default.fileExists(atPath: path.path) {
@@ -679,6 +693,9 @@ func appendEvent(event: Event, stateDir: String) throws {
         }
     }
     events.append(event)
+    if events.count > maxEvents {
+        events = Array(events.suffix(maxEvents))
+    }
     try encoder.encode(events).write(to: path, options: .atomic)
 }
 
@@ -898,7 +915,11 @@ final class TCPPublishForwarder: @unchecked Sendable {
             close(tcpFD)
             return
         }
-        retain(connection)
+        if !retain(connection) {
+            close(tcpFD)
+            connection.close()
+            return
+        }
         let vsockFD = connection.fileDescriptor
         Thread.detachNewThread {
             copyFD(from: tcpFD, to: vsockFD)
@@ -914,10 +935,14 @@ final class TCPPublishForwarder: @unchecked Sendable {
         }
     }
 
-    private func retain(_ connection: VZVirtioSocketConnection) {
+    private func retain(_ connection: VZVirtioSocketConnection) -> Bool {
         lock.lock()
+        defer { lock.unlock() }
+        if connections.count >= maxSocketConnections {
+            return false
+        }
         connections.append(connection)
-        lock.unlock()
+        return true
     }
 
     private func release(_ connection: VZVirtioSocketConnection) {
@@ -957,7 +982,10 @@ final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unc
     }
 
     func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
-        retain(connection)
+        if !retain(connection) {
+            connection.close()
+            return false
+        }
         let fd = connection.fileDescriptor
         let path = self.path
         DispatchQueue.global(qos: .utility).async {
@@ -970,6 +998,9 @@ final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unc
             while true {
                 let n = read(fd, &buffer, buffer.count)
                 if n > 0 {
+                    if data.count + n > maxResultSocketBytes {
+                        return
+                    }
                     data.append(buffer, count: n)
                     continue
                 }
@@ -981,10 +1012,14 @@ final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unc
         return true
     }
 
-    private func retain(_ connection: VZVirtioSocketConnection) {
+    private func retain(_ connection: VZVirtioSocketConnection) -> Bool {
         lock.lock()
+        defer { lock.unlock() }
+        if connections.count >= maxSocketConnections {
+            return false
+        }
         connections.append(connection)
-        lock.unlock()
+        return true
     }
 
     private func release(_ connection: VZVirtioSocketConnection) {
@@ -1022,7 +1057,11 @@ final class TCPSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchec
         if remoteFD < 0 {
             return false
         }
-        retain(connection)
+        if !retain(connection) {
+            close(remoteFD)
+            connection.close()
+            return false
+        }
         let localFD = connection.fileDescriptor
         Thread.detachNewThread {
             copyFD(from: localFD, to: remoteFD)
@@ -1039,10 +1078,14 @@ final class TCPSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchec
         return true
     }
 
-    private func retain(_ connection: VZVirtioSocketConnection) {
+    private func retain(_ connection: VZVirtioSocketConnection) -> Bool {
         lock.lock()
+        defer { lock.unlock() }
+        if connections.count >= maxSocketConnections {
+            return false
+        }
         connections.append(connection)
-        lock.unlock()
+        return true
     }
 
     private func release(_ connection: VZVirtioSocketConnection) {
@@ -1148,7 +1191,7 @@ func runVM(_ request: Request) throws {
         let vm = VZVirtualMachine(configuration: vmConfig)
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
-        let socketListeners = installSocketListeners(vm: vm, config: config)
+        let socketListeners = try installSocketListeners(vm: vm, identity: identity, config: config)
         let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
         let quarantineController = QuarantineController(identity: identity, config: config, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
         quarantineController.start()
@@ -1195,7 +1238,7 @@ func runConsole(_ request: Request) throws {
         let vm = VZVirtualMachine(configuration: vmConfig)
         let delegate = VMRunDelegate(identity: identity, config: config)
         vm.delegate = delegate
-        let socketListeners = installSocketListeners(vm: vm, config: config)
+        let socketListeners = try installSocketListeners(vm: vm, identity: identity, config: config)
         let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
         let quarantineController = QuarantineController(identity: identity, config: config, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
         quarantineController.start()
@@ -1230,7 +1273,7 @@ func runConsole(_ request: Request) throws {
 
 #if canImport(Virtualization)
 @available(macOS 13.0, *)
-func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [SocketListenerHandle] {
+func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Config) throws -> [SocketListenerHandle] {
     guard let socket = vm.socketDevices.first as? VZVirtioSocketDevice else {
         return []
     }
@@ -1245,6 +1288,9 @@ func installSocketListeners(vm: VZVirtualMachine, config: Config) -> [SocketList
         if let target = try? parseTCPHostPort(listenerConfig.target) {
             delegate = TCPSocketDelegate(target: target)
         } else {
+            if listenerConfig.target != resultPath(identity: identity, stateDir: config.stateDir).path {
+                throw ProtocolError.invalid("vsock listener \(listenerConfig.port) target must be host:port or the runtime result path")
+            }
             delegate = ResultSocketDelegate(path: listenerConfig.target)
         }
         listener.delegate = delegate
@@ -1271,7 +1317,7 @@ func listenTCP(_ forward: PortForward) throws -> Int32 {
         throw ProtocolError.invalid("publish protocol must be tcp")
     }
     let host = (forward.host ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    let bindHost = host.isEmpty ? "0.0.0.0" : (host == "localhost" ? "127.0.0.1" : host)
+    let bindHost = host.isEmpty ? "127.0.0.1" : (host == "localhost" ? "127.0.0.1" : host)
     let fd = socket(AF_INET, SOCK_STREAM, 0)
     if fd < 0 {
         throw ProtocolError.invalid("open published tcp socket failed with errno \(errno)")
@@ -1510,6 +1556,11 @@ func bridgeSerialInput(path: String, to output: FileHandle) {
             while true {
                 let n = read(fd, &buffer, buffer.count)
                 if n > 0 {
+                    if !FileManager.default.fileExists(atPath: path) {
+                        close(fd)
+                        output.closeFile()
+                        return
+                    }
                     output.write(Data(buffer.prefix(n)))
                     continue
                 }

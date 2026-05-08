@@ -3568,7 +3568,17 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(configData), `"vsock_id": "vsock0"`) || !strings.Contains(string(configData), `"guest_cid": 3`) {
+	var config struct {
+		Vsock *struct {
+			VsockID  string `json:"vsock_id"`
+			GuestCID uint32 `json:"guest_cid"`
+			UDSPath  string `json:"uds_path"`
+		} `json:"vsock"`
+	}
+	if err := json.Unmarshal(configData, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config.Vsock == nil || config.Vsock.VsockID != "vsock0" || config.Vsock.GuestCID < 3 || config.Vsock.UDSPath == "" {
 		t.Fatalf("firecracker config missing vsock: %s", configData)
 	}
 }

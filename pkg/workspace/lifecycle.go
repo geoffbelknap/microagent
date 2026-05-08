@@ -114,7 +114,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		return result, err
 	}
 	if HasGuestCommand(opts) {
-		resp, runErr := runForeground(ctx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
+		runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
+		resp, runErr := runForeground(runCtx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
 		result.Response = resp
 		result.SerialPath = SerialLogPath(opts.StateDir, opts.Name)
 		if runErr != nil {
@@ -168,7 +170,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := WriteManifest(opts); err != nil {
 		return result, err
 	}
-	resp, err := runForeground(ctx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
+	runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	defer cancel()
+	resp, err := runForeground(runCtx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
 	result.Response = resp
 	result.SerialPath = SerialLogPath(opts.StateDir, opts.Name)
 	if err == nil && resp.OK {
@@ -364,6 +368,9 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return vmkit.Response{}, err
 	}
+	if err := ValidateName(opts.Name); err != nil {
+		return vmkit.Response{}, err
+	}
 	switch command {
 	case "halt", "quarantine", "stop", "kill", "delete":
 	default:
@@ -406,7 +413,6 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		Files:          RootfsFiles(opts.Files),
 		Mounts:         Mounts(opts.Disks),
 		HostForwards:   RootfsPortForwards(opts.Network.PortForwards),
-		AllowMutable:   true,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := Result{
@@ -682,6 +688,9 @@ func SerialInputPath(stateDir, name string) string {
 }
 
 func Cleanup(stateDir, name string) {
+	if ValidateName(name) != nil {
+		return
+	}
 	_ = os.RemoveAll(filepath.Join(stateDir, "workspaces", name))
 	_ = os.RemoveAll(filepath.Join(stateDir, name))
 }
@@ -747,7 +756,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 		opts.Profile = manifest.Profile
 	}
 	opts.RestartPolicy = NormalizeRestartPolicy(manifest.Restart)
-	if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" {
+	if manifest.Network.Mode != "" || manifest.Network.Interface != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" {
 		opts.Network = NetworkConfigFromSpec(manifest.Network)
 	}
 	if manifest.Resources.MemoryMiB != 0 {
@@ -1093,6 +1102,7 @@ func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verifi
 }
 
 func appendEvent(path string, event EventFile) error {
+	const maxEvents = 1024
 	var events []EventFile
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -1104,6 +1114,9 @@ func appendEvent(path string, event EventFile) error {
 		}
 	}
 	events = append(events, event)
+	if len(events) > maxEvents {
+		events = events[len(events)-maxEvents:]
+	}
 	return writeJSONFile(path, events)
 }
 

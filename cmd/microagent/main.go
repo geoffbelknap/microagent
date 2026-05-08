@@ -893,6 +893,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 		name := fmt.Sprintf("perf-boot-%d-%d", time.Now().UnixNano(), i+1)
 		start := time.Now()
 		err := runWorkspaceToDiscardedOutput(ctx, perfBootWorkspaceArgs(opts, name))
+		cleanupWorkspaceState(workspaceOptions{StateDir: opts.StateDir, Name: name})
 		duration := time.Since(start)
 		result := perfIteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds()}
 		if err != nil {
@@ -1303,6 +1304,16 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if *readyTimeoutSeconds < 0 {
 		return fmt.Errorf("connect ready-timeout must not be negative")
 	}
+	state, _, err := workspace.LatestStartState(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	if state == vmkit.StateQuarantined {
+		return fmt.Errorf("workspace %s is quarantined; console input is disabled", name)
+	}
+	if state != vmkit.StateRunning {
+		return fmt.Errorf("workspace %s is not running; console input is unavailable in state %s", name, state)
+	}
 	inputPath := serialInputPath(opts.StateDir, name)
 	logPath := filepath.Join(opts.StateDir, name, "serial.log")
 	if strings.TrimSpace(*send) != "" {
@@ -1542,7 +1553,7 @@ func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (work
 		workspaceOpts.Profile = manifest.Profile
 	}
 	workspaceOpts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
-	if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" {
+	if manifest.Network.Mode != "" || manifest.Network.Interface != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" {
 		workspaceOpts.Network = networkConfigFromSpec(manifest.Network)
 	}
 	if manifest.Resources.MemoryMiB != 0 {
@@ -1555,6 +1566,7 @@ func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (work
 		workspaceOpts.SizeMiB = manifest.Resources.SizeMiB
 	}
 	workspaceOpts.Disks = manifest.Disks
+	workspaceOpts.Mediation = manifest.Mediation
 	if err := validateRestartPolicy(workspaceOpts.RestartPolicy); err != nil {
 		return workspaceOptions{}, err
 	}
@@ -1841,13 +1853,16 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 		opts.SizeMiB = spec.Resources.SizeMiB
 		opts.SpecSize = true
 	}
-	if spec.Network.Mode != "" || len(spec.Network.PortForwards) != 0 || len(spec.Network.DNS) != 0 || len(spec.Network.Routes) != 0 || spec.Network.IP != "" {
+	if spec.Network.Mode != "" || spec.Network.Interface != "" || len(spec.Network.PortForwards) != 0 || len(spec.Network.DNS) != 0 || len(spec.Network.Routes) != 0 || spec.Network.IP != "" || spec.Network.Subnet != "" || spec.Network.Gateway != "" {
 		opts.Network = vmkit.NetworkConfig{
 			Mode:         spec.Network.Mode,
+			Interface:    spec.Network.Interface,
 			PortForwards: append([]vmkit.PortForward{}, spec.Network.PortForwards...),
 			DNS:          append([]string{}, spec.Network.DNS...),
 			Routes:       append([]string{}, spec.Network.Routes...),
 			IP:           spec.Network.IP,
+			Subnet:       spec.Network.Subnet,
+			Gateway:      spec.Network.Gateway,
 		}
 	}
 	if spec.Mediation.Enabled || spec.Mediation.Required || spec.Mediation.Port != 0 || strings.TrimSpace(spec.Mediation.Target) != "" || spec.Mediation.FailClosed {
@@ -1919,6 +1934,9 @@ func workspaceSpecDisks(spec workspaceSpec) ([]workspaceDisk, error) {
 func validateWorkspaceDisk(disk workspaceDisk) error {
 	if strings.TrimSpace(disk.Name) == "" {
 		return fmt.Errorf("disk name is required")
+	}
+	if err := validateSafeBasename("disk name", disk.Name); err != nil {
+		return err
 	}
 	if disk.Name == "rootfs" {
 		return fmt.Errorf("disk name rootfs is reserved")
@@ -2084,7 +2102,8 @@ func canUseImageBaseline(opts workspaceOptions) bool {
 		!workspaceHasGuestCommand(opts) &&
 		len(opts.Files) == 0 &&
 		len(opts.Disks) == 0 &&
-		len(opts.Env) == 0
+		len(opts.Env) == 0 &&
+		len(opts.Network.PortForwards) == 0
 }
 
 func normalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
@@ -2150,7 +2169,6 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Files:          workspace.RootfsFiles(opts.Files),
 		Mounts:         workspaceMounts(opts.Disks),
 		HostForwards:   rootfsPortForwards(opts.Network.PortForwards),
-		AllowMutable:   true,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := workspaceResult{
@@ -2194,6 +2212,9 @@ func prepareWorkspaceDisks(ctx context.Context, opts workspaceOptions) ([]worksp
 	seenNames := map[string]bool{}
 	seenMountpoints := map[string]bool{}
 	for _, disk := range opts.Disks {
+		if err := validateWorkspaceDisk(disk); err != nil {
+			return nil, err
+		}
 		if seenNames[disk.Name] {
 			return nil, fmt.Errorf("duplicate disk name %q", disk.Name)
 		}
@@ -2741,6 +2762,7 @@ func writeWorkspaceProcessState(opts workspaceOptions, req vmkit.Request, state 
 }
 
 func appendWorkspaceEvent(path string, event workspaceEventFile) error {
+	const maxEvents = 1024
 	var events []workspaceEventFile
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -2752,6 +2774,9 @@ func appendWorkspaceEvent(path string, event workspaceEventFile) error {
 		}
 	}
 	events = append(events, event)
+	if len(events) > maxEvents {
+		events = events[len(events)-maxEvents:]
+	}
 	return writeJSONFile(path, events)
 }
 
@@ -2987,13 +3012,13 @@ func writeResultResponse(stdout *os.File, resp vmkit.Response) error {
 		fmt.Fprintf(stdout, "Result: %s\n", resp.Result.ResultPath)
 	}
 	if strings.TrimSpace(resp.Result.Stdout) != "" {
-		fmt.Fprintf(stdout, "\n%s", resp.Result.Stdout)
+		fmt.Fprintf(stdout, "\n%s", sanitizeHumanOutput(resp.Result.Stdout))
 		if !strings.HasSuffix(resp.Result.Stdout, "\n") {
 			fmt.Fprintln(stdout)
 		}
 	}
 	if strings.TrimSpace(resp.Result.Stderr) != "" {
-		fmt.Fprintf(stdout, "\nStderr:\n%s", resp.Result.Stderr)
+		fmt.Fprintf(stdout, "\nStderr:\n%s", sanitizeHumanOutput(resp.Result.Stderr))
 		if !strings.HasSuffix(resp.Result.Stderr, "\n") {
 			fmt.Fprintln(stdout)
 		}
@@ -3048,13 +3073,13 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	if result.Result != nil {
 		fmt.Fprintf(stdout, "Exit code: %d\n", result.Result.ExitCode)
 		if strings.TrimSpace(result.Result.Stdout) != "" {
-			fmt.Fprintf(stdout, "\n%s", result.Result.Stdout)
+			fmt.Fprintf(stdout, "\n%s", sanitizeHumanOutput(result.Result.Stdout))
 			if !strings.HasSuffix(result.Result.Stdout, "\n") {
 				fmt.Fprintln(stdout)
 			}
 		}
 		if strings.TrimSpace(result.Result.Stderr) != "" {
-			fmt.Fprintf(stdout, "\nStderr:\n%s", result.Result.Stderr)
+			fmt.Fprintf(stdout, "\nStderr:\n%s", sanitizeHumanOutput(result.Result.Stderr))
 			if !strings.HasSuffix(result.Result.Stderr, "\n") {
 				fmt.Fprintln(stdout)
 			}
@@ -3064,6 +3089,19 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 		fmt.Fprintf(stdout, "Error: %s\n", result.Response.Error)
 	}
 	return nil
+}
+
+func sanitizeHumanOutput(value string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t':
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
 }
 
 func writeCopyResult(stdout *os.File, result copyResult) error {
@@ -3340,6 +3378,9 @@ func readGuestResult(opts workspaceOptions) (guestResult, error) {
 }
 
 func cleanupWorkspaceState(opts workspaceOptions) {
+	if validateWorkspaceName(opts.Name) != nil {
+		return
+	}
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, "workspaces", opts.Name))
 	_ = os.RemoveAll(filepath.Join(opts.StateDir, opts.Name))
 }
@@ -3383,6 +3424,9 @@ func getWorkspaceArtifact(stateDir, debugfsPath, name, artifactName, target stri
 		return copyResult{}, err
 	}
 	remote := outputRemoteEndpoint(name, output, manifest.Disks)
+	if err := validateRemoteCopyPath(remote.Path); err != nil {
+		return copyResult{}, err
+	}
 	result, err := copyFromWorkspace(stateDir, debugfsPath, remote, target)
 	if err != nil {
 		return copyResult{}, err
@@ -3637,7 +3681,27 @@ func runDebugFS(debugfsPath, imagePath string, write bool, command string) error
 	if err != nil {
 		return fmt.Errorf("debugfs %s: %w: %s", command, err, strings.TrimSpace(string(output)))
 	}
+	if debugFSOutputFailed(output) {
+		return fmt.Errorf("debugfs %s failed: %s", command, strings.TrimSpace(string(output)))
+	}
 	return nil
+}
+
+func debugFSOutputFailed(output []byte) bool {
+	text := strings.ToLower(string(output))
+	for _, marker := range []string{
+		"file not found",
+		"not found by ext2_lookup",
+		"ext2fs_open2",
+		"permission denied",
+		"no such file",
+		"usage:",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneWorkspace(stateDir, source, target string) (workspaceResult, error) {
@@ -3954,7 +4018,6 @@ func pullImage(ctx context.Context, opts imagePullOptions) (imageRecord, error) 
 		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
-		AllowMutable:   true,
 	})
 	if err != nil {
 		return imageRecord{}, err
@@ -4077,7 +4140,9 @@ func removeImageRecords(stateDir, ref string, deleteFiles bool) (imagePruneResul
 		}
 		result.Kept = append(result.Kept, image)
 		if image.OutputPath != "" {
-			keptPaths[filepath.Clean(image.OutputPath)] = true
+			if canonical, ok := canonicalImageStorePath(stateDir, image.OutputPath); ok {
+				keptPaths[canonical] = true
+			}
 		}
 	}
 	if len(matched) == 0 {
@@ -4085,8 +4150,8 @@ func removeImageRecords(stateDir, ref string, deleteFiles bool) (imagePruneResul
 	}
 	deletedPaths := map[string]bool{}
 	for _, image := range matched {
-		cleanPath := filepath.Clean(image.OutputPath)
-		if deleteFiles && image.OutputPath != "" && imagePathInRootfsStore(stateDir, cleanPath) && !keptPaths[cleanPath] {
+		cleanPath, ok := canonicalImageStorePath(stateDir, image.OutputPath)
+		if deleteFiles && image.OutputPath != "" && ok && !keptPaths[cleanPath] {
 			if deletedPaths[cleanPath] {
 				result.Deleted = append(result.Deleted, image)
 				continue
@@ -4158,8 +4223,8 @@ func pruneImageRecords(stateDir string, deleteFiles bool) (imagePruneResult, err
 			result.Kept = append(result.Kept, image)
 			continue
 		}
-		cleanPath := filepath.Clean(image.OutputPath)
-		if deleteFiles && imagePathInRootfsStore(stateDir, cleanPath) {
+		cleanPath, ok := canonicalImageStorePath(stateDir, image.OutputPath)
+		if deleteFiles && ok {
 			if deletedPaths[cleanPath] {
 				result.Deleted = append(result.Deleted, image)
 				continue
@@ -4193,19 +4258,36 @@ func pruneImageRecords(stateDir string, deleteFiles bool) (imagePruneResult, err
 }
 
 func imagePathInRootfsStore(stateDir, path string) bool {
+	_, ok := canonicalImageStorePath(stateDir, path)
+	return ok
+}
+
+func canonicalImageStorePath(stateDir, path string) (string, bool) {
 	storeDir, err := filepath.Abs(filepath.Join(stateDir, "images", "rootfs"))
 	if err != nil {
-		return false
+		return "", false
+	}
+	storeDir, err = filepath.EvalSymlinks(storeDir)
+	if err != nil {
+		return "", false
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return false
+		return "", false
 	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(absPath))
+	if err != nil {
+		return "", false
+	}
+	absPath = filepath.Join(parent, filepath.Base(absPath))
 	rel, err := filepath.Rel(storeDir, absPath)
 	if err != nil {
-		return false
+		return "", false
 	}
-	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return absPath, true
 }
 
 func sortImageRecords(images []imageRecord) {
@@ -4224,8 +4306,15 @@ func validateWorkspaceName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("workspace name is required")
 	}
-	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+	if !vmkit.SafeIdentifier(name) {
 		return fmt.Errorf("invalid workspace name: %s", name)
+	}
+	return nil
+}
+
+func validateSafeBasename(field, value string) error {
+	if !vmkit.SafeIdentifier(value) {
+		return fmt.Errorf("invalid %s: %s", field, value)
 	}
 	return nil
 }
@@ -4524,12 +4613,13 @@ func tailFile(ctx context.Context, path string, stdout *os.File, offset int64) e
 }
 
 func waitForConsoleReady(ctx context.Context, path string, timeout time.Duration) error {
+	const maxConsoleReadyBytes int64 = 64 * 1024
 	var deadline time.Time
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
 	}
 	for {
-		data, err := os.ReadFile(path)
+		data, err := readFileTail(path, maxConsoleReadyBytes)
 		if err == nil && consoleLooksReady(string(data)) {
 			return nil
 		} else if err != nil && !os.IsNotExist(err) {
@@ -4544,6 +4634,26 @@ func waitForConsoleReady(ctx context.Context, path string, timeout time.Duration
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func readFileTail(path string, maxBytes int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	offset := int64(0)
+	if info.Size() > maxBytes {
+		offset = info.Size() - maxBytes
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return io.ReadAll(io.LimitReader(file, maxBytes))
 }
 
 func consoleLooksReady(output string) bool {
@@ -4717,13 +4827,34 @@ func reorderFlagArgs(args []string) []string {
 		if strings.HasPrefix(arg, "--") {
 			arg = "-" + strings.TrimPrefix(arg, "--")
 		}
+		flagName := arg
+		if name, _, ok := strings.Cut(arg, "="); ok {
+			flagName = name
+		}
+		if strings.Contains(arg, "=") {
+			positional = append(positional, args[i])
+			continue
+		}
+		if !valueFlags[flagName] && !isBoolReorderFlag(flagName) {
+			positional = append(positional, args[i])
+			continue
+		}
 		flags = append(flags, arg)
-		if valueFlags[arg] && i+1 < len(args) {
+		if valueFlags[flagName] && i+1 < len(args) {
 			i++
 			flags = append(flags, args[i])
 		}
 	}
 	return append(flags, positional...)
+}
+
+func isBoolReorderFlag(name string) bool {
+	switch name {
+	case "-json", "-text", "-human", "-keep", "-mediation-optional", "-delete":
+		return true
+	default:
+		return false
+	}
 }
 
 func readRequest(path string) (vmkit.Request, error) {

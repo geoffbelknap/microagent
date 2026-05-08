@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
 )
+
+const maxKernelDownloadBytes = 512 * 1024 * 1024
 
 type InstallOptions struct {
 	URL          string
@@ -183,15 +187,21 @@ func install(ctx context.Context, opts InstallOptions) error {
 			return closeErr
 		}
 	} else {
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, opts.URL, nil)
 		if err != nil {
 			_ = tmp.Close()
 			return err
 		}
-		if token := githubToken(); token != "" {
+		if token := githubTokenForURL(opts.URL); token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		client := &http.Client{Timeout: 10 * time.Minute}
+		resp, err := client.Do(req)
 		if err != nil {
 			_ = tmp.Close()
 			return err
@@ -201,9 +211,14 @@ func install(ctx context.Context, opts InstallOptions) error {
 			_ = tmp.Close()
 			return fmt.Errorf("download kernel: %s", resp.Status)
 		}
-		if _, err := io.Copy(tmp, resp.Body); err != nil {
+		limited := &io.LimitedReader{R: resp.Body, N: maxKernelDownloadBytes + 1}
+		if _, err := io.Copy(tmp, limited); err != nil {
 			_ = tmp.Close()
 			return err
+		}
+		if limited.N == 0 {
+			_ = tmp.Close()
+			return fmt.Errorf("download kernel exceeds %d bytes", maxKernelDownloadBytes)
 		}
 	}
 	if err := tmp.Close(); err != nil {
@@ -231,4 +246,16 @@ func githubToken() string {
 		return token
 	}
 	return strings.TrimSpace(os.Getenv("GH_TOKEN"))
+}
+
+func githubTokenForURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host != "github.com" && host != "objects.githubusercontent.com" && !strings.HasSuffix(host, ".githubusercontent.com") {
+		return ""
+	}
+	return githubToken()
 }

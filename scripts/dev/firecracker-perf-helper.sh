@@ -2,7 +2,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-PREFIX="${MICROAGENT_FIRECRACKER_PERF_PREFIX:-${TMPDIR:-/tmp}/microagent-firecracker-perf}"
+if [ -n "${MICROAGENT_FIRECRACKER_PERF_PREFIX:-}" ]; then
+  PREFIX="$MICROAGENT_FIRECRACKER_PERF_PREFIX"
+  if [ -L "$PREFIX" ]; then
+    echo "MICROAGENT_FIRECRACKER_PERF_PREFIX must not be a symlink: $PREFIX" >&2
+    exit 2
+  fi
+  mkdir -p "$PREFIX"
+  chmod 700 "$PREFIX"
+else
+  PREFIX="$(mktemp -d "${TMPDIR:-/tmp}/microagent-firecracker-perf.XXXXXX")"
+fi
 BIN_DIR="$PREFIX/bin"
 LIBEXEC_DIR="$PREFIX/libexec"
 KERNEL_DIR="$LIBEXEC_DIR/kernels/firecracker/amd64"

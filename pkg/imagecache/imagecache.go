@@ -79,7 +79,6 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
-		AllowMutable:   true,
 	})
 	if err != nil {
 		return Record{}, err
@@ -150,7 +149,9 @@ func Remove(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
 		}
 		result.Kept = append(result.Kept, image)
 		if image.OutputPath != "" {
-			keptPaths[filepath.Clean(image.OutputPath)] = true
+			if canonical, ok := CanonicalRootfsStorePath(stateDir, image.OutputPath); ok {
+				keptPaths[canonical] = true
+			}
 		}
 	}
 	if len(matched) == 0 {
@@ -158,8 +159,8 @@ func Remove(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
 	}
 	deletedPaths := map[string]bool{}
 	for _, image := range matched {
-		cleanPath := filepath.Clean(image.OutputPath)
-		if deleteFiles && image.OutputPath != "" && PathInRootfsStore(stateDir, cleanPath) && !keptPaths[cleanPath] {
+		cleanPath, ok := CanonicalRootfsStorePath(stateDir, image.OutputPath)
+		if deleteFiles && image.OutputPath != "" && ok && !keptPaths[cleanPath] {
 			if deletedPaths[cleanPath] {
 				result.Deleted = append(result.Deleted, image)
 				continue
@@ -195,8 +196,8 @@ func Prune(stateDir string, deleteFiles bool) (PruneResult, error) {
 			result.Kept = append(result.Kept, image)
 			continue
 		}
-		cleanPath := filepath.Clean(image.OutputPath)
-		if deleteFiles && PathInRootfsStore(stateDir, cleanPath) {
+		cleanPath, ok := CanonicalRootfsStorePath(stateDir, image.OutputPath)
+		if deleteFiles && ok {
 			if deletedPaths[cleanPath] {
 				result.Deleted = append(result.Deleted, image)
 				continue
@@ -349,19 +350,36 @@ func MatchesRef(image Record, ref string) bool {
 }
 
 func PathInRootfsStore(stateDir, path string) bool {
+	_, ok := CanonicalRootfsStorePath(stateDir, path)
+	return ok
+}
+
+func CanonicalRootfsStorePath(stateDir, path string) (string, bool) {
 	storeDir, err := filepath.Abs(filepath.Join(stateDir, "images", "rootfs"))
 	if err != nil {
-		return false
+		return "", false
+	}
+	storeDir, err = filepath.EvalSymlinks(storeDir)
+	if err != nil {
+		return "", false
 	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return false
+		return "", false
 	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(absPath))
+	if err != nil {
+		return "", false
+	}
+	absPath = filepath.Join(parent, filepath.Base(absPath))
 	rel, err := filepath.Rel(storeDir, absPath)
 	if err != nil {
-		return false
+		return "", false
 	}
-	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return absPath, true
 }
 
 func Sort(images []Record) {

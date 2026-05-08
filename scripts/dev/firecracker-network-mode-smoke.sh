@@ -88,34 +88,6 @@ if command -v getcap >/dev/null 2>&1; then
   fi
 fi
 
-if [ "$(id -u)" -ne 0 ]; then
-  if ! command -v getcap >/dev/null 2>&1; then
-    echo "getcap is required to assert supervisor-only CAP_NET_ADMIN setup" >&2
-    exit 2
-  fi
-  supervisor_caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
-  if ! printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin=eip'; then
-    if command -v sudo >/dev/null 2>&1; then
-      sudo -n setcap 'cap_net_admin+eip' "$SUPERVISOR" 2>/dev/null || true
-      supervisor_caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
-    fi
-  fi
-  if ! printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin=eip'; then
-    echo "grant only the supervisor CAP_NET_ADMIN before running this smoke:" >&2
-    echo "  sudo setcap 'cap_net_admin+eip' $SUPERVISOR" >&2
-    exit 2
-  fi
-  for host_tool in ip iptables xtables-nft-multi; do
-    if tool_path="$(command -v "$host_tool" 2>/dev/null)"; then
-      tool_caps="$(getcap "$tool_path" 2>/dev/null || true)"
-      if printf '%s\n' "$tool_caps" | grep -q 'cap_net_admin'; then
-        echo "$host_tool has CAP_NET_ADMIN; remove that capability to verify supervisor-only networking privileges" >&2
-        exit 2
-      fi
-    fi
-  done
-fi
-
 "$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
@@ -162,31 +134,9 @@ if runtime.get("mode") == "user" and runtime.get("ip") == "":
     raise SystemExit(runtime)
 PY
 
-if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-  sudo -n setcap 'cap_net_admin+ep' "$SUPERVISOR"
-  "$CLI" run \
-    --backend firecracker \
-    --image "$IMAGE" \
-    --arch amd64 \
-    --exec "echo SHOULD_NOT_BOOT" \
-    --kernel "$kernel_path" \
-    --guest-init "$GUEST_INIT" \
-    --state-dir "$STATE_DIR/nat-missing-inheritable" \
-    --size-mib 128 \
-    --result-port 0 \
-    --timeout 30 \
-    --network nat >"$STATE_DIR/nat-missing-inheritable.json" 2>"$STATE_DIR/nat-missing-inheritable.err" || true
-  if ! grep -q 'cap_net_admin+eip' "$STATE_DIR/nat-missing-inheritable.json" "$STATE_DIR/nat-missing-inheritable.err"; then
-    echo "nat with cap_net_admin+ep did not fail with the inheritable capability error" >&2
-    cat "$STATE_DIR/nat-missing-inheritable.json" >&2
-    cat "$STATE_DIR/nat-missing-inheritable.err" >&2
-    exit 1
-  fi
-  if grep -q 'SHOULD_NOT_BOOT' "$STATE_DIR/nat-missing-inheritable.json" "$STATE_DIR/nat-missing-inheritable.err"; then
-    echo "nat with cap_net_admin+ep unexpectedly booted" >&2
-    exit 1
-  fi
-  sudo -n setcap 'cap_net_admin+eip' "$SUPERVISOR"
+if [ "$(id -u)" -ne 0 ]; then
+  echo "nat and bridged portions of this smoke require root so the supervisor can pass CAP_NET_ADMIN to Firecracker" >&2
+  exit 2
 fi
 
 "$CLI" run \

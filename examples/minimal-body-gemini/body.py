@@ -41,6 +41,7 @@ CONSTRAINTS_PATH = Path("/agent/constraints.json")
 SYSTEM_PROMPT_PATH = Path("/agent/system_prompt.md")
 INPUT_PATH = Path("/workspace/input.json")
 RESULT_PATH = Path("/workspace/result.json")
+WORKSPACE_ROOT = Path("/workspace").resolve()
 
 SYSTEM_PROMPT = SYSTEM_PROMPT_PATH.read_text()
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
@@ -89,6 +90,25 @@ def emit(model: BaseModel) -> None:
     print(model.model_dump_json(), file=sys.stderr, flush=True)
 
 
+def tool_env() -> dict[str, str]:
+    blocked = ("API_KEY", "TOKEN", "SECRET", "CREDENTIAL")
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not any(marker in key.upper() for marker in blocked)
+    }
+
+
+def workspace_path(raw: str) -> Path:
+    path = Path(raw)
+    if not path.is_absolute():
+        path = WORKSPACE_ROOT / path
+    resolved = path.resolve(strict=False)
+    if not resolved.is_relative_to(WORKSPACE_ROOT):
+        raise ValueError(f"path must stay under {WORKSPACE_ROOT}: {raw}")
+    return resolved
+
+
 def execute_tool(name: str, args: dict) -> str:
     if name == "bash":
         r = subprocess.run(
@@ -97,12 +117,15 @@ def execute_tool(name: str, args: dict) -> str:
             text=True,
             timeout=30,
             cwd="/workspace",
+            env=tool_env(),
         )
         return f"exit_code={r.returncode}\nstdout:\n{r.stdout}\nstderr:\n{r.stderr}"
     if name == "read_file":
-        return Path(args["path"]).read_text()
+        return workspace_path(args["path"]).read_text()
     if name == "write_file":
-        Path(args["path"]).write_text(args["content"])
+        path = workspace_path(args["path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(args["content"])
         return f"wrote {len(args['content'])} bytes to {args['path']}"
     return f"unknown tool: {name}"
 

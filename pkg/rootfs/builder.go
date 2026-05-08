@@ -444,6 +444,13 @@ func safeSymlinkTarget(linkTarget string) (string, error) {
 	if linkTarget == "" || strings.ContainsRune(linkTarget, 0) {
 		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
 	}
+	if path.IsAbs(linkTarget) {
+		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
+	}
+	clean := path.Clean(linkTarget)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
+	}
 	return linkTarget, nil
 }
 
@@ -471,15 +478,20 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 }
 
 func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount, forwards []PortForward) error {
-	target, err := safeStagePath(stageDir, initPath)
+	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	defer root.Close()
+	target, err := safeStageRel(initPath)
+	if err != nil {
+		return err
+	}
+	if err := root.MkdirAll(path.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create init dir: %w", err)
 	}
 	if initBinaryPath != "" {
-		if err := copyFile(initBinaryPath, target, 0o755); err != nil {
+		if err := copyFileToRoot(root, initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
 		return writeGuestRunConfig(stageDir, command, env, resultPort, mounts, forwards)
@@ -496,7 +508,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		envLines(env) +
 		commandLine +
 		"if [ \"$#\" -gt 0 ]; then\n  set +e\n  \"$@\"\n  status=\"$?\"\n  set -e\n  poweroff -f || halt -f || reboot -f || true\n  exit \"$status\"\nfi\nexec /bin/sh\n"
-	if err := os.WriteFile(target, []byte(script), 0o755); err != nil {
+	if err := writeBytesToRoot(root, target, []byte(script), 0o755); err != nil {
 		return fmt.Errorf("write init: %w", err)
 	}
 	return nil
@@ -511,11 +523,16 @@ type guestRunConfig struct {
 }
 
 func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32, mounts []Mount, forwards []PortForward) error {
-	target, err := safeStagePath(stageDir, "/etc/microagent/run.json")
+	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	defer root.Close()
+	target, err := safeStageRel("/etc/microagent/run.json")
+	if err != nil {
+		return err
+	}
+	if err := root.MkdirAll(path.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create guest config dir: %w", err)
 	}
 	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort, Mounts: mounts, HostForwards: forwards})
@@ -523,7 +540,7 @@ func writeGuestRunConfig(stageDir string, command []string, env map[string]strin
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(target, data, 0o644)
+	return writeBytesToRoot(root, target, data, 0o644)
 }
 
 func envList(env map[string]string) []string {
@@ -565,8 +582,13 @@ func copyFile(src, dst string, mode os.FileMode) error {
 }
 
 func writeDeclaredFiles(stageDir string, files []File) error {
+	root, err := os.OpenRoot(stageDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	for _, file := range files {
-		target, err := safeStagePath(stageDir, file.Path)
+		target, err := safeStageRel(file.Path)
 		if err != nil {
 			return fmt.Errorf("file %s: %w", file.Path, err)
 		}
@@ -584,11 +606,49 @@ func writeDeclaredFiles(stageDir string, files []File) error {
 				return fmt.Errorf("file %s mode: %w", file.Path, err)
 			}
 		}
-		if err := copyFileOverwrite(file.SourcePath, target, mode); err != nil {
+		if err := copyFileToRoot(root, file.SourcePath, target, mode); err != nil {
 			return fmt.Errorf("copy file %s to %s: %w", file.SourcePath, file.Path, err)
 		}
 	}
 	return nil
+}
+
+func copyFileToRoot(root *os.Root, src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if err := root.MkdirAll(path.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := root.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return root.Chmod(dst, mode)
+}
+
+func writeBytesToRoot(root *os.Root, dst string, data []byte, mode os.FileMode) error {
+	out, err := root.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := out.Write(data); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return root.Chmod(dst, mode)
 }
 
 func copyFileOverwrite(src, dst string, mode os.FileMode) error {
@@ -625,6 +685,21 @@ func safeStagePath(stageDir, guestPath string) (string, error) {
 	rel := strings.TrimPrefix(guestPath, string(os.PathSeparator))
 	parts := strings.Split(rel, string(os.PathSeparator))
 	return filepath.Join(append([]string{stageDir}, parts...)...), nil
+}
+
+func safeStageRel(guestPath string) (string, error) {
+	if strings.ContainsRune(guestPath, 0) {
+		return "", fmt.Errorf("guest path contains NUL")
+	}
+	clean := path.Clean(strings.ReplaceAll(guestPath, "\\", "/"))
+	if !path.IsAbs(clean) || clean == "/" {
+		return "", fmt.Errorf("guest path must be absolute and below root")
+	}
+	rel := strings.TrimPrefix(clean, "/")
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", fmt.Errorf("guest path must stay below root")
+	}
+	return rel, nil
 }
 
 func envLines(env map[string]string) string {
