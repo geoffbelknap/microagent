@@ -460,10 +460,10 @@ func validateNetworkConfig(_ network: NetworkConfig?) throws {
     }
     let mode = normalizedNetworkMode(network)
     switch mode {
-    case "nat", "isolated", "bridged":
+    case "user", "nat", "isolated", "bridged":
         break
     default:
-        throw ProtocolError.invalid("network.mode must be nat, isolated, or bridged")
+        throw ProtocolError.invalid("network.mode must be user, nat, isolated, or bridged")
     }
     #if canImport(Virtualization)
     if mode == "bridged" {
@@ -1412,7 +1412,11 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
 @available(macOS 13.0, *)
 func networkDevices(for config: Config) throws -> [VZVirtioNetworkDeviceConfiguration] {
     switch normalizedNetworkMode(config.network) {
-    case "nat":
+    case "user", "nat":
+        // Apple Virtualization.framework's VZNATNetworkDeviceAttachment runs in
+        // user space inside the framework, so it already provides the
+        // unprivileged outbound-only semantics that "user" mode promises on
+        // Linux via pasta. Map both "user" and "nat" to it on macOS.
         let device = VZVirtioNetworkDeviceConfiguration()
         device.attachment = VZNATNetworkDeviceAttachment()
         return [device]
@@ -1423,7 +1427,7 @@ func networkDevices(for config: Config) throws -> [VZVirtioNetworkDeviceConfigur
         device.attachment = VZBridgedNetworkDeviceAttachment(interface: try bridgedInterface(named: config.network?.interface))
         return [device]
     default:
-        throw ProtocolError.invalid("network.mode must be nat, isolated, or bridged")
+        throw ProtocolError.invalid("network.mode must be user, nat, isolated, or bridged")
     }
 }
 

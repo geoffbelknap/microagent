@@ -16,7 +16,7 @@ Backend support is narrower than the enum:
 
 | Backend | What works today |
 |---|---|
-| Apple VF | `nat`, `isolated`, and TCP `--publish`. `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement. |
+| Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment`, which already runs in user space inside the framework — no privileges required. `isolated` works. TCP `--publish` works. `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement. |
 | Firecracker | `user` through pasta plus a namespace-local TAP, `nat` through a transient TAP and nftables MASQUERADE, live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
 
 Apple gates native bridged networking behind `com.apple.vm.networking`. Open-source builds can't self-sign that entitlement, and `sudo` doesn't bypass the check. If you need bridged on macOS, you sign with the entitlement; otherwise, use `nat`.
