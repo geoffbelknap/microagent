@@ -3,6 +3,21 @@ title: Go library
 description: Use microagent-kit packages directly from Go.
 ---
 
+*Want the smallest useful program first? See the [library quickstart](/getting-started/library/first-program/). This page is the package reference.*
+
+## Use it as a generic microVM toolkit
+
+The library doesn't require agent semantics. The same packages back the CLI's
+agent-flavored workflows and any program that just wants microVMs: build a
+rootfs from an OCI image, boot a VM, run a command, tear it down. The
+high-level [`pkg/workspace`](#workspace-api) API treats every workspace as a
+`workload`-role identity by default — you get caller-visible identity for
+free without writing agent-aware code, and you can drop down to
+[`pkg/vmkit`](#supervisor-types) when you need a different role or a custom
+supervisor request.
+
+## Exported packages
+
 `microagent-kit` has these exported Go packages today:
 
 | Package | Purpose |
@@ -94,36 +109,42 @@ func main() {
 Use `pkg/workspace` when your program wants to create, run, start, inspect, and
 control named workspaces without parsing CLI flags.
 
+`workspace.DefaultOptions()` picks the host backend (Firecracker on Linux,
+Apple Virtualization.framework on macOS), guest architecture, default kernel
+path, and default state directory. You override only what your program needs.
+
 ```go
 package main
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
 )
 
 func main() {
 	opts := workspace.DefaultOptions()
-	opts.Name = "agency-task-1"
-	opts.ImageRef = "docker.io/library/ubuntu@sha256:..."
-	opts.Backend = vmkit.BackendFirecracker
-	opts.KernelPath = "/home/me/.microagent/kernels/firecracker/amd64/Image"
-	opts.StateDir = "/home/me/.microagent"
-	opts.MemoryMiB = 2048
-	opts.CPUCount = 2
-	opts.ExecCommand = "printf hello"
+	opts.Name = "demo-vm"
+	opts.ImageRef = "docker.io/library/ubuntu:24.04"
+	opts.ExecCommand = "uname -a"
 
 	result, err := workspace.Run(context.Background(), opts)
 	if err != nil {
 		panic(err)
 	}
-	_ = result.Response
+	if result.Result != nil {
+		fmt.Print(result.Result.Stdout)
+	}
 }
 ```
 
-The lifecycle API includes:
+`Result.Result` is a `*GuestResult` with `Stdout`, `Stderr`, and `ExitCode`
+captured from the guest. `Result.Response` carries the supervisor's structured
+response (state, identity, verification).
+
+For non-defaults — backend override, custom kernel, sized memory/CPUs, networking
+— set the matching `Options` fields before calling `Run`. The lifecycle API:
 
 | Function | Purpose |
 |---|---|
