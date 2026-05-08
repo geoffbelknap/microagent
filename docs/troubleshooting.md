@@ -64,7 +64,7 @@ microagent kernel verify --path ~/.microagent/kernels/<backend>/<arch>/Image \
                          --sha256 <expected>
 ```
 
-If `install` doesn't produce the expected SHA either, the source you're pulling from is wrong — see the [release notes](releases/index.md) for the SHA expected for your microagent-kit version.
+If `install` doesn't produce the expected SHA either, the source you're pulling from is wrong. Reinstall from a trusted kernel URL and pass the expected `--sha256` explicitly.
 
 ## Workspace lifecycle
 
@@ -115,6 +115,10 @@ microagent --json status <name> | jq '.verification.divergence'
 ```
 
 The `field` and `expected` / `actual` values tell you which artifact diverged. Common case: someone reinstalled the kernel without re-creating the workspace, so the workspace still references the old kernel hash.
+
+For repeatable deployments, prefer digest-pinned image refs such as
+`docker.io/library/python@sha256:...`, install kernels with an explicit
+`--sha256`, and check `.verification.ok` before `start`.
 
 ## Networking
 

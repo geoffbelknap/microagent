@@ -64,5 +64,5 @@ Planning loops, LLM calls, tool mediation, policy decisions, credential brokerin
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — development setup and PR conventions
 - [`SECURITY.md`](SECURITY.md) — reporting a security issue
-- [`CHANGELOG.md`](CHANGELOG.md) — unreleased changes; release notes live under [`docs/releases/`](docs/releases/index.md)
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes and unreleased changes
 - License: [`Apache-2.0`](LICENSE)

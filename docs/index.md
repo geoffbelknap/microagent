@@ -30,5 +30,4 @@ and control-plane decisions stay outside this project.
 - [Protocol](protocol/index.md) — shared supervisor protocol and backend notes.
 - [Library](library/go.md) — exported Go package surface.
 - [Security](security.md) — trust boundary and reporting.
-- [Stability](stability.md) — what microagent-kit promises, what it doesn't.
 - [Troubleshooting](troubleshooting.md) — common failure modes, indexed by symptom.
