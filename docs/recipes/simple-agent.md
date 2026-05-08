@@ -9,7 +9,7 @@ The workspace is fully described by [`examples/minimal-body/microagent.yaml`](ht
 
 ## What you'll need
 
-- microagent-kit installed and `microagent doctor` passing — see [install](../getting-started/install.md).
+- microagent-kit installed and `microagent doctor` passing — see [install](/getting-started/install/).
 - On Linux, `pasta` for the default unprivileged network mode. Homebrew installs it as a microagent-kit dependency; on apt-based distros it's `sudo apt install passt`.
 - An Anthropic API key in `ANTHROPIC_API_KEY`. Sign up at [console.anthropic.com](https://console.anthropic.com) if you don't have one.
 
@@ -94,7 +94,7 @@ microagent --json result minimal-body
 
 The second request asks Claude to read `/workspace/hello.py` and explain it. The file is still there from the first run; the system prompt is still loaded; the installed deps are still installed. Anthropic's prompt cache is still warm too — the second request reads the system prompt back at ~10× cheaper than the first paid for it.
 
-(See [glossary](../concepts/glossary.md) for halt vs stop vs kill vs quarantine.)
+(See [glossary](/concepts/glossary/) for halt vs stop vs kill vs quarantine.)
 
 ## Step 5 — clean up
 
@@ -123,7 +123,7 @@ This recipe runs the agent against one request per restart and uses an env-var A
 
 ## What to read next
 
-- [`microagent.yaml`](../cli/spec.md) — the full workspace spec reference.
-- [Glossary](../concepts/glossary.md) — workspace, mediation, halt vs quarantine, etc.
-- [State and identity](../concepts/state-and-identity.md) — how lifecycle events are emitted and what `microagent --json status` reports.
+- [`microagent.yaml`](/cli/spec/) — the full workspace spec reference.
+- [Glossary](/concepts/glossary/) — workspace, mediation, halt vs quarantine, etc.
+- [State and identity](/concepts/state-and-identity/) — how lifecycle events are emitted and what `microagent --json status` reports.
 - [`examples/minimal-body/`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body) — the body source.

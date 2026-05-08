@@ -46,6 +46,6 @@ Stop the foreground `supervise` process to stop restart supervision.
 
 ## Related
 
-- [`create`](create.md)
-- [`start`](start.md)
-- [`status`](status.md)
+- [`create`](/cli/create/)
+- [`start`](/cli/start/)
+- [`status`](/cli/status/)

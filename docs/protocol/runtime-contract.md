@@ -48,6 +48,6 @@ fields instead of scraping documentation prose.
 
 ## Related
 
-- [Supervisor protocol](index.md)
-- [Firecracker supervisor](firecracker.md)
-- [Apple VF supervisor](applevf.md)
+- [Supervisor protocol](/protocol/)
+- [Firecracker supervisor](/protocol/firecracker/)
+- [Apple VF supervisor](/protocol/applevf/)

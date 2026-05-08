@@ -11,7 +11,7 @@ microagent delete <name> [--state-dir <dir>]
 bundles, state file).
 
 For Firecracker, `delete` refuses to remove state while the recorded VM
-process is still running. Use [`stop`](stop.md) or [`kill`](kill.md)
+process is still running. Use [`stop`](/cli/stop/) or [`kill`](/cli/kill/)
 first.
 
 ## Flags
@@ -36,4 +36,4 @@ microagent delete agent-1 --state-dir /tmp/microagent-kit
 
 ## Related
 
-- [`stop`](stop.md), [`kill`](kill.md), [`ps`](ps.md)
+- [`stop`](/cli/stop/), [`kill`](/cli/kill/), [`ps`](/cli/ps/)

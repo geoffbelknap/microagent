@@ -8,12 +8,12 @@ description: Trust boundary and reporting issues.
 `microagent-kit` treats the kernel, rootfs, and request files as **executable
 input**. It does not sign images, scan layers, mediate credentials, or enforce
 policy — those concerns belong to the upstream system that calls `microagent`.
-See [Boundaries](concepts/boundaries.md) for the full list.
+See [Boundaries](/concepts/boundaries/) for the full list.
 
 That means:
 
 - The kernel that boots is whoever installed `~/.microagent/kernels/...`.
-  Verify with [`microagent kernel verify`](cli/kernel.md) when this matters.
+  Verify with [`microagent kernel verify`](/cli/kernel/) when this matters.
 - The rootfs is whatever OCI image the caller specified. Pin by digest in
   production. `microagent rootfs build` rejects mutable tag references
   unless you pass `--allow-mutable`.

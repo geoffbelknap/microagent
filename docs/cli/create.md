@@ -9,7 +9,7 @@ microagent create <name> --image <ref> [flags]
 ```
 
 `create` builds a workspace and records it under `--state-dir`. Unlike
-[`run`](run.md), the state survives — you can `start`, `stop`, `connect`,
+[`run`](/cli/run/), the state survives — you can `start`, `stop`, `connect`,
 and `delete` it later. If the default kernel is missing, `create` installs it
 first.
 
@@ -47,7 +47,7 @@ first.
 
 `--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags (`docker.io/library/ubuntu:24.04`). Both are allowed here — `create` records the resolved digest in the workspace verification record so `microagent --json status` can flag drift later. Pin by digest if you want reproducible workspaces.
 
-[`microagent rootfs build`](rootfs.md) is stricter: it rejects mutable tags unless you pass `--allow-mutable`. See [security](../security.md) for the rationale.
+[`microagent rootfs build`](/cli/rootfs/) is stricter: it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
 
 ## Examples
 
@@ -60,7 +60,7 @@ microagent create \
   --profile medium
 ```
 
-Profiles expand to exact memory/CPU/disk configs and are stored with the workspace. See [`profiles`](profiles.md) for the values.
+Profiles expand to exact memory/CPU/disk configs and are stored with the workspace. See [`profiles`](/cli/profiles/) for the values.
 
 Use `--memory`, `--cpus`, or `--size-mib` with a profile to override a single value while keeping the profile name in the workspace record.
 
@@ -113,7 +113,7 @@ When `microagent.yaml` or `microagent.yml` exists in the current directory,
 `microagent create` reads it automatically. CLI flags override fields from the
 spec.
 
-Restart policies are enforced by [`supervise`](supervise.md).
+Restart policies are enforced by [`supervise`](/cli/supervise/).
 
 On Apple VF, `bridged` also requires a supervisor signed with Apple's
 restricted `com.apple.vm.networking` entitlement. Open-source builds cannot
@@ -173,6 +173,6 @@ microagent --json create research --image docker.io/library/ubuntu:24.04
 
 ## Related
 
-- [`start`](start.md), [`stop`](stop.md), [`delete`](delete.md)
-- [State and identity](../concepts/state-and-identity.md)
-- [Supervisor protocol](../protocol/index.md)
+- [`start`](/cli/start/), [`stop`](/cli/stop/), [`delete`](/cli/delete/)
+- [State and identity](/concepts/state-and-identity/)
+- [Supervisor protocol](/protocol/)

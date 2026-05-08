@@ -29,6 +29,6 @@ microagent create research --image docker.io/library/ubuntu:24.04 --profile medi
 
 ## Related
 
-- [`create`](create.md)
-- [`run`](run.md)
-- [`start`](start.md)
+- [`create`](/cli/create/)
+- [`run`](/cli/run/)
+- [`start`](/cli/start/)

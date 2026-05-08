@@ -53,6 +53,6 @@ microagent cp ./notes.txt research:workspace:/notes.txt
 
 ## Related
 
-- [`create`](create.md)
-- [`clone`](clone.md)
-- [`logs`](logs.md)
+- [`create`](/cli/create/)
+- [`clone`](/cli/clone/)
+- [`logs`](/cli/logs/)

@@ -14,7 +14,7 @@ means the response has `"ok": true`. Nonzero exit means the response has
 `"ok": false` or the request could not be decoded.
 
 For the shared command list and response shape, see
-[Supervisor protocol](index.md). This page only covers the executable
+[Supervisor protocol](/protocol/). This page only covers the executable
 Apple VF process boundary.
 
 ## Request

@@ -124,7 +124,7 @@ mediation:
 
 Use `--mediation-optional` only for development paths where the workspace may boot without the host-side mediator.
 
-For the architecture and a worked pattern, see [Wire up the mediation channel](../recipes/mediation-channel.md).
+For the architecture and a worked pattern, see [Wire up the mediation channel](/recipes/mediation-channel/).
 
 ## What's visible
 

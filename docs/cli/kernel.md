@@ -68,4 +68,4 @@ microagent kernel verify \
 
 ## Related
 
-- [`doctor`](doctor.md), [Backends](../concepts/backends.md)
+- [`doctor`](/cli/doctor/), [Backends](/concepts/backends/)

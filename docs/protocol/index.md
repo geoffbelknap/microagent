@@ -17,7 +17,7 @@ Firecracker and Apple VF use the same protocol:
 The CLI chooses the active host backend and sends the request to that
 supervisor.
 
-Use [`microagent --json contract`](../cli/contract.md) for the versioned
+Use [`microagent --json contract`](/cli/contract/) for the versioned
 backend-neutral runtime contract that Firecracker and Apple VF share.
 
 ## Request
@@ -223,7 +223,7 @@ and event history are preserved for a later `start`. `quarantined` preserves
 disk state and event history while severing host-side network, mediation, and
 side-effect paths.
 
-For the visual state machine — including which transitions `start`, `halt`, `quarantine`, `stop`, `kill`, and `delete` allow — see [State and identity](../concepts/state-and-identity.md).
+For the visual state machine — including which transitions `start`, `halt`, `quarantine`, `stop`, `kill`, and `delete` allow — see [State and identity](/concepts/state-and-identity/).
 
 ## Field presence by command
 
@@ -254,9 +254,9 @@ Reading the table:
 
 ## Backend pages
 
-- [Firecracker supervisor](firecracker.md) documents the Linux
+- [Firecracker supervisor](/protocol/firecracker/) documents the Linux
   executable implementation.
-- [Apple VF supervisor](applevf.md) documents the macOS executable
+- [Apple VF supervisor](/protocol/applevf/) documents the macOS executable
   protocol.
-- [Runtime contract](runtime-contract.md) documents the shared
+- [Runtime contract](/protocol/runtime-contract/) documents the shared
   agent-runtime semantics.

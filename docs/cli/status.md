@@ -29,11 +29,11 @@ records runtime assignment details, `network.runtime` contains the latest guest
 IP, subnet, gateway, DNS, and routes.
 
 When a result is ready, `microagent --json status` includes the same structured `result`
-payload returned by [`microagent result`](result.md).
+payload returned by [`microagent result`](/cli/result/).
 
 Named workspaces also include `artifacts` when inputs or outputs were declared.
 `artifacts.ingress` lists attached bundle inputs, and `artifacts.egress` lists
-declared output paths. Use [`artifacts get`](artifacts.md) to retrieve a
+declared output paths. Use [`artifacts get`](/cli/artifacts/) to retrieve a
 declared output by name without entering the workspace.
 
 ## Flags
@@ -54,5 +54,5 @@ microagent --json status agent-1 --state-dir /tmp/microagent-kit
 
 ## Related
 
-- [`ps`](ps.md) for a list view
-- [State and identity](../concepts/state-and-identity.md)
+- [`ps`](/cli/ps/) for a list view
+- [State and identity](/concepts/state-and-identity/)
