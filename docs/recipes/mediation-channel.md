@@ -39,7 +39,7 @@ mediation:
 Equivalent CLI:
 
 ```bash
-microagent create demo --file ./microagent.yaml \
+microagent create --file ./microagent.yaml \
   --mediation 2048=127.0.0.1:9900
 ```
 

@@ -10,8 +10,7 @@ The workspace is fully described by [`examples/minimal-body/microagent.yaml`](ht
 ## What you'll need
 
 - microagent-kit installed and `microagent doctor` passing — see [install](../getting-started/install.md).
-- On Linux with Firecracker, `pasta` installed for the default unprivileged
-  network mode (`sudo apt install passt` on Debian/Ubuntu).
+- On Linux, `pasta` for the default unprivileged network mode. Homebrew installs it as a microagent-kit dependency; on apt-based distros it's `sudo apt install passt`.
 - An Anthropic API key in `ANTHROPIC_API_KEY`. Sign up at [console.anthropic.com](https://console.anthropic.com) if you don't have one.
 
 ## Step 1 — create the workspace
@@ -19,10 +18,12 @@ The workspace is fully described by [`examples/minimal-body/microagent.yaml`](ht
 From the repo root:
 
 ```bash
-microagent create demo \
+microagent create \
   --file examples/minimal-body/microagent.yaml \
   --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
+
+The spec sets the workspace name to `minimal-body` — that's what the rest of these commands refer to. First-time create takes a minute or so: microagent pulls the OCI base image, builds the rootfs, and runs the `setup:` commands (which `pip install` Pydantic and the Anthropic SDK).
 
 The spec file does the heavy lifting: pulls a stock `python:3.13-slim` image, installs `pydantic` and `anthropic` via `setup`, copies the body source and operator files into the rootfs via `files:`, sets the entrypoint, and declares the result artifact. The CLI just adds the API key as an env var (host secrets stay out of the spec).
 
@@ -35,7 +36,7 @@ The full body source is in [`examples/minimal-body/body.py`](https://github.com/
 The spec covers everything that doesn't change between runs. The one thing that changes per run is the request itself, delivered with `microagent cp`:
 
 ```bash
-microagent cp examples/minimal-body/demo/input-001.json demo:/workspace/input.json
+microagent cp examples/minimal-body/demo/input-001.json minimal-body:/workspace/input.json
 ```
 
 The first request asks for something concrete:
@@ -65,16 +66,16 @@ the user can find the results.
 ## Step 3 — run and look at what happened
 
 ```bash
-microagent start demo
-microagent --json result demo
+microagent start minimal-body
+microagent --json result minimal-body
 ```
 
-You'll see Claude's final summary in the `content` field — something like *"I created `/workspace/hello.py`, ran it with `python3`, and got: `hello from a microVM` followed by the kernel version `6.6.x-...`."*
+The body takes ~5–10 seconds to complete: VM boots, body emits `ready`, runs the structural checks, calls Claude, writes the result, exits. You'll see Claude's final summary in the `content` field — something like *"I created `/workspace/hello.py`, ran it with `python3`, and got `hello from a microVM` followed by the kernel version `6.1.155`."*
 
 The file Claude wrote is still on the workspace's disk. Pull it out:
 
 ```bash
-microagent cp demo:/workspace/hello.py ./hello.py
+microagent cp minimal-body:/workspace/hello.py ./hello.py
 cat ./hello.py
 ```
 
@@ -85,21 +86,21 @@ That's the script Claude wrote, retrieved from the microVM. Claude did real work
 The workspace persists between starts — disk, files, all of it. Halt cleanly, deliver a new request, start it back up. Claude can read whatever it wrote on the previous run.
 
 ```bash
-microagent halt demo
-microagent cp examples/minimal-body/demo/input-002.json demo:/workspace/input.json
-microagent start demo
-microagent --json result demo
+microagent halt minimal-body
+microagent cp examples/minimal-body/demo/input-002.json minimal-body:/workspace/input.json
+microagent start minimal-body
+microagent --json result minimal-body
 ```
 
-The second request asks Claude to read `/workspace/hello.py` and explain it. The file is still there from the first run, the system prompt is still loaded, the installed deps are still installed, and the prompt cache is still warm.
+The second request asks Claude to read `/workspace/hello.py` and explain it. The file is still there from the first run; the system prompt is still loaded; the installed deps are still installed. Anthropic's prompt cache is still warm too — the second request reads the system prompt back at ~10× cheaper than the first paid for it.
 
 (See [glossary](../concepts/glossary.md) for halt vs stop vs kill vs quarantine.)
 
 ## Step 5 — clean up
 
 ```bash
-microagent halt demo
-microagent delete demo
+microagent halt minimal-body
+microagent delete minimal-body
 ```
 
 `delete` removes the workspace record and disk. (For Firecracker, `delete` refuses while the VM is still running; halt or stop first.)

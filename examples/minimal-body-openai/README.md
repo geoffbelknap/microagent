@@ -18,13 +18,13 @@ OpenAI applies prompt caching automatically for prefixes ≥ 1024 tokens — no 
 You'll need an OpenAI API key as `OPENAI_API_KEY`. The flow mirrors the [simple-agent recipe](../../docs/recipes/simple-agent.md), with two substitutions:
 
 ```bash
-microagent create demo \
+microagent create \
   --file examples/minimal-body-openai/microagent.yaml \
   --env OPENAI_API_KEY=$OPENAI_API_KEY
 
-microagent cp examples/minimal-body-openai/demo/input-001.json demo:/workspace/input.json
-microagent start demo
-microagent --json result demo
+microagent cp examples/minimal-body-openai/demo/input-001.json minimal-body-openai:/workspace/input.json
+microagent start minimal-body-openai
+microagent --json result minimal-body-openai
 ```
 
 Everything else — halt, resume, retrieve files, clean up — is identical to the Anthropic recipe.
