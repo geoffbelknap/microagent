@@ -567,7 +567,7 @@ func TestWriteConfigAddsVsockForMediation(t *testing.T) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Vsock == nil || cfg.Vsock.GuestCID != 3 || cfg.Vsock.UDSPath == "" {
+	if cfg.Vsock == nil || cfg.Vsock.GuestCID != firecrackerGuestCID(opts) || cfg.Vsock.UDSPath == "" {
 		t.Fatalf("vsock = %#v", cfg.Vsock)
 	}
 }
