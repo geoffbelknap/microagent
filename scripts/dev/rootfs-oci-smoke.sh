@@ -35,7 +35,7 @@ else
   exit 2
 fi
 
-go build -o "$STATE_DIR/microagent" "$ROOT/cmd/microagent"
+go build -buildvcs=false -o "$STATE_DIR/microagent" "$ROOT/cmd/microagent"
 
 response="$("$STATE_DIR/microagent" rootfs build \
   --image "$IMAGE" \

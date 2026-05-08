@@ -555,6 +555,9 @@ func ensureCanDelete(opts Options) error {
 		return err
 	}
 	if state.PID == 0 {
+		if state.Event.State == vmkit.StateStarting || state.Event.State == vmkit.StateRunning {
+			return fmt.Errorf("firecracker workspace %s is running; stop or kill it before delete", opts.Name)
+		}
 		if state.PortForwardPID != 0 {
 			active, err := processActive(state.PortForwardPID)
 			if err != nil {
@@ -564,6 +567,11 @@ func ensureCanDelete(opts Options) error {
 				return fmt.Errorf("firecracker workspace %s port forwarder is running; stop or kill it before delete", opts.Name)
 			}
 		}
+		if active, err := userNetworkProcessActive(opts); err != nil {
+			return err
+		} else if active {
+			return fmt.Errorf("firecracker workspace %s user network process is running; stop or kill it before delete", opts.Name)
+		}
 		return nil
 	}
 	active, err := processActive(state.PID)
@@ -572,6 +580,11 @@ func ensureCanDelete(opts Options) error {
 	}
 	if active {
 		return fmt.Errorf("firecracker workspace %s is running; stop or kill it before delete", opts.Name)
+	}
+	if active, err := userNetworkProcessActive(opts); err != nil {
+		return err
+	} else if active {
+		return fmt.Errorf("firecracker workspace %s user network process is running; stop or kill it before delete", opts.Name)
 	}
 	return nil
 }

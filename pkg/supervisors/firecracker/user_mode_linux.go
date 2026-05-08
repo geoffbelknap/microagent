@@ -128,6 +128,24 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 				return failedResponse(req, err.Error()), err
 			}
 			if state.Event.State == vmkit.StateRunning {
+				if hasPortForwards(req.Config) && state.PortForwardPID == 0 {
+					portForwardPID, err := startPortForwarderProcess(opts)
+					if err != nil {
+						_ = cmd.Process.Kill()
+						_ = cmd.Process.Release()
+						cleanupUserNetworkProcess(opts)
+						_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+						return failedResponse(req, err.Error()), err
+					}
+					runtimeReq := runtimeStateRequest(req, state)
+					if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, portForwardPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+						_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
+						_ = cmd.Process.Kill()
+						_ = cmd.Process.Release()
+						cleanupUserNetworkProcess(opts)
+						return vmkit.Response{}, err
+					}
+				}
 				if err := cmd.Process.Release(); err != nil {
 					wrapped := fmt.Errorf("release firecracker user networking process: %w", err)
 					_ = writeProcessState(opts, req, vmkit.StateFailed, 0, wrapped.Error())
@@ -258,6 +276,14 @@ func cleanupUserNetworkProcess(opts Options) {
 		_ = waitForProcessExit(context.Background(), pid, 2*time.Second)
 	}
 	_ = os.Remove(userNetworkPIDPath(opts))
+}
+
+func userNetworkProcessActive(opts Options) (bool, error) {
+	pid := readPIDFile(userNetworkPIDPath(opts))
+	if pid == 0 {
+		return false, nil
+	}
+	return processActive(pid)
 }
 
 func readPIDFile(path string) int {

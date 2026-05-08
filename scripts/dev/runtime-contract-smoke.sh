@@ -18,7 +18,7 @@ trap cleanup EXIT
 
 (
   cd "$ROOT"
-  build_output="$(go build -o "$CLI" ./cmd/microagent 2>&1)" || {
+  build_output="$(go build -buildvcs=false -o "$CLI" ./cmd/microagent 2>&1)" || {
     printf '%s\n' "$build_output" >&2
     exit 1
   }
