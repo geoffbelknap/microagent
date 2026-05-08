@@ -1,10 +1,10 @@
 ---
-title: microagent.yaml
-description: Declarative workspace spec for reproducible creates.
+title: Workspace spec
+description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
-control. It is consumed by [`microagent create`](create.md).
+control. It is consumed by [`microagent create`](/cli/create/).
 
 ```yaml
 name: research
@@ -91,6 +91,6 @@ microagent create --file microagent.yaml --name research-2 --profile large
 
 ## Related
 
-- [`create`](create.md)
-- [`profiles`](profiles.md)
-- [`cp`](cp.md)
+- [`create`](/cli/create/)
+- [`profiles`](/cli/profiles/)
+- [`cp`](/cli/cp/)

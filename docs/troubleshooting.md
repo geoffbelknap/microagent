@@ -52,7 +52,7 @@ First `microagent run` installs the default kernel automatically. If you'd rathe
 microagent kernel install
 ```
 
-For a custom kernel or air-gapped install, see [`microagent kernel`](cli/kernel.md).
+For a custom kernel or air-gapped install, see [`microagent kernel`](/cli/kernel/).
 
 ### `microagent kernel verify` reports a SHA mismatch
 
@@ -89,7 +89,7 @@ microagent halt <name>     # or stop / kill
 microagent start <name>    # boots the preserved disk back up
 ```
 
-See [glossary](concepts/glossary.md) for the full lifecycle vocabulary.
+See [glossary](/concepts/glossary/) for the full lifecycle vocabulary.
 
 ### Workspace boots but the entrypoint exits immediately
 
@@ -190,7 +190,7 @@ The workspace declared a mediation channel as required (the default) but the hos
 Fixes:
 
 - **Stand up the mediation listener** at the declared `host:port` before `microagent start`.
-- **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this — the channel is fail-closed for a reason ([security](security.md)).
+- **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this — the channel is fail-closed for a reason ([security](/security/)).
 
 ## Console
 
@@ -225,7 +225,7 @@ error: image reference is mutable, pass --allow-mutable to override
   `microagent rootfs build --image docker.io/library/ubuntu@sha256:...`
 - **Override** (development only): pass `--allow-mutable`.
 
-`microagent create` and `microagent run` are looser — they accept tags by default and record the resolved digest in the workspace's verification record. See [security](security.md) for the trust-boundary discussion.
+`microagent create` and `microagent run` are looser — they accept tags by default and record the resolved digest in the workspace's verification record. See [security](/security/) for the trust-boundary discussion.
 
 ### `microagent images pull` is slow or fails
 

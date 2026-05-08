@@ -31,4 +31,4 @@ microagent start research
 
 ## Related
 
-- [`start`](start.md), [`stop`](stop.md), [`kill`](kill.md), [`status`](status.md)
+- [`start`](/cli/start/), [`stop`](/cli/stop/), [`kill`](/cli/kill/), [`status`](/cli/status/)

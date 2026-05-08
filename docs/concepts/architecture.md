@@ -66,6 +66,6 @@ Go callers can use the same package flow directly without invoking the CLI.
 
 Each backend's supervisor ships as its own JSON-in / JSON-out binary. That's deliberate: it keeps host-specific backend code out of the main CLI and lets anything that can spawn a subprocess and parse JSON drive the same protocol — Go, Python, Rust, Node, shell scripts. Apple VF also requires this boundary, because Virtualization.framework is Swift-only.
 
-The shared protocol is documented at [supervisor protocol](../protocol/index.md). The
+The shared protocol is documented at [supervisor protocol](/protocol/). The
 Apple VF executable protocol is documented at
-[Apple VF supervisor](../protocol/applevf.md).
+[Apple VF supervisor](/protocol/applevf/).

@@ -27,7 +27,7 @@ executable supervisor-shaped request/response boundary.
 - `delete` refuses to remove state while the recorded VM process is still
   running. Use `stop` or `kill` first.
 - Supports interactive `connect` and `connect --send`. Use
-  [`logs`](../cli/logs.md) when you only need captured serial output.
+  [`logs`](/cli/logs/) when you only need captured serial output.
 - The default kernel path is `~/.microagent/kernels/firecracker/<arch>/Image`.
 
 ## Apple VF (macOS)

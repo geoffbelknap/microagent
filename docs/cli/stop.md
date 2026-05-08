@@ -23,8 +23,8 @@ recorded VM process; on Apple VF it asks the supervisor to stop the VM.
 microagent stop research
 ```
 
-If the VM doesn't shut down cleanly, follow up with [`kill`](kill.md).
+If the VM doesn't shut down cleanly, follow up with [`kill`](/cli/kill/).
 
 ## Related
 
-- [`kill`](kill.md), [`delete`](delete.md), [`status`](status.md)
+- [`kill`](/cli/kill/), [`delete`](/cli/delete/), [`status`](/cli/status/)

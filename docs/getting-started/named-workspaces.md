@@ -47,7 +47,7 @@ For scripts, send one line and capture new console output:
 microagent connect research --send "cat /workspace/status"
 ```
 
-`connect` is supported on Apple VF and Firecracker. Use [`logs`](../cli/logs.md)
+`connect` is supported on Apple VF and Firecracker. Use [`logs`](/cli/logs/)
 to review captured serial output.
 
 ## Inspect
@@ -66,7 +66,7 @@ microagent delete research
 ```
 
 For Firecracker, `delete` refuses to remove state while the recorded VM
-process is still running. Use [`stop`](../cli/stop.md) or [`kill`](../cli/kill.md) first.
+process is still running. Use [`stop`](/cli/stop/) or [`kill`](/cli/kill/) first.
 
 ## Attach disks
 

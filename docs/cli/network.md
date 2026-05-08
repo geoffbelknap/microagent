@@ -48,5 +48,5 @@ microagent --json network research
 
 ## Related
 
-- [`create`](create.md)
-- [`status`](status.md)
+- [`create`](/cli/create/)
+- [`status`](/cli/status/)

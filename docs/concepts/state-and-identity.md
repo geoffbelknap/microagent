@@ -140,5 +140,5 @@ event and appends the same record to `<state-dir>/<runtimeID>/events.json`.
 The timeline survives VM runtime exit and is intentionally small: it is a
 forensic lifecycle record, not a log stream.
 
-See the [supervisor protocol](../protocol/index.md) for the shared request and response
+See the [supervisor protocol](/protocol/) for the shared request and response
 schema.

@@ -77,5 +77,5 @@ microagent --json images prune --delete
 
 ## Related
 
-- [`create`](create.md)
-- [`rootfs`](rootfs.md)
+- [`create`](/cli/create/)
+- [`rootfs`](/cli/rootfs/)

@@ -35,4 +35,4 @@ microagent start research
 
 ## Related
 
-- [`create`](create.md), [`start`](start.md), [`ps`](ps.md)
+- [`create`](/cli/create/), [`start`](/cli/start/), [`ps`](/cli/ps/)

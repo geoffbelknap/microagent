@@ -3,7 +3,7 @@ title: Wire up the mediation channel
 description: Move the body from one-request-per-restart to a stream of requests over a guest-to-host vsock contract.
 ---
 
-The [simple-agent recipe](simple-agent.md) ships work into the body via `microagent cp` and retrieves it via `microagent --json result`. That works for a demo; it doesn't scale to "agent processing a stream of requests". For that, the body needs to talk to the host directly while it's running.
+The [simple-agent recipe](/recipes/simple-agent/) ships work into the body via `microagent cp` and retrieves it via `microagent --json result`. That works for a demo; it doesn't scale to "agent processing a stream of requests". For that, the body needs to talk to the host directly while it's running.
 
 microagent-kit has a primitive for exactly this: the **mediation channel**. It's a guest-to-host vsock contract — the body initiates connections to a vsock port; the host listens at a host TCP target; microagent's supervisor proxies bytes between them. Required and fail-closed by default.
 
@@ -158,5 +158,5 @@ If `mediation.required` is true (the default) and the host listener disappears, 
 
 ## Related
 
-- [Networking](../concepts/networking.md) — the mediation channel's place in the workspace network model.
-- [Build a simple agent](simple-agent.md) — the file-based version this builds on.
+- [Networking](/concepts/networking/) — the mediation channel's place in the workspace network model.
+- [Build a simple agent](/recipes/simple-agent/) — the file-based version this builds on.

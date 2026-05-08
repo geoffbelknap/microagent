@@ -46,5 +46,5 @@ visibility is honest.
 
 ## Next
 
-- [Run your first agent workspace](first-agent.md)
-- [Named workspaces](named-workspaces.md)
+- [Run your first agent workspace](/getting-started/first-agent/)
+- [Named workspaces](/getting-started/named-workspaces/)

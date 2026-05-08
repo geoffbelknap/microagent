@@ -7,7 +7,7 @@ description: Force-stop a workspace.
 microagent kill <name> [--state-dir <dir>]
 ```
 
-`kill` is the hard variant of [`stop`](stop.md). On Firecracker it sends
+`kill` is the hard variant of [`stop`](/cli/stop/). On Firecracker it sends
 SIGKILL to the recorded VM process; on Apple VF it asks the supervisor to
 terminate the VM immediately. Use it when `stop` doesn't return.
 
@@ -26,4 +26,4 @@ microagent kill research
 
 ## Related
 
-- [`stop`](stop.md), [`delete`](delete.md)
+- [`stop`](/cli/stop/), [`delete`](/cli/delete/)

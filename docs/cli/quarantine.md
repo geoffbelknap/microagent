@@ -37,4 +37,4 @@ microagent quarantine research
 
 ## Related
 
-- [`status`](status.md), [`halt`](halt.md), [`stop`](stop.md), [`kill`](kill.md)
+- [`status`](/cli/status/), [`halt`](/cli/halt/), [`stop`](/cli/stop/), [`kill`](/cli/kill/)

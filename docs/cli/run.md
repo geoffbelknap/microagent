@@ -39,7 +39,7 @@ VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
 
 ## Image references
 
-`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](rootfs.md) is the stricter path — it rejects mutable tags unless you pass `--allow-mutable`. See [security](../security.md) for the rationale.
+`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path — it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
 
 ## Examples
 
@@ -81,6 +81,6 @@ microagent run \
 
 ## Related
 
-- [`create`](create.md) — keep the workspace between starts
-- [`kernel install`](kernel.md) — manage kernels explicitly
-- [`rootfs build`](rootfs.md) — build a rootfs without booting
+- [`create`](/cli/create/) — keep the workspace between starts
+- [`kernel install`](/cli/kernel/) — manage kernels explicitly
+- [`rootfs build`](/cli/rootfs/) — build a rootfs without booting
