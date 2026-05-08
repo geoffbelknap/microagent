@@ -600,6 +600,10 @@ func resultPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("result.json")
 }
 
+func normalizedFilePath(_ path: String) -> String {
+    URL(fileURLWithPath: path).standardizedFileURL.path
+}
+
 func response(event: Event, config: Config, error: String?) -> Response {
     var response = Response(
         ok: event.state != .failed,
@@ -1280,7 +1284,13 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
     var handles: [SocketListenerHandle] = []
     var listeners = config.vsockListeners ?? []
     if let mediation = config.mediation, mediation.enabled, let port = mediation.port, let target = mediation.target {
-        listeners.append(VsockListener(port: port, target: target))
+        if let existing = listeners.first(where: { $0.port == port }) {
+            if existing.target != target {
+                throw ProtocolError.invalid("mediation port \(port) conflicts with vsock listener target \(existing.target)")
+            }
+        } else {
+            listeners.append(VsockListener(port: port, target: target))
+        }
     }
     for listenerConfig in listeners {
         let listener = VZVirtioSocketListener()
@@ -1288,7 +1298,7 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
         if let target = try? parseTCPHostPort(listenerConfig.target) {
             delegate = TCPSocketDelegate(target: target)
         } else {
-            if listenerConfig.target != resultPath(identity: identity, stateDir: config.stateDir).path {
+            if normalizedFilePath(listenerConfig.target) != normalizedFilePath(resultPath(identity: identity, stateDir: config.stateDir).path) {
                 throw ProtocolError.invalid("vsock listener \(listenerConfig.port) target must be host:port or the runtime result path")
             }
             delegate = ResultSocketDelegate(path: listenerConfig.target)
@@ -1386,6 +1396,10 @@ func copyFD(from source: Int32, to destination: Int32) {
         let readCount = buffer.withUnsafeMutableBytes {
             read(source, $0.baseAddress, $0.count)
         }
+        if readCount < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+            usleep(1_000)
+            continue
+        }
         if readCount <= 0 {
             return
         }
@@ -1393,6 +1407,10 @@ func copyFD(from source: Int32, to destination: Int32) {
         while written < readCount {
             let result = buffer.withUnsafeBytes {
                 write(destination, $0.baseAddress!.advanced(by: written), readCount - written)
+            }
+            if result < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1_000)
+                continue
             }
             if result <= 0 {
                 return

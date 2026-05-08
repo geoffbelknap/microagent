@@ -183,6 +183,52 @@ func TestExtractLayerRejectsAbsoluteSymlinkTarget(t *testing.T) {
 	}
 }
 
+func TestExtractLayerAllowsRelativeSymlinkWithinGuestRoot(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: "bin", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+		t.Fatalf("write dir: %v", err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "bin/env", Mode: 0o755, Size: 2}); err != nil {
+		t.Fatalf("write file header: %v", err)
+	}
+	if _, err := tw.Write([]byte("ok")); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "usr/bin/env", Typeflag: tar.TypeSymlink, Linkname: "../../bin/env", Mode: 0o777}); err != nil {
+		t.Fatalf("write symlink header: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("extractLayer: %v", err)
+	}
+	target, err := os.Readlink(filepath.Join(dir, "usr", "bin", "env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "../../bin/env" {
+		t.Fatalf("symlink target = %q", target)
+	}
+}
+
+func TestExtractLayerRejectsRelativeSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: "app/link", Typeflag: tar.TypeSymlink, Linkname: "../../outside", Mode: 0o777}); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
+		t.Fatal("expected relative symlink escape to be rejected")
+	}
+}
+
 func TestExtractLayerRejectsTraversal(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer

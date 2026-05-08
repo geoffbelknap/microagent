@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016,SC2317
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -8,35 +7,48 @@ KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Im
 if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
   KERNEL="$HOME/.microagent/kernels/apple-vf/Image"
 fi
-IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox:1.36}"
-ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
-STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-vsock.XXXXXX")"
-HOST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-vsock-host.XXXXXX")"
-WORKSPACE="vsock-diagnostic"
-RESULT="$STATE_DIR/result.json"
-START_RESULT="$STATE_DIR/start.json"
+IMAGE="${MICROAGENT_APPLEVF_MEDIATION_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
+ARCH="${MICROAGENT_APPLEVF_MEDIATION_ARCH:-arm64}"
+STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-mediation.XXXXXX")"
+HOST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-mediation-host.XXXXXX")"
+WORKSPACE="mediation-smoke"
+CLI="$STATE_DIR/microagent"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
+PROBE="$HOST_DIR/mediation-probe"
+SPEC="$HOST_DIR/microagent.yaml"
+SERVER_LOG="$HOST_DIR/server.log"
+OBSERVED="$HOST_DIR/observed.jsonl"
+RESPONSE="$STATE_DIR/response.json"
+HOST_PORT=""
+SERVER_PID=""
 
 cleanup() {
   status="$?"
   set +e
-  if [ -n "${SERVER_PID:-}" ]; then
+  if [ -n "$SERVER_PID" ]; then
     kill "$SERVER_PID" >/dev/null 2>&1
     wait "$SERVER_PID" >/dev/null 2>&1
   fi
-  "$STATE_DIR/microagent" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-  if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_VSOCK_DIAGNOSTIC:-0}" != "1" ]; then
+  if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_APPLEVF_MEDIATION_SMOKE:-0}" != "1" ]; then
+    if [ -x "$CLI" ]; then
+      "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    fi
     rm -rf "$STATE_DIR" "$HOST_DIR"
   else
-    echo "kept vsock diagnostic state at $STATE_DIR" >&2
-    echo "kept vsock diagnostic host dir at $HOST_DIR" >&2
+    if [ -x "$CLI" ]; then
+      "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    fi
+    echo "kept Apple VF mediation smoke state at $STATE_DIR" >&2
+    echo "kept Apple VF mediation smoke host dir at $HOST_DIR" >&2
+    [ -f "$SERVER_LOG" ] && tail -n 120 "$SERVER_LOG" >&2
     [ -f "$STATE_DIR/$WORKSPACE/serial.log" ] && tail -n 240 "$STATE_DIR/$WORKSPACE/serial.log" >&2
   fi
 }
 trap cleanup EXIT INT TERM HUP
 
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-  echo "Apple VF vsock diagnostic requires macOS on Apple silicon" >&2
+  echo "Apple VF mediation smoke requires macOS on Apple silicon" >&2
   exit 2
 fi
 if [ ! -r "$KERNEL" ]; then
@@ -47,7 +59,6 @@ if [ ! -x "$SUPERVISOR" ]; then
   echo "supervisor is not executable at $SUPERVISOR; run make signed-supervisor" >&2
   exit 2
 fi
-
 if command -v mke2fs >/dev/null 2>&1; then
   MKE2FS="$(command -v mke2fs)"
 elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ]; then
@@ -57,149 +68,219 @@ else
   exit 2
 fi
 
+cat >"$HOST_DIR/mediation-probe.go" <<'GO'
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+func main() {
+	port := uint32(2048)
+	if raw := strings.TrimSpace(os.Getenv("MEDIATION_PORT")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil || parsed == 0 {
+			fmt.Fprintf(os.Stderr, "invalid MEDIATION_PORT %q\n", raw)
+			os.Exit(2)
+		}
+		port = uint32(parsed)
+	}
+	fd, err := dialHostVsock(port, 15*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dial mediation vsock port %d: %v\n", port, err)
+		os.Exit(1)
+	}
+	defer unix.Close(fd)
+	file := os.NewFile(uintptr(fd), "mediation-vsock")
+	if file == nil {
+		fmt.Fprintln(os.Stderr, "wrap mediation fd")
+		os.Exit(1)
+	}
+	defer file.Close()
+	if _, err := file.WriteString("{\"signal\":\"ready\",\"runtimeID\":\"mediation-smoke\"}\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "write mediation ready: %v\n", err)
+		os.Exit(1)
+	}
+	line, err := bufio.NewReader(file).ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read mediation response: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("MEDIATION_REPLY=%s", line)
+	if !strings.Contains(line, `"ok":true`) {
+		fmt.Fprintf(os.Stderr, "unexpected mediation response: %s", line)
+		os.Exit(1)
+	}
+	fmt.Println("MEDIATION_OK")
+}
+
+func dialHostVsock(port uint32, timeout time.Duration) (int, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+		if err == nil {
+			err = unix.Connect(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port})
+			if err == nil {
+				return fd, nil
+			}
+			_ = unix.Close(fd)
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return -1, lastErr
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+GO
+
+(
+  cd "$ROOT"
+  go build -o "$CLI" ./cmd/microagent
+  GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+  GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o "$PROBE" "$HOST_DIR/mediation-probe.go"
+)
+
 HOST_PORT="$(python3 - <<'PY'
 import socket
-with socket.socket() as s:
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.bind(("127.0.0.1", 0))
     print(s.getsockname()[1])
 PY
 )"
 
-printf 'bridge-ok\n' >"$HOST_DIR/health"
-python3 -m http.server "$HOST_PORT" --bind 127.0.0.1 --directory "$HOST_DIR" >"$STATE_DIR/http.log" 2>&1 &
+cat >"$SPEC" <<YAML
+name: $WORKSPACE
+image: $IMAGE
+entrypoint: /usr/local/bin/mediation-probe
+setup:
+  - /usr/local/bin/mediation-probe
+env:
+  MEDIATION_PORT: "2048"
+mediation:
+  enabled: true
+  required: true
+  port: 2048
+  target: 127.0.0.1:$HOST_PORT
+  failClosed: true
+files:
+  - src: $PROBE
+    dst: /usr/local/bin/mediation-probe
+    mode: "0755"
+YAML
+
+"$CLI" create \
+  --backend apple-vf \
+  --file "$SPEC" \
+  --arch "$ARCH" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR" \
+  --size-mib "${MICROAGENT_APPLEVF_MEDIATION_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --memory "${MICROAGENT_APPLEVF_MEDIATION_MEMORY_MIB:-512}" \
+  --cpus "${MICROAGENT_APPLEVF_MEDIATION_CPUS:-2}" >"$STATE_DIR/create.json"
+
+python3 - "$HOST_PORT" "$OBSERVED" >"$SERVER_LOG" 2>&1 <<'PY' &
+import json
+import socket
+import sys
+
+port = int(sys.argv[1])
+observed = sys.argv[2]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", port))
+    srv.listen(1)
+    print(f"listening on 127.0.0.1:{port}", flush=True)
+    conn, addr = srv.accept()
+    with conn:
+        conn.settimeout(15)
+        data = b""
+        while b"\n" not in data:
+            chunk = conn.recv(4096)
+            if not chunk:
+                raise SystemExit("guest closed before newline")
+            data += chunk
+        line = data.split(b"\n", 1)[0].decode("utf-8")
+        msg = json.loads(line)
+        with open(observed, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"addr": addr, "message": msg}, sort_keys=True) + "\n")
+        conn.sendall(b'{"ok":true,"request_id":"req-mediation-smoke"}\n')
+PY
 SERVER_PID="$!"
 
-for _ in $(seq 1 40); do
-  if curl -fsS "http://127.0.0.1:$HOST_PORT/health" >/dev/null 2>&1; then
+for _ in $(seq 1 80); do
+  if grep -q "listening on" "$SERVER_LOG" 2>/dev/null; then
     break
+  fi
+  if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+    cat "$SERVER_LOG" >&2 || true
+    exit 1
   fi
   sleep 0.25
 done
-
-(
-  cd "$ROOT"
-  go build -o "$STATE_DIR/microagent" ./cmd/microagent
-  GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
-)
-
-diagnostic='
-mkdir -p /proc /sys
-mount -t proc proc /proc 2>/dev/null || true
-mount -t sysfs sysfs /sys 2>/dev/null || true
-echo MICROAGENT_VSOCK_DIAGNOSTIC_START
-echo "--- uname ---"
-uname -a
-echo "--- proc devices ---"
-cat /proc/devices 2>/dev/null || true
-echo "--- proc net vsock ---"
-cat /proc/net/vsock 2>/dev/null || true
-echo "--- virtio devices ---"
-for device in /sys/bus/virtio/devices/*; do
-  [ -e "$device" ] || continue
-  printf "%s " "$device"
-  printf "device="
-  cat "$device/device" 2>/dev/null || printf "?"
-  printf " vendor="
-  cat "$device/vendor" 2>/dev/null || printf "?"
-  printf " status="
-  cat "$device/status" 2>/dev/null || printf "?"
-  printf "\n"
-done
-echo "--- virtio drivers ---"
-find /sys/bus/virtio/drivers -maxdepth 2 -type l -print 2>/dev/null || true
-echo "--- pci devices ---"
-for device in /sys/bus/pci/devices/*; do
-  [ -e "$device" ] || continue
-  printf "%s " "$device"
-  printf "vendor="
-  cat "$device/vendor" 2>/dev/null || printf "?"
-  printf " device="
-  cat "$device/device" 2>/dev/null || printf "?"
-  printf " class="
-  cat "$device/class" 2>/dev/null || printf "?"
-  printf "\n"
-done
-echo "--- dmesg vsock ---"
-dmesg 2>/dev/null | grep -i vsock || true
-echo "--- dmesg virtio ---"
-dmesg 2>/dev/null | grep -i virtio || true
-echo "--- bridge probe ---"
-if command -v wget >/dev/null 2>&1; then
-  wget -S -O- http://127.0.0.1:3128/health || true
-elif command -v curl >/dev/null 2>&1; then
-  curl -v http://127.0.0.1:3128/health || true
-elif command -v python3 >/dev/null 2>&1; then
-  python3 - <<PY || true
-import urllib.request
-try:
-    print(urllib.request.urlopen("http://127.0.0.1:3128/health", timeout=15).read().decode())
-except Exception as exc:
-    print(f"python bridge probe failed: {exc}")
-PY
-else
-  echo "no wget, curl, or python3 available for bridge probe"
+if ! grep -q "listening on" "$SERVER_LOG" 2>/dev/null; then
+  cat "$SERVER_LOG" >&2 || true
+  echo "mediation host listener did not become ready" >&2
+  exit 1
 fi
-sleep 12
-echo MICROAGENT_VSOCK_DIAGNOSTIC_DONE
-'
 
-create_args=(
-  create "$WORKSPACE"
-  --image "$IMAGE"
-  --arch "$ARCH"
-  --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}"
-  --mke2fs "$MKE2FS"
-  --env MICROAGENT_VSOCK_TCP_LISTENERS=3128=3128
-  --entrypoint "$diagnostic"
-  --result-port 0
-  --kernel "$KERNEL"
-  --state-dir "$STATE_DIR"
-  --memory "${MICROAGENT_APPLEVF_BOOT_MEMORY_MIB:-512}"
-  --cpus "${MICROAGENT_APPLEVF_BOOT_CPUS:-2}"
-  --timeout "${MICROAGENT_APPLEVF_BOOT_TIMEOUT_SECONDS:-30}"
-  --guest-init "$GUEST_INIT"
-  --supervisor "$SUPERVISOR"
-)
+wait_for_result() {
+  output="$1"
+  deadline=$((SECONDS + ${MICROAGENT_APPLEVF_MEDIATION_TIMEOUT_SECONDS:-60}))
+  while true; do
+    if "$CLI" result "$WORKSPACE" --state-dir "$STATE_DIR" >"$output" 2>"$STATE_DIR/result.err"; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      cat "$STATE_DIR/result.err" >&2 || true
+      echo "mediation workspace did not produce a result before timeout" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
 
-"$STATE_DIR/microagent" "${create_args[@]}" >"$RESULT"
-
-"$STATE_DIR/microagent" start "$WORKSPACE" \
+"$CLI" start "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
   --kernel "$KERNEL" \
-  --supervisor "$SUPERVISOR" \
-  --vsock "3128=127.0.0.1:$HOST_PORT" >"$START_RESULT"
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/start.json"
+wait_for_result "$RESPONSE"
 
-SERIAL_PATH="$(python3 - "$START_RESULT" <<'PY'
+python3 - "$RESPONSE" "$OBSERVED" <<'PY'
 import json
 import sys
+
 with open(sys.argv[1], "r", encoding="utf-8") as f:
-    print(json.load(f).get("serial_path", ""))
+    result = json.load(f)
+with open(sys.argv[2], "r", encoding="utf-8") as f:
+    observed = [json.loads(line) for line in f if line.strip()]
+guest = result.get("result") or {}
+stdout = guest.get("stdout", "")
+exit_code = guest.get("exit_code", guest.get("exitCode"))
+if exit_code != 0:
+    raise SystemExit(result)
+if "MEDIATION_OK" not in stdout:
+    raise SystemExit(result)
+if not observed:
+    raise SystemExit("host listener did not observe a mediation message")
+message = observed[0].get("message") or {}
+if message.get("signal") != "ready" or message.get("runtimeID") != "mediation-smoke":
+    raise SystemExit(observed)
+readiness = result.get("response", {}).get("readiness", {})
+mediation = readiness.get("mediationReady", {})
+if mediation and result.get("response", {}).get("event", {}).get("state") == "running" and mediation.get("ready") is not True:
+    raise SystemExit(readiness)
 PY
-)"
-for _ in $(seq 1 80); do
-  if [ -n "$SERIAL_PATH" ] && [ -e "$SERIAL_PATH" ]; then
-    break
-  fi
-  sleep 0.25
-done
-for _ in $(seq 1 120); do
-  if [ -n "$SERIAL_PATH" ] && grep -q "MICROAGENT_VSOCK_DIAGNOSTIC_DONE" "$SERIAL_PATH" 2>/dev/null; then
-    break
-  fi
-  sleep 0.25
-done
 
-"$STATE_DIR/microagent" logs "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/serial.log"
-cat "$STATE_DIR/serial.log"
-
-if grep -q "bridge-ok" "$STATE_DIR/serial.log"; then
-  echo "Apple VF vsock diagnostic passed"
-  exit 0
-fi
-
-if grep -q "connect vsock bridge port 3128: no such device" "$STATE_DIR/serial.log"; then
-  echo "Apple VF vsock diagnostic failed: guest AF_VSOCK transport is unavailable" >&2
-else
-  echo "Apple VF vsock diagnostic failed: bridge probe did not reach host" >&2
-fi
-exit 1
+echo "Apple VF mediation smoke passed"
