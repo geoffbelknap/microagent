@@ -109,7 +109,7 @@ def execute_tool(name: str, args: dict) -> str:
 
 def process(req: WorkRequest) -> WorkResult:
     chat = client.chats.create(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         config=types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
             tools=TOOLS,
