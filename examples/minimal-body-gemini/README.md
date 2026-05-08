@@ -18,13 +18,13 @@ The Gemini Python SDK landscape: `google-genai` is the newer SDK and what this e
 You'll need a Gemini API key as `GEMINI_API_KEY` (get one at [aistudio.google.com](https://aistudio.google.com)). The flow mirrors the [simple-agent recipe](../../docs/recipes/simple-agent.md), with two substitutions:
 
 ```bash
-microagent create demo \
+microagent create \
   --file examples/minimal-body-gemini/microagent.yaml \
   --env GEMINI_API_KEY=$GEMINI_API_KEY
 
-microagent cp examples/minimal-body-gemini/demo/input-001.json demo:/workspace/input.json
-microagent start demo
-microagent --json result demo
+microagent cp examples/minimal-body-gemini/demo/input-001.json minimal-body-gemini:/workspace/input.json
+microagent start minimal-body-gemini
+microagent --json result minimal-body-gemini
 ```
 
 Everything else — halt, resume, retrieve files, clean up — is identical to the Anthropic recipe.

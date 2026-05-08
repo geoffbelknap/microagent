@@ -3,23 +3,21 @@ title: Networking
 description: Declarative workspace network intent.
 ---
 
-Every workspace records its network intent in the manifest. The CLI accepts four modes:
+Every workspace declares its network intent. Four modes:
 
 | Mode | What it does |
 |---|---|
-| `user` | Default on Linux. Unprivileged outbound IPv4 through pasta user-mode networking, plus declared TCP `--publish` forwards. |
+| `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. |
 | `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
 | `isolated` | No guest network device. The body has no network access at all. |
-| `bridged` | Attach to a host bridge so the workspace gets its own L2 presence. Backend support varies. |
+| `bridged` | Workspace gets its own L2 presence on a host bridge. |
 
-Backend support is narrower than the enum:
+The implementation under each mode varies by backend:
 
 | Backend | What works today |
 |---|---|
-| Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment`, which already runs in user space inside the framework — no privileges required. `isolated` works. TCP `--publish` works. `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement. |
-| Firecracker | `user` through pasta plus a namespace-local TAP, `nat` through a transient TAP and nftables MASQUERADE, live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
-
-Apple gates native bridged networking behind `com.apple.vm.networking`. Open-source builds can't self-sign that entitlement, and `sudo` doesn't bypass the check. If you need bridged on macOS, you sign with the entitlement; otherwise, use `nat`.
+| Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment` — runs in user space inside the framework, no privileges required. `isolated` and TCP `--publish` work. `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
+| Firecracker | `user` runs Firecracker inside a `pasta` user namespace with a namespace-local TAP. `nat` creates a host-side TAP and installs nftables MASQUERADE rules. `bridged` attaches a transient TAP to an existing host Linux bridge. `isolated` and TCP `--publish` work. |
 
 ## Declaring the mode
 
@@ -51,43 +49,31 @@ Under the hood, the guest init listens on a vsock port matching the host port; t
 
 Isolated workspaces reject port forwards before the request leaves the CLI: there's no guest network for them to reach.
 
-## User Networking on Firecracker
+## User mode on Firecracker
 
-Firecracker `user` mode is the default Linux networking mode. The supervisor
-re-execs itself under `pasta`, which creates an unprivileged user and network
-namespace. Inside that namespace the supervisor creates the Firecracker TAP,
-configures namespace-local nftables forwarding, and starts Firecracker. Pasta
-bridges the namespace to the host network with ordinary user sockets.
+`user` is the default Linux mode. The workspace runs inside an unprivileged user namespace, with `pasta` bridging that namespace's network out to the host using ordinary user-space socket calls. No host `setcap`, no `ip_forward=1`, no bridge configuration — `pasta` does the equivalent of NAT entirely in user space.
 
 Host requirements:
 
-- `pasta` installed (`apt install passt` on Debian/Ubuntu)
-- unprivileged user namespaces enabled
-- `/dev/net/tun` available to the user
+- `pasta` installed (`apt install passt` on Debian/Ubuntu, `dnf install passt` on Fedora). Homebrew installs it automatically.
+- Unprivileged user namespaces enabled (`sysctl user.max_user_namespaces` returns a non-zero value).
+- `/dev/net/tun` readable by the user.
 
-No `setcap`, host `ip_forward`, host bridge, or host firewall edits are needed
-for `user` mode.
+`microagent doctor` checks all three and tells you which is missing.
 
 ## NAT on Firecracker
 
-Firecracker `nat` mode creates a host-side TAP device, assigns a private
-`10.43.x.0/29` subnet, configures nftables MASQUERADE, and attaches the TAP as
-the guest's `eth0`. Guest-init configures a static IPv4 address, installs the
-default route through the TAP gateway, and writes DNS resolvers. Outbound TCP
-and DNS work without a host bridge. Inbound remains closed unless you declare
-specific TCP forwards with `--publish`.
+`nat` is the kernel-speed alternative to `user`. The supervisor creates a host-side TAP, assigns a `10.43.x.0/29` subnet, installs nftables MASQUERADE rules, and attaches the TAP as the guest's `eth0`. Guest-init configures the static IP, default route, and DNS resolvers from kernel command-line parameters. Outbound TCP and DNS work without a host bridge. Inbound stays closed unless you declare a `--publish` forward.
 
 Host requirements:
 
-- Linux kernel 4.4 or newer with nftables support
-- `net.ipv4.ip_forward=1`
-- permission to create TAP devices and edit nftables rules, typically root or
-  `setcap cap_net_admin+eip <supervisor>` on the Firecracker supervisor binary
+- Linux kernel with nftables support (any 4.4+ kernel).
+- `net.ipv4.ip_forward=1`. The supervisor doesn't toggle this for you — it's a host-wide policy decision.
+- `CAP_NET_ADMIN` available, typically `sudo setcap cap_net_admin+eip <supervisor>` on the Firecracker supervisor binary.
 
-The supervisor does not enable `ip_forward` for you because it is host-wide
-policy. If a requirement is missing, `nat` fails closed before booting the VM.
-Transient TAP devices and per-workspace nftables rules are removed on
-`quarantine`, `stop`, `kill`, and `delete`.
+If any of those is missing, `nat` fails closed before the VM boots. Transient TAPs and per-workspace nftables rules are cleaned up on `quarantine`, `stop`, `kill`, and `delete`.
+
+Pick `nat` over `user` when you need the throughput — the user-mode stack costs ~10–30% on bandwidth, irrelevant for LLM API calls but noticeable for high-volume traffic.
 
 ## Bridged on Apple VF
 
@@ -111,9 +97,9 @@ network:
   interface: br0
 ```
 
-The supervisor creates a transient TAP device, attaches it to the bridge, writes the Firecracker network device config, and removes the TAP when the workspace is quarantined, stopped, killed, or deleted. Missing privileges, non-bridge interfaces, and TAP setup failures all fail closed.
-The supervisor uses Linux netlink directly, so bridged mode does not require
-the `ip` command at runtime.
+The supervisor creates a transient TAP, attaches it to the bridge via Linux netlink, writes the Firecracker network device config, and tears the TAP down on `quarantine`/`stop`/`kill`/`delete`. Missing privileges, non-bridge interfaces, and TAP setup failures all fail closed.
+
+Same `CAP_NET_ADMIN` requirement as `nat` — `setcap cap_net_admin+eip` on the supervisor or run as root.
 
 ## Mediation channel
 

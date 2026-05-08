@@ -118,24 +118,17 @@ The `field` and `expected` / `actual` values tell you which artifact diverged. C
 
 ## Networking
 
-### Firecracker `user` mode fails before start
+### Firecracker `user` mode workspace won't start
 
-Linux `user` mode needs:
+`user` mode needs three things:
 
-- `pasta` installed (`apt install passt` on Debian/Ubuntu)
-- unprivileged user namespaces enabled
-- `/dev/net/tun` available to the user
+- `pasta` on `PATH` (from the `passt` package — `apt install passt` on Debian/Ubuntu, `dnf install passt` on Fedora; Homebrew installs it as a microagent-kit dependency).
+- Unprivileged user namespaces enabled. Check `sysctl user.max_user_namespaces` (returns a non-zero count when enabled). Some distros also gate this via `kernel.unprivileged_userns_clone` — set both to `1` if either is `0`.
+- `/dev/net/tun` readable by the calling user.
 
-Fixes:
+`microagent doctor` reports each of these — start there to find the missing piece.
 
-- Install passt with your distro package manager.
-- Check `sysctl kernel.unprivileged_userns_clone` and
-  `cat /proc/sys/user/max_user_namespaces`; enable user namespaces if either is
-  disabled.
-- Check `/dev/net/tun` exists and is accessible.
-
-If the host cannot allow user namespaces, use explicit `--network nat` with the
-Firecracker supervisor capability setup instead.
+If your host doesn't allow unprivileged user namespaces and you can't change that policy, fall back to `--network nat` with the supervisor cap setup (see the next entry).
 
 ### Apple VF `bridged` mode fails closed before start
 
@@ -152,19 +145,17 @@ Fixes:
 
 ### Firecracker `bridged` fails with "host-prerequisite-not-configured"
 
-Linux bridged mode needs:
+`bridged` mode needs both:
 
-- The named host interface to be an existing Linux bridge
-- Permission to create and attach a TAP device (typically root or
-  `setcap cap_net_admin+eip <supervisor>`)
+- The named host interface to actually be a Linux bridge — not a regular interface, not loopback.
+- `CAP_NET_ADMIN` on the supervisor (`sudo setcap cap_net_admin+eip <supervisor>`) or root.
 
 Fixes:
 
-- Create a bridge if you don't have one: `sudo ip link add br0 type bridge && sudo ip link set br0 up`
-- Run with sufficient privileges, or grant the supervisor capabilities with
-  `sudo setcap cap_net_admin+eip <supervisor>`
+- Create a bridge if you don't have one: `sudo ip link add br0 type bridge && sudo ip link set br0 up`.
+- Set the cap on the supervisor binary, or run as root.
 
-If your environment can't satisfy all three, use `nat` instead.
+If neither prerequisite is reachable in your environment, use `--network user` (no privileges needed) or `--network nat`.
 
 ### Firecracker `nat` guest can't reach the internet
 
