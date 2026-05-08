@@ -80,7 +80,7 @@ export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
-if command -v getcap >/dev/null 2>&1; then
+if [ "$(id -u)" -ne 0 ] && command -v getcap >/dev/null 2>&1; then
   supervisor_caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
   if printf '%s\n' "$supervisor_caps" | grep -q 'cap_net_admin'; then
     echo "fresh supervisor unexpectedly has CAP_NET_ADMIN before user-mode smoke" >&2
@@ -101,21 +101,22 @@ print(result["path"])
 PY
 )"
 
-"$CLI" run \
-  --backend firecracker \
-  --image "$IMAGE" \
-  --arch amd64 \
-  --exec "wget -qO- -T 10 http://example.com >/tmp/user.out && echo USER_OUTBOUND_READY || echo USER_OUTBOUND_FAILED" \
-  --kernel "$kernel_path" \
-  --guest-init "$GUEST_INIT" \
-  --state-dir "$STATE_DIR/user-run" \
-  --size-mib 128 \
-  --result-port 0 \
-  --timeout 30 \
-  --network user \
-  --keep >"$STATE_DIR/user.json"
+if [ "$(id -u)" -ne 0 ]; then
+  "$CLI" run \
+    --backend firecracker \
+    --image "$IMAGE" \
+    --arch amd64 \
+    --exec "wget -qO- -T 10 http://example.com >/tmp/user.out && echo USER_OUTBOUND_READY || echo USER_OUTBOUND_FAILED" \
+    --kernel "$kernel_path" \
+    --guest-init "$GUEST_INIT" \
+    --state-dir "$STATE_DIR/user-run" \
+    --size-mib 128 \
+    --result-port 0 \
+    --timeout 30 \
+    --network user \
+    --keep >"$STATE_DIR/user.json"
 
-python3 - "$STATE_DIR/user.json" <<'PY'
+  python3 - "$STATE_DIR/user.json" <<'PY'
 import json
 import sys
 
@@ -135,7 +136,6 @@ if runtime.get("mode") == "user" and runtime.get("ip") == "":
     raise SystemExit(runtime)
 PY
 
-if [ "$(id -u)" -ne 0 ]; then
   echo "nat and bridged portions of this smoke require root so the supervisor can pass CAP_NET_ADMIN to Firecracker" >&2
   exit 2
 fi
@@ -187,7 +187,7 @@ if "$CLI" create isolated-publish \
   echo "isolated publish unexpectedly succeeded" >&2
   exit 1
 fi
-grep -q "network.portForwards require nat or bridged mode" "$STATE_DIR/isolated-publish.err"
+grep -q "network.portForwards require user, nat, or bridged mode" "$STATE_DIR/isolated-publish.err"
 
 "$CLI" create isolated-smoke \
   --image "$IMAGE" \
@@ -232,7 +232,7 @@ if not any(entry["name"] == "isolated-smoke" and entry["network"] == "isolated" 
     raise SystemExit(ps)
 PY
 
-"$CLI" create bridged-missing-interface \
+if "$CLI" create bridged-missing-interface \
   --image "$IMAGE" \
   --arch amd64 \
   --kernel "$kernel_path" \
@@ -240,7 +240,10 @@ PY
   --state-dir "$STATE_DIR/bridged-missing" \
   --size-mib 128 \
   --result-port 0 \
-  --network bridged >"$STATE_DIR/bridged-missing.json" 2>"$STATE_DIR/bridged-missing.err"
+  --network bridged >"$STATE_DIR/bridged-missing.json" 2>"$STATE_DIR/bridged-missing.err"; then
+  echo "bridged missing interface unexpectedly succeeded" >&2
+  exit 1
+fi
 python3 - "$STATE_DIR/bridged-missing.json" <<'PY'
 import json
 import sys
@@ -286,7 +289,7 @@ if result["network"]["mode"] != "bridged" or result["network"].get("interface") 
 PY
   BRIDGE_RESULT="booted-on-$bridge"
 else
-  "$CLI" create bridged-nonbridge \
+  if "$CLI" create bridged-nonbridge \
     --image "$IMAGE" \
     --arch amd64 \
     --kernel "$kernel_path" \
@@ -295,7 +298,10 @@ else
     --size-mib 128 \
     --result-port 0 \
     --network bridged \
-    --network-interface lo >"$STATE_DIR/bridged-nonbridge.json" 2>"$STATE_DIR/bridged-nonbridge.err"
+    --network-interface lo >"$STATE_DIR/bridged-nonbridge.json" 2>"$STATE_DIR/bridged-nonbridge.err"; then
+    echo "bridged nonbridge interface unexpectedly succeeded" >&2
+    exit 1
+  fi
   python3 - "$STATE_DIR/bridged-nonbridge.json" <<'PY'
 import json
 import sys

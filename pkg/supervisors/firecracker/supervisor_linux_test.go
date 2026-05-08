@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
 	"golang.org/x/sys/unix"
 )
@@ -431,6 +432,12 @@ func TestBuildNATFirewallRulesUsesNftablesExpressions(t *testing.T) {
 	}
 	if !containsExpr[*expr.Ct](rules[2].Exprs) || !containsVerdict(rules[2].Exprs, expr.VerdictAccept) {
 		t.Fatalf("established forward rule = %#v", rules[2])
+	}
+}
+
+func TestNATForwardChainPrecedesHostFilterChains(t *testing.T) {
+	if nftForwardPriority >= int(*nftables.ChainPriorityFilter) {
+		t.Fatalf("forward priority = %d, want before filter priority %d", nftForwardPriority, *nftables.ChainPriorityFilter)
 	}
 }
 
