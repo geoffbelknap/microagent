@@ -160,4 +160,3 @@ If `mediation.required` is true (the default) and the host listener disappears, 
 
 - [Networking](../concepts/networking.md) — the mediation channel's place in the workspace network model.
 - [Build a simple agent](simple-agent.md) — the file-based version this builds on.
-- [Pin everything for production](pin-everything.md) — the other side of getting a workspace ready to ship.

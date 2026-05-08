@@ -1,5 +1,5 @@
 ---
-title: Runtime parity contract
+title: Runtime contract
 description: Backend-neutral agent runtime semantics shared by Firecracker and Apple VF.
 ---
 
