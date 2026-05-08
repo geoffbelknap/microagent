@@ -391,7 +391,7 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 			return err
 		}
 	case tar.TypeSymlink:
-		linkTarget, err := safeSymlinkTarget(header.Linkname)
+		linkTarget, err := safeSymlinkTarget(name, header.Linkname)
 		if err != nil {
 			return err
 		}
@@ -440,15 +440,15 @@ func safeGuestRel(guestPath string, allowRoot bool) (string, error) {
 	return rel, nil
 }
 
-func safeSymlinkTarget(linkTarget string) (string, error) {
+func safeSymlinkTarget(linkName, linkTarget string) (string, error) {
 	if linkTarget == "" || strings.ContainsRune(linkTarget, 0) {
 		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
 	}
 	if path.IsAbs(linkTarget) {
 		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
 	}
-	clean := path.Clean(linkTarget)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+	resolved := path.Clean(path.Join(path.Dir(linkName), linkTarget))
+	if resolved == "." || resolved == ".." || strings.HasPrefix(resolved, "../") {
 		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
 	}
 	return linkTarget, nil

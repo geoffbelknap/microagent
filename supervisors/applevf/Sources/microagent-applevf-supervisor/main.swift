@@ -600,6 +600,10 @@ func resultPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("result.json")
 }
 
+func normalizedFilePath(_ path: String) -> String {
+    URL(fileURLWithPath: path).standardizedFileURL.path
+}
+
 func response(event: Event, config: Config, error: String?) -> Response {
     var response = Response(
         ok: event.state != .failed,
@@ -1288,7 +1292,7 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
         if let target = try? parseTCPHostPort(listenerConfig.target) {
             delegate = TCPSocketDelegate(target: target)
         } else {
-            if listenerConfig.target != resultPath(identity: identity, stateDir: config.stateDir).path {
+            if normalizedFilePath(listenerConfig.target) != normalizedFilePath(resultPath(identity: identity, stateDir: config.stateDir).path) {
                 throw ProtocolError.invalid("vsock listener \(listenerConfig.port) target must be host:port or the runtime result path")
             }
             delegate = ResultSocketDelegate(path: listenerConfig.target)

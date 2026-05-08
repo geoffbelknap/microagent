@@ -8,7 +8,7 @@ KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Im
 if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
   KERNEL="$HOME/.microagent/kernels/apple-vf/Image"
 fi
-IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox:1.36}"
+IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
 ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-vsock.XXXXXX")"
 HOST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-vsock-host.XXXXXX")"
