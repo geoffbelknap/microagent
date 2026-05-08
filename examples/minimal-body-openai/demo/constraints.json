@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "hash": "sha256:demo-v1",
+  "effective_at": "2026-05-07T00:00:00Z",
+  "payload_ref": "demo://constraints/v1"
+}

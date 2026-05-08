@@ -35,8 +35,12 @@ OCI image ──► pkg/rootfs ──► ext4 disk ──► VM
   shared shape both backends speak.
 - **`pkg/rootfs`** — OCI image to ext4 rootfs builder. Pulls layers via
   `oras-go`, writes a sized ext4 image with `mke2fs`.
+- **`pkg/supervisors/firecracker`** — Go implementation of the Firecracker
+  supervisor, importable directly on Linux when you'd rather not spawn a
+  subprocess.
 - **`cmd/microagent-firecracker-supervisor`** — Go executable supervisor for
-  Linux Firecracker lifecycle work.
+  Linux Firecracker lifecycle work. Wraps `pkg/supervisors/firecracker` as a
+  JSON-in / JSON-out binary.
 - **`supervisors/applevf`** — Swift executable
   `microagent-applevf-supervisor`. Reads one JSON request from stdin, talks
   to Apple Virtualization.framework, writes one JSON response to stdout.
@@ -58,13 +62,10 @@ OCI image ──► pkg/rootfs ──► ext4 disk ──► VM
 
 Go callers can use the same package flow directly without invoking the CLI.
 
-## Why Supervisors Are Executable
+## Why supervisors are separate executables
 
-Backend supervisors are separate executables. That keeps host-specific backend
-code out of the main CLI and lets callers in Go, Python, Rust, Node, or shell
-drive the same JSON protocol. Apple VF also needs this boundary because
-Virtualization.framework is Swift-only.
+Each backend's supervisor ships as its own JSON-in / JSON-out binary. That's deliberate: it keeps host-specific backend code out of the main CLI and lets anything that can spawn a subprocess and parse JSON drive the same protocol — Go, Python, Rust, Node, shell scripts. Apple VF also requires this boundary, because Virtualization.framework is Swift-only.
 
-The shared protocol is documented at [Supervisor protocol](/protocol/). The
+The shared protocol is documented at [supervisor protocol](../protocol/index.md). The
 Apple VF executable protocol is documented at
-[Apple VF supervisor](/protocol/applevf/).
+[Apple VF supervisor](../protocol/applevf.md).

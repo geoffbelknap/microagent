@@ -46,5 +46,5 @@ visibility is honest.
 
 ## Next
 
-- [Run your first VM](/getting-started/first-vm/)
-- [Named workspaces](/getting-started/named-workspaces/)
+- [Run your first VM](first-vm.md)
+- [Named workspaces](named-workspaces.md)

@@ -58,6 +58,13 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	}
 }
 
+func TestDefaultOptionsUseUserNetworkMode(t *testing.T) {
+	opts := DefaultOptions()
+	if opts.Network.Mode != "user" {
+		t.Fatalf("default network mode = %q", opts.Network.Mode)
+	}
+}
+
 func TestApplyProfileAndRestartValidation(t *testing.T) {
 	opts := Options{Profile: "tiny"}
 	if err := ApplyProfile(&opts, false, false, false); err != nil {

@@ -3,9 +3,9 @@ title: State and identity
 description: Where workspace state lives and how identity flows through requests.
 ---
 
-Microagent reports VM state changes as JSON events. Every request carries an
-identity block; every response carries an event block describing the resulting
-state.
+microagent-kit reports VM state changes as JSON events. Every request carries
+an identity block; every response carries an event block describing the
+resulting state.
 
 ## Identity
 
@@ -26,7 +26,7 @@ Every request has an identity:
   correlate.
 - **`runtimeID`** — the workspace identifier. Equivalent to `--name` /
   `--id`.
-- **`role`** — caller-supplied label. Microagent does not interpret it.
+- **`role`** — caller-supplied label. microagent-kit does not interpret it.
 - **`backend`** — the backend the supervisor should target.
 
 The CLI builds the identity automatically. Callers using `--json` requests
@@ -103,10 +103,42 @@ Commands such as `kill` and `delete` still return lifecycle events, usually
 with state `stopped` and a `detail` field. Callers should treat these strings as
 the authoritative source of truth, not log scraping.
 
+```mermaid
+stateDiagram-v2
+    [*] --> prepared : create
+
+    prepared --> starting : start
+    halted    --> starting : start
+    stopped   --> starting : start
+    failed    --> starting : start
+
+    starting --> running
+
+    running --> halted      : halt
+    running --> stopped     : stop / kill
+    running --> quarantined : quarantine
+    running --> failed      : runtime error
+
+    quarantined --> halted  : halt
+    quarantined --> stopped : stop / kill
+
+    prepared --> [*] : delete
+    halted   --> [*] : delete
+    stopped  --> [*] : delete
+    failed   --> [*] : delete
+```
+
+Two non-obvious things to read from that diagram:
+
+- **Nothing goes directly from `quarantined` back to `start`.** Quarantine is a forensic state — you have to halt, stop, or kill it first, then start from the resulting clean state.
+- **`running` has no direct path to `delete`.** `delete` refuses while a VM process is alive (Firecracker), so you have to take the workspace through halt, stop, or kill first.
+
+`unknown` and `stopping` are real states the API can report — `unknown` for unrecognized state files, `stopping` as the transient between `running` and a terminal state — but neither sits between user-driven transitions, so they're omitted above.
+
 Each state write updates `<state-dir>/<runtimeID>/event.json` with the latest
 event and appends the same record to `<state-dir>/<runtimeID>/events.json`.
 The timeline survives VM runtime exit and is intentionally small: it is a
 forensic lifecycle record, not a log stream.
 
-See the [supervisor protocol](/protocol/) for the shared request and response
+See the [supervisor protocol](../protocol/index.md) for the shared request and response
 schema.

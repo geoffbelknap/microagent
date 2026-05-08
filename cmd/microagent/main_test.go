@@ -113,7 +113,7 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 		func() (string, error) { return "/usr/local/bin/firecracker", nil },
 		func(path string) (os.FileInfo, error) {
 			switch path {
-			case "/dev/kvm", "/dev/vhost-vsock":
+			case "/dev/kvm", "/dev/vhost-vsock", "/dev/net/tun":
 				return fakeFileInfo{name: filepath.Base(path)}, nil
 			default:
 				return nil, os.ErrNotExist
@@ -124,6 +124,21 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 				t.Fatalf("version path = %q", path)
 			}
 			return "Firecracker v1.15.1"
+		},
+		func(name string) (string, error) {
+			if name == "pasta" {
+				return "/usr/bin/pasta", nil
+			}
+			return "", os.ErrNotExist
+		},
+		func(path string) ([]byte, error) {
+			switch path {
+			case "/proc/sys/kernel/unprivileged_userns_clone":
+				return []byte("1\n"), nil
+			case "/proc/sys/user/max_user_namespaces":
+				return []byte("32768\n"), nil
+			}
+			return nil, os.ErrNotExist
 		},
 	)
 	if err != nil {
@@ -159,6 +174,8 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 		func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
 		func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
 		func(string) string { return "" },
+		func(string) (string, error) { return "", os.ErrNotExist },
+		func(string) ([]byte, error) { return nil, os.ErrNotExist },
 	)
 	if err == nil {
 		t.Fatal("firecrackerDoctorResponse returned nil error")
@@ -2013,6 +2030,64 @@ func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
 	}
 }
 
+func TestStatusReportsRuntimeNetworkAssignment(t *testing.T) {
+	outputFormat = "json"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		Profile:       "small",
+		RestartPolicy: "never",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Network:       vmkit.NetworkConfig{Mode: "nat"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			Network: &vmkit.NetworkConfig{
+				Mode:    "nat",
+				IP:      "10.43.12.2/29",
+				Subnet:  "10.43.12.0/29",
+				Gateway: "10.43.12.1",
+				DNS:     []string{"1.1.1.1", "8.8.8.8"},
+				Routes:  []string{"0.0.0.0/0 via 10.43.12.1"},
+			},
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "status.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runWorkspaceStateCommand(context.Background(), "status", []string{"research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"runtime"`) ||
+		!strings.Contains(string(data), `"ip": "10.43.12.2/29"`) ||
+		!strings.Contains(string(data), `"subnet": "10.43.12.0/29"`) {
+		t.Fatalf("status output = %s", data)
+	}
+}
+
 func TestStatusReportsDeclaredArtifacts(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
@@ -2869,6 +2944,7 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(command, `> /etc/microagent/run.json`) ||
 		!strings.Contains(command, `"command":["/bin/sh","-lc","/app/entrypoint.sh"]`) ||
+		!strings.Contains(command, `"port":1024`) ||
 		!strings.Contains(command, `"mountpoint":"/config"`) ||
 		!strings.Contains(command, `"hostPort":8080`) ||
 		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) {

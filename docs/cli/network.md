@@ -23,7 +23,7 @@ microagent --json network research
 {
   "workspace": "research",
   "state": "running",
-  "backend": "apple-vf",
+  "backend": "firecracker",
   "network": {
     "mode": "nat",
     "portForwards": [
@@ -34,11 +34,19 @@ microagent --json network research
         "guestPort": 80
       }
     ]
+  },
+  "runtime": {
+    "mode": "nat",
+    "ip": "10.43.12.2/29",
+    "subnet": "10.43.12.0/29",
+    "gateway": "10.43.12.1",
+    "dns": ["1.1.1.1", "8.8.8.8"],
+    "routes": ["0.0.0.0/0 via 10.43.12.1"]
   }
 }
 ```
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`status`](/cli/status/)
+- [`create`](create.md)
+- [`status`](status.md)

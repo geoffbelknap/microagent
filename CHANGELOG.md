@@ -1,16 +1,8 @@
 # Changelog
 
-Record notable user-visible changes here.
-
-This project uses concise release notes rather than exhaustive commit logs.
-Group entries under an upcoming version heading until a release is cut.
+Release notes live under [`docs/releases/`](docs/releases/index.md) as readiness records — what was validated, on what host, against what gates. Use this file for the rolling list of changes that haven't been cut into a release yet.
 
 ## Unreleased
 
-- Added project governance, contribution, conduct, and security guidance.
-- Added CI coverage for Linux Go checks, documentation links, shell scripts,
-  and dependency vulnerability scanning.
-
-## Release Notes
-
-Historical readiness records live under [`docs/releases/`](docs/releases/).
+- Project governance, contribution, conduct, and security guidance.
+- CI coverage for Linux Go checks, documentation links, shell scripts, and dependency vulnerability scanning.

@@ -3,62 +3,35 @@ title: Networking
 description: Declarative workspace network intent.
 ---
 
-Workspaces carry a network record in their manifest and supervisor request.
-The current CLI accepts these modes:
+Every workspace records its network intent in the manifest. The CLI accepts four modes:
 
-| Mode | Meaning |
+| Mode | What it does |
 |---|---|
-| `nat` | Default backend network mode |
-| `isolated` | No guest network device |
-| `bridged` | Host bridge attachment; requires a backend-supported host interface |
+| `user` | Default on Linux. Unprivileged outbound IPv4 through pasta user-mode networking, plus declared TCP `--publish` forwards. |
+| `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
+| `isolated` | No guest network device. The body has no network access at all. |
+| `bridged` | Attach to a host bridge so the workspace gets its own L2 presence. Backend support varies. |
 
-Current backend support is narrower than the declared enum:
+Backend support is narrower than the enum:
 
-| Backend | Supported mode today |
+| Backend | What works today |
 |---|---|
-| Apple VF | `nat`, `isolated`, and TCP `--publish`; `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement |
-| Firecracker | `nat` plus live TCP `--publish`; `isolated`; `bridged` through a host Linux bridge |
+| Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment`, which already runs in user space inside the framework — no privileges required. `isolated` works. TCP `--publish` works. `bridged` is implemented but blocked in open-source builds by Apple's restricted `com.apple.vm.networking` entitlement. |
+| Firecracker | `user` through pasta plus a namespace-local TAP, `nat` through a transient TAP and nftables MASQUERADE, live TCP `--publish`, `isolated`, and `bridged` through a host Linux bridge. |
 
-Apple puts native Apple VF bridged networking behind the restricted
-`com.apple.vm.networking` entitlement. Open-source builds cannot self-sign that
-entitlement, and running the supervisor with `sudo` does not change the check.
+Apple gates native bridged networking behind `com.apple.vm.networking`. Open-source builds can't self-sign that entitlement, and `sudo` doesn't bypass the check. If you need bridged on macOS, you sign with the entitlement; otherwise, use `nat`.
 
-Create records the mode:
+## Declaring the mode
 
 ```bash
-microagent create research --network nat
+microagent create research --network user
 ```
 
-Port forwards are declared with repeatable `--publish` flags:
-
-```bash
-microagent create research --publish 127.0.0.1:8080:80/tcp
-```
-
-For TCP forwards, guest init records a `hostForwards` entry and listens on a
-guest vsock port matching the declared host port. Backend supervisors own the
-host-side listener that connects host TCP to that guest vsock port.
-
-## Mediation channel
-
-Mediation is a distinct guest-to-host vsock contract for Body calls into the
-host control plane. Declare it with:
-
-```bash
-microagent create research --mediation 2048=127.0.0.1:9900
-```
-
-By default the channel is required and fail-closed. The request, manifest,
-status response, and readiness block carry the same declaration:
-`enabled`, `required`, `port`, `target`, and `failClosed`. Use
-`--mediation-optional` only for development paths where the workspace may boot
-without the host-side mediator.
-
-The same shape is available in `microagent.yaml`:
+Or in the spec:
 
 ```yaml
 network:
-  mode: nat
+  mode: user
   forwards:
     - host: 127.0.0.1
       hostPort: 8080
@@ -66,10 +39,59 @@ network:
       protocol: tcp
 ```
 
-For bridged Apple VF workspaces, declare the host interface identifier or
-display name. The supervisor also needs Apple's restricted
-`com.apple.vm.networking` entitlement. Local ad-hoc builds fail closed before
-start with an error that names the Apple restriction.
+## Port forwards (`--publish`)
+
+Repeat `--publish` for each TCP forward you need:
+
+```bash
+microagent create research --publish 127.0.0.1:8080:80/tcp
+```
+
+Under the hood, the guest init listens on a vsock port matching the host port; the backend supervisor runs the host-side TCP listener and bridges connections to that vsock port. You don't have to configure either side — declaring the forward wires it up.
+
+Isolated workspaces reject port forwards before the request leaves the CLI: there's no guest network for them to reach.
+
+## User Networking on Firecracker
+
+Firecracker `user` mode is the default Linux networking mode. The supervisor
+re-execs itself under `pasta`, which creates an unprivileged user and network
+namespace. Inside that namespace the supervisor creates the Firecracker TAP,
+configures namespace-local nftables forwarding, and starts Firecracker. Pasta
+bridges the namespace to the host network with ordinary user sockets.
+
+Host requirements:
+
+- `pasta` installed (`apt install passt` on Debian/Ubuntu)
+- unprivileged user namespaces enabled
+- `/dev/net/tun` available to the user
+
+No `setcap`, host `ip_forward`, host bridge, or host firewall edits are needed
+for `user` mode.
+
+## NAT on Firecracker
+
+Firecracker `nat` mode creates a host-side TAP device, assigns a private
+`10.43.x.0/29` subnet, configures nftables MASQUERADE, and attaches the TAP as
+the guest's `eth0`. Guest-init configures a static IPv4 address, installs the
+default route through the TAP gateway, and writes DNS resolvers. Outbound TCP
+and DNS work without a host bridge. Inbound remains closed unless you declare
+specific TCP forwards with `--publish`.
+
+Host requirements:
+
+- Linux kernel 4.4 or newer with nftables support
+- `net.ipv4.ip_forward=1`
+- permission to create TAP devices and edit nftables rules, typically root or
+  `setcap cap_net_admin+eip <supervisor>` on the Firecracker supervisor binary
+
+The supervisor does not enable `ip_forward` for you because it is host-wide
+policy. If a requirement is missing, `nat` fails closed before booting the VM.
+Transient TAP devices and per-workspace nftables rules are removed on
+`quarantine`, `stop`, `kill`, and `delete`.
+
+## Bridged on Apple VF
+
+Declare the host interface identifier or its localized display name:
 
 ```yaml
 network:
@@ -77,12 +99,11 @@ network:
   interface: en0
 ```
 
-For bridged Firecracker workspaces, `interface` must name an existing Linux
-bridge. The supervisor creates a transient TAP device, attaches it to that
-bridge, configures the generated `firecracker.json` network device, and removes
-the TAP when the workspace is quarantined, stops, is killed, or is deleted.
-Missing `iproute2`, missing privileges, non-bridge interfaces, and TAP setup
-failures fail closed.
+The supervisor needs the `com.apple.vm.networking` entitlement. Local ad-hoc builds fail closed during `check` with an error that names the Apple restriction — you'll see it before any VM tries to start.
+
+## Bridged on Firecracker
+
+`interface` must name an existing Linux bridge:
 
 ```yaml
 network:
@@ -90,9 +111,38 @@ network:
   interface: br0
 ```
 
-For isolated workspaces, port forwards are invalid because no guest network is
-attached.
+The supervisor creates a transient TAP device, attaches it to the bridge, writes the Firecracker network device config, and removes the TAP when the workspace is quarantined, stopped, killed, or deleted. Missing privileges, non-bridge interfaces, and TAP setup failures all fail closed.
+The supervisor uses Linux netlink directly, so bridged mode does not require
+the `ip` command at runtime.
 
-The network record is visible in JSON output from `create`, `start`, `status`,
-and `ps`. Backend-specific wiring is intentionally behind the supervisor
-protocol; malformed port forwards fail closed before a request is sent.
+## Mediation channel
+
+Mediation is a separate guest-to-host vsock contract for the body's calls into the host control plane — distinct from ordinary networking. Declare it with:
+
+```bash
+microagent create research --mediation 2048=127.0.0.1:9900
+```
+
+By default the channel is required and fail-closed: if the host listener isn't reachable, the workspace refuses to start. The same shape goes in `microagent.yaml`:
+
+```yaml
+mediation:
+  enabled: true
+  required: true
+  port: 2048
+  target: 127.0.0.1:9900
+  failClosed: true
+```
+
+Use `--mediation-optional` only for development paths where the workspace may boot without the host-side mediator.
+
+For the architecture and a worked pattern, see [Wire up the mediation channel](../recipes/mediation-channel.md).
+
+## What's visible
+
+The network record appears in JSON output from `create`, `start`, `status`, and
+`ps`. `microagent --json network <name>` also shows the latest runtime network
+assignment, including Firecracker NAT IP, subnet, gateway, DNS, and route when
+present. Low-level wiring such as TAP names and Firecracker config paths stays
+behind the supervisor protocol. Malformed port forwards fail closed before any
+request is sent.

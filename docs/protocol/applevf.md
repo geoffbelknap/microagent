@@ -3,8 +3,8 @@ title: Apple VF supervisor protocol
 description: One JSON request in, one JSON response out.
 ---
 
-Microagent uses the supervisor concept for backend lifecycle work. The Apple VF
-supervisor is packaged as a standalone executable,
+microagent-kit uses the supervisor concept for backend lifecycle work. The
+Apple VF supervisor is packaged as a standalone executable,
 `microagent-applevf-supervisor`, so non-Swift callers can cross the
 Virtualization.framework boundary through a narrow JSON protocol.
 
@@ -14,7 +14,7 @@ means the response has `"ok": true`. Nonzero exit means the response has
 `"ok": false` or the request could not be decoded.
 
 For the shared command list and response shape, see
-[Supervisor protocol](/protocol/). This page only covers the executable
+[Supervisor protocol](index.md). This page only covers the executable
 Apple VF process boundary.
 
 ## Request

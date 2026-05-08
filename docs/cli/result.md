@@ -30,4 +30,4 @@ microagent --json result research
 
 ## Related
 
-- [`status`](/cli/status/), [`logs`](/cli/logs/)
+- [`status`](status.md), [`logs`](logs.md)

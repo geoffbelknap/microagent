@@ -24,6 +24,8 @@ type FirecrackerProbe struct {
 	ResolveBinary func() (string, error)
 	Stat          func(string) (os.FileInfo, error)
 	BinaryVersion func(string) string
+	LookPath      func(string) (string, error)
+	ReadFile      func(string) ([]byte, error)
 }
 
 func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
@@ -75,6 +77,12 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if probe.BinaryVersion == nil {
 		probe.BinaryVersion = FirecrackerVersion
 	}
+	if probe.LookPath == nil {
+		probe.LookPath = exec.LookPath
+	}
+	if probe.ReadFile == nil {
+		probe.ReadFile = os.ReadFile
+	}
 	host := &vmkit.HostSupport{
 		Backend:      opts.Backend,
 		Architecture: opts.Arch,
@@ -96,6 +104,25 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if _, err := probe.Stat("/dev/vhost-vsock"); err == nil {
 		host.VsockAvailable = true
 	}
+	if _, err := probe.Stat("/dev/net/tun"); err == nil {
+		host.TunAvailable = true
+	} else {
+		issues = append(issues, "/dev/net/tun is not available for Firecracker user networking")
+	}
+	if path, err := probe.LookPath("pasta"); err == nil {
+		host.UserNetworkingAvailable = true
+		host.UserNetworkingBinary = path
+	} else if path, err := probe.LookPath("slirp4netns"); err == nil {
+		host.UserNetworkingBinary = path
+		issues = append(issues, "pasta is not installed; install passt (for example, apt install passt)")
+	} else {
+		issues = append(issues, "pasta is not installed; install passt (for example, apt install passt)")
+	}
+	usernsOK, usernsIssue := checkUserNamespaces(probe.ReadFile)
+	host.UserNamespacesAvailable = usernsOK
+	if usernsIssue != "" {
+		issues = append(issues, usernsIssue)
+	}
 	host.ConsoleAvailable = true
 	host.ConsoleMode = "interactive"
 	resp := vmkit.Response{
@@ -109,6 +136,21 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 		return resp, fmt.Errorf("%s", resp.Error)
 	}
 	return resp, nil
+}
+
+func checkUserNamespaces(readFile func(string) ([]byte, error)) (bool, string) {
+	if data, err := readFile("/proc/sys/kernel/unprivileged_userns_clone"); err == nil {
+		if strings.TrimSpace(string(data)) != "1" {
+			return false, "unprivileged user namespaces are disabled; set kernel.unprivileged_userns_clone=1"
+		}
+	}
+	if data, err := readFile("/proc/sys/user/max_user_namespaces"); err == nil {
+		value := strings.TrimSpace(string(data))
+		if value == "" || value == "0" {
+			return false, "user namespaces are disabled; set user.max_user_namespaces above 0"
+		}
+	}
+	return true, ""
 }
 
 func AugmentHostSupport(resp *vmkit.Response, opts Options) {

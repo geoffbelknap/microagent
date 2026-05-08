@@ -230,10 +230,10 @@ func backendSupportsConsoleInput(backend string) bool {
 	return workspace.BackendSupportsConsoleInput(backend)
 }
 
-func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (string, error), stat func(string) (os.FileInfo, error), binaryVersion func(string) string) (vmkit.Response, error) {
+func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (string, error), stat func(string) (os.FileInfo, error), binaryVersion func(string) string, lookPath func(string) (string, error), readFile func(string) ([]byte, error)) (vmkit.Response, error) {
 	return diagnostics.CheckFirecracker(
 		diagnostics.Options{Backend: backend, Arch: arch},
-		diagnostics.FirecrackerProbe{ResolveBinary: resolveBinary, Stat: stat, BinaryVersion: binaryVersion},
+		diagnostics.FirecrackerProbe{ResolveBinary: resolveBinary, Stat: stat, BinaryVersion: binaryVersion, LookPath: lookPath, ReadFile: readFile},
 	)
 }
 
@@ -430,7 +430,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.IntVar(&config.CPUCount, "cpus", 2, "CPU count")
 	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
-	networkMode := fs.String("network", defaultNetworkMode, "Network mode: nat, isolated, or bridged")
+	networkMode := fs.String("network", defaultNetworkMode, "Network mode: user, nat, isolated, or bridged")
 	networkInterface := fs.String("network-interface", "", "Host interface for bridged network mode")
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
@@ -1379,6 +1379,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		StateDir:       defaultStateDir(),
 		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		ResultPort:     workspace.DefaultResultPort,
 		SerialInput:    backendSupportsConsoleInput(backend),
 	}
 	if err := applyResourceProfile(&opts, false, false, false); err != nil {
@@ -1530,6 +1531,7 @@ func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (work
 		MemoryMiB:      defaultWorkspaceMemoryMiB,
 		CPUCount:       defaultWorkspaceCPUCount,
 		SizeMiB:        rootfs.DefaultSizeMiB,
+		ResultPort:     workspace.DefaultResultPort,
 		SerialInput:    backendSupportsConsoleInput(opts.Backend),
 	}
 	manifest, err := readWorkspaceManifest(opts.StateDir, opts.Name)
@@ -1665,7 +1667,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
-	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: nat, isolated, or bridged")
+	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: user, nat, isolated, or bridged")
 	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
 	mediationMapping := ""
 	fs.StringVar(&mediationMapping, "mediation", "", "Required mediation vsock mapping port=host:port")
@@ -2394,6 +2396,11 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 	if manifest, err := readWorkspaceManifest(opts.StateDir, eventFile.Identity.RuntimeID); err == nil {
 		resp.RestartPolicy = nonEmpty(manifest.Restart, defaultRestartPolicy)
 		network := networkConfigFromSpec(manifest.Network)
+		if state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: eventFile.Identity.RuntimeID}); err == nil && state.Config.Network != nil {
+			runtimeNetwork := normalizeNetworkConfig(*state.Config.Network)
+			runtimeNetwork.Runtime = nil
+			network.Runtime = &runtimeNetwork
+		}
 		resp.Network = &network
 		resp.Mediation = manifest.Mediation
 		artifacts := runtimeArtifactsFromManifest(manifest.Artifacts)
@@ -5019,7 +5026,7 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
   -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
@@ -5078,7 +5085,7 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
   -mediation p=host:port Required mediation vsock mapping
@@ -5112,7 +5119,7 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
   -mediation p=host:port Required mediation vsock mapping

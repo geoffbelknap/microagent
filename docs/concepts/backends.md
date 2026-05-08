@@ -3,7 +3,7 @@ title: Backends
 description: One backend per host OS. Same lifecycle surface, different mechanics.
 ---
 
-Microagent has one backend per host OS. The `--backend` flag exists for
+microagent-kit uses one backend per host OS. The `--backend` flag exists for
 lower-level request compatibility and backend validation, not for normal
 backend selection.
 
@@ -27,7 +27,7 @@ executable supervisor-shaped request/response boundary.
 - `delete` refuses to remove state while the recorded VM process is still
   running. Use `stop` or `kill` first.
 - Supports interactive `connect` and `connect --send`. Use
-  [`logs`](/cli/logs/) when you only need captured serial output.
+  [`logs`](../cli/logs.md) when you only need captured serial output.
 - Default kernel SHA is pinned and checked by the smoke targets in the root
   `Makefile`.
 

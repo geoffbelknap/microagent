@@ -2,14 +2,18 @@ package workspace
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
 )
+
+var e2fsckPath = "e2fsck"
 
 type CopyResult struct {
 	Artifact  string `json:"artifact,omitempty"`
@@ -260,6 +264,9 @@ func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, 
 	if err != nil {
 		return CopyResult{}, err
 	}
+	if err := reconcileExt4Journal(imagePath); err != nil {
+		return CopyResult{}, err
+	}
 	target, err := localCopyTarget(localTarget, filepath.Base(remote.Path))
 	if err != nil {
 		return CopyResult{}, err
@@ -322,6 +329,15 @@ func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCop
 	if err != nil {
 		return CopyResult{}, err
 	}
+	if err := reconcileExt4Journal(imagePath); err != nil {
+		return CopyResult{}, err
+	}
+	if err := ensureDebugFSParentDir(debugfsPath, imagePath, remote.Path); err != nil {
+		return CopyResult{}, err
+	}
+	if err := removeDebugFSFileIfExists(debugfsPath, imagePath, remote.Path); err != nil {
+		return CopyResult{}, err
+	}
 	if err := runDebugFS(debugfsPath, imagePath, true, "write "+localSource+" "+remote.Path); err != nil {
 		return CopyResult{}, err
 	}
@@ -357,6 +373,32 @@ func workspaceImagePath(stateDir string, remote remoteCopyEndpoint) (string, err
 		}
 	}
 	return "", fmt.Errorf("workspace %s has no disk %q", remote.Workspace, remote.Disk)
+}
+
+func ensureDebugFSParentDir(debugfsPath, imagePath, target string) error {
+	parent := filepath.Dir(target)
+	if parent == "." || parent == "/" {
+		return nil
+	}
+	output, err := runDebugFSOutput(debugfsPath, imagePath, false, "stat "+parent)
+	if err != nil {
+		return fmt.Errorf("workspace path parent %s does not exist in the image", parent)
+	}
+	if !strings.Contains(output, "Type: directory") {
+		return fmt.Errorf("workspace path parent %s exists but is not a directory", parent)
+	}
+	return nil
+}
+
+func removeDebugFSFileIfExists(debugfsPath, imagePath, target string) error {
+	output, err := runDebugFSOutput(debugfsPath, imagePath, true, "rm "+target)
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(output, "File not found") {
+		return nil
+	}
+	return err
 }
 
 func outputRemoteEndpoint(workspace string, output Output, disks []Disk) remoteCopyEndpoint {
@@ -444,6 +486,61 @@ func localCopyTarget(target, fallbackName string) (string, error) {
 }
 
 func runDebugFS(debugfsPath, imagePath string, write bool, command string) error {
+	_, err := runDebugFSOutput(debugfsPath, imagePath, write, command)
+	return err
+}
+
+func reconcileExt4Journal(imagePath string) error {
+	ext, err := hasExtSuperblock(imagePath)
+	if err != nil {
+		return err
+	}
+	if !ext {
+		return nil
+	}
+	cmd := exec.Command(e2fsckPath, "-fy", imagePath)
+	output, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(output))
+	if err == nil {
+		return nil
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		return fmt.Errorf("e2fsck %s: %w: %s", imagePath, err, text)
+	}
+	status, ok := exitErr.Sys().(syscall.WaitStatus)
+	if !ok {
+		return fmt.Errorf("e2fsck %s: %w: %s", imagePath, err, text)
+	}
+	// e2fsck uses bit flags. Bits 1 and 2 mean the filesystem was corrected;
+	// higher bits indicate uncorrected errors or operational failures.
+	if status.ExitStatus()&^3 == 0 {
+		return nil
+	}
+	return fmt.Errorf("e2fsck %s: %w: %s", imagePath, err, text)
+}
+
+func hasExtSuperblock(imagePath string) (bool, error) {
+	file, err := os.Open(imagePath)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	magic := []byte{0, 0}
+	n, err := file.ReadAt(magic, 1080)
+	if err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return false, nil
+		}
+		return false, err
+	}
+	if n != len(magic) {
+		return false, nil
+	}
+	return magic[0] == 0x53 && magic[1] == 0xef, nil
+}
+
+func runDebugFSOutput(debugfsPath, imagePath string, write bool, command string) (string, error) {
 	args := []string{}
 	if write {
 		args = append(args, "-w")
@@ -451,10 +548,32 @@ func runDebugFS(debugfsPath, imagePath string, write bool, command string) error
 	args = append(args, "-R", command, imagePath)
 	cmd := exec.Command(debugfsPath, args...)
 	output, err := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(output))
 	if err != nil {
-		return fmt.Errorf("debugfs %s: %w: %s", command, err, strings.TrimSpace(string(output)))
+		return text, fmt.Errorf("debugfs %s: %w: %s", command, err, text)
 	}
-	return nil
+	if debugFSOutputFailed(text) {
+		return text, fmt.Errorf("debugfs %s: %s", command, text)
+	}
+	return text, nil
+}
+
+func debugFSOutputFailed(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "debugfs ") || line == "" {
+			continue
+		}
+		if strings.Contains(line, "File not found") ||
+			strings.Contains(line, "Filesystem not open") ||
+			strings.Contains(line, "Ext2 file already exists") ||
+			strings.Contains(line, "while trying to open") ||
+			strings.Contains(line, "Could not allocate block") ||
+			strings.Contains(line, "Could not allocate inode") {
+			return true
+		}
+	}
+	return false
 }
 
 func cloneableState(name string, state vmkit.VMState) error {

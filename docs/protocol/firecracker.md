@@ -16,7 +16,7 @@ The supervisor:
 - sends `SIGTERM` for `stop`, `SIGKILL` for `kill`, and does not signal the VM
   process for `quarantine`
 
-## Process Model
+## Process model
 
 Firecracker itself is still a separate VM process. The supervisor executable is
 the Go implementation that owns its config, process group, state files, and
@@ -41,7 +41,7 @@ Important files include:
 | `firecracker.json` | generated Firecracker config |
 | `serial.log` | guest serial output |
 | `serial.in` | console input FIFO for running workspaces |
-| transient `magtap*` device | TAP created for bridged mode and removed on quarantine/stop/kill/delete |
+| transient `magtap*` device | TAP created for `nat` or `bridged` mode and removed on quarantine/stop/kill/delete |
 
 Persistent workspace disks live under:
 
@@ -57,7 +57,11 @@ Persistent workspace disks live under:
   through `MICROAGENT_FIRECRACKER`.
 - Supports interactive `microagent connect`; use `microagent logs` to review
   captured serial output.
-- Firecracker `network.mode` supports `nat`, `isolated`, and `bridged`.
+- Firecracker `network.mode` supports `user`, `nat`, `isolated`, and `bridged`.
+- Firecracker `user` requires `pasta`, unprivileged user namespaces, and
+  `/dev/net/tun`.
+- Firecracker `nat` requires nftables-capable kernel support, host IPv4
+  forwarding, and permission to create TAP devices and edit firewall rules.
 - Firecracker `bridged` requires `network.interface` to name an existing Linux
   bridge and requires host permissions to create and attach a TAP device.
 - The supervisor does not implement a direct `console` command. The CLI uses
@@ -65,9 +69,23 @@ Persistent workspace disks live under:
 
 ## Networking
 
-`nat` preserves the existing Firecracker behavior and live TCP `--publish`
-support. Published TCP listeners are still host-side listeners bridged to the
+`user` re-execs the supervisor under `pasta`, which creates an unprivileged
+user and network namespace. Inside that namespace, the supervisor creates the
+Firecracker TAP, configures namespace-local forwarding, and starts Firecracker.
+Pasta bridges the namespace to the host network without host capabilities.
+
+`nat` creates a deterministic transient TAP device, allocates a private
+`10.43.x.0/29` subnet, assigns the host side to `10.43.x.1`, attaches the TAP
+as guest `eth0`, and installs per-workspace nftables rules through
+microagent-owned NAT and forward chains. Guest-init reads the assigned network
+metadata from the kernel command line, configures `eth0` with a static IPv4
+address, installs the default route through the TAP gateway, and writes DNS
+resolvers. Published TCP listeners are still host-side listeners bridged to the
 guest through vsock.
+
+The assigned runtime IP, subnet, gateway, DNS, and route are recorded in the
+runtime network config. The supervisor fails closed if nftables support,
+`net.ipv4.ip_forward=1`, or `CAP_NET_ADMIN`-equivalent privileges are missing.
 
 `isolated` writes no Firecracker network device and rejects `--publish` before
 the supervisor starts the VM.
@@ -77,8 +95,8 @@ requested Linux bridge, and writes a Firecracker `network-interfaces` entry
 using that TAP. The TAP name is recorded in `runtime.json` while running and is
 deleted on `quarantine`, `stop`, `kill`, or `delete`. Missing
 `network.interface`, a
-nonexistent interface, a non-bridge interface, missing `iproute2`, missing
-permissions, or TAP setup failure all fail closed with explicit errors.
+nonexistent interface, a non-bridge interface, missing permissions, or TAP
+setup failure all fail closed with explicit errors.
 
 ## Quarantine
 

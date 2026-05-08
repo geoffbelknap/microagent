@@ -9,7 +9,7 @@ microagent create <name> --image <ref> [flags]
 ```
 
 `create` builds a workspace and records it under `--state-dir`. Unlike
-[`run`](/cli/run/), the state survives — you can `start`, `stop`, `connect`,
+[`run`](run.md), the state survives — you can `start`, `stop`, `connect`,
 and `delete` it later. If the default kernel is missing, `create` installs it
 first.
 
@@ -30,7 +30,7 @@ first.
 | `--state-dir <dir>` | State directory |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `nat`, `isolated`, or `bridged` |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `bridged` |
 | `--network-interface <if>` | Host interface identifier or display name for bridged mode |
 | `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
@@ -43,6 +43,12 @@ first.
 | `--dry-run` | Validate config without creating |
 | `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
 
+## Image references
+
+`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags (`docker.io/library/ubuntu:24.04`). Both are allowed here — `create` records the resolved digest in the workspace verification record so `microagent --json status` can flag drift later. Pin by digest if you want reproducible workspaces.
+
+[`microagent rootfs build`](rootfs.md) is stricter: it rejects mutable tags unless you pass `--allow-mutable`. See [security](../security.md) for the rationale.
+
 ## Examples
 
 Create a workspace:
@@ -54,17 +60,9 @@ microagent create \
   --profile medium
 ```
 
-Profiles expand to exact configs and are stored with the workspace:
+Profiles expand to exact memory/CPU/disk configs and are stored with the workspace. See [`profiles`](profiles.md) for the values.
 
-| Profile | Memory MiB | CPUs | Disk MiB |
-|---|---:|---:|---:|
-| `tiny` | 256 | 1 | 512 |
-| `small` | 512 | 2 | 1024 |
-| `medium` | 2048 | 2 | 8192 |
-| `large` | 4096 | 4 | 16384 |
-
-Use `--memory`, `--cpus`, or `--size-mib` with a profile to override a single
-value while keeping the profile name in the workspace record.
+Use `--memory`, `--cpus`, or `--size-mib` with a profile to override a single value while keeping the profile name in the workspace record.
 
 With setup commands:
 
@@ -115,7 +113,7 @@ When `microagent.yaml` or `microagent.yml` exists in the current directory,
 `microagent create` reads it automatically. CLI flags override fields from the
 spec.
 
-Restart policies are enforced by [`supervise`](/cli/supervise/).
+Restart policies are enforced by [`supervise`](supervise.md).
 
 On Apple VF, `bridged` also requires a supervisor signed with Apple's
 restricted `com.apple.vm.networking` entitlement. Open-source builds cannot
@@ -175,6 +173,6 @@ microagent --json create research --image docker.io/library/ubuntu:24.04
 
 ## Related
 
-- [`start`](/cli/start/), [`stop`](/cli/stop/), [`delete`](/cli/delete/)
-- [State and identity](/concepts/state-and-identity/)
-- [Supervisor protocol](/protocol/)
+- [`start`](start.md), [`stop`](stop.md), [`delete`](delete.md)
+- [State and identity](../concepts/state-and-identity.md)
+- [Supervisor protocol](../protocol/index.md)

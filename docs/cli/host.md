@@ -7,10 +7,10 @@ description: Report host backend capabilities.
 microagent host [--backend <name>] [--arch <arch>] [--supervisor <path>]
 ```
 
-`host` reports what Microagent can see on the current machine: backend,
+`host` reports what `microagent` can see on the current machine: backend,
 architecture, supervisor availability, kernel status, virtualization support,
 vsock support, and console mode. It uses the same probes as
-[`doctor`](/cli/doctor/), but is meant as an inspectable capability report.
+[`doctor`](doctor.md), but is meant as an inspectable capability report.
 
 ## Flags
 
@@ -21,12 +21,12 @@ vsock support, and console mode. It uses the same probes as
 | `--supervisor <path>` | Override the active backend supervisor path |
 | `--json` | Global flag before `host`; print structured JSON output |
 
-## Console Modes
+## Console modes
 
 | Backend | Console |
 |---|---|
-| Apple VF | `interactive` via [`connect`](/cli/connect/) |
-| Firecracker | `interactive` via [`connect`](/cli/connect/); captured output via [`logs`](/cli/logs/) |
+| Apple VF | `interactive` via [`connect`](connect.md) |
+| Firecracker | `interactive` via [`connect`](connect.md); captured output via [`logs`](logs.md) |
 
 `consoleAvailable` reports backend capability on this host. A workspace can
 still reject `connect` until it is running and the backend has created the
@@ -41,6 +41,6 @@ microagent --json host
 
 ## Related
 
-- [`doctor`](/cli/doctor/)
-- [Backends](/concepts/backends/)
-- [`kernel verify`](/cli/kernel/)
+- [`doctor`](doctor.md)
+- [Backends](../concepts/backends.md)
+- [`kernel verify`](kernel.md)

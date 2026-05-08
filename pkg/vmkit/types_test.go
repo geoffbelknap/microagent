@@ -120,6 +120,12 @@ func TestValidateNetworkConfigRejectsInvalidMode(t *testing.T) {
 	}
 }
 
+func TestValidateNetworkConfigAcceptsUserMode(t *testing.T) {
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "user"}); err != nil {
+		t.Fatalf("ValidateNetworkConfig user: %v", err)
+	}
+}
+
 func TestValidateNetworkConfigRejectsIsolatedPortForwards(t *testing.T) {
 	cfg := NetworkConfig{
 		Mode: "isolated",

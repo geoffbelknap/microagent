@@ -26,4 +26,4 @@ microagent --json ps
 
 ## Related
 
-- [`status`](/cli/status/) for a single workspace
+- [`status`](status.md) for a single workspace

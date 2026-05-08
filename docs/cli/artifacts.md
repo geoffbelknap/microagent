@@ -13,7 +13,7 @@ manifest. `artifacts get` retrieves a declared output artifact by name without
 entering the workspace.
 
 Only declared `outputs` are retrievable by artifact name. For arbitrary file
-copying, use [`cp`](/cli/cp/).
+copying, use [`cp`](cp.md).
 
 ## Flags
 
@@ -35,7 +35,7 @@ from that disk. Otherwise it reads from the rootfs image.
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`run`](/cli/run/)
-- [`cp`](/cli/cp/)
-- [`status`](/cli/status/)
+- [`create`](create.md)
+- [`run`](run.md)
+- [`cp`](cp.md)
+- [`status`](status.md)

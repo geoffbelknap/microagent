@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/google/nftables/expr"
+	"golang.org/x/sys/unix"
 )
 
 func TestDialGuestVsockUsesFirecrackerConnectHandshake(t *testing.T) {
@@ -121,6 +123,7 @@ printf 'got:%s\n' "$line"
 			StateDir:    dir,
 			MemoryMiB:   128,
 			CPUCount:    1,
+			Network:     &vmkit.NetworkConfig{Mode: "isolated"},
 			SerialInput: true,
 		},
 	}
@@ -221,6 +224,43 @@ func TestServePortForwardUsesRequestedVsockPort(t *testing.T) {
 	}
 }
 
+func TestStartVsockListenersWritesGuestResult(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "demo"}
+	resultPath := filepath.Join(dir, "demo", "result.json")
+	set, err := startVsockListeners(opts, &vmkit.Config{
+		VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: resultPath}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer set.Close()
+	conn, err := net.Dial("unix", firecrackerGuestVsockPath(opts, 1024))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		data, err := os.ReadFile(resultPath)
+		if err == nil {
+			if string(data) != `{"ok":true}` {
+				t.Fatalf("result = %s", data)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("result not written: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestSerialInputFIFOUsesFIFOType(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
 	file, err := openSerialInputFIFO(opts)
@@ -247,6 +287,12 @@ func TestValidateFirecrackerConfigRejectsUnsupportedNetworkMode(t *testing.T) {
 func TestValidateFirecrackerConfigAcceptsIsolatedNetworkMode(t *testing.T) {
 	if err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "isolated"}}); err != nil {
 		t.Fatalf("validateFirecrackerConfig isolated: %v", err)
+	}
+}
+
+func TestValidateFirecrackerConfigAcceptsUserNetworkMode(t *testing.T) {
+	if err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "user"}}); err != nil {
+		t.Fatalf("validateFirecrackerConfig user: %v", err)
 	}
 }
 
@@ -317,6 +363,173 @@ func TestWriteConfigAddsBridgedNetworkInterface(t *testing.T) {
 	if cfg.NetworkInterfaces[0].IfaceID != "eth0" || cfg.NetworkInterfaces[0].HostDevName == "" || cfg.NetworkInterfaces[0].GuestMAC == "" {
 		t.Fatalf("network interface = %#v", cfg.NetworkInterfaces[0])
 	}
+}
+
+func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   opts.StateDir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+			Network: &vmkit.NetworkConfig{
+				Mode:    "nat",
+				IP:      "10.43.12.2/29",
+				Gateway: "10.43.12.1",
+				DNS:     []string{"1.1.1.1", "8.8.8.8"},
+			},
+		},
+	}
+	if err := writeConfig(opts, req); err != nil {
+		t.Fatalf("writeConfig: %v", err)
+	}
+	var cfg config
+	data, err := os.ReadFile(configPath(opts))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.NetworkInterfaces) != 1 {
+		t.Fatalf("network interfaces = %#v", cfg.NetworkInterfaces)
+	}
+	bootArgs := cfg.BootSource.BootArgs
+	if !strings.Contains(bootArgs, "microagent_net_if=eth0") ||
+		!strings.Contains(bootArgs, "microagent_net_ip=10.43.12.2/29") ||
+		!strings.Contains(bootArgs, "microagent_net_gw=10.43.12.1") ||
+		!strings.Contains(bootArgs, "microagent_net_dns=1.1.1.1,8.8.8.8") {
+		t.Fatalf("boot args = %q", bootArgs)
+	}
+}
+
+func TestBuildNATFirewallRulesUsesNftablesExpressions(t *testing.T) {
+	rules, err := buildNATFirewallRules("magtap1234", "10.43.12.0/29")
+	if err != nil {
+		t.Fatalf("buildNATFirewallRules: %v", err)
+	}
+	if len(rules) != 3 {
+		t.Fatalf("rules = %#v", rules)
+	}
+	if rules[0].Table != nftMicroagentTable || rules[0].Chain != nftNATPostroutingChain || rules[0].Comment == "" {
+		t.Fatalf("nat rule metadata = %#v", rules[0].transientFirewallRule)
+	}
+	if !containsExpr[*expr.Masq](rules[0].Exprs) {
+		t.Fatalf("nat rule missing masquerade expression: %#v", rules[0].Exprs)
+	}
+	if rules[1].Chain != nftForwardChain || !containsVerdict(rules[1].Exprs, expr.VerdictAccept) {
+		t.Fatalf("forward rule = %#v", rules[1])
+	}
+	if !containsExpr[*expr.Ct](rules[2].Exprs) || !containsVerdict(rules[2].Exprs, expr.VerdictAccept) {
+		t.Fatalf("established forward rule = %#v", rules[2])
+	}
+}
+
+func TestFirecrackerNetworkSetupDoesNotExecIPOrIPTables(t *testing.T) {
+	data, err := os.ReadFile("supervisor_linux.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	for _, needle := range []string{
+		`exec.` + `Command("ip"`,
+		`exec.` + `CommandContext(ctx, "ip"`,
+		`exec.` + `LookPath("ip"`,
+		`exec.` + `Command("iptables"`,
+		`exec.` + `CommandContext(ctx, "iptables"`,
+		`exec.` + `LookPath("iptables"`,
+		`exec.` + `Command("xtables-nft-multi"`,
+		`exec.` + `LookPath("xtables-nft-multi"`,
+	} {
+		if strings.Contains(source, needle) {
+			t.Fatalf("firecracker network setup still shells out through %s", needle)
+		}
+	}
+}
+
+func TestEnsureNetAdminInheritableRejectsMissingInheritable(t *testing.T) {
+	oldGetCaps := getProcessCapabilities
+	oldGetEUID := getEffectiveUID
+	t.Cleanup(func() {
+		getProcessCapabilities = oldGetCaps
+		getEffectiveUID = oldGetEUID
+	})
+	getEffectiveUID = func() int { return 1000 }
+	getProcessCapabilities = func() (processCapabilities, error) {
+		mask := uint64(1) << uint(unix.CAP_NET_ADMIN)
+		return processCapabilities{
+			Effective: mask,
+			Permitted: mask,
+		}, nil
+	}
+	err := ensureNetAdminInheritable()
+	if err == nil {
+		t.Fatal("ensureNetAdminInheritable accepted missing inheritable CAP_NET_ADMIN")
+	}
+	if !strings.Contains(err.Error(), "cap_net_admin+eip") || strings.Contains(err.Error(), "Operation not permitted") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEnsureNetAdminInheritableAcceptsEIP(t *testing.T) {
+	oldGetCaps := getProcessCapabilities
+	oldGetEUID := getEffectiveUID
+	t.Cleanup(func() {
+		getProcessCapabilities = oldGetCaps
+		getEffectiveUID = oldGetEUID
+	})
+	getEffectiveUID = func() int { return 1000 }
+	getProcessCapabilities = func() (processCapabilities, error) {
+		mask := uint64(1) << uint(unix.CAP_NET_ADMIN)
+		return processCapabilities{
+			Effective:   mask,
+			Permitted:   mask,
+			Inheritable: mask,
+		}, nil
+	}
+	if err := ensureNetAdminInheritable(); err != nil {
+		t.Fatalf("ensureNetAdminInheritable: %v", err)
+	}
+}
+
+func TestFirecrackerSysProcAttrAddsAmbientNetAdminOnlyForNetworkedVMs(t *testing.T) {
+	if attr := firecrackerSysProcAttr(false, false); attr != nil {
+		t.Fatalf("isolated attr = %#v", attr)
+	}
+	attr := firecrackerSysProcAttr(true, true)
+	if attr == nil || !attr.Setpgid {
+		t.Fatalf("networked detached attr = %#v", attr)
+	}
+	if len(attr.AmbientCaps) != 1 || attr.AmbientCaps[0] != uintptr(unix.CAP_NET_ADMIN) {
+		t.Fatalf("ambient caps = %#v", attr.AmbientCaps)
+	}
+}
+
+func containsExpr[T expr.Any](exprs []expr.Any) bool {
+	for _, candidate := range exprs {
+		if _, ok := candidate.(T); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func containsVerdict(exprs []expr.Any, kind expr.VerdictKind) bool {
+	for _, candidate := range exprs {
+		verdict, ok := candidate.(*expr.Verdict)
+		if ok && verdict.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWriteConfigAddsVsockForMediation(t *testing.T) {

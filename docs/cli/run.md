@@ -7,9 +7,9 @@ description: Boot a VM from an OCI image, run a command, and tear down.
 microagent run --image <ref> --exec "<command>" [flags]
 ```
 
-`run` is the one-shot path. Microagent fetches the image, builds a rootfs,
-boots the VM, runs `--setup` then `--exec`, prints the result, and removes
-scratch state (unless `--keep` is set).
+`run` is the one-shot path. It fetches the image, builds a rootfs, boots the
+VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
+(unless `--keep` is set).
 
 ## Flags
 
@@ -36,6 +36,10 @@ scratch state (unless `--keep` is set).
 | `--keep` | Keep state after the command exits |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the active backend supervisor path |
+
+## Image references
+
+`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](rootfs.md) is the stricter path — it rejects mutable tags unless you pass `--allow-mutable`. See [security](../security.md) for the rationale.
 
 ## Examples
 
@@ -77,6 +81,6 @@ microagent run \
 
 ## Related
 
-- [`create`](/cli/create/) — keep the workspace between starts
-- [`kernel install`](/cli/kernel/) — manage kernels explicitly
-- [`rootfs build`](/cli/rootfs/) — build a rootfs without booting
+- [`create`](create.md) — keep the workspace between starts
+- [`kernel install`](kernel.md) — manage kernels explicitly
+- [`rootfs build`](rootfs.md) — build a rootfs without booting

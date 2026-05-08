@@ -19,7 +19,7 @@ The CLI is an adapter over these packages. Go callers should use the library
 directly for workspace lifecycle operations instead of shelling out to
 `microagent`.
 
-## Supervisor Types
+## Supervisor types
 
 Use `pkg/vmkit` when you need the shared request/response schema or want to
 call an executable supervisor.
@@ -61,7 +61,7 @@ func inspect(ctx context.Context, supervisor vmkit.Supervisor, req vmkit.Request
 }
 ```
 
-## Rootfs Builder
+## Rootfs builder
 
 Use `pkg/rootfs` when your program needs to build a VM rootfs from an OCI image
 without shelling out to `microagent rootfs`.
@@ -168,7 +168,7 @@ if err != nil {
 _ = verified
 ```
 
-## Image Cache API
+## Image cache API
 
 Use `pkg/imagecache` when an orchestrator wants reusable rootfs baselines.
 
@@ -200,5 +200,34 @@ _ = resp
 ```
 
 The CLI contains presentation, flag parsing, and terminal-oriented behavior.
-MicroVM orchestration and management capabilities are exposed through the Go
+microVM orchestration and management capabilities are exposed through the Go
 packages.
+
+## CLI ↔ library mapping
+
+If you already know the CLI, this is the lookup for the equivalent library call:
+
+| CLI command | Library call |
+|---|---|
+| `microagent run` | [`workspace.Run`](#workspace-api) |
+| `microagent create` | `workspace.Create` |
+| `microagent start` | `workspace.Start` |
+| `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
+| `microagent result` | `workspace.ResultStatus` |
+| `microagent ps` | `workspace.List` |
+| `microagent halt` / `quarantine` / `stop` / `kill` / `delete` | `workspace.Control` (one function, action picked via options) |
+| `microagent supervise` | `workspace.Supervise` |
+| `microagent connect` | No direct library equivalent — interactive console is CLI-only. Use `workspace.ReadLogs` for captured serial output. |
+| `microagent logs` | `workspace.ReadLogs` |
+| `microagent cp` | `workspace.Copy` |
+| `microagent clone` | `workspace.Clone` |
+| `microagent artifacts` / `artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
+| `microagent network` | `workspace.Network` |
+| `microagent doctor` / `host` | [`diagnostics.Check`](#diagnostics-api) |
+| `microagent contract` | `vmkit.Contract` |
+| `microagent kernel install` / `verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
+| `microagent rootfs build` | `rootfs.Builder.Build` |
+| `microagent images pull` / `list` / `tag` / `rm` / `prune` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
+| `microagent.yaml` (spec parsing) | `workspace.ReadManifest` / `WriteManifest` |
+
+The library calls take options structs and return typed responses. The CLI is a thin shell over them — anything the CLI does, your program can do too without shelling out.
