@@ -1361,7 +1361,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
     let vmConfig = VZVirtualMachineConfiguration()
     vmConfig.platform = VZGenericPlatformConfiguration()
     let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: config.kernelPath))
-    bootLoader.commandLine = "console=hvc0 root=/dev/vda rw init=/sbin/microagent-init"
+    bootLoader.commandLine = linuxKernelCommandLine(for: config)
     vmConfig.bootLoader = bootLoader
     vmConfig.cpuCount = config.cpuCount ?? 2
     vmConfig.memorySize = UInt64(config.memoryMiB ?? 512) * 1024 * 1024
@@ -1407,6 +1407,17 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
         vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
     }
     return vmConfig
+}
+
+func linuxKernelCommandLine(for config: Config) -> String {
+    var args = ["console=hvc0", "root=/dev/vda", "rw", "init=/sbin/microagent-init"]
+    switch normalizedNetworkMode(config.network) {
+    case "nat", "bridged":
+        args.append("ip=dhcp")
+    default:
+        break
+    }
+    return args.joined(separator: " ")
 }
 
 @available(macOS 13.0, *)

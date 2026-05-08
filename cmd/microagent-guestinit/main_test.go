@@ -80,3 +80,33 @@ func TestEnvValuePrefersConfigEnv(t *testing.T) {
 		t.Fatalf("envValue = %q, want from-config", got)
 	}
 }
+
+func TestCmdlineRequestsDHCP(t *testing.T) {
+	for _, cmdline := range []string{
+		"console=hvc0 root=/dev/vda ip=dhcp",
+		"ip=on console=hvc0",
+		"root=/dev/vda ip=any",
+	} {
+		if !cmdlineRequestsDHCP(cmdline) {
+			t.Fatalf("cmdlineRequestsDHCP(%q) = false, want true", cmdline)
+		}
+	}
+	if cmdlineRequestsDHCP("console=hvc0 root=/dev/vda ip=off") {
+		t.Fatal("cmdlineRequestsDHCP(ip=off) = true, want false")
+	}
+}
+
+func TestParseKernelPNPNameservers(t *testing.T) {
+	got := parseKernelPNPNameservers(`
+#PROTO: DHCP
+domain local
+nameserver 192.168.64.1
+# nameserver 8.8.8.8
+nameserver not-an-ip
+nameserver 192.168.64.1
+`)
+	want := []string{"192.168.64.1", "8.8.8.8"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("nameservers = %#v, want %#v", got, want)
+	}
+}

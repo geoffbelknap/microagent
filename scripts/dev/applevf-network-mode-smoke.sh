@@ -9,6 +9,10 @@ if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
 fi
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-network.XXXXXX")"
 ROOTFS="$STATE_DIR/rootfs.ext4"
+CLI="$STATE_DIR/microagent"
+GUEST_INIT="$STATE_DIR/microagent-guestinit"
+IMAGE="${MICROAGENT_APPLEVF_NETWORK_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
+ARCH="${MICROAGENT_APPLEVF_NETWORK_ARCH:-arm64}"
 
 cleanup() {
   if [ "${MICROAGENT_KEEP_NETWORK_SMOKE:-0}" != "1" ]; then
@@ -31,6 +35,20 @@ if [ ! -x "$SUPERVISOR" ]; then
   echo "supervisor is not executable at $SUPERVISOR; run make signed-supervisor" >&2
   exit 2
 fi
+if command -v mke2fs >/dev/null 2>&1; then
+  MKE2FS="$(command -v mke2fs)"
+elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ]; then
+  MKE2FS="/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
+else
+  echo "mke2fs not found; install e2fsprogs" >&2
+  exit 2
+fi
+
+(
+  cd "$ROOT"
+  go build -o "$CLI" ./cmd/microagent
+  GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o "$GUEST_INIT" ./cmd/microagent-guestinit
+)
 
 : >"$ROOTFS"
 
@@ -74,13 +92,45 @@ run_check() {
   request "$runtime" "$mode" "$iface" | "$SUPERVISOR"
 }
 
-NAT_RESPONSE="$(run_check nat-check nat)"
-python3 - "$NAT_RESPONSE" <<'PY'
+NAT_RESULT="$STATE_DIR/nat.json"
+"$CLI" run \
+  --backend apple-vf \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --exec "wget -qO- -T 10 http://example.com >/tmp/applevf-nat.out && echo APPLEVF_NAT_OK" \
+  --name nat-smoke \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR/nat" \
+  --size-mib "${MICROAGENT_APPLEVF_NETWORK_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --memory "${MICROAGENT_APPLEVF_NETWORK_MEMORY_MIB:-512}" \
+  --cpus "${MICROAGENT_APPLEVF_NETWORK_CPUS:-2}" \
+  --network nat \
+  --timeout "${MICROAGENT_APPLEVF_NETWORK_TIMEOUT_SECONDS:-45}" >"$NAT_RESULT"
+
+python3 - "$NAT_RESULT" <<'PY'
 import json
 import sys
-resp = json.loads(sys.argv[1])
-if not resp.get("ok"):
-    raise SystemExit(resp)
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    result = json.load(f)
+response = result.get("response") or {}
+if (response.get("event") or {}).get("state") != "stopped":
+    raise SystemExit(result)
+guest = result.get("result") or {}
+stdout = guest.get("stdout", "")
+stderr = guest.get("stderr", "")
+serial = result.get("serial_log", "")
+if "APPLEVF_NAT_OK" not in stdout and "APPLEVF_NAT_OK" not in serial:
+    raise SystemExit(result)
+if "bad address" in stderr.lower() or "network is unreachable" in stderr.lower():
+    raise SystemExit(result)
+if guest.get("exit_code") != 0:
+    raise SystemExit(result)
+if (result.get("network") or {}).get("mode") != "nat":
+    raise SystemExit(result.get("network"))
 PY
 
 ISOLATED_RESPONSE="$(run_check isolated-check isolated)"
