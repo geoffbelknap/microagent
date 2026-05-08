@@ -3,6 +3,8 @@ title: Run your first agent workspace
 description: Use `microagent run` for a one-shot task inside a Linux workspace.
 ---
 
+*Driving microagent from a Go program instead? See the [library quickstart](/getting-started/library/first-program/).*
+
 Start with `microagent run`. It pulls an OCI image, builds a Linux workspace,
 boots it with the host backend, runs your command, and removes the scratch state
 afterward.
@@ -76,4 +78,4 @@ Manage kernels explicitly with [`microagent kernel`](/cli/kernel/).
 
 To keep an agent workspace around for later `start`, `connect`, artifact
 inspection, and shutdown, see
-[Named workspaces](/getting-started/named-workspaces/) and [`create`](/cli/create/).
+[Named workspaces](/getting-started/cli/named-workspaces/) and [`create`](/cli/create/).

@@ -50,13 +50,25 @@ Planning loops, LLM calls, tool mediation, policy decisions, credential brokerin
 
 ## Docs
 
-| | |
+Pick the path that matches what you're doing:
+
+| Trying it out (CLI) | |
 |---|---|
-| [Getting started](docs/getting-started/install.md) | Install, first VM, named workspaces |
-| [Concepts](docs/concepts/architecture.md) | Architecture, backends, networking, state, [glossary](docs/concepts/glossary.md) |
+| [Install](docs/getting-started/install.md) | Homebrew, source, host check |
+| [First agent workspace](docs/getting-started/cli/first-agent.md) | Boot, run, tear down with `microagent run` |
+| [Named workspaces](docs/getting-started/cli/named-workspaces.md) | Create, start, stop, resume |
 | [CLI reference](docs/cli/index.md) | Every subcommand |
-| [Protocol](docs/protocol/index.md) | Supervisor JSON protocol and runtime contract |
-| [Library](docs/library/go.md) | Go package surface |
+
+| Building with the library (Go) | |
+|---|---|
+| [First program](docs/getting-started/library/first-program.md) | A handful of lines that boots a VM, runs a command, tears down |
+| [Go library](docs/library/go.md) | Exported package surface and CLI ↔ library mapping |
+| [Supervisor protocol](docs/protocol/index.md) | JSON protocol if you're going below the library |
+
+| Reference and operations | |
+|---|---|
+| [Concepts](docs/concepts/architecture.md) | Architecture, backends, networking, state, [glossary](docs/concepts/glossary.md) |
+| [Recipes](docs/recipes/index.md) | End-to-end examples |
 | [Security](docs/security.md) | Trust boundary; see [`SECURITY.md`](SECURITY.md) for disclosure |
 | [Troubleshooting](docs/troubleshooting.md) | Common failure modes, indexed by symptom |
 
