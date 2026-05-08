@@ -9,10 +9,10 @@ microagent [--json] contract
 
 `contract` reports the runtime semantics that Firecracker and Apple VF must
 share: lifecycle commands, states, readiness signals, result fields, artifact
-channels, mediation fields, verification, and parity rules.
+channels, mediation fields, and verification.
 
-The JSON output is intended for agent-runtime builders and backend conformance
-tests.
+The JSON output is intended for agent-runtime builders and host integrations
+that need a machine-readable contract.
 
 ## Example
 
@@ -22,6 +22,6 @@ microagent --json contract
 
 ## Related
 
-- [Runtime parity contract](../protocol/runtime-contract.md)
+- [Runtime contract](../protocol/runtime-contract.md)
 - [Supervisor protocol](../protocol/index.md)
 - [Backends](../concepts/backends.md)

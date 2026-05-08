@@ -184,8 +184,8 @@ readiness signals. Each signal has `ready` plus optional `observedAt`, `detail`,
 and `error`.
 
 `mediation` reports the declared guest-to-host vsock channel separately from
-ordinary networking and logs. It is the stable path between the guest Body and
-the host enforcer/orchestrator.
+ordinary networking and logs. It is the control-plane path between the guest
+body and the host process handling work.
 
 When the guest result channel has completed, status responses may include
 `result`. The result is structured separately from serial logs and carries
@@ -227,7 +227,8 @@ For the visual state machine — including which transitions `start`, `halt`, `q
 
 ## Field presence by command
 
-The kitchen-sink response above shows every block the protocol can carry. Most commands return a subset. This table is the source of truth for which fields you can rely on for which command:
+The response above shows every block the protocol can carry. Most commands
+return a subset:
 
 | Command | `event` | `host` | `verification` | `readiness` | `result` | `artifacts` | `mediation` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -257,5 +258,5 @@ Reading the table:
   executable implementation.
 - [Apple VF supervisor](applevf.md) documents the macOS executable
   protocol.
-- [Runtime parity contract](runtime-contract.md) documents the shared
+- [Runtime contract](runtime-contract.md) documents the shared
   agent-runtime semantics.

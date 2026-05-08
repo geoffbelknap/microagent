@@ -3,9 +3,9 @@ title: Backends
 description: One backend per host OS. Same lifecycle surface, different mechanics.
 ---
 
-microagent-kit uses one backend per host OS. The `--backend` flag exists for
-lower-level request compatibility and backend validation, not for normal
-backend selection.
+microagent-kit uses one backend per host OS. Most users can let `microagent`
+choose the host backend automatically; `--backend` is mainly for callers that
+need to construct lower-level requests directly.
 
 | Backend | Host OS | Supervisor | `connect` | Process model |
 |---|---|---|---|---|
@@ -28,8 +28,7 @@ executable supervisor-shaped request/response boundary.
   running. Use `stop` or `kill` first.
 - Supports interactive `connect` and `connect --send`. Use
   [`logs`](../cli/logs.md) when you only need captured serial output.
-- Default kernel SHA is pinned and checked by the smoke targets in the root
-  `Makefile`.
+- The default kernel path is `~/.microagent/kernels/firecracker/<arch>/Image`.
 
 ## Apple VF (macOS)
 
@@ -40,7 +39,7 @@ executable supervisor-shaped request/response boundary.
   the restricted `com.apple.vm.networking` entitlement.
 - The supervisor is packaged as `microagent-applevf-supervisor`. Override with
   `--supervisor` or `MICROAGENT_APPLEVF_SUPERVISOR`.
-- Default kernel for arm64 lives at
+- The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
 
 ## Selecting a host

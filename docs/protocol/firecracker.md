@@ -112,20 +112,11 @@ Firecracker matches the Apple VF console behavior callers see:
 - `microagent connect <name> --send "echo CONNECT_READY"` reaches a running
   guest shell and prints `CONNECT_READY`.
 - interactive `microagent connect <name>` waits for the guest shell readiness
-  gate by default.
+  signal by default.
 - `Ctrl-]` detaches without stopping the workspace.
 - errors clearly distinguish "guest shell is not ready" from "console input is
   unavailable".
 - serial output remains inspectable through `microagent logs`.
-
-The console gate is:
-
-```bash
-make smoke-firecracker-console
-```
-
-That target requires Linux amd64 with KVM and is part of the Linux `make smoke`
-suite.
 
 `consoleAvailable` in host reports describes backend capability. A prepared
 workspace still reports "console input is not ready" until it has been started
