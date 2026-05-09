@@ -9,10 +9,10 @@ description: Install microagent-kit via Homebrew or build from source.
 brew install geoffbelknap/tap/microagent-kit
 ```
 
-This installs the `microagent` CLI on Linux and macOS. On Linux it also
-installs `microagent-firecracker-supervisor`. On macOS it also installs
-`microagent-applevf-supervisor`, the Swift JSON executable that owns Apple
-Virtualization.framework lifecycle.
+This installs the `microagent` CLI on Linux and macOS. It also installs
+`microagent-supervisor` as a host-specific symlink. On Linux, that symlink
+targets the Firecracker supervisor; on macOS, it targets the Apple
+Virtualization.framework supervisor.
 
 ## From source
 
