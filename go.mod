@@ -6,7 +6,7 @@ require (
 	github.com/google/nftables v0.3.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/vishvananda/netlink v1.3.1
-	golang.org/x/sys v0.43.0
+	golang.org/x/sys v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 	oras.land/oras-go/v2 v2.6.0
 )
