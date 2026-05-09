@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent-kit/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
 	firecrackersupervisor "github.com/geoffbelknap/microagent-kit/pkg/supervisors/firecracker"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
@@ -111,6 +112,10 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 		vmkit.BackendFirecracker,
 		"amd64",
 		func() (string, error) { return "/usr/local/bin/firecracker", nil },
+		func(diagnostics.Options) (string, error) {
+			return "/usr/local/bin/microagent-firecracker-supervisor", nil
+		},
+		func(diagnostics.Options) (string, error) { return "/usr/local/libexec/microagent-guestinit-amd64", nil },
 		func(path string) (os.FileInfo, error) {
 			switch path {
 			case "/dev/kvm", "/dev/vhost-vsock", "/dev/net/tun":
@@ -172,6 +177,10 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 		vmkit.BackendFirecracker,
 		"amd64",
 		func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
+		func(diagnostics.Options) (string, error) {
+			return "", fmt.Errorf("microagent Firecracker supervisor not found")
+		},
+		func(diagnostics.Options) (string, error) { return "", fmt.Errorf("microagent guest init not found") },
 		func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
 		func(string) string { return "" },
 		func(string) (string, error) { return "", os.ErrNotExist },

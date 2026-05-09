@@ -114,6 +114,8 @@ type HostSupport struct {
 	VirtualizationSupported bool   `json:"virtualizationSupported"`
 	SupervisorPath          string `json:"supervisorPath,omitempty"`
 	SupervisorAvailable     bool   `json:"supervisorAvailable,omitempty"`
+	GuestInitPath           string `json:"guestInitPath,omitempty"`
+	GuestInitAvailable      bool   `json:"guestInitAvailable,omitempty"`
 	BinaryPath              string `json:"binaryPath,omitempty"`
 	BinaryVersion           string `json:"binaryVersion,omitempty"`
 	KVMAvailable            bool   `json:"kvmAvailable,omitempty"`

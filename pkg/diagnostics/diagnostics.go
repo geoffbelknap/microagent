@@ -21,11 +21,13 @@ type Options struct {
 }
 
 type FirecrackerProbe struct {
-	ResolveBinary func() (string, error)
-	Stat          func(string) (os.FileInfo, error)
-	BinaryVersion func(string) string
-	LookPath      func(string) (string, error)
-	ReadFile      func(string) ([]byte, error)
+	ResolveBinary     func() (string, error)
+	ResolveSupervisor func(Options) (string, error)
+	ResolveGuestInit  func(Options) (string, error)
+	Stat              func(string) (os.FileInfo, error)
+	BinaryVersion     func(string) string
+	LookPath          func(string) (string, error)
+	ReadFile          func(string) ([]byte, error)
 }
 
 func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
@@ -71,6 +73,12 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if probe.ResolveBinary == nil {
 		probe.ResolveBinary = ResolveFirecrackerPath
 	}
+	if probe.ResolveSupervisor == nil {
+		probe.ResolveSupervisor = ResolveFirecrackerSupervisorPath
+	}
+	if probe.ResolveGuestInit == nil {
+		probe.ResolveGuestInit = ResolveGuestInitPath
+	}
 	if probe.Stat == nil {
 		probe.Stat = os.Stat
 	}
@@ -93,6 +101,20 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 		host.BinaryVersion = probe.BinaryVersion(path)
 		host.FrameworkAvailable = true
 	} else {
+		issues = append(issues, err.Error())
+	}
+	if path, err := probe.ResolveSupervisor(opts); err == nil {
+		host.SupervisorPath = path
+		host.SupervisorAvailable = true
+	} else {
+		host.SupervisorPath = workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})
+		issues = append(issues, err.Error())
+	}
+	if path, err := probe.ResolveGuestInit(opts); err == nil {
+		host.GuestInitPath = path
+		host.GuestInitAvailable = true
+	} else {
+		host.GuestInitPath = workspace.GuestInitPath(opts.Arch)
 		issues = append(issues, err.Error())
 	}
 	if _, err := probe.Stat("/dev/kvm"); err == nil {
@@ -173,8 +195,9 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		resp.Host.ConsoleAvailable = true
 		resp.Host.ConsoleMode = "interactive"
 	case vmkit.BackendFirecracker:
-		resp.Host.SupervisorPath = workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})
-		resp.Host.SupervisorAvailable = true
+		if resp.Host.SupervisorPath == "" {
+			resp.Host.SupervisorPath = workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})
+		}
 		resp.Host.ConsoleAvailable = true
 		resp.Host.ConsoleMode = "interactive"
 	}
@@ -204,6 +227,42 @@ func DefaultFirecrackerPathFromExecutable(executable string) string {
 		executable = resolved
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "libexec", "firecracker"))
+}
+
+func ResolveFirecrackerSupervisorPath(opts Options) (string, error) {
+	name := workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})
+	if filepath.IsAbs(name) || strings.ContainsRune(name, os.PathSeparator) {
+		if info, err := os.Stat(name); err == nil && !info.IsDir() {
+			return name, nil
+		}
+		return "", fmt.Errorf("microagent Firecracker supervisor not found at %s; set MICROAGENT_FIRECRACKER_SUPERVISOR or install microagent-firecracker-supervisor on PATH", name)
+	}
+	if path, err := exec.LookPath(name); err == nil {
+		return path, nil
+	}
+	if exe, err := os.Executable(); err == nil {
+		path := DefaultFirecrackerSupervisorPathFromExecutable(exe)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("microagent Firecracker supervisor not found; set MICROAGENT_FIRECRACKER_SUPERVISOR or install microagent-firecracker-supervisor on PATH")
+}
+
+func DefaultFirecrackerSupervisorPathFromExecutable(executable string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	return filepath.Join(filepath.Dir(executable), "microagent-firecracker-supervisor")
+}
+
+func ResolveGuestInitPath(opts Options) (string, error) {
+	path := workspace.GuestInitPath(opts.Arch)
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return path, nil
+	}
+	name := "microagent-guestinit-" + opts.Arch
+	return "", fmt.Errorf("microagent guest init not found at %s; set guest init explicitly or install %s under the microagent-kit Homebrew libexec directory", path, name)
 }
 
 func FirecrackerVersion(path string) string {

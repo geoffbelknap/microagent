@@ -12,7 +12,7 @@ Each agent gets its own Linux microVM — kernel, rootfs, state, lifecycle. Boot
 brew install geoffbelknap/tap/microagent-kit
 ```
 
-This installs `microagent` and the supervisor for your host (`microagent-firecracker-supervisor` on Linux, `microagent-applevf-supervisor` on macOS). To build from source, see [`docs/getting-started/install.md`](docs/getting-started/install.md).
+This installs `microagent` and `microagent-supervisor`, a symlink to the correct supervisor for your host. To build from source, see [`docs/getting-started/install.md`](docs/getting-started/install.md).
 
 ## 30-second tour
 

@@ -230,10 +230,10 @@ func backendSupportsConsoleInput(backend string) bool {
 	return workspace.BackendSupportsConsoleInput(backend)
 }
 
-func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (string, error), stat func(string) (os.FileInfo, error), binaryVersion func(string) string, lookPath func(string) (string, error), readFile func(string) ([]byte, error)) (vmkit.Response, error) {
+func firecrackerDoctorResponse(backend, arch string, resolveBinary func() (string, error), resolveSupervisor func(diagnostics.Options) (string, error), resolveGuestInit func(diagnostics.Options) (string, error), stat func(string) (os.FileInfo, error), binaryVersion func(string) string, lookPath func(string) (string, error), readFile func(string) ([]byte, error)) (vmkit.Response, error) {
 	return diagnostics.CheckFirecracker(
 		diagnostics.Options{Backend: backend, Arch: arch},
-		diagnostics.FirecrackerProbe{ResolveBinary: resolveBinary, Stat: stat, BinaryVersion: binaryVersion, LookPath: lookPath, ReadFile: readFile},
+		diagnostics.FirecrackerProbe{ResolveBinary: resolveBinary, ResolveSupervisor: resolveSupervisor, ResolveGuestInit: resolveGuestInit, Stat: stat, BinaryVersion: binaryVersion, LookPath: lookPath, ReadFile: readFile},
 	)
 }
 

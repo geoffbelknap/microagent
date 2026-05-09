@@ -15,7 +15,9 @@ func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
 	resp, err := CheckFirecracker(
 		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
 		FirecrackerProbe{
-			ResolveBinary: func() (string, error) { return "/usr/local/bin/firecracker", nil },
+			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
+			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
+			ResolveGuestInit:  func(Options) (string, error) { return "/usr/local/libexec/microagent-guestinit-amd64", nil },
 			Stat: func(path string) (os.FileInfo, error) {
 				switch path {
 				case "/dev/kvm", "/dev/vhost-vsock", "/dev/net/tun":
@@ -42,16 +44,24 @@ func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
 	if !resp.OK || resp.Host == nil || !resp.Host.KVMAvailable || !resp.Host.VsockAvailable || !resp.Host.UserNetworkingAvailable {
 		t.Fatalf("response = %#v", resp)
 	}
+	if !resp.Host.SupervisorAvailable || resp.Host.SupervisorPath != "/usr/local/bin/microagent-firecracker-supervisor" {
+		t.Fatalf("supervisor support = %#v", resp.Host)
+	}
+	if !resp.Host.GuestInitAvailable || resp.Host.GuestInitPath != "/usr/local/libexec/microagent-guestinit-amd64" {
+		t.Fatalf("guest init support = %#v", resp.Host)
+	}
 }
 
 func TestCheckFirecrackerReportsMissingSupport(t *testing.T) {
 	resp, err := CheckFirecracker(
 		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
 		FirecrackerProbe{
-			ResolveBinary: func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
-			Stat:          func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
-			LookPath:      func(string) (string, error) { return "", os.ErrNotExist },
-			ReadFile:      func(string) ([]byte, error) { return []byte("0\n"), nil },
+			ResolveBinary:     func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
+			ResolveSupervisor: func(Options) (string, error) { return "", fmt.Errorf("microagent Firecracker supervisor not found") },
+			ResolveGuestInit:  func(Options) (string, error) { return "", fmt.Errorf("microagent guest init not found") },
+			Stat:              func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+			LookPath:          func(string) (string, error) { return "", os.ErrNotExist },
+			ReadFile:          func(string) ([]byte, error) { return []byte("0\n"), nil },
 		},
 	)
 	if err == nil {
@@ -63,13 +73,18 @@ func TestCheckFirecrackerReportsMissingSupport(t *testing.T) {
 	if resp.Error == "" {
 		t.Fatal("missing error")
 	}
+	if !strings.Contains(resp.Error, "microagent Firecracker supervisor not found") || !strings.Contains(resp.Error, "microagent guest init not found") {
+		t.Fatalf("error = %q", resp.Error)
+	}
 }
 
 func TestCheckFirecrackerReportsMissingPasta(t *testing.T) {
 	resp, err := CheckFirecracker(
 		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
 		FirecrackerProbe{
-			ResolveBinary: func() (string, error) { return "/usr/local/bin/firecracker", nil },
+			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
+			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
+			ResolveGuestInit:  func(Options) (string, error) { return "/usr/local/libexec/microagent-guestinit-amd64", nil },
 			Stat: func(path string) (os.FileInfo, error) {
 				return fakeFileInfo{name: filepath.Base(path)}, nil
 			},
