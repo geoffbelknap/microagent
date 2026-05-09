@@ -26,11 +26,18 @@ Every request has an identity:
   correlate.
 - **`runtimeID`** — the workspace identifier. Equivalent to `--name` /
   `--id`.
-- **`role`** — caller-supplied label. microagent-kit does not interpret it.
+- **`role`** — caller-supplied label. Defaults to `workload`. microagent-kit
+  records it in requests, state files, and events but does not interpret it —
+  use `workload` for an agent workspace; pick another label only if you're
+  starting an enforcement component or other non-workload caller in your own
+  runtime.
 - **`backend`** — the backend the supervisor should target.
 
-The CLI builds the identity automatically. Callers using `--json` requests
-supply it directly.
+The CLI builds the identity automatically on the high-level `run` and
+`create` paths — workspaces default to `role: workload` and the runtime ID
+comes from `--name` / `--id`. The lower-level `create --rootfs` path and
+`--json` requests let callers set `role` explicitly; see
+[`microagent create`](/cli/create/) for the flag surface.
 
 ## State directory
 

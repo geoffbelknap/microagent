@@ -13,8 +13,9 @@ and control-plane decisions stay outside this project.
 
 Pick the path that matches what you're doing:
 
-- **Trying it out from the CLI** — [Install](/getting-started/install/), then
-  [run your first agent workspace](/getting-started/cli/first-agent/), then
+- **Trying it out from the CLI** — [Install](/getting-started/install/),
+  [run your first microVM](/getting-started/cli/first-microvm/),
+  [run your first agent](/getting-started/cli/first-agent/), then
   [keep workspaces around](/getting-started/cli/named-workspaces/).
 - **Building with the library (agent runtime, microVM orchestrator, or just
   microVMs from Go)** — [Install](/getting-started/install/), then

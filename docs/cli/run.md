@@ -23,7 +23,7 @@ VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
 | `--output n=/guest/path` | Declare an output artifact path |
-| `--name <name>` | Workspace name; generated when omitted |
+| `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
