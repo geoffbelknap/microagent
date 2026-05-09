@@ -1,81 +1,112 @@
 ---
-title: Run your first agent workspace
-description: Use `microagent run` for a one-shot task inside a Linux workspace.
+title: Run your first agent
+description: Boot a microVM, point it at an LLM, watch it write and run files in its own workspace.
 ---
 
-*Driving microagent from a Go program instead? See the [library quickstart](/getting-started/library/first-program/).*
+This walks through running an agent — a body that calls an LLM with `bash`,
+`read_file`, and `write_file` tools — inside a microVM. The example ships in
+three flavors: Anthropic Claude, OpenAI, and Google Gemini. The flow is
+identical; only the example folder and the API key env var change.
 
-Start with `microagent run`. It pulls an OCI image, builds a Linux workspace,
-boots it with the host backend, runs your command, and removes the scratch state
-afterward.
+*If you just want to see microagent boot a VM and run a command, start with
+[run your first microVM](/getting-started/cli/first-microvm/).*
 
-Microagent does not plan, call an LLM, grant credentials, or decide policy. Your
-agent runtime owns those parts. Microagent gives it a clean place to run work.
+## Before you start
 
-```bash
-microagent run \
-  --image docker.io/library/ubuntu:24.04 \
-  --setup "mkdir -p /workspace" \
-  --exec "printf 'agent workspace ready\n'; uname -a"
-```
+1. [Install microagent-kit](/getting-started/install/) and run `microagent doctor`.
+2. Pick a provider and set the matching API key:
 
-Microagent downloads the default kernel for the host backend the first time it
-needs one.
+   | Provider | Example folder | API key env var | Sign up |
+   |---|---|---|---|
+   | Anthropic Claude | [`examples/minimal-body`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body) | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+   | OpenAI | [`examples/minimal-body-openai`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body-openai) | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
+   | Google Gemini | [`examples/minimal-body-gemini`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body-gemini) | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
 
-## Prepare the workspace first
+3. Clone the microagent-kit repo to get the example sources:
 
-Use `--setup` for files or directories the task needs. Repeat the flag for
-multiple setup commands.
+   ```bash
+   git clone https://github.com/geoffbelknap/microagent-kit.git
+   cd microagent-kit
+   ```
 
-```bash
-microagent run \
-  --image docker.io/library/busybox:1.36 \
-  --setup "mkdir -p /workspace" \
-  --setup "echo 'summarize /workspace/input.txt' > /workspace/task" \
-  --setup "echo 'hello from an isolated workspace' > /workspace/input.txt" \
-  --exec "cat /workspace/task; cat /workspace/input.txt"
-```
+The rest of this page uses the **Anthropic** example. To follow along with
+OpenAI or Gemini instead, swap `minimal-body` for `minimal-body-openai` or
+`minimal-body-gemini` in every command, and use the matching API key env var.
 
-## Keep agent identity explicit
-
-For one-shot runs, pass caller-visible identity with `--id` and `--role`. Use
-`workload` for an agent workspace unless you are starting an enforcement
-component. Microagent records that identity in requests, state files, and events,
-but it does not interpret user intent.
+## Create the workspace
 
 ```bash
-microagent run \
-  --id agent-1 \
-  --role workload \
-  --image docker.io/library/ubuntu:24.04 \
-  --exec "cat /etc/os-release"
+microagent create \
+  --file examples/minimal-body/microagent.yaml \
+  --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
 
-Use that identity in your own runtime to connect VM state back to the agent,
-principal, task, or audit record. See
-[State and identity](/concepts/state-and-identity/) for the files Microagent
-writes.
+The spec sets the workspace name to `minimal-body` — that's what the rest of
+the commands refer to. First-time create takes a minute or two: microagent
+pulls the base Python image, builds the rootfs, installs Pydantic and the
+Anthropic SDK, and copies the body source in. The API key is passed in as an
+env var so it stays out of the spec file.
 
-## Use a custom kernel
+## Send a request
+
+The body reads requests from `/workspace/input.json`. Drop the first one in
+with `microagent cp`:
 
 ```bash
-microagent run \
-  --image docker.io/library/ubuntu:24.04 \
-  --exec "uname -a" \
-  --kernel /tmp/Image
+microagent cp examples/minimal-body/demo/input-001.json minimal-body:/workspace/input.json
 ```
 
-Manage kernels explicitly with [`microagent kernel`](/cli/kernel/).
+The request asks for a concrete task — write a Python script, run it, show
+the output.
 
-## What just happened
+## Run it
 
-1. Microagent fetched the OCI image.
-2. It converted the image into an ext4 rootfs.
-3. It booted the VM via the host backend ([Firecracker or Apple VF](/concepts/backends/)).
-4. The guest init ran `--setup`, then ran your task command.
-5. Microagent wrote the result state, shut the VM down, and removed the scratch
-   state.
+```bash
+microagent start minimal-body
+microagent --json result minimal-body
+```
 
-To keep an agent workspace around for later `start`, `connect`, artifact
-inspection, and shutdown, see
-[Named workspaces](/getting-started/cli/named-workspaces/) and [`create`](/cli/create/).
+The body boots, calls the LLM with `bash` / `read_file` / `write_file`
+tools, runs the tool calls inside `/workspace`, and writes a result. You'll
+see the LLM's summary in the result's `content` field.
+
+The file the LLM wrote is still on the workspace's disk. Pull it out:
+
+```bash
+microagent cp minimal-body:/workspace/hello.py ./hello.py
+cat ./hello.py
+```
+
+## Halt, ask a follow-up, resume
+
+The workspace persists between starts — disk, files, all of it. Halt cleanly,
+drop in a new request, start again. The LLM can read whatever it wrote on the
+previous run.
+
+```bash
+microagent halt minimal-body
+microagent cp examples/minimal-body/demo/input-002.json minimal-body:/workspace/input.json
+microagent start minimal-body
+microagent --json result minimal-body
+```
+
+The second request asks the LLM to read `/workspace/hello.py` and explain it.
+The file is still there from the first run.
+
+## Clean up
+
+```bash
+microagent halt minimal-body
+microagent delete minimal-body
+```
+
+`delete` removes the workspace record and its disk.
+
+## What's next
+
+- [Build a simple agent](/recipes/simple-agent/) — the same flow with more
+  on the body's structure, prompt caching, and the production-shape gaps
+  (mediation channel, host-side proxy for keys).
+- [`microagent.yaml`](/cli/spec/) — the full workspace spec reference.
+- [State and identity](/concepts/state-and-identity/) — what `microagent --json status` reports and how lifecycle events are emitted.
+- [Glossary](/concepts/glossary/) — workspace, mediation, halt vs stop vs kill vs quarantine.

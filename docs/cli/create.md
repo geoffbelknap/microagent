@@ -19,7 +19,7 @@ first.
 |---|---|
 | `--image <ref>` | OCI image reference. Defaults to a small BusyBox image |
 | `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
-| `--name <name>` | Workspace name (also accepted as a positional argument) |
+| `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
 | `--entrypoint <command>` | Command to run on start |
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |
@@ -143,10 +143,19 @@ Lower-level form using an existing rootfs:
 ```bash
 microagent create \
   --id agent-1 \
+  --role workload \
   --kernel /tmp/kernel \
   --rootfs /tmp/rootfs.ext4 \
   --state-dir /tmp/microagent-kit
 ```
+
+The `--rootfs` path opens up two extra identity flags that the high-level
+path doesn't expose:
+
+| Flag | Description |
+|---|---|
+| `--id <id>` | Runtime ID for the workspace. Required on the `--rootfs` path |
+| `--role <role>` | Caller-supplied role label. Defaults to `workload`. microagent-kit records it in requests, state files, and events but does not interpret it — see [state and identity](/concepts/state-and-identity/) |
 
 Validate without creating:
 

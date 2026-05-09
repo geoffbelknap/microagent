@@ -3,7 +3,7 @@ title: Run microagent from a Go program
 description: Boot a microVM, run a command, and tear it down — in a few lines of Go.
 ---
 
-*If you'd rather drive microagent from the command line, see the [CLI quickstart](/getting-started/cli/first-agent/) instead.*
+*If you'd rather drive microagent from the command line, see [run your first microVM](/getting-started/cli/first-microvm/) instead.*
 
 `microagent-kit` is a Go library; the CLI is a thin shell over it. This page
 shows the smallest useful program: it boots a Linux microVM, runs a command
@@ -85,10 +85,8 @@ The returned `Result.Result.Stdout` contains the guest's stdout;
   [supervisor protocol](/protocol/).
 - Already agent-flavored: the library treats every workspace as a
   `workload`-role identity by default. `opts.Name` becomes the `RuntimeID`
-  carried in requests, state files, and events. The [CLI
-  quickstart](/getting-started/cli/first-agent/) is the same workflow with
-  explicit `--id`/`--role` framing. For enforcement-role components or
-  custom requests, build a `vmkit.Request` directly —
+  carried in requests, state files, and events. For enforcement-role
+  components or custom requests, build a `vmkit.Request` directly —
   see [`pkg/vmkit`](/library/go/#supervisor-types).
 
 For the full set of exported packages and CLI ↔ library mapping, see the

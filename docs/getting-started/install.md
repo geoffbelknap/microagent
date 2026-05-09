@@ -46,5 +46,5 @@ visibility is honest.
 
 ## Next
 
-- **Try it from the CLI** — [run your first agent workspace](/getting-started/cli/first-agent/), then [named workspaces](/getting-started/cli/named-workspaces/) for stop/resume.
+- **Try it from the CLI** — [run your first microVM](/getting-started/cli/first-microvm/), then [run your first agent](/getting-started/cli/first-agent/), then [named workspaces](/getting-started/cli/named-workspaces/) for stop/resume.
 - **Build with the library** — [run microagent from a Go program](/getting-started/library/first-program/).
