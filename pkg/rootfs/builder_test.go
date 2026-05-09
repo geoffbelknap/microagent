@@ -168,18 +168,40 @@ func TestWriteDeclaredFilesDoesNotFollowStageSymlink(t *testing.T) {
 	}
 }
 
-func TestExtractLayerRejectsAbsoluteSymlinkTarget(t *testing.T) {
+func TestExtractLayerAllowsAbsoluteSymlinkWithinGuestRoot(t *testing.T) {
 	dir := t.TempDir()
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{Name: "app", Typeflag: tar.TypeSymlink, Linkname: "/tmp/outside", Mode: 0o777}); err != nil {
+	if err := tw.WriteHeader(&tar.Header{Name: "etc/alternatives/awk", Typeflag: tar.TypeSymlink, Linkname: "/usr/bin/mawk", Mode: 0o777}); err != nil {
+		t.Fatalf("write header: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("extractLayer: %v", err)
+	}
+	target, err := os.Readlink(filepath.Join(dir, "etc", "alternatives", "awk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "/usr/bin/mawk" {
+		t.Fatalf("symlink target = %q", target)
+	}
+}
+
+func TestExtractLayerRejectsAbsoluteSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{Name: "app", Typeflag: tar.TypeSymlink, Linkname: "/../../outside", Mode: 0o777}); err != nil {
 		t.Fatalf("write header: %v", err)
 	}
 	if err := tw.Close(); err != nil {
 		t.Fatalf("close tar: %v", err)
 	}
 	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err == nil {
-		t.Fatal("expected absolute symlink target to be rejected")
+		t.Fatal("expected absolute symlink escape to be rejected")
 	}
 }
 

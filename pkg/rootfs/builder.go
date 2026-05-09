@@ -445,7 +445,14 @@ func safeSymlinkTarget(linkName, linkTarget string) (string, error) {
 		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
 	}
 	if path.IsAbs(linkTarget) {
-		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
+		guestRel := strings.TrimPrefix(linkTarget, "/")
+		if guestRel == "" {
+			return linkTarget, nil
+		}
+		if _, err := safeGuestRel(guestRel, false); err != nil {
+			return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
+		}
+		return linkTarget, nil
 	}
 	resolved := path.Clean(path.Join(path.Dir(linkName), linkTarget))
 	if resolved == "." || resolved == ".." || strings.HasPrefix(resolved, "../") {
