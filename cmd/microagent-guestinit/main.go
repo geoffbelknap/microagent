@@ -120,13 +120,11 @@ func run() int {
 		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 		cmd.Env = guestEnv(cfg.Env)
 		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
+		cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
+		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
 		err := cmd.Run()
 		res.Stdout = stdout.String()
 		res.Stderr = stderr.String()
-		fmt.Print(res.Stdout)
-		fmt.Fprint(os.Stderr, res.Stderr)
 		if err != nil {
 			code = exitCode(err)
 			res.Error = err.Error()
