@@ -622,13 +622,21 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 		_ = forwarder.Process.Kill()
 		_, _ = forwarder.Process.Wait()
 	})
+	vsockListener := exec.Command("sleep", "30")
+	if err := vsockListener.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = vsockListener.Process.Kill()
+		_, _ = vsockListener.Process.Wait()
+	})
 	if err := os.MkdirAll(filepath.Dir(vsockSocketPath(opts)), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(vsockSocketPath(opts), []byte("socket placeholder"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeProcessStateWithForwarder(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	quarantineReq := vmkit.Request{
@@ -646,6 +654,9 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 	if err := waitForProcessExit(context.Background(), forwarder.Process.Pid, time.Second); err != nil {
 		t.Fatalf("forwarder still active: %v", err)
 	}
+	if err := waitForProcessExit(context.Background(), vsockListener.Process.Pid, time.Second); err != nil {
+		t.Fatalf("vsock listener still active: %v", err)
+	}
 	active, err := processActive(vmProcess.Process.Pid)
 	if err != nil {
 		t.Fatal(err)
@@ -660,7 +671,7 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Event.State != vmkit.StateQuarantined || state.PID != vmProcess.Process.Pid || state.PortForwardPID != 0 || len(state.NetworkDevices) != 0 {
+	if state.Event.State != vmkit.StateQuarantined || state.PID != vmProcess.Process.Pid || state.PortForwardPID != 0 || state.VsockListenerPID != 0 || len(state.NetworkDevices) != 0 {
 		t.Fatalf("state = %#v", state)
 	}
 }

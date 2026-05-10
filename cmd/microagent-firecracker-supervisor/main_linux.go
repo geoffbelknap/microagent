@@ -34,6 +34,18 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		return firecrackersupervisor.RunPortForwarder(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
 	}
+	if len(args) > 0 && args[0] == "--vsock-listener" {
+		fs := flag.NewFlagSet("vsock-listener", flag.ContinueOnError)
+		stateDir := fs.String("state-dir", "", "State directory")
+		name := fs.String("name", "", "Workspace name")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *stateDir == "" || *name == "" {
+			return fmt.Errorf("usage: microagent-firecracker-supervisor --vsock-listener --state-dir <dir> --name <name>")
+		}
+		return firecrackersupervisor.RunVsockListener(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
+	}
 	req, err := readRequest(args)
 	if err != nil {
 		resp := vmkit.Response{OK: false, Backend: vmkit.BackendFirecracker, Error: err.Error()}

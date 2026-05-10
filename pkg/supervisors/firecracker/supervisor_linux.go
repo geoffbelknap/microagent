@@ -273,17 +273,18 @@ type transientFirewallRule struct {
 }
 
 type runtimeState struct {
-	Event           eventFile                `json:"event"`
-	Config          vmkit.Config             `json:"config"`
-	PID             int                      `json:"pid,omitempty"`
-	PortForwardPID  int                      `json:"portForwardPid,omitempty"`
-	NetworkDevices  []transientNetworkDevice `json:"networkDevices,omitempty"`
-	FirewallRules   []transientFirewallRule  `json:"firewallRules,omitempty"`
-	SerialLogPath   string                   `json:"serialLogPath"`
-	SerialInputPath string                   `json:"serialInputPath,omitempty"`
-	StartedAt       string                   `json:"startedAt,omitempty"`
-	UpdatedAt       string                   `json:"updatedAt"`
-	Error           string                   `json:"error,omitempty"`
+	Event            eventFile                `json:"event"`
+	Config           vmkit.Config             `json:"config"`
+	PID              int                      `json:"pid,omitempty"`
+	PortForwardPID   int                      `json:"portForwardPid,omitempty"`
+	VsockListenerPID int                      `json:"vsockListenerPid,omitempty"`
+	NetworkDevices   []transientNetworkDevice `json:"networkDevices,omitempty"`
+	FirewallRules    []transientFirewallRule  `json:"firewallRules,omitempty"`
+	SerialLogPath    string                   `json:"serialLogPath"`
+	SerialInputPath  string                   `json:"serialInputPath,omitempty"`
+	StartedAt        string                   `json:"startedAt,omitempty"`
+	UpdatedAt        string                   `json:"updatedAt"`
+	Error            string                   `json:"error,omitempty"`
 }
 
 func prepareWorkspace(opts Options, req vmkit.Request) error {
@@ -337,14 +338,17 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
-	vsockListeners, err := startVsockListeners(opts, runtimeReq.Config)
-	if err != nil {
-		cleanupTransientFirewallRules(firewallRules)
-		cleanupTransientNetworkDevices(networkDevices)
-		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
-		return failedResponse(req, err.Error()), err
+	var vsockListeners *vsockListenerSet
+	if !detached && !insideUserNetworkNamespace() {
+		vsockListeners, err = startVsockListeners(opts, runtimeReq.Config)
+		if err != nil {
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
+		defer vsockListeners.Close()
 	}
-	defer vsockListeners.Close()
 	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o755); err != nil {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -396,8 +400,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		return vmkit.Response{}, err
 	}
 	portForwardPID := 0
-	if detached && hasPortForwards(req.Config) {
-		pid, err := startPortForwarderProcess(opts)
+	vsockListenerPID := 0
+	if detached && hasVsockListeners(req.Config) {
+		pid, err := startVsockListenerProcess(opts)
 		if err != nil {
 			_ = cmd.Process.Kill()
 			cleanupTransientFirewallRules(firewallRules)
@@ -409,9 +414,41 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
 		}
+		vsockListenerPID = pid
+		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, networkDevices, firewallRules, ""); err != nil {
+			_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
+			_ = cmd.Process.Kill()
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
+			_ = serialLog.Close()
+			return vmkit.Response{}, err
+		}
+	}
+	if detached && hasPortForwards(req.Config) {
+		pid, err := startPortForwarderProcess(opts)
+		if err != nil {
+			if vsockListenerPID != 0 {
+				_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
+			}
+			_ = cmd.Process.Kill()
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
+			_ = serialLog.Close()
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
 		portForwardPID = pid
-		if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, networkDevices, firewallRules, ""); err != nil {
+		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, networkDevices, firewallRules, ""); err != nil {
 			_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
+			if vsockListenerPID != 0 {
+				_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
+			}
 			_ = cmd.Process.Kill()
 			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
@@ -492,6 +529,9 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		if state.PortForwardPID != 0 {
 			_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 		}
+		if state.VsockListenerPID != 0 {
+			terminateAuxProcess(state.VsockListenerPID)
+		}
 		cleanupTransientFirewallRules(state.FirewallRules)
 		cleanupTransientNetworkDevices(state.NetworkDevices)
 		cleanupUserNetworkProcess(opts)
@@ -519,6 +559,9 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	if state.PortForwardPID != 0 {
 		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
 	}
+	if state.VsockListenerPID != 0 {
+		terminateAuxProcess(state.VsockListenerPID)
+	}
 	cleanupTransientFirewallRules(state.FirewallRules)
 	cleanupTransientNetworkDevices(state.NetworkDevices)
 	cleanupUserNetworkProcess(opts)
@@ -535,6 +578,9 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 	}
 	if state.PortForwardPID != 0 {
 		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
+	}
+	if state.VsockListenerPID != 0 {
+		terminateAuxProcess(state.VsockListenerPID)
 	}
 	cleanupTransientFirewallRules(state.FirewallRules)
 	cleanupTransientNetworkDevices(state.NetworkDevices)
@@ -566,6 +612,15 @@ func ensureCanDelete(opts Options) error {
 			}
 			if active {
 				return fmt.Errorf("firecracker workspace %s port forwarder is running; stop or kill it before delete", opts.Name)
+			}
+		}
+		if state.VsockListenerPID != 0 {
+			active, err := processActive(state.VsockListenerPID)
+			if err != nil {
+				return err
+			}
+			if active {
+				return fmt.Errorf("firecracker workspace %s vsock listener is running; stop or kill it before delete", opts.Name)
 			}
 		}
 		if active, err := userNetworkProcessActive(opts); err != nil {
@@ -661,6 +716,10 @@ func needsVsock(config *vmkit.Config) bool {
 
 func hasPortForwards(config *vmkit.Config) bool {
 	return config != nil && config.Network != nil && len(config.Network.PortForwards) != 0
+}
+
+func hasVsockListeners(config *vmkit.Config) bool {
+	return config != nil && len(config.VsockListeners) != 0
 }
 
 func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInterface, bool) {
@@ -1393,6 +1452,47 @@ func startPortForwarderProcess(opts Options) (int, error) {
 	return pid, nil
 }
 
+func startVsockListenerProcess(opts Options) (int, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+	logPath := filepath.Join(opts.StateDir, opts.Name, "vsock-listener.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return 0, err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return 0, err
+	}
+	cmd := exec.Command(executable, "--vsock-listener", "--state-dir", opts.StateDir, "--name", opts.Name)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	_ = logFile.Close()
+	return pid, nil
+}
+
+func RunVsockListener(ctx context.Context, opts Options) error {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return err
+	}
+	set, err := startVsockListeners(opts, &state.Config)
+	if err != nil {
+		return err
+	}
+	defer set.Close()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
 func RunPortForwarder(ctx context.Context, opts Options) error {
 	state, err := readRuntimeState(opts)
 	if err != nil {
@@ -1639,6 +1739,10 @@ func writeProcessStateWithForwarder(opts Options, req vmkit.Request, state vmkit
 }
 
 func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID int, networkDevices []transientNetworkDevice, firewallRules []transientFirewallRule, errorText string) error {
+	return writeProcessStateWithProcessesAndNetwork(opts, req, state, pid, portForwardPID, 0, networkDevices, firewallRules, errorText)
+}
+
+func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID, vsockListenerPID int, networkDevices []transientNetworkDevice, firewallRules []transientFirewallRule, errorText string) error {
 	if req.Identity == nil || req.Config == nil {
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
@@ -1660,16 +1764,17 @@ func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, s
 		return err
 	}
 	runtime := runtimeState{
-		Event:           fileEvent,
-		Config:          *req.Config,
-		PID:             pid,
-		PortForwardPID:  portForwardPID,
-		NetworkDevices:  append([]transientNetworkDevice{}, networkDevices...),
-		FirewallRules:   append([]transientFirewallRule{}, firewallRules...),
-		SerialLogPath:   serialLogPath(opts),
-		SerialInputPath: serialInputPath(opts),
-		UpdatedAt:       now.Format(time.RFC3339),
-		Error:           errorText,
+		Event:            fileEvent,
+		Config:           *req.Config,
+		PID:              pid,
+		PortForwardPID:   portForwardPID,
+		VsockListenerPID: vsockListenerPID,
+		NetworkDevices:   append([]transientNetworkDevice{}, networkDevices...),
+		FirewallRules:    append([]transientFirewallRule{}, firewallRules...),
+		SerialLogPath:    serialLogPath(opts),
+		SerialInputPath:  serialInputPath(opts),
+		UpdatedAt:        now.Format(time.RFC3339),
+		Error:            errorText,
 	}
 	if state == vmkit.StateStarting || state == vmkit.StateRunning {
 		runtime.StartedAt = now.Format(time.RFC3339)
@@ -1849,6 +1954,18 @@ func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) err
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func terminateAuxProcess(pid int) {
+	if pid <= 0 {
+		return
+	}
+	_ = signalProcessGroup(pid, syscall.SIGTERM)
+	if err := waitForProcessExit(context.Background(), pid, 2*time.Second); err == nil {
+		return
+	}
+	_ = signalProcessGroup(pid, syscall.SIGKILL)
+	_ = waitForProcessExit(context.Background(), pid, time.Second)
 }
 
 func linuxProcessState(pid int) (string, error) {
