@@ -64,9 +64,13 @@ rootfs is built or copied from the local image store. The record includes:
 - injected guest init path and SHA-256
 
 `microagent --json status <name>` recomputes the current file hashes and
-compares them with the recorded values. A mismatch is reported under
+compares enforced artifacts with the recorded values. Kernel and injected-init
+hashes are enforced on every status check. Rootfs hashes are enforced while the
+workspace is still `prepared`; once the workspace starts, the rootfs is the
+writable VM disk, so status reports current and recorded rootfs hashes without
+treating normal guest writes as drift. Enforced mismatches are reported under
 `verification.divergence`; callers do not need to scrape logs or reimplement
-hash checks to detect runtime drift.
+hash checks for immutable runtime artifacts.
 
 ## Readiness
 

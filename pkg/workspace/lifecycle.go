@@ -396,8 +396,26 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
+	req := buildRootfsRequest(opts, rootfsPath)
+	provenance, err := rootfs.NewBuilder().Build(ctx, req)
+	result := Result{
+		Workspace:  opts.Name,
+		StateDir:   opts.StateDir,
+		Profile:    opts.Profile,
+		Restart:    opts.RestartPolicy,
+		Resources:  ResourcesFromOptions(opts),
+		Network:    NetworkSpecFromConfig(opts.Network),
+		RootfsPath: rootfsPath,
+		KernelPath: opts.KernelPath,
+		Artifacts:  ArtifactsFromOptions(opts),
+		Image:      provenance,
+	}
+	return result, err
+}
+
+func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 	command, resultPort := BuildCommandAndPort(opts)
-	req := rootfs.BuildRequest{
+	return rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
@@ -413,21 +431,8 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		Files:          RootfsFiles(opts.Files),
 		Mounts:         Mounts(opts.Disks),
 		HostForwards:   RootfsPortForwards(opts.Network.PortForwards),
+		AllowMutable:   true,
 	}
-	provenance, err := rootfs.NewBuilder().Build(ctx, req)
-	result := Result{
-		Workspace:  opts.Name,
-		StateDir:   opts.StateDir,
-		Profile:    opts.Profile,
-		Restart:    opts.RestartPolicy,
-		Resources:  ResourcesFromOptions(opts),
-		Network:    NetworkSpecFromConfig(opts.Network),
-		RootfsPath: rootfsPath,
-		KernelPath: opts.KernelPath,
-		Artifacts:  ArtifactsFromOptions(opts),
-		Image:      provenance,
-	}
-	return result, err
 }
 
 func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
@@ -909,7 +914,7 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		resp.Mediation = manifest.Mediation
 		artifacts := RuntimeArtifacts(manifest.Artifacts)
 		resp.Artifacts = &artifacts
-		resp.Verification = VerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest)
+		resp.Verification = VerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest, eventFile.State)
 	}
 	readiness := readinessForStatus(opts, eventFile)
 	resp.Readiness = &readiness
@@ -922,7 +927,7 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 	return resp
 }
 
-func VerificationForStatus(opts Options, name string, manifest Manifest) *vmkit.RuntimeVerification {
+func VerificationForStatus(opts Options, name string, manifest Manifest, state vmkit.VMState) *vmkit.RuntimeVerification {
 	recorded := manifest.Verification
 	if recorded == nil {
 		if _, err := ReadRuntimeState(Options{StateDir: opts.StateDir, Name: name}); err != nil {
@@ -949,10 +954,10 @@ func VerificationForStatus(opts Options, name string, manifest Manifest) *vmkit.
 	if rootfsPath == "" {
 		rootfsPath = filepath.Join(opts.StateDir, "workspaces", name, "rootfs.ext4")
 	}
-	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification)
-	verification.Rootfs = currentArtifact("rootfs", rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification)
+	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification, true)
+	verification.Rootfs = currentArtifact("rootfs", rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification, shouldCompareRootfs(state))
 	if recorded != nil && recorded.Init != nil {
-		verification.Init = currentArtifact("init", recorded.Init.Path, recorded.Init, &verification)
+		verification.Init = currentArtifact("init", recorded.Init.Path, recorded.Init, &verification, true)
 	}
 	verification.OK = len(verification.Divergence) == 0
 	return &verification
@@ -1070,7 +1075,11 @@ func recordedArtifactFor(recorded *vmkit.RuntimeVerification, name string) *vmki
 	}
 }
 
-func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification) *vmkit.VerifiedArtifact {
+func shouldCompareRootfs(state vmkit.VMState) bool {
+	return state == "" || state == vmkit.StateUnknown || state == vmkit.StatePrepared
+}
+
+func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification, compare bool) *vmkit.VerifiedArtifact {
 	artifact := &vmkit.VerifiedArtifact{Path: path}
 	if recorded != nil {
 		artifact.RecordedSHA256 = recorded.SHA256
@@ -1090,7 +1099,7 @@ func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verifi
 		return artifact
 	}
 	artifact.SHA256 = sum
-	if artifact.RecordedSHA256 != "" && artifact.RecordedSHA256 != artifact.SHA256 {
+	if compare && artifact.RecordedSHA256 != "" && artifact.RecordedSHA256 != artifact.SHA256 {
 		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{
 			Artifact: name,
 			Field:    "sha256",

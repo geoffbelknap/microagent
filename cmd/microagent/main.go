@@ -42,6 +42,7 @@ const (
 	defaultRestartPolicy       = workspace.DefaultRestartPolicy
 	defaultNetworkMode         = workspace.DefaultNetworkMode
 	consoleDetachByte          = byte(0x1d) // Ctrl-]
+	consoleShellExitedMarker   = "microagent-init: console shell exited; closing connect session"
 )
 
 func main() {
@@ -1364,18 +1365,27 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	defer input.Close()
 	tailCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errs := make(chan error, 1)
-	go func() {
-		errs <- tailFile(tailCtx, logPath, stdout, 0)
-	}()
-	if _, err := copyConsoleInput(input, os.Stdin); err != nil {
-		cancel()
-		<-errs
-		return err
+	sessionStart := fileSize(logPath)
+	type connectResult struct {
+		source string
+		err    error
 	}
+	results := make(chan connectResult, 2)
+	go func() {
+		results <- connectResult{source: "tail", err: tailFileUntil(tailCtx, logPath, stdout, 0, sessionStart, consoleShellExitedMarker)}
+	}()
+	go func() {
+		_, err := copyConsoleInput(input, os.Stdin)
+		results <- connectResult{source: "input", err: err}
+	}()
+	result := <-results
 	cancel()
-	<-errs
-	return nil
+	if result.source == "input" {
+		if tailResult := <-results; result.err == nil {
+			result.err = tailResult.err
+		}
+	}
+	return result.err
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
@@ -2169,6 +2179,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Files:          workspace.RootfsFiles(opts.Files),
 		Mounts:         workspaceMounts(opts.Disks),
 		HostForwards:   rootfsPortForwards(opts.Network.PortForwards),
+		AllowMutable:   true,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := workspaceResult{
@@ -2426,7 +2437,7 @@ func responseFromWorkspaceEvent(opts workspaceOptions, eventFile workspaceEventF
 		resp.Mediation = manifest.Mediation
 		artifacts := runtimeArtifactsFromManifest(manifest.Artifacts)
 		resp.Artifacts = &artifacts
-		resp.Verification = workspaceVerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest)
+		resp.Verification = workspaceVerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest, eventFile.State)
 	}
 	readiness := workspaceReadinessForStatus(opts, eventFile)
 	resp.Readiness = &readiness
@@ -2534,7 +2545,7 @@ func recordedArtifact(path string) *vmkit.VerifiedArtifact {
 	return artifact
 }
 
-func workspaceVerificationForStatus(opts workspaceOptions, name string, manifest workspaceManifest) *vmkit.RuntimeVerification {
+func workspaceVerificationForStatus(opts workspaceOptions, name string, manifest workspaceManifest, state vmkit.VMState) *vmkit.RuntimeVerification {
 	recorded := manifest.Verification
 	if recorded == nil {
 		if _, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name}); err != nil {
@@ -2561,10 +2572,10 @@ func workspaceVerificationForStatus(opts workspaceOptions, name string, manifest
 	if rootfsPath == "" {
 		rootfsPath = filepath.Join(opts.StateDir, "workspaces", name, "rootfs.ext4")
 	}
-	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification)
-	verification.Rootfs = currentArtifact("rootfs", rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification)
+	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification, true)
+	verification.Rootfs = currentArtifact("rootfs", rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification, shouldCompareRootfs(state))
 	if recorded != nil && recorded.Init != nil {
-		verification.Init = currentArtifact("init", recorded.Init.Path, recorded.Init, &verification)
+		verification.Init = currentArtifact("init", recorded.Init.Path, recorded.Init, &verification, true)
 	}
 	verification.OK = len(verification.Divergence) == 0
 	return &verification
@@ -2586,7 +2597,11 @@ func recordedArtifactFor(recorded *vmkit.RuntimeVerification, name string) *vmki
 	}
 }
 
-func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification) *vmkit.VerifiedArtifact {
+func shouldCompareRootfs(state vmkit.VMState) bool {
+	return state == "" || state == vmkit.StateUnknown || state == vmkit.StatePrepared
+}
+
+func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification, compare bool) *vmkit.VerifiedArtifact {
 	artifact := &vmkit.VerifiedArtifact{Path: path}
 	if recorded != nil {
 		artifact.RecordedSHA256 = recorded.SHA256
@@ -2606,7 +2621,7 @@ func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verifi
 		return artifact
 	}
 	artifact.SHA256 = sum
-	if artifact.RecordedSHA256 != "" && artifact.RecordedSHA256 != artifact.SHA256 {
+	if compare && artifact.RecordedSHA256 != "" && artifact.RecordedSHA256 != artifact.SHA256 {
 		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{
 			Artifact: name,
 			Field:    "sha256",
@@ -4018,6 +4033,7 @@ func pullImage(ctx context.Context, opts imagePullOptions) (imageRecord, error) 
 		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
+		AllowMutable:   true,
 	})
 	if err != nil {
 		return imageRecord{}, err
@@ -4583,6 +4599,10 @@ func openFIFOForWrite(ctx context.Context, path string, timeout time.Duration) (
 }
 
 func tailFile(ctx context.Context, path string, stdout *os.File, offset int64) error {
+	return tailFileUntil(ctx, path, stdout, offset, 0, "")
+}
+
+func tailFileUntil(ctx context.Context, path string, stdout *os.File, offset int64, detectAfter int64, stopText string) error {
 	for {
 		file, err := os.Open(path)
 		if err == nil {
@@ -4590,13 +4610,20 @@ func tailFile(ctx context.Context, path string, stdout *os.File, offset int64) e
 				_ = file.Close()
 				return err
 			}
-			n, copyErr := io.Copy(stdout, file)
-			offset += n
+			data, readErr := io.ReadAll(file)
+			n, copyErr := stdout.Write(data)
+			offset += int64(n)
 			if closeErr := file.Close(); closeErr != nil {
 				return closeErr
 			}
+			if readErr != nil {
+				return readErr
+			}
 			if copyErr != nil {
 				return copyErr
+			}
+			if stopText != "" && offset > detectAfter && bytes.Contains(dataAfterOffset(data, offset, detectAfter), []byte(stopText)) {
+				return nil
 			}
 		} else if !os.IsNotExist(err) {
 			return err
@@ -4610,6 +4637,17 @@ func tailFile(ctx context.Context, path string, stdout *os.File, offset int64) e
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func dataAfterOffset(data []byte, currentOffset, detectAfter int64) []byte {
+	startOffset := currentOffset - int64(len(data))
+	if detectAfter <= startOffset {
+		return data
+	}
+	if detectAfter >= currentOffset {
+		return nil
+	}
+	return data[detectAfter-startOffset:]
 }
 
 func waitForConsoleReady(ctx context.Context, path string, timeout time.Duration) error {

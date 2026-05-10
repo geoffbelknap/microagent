@@ -79,6 +79,7 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
+		AllowMutable:   true,
 	})
 	if err != nil {
 		return Record{}, err

@@ -26,6 +26,7 @@ import (
 const configPath = "/etc/microagent/run.json"
 const resultConnectTimeout = 15 * time.Second
 const tcpVsockListenersEnv = "MICROAGENT_VSOCK_TCP_LISTENERS"
+const consoleShellExitedMarker = "microagent-init: console shell exited; closing connect session"
 
 type config struct {
 	Command      []string      `json:"command"`
@@ -139,14 +140,8 @@ func run() int {
 			_ = sendResult(cfg.Port, res)
 			return code
 		}
-		log.Printf("microagent-init: handing off to %v", []string{"/bin/sh", "-i"})
-		cmd := exec.Command("/bin/sh", "-i")
-		cmd.Env = guestEnv(cfg.Env)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			code = exitCode(err)
+		if err := runInteractiveShells(guestEnv(cfg.Env)); err != nil {
+			code = 127
 			res.Error = err.Error()
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -157,6 +152,38 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 	}
 	return code
+}
+
+func runInteractiveShells(env []string) error {
+	for {
+		log.Printf("microagent-init: starting console shell %v", []string{"/bin/sh", "-i"})
+		err := runInteractiveShell(env)
+		if shellLaunchFailed(err) {
+			return err
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		log.Println(consoleShellExitedMarker)
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func runInteractiveShell(env []string) error {
+	cmd := exec.Command("/bin/sh", "-i")
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func shellLaunchFailed(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pathErr *os.PathError
+	return errors.As(err, &pathErr)
 }
 
 type guestFilesystem struct {
