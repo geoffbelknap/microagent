@@ -1476,7 +1476,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
 func linuxKernelCommandLine(for config: Config) -> String {
     var args = ["console=hvc0", "root=/dev/vda", "rw", "init=/sbin/microagent-init"]
     switch normalizedNetworkMode(config.network) {
-    case "nat", "bridged":
+    case "user", "nat", "bridged":
         args.append("ip=dhcp")
     default:
         break
