@@ -25,6 +25,7 @@ description: All microagent subcommands at a glance.
 | [`connect`](/cli/connect/) | Open the workspace console |
 | [`profiles`](/cli/profiles/) | List exact named resource profiles |
 | [`images`](/cli/images/) | List or prune local image records |
+| [`prune`](/cli/prune/) | Prune stale records and optional reusable image baselines |
 | [`perf`](/cli/perf/) | Measure workspace boot performance |
 | [`contract`](/cli/contract/) | Print the backend-neutral runtime contract |
 | [`host`](/cli/host/) | Report host backend capabilities |

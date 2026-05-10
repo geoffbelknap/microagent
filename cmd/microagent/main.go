@@ -87,6 +87,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "images" {
 		return runImages(args[1:], stdout)
 	}
+	if args[0] == "prune" {
+		return runPrune(args[1:], stdout)
+	}
 	if args[0] == "perf" {
 		return runPerf(ctx, args[1:], stdout)
 	}
@@ -763,6 +766,8 @@ func runImages(args []string, stdout *os.File) error {
 	mke2fsPath := fs.String("mke2fs", defaultMke2fsPath(), "mke2fs binary path")
 	guestInitPath := fs.String("guest-init", defaultGuestInitPath(*arch), "Guest init path")
 	deleteFiles := fs.Bool("delete", false, "Delete reusable local image rootfs files during prune")
+	yes := fs.Bool("yes", false, "Confirm destructive image cache cleanup without prompting")
+	fs.BoolVar(yes, "y", false, "Confirm destructive image cache cleanup without prompting")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -809,6 +814,11 @@ func runImages(args []string, stdout *os.File) error {
 		if fs.NArg() != 2 {
 			return fmt.Errorf("usage: microagent images rm <image> [--delete] [--state-dir <dir>]")
 		}
+		if *deleteFiles {
+			if err := confirmImageCacheDelete(*yes); err != nil {
+				return err
+			}
+		}
 		result, err := imagecache.Remove(opts.StateDir, fs.Arg(1), *deleteFiles)
 		if err != nil {
 			return err
@@ -818,6 +828,11 @@ func runImages(args []string, stdout *os.File) error {
 		if fs.NArg() != 1 {
 			return fmt.Errorf("usage: microagent images prune [--state-dir <dir>]")
 		}
+		if *deleteFiles {
+			if err := confirmImageCacheDelete(*yes); err != nil {
+				return err
+			}
+		}
 		result, err := imagecache.Prune(opts.StateDir, *deleteFiles)
 		if err != nil {
 			return err
@@ -826,6 +841,46 @@ func runImages(args []string, stdout *os.File) error {
 	default:
 		return fmt.Errorf("unknown images command: %s", fs.Arg(0))
 	}
+}
+
+func runPrune(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	deleteImages := fs.Bool("images", false, "Delete reusable local image rootfs files")
+	yes := fs.Bool("yes", false, "Confirm destructive cleanup without prompting")
+	fs.BoolVar(yes, "y", false, "Confirm destructive cleanup without prompting")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("usage: microagent prune [--images] [--yes] [--state-dir <dir>]")
+	}
+	if *deleteImages {
+		if err := confirmImageCacheDelete(*yes); err != nil {
+			return err
+		}
+	}
+	result, err := imagecache.Prune(opts.StateDir, *deleteImages)
+	if err != nil {
+		return err
+	}
+	return writeImagePruneResult(stdout, result)
+}
+
+func confirmImageCacheDelete(yes bool) error {
+	if yes {
+		return nil
+	}
+	ok, err := confirmAction("Delete reusable image cache rootfs files under the local image store? Workspace disks will not be deleted.")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("prune cancelled")
+	}
+	return nil
 }
 
 func runPerf(ctx context.Context, args []string, stdout *os.File) error {
@@ -3437,6 +3492,7 @@ func writeImagePruneResult(stdout *os.File, result imagePruneResult) error {
 		return writeJSON(stdout, result)
 	}
 	fmt.Fprintf(stdout, "Removed: %d\n", len(result.Removed))
+	fmt.Fprintf(stdout, "Deleted: %d\n", len(result.Deleted))
 	fmt.Fprintf(stdout, "Kept: %d\n", len(result.Kept))
 	return nil
 }
@@ -5056,7 +5112,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f":
+	case "-json", "-text", "-human", "-keep", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
 		return true
 	default:
 		return false
@@ -5326,6 +5382,7 @@ Commands:
   logs                 Show workspace logs
   profiles             List resource profiles
   images               List or prune local image records
+  prune                Prune stale local records and optional image cache files
   perf                 Measure workspace performance
   halt                 Halt a workspace and preserve disk state
   quarantine           Sever host-side network and mediation
