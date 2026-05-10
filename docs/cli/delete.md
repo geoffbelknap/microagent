@@ -4,15 +4,15 @@ description: Remove a workspace and its state.
 ---
 
 ```text
-microagent delete <name> [--state-dir <dir>]
+microagent delete <name> [--yes] [--force] [--state-dir <dir>]
 ```
 
 `delete` removes the workspace record and its on-disk artifacts (rootfs,
 bundles, state file).
 
-For Firecracker, `delete` refuses to remove state while the recorded VM
-process is still running. Use [`stop`](/cli/stop/) or [`kill`](/cli/kill/)
-first.
+By default, `delete` asks for confirmation. If the workspace is running, it
+asks whether to stop and delete it. Use `--yes` for non-interactive cleanup.
+Use `--force` to kill a running workspace before deleting it.
 
 ## Flags
 
@@ -20,12 +20,25 @@ first.
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record |
 | `--supervisor <path>` | Override the active backend supervisor path |
+| `--yes`, `-y` | Confirm deletion without prompting |
+| `--force`, `-f` | Kill a running workspace before deleting |
 
 ## Example
 
 ```bash
-microagent stop research
 microagent delete research
+```
+
+Non-interactive cleanup:
+
+```bash
+microagent delete research --yes
+```
+
+Force-delete a running workspace:
+
+```bash
+microagent delete research --force
 ```
 
 Lower-level form:

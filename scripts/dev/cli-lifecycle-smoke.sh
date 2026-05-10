@@ -77,7 +77,7 @@ if start_response="$(run_cli start --id agent-smoke --kernel "$KERNEL" --rootfs 
 fi
 assert_json "$start_response" false
 
-delete_response="$(run_cli delete agent-smoke --state-dir "$STATE_DIR")"
+delete_response="$(run_cli delete agent-smoke --state-dir "$STATE_DIR" --yes)"
 assert_json "$delete_response" true stopped
 test ! -e "$STATE_DIR/agent-smoke"
 
