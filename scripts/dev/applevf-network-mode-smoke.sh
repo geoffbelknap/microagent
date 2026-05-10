@@ -92,29 +92,32 @@ run_check() {
   request "$runtime" "$mode" "$iface" | "$SUPERVISOR"
 }
 
-NAT_RESULT="$STATE_DIR/nat.json"
-"$CLI" run \
+run_outbound_smoke() {
+  local mode="$1"
+  local output="$STATE_DIR/${mode}.json"
+  "$CLI" run \
   --backend apple-vf \
   --image "$IMAGE" \
   --arch "$ARCH" \
   --exec "wget -qO- -T 10 http://example.com >/tmp/applevf-nat.out && echo APPLEVF_NAT_OK" \
-  --name nat-smoke \
+  --name "${mode}-smoke" \
   --kernel "$KERNEL" \
-  --state-dir "$STATE_DIR/nat" \
+  --state-dir "$STATE_DIR/$mode" \
   --size-mib "${MICROAGENT_APPLEVF_NETWORK_SIZE_MIB:-128}" \
   --mke2fs "$MKE2FS" \
   --guest-init "$GUEST_INIT" \
   --supervisor "$SUPERVISOR" \
   --memory "${MICROAGENT_APPLEVF_NETWORK_MEMORY_MIB:-512}" \
   --cpus "${MICROAGENT_APPLEVF_NETWORK_CPUS:-2}" \
-  --network nat \
-  --timeout "${MICROAGENT_APPLEVF_NETWORK_TIMEOUT_SECONDS:-45}" >"$NAT_RESULT"
+  --network "$mode" \
+  --timeout "${MICROAGENT_APPLEVF_NETWORK_TIMEOUT_SECONDS:-45}" >"$output"
 
-python3 - "$NAT_RESULT" <<'PY'
+  python3 - "$output" "$mode" <<'PY'
 import json
 import sys
 
-with open(sys.argv[1], "r", encoding="utf-8") as f:
+path, mode = sys.argv[1:]
+with open(path, "r", encoding="utf-8") as f:
     result = json.load(f)
 response = result.get("response") or {}
 if (response.get("event") or {}).get("state") != "stopped":
@@ -129,9 +132,13 @@ if "bad address" in stderr.lower() or "network is unreachable" in stderr.lower()
     raise SystemExit(result)
 if guest.get("exit_code") != 0:
     raise SystemExit(result)
-if (result.get("network") or {}).get("mode") != "nat":
+if (result.get("network") or {}).get("mode") != mode:
     raise SystemExit(result.get("network"))
 PY
+}
+
+run_outbound_smoke user
+run_outbound_smoke nat
 
 ISOLATED_RESPONSE="$(run_check isolated-check isolated)"
 python3 - "$ISOLATED_RESPONSE" <<'PY'
