@@ -1,12 +1,15 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test smoke smoke-contract smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
+.PHONY: test dev-build smoke smoke-contract smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
 
 test:
 	go test ./...
 ifeq ($(UNAME_S),Darwin)
 	swift build --package-path supervisors/applevf --disable-sandbox
 endif
+
+dev-build:
+	scripts/dev/build-local.sh
 
 smoke: test
 	scripts/dev/runtime-contract-smoke.sh
