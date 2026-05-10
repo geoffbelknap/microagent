@@ -1032,6 +1032,7 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 		"delete",
 		"--supervisor", supervisor,
 		"--state-dir", dir,
+		"--yes",
 		"research",
 	}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
@@ -1045,6 +1046,33 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 	if _, err := os.Stat(filepath.Join(dir, "research")); !os.IsNotExist(err) {
 		t.Fatalf("runtime state still exists after delete: %v", err)
+	}
+}
+
+func TestDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
+	dir := t.TempDir()
+	oldTerminal := stdinIsTerminal
+	t.Cleanup(func() { stdinIsTerminal = oldTerminal })
+	stdinIsTerminal = func() bool { return false }
+	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, false, false)
+	if err == nil || !strings.Contains(err.Error(), "pass --yes") {
+		t.Fatalf("err = %v, want --yes confirmation error", err)
+	}
+}
+
+func TestDeleteCancelsWhenConfirmationDeclines(t *testing.T) {
+	dir := t.TempDir()
+	oldTerminal := stdinIsTerminal
+	oldConfirm := readConfirmation
+	t.Cleanup(func() {
+		stdinIsTerminal = oldTerminal
+		readConfirmation = oldConfirm
+	})
+	stdinIsTerminal = func() bool { return true }
+	readConfirmation = func(string) (bool, error) { return false, nil }
+	_, err := runDeleteWorkspace(t.Context(), workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, false, false)
+	if err == nil || !strings.Contains(err.Error(), "delete cancelled") {
+		t.Fatalf("err = %v, want cancellation", err)
 	}
 }
 
@@ -3543,7 +3571,7 @@ func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
 	}
 }
 
-func TestFirecrackerDeleteRefusesRunningPID(t *testing.T) {
+func TestFirecrackerDeleteStopsRunningPIDWithYes(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("darwin uses Apple VF")
 	}
@@ -3570,15 +3598,18 @@ func TestFirecrackerDeleteRefusesRunningPID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"delete", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t)}, stdout)
+	err = run(t.Context(), []string{"delete", "agent-1", "--state-dir", dir, "--supervisor", firecrackerSupervisorHelper(t), "--yes"}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	if err == nil || !strings.Contains(err.Error(), "is running; stop or kill it before delete") {
-		t.Fatalf("err = %v, want running delete refusal", err)
+	if err != nil {
+		t.Fatalf("run delete: %v", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(dir, "agent-1", "runtime.json")); statErr != nil {
-		t.Fatalf("runtime state should remain after refused delete: %v", statErr)
+	if _, statErr := os.Stat(filepath.Join(dir, "agent-1", "runtime.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("runtime state still exists after delete: %v", statErr)
+	}
+	if processStillActive(cmd.Process.Pid) {
+		t.Fatalf("running process still exists after delete")
 	}
 }
 

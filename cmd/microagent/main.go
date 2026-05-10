@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -28,8 +29,10 @@ import (
 )
 
 var (
-	version      = "dev"
-	outputFormat string
+	version          = "dev"
+	outputFormat     string
+	stdinIsTerminal  = defaultStdinIsTerminal
+	readConfirmation = defaultReadConfirmation
 )
 
 const (
@@ -1222,6 +1225,8 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	supervisorPath := os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
 	backend := hostBackend()
 	name := ""
+	yes := false
+	force := false
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
@@ -1229,6 +1234,12 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	fs.StringVar(&backend, "backend", backend, "Backend override")
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
+	if command == "delete" {
+		fs.BoolVar(&yes, "yes", false, "Confirm workspace deletion without prompting")
+		fs.BoolVar(&yes, "y", false, "Confirm workspace deletion without prompting")
+		fs.BoolVar(&force, "force", false, "Kill a running workspace before deleting")
+		fs.BoolVar(&force, "f", false, "Kill a running workspace before deleting")
+	}
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -1272,6 +1283,18 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		}
 		return writeResultResponse(stdout, resp)
 	}
+	if command == "delete" {
+		resp, err := runDeleteWorkspace(ctx, workspaceOpts, yes, force)
+		if err != nil {
+			if resp.Error == "" {
+				return err
+			}
+		}
+		if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
+			return encodeErr
+		}
+		return err
+	}
 	resp, err := workspace.Control(ctx, workspaceOpts, req.Command)
 	if err != nil {
 		if resp.Error == "" {
@@ -1282,6 +1305,97 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		return encodeErr
 	}
 	return err
+}
+
+func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force bool) (vmkit.Response, error) {
+	state, _, err := workspace.LatestStartState(opts.StateDir, opts.Name)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if !yes && !force {
+		prompt := fmt.Sprintf("Delete workspace %s and its disk/state?", opts.Name)
+		if state == vmkit.StateRunning || state == vmkit.StateStarting {
+			prompt = fmt.Sprintf("Workspace %s is %s. Stop and delete it?", opts.Name, state)
+		}
+		ok, err := confirmAction(prompt)
+		if err != nil {
+			return vmkit.Response{}, err
+		}
+		if !ok {
+			return vmkit.Response{}, fmt.Errorf("delete cancelled")
+		}
+	}
+	if state == vmkit.StateRunning || state == vmkit.StateStarting {
+		control := "stop"
+		if force {
+			control = "kill"
+		}
+		if resp, err := controlWorkspaceForDelete(ctx, opts, control); err != nil {
+			return resp, err
+		}
+	}
+	resp, err := workspace.Control(ctx, opts, "delete")
+	if err != nil && deleteNeedsStopped(err, resp) && (yes || force) {
+		control := "stop"
+		if force {
+			control = "kill"
+		}
+		if stopResp, stopErr := controlWorkspaceForDelete(ctx, opts, control); stopErr != nil {
+			return stopResp, stopErr
+		}
+		return workspace.Control(ctx, opts, "delete")
+	}
+	return resp, err
+}
+
+func controlWorkspaceForDelete(ctx context.Context, opts workspaceOptions, control string) (vmkit.Response, error) {
+	resp, err := workspace.Control(ctx, opts, control)
+	if err != nil || !resp.OK {
+		if err != nil {
+			return resp, err
+		}
+		if resp.Error != "" {
+			return resp, fmt.Errorf("%s", resp.Error)
+		}
+		return resp, fmt.Errorf("%s workspace %s failed", control, opts.Name)
+	}
+	return resp, nil
+}
+
+func deleteNeedsStopped(err error, resp vmkit.Response) bool {
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	if resp.Error != "" {
+		if text != "" {
+			text += " "
+		}
+		text += resp.Error
+	}
+	return strings.Contains(text, "is running") && strings.Contains(text, "before delete")
+}
+
+func confirmAction(prompt string) (bool, error) {
+	if !stdinIsTerminal() {
+		return false, fmt.Errorf("%s pass --yes to confirm", prompt)
+	}
+	return readConfirmation(prompt)
+}
+
+func defaultStdinIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func defaultReadConfirmation(prompt string) (bool, error) {
+	fmt.Fprintf(os.Stderr, "%s [y/N] ", prompt)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes", nil
 }
 
 func runConnect(ctx context.Context, args []string, stdout *os.File) error {
@@ -4942,7 +5056,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-mediation-optional", "-delete":
+	case "-json", "-text", "-human", "-keep", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f":
 		return true
 	default:
 		return false
