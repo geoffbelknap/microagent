@@ -1451,9 +1451,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
             if config.serialInput == true {
                 let inputURL = serialInputPath(identity: identity, stateDir: config.stateDir)
                 try prepareSerialInput(path: inputURL.path)
-                let inputPipe = Pipe()
-                bridgeSerialInput(path: inputURL.path, to: inputPipe.fileHandleForWriting)
-                inputHandle = inputPipe.fileHandleForReading
+                inputHandle = try openSerialInput(path: inputURL.path)
             } else {
                 inputHandle = nil
             }
@@ -1562,31 +1560,12 @@ func prepareSerialInput(path: String) throws {
     }
 }
 
-func bridgeSerialInput(path: String, to output: FileHandle) {
-    DispatchQueue.global(qos: .utility).async {
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let fd = open(path, O_RDONLY)
-            if fd < 0 {
-                usleep(100_000)
-                continue
-            }
-            while true {
-                let n = read(fd, &buffer, buffer.count)
-                if n > 0 {
-                    if !FileManager.default.fileExists(atPath: path) {
-                        close(fd)
-                        output.closeFile()
-                        return
-                    }
-                    output.write(Data(buffer.prefix(n)))
-                    continue
-                }
-                break
-            }
-            close(fd)
-        }
+func openSerialInput(path: String) throws -> FileHandle {
+    let fd = open(path, O_RDWR)
+    if fd < 0 {
+        throw ProtocolError.invalid("open serial input failed with errno \(errno)")
     }
+    return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
 }
 #endif
 
