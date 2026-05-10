@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"os/exec"
 	"reflect"
 	"syscall"
 	"testing"
@@ -93,6 +94,26 @@ func TestCmdlineRequestsDHCP(t *testing.T) {
 	}
 	if cmdlineRequestsDHCP("console=hvc0 root=/dev/vda ip=off") {
 		t.Fatal("cmdlineRequestsDHCP(ip=off) = true, want false")
+	}
+}
+
+func TestInteractiveShellExitIsNotLaunchFailure(t *testing.T) {
+	err := exec.Command("sh", "-c", "exit 7").Run()
+	if err == nil {
+		t.Fatal("shell exit error = nil")
+	}
+	if shellLaunchFailed(err) {
+		t.Fatalf("shellLaunchFailed(%v) = true, want false", err)
+	}
+}
+
+func TestInteractiveShellMissingBinaryIsLaunchFailure(t *testing.T) {
+	err := exec.Command("/definitely/missing/microagent-shell").Run()
+	if err == nil {
+		t.Fatal("missing shell error = nil")
+	}
+	if !shellLaunchFailed(err) {
+		t.Fatalf("shellLaunchFailed(%v) = false, want true", err)
 	}
 }
 

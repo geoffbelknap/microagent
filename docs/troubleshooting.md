@@ -108,7 +108,7 @@ Usual causes:
 
 ### `microagent --json status` shows `verification.divergence`
 
-Recorded hashes (image digest, kernel SHA, rootfs SHA, injected init SHA) don't match what's currently on disk. Something changed under the workspace's feet — investigate before you `start`.
+Recorded hashes don't match what's currently on disk. Treat kernel or injected-init divergence as suspicious until you understand it. Rootfs hashes are enforced while the workspace is still `prepared`; after a workspace has started, the rootfs is the writable VM disk and normal guest boot activity can change it.
 
 ```bash
 microagent --json status <name> | jq '.verification.divergence'

@@ -3152,6 +3152,14 @@ func TestCopyConsoleInputDetachesOnCtrlBracket(t *testing.T) {
 	}
 }
 
+func TestDataAfterOffsetIgnoresOldConsoleMarkers(t *testing.T) {
+	data := []byte("old marker\nnew marker\n")
+	got := dataAfterOffset(data, int64(len(data)), int64(len("old marker\n")))
+	if string(got) != "new marker\n" {
+		t.Fatalf("dataAfterOffset = %q", got)
+	}
+}
+
 func TestRunPSListsWorkspaces(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {

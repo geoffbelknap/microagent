@@ -175,9 +175,13 @@ consumers should treat it as closed by default.
 ```
 
 For named workspace status responses, `verification` compares current runtime
-artifacts with the values recorded when the workspace was created. If a hash no
-longer matches, `verification.ok` is false and `verification.divergence`
-contains entries with `artifact`, `field`, `expected`, and `actual`.
+artifacts with the values recorded when the workspace was created. Kernel and
+injected-init hashes are always compared. Rootfs hashes are compared while the
+workspace is still `prepared`; after start, the rootfs is a writable VM disk, so
+status reports current and recorded rootfs hashes without treating normal guest
+writes as divergence. If an enforced hash no longer matches,
+`verification.ok` is false and `verification.divergence` contains entries with
+`artifact`, `field`, `expected`, and `actual`.
 
 `readiness` gives consumers explicit guest, shell, result, and mediation
 readiness signals. Each signal has `ready` plus optional `observedAt`, `detail`,

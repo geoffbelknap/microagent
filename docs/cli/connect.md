@@ -12,7 +12,9 @@ it writes one line to the console and prints any new output, which is useful
 in scripts.
 
 In interactive mode, press `Ctrl-]` to detach from the console without stopping
-the workspace.
+the workspace. Typing `exit` closes the current guest shell and returns from
+`connect`; the workspace stays running unless you run a shutdown command such as
+`poweroff`.
 
 `connect` is supported by Apple VF and Firecracker. [`logs`](/cli/logs/)
 remains available for captured serial output.
