@@ -34,6 +34,8 @@ type Options struct {
 	ImageRef        string
 	ExecCommand     string
 	Entrypoint      string
+	ConsoleShell    string
+	Hostname        string
 	SetupCommands   []string
 	Env             map[string]string
 	Files           []File
@@ -73,6 +75,8 @@ type Spec struct {
 	Profile    string                `yaml:"profile"`
 	Restart    string                `yaml:"restart"`
 	Entrypoint string                `yaml:"entrypoint"`
+	Shell      string                `yaml:"shell"`
+	Hostname   string                `yaml:"hostname"`
 	Setup      []string              `yaml:"setup"`
 	Env        map[string]string     `yaml:"env"`
 	Resources  Resources             `yaml:"resources"`
@@ -126,6 +130,8 @@ type Manifest struct {
 	Restart      string                     `json:"restart"`
 	Resources    Resources                  `json:"resources"`
 	Network      NetworkSpec                `json:"network,omitempty"`
+	ConsoleShell string                     `json:"shell,omitempty"`
+	Hostname     string                     `json:"hostname,omitempty"`
 	Mediation    *vmkit.MediationConfig     `json:"mediation,omitempty"`
 	Disks        []Disk                     `json:"disks,omitempty"`
 	Artifacts    Artifacts                  `json:"artifacts,omitempty"`
@@ -670,7 +676,7 @@ func Command(opts Options) string {
 		lines = append(lines, execCommand)
 	}
 	if opts.PrepareForStart {
-		lines = append(lines, ResetGuestConfigCommand(ShellCommand(opts.Entrypoint), opts.Env, opts.ResultPort, Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards)))
+		lines = append(lines, ResetGuestConfigCommand(ShellCommand(opts.Entrypoint), opts.Env, opts.ResultPort, Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -685,7 +691,7 @@ func BuildCommandAndPort(opts Options) ([]string, uint32) {
 	return ShellCommand(Command(opts)), opts.ResultPort
 }
 
-func ResetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward) string {
+func ResetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
 	if command == nil {
 		command = []string{}
 	}
@@ -695,12 +701,16 @@ func ResetGuestConfigCommand(command []string, env map[string]string, port uint3
 		Port         uint32               `json:"port"`
 		Mounts       []rootfs.Mount       `json:"mounts,omitempty"`
 		HostForwards []rootfs.PortForward `json:"hostForwards,omitempty"`
+		ConsoleShell string               `json:"consoleShell,omitempty"`
+		Hostname     string               `json:"hostname,omitempty"`
 	}{
 		Command:      command,
 		Env:          envList(env),
 		Port:         port,
 		Mounts:       mounts,
 		HostForwards: forwards,
+		ConsoleShell: strings.TrimSpace(consoleShell),
+		Hostname:     strings.TrimSpace(hostname),
 	})
 	if err != nil {
 		panic(err)

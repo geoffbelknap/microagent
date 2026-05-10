@@ -16,7 +16,7 @@ func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello world"}, map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	}, "", 0, nil, nil)
+	}, "", 0, nil, nil, "", "research")
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -27,6 +27,9 @@ func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, "export GOOD_ENV='ok'") {
 		t.Fatalf("init missing valid env: %s", text)
+	}
+	if !strings.Contains(text, "hostname 'research'") {
+		t.Fatalf("init missing hostname setup: %s", text)
 	}
 	if strings.Contains(text, "bad-env") {
 		t.Fatalf("init included invalid env: %s", text)
@@ -48,7 +51,7 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	}, initBinary, 1024, []Mount{{Device: "/dev/vdb", Mountpoint: "/config", Mode: "ro"}}, []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}})
+	}, initBinary, 1024, []Mount{{Device: "/dev/vdb", Mountpoint: "/config", Mode: "ro"}}, []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}, "/bin/bash", "research")
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -68,6 +71,8 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 		!strings.Contains(text, `"/bin/echo"`) ||
 		!strings.Contains(text, `"GOOD_ENV=ok"`) ||
 		!strings.Contains(text, `"/config"`) ||
+		!strings.Contains(text, `"consoleShell":"/bin/bash"`) ||
+		!strings.Contains(text, `"hostname":"research"`) ||
 		!strings.Contains(text, `"hostPort":8080`) ||
 		strings.Contains(text, "bad-env") {
 		t.Fatalf("unexpected run config: %s", text)
@@ -140,7 +145,7 @@ func TestWriteInitDoesNotFollowStageSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "sbin")); err != nil {
 		t.Fatal(err)
 	}
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, nil, "", 0, nil, nil)
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, nil, "", 0, nil, nil, "", "")
 	if err == nil {
 		t.Fatal("expected symlinked init parent to be rejected")
 	}

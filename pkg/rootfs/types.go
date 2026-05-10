@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ type BuildRequest struct {
 	InitPath       string            `json:"init_path,omitempty"`
 	InitBinaryPath string            `json:"init_binary_path,omitempty"`
 	Command        []string          `json:"command,omitempty"`
+	ConsoleShell   string            `json:"console_shell,omitempty"`
+	Hostname       string            `json:"hostname,omitempty"`
 	NoImageCommand bool              `json:"no_image_command,omitempty"`
 	ResultPort     uint32            `json:"result_port,omitempty"`
 	StateDir       string            `json:"state_dir,omitempty"`
@@ -122,8 +125,40 @@ func ValidateRequest(req BuildRequest) error {
 	if req.SizeMiB < 0 {
 		return errors.New("size_mib must not be negative")
 	}
+	if shellPath := strings.TrimSpace(req.ConsoleShell); shellPath != "" {
+		if !strings.HasPrefix(shellPath, "/") {
+			return errors.New("console_shell must be an absolute guest path")
+		}
+		if path.Clean(shellPath) != shellPath {
+			return errors.New("console_shell must be a clean absolute guest path")
+		}
+	}
+	if hostname := strings.TrimSpace(req.Hostname); hostname != "" {
+		if err := validateHostname(hostname); err != nil {
+			return err
+		}
+	}
 	if err := ValidateFiles(req.Files); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateHostname(hostname string) error {
+	if len(hostname) > 63 {
+		return errors.New("hostname must be 63 characters or fewer")
+	}
+	if hostname == "" {
+		return errors.New("hostname is required")
+	}
+	if hostname[0] == '-' || hostname[len(hostname)-1] == '-' {
+		return errors.New("hostname must not start or end with '-'")
+	}
+	for _, r := range hostname {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return errors.New("hostname must contain only letters, numbers, and '-'")
 	}
 	return nil
 }

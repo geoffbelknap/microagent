@@ -4,7 +4,9 @@ package main
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"syscall"
 	"testing"
@@ -114,6 +116,53 @@ func TestInteractiveShellMissingBinaryIsLaunchFailure(t *testing.T) {
 	}
 	if !shellLaunchFailed(err) {
 		t.Fatalf("shellLaunchFailed(%v) = false, want true", err)
+	}
+}
+
+func TestConsoleShellCommandDefaultsToBinSh(t *testing.T) {
+	got, err := consoleShellCommand("")
+	if err != nil {
+		t.Fatalf("consoleShellCommand: %v", err)
+	}
+	want := []string{"/bin/sh", "-i"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("consoleShellCommand = %#v, want %#v", got, want)
+	}
+}
+
+func TestConsoleShellCommandUsesConfiguredShell(t *testing.T) {
+	dir := t.TempDir()
+	shellPath := filepath.Join(dir, "bash")
+	if err := os.WriteFile(shellPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := consoleShellCommand(shellPath)
+	if err != nil {
+		t.Fatalf("consoleShellCommand: %v", err)
+	}
+	want := []string{shellPath, "-i"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("consoleShellCommand = %#v, want %#v", got, want)
+	}
+}
+
+func TestConsoleShellCommandRejectsMissingShell(t *testing.T) {
+	_, err := consoleShellCommand("/definitely/missing/microagent-shell")
+	if err == nil {
+		t.Fatal("consoleShellCommand error = nil")
+	}
+}
+
+func TestValidateHostname(t *testing.T) {
+	for _, hostname := range []string{"research", "homebridge-1"} {
+		if err := validateHostname(hostname); err != nil {
+			t.Fatalf("validateHostname(%q): %v", hostname, err)
+		}
+	}
+	for _, hostname := range []string{"bad_name", "-bad", "bad-", ""} {
+		if err := validateHostname(hostname); err == nil {
+			t.Fatalf("validateHostname(%q) error = nil", hostname)
+		}
 	}
 }
 

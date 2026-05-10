@@ -22,6 +22,8 @@ first.
 | `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
 | `--entrypoint <command>` | Command to run on start |
+| `--shell <path>` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
+| `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
@@ -74,6 +76,19 @@ microagent create \
   --setup "echo ready > /workspace/status"
 ```
 
+Use Bash for `connect`:
+
+```bash
+microagent create \
+  --name research \
+  --image docker.io/library/ubuntu:24.04 \
+  --hostname research \
+  --shell /bin/bash
+```
+
+The shell is a guest path, not a host path. If you choose a shell that is not
+already in the image, install it with `--setup` or build it into the image.
+
 Create from a declarative spec:
 
 ```yaml
@@ -82,6 +97,8 @@ image: docker.io/library/ubuntu:24.04
 profile: medium
 restart: on-failure
 entrypoint: /app/start.sh
+shell: /bin/bash
+hostname: research
 setup:
   - mkdir -p /workspace
   - echo ready > /workspace/status

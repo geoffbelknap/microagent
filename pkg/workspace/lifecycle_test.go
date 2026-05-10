@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
@@ -70,6 +71,28 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Name != "agency-task" || entries[0].State != string(vmkit.StateRunning) {
 		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestDefaultHostnameSanitizesWorkspaceName(t *testing.T) {
+	tests := map[string]string{
+		"homebridge":            "homebridge",
+		"Home_Bridge.local":     "home-bridge-local",
+		"---":                   "microagent",
+		strings.Repeat("a", 70): strings.Repeat("a", 63),
+	}
+	for name, want := range tests {
+		if got := DefaultHostname(name); got != want {
+			t.Fatalf("DefaultHostname(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestValidateHostnameRejectsInvalidValues(t *testing.T) {
+	for _, hostname := range []string{"bad_name", "-bad", "bad-", "", strings.Repeat("a", 64)} {
+		if err := ValidateHostname(hostname); err == nil {
+			t.Fatalf("ValidateHostname(%q) error = nil", hostname)
+		}
 	}
 }
 
