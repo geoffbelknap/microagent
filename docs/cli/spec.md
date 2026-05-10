@@ -12,6 +12,8 @@ image: docker.io/library/ubuntu:24.04
 profile: medium
 restart: on-failure
 entrypoint: /app/start.sh
+shell: /bin/bash
+hostname: research
 setup:
   - mkdir -p /workspace
   - echo ready > /workspace/status
@@ -70,6 +72,8 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `profile` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `restart` | Restart policy: `never`, `on-failure`, or `always` |
 | `entrypoint` | Command to run when the workspace starts |
+| `shell` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
+| `hostname` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
 | `setup` | Commands to run before first start |
 | `files` | Source files to copy into the workspace rootfs |
 | `files[].src` | Host path, relative to the spec file or absolute |

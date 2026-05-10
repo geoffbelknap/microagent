@@ -19,6 +19,13 @@ the workspace. Typing `exit` closes the current guest shell and returns from
 `connect` is supported by Apple VF and Firecracker. [`logs`](/cli/logs/)
 remains available for captured serial output.
 
+The console starts `/bin/sh` by default. Set `--shell <path>` on
+[`create`](/cli/create/) or `shell:` in a workspace spec to use another shell,
+such as `/bin/bash`. The shell path must exist inside the guest rootfs.
+
+The guest hostname defaults to the workspace name sanitized as a Linux hostname.
+Use `--hostname <name>` or `hostname:` in the spec to override it.
+
 ## Flags
 
 | Flag | Description |

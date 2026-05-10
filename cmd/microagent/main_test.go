@@ -1082,6 +1082,8 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 		"--setup", "apt-get update",
 		"--setup", "apt-get install -y git",
 		"--entrypoint", "/app/entrypoint.sh",
+		"--shell", "/bin/bash",
+		"--hostname", "research-vm",
 		"--env", "AGENCY_AGENT_NAME=research",
 		"--env", "AGENCY_MODEL=standard",
 		"--name", "research",
@@ -1107,6 +1109,12 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	}
 	if opts.Entrypoint != "/app/entrypoint.sh" {
 		t.Fatalf("Entrypoint = %q", opts.Entrypoint)
+	}
+	if opts.ConsoleShell != "/bin/bash" {
+		t.Fatalf("ConsoleShell = %q", opts.ConsoleShell)
+	}
+	if opts.Hostname != "research-vm" {
+		t.Fatalf("Hostname = %q", opts.Hostname)
 	}
 	if opts.Env["AGENCY_AGENT_NAME"] != "research" || opts.Env["AGENCY_MODEL"] != "standard" {
 		t.Fatalf("Env = %#v", opts.Env)
@@ -1136,6 +1144,9 @@ func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing
 	if opts.ImageRef != defaultWorkspaceImageAMD64 {
 		t.Fatalf("ImageRef = %q, want %q", opts.ImageRef, defaultWorkspaceImageAMD64)
 	}
+	if opts.Hostname != "research" {
+		t.Fatalf("Hostname = %q", opts.Hostname)
+	}
 	if opts.MemoryMiB != defaultWorkspaceMemoryMiB || opts.CPUCount != 2 || opts.SizeMiB != rootfs.DefaultSizeMiB {
 		t.Fatalf("defaults = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
 	}
@@ -1151,6 +1162,32 @@ func TestParseWorkspaceOptionsAppliesResourceProfile(t *testing.T) {
 	}
 	if opts.Profile != "medium" || opts.MemoryMiB != 2048 || opts.CPUCount != 2 || opts.SizeMiB != 8192 {
 		t.Fatalf("profile resources = profile %q memory %d cpus %d size %d", opts.Profile, opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsInvalidConsoleShell(t *testing.T) {
+	for _, shellPath := range []string{"bash", "/bin/../bin/bash"} {
+		_, err := parseWorkspaceOptions("create", []string{
+			"research",
+			"--image", "docker.io/library/ubuntu:24.04",
+			"--shell", shellPath,
+		})
+		if err == nil {
+			t.Fatalf("parseWorkspaceOptions accepted shell %q", shellPath)
+		}
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsInvalidHostname(t *testing.T) {
+	for _, hostname := range []string{"bad_name", "-bad", strings.Repeat("a", 64)} {
+		_, err := parseWorkspaceOptions("create", []string{
+			"research",
+			"--image", "docker.io/library/ubuntu:24.04",
+			"--hostname", hostname,
+		})
+		if err == nil {
+			t.Fatalf("parseWorkspaceOptions accepted hostname %q", hostname)
+		}
 	}
 }
 
@@ -1298,6 +1335,8 @@ image: docker.io/library/ubuntu:24.04
 profile: medium
 restart: on-failure
 entrypoint: /app/start.sh
+shell: /bin/bash
+hostname: research-vm
 setup:
   - mkdir -p /workspace
   - echo ready > /workspace/status
@@ -1355,8 +1394,8 @@ files:
 	if opts.Name != "research" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "medium" || opts.RestartPolicy != "on-failure" {
 		t.Fatalf("identity/image/profile = %#v", opts)
 	}
-	if opts.Entrypoint != "/app/start.sh" || len(opts.SetupCommands) != 2 {
-		t.Fatalf("commands = entrypoint %q setup %#v", opts.Entrypoint, opts.SetupCommands)
+	if opts.Entrypoint != "/app/start.sh" || opts.ConsoleShell != "/bin/bash" || opts.Hostname != "research-vm" || len(opts.SetupCommands) != 2 {
+		t.Fatalf("commands = entrypoint %q shell %q hostname %q setup %#v", opts.Entrypoint, opts.ConsoleShell, opts.Hostname, opts.SetupCommands)
 	}
 	if opts.Env["MICROAGENT_NAME"] != "research" {
 		t.Fatalf("env = %#v", opts.Env)
@@ -2941,6 +2980,8 @@ func TestWorkspaceCommandAllowsMultiCommandExec(t *testing.T) {
 func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 	command := workspaceCommand(workspaceOptions{
 		Entrypoint:      "/app/entrypoint.sh",
+		ConsoleShell:    "/bin/bash",
+		Hostname:        "research-vm",
 		SetupCommands:   []string{"echo setup"},
 		Env:             map[string]string{"AGENCY_AGENT_NAME": "research"},
 		Disks:           []workspaceDisk{{Name: "constraints", Path: "/tmp/constraints.ext4", Mountpoint: "/config", Mode: "ro"}},
@@ -2956,7 +2997,9 @@ func TestWorkspaceCommandResetsGuestConfigForCreatedWorkspace(t *testing.T) {
 		!strings.Contains(command, `"port":1024`) ||
 		!strings.Contains(command, `"mountpoint":"/config"`) ||
 		!strings.Contains(command, `"hostPort":8080`) ||
-		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) {
+		!strings.Contains(command, `"AGENCY_AGENT_NAME=research"`) ||
+		!strings.Contains(command, `"consoleShell":"/bin/bash"`) ||
+		!strings.Contains(command, `"hostname":"research-vm"`) {
 		t.Fatalf("workspaceCommand missing guest config reset: %q", command)
 	}
 }

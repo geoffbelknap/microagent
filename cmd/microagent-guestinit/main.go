@@ -35,6 +35,8 @@ type config struct {
 	Mode         string        `json:"mode,omitempty"`
 	Mounts       []mount       `json:"mounts,omitempty"`
 	HostForwards []hostForward `json:"hostForwards,omitempty"`
+	ConsoleShell string        `json:"consoleShell,omitempty"`
+	Hostname     string        `json:"hostname,omitempty"`
 }
 
 type mount struct {
@@ -98,6 +100,15 @@ func run() int {
 		_ = sendResult(cfg.Port, res)
 		return code
 	}
+	if err := configureHostname(cfg.Hostname); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
 	if err := startTCPVsockBridges(cfg.Env); err != nil {
 		code = 127
 		res.Error = err.Error()
@@ -140,7 +151,7 @@ func run() int {
 			_ = sendResult(cfg.Port, res)
 			return code
 		}
-		if err := runInteractiveShells(guestEnv(cfg.Env)); err != nil {
+		if err := runInteractiveShells(guestEnv(cfg.Env), cfg.ConsoleShell); err != nil {
 			code = 127
 			res.Error = err.Error()
 			fmt.Fprintln(os.Stderr, err)
@@ -154,10 +165,51 @@ func run() int {
 	return code
 }
 
-func runInteractiveShells(env []string) error {
+func configureHostname(hostname string) error {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return nil
+	}
+	if err := validateHostname(hostname); err != nil {
+		return err
+	}
+	if err := unix.Sethostname([]byte(hostname)); err != nil {
+		return fmt.Errorf("set hostname %s: %w", hostname, err)
+	}
+	if err := os.WriteFile("/etc/hostname", []byte(hostname+"\n"), 0o644); err != nil {
+		return fmt.Errorf("write /etc/hostname: %w", err)
+	}
+	log.Printf("microagent-init: hostname set to %s", hostname)
+	return nil
+}
+
+func validateHostname(hostname string) error {
+	if hostname == "" {
+		return fmt.Errorf("hostname is required")
+	}
+	if len(hostname) > 63 {
+		return fmt.Errorf("hostname must be 63 characters or fewer")
+	}
+	if hostname[0] == '-' || hostname[len(hostname)-1] == '-' {
+		return fmt.Errorf("hostname must not start or end with '-'")
+	}
+	for _, r := range hostname {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return fmt.Errorf("hostname must contain only letters, numbers, and '-'")
+	}
+	return nil
+}
+
+func runInteractiveShells(env []string, shellPath string) error {
+	command, err := consoleShellCommand(shellPath)
+	if err != nil {
+		return err
+	}
 	for {
-		log.Printf("microagent-init: starting console shell %v", []string{"/bin/sh", "-i"})
-		err := runInteractiveShell(env)
+		log.Printf("microagent-init: starting console shell %v", command)
+		err := runInteractiveShell(env, command)
 		if shellLaunchFailed(err) {
 			return err
 		}
@@ -169,8 +221,26 @@ func runInteractiveShells(env []string) error {
 	}
 }
 
-func runInteractiveShell(env []string) error {
-	cmd := exec.Command("/bin/sh", "-i")
+func consoleShellCommand(shellPath string) ([]string, error) {
+	shellPath = strings.TrimSpace(shellPath)
+	if shellPath == "" {
+		shellPath = "/bin/sh"
+	}
+	if !strings.HasPrefix(shellPath, "/") {
+		return nil, fmt.Errorf("console shell must be an absolute path: %q", shellPath)
+	}
+	if info, err := os.Stat(shellPath); err != nil {
+		return nil, fmt.Errorf("console shell %s is unavailable: %w", shellPath, err)
+	} else if info.IsDir() {
+		return nil, fmt.Errorf("console shell %s is a directory", shellPath)
+	} else if info.Mode().Perm()&0o111 == 0 {
+		return nil, fmt.Errorf("console shell %s is not executable", shellPath)
+	}
+	return []string{shellPath, "-i"}, nil
+}
+
+func runInteractiveShell(env []string, command []string) error {
+	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

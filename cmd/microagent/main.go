@@ -1670,6 +1670,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
 	fs.StringVar(&opts.ExecCommand, "exec", "", "Shell command to run as guest init")
 	fs.StringVar(&opts.Entrypoint, "entrypoint", opts.Entrypoint, "Shell command to run when the workspace starts")
+	fs.StringVar(&opts.ConsoleShell, "shell", opts.ConsoleShell, "Interactive console shell path")
+	fs.StringVar(&opts.Hostname, "hostname", opts.Hostname, "Guest hostname")
 	setupCommands := multiFlag(append([]string{}, opts.SetupCommands...))
 	fs.Var(&setupCommands, "setup", "Shell command to run before --exec")
 	var envVars multiFlag
@@ -1757,6 +1759,15 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		} else {
 			return workspaceOptions{}, fmt.Errorf("%s requires --image", command)
 		}
+	}
+	if err := validateConsoleShell(opts.ConsoleShell); err != nil {
+		return workspaceOptions{}, err
+	}
+	if strings.TrimSpace(opts.Hostname) == "" && strings.TrimSpace(opts.Name) != "" {
+		opts.Hostname = workspace.DefaultHostname(opts.Name)
+	}
+	if err := validateHostname(opts.Hostname); err != nil {
+		return workspaceOptions{}, err
 	}
 	if !kernelExplicit {
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
@@ -1884,6 +1895,12 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 	}
 	if strings.TrimSpace(spec.Entrypoint) != "" {
 		opts.Entrypoint = spec.Entrypoint
+	}
+	if strings.TrimSpace(spec.Shell) != "" {
+		opts.ConsoleShell = strings.TrimSpace(spec.Shell)
+	}
+	if strings.TrimSpace(spec.Hostname) != "" {
+		opts.Hostname = strings.TrimSpace(spec.Hostname)
 	}
 	if len(spec.Setup) != 0 {
 		opts.SetupCommands = append([]string{}, spec.Setup...)
@@ -2103,6 +2120,27 @@ func validateRestartPolicy(policy string) error {
 	return workspace.ValidateRestartPolicy(policy)
 }
 
+func validateConsoleShell(shellPath string) error {
+	shellPath = strings.TrimSpace(shellPath)
+	if shellPath == "" {
+		return nil
+	}
+	if !filepath.IsAbs(shellPath) {
+		return fmt.Errorf("shell must be an absolute guest path")
+	}
+	if filepath.Clean(shellPath) != shellPath {
+		return fmt.Errorf("shell must be a clean absolute guest path")
+	}
+	return nil
+}
+
+func validateHostname(hostname string) error {
+	if strings.TrimSpace(hostname) == "" {
+		return nil
+	}
+	return workspace.ValidateHostname(strings.TrimSpace(hostname))
+}
+
 func normalizeRestartPolicy(policy string) string {
 	return workspace.NormalizeRestartPolicy(policy)
 }
@@ -2110,6 +2148,8 @@ func normalizeRestartPolicy(policy string) string {
 func canUseImageBaseline(opts workspaceOptions) bool {
 	return opts.PrepareForStart &&
 		!workspaceHasGuestCommand(opts) &&
+		strings.TrimSpace(opts.ConsoleShell) == "" &&
+		strings.TrimSpace(opts.Hostname) == "" &&
 		len(opts.Files) == 0 &&
 		len(opts.Disks) == 0 &&
 		len(opts.Env) == 0 &&
@@ -2149,16 +2189,18 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 				return workspaceResult{}, err
 			}
 			return workspaceResult{
-				Workspace:  opts.Name,
-				StateDir:   opts.StateDir,
-				Profile:    opts.Profile,
-				Restart:    opts.RestartPolicy,
-				Resources:  workspaceResources(opts),
-				Network:    networkSpecFromConfig(opts.Network),
-				RootfsPath: rootfsPath,
-				KernelPath: opts.KernelPath,
-				Artifacts:  workspaceArtifactsFromOptions(opts),
-				Image:      imagecache.Provenance(record, rootfsPath),
+				Workspace:    opts.Name,
+				StateDir:     opts.StateDir,
+				Profile:      opts.Profile,
+				Restart:      opts.RestartPolicy,
+				Resources:    workspaceResources(opts),
+				Network:      networkSpecFromConfig(opts.Network),
+				ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
+				Hostname:     strings.TrimSpace(opts.Hostname),
+				RootfsPath:   rootfsPath,
+				KernelPath:   opts.KernelPath,
+				Artifacts:    workspaceArtifactsFromOptions(opts),
+				Image:        imagecache.Provenance(record, rootfsPath),
 			}, nil
 		}
 	}
@@ -2169,6 +2211,8 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		OutputPath:     rootfsPath,
 		InitPath:       rootfs.DefaultInitPath,
 		Command:        command,
+		ConsoleShell:   opts.ConsoleShell,
+		Hostname:       opts.Hostname,
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
 		NoImageCommand: opts.PrepareForStart && !workspaceHasGuestCommand(opts),
@@ -2183,16 +2227,18 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := workspaceResult{
-		Workspace:  opts.Name,
-		StateDir:   opts.StateDir,
-		Profile:    opts.Profile,
-		Restart:    opts.RestartPolicy,
-		Resources:  workspaceResources(opts),
-		Network:    networkSpecFromConfig(opts.Network),
-		RootfsPath: rootfsPath,
-		KernelPath: opts.KernelPath,
-		Artifacts:  workspaceArtifactsFromOptions(opts),
-		Image:      provenance,
+		Workspace:    opts.Name,
+		StateDir:     opts.StateDir,
+		Profile:      opts.Profile,
+		Restart:      opts.RestartPolicy,
+		Resources:    workspaceResources(opts),
+		Network:      networkSpecFromConfig(opts.Network),
+		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
+		Hostname:     strings.TrimSpace(opts.Hostname),
+		RootfsPath:   rootfsPath,
+		KernelPath:   opts.KernelPath,
+		Artifacts:    workspaceArtifactsFromOptions(opts),
+		Image:        provenance,
 	}
 	if err != nil {
 		return result, err
@@ -3068,6 +3114,12 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	}
 	if result.Network.Mode != "" {
 		fmt.Fprintf(stdout, "Network: %s\n", result.Network.Mode)
+	}
+	if strings.TrimSpace(result.ConsoleShell) != "" {
+		fmt.Fprintf(stdout, "Shell: %s\n", strings.TrimSpace(result.ConsoleShell))
+	}
+	if strings.TrimSpace(result.Hostname) != "" {
+		fmt.Fprintf(stdout, "Hostname: %s\n", strings.TrimSpace(result.Hostname))
 	}
 	if len(result.Artifacts.Ingress) != 0 || len(result.Artifacts.Egress) != 0 {
 		fmt.Fprintf(stdout, "Artifacts: ingress=%d egress=%d\n", len(result.Artifacts.Ingress), len(result.Artifacts.Egress))
@@ -4357,7 +4409,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
 		return true
 	}
-	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
+	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
 }
 
 func hasLowLevelCreateFlag(args []string) bool {
@@ -4474,7 +4526,7 @@ func hasPositionalWorkspaceName(args []string) bool {
 		if !strings.HasPrefix(arg, "-") {
 			return true
 		}
-		if arg == "--json" || arg == "-json" || arg == "--rootfs" || arg == "-rootfs" || arg == "--kernel" || arg == "-kernel" || arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" || arg == "--file" || arg == "-file" || arg == "--entrypoint" || arg == "-entrypoint" || arg == "--env" || arg == "-env" {
+		if arg == "--json" || arg == "-json" || arg == "--rootfs" || arg == "-rootfs" || arg == "--kernel" || arg == "-kernel" || arg == "--name" || arg == "-name" || arg == "--id" || arg == "-id" || arg == "--file" || arg == "-file" || arg == "--entrypoint" || arg == "-entrypoint" || arg == "--shell" || arg == "-shell" || arg == "--hostname" || arg == "-hostname" || arg == "--env" || arg == "-env" {
 			return false
 		}
 	}
@@ -4509,8 +4561,8 @@ func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
 	return workspace.BuildCommandAndPort(opts)
 }
 
-func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward) string {
-	return workspace.ResetGuestConfigCommand(command, env, port, mounts, forwards)
+func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
+	return workspace.ResetGuestConfigCommand(command, env, port, mounts, forwards, consoleShell, hostname)
 }
 
 func envList(env map[string]string) []string {
@@ -4815,6 +4867,8 @@ func reorderFlagArgs(args []string) []string {
 		"-image":             true,
 		"-exec":              true,
 		"-entrypoint":        true,
+		"-shell":             true,
+		"-hostname":          true,
 		"-file":              true,
 		"-env":               true,
 		"-setup":             true,
@@ -5185,6 +5239,8 @@ Options:
   -name <name>          Workspace name
   -id <id>              Workspace ID
   -entrypoint <command> Command to run on start
+  -shell <path>         Interactive console shell path
+  -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
@@ -5244,6 +5300,8 @@ Options:
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
   -entrypoint <command> Command to run on start
+  -shell <path>         Interactive console shell path
+  -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
@@ -5279,6 +5337,8 @@ Options:
   -name <name>          Workspace name
   -setup <command>      Shell command to run before first start
   -entrypoint <command> Command to run on start
+  -shell <path>         Interactive console shell path
+  -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle

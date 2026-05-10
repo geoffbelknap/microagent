@@ -19,6 +19,8 @@ VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
 | `--exec <command>` | Shell command to run |
 | `--setup <command>` | Shell command to run before `--exec`. Repeatable |
 | `--entrypoint <command>` | Command to run on start |
+| `--shell <path>` | Interactive console shell path for kept/named runs. Defaults to `/bin/sh` |
+| `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |

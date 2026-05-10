@@ -133,7 +133,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 
 	provenance.BuilderPhase = "write-init"
 	command := buildCommand(req, imageConfig)
-	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts, req.HostForwards); err != nil {
+	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
 		return provenance, err
 	}
 	provenance.BuilderPhase = "write-files"
@@ -484,7 +484,7 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 	return nil
 }
 
-func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount, forwards []PortForward) error {
+func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -501,7 +501,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		if err := copyFileToRoot(root, initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
-		return writeGuestRunConfig(stageDir, command, env, resultPort, mounts, forwards)
+		return writeGuestRunConfig(stageDir, command, env, resultPort, mounts, forwards, consoleShell, hostname)
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -511,10 +511,16 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		}
 		commandLine = "set -- " + strings.Join(quoted, " ") + "\n"
 	}
+	consoleShell = strings.TrimSpace(consoleShell)
+	if consoleShell == "" {
+		consoleShell = "/bin/sh"
+	}
 	script := "#!/bin/sh\nset -eu\nmkdir -p /proc /sys /dev\nmount -t proc proc /proc || true\nmount -t sysfs sysfs /sys || true\n" +
 		envLines(env) +
+		hostnameLines(hostname) +
 		commandLine +
 		"if [ \"$#\" -gt 0 ]; then\n  set +e\n  \"$@\"\n  status=\"$?\"\n  set -e\n  poweroff -f || halt -f || reboot -f || true\n  exit \"$status\"\nfi\nexec /bin/sh\n"
+	script = strings.Replace(script, "exec /bin/sh\n", "exec "+shellQuote(consoleShell)+"\n", 1)
 	if err := writeBytesToRoot(root, target, []byte(script), 0o755); err != nil {
 		return fmt.Errorf("write init: %w", err)
 	}
@@ -527,9 +533,11 @@ type guestRunConfig struct {
 	Port         uint32        `json:"port"`
 	Mounts       []Mount       `json:"mounts,omitempty"`
 	HostForwards []PortForward `json:"hostForwards,omitempty"`
+	ConsoleShell string        `json:"consoleShell,omitempty"`
+	Hostname     string        `json:"hostname,omitempty"`
 }
 
-func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32, mounts []Mount, forwards []PortForward) error {
+func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -542,7 +550,7 @@ func writeGuestRunConfig(stageDir string, command []string, env map[string]strin
 	if err := root.MkdirAll(path.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create guest config dir: %w", err)
 	}
-	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort, Mounts: mounts, HostForwards: forwards})
+	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort, Mounts: mounts, HostForwards: forwards, ConsoleShell: strings.TrimSpace(consoleShell), Hostname: strings.TrimSpace(hostname)})
 	if err != nil {
 		return err
 	}
@@ -732,6 +740,15 @@ func envLines(env map[string]string) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+func hostnameLines(hostname string) string {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return ""
+	}
+	quoted := shellQuote(hostname)
+	return "hostname " + quoted + "\nprintf '%s\\n' " + quoted + " > /etc/hostname\n"
 }
 
 func validShellEnvName(key string) bool {

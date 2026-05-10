@@ -27,6 +27,8 @@ type Result struct {
 	Restart      string                     `json:"restart"`
 	Resources    Resources                  `json:"resources"`
 	Network      NetworkSpec                `json:"network,omitempty"`
+	ConsoleShell string                     `json:"shell,omitempty"`
+	Hostname     string                     `json:"hostname,omitempty"`
 	RootfsPath   string                     `json:"rootfs_path"`
 	KernelPath   string                     `json:"kernel_path"`
 	Disks        []Disk                     `json:"disks,omitempty"`
@@ -241,18 +243,20 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	}
 	resp, err := startDetached(opts, Request(opts, "run", rootfsPath, NewRequestID()))
 	return Result{
-		Workspace:  opts.Name,
-		StateDir:   opts.StateDir,
-		Profile:    opts.Profile,
-		Restart:    opts.RestartPolicy,
-		Resources:  ResourcesFromOptions(opts),
-		Network:    NetworkSpecFromConfig(opts.Network),
-		RootfsPath: rootfsPath,
-		KernelPath: opts.KernelPath,
-		Disks:      opts.Disks,
-		Artifacts:  ArtifactsFromOptions(opts),
-		SerialPath: SerialLogPath(opts.StateDir, opts.Name),
-		Response:   resp,
+		Workspace:    opts.Name,
+		StateDir:     opts.StateDir,
+		Profile:      opts.Profile,
+		Restart:      opts.RestartPolicy,
+		Resources:    ResourcesFromOptions(opts),
+		Network:      NetworkSpecFromConfig(opts.Network),
+		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
+		Hostname:     strings.TrimSpace(opts.Hostname),
+		RootfsPath:   rootfsPath,
+		KernelPath:   opts.KernelPath,
+		Disks:        opts.Disks,
+		Artifacts:    ArtifactsFromOptions(opts),
+		SerialPath:   SerialLogPath(opts.StateDir, opts.Name),
+		Response:     resp,
 	}, err
 }
 
@@ -399,16 +403,18 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	req := buildRootfsRequest(opts, rootfsPath)
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := Result{
-		Workspace:  opts.Name,
-		StateDir:   opts.StateDir,
-		Profile:    opts.Profile,
-		Restart:    opts.RestartPolicy,
-		Resources:  ResourcesFromOptions(opts),
-		Network:    NetworkSpecFromConfig(opts.Network),
-		RootfsPath: rootfsPath,
-		KernelPath: opts.KernelPath,
-		Artifacts:  ArtifactsFromOptions(opts),
-		Image:      provenance,
+		Workspace:    opts.Name,
+		StateDir:     opts.StateDir,
+		Profile:      opts.Profile,
+		Restart:      opts.RestartPolicy,
+		Resources:    ResourcesFromOptions(opts),
+		Network:      NetworkSpecFromConfig(opts.Network),
+		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
+		Hostname:     strings.TrimSpace(opts.Hostname),
+		RootfsPath:   rootfsPath,
+		KernelPath:   opts.KernelPath,
+		Artifacts:    ArtifactsFromOptions(opts),
+		Image:        provenance,
 	}
 	return result, err
 }
@@ -421,6 +427,8 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		OutputPath:     rootfsPath,
 		InitPath:       rootfs.DefaultInitPath,
 		Command:        command,
+		ConsoleShell:   opts.ConsoleShell,
+		Hostname:       opts.Hostname,
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
 		NoImageCommand: opts.PrepareForStart && !HasGuestCommand(opts),
@@ -484,6 +492,8 @@ func WriteManifest(opts Options) error {
 		Restart:      NormalizeRestartPolicy(opts.RestartPolicy),
 		Resources:    ResourcesFromOptions(opts),
 		Network:      NetworkSpecFromConfig(opts.Network),
+		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
+		Hostname:     strings.TrimSpace(opts.Hostname),
 		Mediation:    opts.Mediation,
 		Disks:        opts.Disks,
 		Artifacts:    ArtifactsFromOptions(opts),
@@ -603,6 +613,52 @@ func ValidateName(name string) error {
 	}
 	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
 		return fmt.Errorf("invalid workspace name: %s", name)
+	}
+	return nil
+}
+
+func DefaultHostname(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	var b strings.Builder
+	lastHyphen := false
+	for _, r := range name {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if valid {
+			b.WriteRune(r)
+			lastHyphen = false
+			continue
+		}
+		if !lastHyphen && b.Len() > 0 {
+			b.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if len(out) > 63 {
+		out = strings.TrimRight(out[:63], "-")
+	}
+	if out == "" {
+		return "microagent"
+	}
+	return out
+}
+
+func ValidateHostname(hostname string) error {
+	hostname = strings.TrimSpace(hostname)
+	if hostname == "" {
+		return fmt.Errorf("hostname is required")
+	}
+	if len(hostname) > 63 {
+		return fmt.Errorf("hostname must be 63 characters or fewer")
+	}
+	if hostname[0] == '-' || hostname[len(hostname)-1] == '-' {
+		return fmt.Errorf("hostname must not start or end with '-'")
+	}
+	for _, r := range hostname {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return fmt.Errorf("hostname must contain only letters, numbers, and '-'")
 	}
 	return nil
 }
@@ -747,6 +803,12 @@ func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
 		return err
 	}
+	if strings.TrimSpace(opts.Hostname) == "" {
+		opts.Hostname = DefaultHostname(opts.Name)
+	}
+	if err := ValidateHostname(opts.Hostname); err != nil {
+		return err
+	}
 	opts.SerialInput = BackendSupportsConsoleInput(opts.Backend)
 	if opts.MemoryMiB == 0 || opts.CPUCount == 0 || (requireDisk && opts.SizeMiB == 0) {
 		if err := ApplyProfile(opts, opts.MemoryMiB != 0, opts.CPUCount != 0, opts.SizeMiB != 0); err != nil {
@@ -763,6 +825,12 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.RestartPolicy = NormalizeRestartPolicy(manifest.Restart)
 	if manifest.Network.Mode != "" || manifest.Network.Interface != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" {
 		opts.Network = NetworkConfigFromSpec(manifest.Network)
+	}
+	if strings.TrimSpace(manifest.ConsoleShell) != "" {
+		opts.ConsoleShell = strings.TrimSpace(manifest.ConsoleShell)
+	}
+	if strings.TrimSpace(manifest.Hostname) != "" {
+		opts.Hostname = strings.TrimSpace(manifest.Hostname)
 	}
 	if manifest.Resources.MemoryMiB != 0 {
 		opts.MemoryMiB = manifest.Resources.MemoryMiB
