@@ -1750,6 +1750,71 @@ func TestImagesPruneDeleteRemovesReusableBaselines(t *testing.T) {
 	}
 }
 
+func TestRunImagesPruneDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
+	dir := t.TempDir()
+	oldTerminal := stdinIsTerminal
+	t.Cleanup(func() { stdinIsTerminal = oldTerminal })
+	stdinIsTerminal = func() bool { return false }
+	stdout, err := os.Create(filepath.Join(dir, "stdout.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runImages([]string{"prune", "--delete", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "pass --yes") {
+		t.Fatalf("err = %v, want --yes confirmation error", err)
+	}
+}
+
+func TestRunPruneImagesDeletesReusableBaselinesWithYes(t *testing.T) {
+	oldOutput := outputFormat
+	t.Cleanup(func() { outputFormat = oldOutput })
+	outputFormat = "text"
+	dir := t.TempDir()
+	rootfsPath := filepath.Join(dir, "images", "rootfs", "busybox.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := upsertImageRecord(dir, imageRecord{
+		ImageRef:    "docker.io/library/busybox:1.36",
+		ResolvedRef: "docker.io/library/busybox@sha256:abc",
+		Digest:      "sha256:abc",
+		Platform:    rootfs.Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath:  rootfsPath,
+		SizeBytes:   6,
+		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "prune.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPrune([]string{"--images", "--yes", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runPrune: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "Deleted: 1") {
+		t.Fatalf("prune output = %s", data)
+	}
+	if _, err := os.Stat(rootfsPath); !os.IsNotExist(err) {
+		t.Fatalf("rootfs still exists or stat failed unexpectedly: %v", err)
+	}
+}
+
 func TestImagesPruneDeleteKeepsWorkspaceRootfs(t *testing.T) {
 	dir := t.TempDir()
 	rootfsPath := filepath.Join(dir, "workspaces", "research", "rootfs.ext4")
