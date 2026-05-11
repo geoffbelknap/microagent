@@ -87,7 +87,7 @@ Important files include:
 | `event.json` | latest lifecycle event |
 | `events.json` | append-only lifecycle history |
 | `runtime.json` | latest lifecycle state and HCS compute system ID |
-| `serial.log` | serial log path reserved for guest output |
+| `serial.log` | guest serial output captured from the HCS COM1 named pipe |
 | `result.json` | structured guest result when delivered |
 
 `inspect` returns the latest event and readiness state. If `result.json`
@@ -102,8 +102,11 @@ exists, `inspect` also returns the backend-neutral `result` object and marks
 - Published TCP networking is not available yet.
 - Mediation and arbitrary guest-to-host listener parity are not available yet.
 - `prepare` / `start`, `halt`, and `quarantine` are not implemented yet.
-- The result and serial file semantics are present in state responses, but the
-  richer host/guest transport that writes them is still experimental.
+- Foreground `run` supports the configured result listener by mapping the guest
+  AF_VSOCK result port to a Hyper-V socket service and writing the received
+  payload to `result.json`.
+- Result runs configure COM1 as an HCS named pipe and append guest serial output
+  to `serial.log`.
 
 Treat this backend as an implementation target for Windows Hyper-V Linux guest
 support, not as full Firecracker or Apple VF parity yet.
