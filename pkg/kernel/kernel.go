@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
-	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 const maxKernelDownloadBytes = 512 * 1024 * 1024
@@ -55,7 +55,7 @@ var Defaults = []ManifestEntry{
 	{
 		Backend:      vmkit.BackendAppleVF,
 		Architecture: "arm64",
-		URL:          "https://github.com/geoffbelknap/microagent-kit/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-apple-vf-arm64",
+		URL:          "https://github.com/geoffbelknap/microagent/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-apple-vf-arm64",
 		SHA256:       "73fe78e51a8ce348e69311d376a02114440eee6b60bf2e91af54bdf2dfb405ec",
 	},
 	{

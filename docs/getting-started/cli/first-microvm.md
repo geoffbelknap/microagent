@@ -3,12 +3,12 @@ title: Run your first microVM
 description: Boot a Linux microVM, run a command, tear it down.
 ---
 
-The fastest way to see microagent-kit work: boot a Linux microVM from an OCI
+The fastest way to see microagent work: boot a Linux microVM from an OCI
 image, run one command inside it, and tear it down.
 
 ## Before you start
 
-1. [Install microagent-kit](/getting-started/install/).
+1. [Install microagent](/getting-started/install/).
 2. Run `microagent doctor` — it confirms the host has the right backend
    (Firecracker on Linux, Apple Virtualization.framework on macOS) and reports
    whether the default kernel is in place.

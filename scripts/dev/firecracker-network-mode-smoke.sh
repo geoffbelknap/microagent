@@ -47,14 +47,14 @@ if [ -n "${MICROAGENT_FIRECRACKER:-}" ]; then
 elif command -v firecracker >/dev/null 2>&1; then
   firecracker="$(command -v firecracker)"
 elif command -v brew >/dev/null 2>&1; then
-  formula_prefix="$(brew --prefix microagent-kit 2>/dev/null || true)"
+  formula_prefix="$(brew --prefix microagent 2>/dev/null || true)"
   firecracker="$formula_prefix/libexec/firecracker"
 else
   firecracker=""
 fi
 
 if [ ! -x "${firecracker:-}" ]; then
-  echo "firecracker binary not found; install microagent-kit or set MICROAGENT_FIRECRACKER" >&2
+  echo "firecracker binary not found; install microagent or set MICROAGENT_FIRECRACKER" >&2
   exit 2
 fi
 

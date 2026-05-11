@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"os"
 
-	firecrackersupervisor "github.com/geoffbelknap/microagent-kit/pkg/supervisors/firecracker"
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 func main() {

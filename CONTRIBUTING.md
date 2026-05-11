@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve `microagent-kit`.
+Thanks for helping improve `microagent`.
 
 This repository owns the VM boundary: kernels, OCI-to-rootfs conversion, VM
 lifecycle commands, backend supervisors, state reporting, runtime verification,

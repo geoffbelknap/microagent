@@ -36,7 +36,7 @@ if [ -n "${MICROAGENT_FIRECRACKER:-}" ] && [ -x "$MICROAGENT_FIRECRACKER" ]; the
 elif command -v firecracker >/dev/null 2>&1; then
   firecracker --version
 elif command -v brew >/dev/null 2>&1; then
-  formula_prefix="$(brew --prefix microagent-kit 2>/dev/null || true)"
+  formula_prefix="$(brew --prefix microagent 2>/dev/null || true)"
   if [ -x "$formula_prefix/libexec/firecracker" ]; then
     "$formula_prefix/libexec/firecracker" --version
   else

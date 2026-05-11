@@ -1,15 +1,15 @@
-# microagent-kit
+# microagent
 
 Run AI agent workspaces in microVMs.
 
 Each agent gets its own Linux microVM — kernel, rootfs, state, lifecycle. Boot from an OCI image and tear down, or keep the workspace around and halt/resume it later. Linux uses Firecracker; macOS uses Apple Virtualization.framework. Identity, policy, credentials, and control-plane decisions live in your code, not in this one.
 
-`microagent-kit` is a Go library; the `microagent` CLI is a thin shell over it. Anything the CLI can do, your program can do directly.
+The project is a Go library; the `microagent` CLI is a thin shell over it. Anything the CLI can do, your program can do directly.
 
 ## Install
 
 ```bash
-brew install geoffbelknap/tap/microagent-kit
+brew install geoffbelknap/tap/microagent
 ```
 
 This installs `microagent` and `microagent-supervisor`, a symlink to the correct supervisor for your host. To build from source, see [`docs/getting-started/install.md`](docs/getting-started/install.md).
@@ -46,7 +46,7 @@ The VM boundary. Kernel management, OCI-to-rootfs builds, VM lifecycle (`run`, `
 
 ## What it doesn't own
 
-Planning loops, LLM calls, tool mediation, policy decisions, credential brokering, audit interpretation. Other projects own those — `microagent-kit` is the substrate they sit on.
+Planning loops, LLM calls, tool mediation, policy decisions, credential brokering, audit interpretation. Other projects own those — `microagent` is the substrate they sit on.
 
 ## Docs
 

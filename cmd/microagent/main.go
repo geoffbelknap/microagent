@@ -21,12 +21,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/diagnostics"
-	"github.com/geoffbelknap/microagent-kit/pkg/imagecache"
-	"github.com/geoffbelknap/microagent-kit/pkg/kernel"
-	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
-	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
+	"github.com/geoffbelknap/microagent/pkg/diagnostics"
+	"github.com/geoffbelknap/microagent/pkg/imagecache"
+	"github.com/geoffbelknap/microagent/pkg/kernel"
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 	"gopkg.in/yaml.v3"
 )
 

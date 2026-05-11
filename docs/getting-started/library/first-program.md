@@ -5,7 +5,7 @@ description: Boot a microVM, run a command, and tear it down — in a few lines 
 
 *If you'd rather drive microagent from the command line, see [run your first microVM](/getting-started/cli/first-microvm/) instead.*
 
-`microagent-kit` is a Go library; the CLI is a thin shell over it. This page
+The project is a Go library; the CLI is a thin shell over it. This page
 shows the smallest useful program: it boots a Linux microVM, runs a command
 inside it, captures the output, and tears the VM down.
 
@@ -36,7 +36,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func main() {

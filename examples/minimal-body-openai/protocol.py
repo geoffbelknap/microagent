@@ -1,7 +1,7 @@
 """Body protocol — request/reply wire shapes for an agent body in a microVM.
 
 This module is the working draft of a protocol for agent bodies that run
-inside microagent-kit microVMs. It's a "primitive" — built from experience,
+inside microagent microVMs. It's a "primitive" — built from experience,
 small on purpose, and meant to mature here before it earns its way into a
 stable contract somewhere else.
 

@@ -5,7 +5,7 @@ description: Trust boundary and reporting issues.
 
 ## Trust boundary
 
-`microagent-kit` treats the kernel, rootfs, and request files as **executable
+`microagent` treats the kernel, rootfs, and request files as **executable
 input**. It does not sign images, scan layers, mediate credentials, or enforce
 policy — those concerns belong to the upstream system that calls `microagent`.
 See [Boundaries](/concepts/boundaries/) for the full list.
@@ -26,4 +26,4 @@ That means:
 
 ## Reporting
 
-For the disclosure flow, supported versions, and response expectations, see [`SECURITY.md`](https://github.com/geoffbelknap/microagent-kit/blob/main/SECURITY.md) at the repository root.
+For the disclosure flow, supported versions, and response expectations, see [`SECURITY.md`](https://github.com/geoffbelknap/microagent/blob/main/SECURITY.md) at the repository root.

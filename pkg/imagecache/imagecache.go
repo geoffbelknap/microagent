@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
-	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 type Record struct {

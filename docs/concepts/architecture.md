@@ -3,14 +3,14 @@ title: Architecture
 description: How the Go library, CLI, and backend supervisors fit together.
 ---
 
-`microagent-kit` is a Go library with a CLI adapter. The library packages own
+`microagent` is a Go library with a CLI adapter. The library packages own
 workspace lifecycle, rootfs builds, kernel management, image cache management,
 diagnostics, shared request/response types, and backend supervisor dispatch.
 Each host OS uses one backend.
 
 ```text
 your orchestrator
-  └─ microagent-kit Go packages
+  └─ microagent Go packages
        ├─ workspace lifecycle, artifacts, logs, network, supervision
        ├─ rootfs, kernel, image cache, diagnostics
        └─ vmkit supervisor dispatch

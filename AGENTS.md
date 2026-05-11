@@ -1,4 +1,4 @@
-# microagent-kit
+# microagent
 
 Go CLI/library plus backend supervisors for running Linux workspaces in
 microVMs.

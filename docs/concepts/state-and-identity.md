@@ -3,7 +3,7 @@ title: State and identity
 description: Where workspace state lives and how identity flows through requests.
 ---
 
-microagent-kit reports VM state changes as JSON events. Every request carries
+microagent reports VM state changes as JSON events. Every request carries
 an identity block; every response carries an event block describing the
 resulting state.
 
@@ -26,7 +26,7 @@ Every request has an identity:
   correlate.
 - **`runtimeID`** — the workspace identifier. Equivalent to `--name` /
   `--id`.
-- **`role`** — caller-supplied label. Defaults to `workload`. microagent-kit
+- **`role`** — caller-supplied label. Defaults to `workload`. microagent
   records it in requests, state files, and events but does not interpret it —
   use `workload` for an agent workspace; pick another label only if you're
   starting an enforcement component or other non-workload caller in your own

@@ -5,7 +5,7 @@ description: Move the body from one-request-per-restart to a stream of requests 
 
 The [simple-agent recipe](/recipes/simple-agent/) ships work into the body via `microagent cp` and retrieves it via `microagent --json result`. That works for a demo; it doesn't scale to "agent processing a stream of requests". For that, the body needs to talk to the host directly while it's running.
 
-microagent-kit has a primitive for exactly this: the **mediation channel**. It's a guest-to-host vsock contract — the body initiates connections to a vsock port; the host listens at a host TCP target; microagent's supervisor proxies bytes between them. Required and fail-closed by default.
+microagent has a primitive for exactly this: the **mediation channel**. It's a guest-to-host vsock contract — the body initiates connections to a vsock port; the host listens at a host TCP target; microagent's supervisor proxies bytes between them. Required and fail-closed by default.
 
 This recipe sketches the architecture, the body changes, and the host listener shape. It's a pattern guide, not a copy-paste demo — the right shape depends on your control plane.
 
@@ -154,7 +154,7 @@ If `mediation.required` is true (the default) and the host listener disappears, 
 
 - **Egress for credentials.** API keys still come in via `--env` unless you also route the body's egress through a host-side proxy. See [agency](https://github.com/geoffbelknap/agency) for that pattern.
 - **Authorization.** The mediation channel is a transport. Whether a given `WorkRequest` should be processed at all (verified principal, scope, constraints version) is what the body's structural checks decide — your control plane has to populate the request shape correctly.
-- **Multi-body coordination.** Each workspace has one body and one mediation channel. Coordinating across bodies is your control plane's job, not microagent-kit's.
+- **Multi-body coordination.** Each workspace has one body and one mediation channel. Coordinating across bodies is your control plane's job, not microagent's.
 
 ## Related
 

@@ -3,7 +3,7 @@ title: Backends
 description: One backend per host OS. Same lifecycle surface, different mechanics.
 ---
 
-microagent-kit uses one backend per host OS. Most users can let `microagent`
+microagent uses one backend per host OS. Most users can let `microagent`
 choose the host backend automatically; `--backend` is mainly for callers that
 need to construct lower-level requests directly.
 
