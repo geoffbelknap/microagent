@@ -24,6 +24,7 @@ type runtimeAdapter interface {
 	Shutdown(ctx context.Context, id string) error
 	Kill(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
+	Wait(ctx context.Context, id string) error
 }
 
 type computeSystemSpec struct {
@@ -49,6 +50,7 @@ type hcsClient interface {
 	ShutdownComputeSystem(ctx context.Context, id string) error
 	KillComputeSystem(ctx context.Context, id string) error
 	DeleteComputeSystem(ctx context.Context, id string) error
+	WaitComputeSystem(ctx context.Context, id string) error
 }
 
 func (s Supervisor) runtimeAdapter() runtimeAdapter {

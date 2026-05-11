@@ -67,6 +67,33 @@ func TestVMComputeClientControlCommandsOpenOperateAndClose(t *testing.T) {
 	}
 }
 
+func TestVMComputeClientWaitsForSystemExitNotification(t *testing.T) {
+	api := &fakeVMComputeAPI{nextHandle: 77}
+	client := vmcomputeClient{api: api}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- client.WaitComputeSystem(context.Background(), "agent-1")
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("WaitComputeSystem returned before exit notification: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if api.registers != 1 {
+		t.Fatalf("registers = %d, want 1", api.registers)
+	}
+
+	api.notify(hcsNotificationSystemExited, nil)
+	if err := <-done; err != nil {
+		t.Fatalf("WaitComputeSystem: %v", err)
+	}
+	if api.unregisters != 1 {
+		t.Fatalf("unregisters = %d, want 1", api.unregisters)
+	}
+}
+
 func TestVMComputeClientWaitsForPendingCreateNotification(t *testing.T) {
 	api := &fakeVMComputeAPI{
 		nextHandle:         42,

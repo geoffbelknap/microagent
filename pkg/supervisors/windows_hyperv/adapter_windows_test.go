@@ -216,3 +216,7 @@ func (f *fakeHCSClient) KillComputeSystem(ctx context.Context, id string) error 
 func (f *fakeHCSClient) DeleteComputeSystem(ctx context.Context, id string) error {
 	return nil
 }
+
+func (f *fakeHCSClient) WaitComputeSystem(ctx context.Context, id string) error {
+	return nil
+}

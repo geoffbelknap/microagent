@@ -57,6 +57,10 @@ func (a defaultAdapter) Delete(ctx context.Context, id string) error {
 	return a.hcsClient().DeleteComputeSystem(ctx, id)
 }
 
+func (a defaultAdapter) Wait(ctx context.Context, id string) error {
+	return a.hcsClient().WaitComputeSystem(ctx, id)
+}
+
 func (a defaultAdapter) hcsClient() hcsClient {
 	if a.client != nil {
 		return a.client
@@ -251,4 +255,8 @@ func (unsupportedHCSClient) KillComputeSystem(ctx context.Context, id string) er
 
 func (unsupportedHCSClient) DeleteComputeSystem(ctx context.Context, id string) error {
 	return errHCSNotImplemented("delete")
+}
+
+func (unsupportedHCSClient) WaitComputeSystem(ctx context.Context, id string) error {
+	return errHCSNotImplemented("wait")
 }

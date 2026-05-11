@@ -191,6 +191,9 @@ func TestRunCommandWaitsForResultListenerAndReturnsResult(t *testing.T) {
 	if resp.Result == nil || resp.Result.Stdout != "ok\n" || resp.Result.Backend != vmkit.BackendWindowsHyperV {
 		t.Fatalf("result = %#v", resp.Result)
 	}
+	if adapter.waits != 1 || adapter.waitID != "fake" {
+		t.Fatalf("waits=%d waitID=%q", adapter.waits, adapter.waitID)
+	}
 }
 
 func TestRunCommandFailsClosedForUnsupportedWindowsHyperVVsockTarget(t *testing.T) {
@@ -355,6 +358,8 @@ type fakeAdapter struct {
 	killID     string
 	deletes    int
 	deleteID   string
+	waits      int
+	waitID     string
 }
 
 func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
@@ -396,6 +401,12 @@ func (f *fakeAdapter) Kill(ctx context.Context, id string) error {
 func (f *fakeAdapter) Delete(ctx context.Context, id string) error {
 	f.deletes++
 	f.deleteID = id
+	return nil
+}
+
+func (f *fakeAdapter) Wait(ctx context.Context, id string) error {
+	f.waits++
+	f.waitID = id
 	return nil
 }
 
@@ -452,6 +463,10 @@ func (failingAdapter) Kill(ctx context.Context, id string) error {
 
 func (failingAdapter) Delete(ctx context.Context, id string) error {
 	return fmt.Errorf("delete unavailable")
+}
+
+func (failingAdapter) Wait(ctx context.Context, id string) error {
+	return fmt.Errorf("wait unavailable")
 }
 
 func readJSON(t *testing.T, path string, out any) {

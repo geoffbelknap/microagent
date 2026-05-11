@@ -64,6 +64,9 @@ func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response,
 		if err := listeners.Wait(ctx); err != nil {
 			return failRun(req, vmkit.StateFailed, fmt.Sprintf("result listener failed: %s", err), err)
 		}
+		if err := adapter.Wait(ctx, handle.ID); err != nil {
+			return failRun(req, vmkit.StateFailed, fmt.Sprintf("wait failed: %s", err), err)
+		}
 		event, err = writeRuntimeTransitionWithComputeID(req, vmkit.StateStopped, "windows-hyperv result received", "", handle.ID)
 		if err != nil {
 			return vmkit.Response{}, err

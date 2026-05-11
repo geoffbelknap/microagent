@@ -167,6 +167,12 @@ func (c vmcomputeClient) DeleteComputeSystem(ctx context.Context, id string) err
 	return c.terminateComputeSystem(ctx, id, "delete")
 }
 
+func (c vmcomputeClient) WaitComputeSystem(ctx context.Context, id string) error {
+	return c.withComputeSystem(ctx, id, "wait", hcsNotificationSystemExited, func(handle uintptr) (string, error) {
+		return "", hcsOperationPending
+	})
+}
+
 func (c vmcomputeClient) terminateComputeSystem(ctx context.Context, id, operation string) error {
 	return c.withComputeSystem(ctx, id, operation, 0, func(handle uintptr) (string, error) {
 		return c.vmcomputeAPI().TerminateComputeSystem(ctx, handle, "{}")
