@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Microsoft/go-winio"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -77,6 +78,51 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 	}
 	if doc.VirtualMachine.ComputeTopology.Memory.SizeInMB != 768 || doc.VirtualMachine.ComputeTopology.Processor.Count != 3 {
 		t.Fatalf("topology = %#v", doc.VirtualMachine.ComputeTopology)
+	}
+}
+
+func TestBuildComputeSystemDocumentAddsHvSocketServicesForVsockListeners(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			VsockListeners: []vmkit.VsockListener{
+				{Port: 1024, Target: "C:\\state\\agent-1\\result.json"},
+				{Port: 2048, Target: "127.0.0.1:9900"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		VirtualMachine struct {
+			Devices struct {
+				HvSocket struct {
+					HvSocketConfig struct {
+						ServiceTable map[string]struct {
+							AllowWildcardBinds        bool   `json:"AllowWildcardBinds"`
+							BindSecurityDescriptor    string `json:"BindSecurityDescriptor"`
+							ConnectSecurityDescriptor string `json:"ConnectSecurityDescriptor"`
+						} `json:"ServiceTable"`
+					} `json:"HvSocketConfig"`
+				} `json:"HvSocket"`
+			} `json:"Devices"`
+		} `json:"VirtualMachine"`
+	}
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, port := range []uint32{1024, 2048} {
+		serviceID := winio.VsockServiceID(port).String()
+		service, ok := doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable[serviceID]
+		if !ok {
+			t.Fatalf("missing HvSocket service for port %d (%s): %#v", port, serviceID, doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable)
+		}
+		if !service.AllowWildcardBinds || service.BindSecurityDescriptor == "" || service.ConnectSecurityDescriptor == "" {
+			t.Fatalf("service %d config = %#v", port, service)
+		}
 	}
 }
 

@@ -34,7 +34,8 @@ type computeSystemSpec struct {
 }
 
 type computeSystemHandle struct {
-	ID string
+	ID        string
+	RuntimeID string
 }
 
 type hcsClient interface {

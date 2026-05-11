@@ -11,7 +11,10 @@ import (
 )
 
 func TestVMComputeClientCreatePassesDocumentAndClosesHandle(t *testing.T) {
-	api := &fakeVMComputeAPI{nextHandle: 42}
+	api := &fakeVMComputeAPI{
+		nextHandle:         42,
+		propertiesResponse: `{"RuntimeId":"11111111-1111-1111-1111-111111111111"}`,
+	}
 	client := vmcomputeClient{api: api}
 
 	handle, err := client.CreateComputeSystem(context.Background(), "agent-1", []byte(`{"Owner":"microagent"}`))
@@ -20,6 +23,9 @@ func TestVMComputeClientCreatePassesDocumentAndClosesHandle(t *testing.T) {
 	}
 	if handle.ID != "agent-1" {
 		t.Fatalf("handle.ID = %q", handle.ID)
+	}
+	if handle.RuntimeID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("handle.RuntimeID = %q", handle.RuntimeID)
 	}
 	if api.createdID != "agent-1" || api.createdDocument != `{"Owner":"microagent"}` {
 		t.Fatalf("create id=%q document=%q", api.createdID, api.createdDocument)
@@ -63,8 +69,9 @@ func TestVMComputeClientControlCommandsOpenOperateAndClose(t *testing.T) {
 
 func TestVMComputeClientWaitsForPendingCreateNotification(t *testing.T) {
 	api := &fakeVMComputeAPI{
-		nextHandle: 42,
-		createErr:  hcsOperationPending,
+		nextHandle:         42,
+		createErr:          hcsOperationPending,
+		propertiesResponse: `{"RuntimeId":"11111111-1111-1111-1111-111111111111"}`,
 	}
 	client := vmcomputeClient{api: api}
 
@@ -143,17 +150,18 @@ func TestVMComputeClientPendingStartFailsOnUnexpectedExit(t *testing.T) {
 }
 
 type fakeVMComputeAPI struct {
-	nextHandle      uintptr
-	createdID       string
-	createdDocument string
-	openedID        string
-	operations      []string
-	closedHandles   []uintptr
-	createErr       error
-	startErr        error
-	callbackContext uintptr
-	registers       int
-	unregisters     int
+	nextHandle         uintptr
+	createdID          string
+	createdDocument    string
+	openedID           string
+	operations         []string
+	closedHandles      []uintptr
+	createErr          error
+	startErr           error
+	propertiesResponse string
+	callbackContext    uintptr
+	registers          int
+	unregisters        int
 }
 
 func (f *fakeVMComputeAPI) CreateComputeSystem(ctx context.Context, id, document string) (uintptr, string, error) {
@@ -185,6 +193,10 @@ func (f *fakeVMComputeAPI) ShutdownComputeSystem(ctx context.Context, handle uin
 func (f *fakeVMComputeAPI) TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	f.operations = append(f.operations, "terminate")
 	return "", nil
+}
+
+func (f *fakeVMComputeAPI) GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error) {
+	return f.propertiesResponse, "", nil
 }
 
 func (f *fakeVMComputeAPI) RegisterComputeSystemCallback(ctx context.Context, handle, callback, callbackContext uintptr) (uintptr, error) {

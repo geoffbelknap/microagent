@@ -4,6 +4,7 @@ package windows_hyperv
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -66,6 +67,7 @@ type vmcomputeAPI interface {
 	StartComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	ShutdownComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
+	GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error)
 	RegisterComputeSystemCallback(ctx context.Context, handle, callback, callbackContext uintptr) (uintptr, error)
 	UnregisterComputeSystemCallback(ctx context.Context, callbackHandle uintptr) error
 }
@@ -117,11 +119,32 @@ func (c vmcomputeClient) CreateComputeSystem(ctx context.Context, id string, doc
 				return computeSystemHandle{}, hcsCallError("unregister create callback", "", unregisterErr)
 			}
 		}
+		runtimeID, propErr := computeSystemRuntimeID(ctx, api, handle)
+		if propErr != nil {
+			_ = api.CloseComputeSystem(ctx, handle)
+			return computeSystemHandle{}, hcsCallError("get properties after create", "", propErr)
+		}
 		if closeErr := api.CloseComputeSystem(ctx, handle); closeErr != nil {
 			return computeSystemHandle{}, hcsCallError("close after create", "", closeErr)
 		}
+		return computeSystemHandle{ID: id, RuntimeID: runtimeID}, nil
 	}
 	return computeSystemHandle{ID: id}, nil
+}
+
+func computeSystemRuntimeID(ctx context.Context, api vmcomputeAPI, handle uintptr) (string, error) {
+	query := `{"PropertyTypes":["Basic"]}`
+	properties, result, err := api.GetComputeSystemProperties(ctx, handle, query)
+	if err != nil {
+		return "", hcsCallError("get properties", result, err)
+	}
+	var decoded struct {
+		RuntimeID string `json:"RuntimeId"`
+	}
+	if err := json.Unmarshal([]byte(properties), &decoded); err != nil {
+		return "", err
+	}
+	return decoded.RuntimeID, nil
 }
 
 func (c vmcomputeClient) StartComputeSystem(ctx context.Context, id string) error {
@@ -277,6 +300,7 @@ var (
 	procHcsCreateComputeSystem             = vmcomputeDLL.NewProc("HcsCreateComputeSystem")
 	procHcsOpenComputeSystem               = vmcomputeDLL.NewProc("HcsOpenComputeSystem")
 	procHcsCloseComputeSystem              = vmcomputeDLL.NewProc("HcsCloseComputeSystem")
+	procHcsGetComputeSystemProperties      = vmcomputeDLL.NewProc("HcsGetComputeSystemProperties")
 	procHcsStartComputeSystem              = vmcomputeDLL.NewProc("HcsStartComputeSystem")
 	procHcsShutdownComputeSystem           = vmcomputeDLL.NewProc("HcsShutdownComputeSystem")
 	procHcsTerminateComputeSystem          = vmcomputeDLL.NewProc("HcsTerminateComputeSystem")
@@ -324,6 +348,17 @@ func (windowsVMComputeAPI) ShutdownComputeSystem(ctx context.Context, handle uin
 
 func (windowsVMComputeAPI) TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	return callComputeSystemOperation(procHcsTerminateComputeSystem, handle, options)
+}
+
+func (windowsVMComputeAPI) GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error) {
+	queryPtr, err := syscall.UTF16PtrFromString(query)
+	if err != nil {
+		return "", "", err
+	}
+	var properties *uint16
+	var result *uint16
+	err = callHRESULT(procHcsGetComputeSystemProperties, handle, uintptr(unsafe.Pointer(queryPtr)), uintptr(unsafe.Pointer(&properties)), uintptr(unsafe.Pointer(&result)))
+	return convertAndFreeCoTaskMemString(properties), convertAndFreeCoTaskMemString(result), err
 }
 
 func (windowsVMComputeAPI) RegisterComputeSystemCallback(ctx context.Context, handle, callback, callbackContext uintptr) (uintptr, error) {

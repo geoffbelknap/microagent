@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/Microsoft/go-winio"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -129,7 +130,15 @@ type hvSocket struct {
 }
 
 type hvSocketConfig struct {
-	DefaultBindSecurityDescriptor string `json:"DefaultBindSecurityDescriptor"`
+	DefaultBindSecurityDescriptor    string                           `json:"DefaultBindSecurityDescriptor"`
+	DefaultConnectSecurityDescriptor string                           `json:"DefaultConnectSecurityDescriptor,omitempty"`
+	ServiceTable                     map[string]hvSocketServiceConfig `json:"ServiceTable,omitempty"`
+}
+
+type hvSocketServiceConfig struct {
+	AllowWildcardBinds        bool   `json:"AllowWildcardBinds"`
+	BindSecurityDescriptor    string `json:"BindSecurityDescriptor"`
+	ConnectSecurityDescriptor string `json:"ConnectSecurityDescriptor"`
 }
 
 func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
@@ -149,6 +158,14 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	cpuCount := spec.Config.CPUCount
 	if cpuCount == 0 {
 		cpuCount = 2
+	}
+	serviceTable := map[string]hvSocketServiceConfig{}
+	for _, listener := range spec.Config.VsockListeners {
+		serviceTable[winio.VsockServiceID(listener.Port).String()] = hvSocketServiceConfig{
+			AllowWildcardBinds:        true,
+			BindSecurityDescriptor:    "D:P(A;;FA;;;WD)",
+			ConnectSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
+		}
 	}
 	doc := computeSystemDocument{
 		Owner:                             "microagent",
@@ -171,7 +188,9 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 					}},
 				},
 				HvSocket: hvSocket{HvSocketConfig: hvSocketConfig{
-					DefaultBindSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
+					DefaultBindSecurityDescriptor:    "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
+					DefaultConnectSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
+					ServiceTable:                     serviceTable,
 				}},
 				Plan9: map[string]any{},
 			},
