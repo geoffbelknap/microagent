@@ -171,7 +171,7 @@ func DefaultOptions() Options {
 	}
 	opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)
 	opts.GuestInitPath = GuestInitPath(opts.Architecture)
-	opts.SupervisorPath = os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	opts.SupervisorPath = AppleVFSupervisorPath()
 	_ = ApplyProfile(&opts, false, false, false)
 	return opts
 }
@@ -283,6 +283,34 @@ func Mke2fsPath() string {
 		return "/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
 	}
 	return "mke2fs"
+}
+
+func AppleVFSupervisorPath() string {
+	if path := strings.TrimSpace(os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")); path != "" {
+		return path
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "microagent-applevf-supervisor"
+	}
+	return AppleVFSupervisorPathFromExecutable(executable)
+}
+
+func AppleVFSupervisorPathFromExecutable(executable string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	dir := filepath.Dir(executable)
+	candidates := []string{
+		filepath.Join(dir, "microagent-applevf-supervisor"),
+		filepath.Join(filepath.Clean(filepath.Join(dir, "..", "..")), "supervisors", "applevf", ".build", "release", "microagent-applevf-supervisor"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return "microagent-applevf-supervisor"
 }
 
 func GuestInitPath(arch string) string {

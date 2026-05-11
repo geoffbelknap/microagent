@@ -1451,7 +1451,9 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
             if config.serialInput == true {
                 let inputURL = serialInputPath(identity: identity, stateDir: config.stateDir)
                 try prepareSerialInput(path: inputURL.path)
-                inputHandle = try openSerialInput(path: inputURL.path)
+                let inputPipe = Pipe()
+                bridgeSerialInput(path: inputURL.path, to: inputPipe.fileHandleForWriting)
+                inputHandle = inputPipe.fileHandleForReading
             } else {
                 inputHandle = nil
             }
@@ -1560,12 +1562,41 @@ func prepareSerialInput(path: String) throws {
     }
 }
 
-func openSerialInput(path: String) throws -> FileHandle {
-    let fd = open(path, O_RDWR)
-    if fd < 0 {
-        throw ProtocolError.invalid("open serial input failed with errno \(errno)")
+func bridgeSerialInput(path: String, to output: FileHandle) {
+    DispatchQueue.global(qos: .utility).async {
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let readFD = open(path, O_RDONLY)
+        if readFD < 0 {
+            output.closeFile()
+            return
+        }
+        let keepaliveFD = open(path, O_WRONLY | O_NONBLOCK)
+        defer {
+            close(readFD)
+            if keepaliveFD >= 0 {
+                close(keepaliveFD)
+            }
+            output.closeFile()
+        }
+        while true {
+            let n = read(readFD, &buffer, buffer.count)
+            if n > 0 {
+                if !FileManager.default.fileExists(atPath: path) {
+                    return
+                }
+                output.write(Data(buffer.prefix(n)))
+                continue
+            }
+            if n == 0 {
+                return
+            }
+            if errno == EINTR {
+                usleep(10_000)
+                continue
+            }
+            return
+        }
     }
-    return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
 }
 #endif
 

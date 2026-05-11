@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -62,6 +63,52 @@ func TestDefaultOptionsUseUserNetworkMode(t *testing.T) {
 	opts := DefaultOptions()
 	if opts.Network.Mode != "user" {
 		t.Fatalf("default network mode = %q", opts.Network.Mode)
+	}
+}
+
+func TestAppleVFSupervisorPathResolvesDevBuildSupervisor(t *testing.T) {
+	dir := t.TempDir()
+	devDir := filepath.Join(dir, ".build", "dev")
+	releaseDir := filepath.Join(dir, "supervisors", "applevf", ".build", "release")
+	if err := os.MkdirAll(devDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(releaseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(devDir, "microagent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := filepath.Join(releaseDir, "microagent-applevf-supervisor")
+	if err := os.WriteFile(supervisor, []byte("supervisor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedSupervisor, err := filepath.EvalSymlinks(supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := AppleVFSupervisorPathFromExecutable(executable); got != resolvedSupervisor {
+		t.Fatalf("AppleVFSupervisorPathFromExecutable() = %q, want %q", got, resolvedSupervisor)
+	}
+}
+
+func TestAppleVFSupervisorPathResolvesSiblingSupervisor(t *testing.T) {
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "microagent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := filepath.Join(dir, "microagent-applevf-supervisor")
+	if err := os.WriteFile(supervisor, []byte("supervisor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedSupervisor, err := filepath.EvalSymlinks(supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := AppleVFSupervisorPathFromExecutable(executable); got != resolvedSupervisor {
+		t.Fatalf("AppleVFSupervisorPathFromExecutable() = %q, want %q", got, resolvedSupervisor)
 	}
 }
 

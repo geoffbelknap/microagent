@@ -138,7 +138,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "create" && shouldUseHighLevelCreate(args[1:]) {
 		return runHighLevelCreate(ctx, args[1:], stdout)
 	}
-	supervisorPath := os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	supervisorPath := defaultAppleVFSupervisorPath()
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
@@ -184,7 +184,7 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	opts := doctorOptions{
 		Backend:        hostBackend(),
 		Arch:           defaultGuestArch(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -208,7 +208,7 @@ func runHost(ctx context.Context, args []string, stdout *os.File) error {
 	opts := doctorOptions{
 		Backend:        hostBackend(),
 		Arch:           defaultGuestArch(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 	}
 	fs := flag.NewFlagSet("host", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -909,7 +909,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 		Iterations:     1,
 		TimeoutSeconds: 120,
 		Mke2fsPath:     defaultMke2fsPath(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 	}
 	fs := flag.NewFlagSet("perf boot", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -1277,7 +1277,7 @@ func runNetwork(args []string, stdout *os.File) error {
 
 func runWorkspaceStateCommand(ctx context.Context, command string, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	supervisorPath := os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	supervisorPath := defaultAppleVFSupervisorPath()
 	backend := hostBackend()
 	name := ""
 	yes := false
@@ -1568,7 +1568,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		Profile:        defaultWorkspaceProfile,
 		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		StateDir:       defaultStateDir(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 		ResultPort:     workspace.DefaultResultPort,
 		SerialInput:    backendSupportsConsoleInput(backend),
 	}
@@ -1660,7 +1660,7 @@ type superviseResult = workspace.SuperviseResult
 func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	opts := superviseOptions{
 		StateDir:       defaultStateDir(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 		Backend:        hostBackend(),
 		Architecture:   defaultGuestArch(),
 		Interval:       time.Second,
@@ -1824,7 +1824,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	opts.Mke2fsPath = defaultMke2fsPath()
 	opts.GuestInitPath = defaultGuestInitPath(opts.Architecture)
-	opts.SupervisorPath = os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	opts.SupervisorPath = defaultAppleVFSupervisorPath()
 	specPath := workspaceSpecPath(command, args)
 	if specPath != "" {
 		if err := applyWorkspaceSpecFile(&opts, specPath, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
@@ -4630,6 +4630,10 @@ func defaultWritableKernelPath(backend, arch string) string {
 
 func defaultLegacyKernelPath(backend string) string {
 	return workspace.LegacyKernelPath(backend)
+}
+
+func defaultAppleVFSupervisorPath() string {
+	return workspace.AppleVFSupervisorPath()
 }
 
 func defaultPackagedKernelPath(backend, arch string) string {
