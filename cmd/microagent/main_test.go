@@ -4158,6 +4158,19 @@ func TestDefaultKernelManifestHasFirecrackerAMD64(t *testing.T) {
 	}
 }
 
+func TestDefaultKernelManifestHasFirecrackerARM64(t *testing.T) {
+	kernel, ok := defaultKernel(vmkit.BackendFirecracker, "arm64")
+	if !ok {
+		t.Fatal("missing firecracker arm64 kernel")
+	}
+	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r3/microagent-kernel-6.1.155-firecracker-arm64" {
+		t.Fatalf("url = %q", kernel.URL)
+	}
+	if kernel.SHA256 != "bd91c4f5c15e497b99ac0c96977a92e68a0c11d3c72267104f5fb968994c4a71" {
+		t.Fatalf("sha256 = %q", kernel.SHA256)
+	}
+}
+
 func TestDefaultKernelSupportReportsDownloadable(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Image")
