@@ -28,7 +28,7 @@ func (defaultAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
 }
 
 func (defaultAdapter) Check(ctx context.Context) error {
-	return nil
+	return ProbeHCSAccess(ctx)
 }
 
 func (a defaultAdapter) Create(ctx context.Context, spec computeSystemSpec) (computeSystemHandle, error) {

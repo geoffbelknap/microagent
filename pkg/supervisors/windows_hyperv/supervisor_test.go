@@ -29,7 +29,7 @@ func TestHostResponseReportsBackend(t *testing.T) {
 	}
 }
 
-func TestCheckCommandFailsClosedOffWindows(t *testing.T) {
+func TestCheckCommandFailsClosedWhenHostProbeFails(t *testing.T) {
 	req := vmkit.Request{
 		Command: "check",
 		Identity: &vmkit.Identity{
@@ -46,7 +46,10 @@ func TestCheckCommandFailsClosedOffWindows(t *testing.T) {
 	}
 	resp, err := (Supervisor{}).Do(context.Background(), req)
 	if runtime.GOOS == "windows" {
-		if err != nil || !resp.OK {
+		if err == nil && resp.OK {
+			return
+		}
+		if err == nil || resp.OK || !strings.Contains(resp.Error, "windows-hyperv HCS") {
 			t.Fatalf("windows check resp=%#v err=%v", resp, err)
 		}
 		return

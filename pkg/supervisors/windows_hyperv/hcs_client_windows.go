@@ -12,7 +12,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const hcsOperationPending = syscall.Errno(0xC0370103)
+const (
+	hcsOperationPending          = syscall.Errno(0xC0370103)
+	hcsComputeSystemDoesNotExist = syscall.Errno(0xC037010E)
+)
 
 type vmcomputeClient struct {
 	api vmcomputeAPI
@@ -29,6 +32,18 @@ type vmcomputeAPI interface {
 
 func newVMComputeClient() vmcomputeClient {
 	return vmcomputeClient{api: windowsVMComputeAPI{}}
+}
+
+func ProbeHCSAccess(ctx context.Context) error {
+	api := newVMComputeClient().vmcomputeAPI()
+	handle, result, err := api.OpenComputeSystem(ctx, "__microagent_hcs_access_probe__")
+	if handle != 0 {
+		_ = api.CloseComputeSystem(ctx, handle)
+	}
+	if err == nil || errors.Is(err, hcsComputeSystemDoesNotExist) {
+		return nil
+	}
+	return hcsCallError("probe access", result, err)
 }
 
 func (c vmcomputeClient) vmcomputeAPI() vmcomputeAPI {

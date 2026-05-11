@@ -1,6 +1,7 @@
 package diagnostics
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,6 +101,96 @@ func TestCheckFirecrackerReportsMissingPasta(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "apt install passt") {
 		t.Fatalf("error = %q", resp.Error)
+	}
+}
+
+func TestCheckWindowsHyperVReportsHostSuitability(t *testing.T) {
+	resp, err := CheckWindowsHyperV(
+		context.Background(),
+		Options{Backend: vmkit.BackendWindowsHyperV, Arch: "amd64"},
+		WindowsHyperVProbe{
+			HostResponse: func() vmkit.Response {
+				return vmkit.Response{
+					OK:      true,
+					Backend: vmkit.BackendWindowsHyperV,
+					Host: &vmkit.HostSupport{
+						Backend:                 vmkit.BackendWindowsHyperV,
+						Architecture:            "amd64",
+						FrameworkAvailable:      true,
+						VirtualizationSupported: true,
+					},
+				}
+			},
+			KernelSupport: func(string, string) *vmkit.KernelSupport {
+				return &vmkit.KernelSupport{Backend: vmkit.BackendWindowsHyperV, Architecture: "amd64", Path: `C:\microagent\Image`, Status: "present"}
+			},
+			ResolveGuestInit: func(Options) (string, error) {
+				return `C:\microagent\microagent-guestinit-amd64`, nil
+			},
+			ProbeHCSAccess: func(context.Context) error { return nil },
+		},
+	)
+	if err != nil {
+		t.Fatalf("CheckWindowsHyperV: %v", err)
+	}
+	if !resp.OK || resp.Host == nil || !resp.Host.FrameworkAvailable || !resp.Host.VirtualizationSupported {
+		t.Fatalf("response = %#v", resp)
+	}
+	if resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "unsupported" {
+		t.Fatalf("console support = %#v", resp.Host)
+	}
+	if !resp.Host.GuestInitAvailable || resp.Host.GuestInitPath != `C:\microagent\microagent-guestinit-amd64` {
+		t.Fatalf("guest init support = %#v", resp.Host)
+	}
+	if resp.Kernel == nil || resp.Kernel.Status != "present" {
+		t.Fatalf("kernel support = %#v", resp.Kernel)
+	}
+}
+
+func TestCheckWindowsHyperVReportsMissingSupport(t *testing.T) {
+	resp, err := CheckWindowsHyperV(
+		context.Background(),
+		Options{Backend: vmkit.BackendWindowsHyperV, Arch: "amd64"},
+		WindowsHyperVProbe{
+			HostResponse: func() vmkit.Response {
+				return vmkit.Response{
+					OK:      false,
+					Backend: vmkit.BackendWindowsHyperV,
+					Host: &vmkit.HostSupport{
+						Backend:                 vmkit.BackendWindowsHyperV,
+						Architecture:            "amd64",
+						FrameworkAvailable:      false,
+						VirtualizationSupported: false,
+					},
+					Error: "windows-hyperv supervisor is only supported on windows",
+				}
+			},
+			KernelSupport: func(string, string) *vmkit.KernelSupport {
+				return &vmkit.KernelSupport{Backend: vmkit.BackendWindowsHyperV, Architecture: "amd64", Path: `C:\microagent\Image`, Status: "unavailable"}
+			},
+			ResolveGuestInit: func(Options) (string, error) {
+				return "", fmt.Errorf("microagent guest init not found")
+			},
+			ProbeHCSAccess: func(context.Context) error {
+				return fmt.Errorf("HCS access denied; run as Administrator or join Hyper-V Administrators")
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("CheckWindowsHyperV returned nil error")
+	}
+	if resp.OK || resp.Host == nil || resp.Host.FrameworkAvailable {
+		t.Fatalf("response = %#v", resp)
+	}
+	for _, want := range []string{
+		"windows-hyperv supervisor is only supported on windows",
+		"windows-hyperv kernel is unavailable",
+		"microagent guest init not found",
+		"Hyper-V Administrators",
+	} {
+		if !strings.Contains(resp.Error, want) {
+			t.Fatalf("error = %q, missing %q", resp.Error, want)
+		}
 	}
 }
 

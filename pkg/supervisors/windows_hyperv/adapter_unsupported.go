@@ -27,6 +27,10 @@ func (defaultAdapter) Check(ctx context.Context) error {
 	return errUnsupportedHost()
 }
 
+func ProbeHCSAccess(ctx context.Context) error {
+	return errUnsupportedHost()
+}
+
 func (defaultAdapter) Create(ctx context.Context, spec computeSystemSpec) (computeSystemHandle, error) {
 	return computeSystemHandle{}, errUnsupportedHost()
 }
