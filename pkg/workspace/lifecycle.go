@@ -27,6 +27,7 @@ type Result struct {
 	Restart      string                     `json:"restart"`
 	Resources    Resources                  `json:"resources"`
 	Network      NetworkSpec                `json:"network,omitempty"`
+	Service      string                     `json:"service_command,omitempty"`
 	ConsoleShell string                     `json:"shell,omitempty"`
 	Hostname     string                     `json:"hostname,omitempty"`
 	RootfsPath   string                     `json:"rootfs_path"`
@@ -93,6 +94,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if opts.ImageRef == "" {
 		opts.ImageRef = DefaultImage(opts.Architecture)
 	}
+	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
+		return Result{}, fmt.Errorf("create cannot use both image command and service command")
+	}
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
@@ -115,7 +119,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := WriteManifest(opts); err != nil {
 		return result, err
 	}
-	if HasGuestCommand(opts) {
+	if HasGuestCommand(opts) && strings.TrimSpace(opts.ServiceCommand) == "" {
 		runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 		resp, runErr := runForeground(runCtx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
@@ -249,6 +253,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		Restart:      opts.RestartPolicy,
 		Resources:    ResourcesFromOptions(opts),
 		Network:      NetworkSpecFromConfig(opts.Network),
+		Service:      strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
 		Hostname:     strings.TrimSpace(opts.Hostname),
 		RootfsPath:   rootfsPath,
@@ -409,6 +414,7 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		Restart:      opts.RestartPolicy,
 		Resources:    ResourcesFromOptions(opts),
 		Network:      NetworkSpecFromConfig(opts.Network),
+		Service:      strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
 		Hostname:     strings.TrimSpace(opts.Hostname),
 		RootfsPath:   rootfsPath,
@@ -424,6 +430,8 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 	mode := ""
 	if opts.PrepareForStart && opts.UseImageCommand {
 		mode = "service"
+	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" {
+		mode = "managed-service"
 	}
 	return rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
@@ -499,6 +507,7 @@ func WriteManifest(opts Options) error {
 		Restart:      NormalizeRestartPolicy(opts.RestartPolicy),
 		Resources:    ResourcesFromOptions(opts),
 		Network:      NetworkSpecFromConfig(opts.Network),
+		Service:      strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
 		Hostname:     strings.TrimSpace(opts.Hostname),
 		Mediation:    opts.Mediation,
@@ -835,6 +844,9 @@ func applyManifest(opts *Options, manifest Manifest) {
 	}
 	if strings.TrimSpace(manifest.ConsoleShell) != "" {
 		opts.ConsoleShell = strings.TrimSpace(manifest.ConsoleShell)
+	}
+	if strings.TrimSpace(manifest.Service) != "" {
+		opts.ServiceCommand = strings.TrimSpace(manifest.Service)
 	}
 	if strings.TrimSpace(manifest.Hostname) != "" {
 		opts.Hostname = strings.TrimSpace(manifest.Hostname)

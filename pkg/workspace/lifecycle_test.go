@@ -13,15 +13,16 @@ import (
 func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{
-		Name:          "agency-task",
-		StateDir:      dir,
-		Backend:       vmkit.BackendFirecracker,
-		Profile:       "small",
-		RestartPolicy: "never",
-		MemoryMiB:     512,
-		CPUCount:      2,
-		SizeMiB:       1024,
-		Network:       vmkit.NetworkConfig{Mode: "nat"},
+		Name:           "agency-task",
+		StateDir:       dir,
+		Backend:        vmkit.BackendFirecracker,
+		Profile:        "small",
+		RestartPolicy:  "never",
+		MemoryMiB:      512,
+		CPUCount:       2,
+		SizeMiB:        1024,
+		Network:        vmkit.NetworkConfig{Mode: "nat"},
+		ServiceCommand: "/opt/homebridge/start.sh --allow-root",
 		Disks: []Disk{{
 			Name:       "work",
 			Path:       "/tmp/work.ext4",
@@ -39,6 +40,9 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	}
 	if manifest.Name != "agency-task" || manifest.Artifacts.Egress[0].Name != "result" {
 		t.Fatalf("manifest = %#v", manifest)
+	}
+	if manifest.Service != "/opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("manifest Service = %q", manifest.Service)
 	}
 
 	req := Request(opts, "run", filepath.Join(dir, "workspaces", "agency-task", "rootfs.ext4"), "req-1")
@@ -132,6 +136,28 @@ func TestBuildRootfsRequestCanUseImageCommandForPreparedWorkspace(t *testing.T) 
 	}
 	if len(req.Command) != 0 {
 		t.Fatalf("Command = %#v, want OCI image command", req.Command)
+	}
+}
+
+func TestBuildRootfsRequestCanUseServiceCommandForPreparedWorkspace(t *testing.T) {
+	req := buildRootfsRequest(Options{
+		Name:            "homebridge",
+		StateDir:        "/tmp/microagent",
+		ImageRef:        "homebridge/homebridge:latest",
+		Architecture:    "arm64",
+		SizeMiB:         4096,
+		PrepareForStart: true,
+		ServiceCommand:  "/opt/homebridge/start.sh --allow-root",
+	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
+
+	if req.Mode != "managed-service" {
+		t.Fatalf("Mode = %q, want managed-service", req.Mode)
+	}
+	if strings.Join(req.Command, " ") != "/bin/sh -lc /opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("Command = %#v", req.Command)
+	}
+	if req.ResultPort != 0 {
+		t.Fatalf("ResultPort = %d, want 0", req.ResultPort)
 	}
 }
 

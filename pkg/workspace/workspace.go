@@ -35,6 +35,7 @@ type Options struct {
 	Name            string
 	ImageRef        string
 	ExecCommand     string
+	ServiceCommand  string
 	Entrypoint      string
 	ConsoleShell    string
 	Hostname        string
@@ -80,6 +81,7 @@ type Spec struct {
 	Profile    string                `yaml:"profile"`
 	Restart    string                `yaml:"restart"`
 	Entrypoint string                `yaml:"entrypoint"`
+	Service    string                `json:"service_command,omitempty" yaml:"service"`
 	Shell      string                `yaml:"shell"`
 	Hostname   string                `yaml:"hostname"`
 	Setup      []string              `yaml:"setup"`
@@ -135,6 +137,7 @@ type Manifest struct {
 	Restart      string                     `json:"restart"`
 	Resources    Resources                  `json:"resources"`
 	Network      NetworkSpec                `json:"network,omitempty"`
+	Service      string                     `json:"service_command,omitempty"`
 	ConsoleShell string                     `json:"shell,omitempty"`
 	Hostname     string                     `json:"hostname,omitempty"`
 	Mediation    *vmkit.MediationConfig     `json:"mediation,omitempty"`
@@ -736,6 +739,9 @@ func Command(opts Options) string {
 }
 
 func BuildCommandAndPort(opts Options) ([]string, uint32) {
+	if strings.TrimSpace(opts.ServiceCommand) != "" {
+		return ShellCommand(opts.ServiceCommand), 0
+	}
 	if opts.PrepareForStart && !HasGuestCommand(opts) {
 		return ShellCommand(opts.Entrypoint), 0
 	}
@@ -772,6 +778,9 @@ func ResetGuestConfigCommand(command []string, env map[string]string, port uint3
 }
 
 func HasGuestCommand(opts Options) bool {
+	if strings.TrimSpace(opts.ServiceCommand) != "" {
+		return true
+	}
 	if strings.TrimSpace(opts.ExecCommand) != "" {
 		return true
 	}

@@ -1498,11 +1498,11 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 			return err
 		}
 		defer conn.Close()
-		text := strings.ReplaceAll(*send, "\r", "\n")
-		if !strings.HasSuffix(text, "\n") {
-			text += "\n"
+		text := strings.ReplaceAll(*send, "\n", "\r")
+		if !strings.HasSuffix(text, "\r") {
+			text += "\r"
 		}
-		text += "exit\n"
+		text += "exit\r"
 		if _, err := io.WriteString(conn, text); err != nil {
 			return err
 		}
@@ -1857,6 +1857,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Name, "id", opts.Name, "Workspace ID")
 	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
 	fs.StringVar(&opts.ExecCommand, "exec", "", "Shell command to run as guest init")
+	fs.StringVar(&opts.ServiceCommand, "service-command", opts.ServiceCommand, "Long-running shell command to run as the VM service")
 	fs.StringVar(&opts.Entrypoint, "entrypoint", opts.Entrypoint, "Shell command to run when the workspace starts")
 	fs.BoolVar(&opts.UseImageCommand, "image-command", opts.UseImageCommand, "Run the image Entrypoint/Cmd when creating a prepared workspace")
 	fs.StringVar(&opts.ConsoleShell, "shell", opts.ConsoleShell, "Interactive console shell path")
@@ -1969,6 +1970,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.Network = normalizeNetworkConfig(opts.Network)
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
 		return workspaceOptions{}, err
+	}
+	if command != "create" && strings.TrimSpace(opts.ServiceCommand) != "" {
+		return workspaceOptions{}, fmt.Errorf("%s does not support --service-command", command)
+	}
+	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
+		return workspaceOptions{}, fmt.Errorf("%s cannot use both --image-command and --service-command", command)
 	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if specExplicit && specPath == "" {
@@ -2084,6 +2091,9 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 	}
 	if strings.TrimSpace(spec.Entrypoint) != "" {
 		opts.Entrypoint = spec.Entrypoint
+	}
+	if strings.TrimSpace(spec.Service) != "" {
+		opts.ServiceCommand = strings.TrimSpace(spec.Service)
 	}
 	if strings.TrimSpace(spec.Shell) != "" {
 		opts.ConsoleShell = strings.TrimSpace(spec.Shell)
@@ -2397,6 +2407,8 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 	mode := ""
 	if opts.PrepareForStart && opts.UseImageCommand {
 		mode = "service"
+	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" {
+		mode = "managed-service"
 	}
 	req := rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
@@ -2407,6 +2419,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Mode:           mode,
 		ConsoleShell:   opts.ConsoleShell,
 		Hostname:       opts.Hostname,
+		ShellPort:      workspace.ShellPort(opts),
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
 		NoImageCommand: opts.PrepareForStart && !workspaceHasGuestCommand(opts) && !opts.UseImageCommand,
@@ -2505,6 +2518,7 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 		Restart:      normalizeRestartPolicy(opts.RestartPolicy),
 		Resources:    workspaceResources(opts),
 		Network:      networkSpecFromConfig(opts.Network),
+		Service:      strings.TrimSpace(opts.ServiceCommand),
 		Mediation:    opts.Mediation,
 		Disks:        opts.Disks,
 		Artifacts:    workspaceArtifactsFromOptions(opts),
@@ -5106,7 +5120,6 @@ func copyShellInput(dst io.Writer, src io.Reader) (int64, error) {
 		if n > 0 {
 			chunk := buffer[:n]
 			filtered, detach := filterConsoleInput(chunk, &state)
-			filtered = normalizeShellInputChunk(filtered)
 			written, writeErr := dst.Write(filtered)
 			total += int64(written)
 			if writeErr != nil {
@@ -5123,20 +5136,6 @@ func copyShellInput(dst io.Writer, src io.Reader) (int64, error) {
 			return total, readErr
 		}
 	}
-}
-
-func normalizeShellInputChunk(chunk []byte) []byte {
-	if len(chunk) == 0 {
-		return chunk
-	}
-	out := make([]byte, len(chunk))
-	copy(out, chunk)
-	for i := range out {
-		if out[i] == '\r' {
-			out[i] = '\n'
-		}
-	}
-	return out
 }
 
 type consoleInputState struct {
@@ -5260,6 +5259,7 @@ func reorderFlagArgs(args []string) []string {
 		"-name":              true,
 		"-image":             true,
 		"-exec":              true,
+		"-service-command":   true,
 		"-entrypoint":        true,
 		"-shell":             true,
 		"-hostname":          true,
@@ -5632,6 +5632,7 @@ Options:
   -json <path|- >       Read request JSON from a file or stdin
   -image <ref>          OCI image
   -image-command        Run the image Entrypoint/Cmd instead of opening a shell
+  -service-command <cmd> Long-running command to run as the VM service
   -name <name>          Workspace name
   -id <id>              Workspace ID
   -entrypoint <command> Command to run on start
@@ -5732,6 +5733,7 @@ Options:
   -image <ref>          OCI image; defaults to Python 3.13 slim
   -name <name>          Workspace name
   -setup <command>      Shell command to run before first start
+  -service-command <cmd> Long-running command to run as the VM service
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname

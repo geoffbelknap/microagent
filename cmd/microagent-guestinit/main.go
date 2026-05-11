@@ -158,6 +158,21 @@ func run() int {
 			res.Error = err.Error()
 			fmt.Fprintln(os.Stderr, err)
 		}
+	} else if cfg.Mode == "managed-service" && len(cfg.Command) > 0 {
+		if err := attachConsole(); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = sendResult(cfg.Port, res)
+			return code
+		}
+		if err := runManagedServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+		}
 	} else if len(cfg.Command) > 0 {
 		log.Printf("microagent-init: handing off to %v", cfg.Command)
 		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
@@ -200,6 +215,44 @@ func execServiceCommand(command []string, env []string) error {
 	log.Printf("microagent-init: exec service command %v", command)
 	closeExtraFiles()
 	return syscall.Exec(command[0], command, env)
+}
+
+func runManagedServiceCommand(command []string, env []string) error {
+	log.Printf("microagent-init: starting managed service command %v", command)
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start managed service command: %w", err)
+	}
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			log.Printf("microagent-init: managed service command exited: %v", err)
+			go reapOrphanedChildren()
+			return
+		}
+		log.Println("microagent-init: managed service command exited")
+		go reapOrphanedChildren()
+	}()
+	select {}
+}
+
+func reapOrphanedChildren() {
+	for {
+		var status unix.WaitStatus
+		_, err := unix.Wait4(-1, &status, 0, nil)
+		if err == nil {
+			continue
+		}
+		if err == unix.ECHILD {
+			time.Sleep(time.Second)
+			continue
+		}
+		log.Printf("microagent-init: reap child: %v", err)
+		time.Sleep(time.Second)
+	}
 }
 
 func startInteractiveShell(env []string, shellPath string) error {
@@ -594,17 +647,99 @@ func runShellSession(fd int, shellPath string) {
 		fmt.Fprintf(file, "microagent-init: %v\n", err)
 		return
 	}
+	master, slave, err := openPTY()
+	if err != nil {
+		fmt.Fprintf(file, "microagent-init: open shell pty: %v\n", err)
+		return
+	}
+	defer master.Close()
+	defer slave.Close()
 	log.Printf("microagent-init: starting connect shell %v", command)
 	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Env = os.Environ()
-	cmd.Stdin = file
-	cmd.Stdout = file
-	cmd.Stderr = file
-	if err := cmd.Run(); err != nil {
+	cmd.Env = shellSessionEnv()
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = slave
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid:  true,
+		Setctty: true,
+		Ctty:    0,
+	}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(file, "microagent-init: start connect shell: %v\n", err)
+		return
+	}
+	_ = slave.Close()
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(master, file)
+		_ = master.Close()
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(file, master)
+		closeWriteFile(file)
+		done <- struct{}{}
+	}()
+	err = cmd.Wait()
+	_ = master.Close()
+	_ = file.Close()
+	<-done
+	if err != nil {
 		log.Printf("microagent-init: connect shell exited: %v", err)
 		return
 	}
 	log.Println("microagent-init: connect shell exited")
+}
+
+func openPTY() (*os.File, *os.File, error) {
+	masterFD, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	unlock := 0
+	if err := unix.IoctlSetPointerInt(masterFD, unix.TIOCSPTLCK, unlock); err != nil {
+		_ = unix.Close(masterFD)
+		return nil, nil, err
+	}
+	ptyNumber, err := unix.IoctlGetInt(masterFD, unix.TIOCGPTN)
+	if err != nil {
+		_ = unix.Close(masterFD)
+		return nil, nil, err
+	}
+	slavePath := fmt.Sprintf("/dev/pts/%d", ptyNumber)
+	slaveFD, err := unix.Open(slavePath, unix.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		_ = unix.Close(masterFD)
+		return nil, nil, err
+	}
+	master := os.NewFile(uintptr(masterFD), "connect-pty-master")
+	slave := os.NewFile(uintptr(slaveFD), "connect-pty-slave")
+	if master == nil || slave == nil {
+		if master != nil {
+			_ = master.Close()
+		} else {
+			_ = unix.Close(masterFD)
+		}
+		if slave != nil {
+			_ = slave.Close()
+		} else {
+			_ = unix.Close(slaveFD)
+		}
+		return nil, nil, fmt.Errorf("wrap pty files")
+	}
+	_ = unix.IoctlSetWinsize(masterFD, unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80})
+	return master, slave, nil
+}
+
+func shellSessionEnv() []string {
+	env := os.Environ()
+	for _, item := range env {
+		if strings.HasPrefix(item, "TERM=") {
+			return env
+		}
+	}
+	return append(env, "TERM=xterm-256color")
 }
 
 func startHostForwardHelpers(forwards []hostForward) error {

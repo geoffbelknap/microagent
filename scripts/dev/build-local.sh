@@ -90,6 +90,7 @@ supervisor_path="$output_dir/microagent-applevf-supervisor"
 if [ "$(uname -s)" = "Darwin" ]; then
   "$ROOT/scripts/dev/applevf-supervisor-build.sh" >/dev/null
   cp "$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor" "$supervisor_path"
+  codesign -s - -f --entitlements "$ROOT/supervisors/applevf/microagent-applevf-supervisor.entitlements" "$supervisor_path" >/dev/null
 fi
 
 echo "CLI: $cli_path"

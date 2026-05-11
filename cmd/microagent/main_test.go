@@ -3128,6 +3128,23 @@ func TestCreateWorkspaceRootfsCanUseImageCommand(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceRootfsCanUseServiceCommand(t *testing.T) {
+	opts := workspaceOptions{
+		ImageRef:        "homebridge/homebridge:latest",
+		Architecture:    "arm64",
+		ResultPort:      1024,
+		PrepareForStart: true,
+		ServiceCommand:  "/opt/homebridge/start.sh --allow-root",
+	}
+	command, port := workspaceBuildCommandAndPort(opts)
+	if strings.Join(command, " ") != "/bin/sh -lc /opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("command = %#v", command)
+	}
+	if port != 0 {
+		t.Fatalf("port = %d, want 0", port)
+	}
+}
+
 func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"homebridge",
@@ -3146,6 +3163,39 @@ func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T
 	}
 	if !opts.UseImageCommand {
 		t.Fatal("UseImageCommand = false")
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsServiceCommand(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"homebridge",
+		"--image", "homebridge/homebridge:latest",
+		"--service-command", "/opt/homebridge/start.sh --allow-root",
+		"--network", "nat",
+		"--publish", "8581:8581",
+		"--size-mib", "4096",
+		"--restart", "always",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "homebridge" {
+		t.Fatalf("Name = %q", opts.Name)
+	}
+	if opts.ServiceCommand != "/opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("ServiceCommand = %q", opts.ServiceCommand)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsImageAndServiceCommand(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{
+		"homebridge",
+		"--image", "homebridge/homebridge:latest",
+		"--image-command",
+		"--service-command", "/opt/homebridge/start.sh --allow-root",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot use both") {
+		t.Fatalf("parseWorkspaceOptions err = %v", err)
 	}
 }
 
@@ -3255,6 +3305,9 @@ func TestWorkspaceHasGuestCommand(t *testing.T) {
 	if !workspaceHasGuestCommand(workspaceOptions{ExecCommand: "echo run"}) {
 		t.Fatal("exec command should count as guest work")
 	}
+	if !workspaceHasGuestCommand(workspaceOptions{ServiceCommand: "sleep infinity"}) {
+		t.Fatal("service command should count as guest work")
+	}
 	if workspaceHasGuestCommand(workspaceOptions{SetupCommands: []string{"  "}}) {
 		t.Fatal("blank setup command should not count as guest work")
 	}
@@ -3361,13 +3414,13 @@ func TestCopyConsoleInputKeepsCtrlPWithoutCtrlQ(t *testing.T) {
 	}
 }
 
-func TestCopyShellInputNormalizesCarriageReturns(t *testing.T) {
+func TestCopyShellInputPreservesCarriageReturns(t *testing.T) {
 	var dst bytes.Buffer
 	written, err := copyShellInput(&dst, strings.NewReader("echo ready\r"))
 	if err != nil {
 		t.Fatalf("copyShellInput: %v", err)
 	}
-	if written != int64(len("echo ready\n")) || dst.String() != "echo ready\n" {
+	if written != int64(len("echo ready\r")) || dst.String() != "echo ready\r" {
 		t.Fatalf("written=%d dst=%q", written, dst.String())
 	}
 }
