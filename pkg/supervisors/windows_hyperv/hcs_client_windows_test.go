@@ -4,7 +4,10 @@ package windows_hyperv
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestVMComputeClientCreatePassesDocumentAndClosesHandle(t *testing.T) {
@@ -58,6 +61,87 @@ func TestVMComputeClientControlCommandsOpenOperateAndClose(t *testing.T) {
 	}
 }
 
+func TestVMComputeClientWaitsForPendingCreateNotification(t *testing.T) {
+	api := &fakeVMComputeAPI{
+		nextHandle: 42,
+		createErr:  hcsOperationPending,
+	}
+	client := vmcomputeClient{api: api}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.CreateComputeSystem(context.Background(), "agent-1", []byte(`{"Owner":"microagent"}`))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("CreateComputeSystem returned before completion notification: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if api.registers != 1 {
+		t.Fatalf("registers = %d, want 1", api.registers)
+	}
+
+	api.notify(hcsNotificationSystemCreateCompleted, nil)
+	if err := <-done; err != nil {
+		t.Fatalf("CreateComputeSystem: %v", err)
+	}
+	if api.unregisters != 1 {
+		t.Fatalf("unregisters = %d, want 1", api.unregisters)
+	}
+}
+
+func TestVMComputeClientWaitsForPendingStartNotification(t *testing.T) {
+	api := &fakeVMComputeAPI{
+		nextHandle: 77,
+		startErr:   hcsOperationPending,
+	}
+	client := vmcomputeClient{api: api}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- client.StartComputeSystem(context.Background(), "agent-1")
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("StartComputeSystem returned before completion notification: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if api.registers != 1 {
+		t.Fatalf("registers = %d, want 1", api.registers)
+	}
+
+	api.notify(hcsNotificationSystemStartCompleted, nil)
+	if err := <-done; err != nil {
+		t.Fatalf("StartComputeSystem: %v", err)
+	}
+	if api.unregisters != 1 {
+		t.Fatalf("unregisters = %d, want 1", api.unregisters)
+	}
+}
+
+func TestVMComputeClientPendingStartFailsOnUnexpectedExit(t *testing.T) {
+	api := &fakeVMComputeAPI{
+		nextHandle: 77,
+		startErr:   hcsOperationPending,
+	}
+	client := vmcomputeClient{api: api}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- client.StartComputeSystem(context.Background(), "agent-1")
+	}()
+	time.Sleep(50 * time.Millisecond)
+
+	api.notify(hcsNotificationSystemExited, errors.New("guest exited"))
+	err := <-done
+	if err == nil || !strings.Contains(err.Error(), "unexpected HCS notification SystemExited") {
+		t.Fatalf("StartComputeSystem err = %v", err)
+	}
+}
+
 type fakeVMComputeAPI struct {
 	nextHandle      uintptr
 	createdID       string
@@ -65,12 +149,17 @@ type fakeVMComputeAPI struct {
 	openedID        string
 	operations      []string
 	closedHandles   []uintptr
+	createErr       error
+	startErr        error
+	callbackContext uintptr
+	registers       int
+	unregisters     int
 }
 
 func (f *fakeVMComputeAPI) CreateComputeSystem(ctx context.Context, id, document string) (uintptr, string, error) {
 	f.createdID = id
 	f.createdDocument = document
-	return f.nextHandle, "", nil
+	return f.nextHandle, "", f.createErr
 }
 
 func (f *fakeVMComputeAPI) OpenComputeSystem(ctx context.Context, id string) (uintptr, string, error) {
@@ -85,7 +174,7 @@ func (f *fakeVMComputeAPI) CloseComputeSystem(ctx context.Context, handle uintpt
 
 func (f *fakeVMComputeAPI) StartComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	f.operations = append(f.operations, "start")
-	return "", nil
+	return "", f.startErr
 }
 
 func (f *fakeVMComputeAPI) ShutdownComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
@@ -96,4 +185,26 @@ func (f *fakeVMComputeAPI) ShutdownComputeSystem(ctx context.Context, handle uin
 func (f *fakeVMComputeAPI) TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	f.operations = append(f.operations, "terminate")
 	return "", nil
+}
+
+func (f *fakeVMComputeAPI) RegisterComputeSystemCallback(ctx context.Context, handle, callback, callbackContext uintptr) (uintptr, error) {
+	f.registers++
+	f.callbackContext = callbackContext
+	return 99, nil
+}
+
+func (f *fakeVMComputeAPI) UnregisterComputeSystemCallback(ctx context.Context, callbackHandle uintptr) error {
+	f.unregisters++
+	return nil
+}
+
+func (f *fakeVMComputeAPI) notify(notification hcsNotification, err error) {
+	notificationWatcher(notification, f.callbackContext, errnoForTest(err), nil)
+}
+
+func errnoForTest(err error) uintptr {
+	if err == nil {
+		return 0
+	}
+	return uintptr(0x80004005)
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -15,6 +16,43 @@ import (
 const (
 	hcsOperationPending          = syscall.Errno(0xC0370103)
 	hcsComputeSystemDoesNotExist = syscall.Errno(0xC037010E)
+)
+
+const (
+	hcsNotificationSystemExited          hcsNotification = 0x00000001
+	hcsNotificationSystemCreateCompleted hcsNotification = 0x00000002
+	hcsNotificationSystemStartCompleted  hcsNotification = 0x00000003
+	hcsNotificationServiceDisconnect     hcsNotification = 0x01000000
+)
+
+type hcsNotification uint32
+
+func (n hcsNotification) String() string {
+	switch n {
+	case hcsNotificationSystemExited:
+		return "SystemExited"
+	case hcsNotificationSystemCreateCompleted:
+		return "SystemCreateCompleted"
+	case hcsNotificationSystemStartCompleted:
+		return "SystemStartCompleted"
+	case hcsNotificationServiceDisconnect:
+		return "ServiceDisconnect"
+	default:
+		return fmt.Sprintf("Unknown:%d", n)
+	}
+}
+
+type hcsCallbackRegistration struct {
+	number   uintptr
+	handle   uintptr
+	channels map[hcsNotification]chan error
+}
+
+var (
+	nextHCSCallbackNumber uintptr
+	hcsCallbackMap        = map[uintptr]*hcsCallbackRegistration{}
+	hcsCallbackMapLock    sync.RWMutex
+	hcsNotificationCB     = syscall.NewCallback(notificationWatcher)
 )
 
 type vmcomputeClient struct {
@@ -28,6 +66,8 @@ type vmcomputeAPI interface {
 	StartComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	ShutdownComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
+	RegisterComputeSystemCallback(ctx context.Context, handle, callback, callbackContext uintptr) (uintptr, error)
+	UnregisterComputeSystemCallback(ctx context.Context, callbackHandle uintptr) error
 }
 
 func newVMComputeClient() vmcomputeClient {
@@ -60,6 +100,23 @@ func (c vmcomputeClient) CreateComputeSystem(ctx context.Context, id string, doc
 		return computeSystemHandle{}, hcsCallError("create", result, err)
 	}
 	if handle != 0 {
+		if errors.Is(err, hcsOperationPending) {
+			reg, regErr := registerComputeSystemCallback(ctx, api, handle)
+			if regErr != nil {
+				_ = api.CloseComputeSystem(ctx, handle)
+				return computeSystemHandle{}, hcsCallError("register create callback", "", regErr)
+			}
+			waitErr := reg.wait(ctx, hcsNotificationSystemCreateCompleted)
+			unregisterErr := reg.unregister(ctx, api)
+			if waitErr != nil {
+				_ = api.CloseComputeSystem(ctx, handle)
+				return computeSystemHandle{}, hcsCallError("create wait", result, waitErr)
+			}
+			if unregisterErr != nil {
+				_ = api.CloseComputeSystem(ctx, handle)
+				return computeSystemHandle{}, hcsCallError("unregister create callback", "", unregisterErr)
+			}
+		}
 		if closeErr := api.CloseComputeSystem(ctx, handle); closeErr != nil {
 			return computeSystemHandle{}, hcsCallError("close after create", "", closeErr)
 		}
@@ -68,13 +125,13 @@ func (c vmcomputeClient) CreateComputeSystem(ctx context.Context, id string, doc
 }
 
 func (c vmcomputeClient) StartComputeSystem(ctx context.Context, id string) error {
-	return c.withComputeSystem(ctx, id, "start", func(handle uintptr) (string, error) {
+	return c.withComputeSystem(ctx, id, "start", hcsNotificationSystemStartCompleted, func(handle uintptr) (string, error) {
 		return c.vmcomputeAPI().StartComputeSystem(ctx, handle, "{}")
 	})
 }
 
 func (c vmcomputeClient) ShutdownComputeSystem(ctx context.Context, id string) error {
-	return c.withComputeSystem(ctx, id, "shutdown", func(handle uintptr) (string, error) {
+	return c.withComputeSystem(ctx, id, "shutdown", 0, func(handle uintptr) (string, error) {
 		return c.vmcomputeAPI().ShutdownComputeSystem(ctx, handle, "{}")
 	})
 }
@@ -88,12 +145,12 @@ func (c vmcomputeClient) DeleteComputeSystem(ctx context.Context, id string) err
 }
 
 func (c vmcomputeClient) terminateComputeSystem(ctx context.Context, id, operation string) error {
-	return c.withComputeSystem(ctx, id, operation, func(handle uintptr) (string, error) {
+	return c.withComputeSystem(ctx, id, operation, 0, func(handle uintptr) (string, error) {
 		return c.vmcomputeAPI().TerminateComputeSystem(ctx, handle, "{}")
 	})
 }
 
-func (c vmcomputeClient) withComputeSystem(ctx context.Context, id, operation string, fn func(uintptr) (string, error)) error {
+func (c vmcomputeClient) withComputeSystem(ctx context.Context, id, operation string, pendingNotification hcsNotification, fn func(uintptr) (string, error)) error {
 	api := c.vmcomputeAPI()
 	handle, result, err := api.OpenComputeSystem(ctx, id)
 	if err != nil {
@@ -103,11 +160,106 @@ func (c vmcomputeClient) withComputeSystem(ctx context.Context, id, operation st
 		return fmt.Errorf("windows-hyperv HCS %s open returned an empty handle", operation)
 	}
 	defer api.CloseComputeSystem(ctx, handle)
+	var reg *hcsCallbackRegistration
+	if pendingNotification != 0 {
+		reg, err = registerComputeSystemCallback(ctx, api, handle)
+		if err != nil {
+			return hcsCallError(operation+" register callback", "", err)
+		}
+		defer reg.unregister(ctx, api)
+	}
 	result, err = fn(handle)
 	if err != nil && !errors.Is(err, hcsOperationPending) {
 		return hcsCallError(operation, result, err)
 	}
+	if errors.Is(err, hcsOperationPending) && pendingNotification != 0 {
+		if waitErr := reg.wait(ctx, pendingNotification); waitErr != nil {
+			return hcsCallError(operation+" wait", result, waitErr)
+		}
+	}
 	return nil
+}
+
+func registerComputeSystemCallback(ctx context.Context, api vmcomputeAPI, handle uintptr) (*hcsCallbackRegistration, error) {
+	reg := &hcsCallbackRegistration{
+		channels: map[hcsNotification]chan error{
+			hcsNotificationServiceDisconnect:     make(chan error, 1),
+			hcsNotificationSystemExited:          make(chan error, 1),
+			hcsNotificationSystemCreateCompleted: make(chan error, 1),
+			hcsNotificationSystemStartCompleted:  make(chan error, 1),
+		},
+	}
+	hcsCallbackMapLock.Lock()
+	reg.number = nextHCSCallbackNumber
+	nextHCSCallbackNumber++
+	hcsCallbackMap[reg.number] = reg
+	hcsCallbackMapLock.Unlock()
+
+	callbackHandle, err := api.RegisterComputeSystemCallback(ctx, handle, hcsNotificationCB, reg.number)
+	if err != nil {
+		hcsCallbackMapLock.Lock()
+		delete(hcsCallbackMap, reg.number)
+		hcsCallbackMapLock.Unlock()
+		return nil, err
+	}
+	reg.handle = callbackHandle
+	return reg, nil
+}
+
+func (r *hcsCallbackRegistration) wait(ctx context.Context, expected hcsNotification) error {
+	expectedChannel := r.channels[expected]
+	if expectedChannel == nil {
+		return fmt.Errorf("unsupported HCS notification wait: %s", expected)
+	}
+	select {
+	case err := <-expectedChannel:
+		return err
+	case err := <-r.channels[hcsNotificationSystemExited]:
+		if expected == hcsNotificationSystemExited {
+			return err
+		}
+		return fmt.Errorf("unexpected HCS notification %s: %w", hcsNotificationSystemExited, err)
+	case err := <-r.channels[hcsNotificationServiceDisconnect]:
+		return fmt.Errorf("unexpected HCS notification %s: %w", hcsNotificationServiceDisconnect, err)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (r *hcsCallbackRegistration) unregister(ctx context.Context, api vmcomputeAPI) error {
+	if r == nil || r.handle == 0 {
+		return nil
+	}
+	if err := api.UnregisterComputeSystemCallback(ctx, r.handle); err != nil {
+		return err
+	}
+	hcsCallbackMapLock.Lock()
+	delete(hcsCallbackMap, r.number)
+	hcsCallbackMapLock.Unlock()
+	for _, ch := range r.channels {
+		close(ch)
+	}
+	r.handle = 0
+	return nil
+}
+
+func notificationWatcher(notification hcsNotification, callbackNumber uintptr, notificationStatus uintptr, notificationData *uint16) uintptr {
+	hcsCallbackMapLock.RLock()
+	reg := hcsCallbackMap[callbackNumber]
+	hcsCallbackMapLock.RUnlock()
+	if reg == nil {
+		return 0
+	}
+	ch := reg.channels[notification]
+	if ch == nil {
+		return 0
+	}
+	var err error
+	if int32(notificationStatus) < 0 {
+		err = syscall.Errno(notificationStatus)
+	}
+	ch <- err
+	return 0
 }
 
 func hcsCallError(operation, result string, err error) error {
@@ -122,12 +274,14 @@ type windowsVMComputeAPI struct{}
 var vmcomputeDLL = windows.NewLazySystemDLL("vmcompute.dll")
 
 var (
-	procHcsCreateComputeSystem    = vmcomputeDLL.NewProc("HcsCreateComputeSystem")
-	procHcsOpenComputeSystem      = vmcomputeDLL.NewProc("HcsOpenComputeSystem")
-	procHcsCloseComputeSystem     = vmcomputeDLL.NewProc("HcsCloseComputeSystem")
-	procHcsStartComputeSystem     = vmcomputeDLL.NewProc("HcsStartComputeSystem")
-	procHcsShutdownComputeSystem  = vmcomputeDLL.NewProc("HcsShutdownComputeSystem")
-	procHcsTerminateComputeSystem = vmcomputeDLL.NewProc("HcsTerminateComputeSystem")
+	procHcsCreateComputeSystem             = vmcomputeDLL.NewProc("HcsCreateComputeSystem")
+	procHcsOpenComputeSystem               = vmcomputeDLL.NewProc("HcsOpenComputeSystem")
+	procHcsCloseComputeSystem              = vmcomputeDLL.NewProc("HcsCloseComputeSystem")
+	procHcsStartComputeSystem              = vmcomputeDLL.NewProc("HcsStartComputeSystem")
+	procHcsShutdownComputeSystem           = vmcomputeDLL.NewProc("HcsShutdownComputeSystem")
+	procHcsTerminateComputeSystem          = vmcomputeDLL.NewProc("HcsTerminateComputeSystem")
+	procHcsRegisterComputeSystemCallback   = vmcomputeDLL.NewProc("HcsRegisterComputeSystemCallback")
+	procHcsUnregisterComputeSystemCallback = vmcomputeDLL.NewProc("HcsUnregisterComputeSystemCallback")
 )
 
 func (windowsVMComputeAPI) CreateComputeSystem(ctx context.Context, id, document string) (uintptr, string, error) {
@@ -170,6 +324,16 @@ func (windowsVMComputeAPI) ShutdownComputeSystem(ctx context.Context, handle uin
 
 func (windowsVMComputeAPI) TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	return callComputeSystemOperation(procHcsTerminateComputeSystem, handle, options)
+}
+
+func (windowsVMComputeAPI) RegisterComputeSystemCallback(ctx context.Context, handle, callback, callbackContext uintptr) (uintptr, error) {
+	var callbackHandle uintptr
+	err := callHRESULT(procHcsRegisterComputeSystemCallback, handle, callback, callbackContext, uintptr(unsafe.Pointer(&callbackHandle)))
+	return callbackHandle, err
+}
+
+func (windowsVMComputeAPI) UnregisterComputeSystemCallback(ctx context.Context, callbackHandle uintptr) error {
+	return callHRESULT(procHcsUnregisterComputeSystemCallback, callbackHandle)
 }
 
 func callComputeSystemOperation(proc *windows.LazyProc, handle uintptr, options string) (string, error) {
