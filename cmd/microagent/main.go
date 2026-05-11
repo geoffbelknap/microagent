@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -2659,14 +2660,14 @@ func validateWorkspaceFiles(files []workspaceFile, baseDir string) ([]workspaceF
 		if file.Path == "" {
 			return nil, fmt.Errorf("file dst is required for %s", file.SourcePath)
 		}
-		if !filepath.IsAbs(file.Path) {
+		if !path.IsAbs(file.Path) {
 			return nil, fmt.Errorf("file dst must be absolute: %s", file.Path)
 		}
 		if strings.ContainsRune(file.Path, 0) {
 			return nil, fmt.Errorf("file dst contains NUL")
 		}
-		cleanPath := filepath.Clean(file.Path)
-		if cleanPath == string(os.PathSeparator) {
+		cleanPath := path.Clean(file.Path)
+		if cleanPath == "/" {
 			return nil, fmt.Errorf("file dst must name a file: %s", file.Path)
 		}
 		if seen[cleanPath] {
@@ -2727,10 +2728,10 @@ func validateConsoleShell(shellPath string) error {
 	if shellPath == "" {
 		return nil
 	}
-	if !filepath.IsAbs(shellPath) {
+	if !path.IsAbs(shellPath) {
 		return fmt.Errorf("shell must be an absolute guest path")
 	}
-	if filepath.Clean(shellPath) != shellPath {
+	if path.Clean(shellPath) != shellPath {
 		return fmt.Errorf("shell must be a clean absolute guest path")
 	}
 	return nil

@@ -1011,7 +1011,13 @@ func backendOwnsRuntimeState(backend string) bool {
 func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	if command := detachedSupervisorCommand(opts.Backend); command != "run" {
 		req.Command = command
-		return Dispatch(context.Background(), opts, req)
+		dispatchCtx := context.Background()
+		var cancel context.CancelFunc
+		if opts.Timeout > 0 {
+			dispatchCtx, cancel = context.WithTimeout(dispatchCtx, opts.Timeout)
+			defer cancel()
+		}
+		return Dispatch(dispatchCtx, opts, req)
 	}
 	if opts.Backend != vmkit.BackendAppleVF {
 		return Dispatch(context.Background(), opts, req)

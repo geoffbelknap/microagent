@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -110,6 +111,34 @@ func TestBackendOwnsRuntimeState(t *testing.T) {
 	}
 	if backendOwnsRuntimeState(vmkit.BackendAppleVF) {
 		t.Fatalf("backendOwnsRuntimeState(%q) = true, want false", vmkit.BackendAppleVF)
+	}
+}
+
+func TestReadinessFromRuntimeReportsWindowsHyperVMediation(t *testing.T) {
+	state := RuntimeState{
+		Event: EventFile{
+			Identity:   vmkit.Identity{RuntimeID: "agent", Backend: vmkit.BackendWindowsHyperV},
+			State:      vmkit.StateRunning,
+			ObservedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		Config: vmkit.Config{
+			StateDir: t.TempDir(),
+			Mediation: &vmkit.MediationConfig{
+				Enabled:    true,
+				Required:   true,
+				Port:       2048,
+				Target:     "127.0.0.1:9000",
+				FailClosed: true,
+			},
+		},
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	readiness := readinessFromRuntime(state)
+	if !readiness.MediationReady.Ready {
+		t.Fatalf("mediation readiness = %#v", readiness.MediationReady)
+	}
+	if !strings.Contains(readiness.MediationReady.Detail, "port=2048") || !strings.Contains(readiness.MediationReady.Detail, "target=127.0.0.1:9000") {
+		t.Fatalf("mediation readiness detail = %q", readiness.MediationReady.Detail)
 	}
 }
 

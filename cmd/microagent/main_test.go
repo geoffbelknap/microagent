@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -3846,6 +3847,267 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "CONNECT_SMOKE") {
 		t.Fatalf("connect output = %q", data)
+	}
+}
+
+func TestWindowsHyperVMediationSmoke(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_MEDIATION_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_MEDIATION_SMOKE=1 to run the Windows Hyper-V mediation smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	dir := t.TempDir()
+	workspaceName := fmt.Sprintf("whv-med-%d", time.Now().UnixNano()%1000000000)
+	cliPath := filepath.Join(dir, "microagent.exe")
+	guestInitPath := filepath.Join(dir, "microagent-guestinit")
+	probePath := filepath.Join(dir, "mediation-probe")
+	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
+	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
+	buildMediationProbe(t, dir, probePath)
+
+	hostListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hostListener.Close()
+	observed := make(chan string, 1)
+	go func() {
+		conn, err := hostListener.Accept()
+		if err != nil {
+			observed <- "accept: " + err.Error()
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+		line, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil {
+			observed <- "read: " + err.Error()
+			return
+		}
+		_, _ = conn.Write([]byte(`{"ok":true}` + "\n"))
+		observed <- line
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	workspaceOpts := workspace.Options{
+		Name:            workspaceName,
+		Backend:         vmkit.BackendWindowsHyperV,
+		Architecture:    "amd64",
+		StateDir:        dir,
+		KernelPath:      kernelPath,
+		GuestInitPath:   guestInitPath,
+		ImageRef:        "docker.io/library/busybox:1.36",
+		ServiceCommand:  "/usr/local/bin/mediation-probe",
+		PrepareForStart: true,
+		Env:             map[string]string{"MICROAGENT_RUNTIME_ID": workspaceName, "MEDIATION_PORT": "2048"},
+		MemoryMiB:       512,
+		CPUCount:        2,
+		SizeMiB:         1024,
+		Network:         vmkit.NetworkConfig{Mode: "user"},
+		Mediation: &vmkit.MediationConfig{
+			Enabled:    true,
+			Required:   true,
+			Port:       2048,
+			Target:     hostListener.Addr().String(),
+			FailClosed: true,
+		},
+		Files: []workspace.File{{
+			SourcePath: probePath,
+			Path:       "/usr/local/bin/mediation-probe",
+			Mode:       "0755",
+		}},
+	}
+	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
+		t.Fatalf("BuildRootfs: %v", err)
+	}
+	if err := workspace.WriteManifest(workspaceOpts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", workspaceName, "--state-dir", dir)
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", workspaceName, "--state-dir", dir, "--yes")
+	})
+	runExternal(t, ctx, cliPath, "start", workspaceName, "--state-dir", dir, "--kernel", kernelPath)
+	select {
+	case line := <-observed:
+		if !strings.Contains(line, `"signal":"ready"`) || !strings.Contains(line, `"runtimeID":"`+workspaceName+`"`) {
+			t.Fatalf("observed mediation line = %q", line)
+		}
+	case <-time.After(90 * time.Second):
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatal("timed out waiting for mediated guest message")
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var runtimeState workspace.RuntimeState
+	runtimeData, err := os.ReadFile(filepath.Join(dir, workspaceName, "runtime.json"))
+	if err != nil {
+		t.Fatalf("read runtime.json: %v", err)
+	}
+	if err := json.Unmarshal(runtimeData, &runtimeState); err != nil {
+		t.Fatalf("parse runtime.json: %v\n%s", err, runtimeData)
+	}
+	if runtimeState.VsockListenerPID == 0 {
+		t.Fatalf("runtime.json missing vsock listener pid:\n%s", runtimeData)
+	}
+	if runtimeState.Config.Mediation == nil || !runtimeState.Config.Mediation.Enabled || runtimeState.Config.Mediation.Port != 2048 {
+		t.Fatalf("runtime.json missing mediation config:\n%s", runtimeData)
+	}
+}
+
+func buildCmd(t *testing.T, workdir, output, pkg, goos, goarch string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, pkg)
+	cmd.Dir = workdir
+	cmd.Env = os.Environ()
+	if goos != "" {
+		cmd.Env = append(cmd.Env, "GOOS="+goos)
+	}
+	if goarch != "" {
+		cmd.Env = append(cmd.Env, "GOARCH="+goarch)
+	}
+	if goos == "linux" {
+		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build %s: %v\n%s", pkg, err, out)
+	}
+}
+
+func buildMediationProbe(t *testing.T, dir, output string) {
+	t.Helper()
+	source := filepath.Join(dir, "mediation-probe.go")
+	code := `package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+func main() {
+	port := uint32(2048)
+	if raw := strings.TrimSpace(os.Getenv("MEDIATION_PORT")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "invalid MEDIATION_PORT: %v\n", err)
+			os.Exit(2)
+		}
+		port = uint32(parsed)
+	}
+	fd, err := dialHostVsock(port, 30*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dial mediation vsock: %v\n", err)
+		os.Exit(1)
+	}
+	defer unix.Close(fd)
+	file := os.NewFile(uintptr(fd), "mediation-vsock")
+	if file == nil {
+		fmt.Fprintln(os.Stderr, "wrap mediation fd")
+		os.Exit(1)
+	}
+	defer file.Close()
+	runtimeID := os.Getenv("MICROAGENT_RUNTIME_ID")
+	if runtimeID == "" {
+		runtimeID = "unknown"
+	}
+	if _, err := file.WriteString("{\"signal\":\"ready\",\"runtimeID\":\"" + runtimeID + "\"}\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "write mediation message: %v\n", err)
+		os.Exit(1)
+	}
+	line, err := bufio.NewReader(file).ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read mediation response: %v\n", err)
+		os.Exit(1)
+	}
+	if !strings.Contains(line, "\"ok\":true") {
+		fmt.Fprintf(os.Stderr, "unexpected response: %s\n", line)
+		os.Exit(1)
+	}
+	fmt.Println("MEDIATION_OK")
+}
+
+func dialHostVsock(port uint32, timeout time.Duration) (int, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+		if err == nil {
+			err = unix.Connect(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port})
+			if err == nil {
+				return fd, nil
+			}
+			_ = unix.Close(fd)
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return -1, lastErr
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+`
+	if err := os.WriteFile(source, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buildCmd(t, filepath.Join("..", ".."), output, source, "linux", "amd64")
+}
+
+func runExternal(t *testing.T, ctx context.Context, exe string, args ...string) []byte {
+	t.Helper()
+	out, err := runExternalOutput(ctx, exe, args...)
+	if err != nil {
+		t.Fatalf("%s %s: %v\n%s", exe, strings.Join(args, " "), err, out)
+	}
+	return out
+}
+
+func runExternalOutput(ctx context.Context, exe string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, exe, args...)
+	return cmd.CombinedOutput()
+}
+
+func waitForExternalResult(t *testing.T, ctx context.Context, cliPath, stateDir, name string, timeout time.Duration) []byte {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last []byte
+	for {
+		out, err := runExternalOutput(ctx, cliPath, "result", name, "--state-dir", stateDir)
+		last = out
+		if err == nil {
+			return out
+		}
+		if time.Now().After(deadline) {
+			logWindowsHyperVSmokeState(t, stateDir, name)
+			t.Fatalf("result not ready: %v\n%s", err, last)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func logWindowsHyperVSmokeState(t *testing.T, stateDir, name string) {
+	t.Helper()
+	for _, file := range []string{"serial.log", "hvsock-listener.log", "runtime.json"} {
+		if data, readErr := os.ReadFile(filepath.Join(stateDir, name, file)); readErr == nil {
+			t.Logf("%s:\n%s", file, data)
+		}
 	}
 }
 
