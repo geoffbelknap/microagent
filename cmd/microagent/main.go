@@ -1833,6 +1833,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	cpusExplicit := hasFlagValue(args, "cpus")
 	sizeExplicit := hasFlagValue(args, "size-mib")
 	specExplicit := hasFlagValue(args, "file")
+	supervisorExplicit := hasFlagValue(args, "supervisor")
 	opts := workspaceOptions{
 		Backend:       hostBackend(),
 		Architecture:  defaultGuestArch(),
@@ -1849,7 +1850,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	opts.Mke2fsPath = defaultMke2fsPath()
 	opts.GuestInitPath = defaultGuestInitPath(opts.Architecture)
-	opts.SupervisorPath = defaultAppleVFSupervisorPath()
+	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	specPath := workspaceSpecPath(command, args)
 	if specPath != "" {
 		if err := applyWorkspaceSpecFile(&opts, specPath, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
@@ -1974,6 +1975,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	if !kernelExplicit {
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	}
+	if !supervisorExplicit {
+		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
 	opts.KernelExplicit = kernelExplicit
 	if err := validateRestartPolicy(opts.RestartPolicy); err != nil {
@@ -4900,6 +4904,13 @@ func defaultLegacyKernelPath(backend string) string {
 
 func defaultAppleVFSupervisorPath() string {
 	return workspace.AppleVFSupervisorPath()
+}
+
+func defaultSupervisorPath(backend string) string {
+	if backend == vmkit.BackendAppleVF {
+		return defaultAppleVFSupervisorPath()
+	}
+	return ""
 }
 
 func defaultPackagedKernelPath(backend, arch string) string {

@@ -234,7 +234,9 @@ func DefaultOptions() Options {
 	}
 	opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)
 	opts.GuestInitPath = GuestInitPath(opts.Architecture)
-	opts.SupervisorPath = AppleVFSupervisorPath()
+	if opts.Backend == vmkit.BackendAppleVF {
+		opts.SupervisorPath = AppleVFSupervisorPath()
+	}
 	_ = ApplyProfile(&opts, false, false, false)
 	return opts
 }

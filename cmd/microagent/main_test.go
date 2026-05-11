@@ -3042,6 +3042,35 @@ func TestWorkspaceSupervisorSelectsSymmetricBackends(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsClearsAppleVFDefaultForFirecracker(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"--backend", vmkit.BackendFirecracker,
+		"--image", "docker.io/library/busybox:1.36",
+		"--exec", "true",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.SupervisorPath != "" {
+		t.Fatalf("SupervisorPath = %q, want empty Firecracker default", opts.SupervisorPath)
+	}
+}
+
+func TestParseWorkspaceOptionsPreservesExplicitFirecrackerSupervisor(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"--backend", vmkit.BackendFirecracker,
+		"--supervisor", "/tmp/microagent-firecracker-supervisor",
+		"--image", "docker.io/library/busybox:1.36",
+		"--exec", "true",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.SupervisorPath != "/tmp/microagent-firecracker-supervisor" {
+		t.Fatalf("SupervisorPath = %q", opts.SupervisorPath)
+	}
+}
+
 func firecrackerSupervisorHelper(t *testing.T) string {
 	t.Helper()
 	executable, err := os.Executable()

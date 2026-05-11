@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -73,6 +74,19 @@ func TestDefaultOptionsUseUserNetworkMode(t *testing.T) {
 	opts := DefaultOptions()
 	if opts.Network.Mode != "user" {
 		t.Fatalf("default network mode = %q", opts.Network.Mode)
+	}
+}
+
+func TestDefaultOptionsDoNotSetAppleVFPathForFirecracker(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("host default backend is apple-vf on darwin")
+	}
+	opts := DefaultOptions()
+	if opts.Backend != vmkit.BackendFirecracker {
+		t.Fatalf("backend = %q, want firecracker", opts.Backend)
+	}
+	if opts.SupervisorPath != "" {
+		t.Fatalf("SupervisorPath = %q, want empty Firecracker default", opts.SupervisorPath)
 	}
 }
 
