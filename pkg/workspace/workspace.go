@@ -14,6 +14,7 @@ import (
 
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -84,7 +85,8 @@ type Spec struct {
 	Service    string                `json:"service_command,omitempty" yaml:"service"`
 	Shell      string                `yaml:"shell"`
 	Hostname   string                `yaml:"hostname"`
-	Setup      []string              `yaml:"setup"`
+	Setup      SetupSteps            `yaml:"setup"`
+	SetupFiles []string              `yaml:"setupFiles"`
 	Env        map[string]string     `yaml:"env"`
 	Resources  Resources             `yaml:"resources"`
 	Network    NetworkSpec           `yaml:"network"`
@@ -124,6 +126,59 @@ type File struct {
 	SourcePath string `json:"source_path" yaml:"src"`
 	Path       string `json:"path" yaml:"dst"`
 	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty"`
+}
+
+type SetupStep struct {
+	Run  string `json:"run,omitempty" yaml:"run,omitempty"`
+	File string `json:"file,omitempty" yaml:"file,omitempty"`
+}
+
+type SetupSteps []SetupStep
+
+func (steps *SetupSteps) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var raw string
+		if err := value.Decode(&raw); err != nil {
+			return err
+		}
+		*steps = SetupSteps{{Run: raw}}
+		return nil
+	case yaml.SequenceNode:
+		out := make([]SetupStep, 0, len(value.Content))
+		for _, item := range value.Content {
+			switch item.Kind {
+			case yaml.ScalarNode:
+				var raw string
+				if err := item.Decode(&raw); err != nil {
+					return err
+				}
+				out = append(out, SetupStep{Run: raw})
+			case yaml.MappingNode:
+				var decoded struct {
+					Run     string `yaml:"run"`
+					Command string `yaml:"command"`
+					File    string `yaml:"file"`
+				}
+				if err := item.Decode(&decoded); err != nil {
+					return err
+				}
+				step := SetupStep{Run: decoded.Run, File: decoded.File}
+				if strings.TrimSpace(step.Run) == "" {
+					step.Run = decoded.Command
+				}
+				out = append(out, step)
+			default:
+				return fmt.Errorf("setup entries must be strings or maps")
+			}
+		}
+		*steps = out
+		return nil
+	case 0:
+		return nil
+	default:
+		return fmt.Errorf("setup must be a string or list")
+	}
 }
 
 type Artifacts struct {

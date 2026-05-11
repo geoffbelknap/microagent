@@ -218,40 +218,54 @@ func execServiceCommand(command []string, env []string) error {
 }
 
 func runManagedServiceCommand(command []string, env []string) error {
-	log.Printf("microagent-init: starting managed service command %v", command)
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start managed service command: %w", err)
-	}
-	go func() {
+	backoff := time.Second
+	for {
+		reapExitedChildren()
+		log.Printf("microagent-init: starting managed service command %v", command)
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Env = env
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		startedAt := time.Now()
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start managed service command: %w", err)
+		}
 		if err := cmd.Wait(); err != nil {
 			log.Printf("microagent-init: managed service command exited: %v", err)
-			go reapOrphanedChildren()
-			return
+		} else {
+			log.Println("microagent-init: managed service command exited")
 		}
-		log.Println("microagent-init: managed service command exited")
-		go reapOrphanedChildren()
-	}()
-	select {}
+		reapExitedChildren()
+		if time.Since(startedAt) > 30*time.Second {
+			backoff = time.Second
+		}
+		log.Printf("microagent-init: restarting managed service command in %s", backoff)
+		time.Sleep(backoff)
+		if backoff < 30*time.Second {
+			backoff *= 2
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+		}
+	}
 }
 
-func reapOrphanedChildren() {
+func reapExitedChildren() {
 	for {
 		var status unix.WaitStatus
-		_, err := unix.Wait4(-1, &status, 0, nil)
+		pid, err := unix.Wait4(-1, &status, unix.WNOHANG, nil)
+		if err == nil && pid > 0 {
+			log.Printf("microagent-init: reaped child pid %d", pid)
+			continue
+		}
 		if err == nil {
-			continue
+			return
 		}
-		if err == unix.ECHILD {
-			time.Sleep(time.Second)
-			continue
+		if err != unix.ECHILD {
+			log.Printf("microagent-init: reap child: %v", err)
 		}
-		log.Printf("microagent-init: reap child: %v", err)
-		time.Sleep(time.Second)
+		return
 	}
 }
 

@@ -1104,11 +1104,17 @@ func TestRootFSExecMapsToShellCommand(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsForRun(t *testing.T) {
+	dir := t.TempDir()
+	setupPath := filepath.Join(dir, "setup.sh")
+	if err := os.WriteFile(setupPath, []byte("#!/bin/sh\necho from-file\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	opts, err := parseWorkspaceOptions("run", []string{
 		"--image", "docker.io/library/ubuntu:24.04",
 		"--exec", "uname -a",
 		"--setup", "apt-get update",
 		"--setup", "apt-get install -y git",
+		"--setup-file", setupPath,
 		"--entrypoint", "/app/entrypoint.sh",
 		"--shell", "/bin/bash",
 		"--hostname", "research-vm",
@@ -1132,7 +1138,7 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	if opts.ExecCommand != "uname -a" {
 		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
 	}
-	if len(opts.SetupCommands) != 2 || opts.SetupCommands[0] != "apt-get update" || opts.SetupCommands[1] != "apt-get install -y git" {
+	if len(opts.SetupCommands) != 3 || opts.SetupCommands[0] != "apt-get update" || opts.SetupCommands[1] != "apt-get install -y git" || !strings.Contains(opts.SetupCommands[2], "echo from-file") {
 		t.Fatalf("SetupCommands = %#v", opts.SetupCommands)
 	}
 	if opts.Entrypoint != "/app/entrypoint.sh" {
@@ -1367,7 +1373,8 @@ shell: /bin/bash
 hostname: research-vm
 setup:
   - mkdir -p /workspace
-  - echo ready > /workspace/status
+  - file: ./setup.sh
+  - run: echo ready > /workspace/status
 env:
   MICROAGENT_NAME: research
 resources:
@@ -1412,6 +1419,9 @@ files:
 	if err := os.WriteFile(filepath.Join(dir, "body.py"), []byte("print('ok')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "setup.sh"), []byte("#!/bin/sh\napt-get update\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1422,8 +1432,11 @@ files:
 	if opts.Name != "research" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "medium" || opts.RestartPolicy != "on-failure" {
 		t.Fatalf("identity/image/profile = %#v", opts)
 	}
-	if opts.Entrypoint != "/app/start.sh" || opts.ConsoleShell != "/bin/bash" || opts.Hostname != "research-vm" || len(opts.SetupCommands) != 2 {
+	if opts.Entrypoint != "/app/start.sh" || opts.ConsoleShell != "/bin/bash" || opts.Hostname != "research-vm" || len(opts.SetupCommands) != 3 {
 		t.Fatalf("commands = entrypoint %q shell %q hostname %q setup %#v", opts.Entrypoint, opts.ConsoleShell, opts.Hostname, opts.SetupCommands)
+	}
+	if !strings.Contains(opts.SetupCommands[1], "apt-get update") {
+		t.Fatalf("setup file command = %q", opts.SetupCommands[1])
 	}
 	if opts.Env["MICROAGENT_NAME"] != "research" {
 		t.Fatalf("env = %#v", opts.Env)
@@ -1473,6 +1486,16 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 			name: "duplicate dst",
 			spec: "name: bad\nfiles:\n  - src: ./body.py\n    dst: /app/body.py\n  - src: ./body.py\n    dst: /app/body.py\n",
 			want: "duplicate file dst",
+		},
+		{
+			name: "missing setup file",
+			spec: "name: bad\nsetup:\n  - file: ./missing.sh\n",
+			want: "setup file",
+		},
+		{
+			name: "ambiguous setup entry",
+			spec: "name: bad\nsetup:\n  - run: echo ok\n    file: ./body.py\n",
+			want: "cannot use both run and file",
 		},
 	}
 	for _, tt := range tests {

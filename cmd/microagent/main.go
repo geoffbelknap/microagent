@@ -1864,6 +1864,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Hostname, "hostname", opts.Hostname, "Guest hostname")
 	setupCommands := multiFlag(append([]string{}, opts.SetupCommands...))
 	fs.Var(&setupCommands, "setup", "Shell command to run before --exec")
+	var setupFiles multiFlag
+	fs.Var(&setupFiles, "setup-file", "Shell script file to run before --exec")
 	var envVars multiFlag
 	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
 	var diskFlags multiFlag
@@ -1908,6 +1910,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		}
 	}
 	opts.SetupCommands = append([]string{}, setupCommands...)
+	setupFileCommands, err := setupCommandsFromFiles(setupFiles, ".")
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.SetupCommands = append(opts.SetupCommands, setupFileCommands...)
 	env, err := parseEnvFlags(envVars)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -2101,8 +2108,12 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 	if strings.TrimSpace(spec.Hostname) != "" {
 		opts.Hostname = strings.TrimSpace(spec.Hostname)
 	}
-	if len(spec.Setup) != 0 {
-		opts.SetupCommands = append([]string{}, spec.Setup...)
+	if len(spec.Setup) != 0 || len(spec.SetupFiles) != 0 {
+		setupCommands, err := setupCommandsFromSpec(spec.Setup, spec.SetupFiles, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		opts.SetupCommands = setupCommands
 	}
 	opts.Env = mergeEnv(opts.Env, spec.Env)
 	files, err := validateWorkspaceFiles(spec.Files, filepath.Dir(path))
@@ -2133,6 +2144,72 @@ func readWorkspaceSpec(path string) (workspaceSpec, error) {
 		return workspaceSpec{}, err
 	}
 	return spec, nil
+}
+
+func setupCommandsFromSpec(steps workspace.SetupSteps, setupFiles []string, baseDir string) ([]string, error) {
+	commands := make([]string, 0, len(steps)+len(setupFiles))
+	for _, step := range steps {
+		run := strings.TrimSpace(step.Run)
+		file := strings.TrimSpace(step.File)
+		if run != "" && file != "" {
+			return nil, fmt.Errorf("setup entry cannot use both run and file")
+		}
+		if run != "" {
+			commands = append(commands, run)
+			continue
+		}
+		if file != "" {
+			command, err := setupCommandFromFile(file, baseDir)
+			if err != nil {
+				return nil, err
+			}
+			commands = append(commands, command)
+		}
+	}
+	fileCommands, err := setupCommandsFromFiles(setupFiles, baseDir)
+	if err != nil {
+		return nil, err
+	}
+	commands = append(commands, fileCommands...)
+	return commands, nil
+}
+
+func setupCommandsFromFiles(files []string, baseDir string) ([]string, error) {
+	commands := make([]string, 0, len(files))
+	for _, file := range files {
+		command, err := setupCommandFromFile(file, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		commands = append(commands, command)
+	}
+	return commands, nil
+}
+
+func setupCommandFromFile(path, baseDir string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("setup file path is required")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("setup file %q: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("setup file must be a regular file: %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read setup file %q: %w", path, err)
+	}
+	command := strings.TrimSpace(string(data))
+	if command == "" {
+		return "", fmt.Errorf("setup file is empty: %s", path)
+	}
+	return command, nil
 }
 
 func workspaceSpecDisks(spec workspaceSpec) ([]workspaceDisk, error) {
@@ -4737,7 +4814,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
 		return true
 	}
-	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
+	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "setup-file") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
 }
 
 func hasLowLevelCreateFlag(args []string) bool {
@@ -5259,6 +5336,7 @@ func reorderFlagArgs(args []string) []string {
 		"-name":              true,
 		"-image":             true,
 		"-exec":              true,
+		"-setup-file":        true,
 		"-service-command":   true,
 		"-entrypoint":        true,
 		"-shell":             true,
@@ -5696,6 +5774,7 @@ Options:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
+  -setup-file <path>    Shell script file to run before --exec
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
@@ -5733,6 +5812,7 @@ Options:
   -image <ref>          OCI image; defaults to Python 3.13 slim
   -name <name>          Workspace name
   -setup <command>      Shell command to run before first start
+  -setup-file <path>    Shell script file to run before first start
   -service-command <cmd> Long-running command to run as the VM service
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
