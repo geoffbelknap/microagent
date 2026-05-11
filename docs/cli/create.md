@@ -163,7 +163,7 @@ microagent create \
   --role workload \
   --kernel /tmp/kernel \
   --rootfs /tmp/rootfs.ext4 \
-  --state-dir /tmp/microagent-kit
+  --state-dir /tmp/microagent
 ```
 
 The `--rootfs` path opens up two extra identity flags that the high-level
@@ -172,7 +172,7 @@ path doesn't expose:
 | Flag | Description |
 |---|---|
 | `--id <id>` | Runtime ID for the workspace. Required on the `--rootfs` path |
-| `--role <role>` | Caller-supplied role label. Defaults to `workload`. microagent-kit records it in requests, state files, and events but does not interpret it — see [state and identity](/concepts/state-and-identity/) |
+| `--role <role>` | Caller-supplied role label. Defaults to `workload`. microagent records it in requests, state files, and events but does not interpret it — see [state and identity](/concepts/state-and-identity/) |
 
 Validate without creating:
 
@@ -181,7 +181,7 @@ microagent create --dry-run \
   --id agent-1 \
   --kernel /tmp/kernel \
   --rootfs /tmp/rootfs.ext4 \
-  --state-dir /tmp/microagent-kit
+  --state-dir /tmp/microagent
 ```
 
 Use request JSON:

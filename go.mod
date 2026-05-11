@@ -1,4 +1,4 @@
-module github.com/geoffbelknap/microagent-kit
+module github.com/geoffbelknap/microagent
 
 go 1.26
 

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 type SuperviseOptions struct {

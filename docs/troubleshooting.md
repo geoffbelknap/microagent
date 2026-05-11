@@ -126,7 +126,7 @@ For repeatable deployments, prefer digest-pinned image refs such as
 
 `user` mode needs three things:
 
-- `pasta` on `PATH` (from the `passt` package — `apt install passt` on Debian/Ubuntu, `dnf install passt` on Fedora; Homebrew installs it as a microagent-kit dependency).
+- `pasta` on `PATH` (from the `passt` package — `apt install passt` on Debian/Ubuntu, `dnf install passt` on Fedora; Homebrew installs it as a microagent dependency).
 - Unprivileged user namespaces enabled. Check `sysctl user.max_user_namespaces` (returns a non-zero count when enabled). Some distros also gate this via `kernel.unprivileged_userns_clone` — set both to `1` if either is `0`.
 - `/dev/net/tun` readable by the calling user.
 
@@ -237,4 +237,4 @@ error: image reference is mutable, pass --allow-mutable to override
 - Run `microagent --json doctor` for the full host capability report.
 - Run `microagent --json status <name>` for the workspace state plus verification details.
 - Check `microagent logs <name>` for serial output — most guest-side issues surface there.
-- File an issue at [github.com/geoffbelknap/microagent-kit/issues](https://github.com/geoffbelknap/microagent-kit/issues) with the doctor output and the failing command.
+- File an issue at [github.com/geoffbelknap/microagent/issues](https://github.com/geoffbelknap/microagent/issues) with the doctor output and the failing command.

@@ -49,7 +49,7 @@ declared output by name without entering the workspace.
 
 ```bash
 microagent status --name research
-microagent --json status agent-1 --state-dir /tmp/microagent-kit
+microagent --json status agent-1 --state-dir /tmp/microagent
 ```
 
 ## Related

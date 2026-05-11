@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"gopkg.in/yaml.v3"
 )
 

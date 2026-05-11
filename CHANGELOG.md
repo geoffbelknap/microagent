@@ -5,6 +5,9 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Renamed the project, Go module, Homebrew formula references, and docs from
+  `microagent-kit` to `microagent`; the CLI name and `~/.microagent` state
+  layout are unchanged.
 - Hardened workspace/rootfs security behavior from the May 2026 findings pass.
 - Added Apple VF end-to-end mediation validation for guest-to-host vsock,
   host replies, and structured guest results.

@@ -7,12 +7,12 @@ This recipe builds an agent: a Linux microVM running a body that calls Claude wi
 
 *New here? Start with [run your first agent](/getting-started/cli/first-agent/) for the quickstart version. This recipe goes deeper on the body, prompt caching, and production-shape gaps.*
 
-The workspace is fully described by [`examples/minimal-body/microagent.yaml`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body/microagent.yaml). One spec file, one `microagent create` call — no Docker, no separate build step.
+The workspace is fully described by [`examples/minimal-body/microagent.yaml`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/microagent.yaml). One spec file, one `microagent create` call — no Docker, no separate build step.
 
 ## What you'll need
 
-- microagent-kit installed and `microagent doctor` passing — see [install](/getting-started/install/).
-- On Linux, `pasta` for the default unprivileged network mode. Homebrew installs it as a microagent-kit dependency; on apt-based distros it's `sudo apt install passt`.
+- microagent installed and `microagent doctor` passing — see [install](/getting-started/install/).
+- On Linux, `pasta` for the default unprivileged network mode. Homebrew installs it as a microagent dependency; on apt-based distros it's `sudo apt install passt`.
 - An Anthropic API key in `ANTHROPIC_API_KEY`. Sign up at [console.anthropic.com](https://console.anthropic.com) if you don't have one.
 
 ## Step 1 — create the workspace
@@ -31,7 +31,7 @@ The spec file does the heavy lifting: pulls a stock `python:3.13-slim` image, in
 
 The body's `process()` function runs an agentic loop: send the request to Claude with the three tools, execute any tool calls inside `/workspace`, feed the results back, loop until Claude returns a final answer. Prompt caching is on by default — the system prompt is stable across requests, so the body pays for it once and reads it back at ~10× cheaper afterward.
 
-The full body source is in [`examples/minimal-body/body.py`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body/body.py).
+The full body source is in [`examples/minimal-body/body.py`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/body.py).
 
 ## Step 2 — deliver the request
 
@@ -51,7 +51,7 @@ The first request asks for something concrete:
 }
 ```
 
-(Full file: [`examples/minimal-body/demo/input-001.json`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body/demo/input-001.json).)
+(Full file: [`examples/minimal-body/demo/input-001.json`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/demo/input-001.json).)
 
 The system prompt — already baked into the workspace by the spec — makes the agent take initiative:
 
@@ -111,8 +111,8 @@ microagent delete minimal-body
 
 The body's shape doesn't depend on which model it talks to. Sibling examples ship the same flow against OpenAI and Gemini — same protocol, same tools, same workspace, same recipe. Each variant has its own `microagent.yaml` and README:
 
-- [`examples/minimal-body-openai/`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body-openai) — OpenAI Chat Completions with function calling.
-- [`examples/minimal-body-gemini/`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body-gemini) — Google Gemini with function calling.
+- [`examples/minimal-body-openai/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-openai) — OpenAI Chat Completions with function calling.
+- [`examples/minimal-body-gemini/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-gemini) — Google Gemini with function calling.
 
 Swap the spec path and the API-key env var; everything else stays the same.
 
@@ -128,4 +128,4 @@ This recipe runs the agent against one request per restart and uses an env-var A
 - [`microagent.yaml`](/cli/spec/) — the full workspace spec reference.
 - [Glossary](/concepts/glossary/) — workspace, mediation, halt vs quarantine, etc.
 - [State and identity](/concepts/state-and-identity/) — how lifecycle events are emitted and what `microagent --json status` reports.
-- [`examples/minimal-body/`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body) — the body source.
+- [`examples/minimal-body/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body) — the body source.

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 func TestInstallFromPathAndVerify(t *testing.T) {

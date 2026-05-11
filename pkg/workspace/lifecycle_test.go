@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {

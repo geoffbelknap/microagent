@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/diagnostics"
-	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
-	firecrackersupervisor "github.com/geoffbelknap/microagent-kit/pkg/supervisors/firecracker"
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/diagnostics"
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 func TestMain(m *testing.M) {
@@ -301,8 +301,8 @@ func TestResolveFirecrackerPathUsesEnvironment(t *testing.T) {
 func TestDefaultFirecrackerPathResolvesHomebrewSymlink(t *testing.T) {
 	dir := t.TempDir()
 	cellarVersion := "test-version"
-	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", cellarVersion, "bin")
-	cellarLibexec := filepath.Join(dir, "Cellar", "microagent-kit", cellarVersion, "libexec")
+	cellarBin := filepath.Join(dir, "Cellar", "microagent", cellarVersion, "bin")
+	cellarLibexec := filepath.Join(dir, "Cellar", "microagent", cellarVersion, "libexec")
 	homebrewBin := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(cellarBin, 0o755); err != nil {
 		t.Fatal(err)
@@ -337,8 +337,8 @@ func TestDefaultFirecrackerPathResolvesHomebrewSymlink(t *testing.T) {
 func TestDefaultPackagedKernelPathResolvesHomebrewSymlink(t *testing.T) {
 	dir := t.TempDir()
 	cellarVersion := "test-version"
-	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", cellarVersion, "bin")
-	cellarLibexec := filepath.Join(dir, "Cellar", "microagent-kit", cellarVersion, "libexec")
+	cellarBin := filepath.Join(dir, "Cellar", "microagent", cellarVersion, "bin")
+	cellarLibexec := filepath.Join(dir, "Cellar", "microagent", cellarVersion, "libexec")
 	homebrewBin := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(cellarBin, 0o755); err != nil {
 		t.Fatal(err)
@@ -3380,8 +3380,8 @@ func TestCreateWorkspaceRootfsUsesPulledBaseline(t *testing.T) {
 
 func TestDefaultGuestInitPathResolvesHomebrewSymlink(t *testing.T) {
 	dir := t.TempDir()
-	cellarBin := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.14", "bin")
-	cellarLibexec := filepath.Join(dir, "Cellar", "microagent-kit", "0.1.14", "libexec")
+	cellarBin := filepath.Join(dir, "Cellar", "microagent", "0.1.14", "bin")
+	cellarLibexec := filepath.Join(dir, "Cellar", "microagent", "0.1.14", "libexec")
 	homebrewBin := filepath.Join(dir, "bin")
 	if err := os.MkdirAll(cellarBin, 0o755); err != nil {
 		t.Fatal(err)

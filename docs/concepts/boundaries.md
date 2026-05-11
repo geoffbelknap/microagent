@@ -1,9 +1,9 @@
 ---
 title: Boundaries
-description: What microagent-kit owns, and what it deliberately leaves to the caller.
+description: What microagent owns, and what it deliberately leaves to the caller.
 ---
 
-`microagent-kit` runs Linux workspaces inside microVMs. It stops at the VM
+`microagent` runs Linux workspaces inside microVMs. It stops at the VM
 boundary. Other systems own policy, identity, and intent.
 
 ## In this repo
@@ -29,7 +29,7 @@ boundary. Other systems own policy, identity, and intent.
 - Credentials and grants
 - User experience
 
-Your program supplies identity and bridge targets. microagent-kit provides the
+Your program supplies identity and bridge targets. microagent provides the
 kernel, rootfs conversion, VM state, and VM commands without taking over
 policy.
 

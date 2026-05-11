@@ -3,7 +3,7 @@ title: Apple VF supervisor protocol
 description: One JSON request in, one JSON response out.
 ---
 
-microagent-kit uses the supervisor concept for backend lifecycle work. The
+microagent uses the supervisor concept for backend lifecycle work. The
 Apple VF supervisor is packaged as a standalone executable,
 `microagent-applevf-supervisor`, so non-Swift callers can cross the
 Virtualization.framework boundary through a narrow JSON protocol.

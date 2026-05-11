@@ -49,7 +49,7 @@ microagent create \
   --id agent-1 \
   --kernel /tmp/kernel \
   --rootfs /tmp/busybox-rootfs.ext4 \
-  --state-dir /tmp/microagent-kit
+  --state-dir /tmp/microagent
 ```
 
 ## Related

@@ -43,7 +43,7 @@ find_firecracker() {
     return
   fi
   if command -v brew >/dev/null 2>&1; then
-    formula_prefix="$(brew --prefix microagent-kit 2>/dev/null || true)"
+    formula_prefix="$(brew --prefix microagent 2>/dev/null || true)"
     if [ -n "$formula_prefix" ] && [ -x "$formula_prefix/libexec/firecracker" ]; then
       printf '%s\n' "$formula_prefix/libexec/firecracker"
       return
@@ -66,7 +66,7 @@ find_kernel() {
     fi
   done
   if command -v brew >/dev/null 2>&1; then
-    formula_prefix="$(brew --prefix microagent-kit 2>/dev/null || true)"
+    formula_prefix="$(brew --prefix microagent 2>/dev/null || true)"
     candidate="$formula_prefix/libexec/kernels/firecracker/amd64/Image"
     if [ -n "$formula_prefix" ] && [ -f "$candidate" ]; then
       printf '%s\n' "$candidate"
@@ -92,7 +92,7 @@ esac
 
 firecracker="$(find_firecracker || true)"
 if [ ! -x "${firecracker:-}" ]; then
-  echo "firecracker binary not found; install microagent-kit or set MICROAGENT_FIRECRACKER" >&2
+  echo "firecracker binary not found; install microagent or set MICROAGENT_FIRECRACKER" >&2
   exit 2
 fi
 

@@ -13,20 +13,20 @@ identical; only the example folder and the API key env var change.
 
 ## Before you start
 
-1. [Install microagent-kit](/getting-started/install/) and run `microagent doctor`.
+1. [Install microagent](/getting-started/install/) and run `microagent doctor`.
 2. Pick a provider and set the matching API key:
 
    | Provider | Example folder | API key env var | Sign up |
    |---|---|---|---|
-   | Anthropic Claude | [`examples/minimal-body`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body) | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
-   | OpenAI | [`examples/minimal-body-openai`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body-openai) | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
-   | Google Gemini | [`examples/minimal-body-gemini`](https://github.com/geoffbelknap/microagent-kit/tree/main/examples/minimal-body-gemini) | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
+   | Anthropic Claude | [`examples/minimal-body`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body) | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+   | OpenAI | [`examples/minimal-body-openai`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-openai) | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
+   | Google Gemini | [`examples/minimal-body-gemini`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-gemini) | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
 
-3. Clone the microagent-kit repo to get the example sources:
+3. Clone the microagent repo to get the example sources:
 
    ```bash
-   git clone https://github.com/geoffbelknap/microagent-kit.git
-   cd microagent-kit
+   git clone https://github.com/geoffbelknap/microagent.git
+   cd microagent
    ```
 
 The rest of this page uses the **Anthropic** example. To follow along with

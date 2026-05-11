@@ -1,13 +1,13 @@
 ---
 title: Glossary
-description: Terms used throughout the microagent-kit docs and what they actually mean.
+description: Terms used throughout the microagent docs and what they actually mean.
 ---
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse — and the distinctions matter for what you can do next.
 
 ## Project
 
-- **microagent-kit** — the project: Go library, CLI, and backend supervisors.
+- **microagent** — the project: Go library, CLI, and backend supervisors.
 - **`microagent`** — the CLI binary. A thin shell over the Go library.
 - **library** — the Go packages (`pkg/workspace`, `pkg/rootfs`, and friends) that do the actual work. Importable from your own program when you'd rather not shell out.
 

@@ -44,7 +44,7 @@ microagent delete research --force
 Lower-level form:
 
 ```bash
-microagent delete agent-1 --state-dir /tmp/microagent-kit
+microagent delete agent-1 --state-dir /tmp/microagent
 ```
 
 ## Related

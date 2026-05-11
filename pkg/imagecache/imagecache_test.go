@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
 )
 
 func TestUpsertListTagRemoveAndPrune(t *testing.T) {

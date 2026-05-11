@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/kernel"
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
-	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
+	"github.com/geoffbelknap/microagent/pkg/kernel"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 type Options struct {
@@ -262,7 +262,7 @@ func ResolveGuestInitPath(opts Options) (string, error) {
 		return path, nil
 	}
 	name := "microagent-guestinit-" + opts.Arch
-	return "", fmt.Errorf("microagent guest init not found at %s; set guest init explicitly or install %s under the microagent-kit Homebrew libexec directory", path, name)
+	return "", fmt.Errorf("microagent guest init not found at %s; set guest init explicitly or install %s under the microagent Homebrew libexec directory", path, name)
 }
 
 func FirecrackerVersion(path string) string {

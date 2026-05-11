@@ -1,6 +1,6 @@
 ---
 title: Go library
-description: Use microagent-kit packages directly from Go.
+description: Use microagent packages directly from Go.
 ---
 
 *Want the smallest useful program first? See the [library quickstart](/getting-started/library/first-program/). This page is the package reference.*
@@ -18,7 +18,7 @@ supervisor request.
 
 ## Exported packages
 
-`microagent-kit` has these exported Go packages today:
+`microagent` has these exported Go packages today:
 
 | Package | Purpose |
 |---|---|
@@ -46,7 +46,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 func main() {
@@ -61,7 +61,7 @@ func main() {
 ```
 
 On Linux, Go callers can also use
-`github.com/geoffbelknap/microagent-kit/pkg/supervisors/firecracker` directly:
+`github.com/geoffbelknap/microagent/pkg/supervisors/firecracker` directly:
 
 ```go
 resp, err := firecrackersupervisor.Supervisor{}.Do(ctx, req)
@@ -87,7 +87,7 @@ package main
 import (
 	"context"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
 )
 
 func main() {
@@ -120,7 +120,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/workspace"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func main() {

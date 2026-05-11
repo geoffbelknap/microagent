@@ -1,6 +1,6 @@
 # Reporting a security issue
 
-Report security issues privately through GitHub's "Report a vulnerability" flow on the [microagent-kit repository](https://github.com/geoffbelknap/microagent-kit/security). Don't open public issues for security-sensitive reports.
+Report security issues privately through GitHub's "Report a vulnerability" flow on the [microagent repository](https://github.com/geoffbelknap/microagent/security). Don't open public issues for security-sensitive reports.
 
 Include in your report:
 
@@ -19,4 +19,4 @@ Security fixes target the latest released version and `main`. Older releases may
 
 ## Trust boundary
 
-For what `microagent-kit` does and doesn't enforce — kernel verification, image pinning, supervisor signing — see [`docs/security.md`](docs/security.md).
+For what `microagent` does and doesn't enforce — kernel verification, image pinning, supervisor signing — see [`docs/security.md`](docs/security.md).

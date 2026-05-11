@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 type Options struct {
