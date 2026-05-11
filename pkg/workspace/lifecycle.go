@@ -65,6 +65,7 @@ type RuntimeState struct {
 	Config                 vmkit.Config           `json:"config"`
 	PID                    int                    `json:"pid,omitempty"`
 	ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID,omitempty"`
+	VsockListenerPID       int                    `json:"vsockListenerPid,omitempty"`
 	SerialLogPath          string                 `json:"serialLogPath"`
 	SerialInputPath        string                 `json:"serialInputPath,omitempty"`
 	StartedAt              string                 `json:"startedAt,omitempty"`

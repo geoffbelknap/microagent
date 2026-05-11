@@ -3805,7 +3805,7 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 		KernelPath:      kernelPath,
 		GuestInitPath:   guestInitPath,
 		ImageRef:        "docker.io/library/busybox:1.36",
-		ServiceCommand:  "sleep 30",
+		ServiceCommand:  "sleep 60",
 		PrepareForStart: true,
 		Timeout:         time.Minute,
 		Keep:            true,
@@ -3827,16 +3827,13 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 		_, _ = workspace.Control(context.Background(), workspaceOpts, "delete")
 	})
 	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
-	if err := waitForSerialContains(ctx, filepath.Join(stateDir, "windows-hyperv-connect", "serial.log"), "shell helper listening", 15*time.Second); err != nil {
-		t.Fatal(err)
-	}
 
 	stdoutPath := filepath.Join(stateDir, "connect.out")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runConnect(ctx, []string{"windows-hyperv-connect", "--state-dir", stateDir, "--send", "echo CONNECT_SMOKE", "--timeout", "3"}, stdout)
+	err = runConnect(ctx, []string{"windows-hyperv-connect", "--state-dir", stateDir, "--send", "echo CONNECT_SMOKE", "--ready-timeout", "45", "--timeout", "3"}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}

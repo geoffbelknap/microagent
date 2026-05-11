@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+const clearVsockListenerPID = -1
 
 type eventFile struct {
 	Identity   vmkit.Identity `json:"identity"`
@@ -23,6 +26,7 @@ type runtimeState struct {
 	Config                 vmkit.Config           `json:"config"`
 	ComputeSystemID        string                 `json:"computeSystemID,omitempty"`
 	ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID,omitempty"`
+	VsockListenerPID       int                    `json:"vsockListenerPid,omitempty"`
 	SerialLogPath          string                 `json:"serialLogPath"`
 	StartedAt              string                 `json:"startedAt,omitempty"`
 	UpdatedAt              string                 `json:"updatedAt"`
@@ -31,6 +35,8 @@ type runtimeState struct {
 }
 
 var startRuntimeListenersHook = startRuntimeListeners
+var startRuntimeListenerProcessHook = startRuntimeListenerProcess
+var terminateRuntimeListenerProcessHook = terminateRuntimeListenerProcess
 
 func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
 	return s.startComputeSystem(ctx, req, true)
@@ -55,22 +61,35 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 	if err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("create failed: %s", err), err)
 	}
-	listeners, err := startRuntimeListenersHook(ctx, handle, req)
-	if err != nil {
-		return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("listener setup failed: %s", err), err)
-	}
-	if listeners != nil {
-		if foreground {
+	listenerPID := 0
+	var listeners runtimeListenerSet
+	if foreground {
+		listeners, err = startRuntimeListenersHook(ctx, handle, req)
+		if err != nil {
+			return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("listener setup failed: %s", err), err)
+		}
+		if listeners != nil {
 			defer listeners.Close()
+		}
+	} else if hasDetachedRuntimeListeners(req) {
+		if _, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateStarting, "starting windows-hyperv runtime listener helper", "", handle.ID, handle.RuntimeID); err != nil {
+			return vmkit.Response{}, err
+		}
+		listenerPID, err = startRuntimeListenerProcessHook(req)
+		if err != nil {
+			return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("listener helper failed: %s", err), err)
 		}
 	}
 	if err := adapter.Start(ctx, handle.ID); err != nil {
 		if listeners != nil {
 			_ = listeners.Close()
 		}
+		if listenerPID != 0 {
+			terminateRuntimeListenerProcessHook(listenerPID)
+		}
 		return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("start failed: %s", err), err)
 	}
-	event, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateRunning, "serial="+serialLogPath(req), "", handle.ID, handle.RuntimeID)
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateRunning, "serial="+serialLogPath(req), "", handle.ID, handle.RuntimeID, listenerPID)
 	if err != nil {
 		if listeners != nil && foreground {
 			_ = listeners.Close()
@@ -131,10 +150,11 @@ func (s Supervisor) stop(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
+	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
 	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("stop failed: %s", err), err)
 	}
-	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateStopped, "windows-hyperv compute system stopped", "", state.ComputeSystemID)
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system stopped", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
 	}
@@ -146,10 +166,11 @@ func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
+	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
 	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
 	}
-	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateHalted, "windows-hyperv compute system halted", "", state.ComputeSystemID)
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateHalted, "windows-hyperv compute system halted", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
 	}
@@ -161,7 +182,8 @@ func (s Supervisor) quarantine(req vmkit.Request) (vmkit.Response, error) {
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
-	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateQuarantined, "windows-hyperv compute system quarantined", "", state.ComputeSystemID)
+	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateQuarantined, "windows-hyperv compute system quarantined", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
 	}
@@ -173,10 +195,11 @@ func (s Supervisor) kill(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
+	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
 	if err := s.runtimeAdapter().Kill(ctx, state.ComputeSystemID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("kill failed: %s", err), err)
 	}
-	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateStopped, "windows-hyperv compute system killed", "", state.ComputeSystemID)
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system killed", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
 	}
@@ -188,10 +211,11 @@ func (s Supervisor) delete(ctx context.Context, req vmkit.Request) (vmkit.Respon
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
+	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
 	if err := s.runtimeAdapter().Delete(ctx, state.ComputeSystemID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("delete failed: %s", err), err)
 	}
-	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateStopped, "windows-hyperv compute system deleted", "", state.ComputeSystemID)
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system deleted", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
 	}
@@ -242,6 +266,10 @@ func writeRuntimeTransitionWithComputeID(req vmkit.Request, state vmkit.VMState,
 }
 
 func writeRuntimeTransitionWithComputeIDs(req vmkit.Request, state vmkit.VMState, detail, errorText, computeSystemID, computeSystemRuntimeID string) (vmkit.Event, error) {
+	return writeRuntimeTransitionWithComputeIDsAndListenerPID(req, state, detail, errorText, computeSystemID, computeSystemRuntimeID, 0)
+}
+
+func writeRuntimeTransitionWithComputeIDsAndListenerPID(req vmkit.Request, state vmkit.VMState, detail, errorText, computeSystemID, computeSystemRuntimeID string, vsockListenerPID int) (vmkit.Event, error) {
 	if req.Identity == nil || req.Config == nil {
 		return vmkit.Event{}, fmt.Errorf("windows-hyperv request is missing identity or config")
 	}
@@ -294,11 +322,19 @@ func writeRuntimeTransitionWithComputeIDs(req vmkit.Request, state vmkit.VMState
 			computeSystemRuntimeID = previous.ComputeSystemRuntimeID
 		}
 	}
+	if vsockListenerPID == clearVsockListenerPID {
+		vsockListenerPID = 0
+	} else if vsockListenerPID == 0 {
+		if previous, err := readRuntimeState(req); err == nil {
+			vsockListenerPID = previous.VsockListenerPID
+		}
+	}
 	runtime := runtimeState{
 		Event:                  fileEvent,
 		Config:                 *req.Config,
 		ComputeSystemID:        computeSystemID,
 		ComputeSystemRuntimeID: computeSystemRuntimeID,
+		VsockListenerPID:       vsockListenerPID,
 		SerialLogPath:          serialPath,
 		StartedAt:              startedAt,
 		UpdatedAt:              now.Format(time.RFC3339),
@@ -309,6 +345,104 @@ func writeRuntimeTransitionWithComputeIDs(req vmkit.Request, state vmkit.VMState
 		return vmkit.Event{}, err
 	}
 	return event, nil
+}
+
+func hasDetachedRuntimeListeners(req vmkit.Request) bool {
+	if req.Config == nil {
+		return false
+	}
+	for _, listener := range req.Config.VsockListeners {
+		if listener.Target != resultPath(req) {
+			return true
+		}
+	}
+	return false
+}
+
+func startRuntimeListenerProcess(req vmkit.Request) (int, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+	logPath := filepath.Join(runtimeDir(req), "hvsock-listener.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return 0, err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return 0, err
+	}
+	cmd := exec.Command(executable, "--windows-hyperv-listener", "--state-dir", req.Config.StateDir, "--name", req.Identity.RuntimeID)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = detachedListenerSysProcAttr()
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	_ = logFile.Close()
+	return pid, nil
+}
+
+func terminateRuntimeListenerProcess(pid int) {
+	if pid <= 0 {
+		return
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	_ = process.Kill()
+	_ = process.Release()
+}
+
+func RunRuntimeListeners(ctx context.Context, opts Options) error {
+	req, state, err := runtimeListenerRequest(opts)
+	if err != nil {
+		return err
+	}
+	handle := computeSystemHandle{ID: state.ComputeSystemID, RuntimeID: state.ComputeSystemRuntimeID}
+	listeners, err := startRuntimeListenersHook(ctx, handle, req)
+	if err != nil {
+		return err
+	}
+	if listeners != nil {
+		defer listeners.Close()
+	}
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- (Supervisor{}).runtimeAdapter().Wait(ctx, state.ComputeSystemID)
+	}()
+	select {
+	case err := <-waitCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func runtimeListenerRequest(opts Options) (vmkit.Request, runtimeState, error) {
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{
+			RuntimeID: opts.Name,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			StateDir: opts.StateDir,
+		},
+	}
+	state, err := readRuntimeState(req)
+	if err != nil {
+		return vmkit.Request{}, runtimeState{}, err
+	}
+	req.Identity = &state.Event.Identity
+	req.Config = &state.Config
+	if state.ComputeSystemID == "" || state.ComputeSystemRuntimeID == "" {
+		return vmkit.Request{}, runtimeState{}, fmt.Errorf("windows-hyperv runtime listener state is missing compute system IDs")
+	}
+	return req, state, nil
 }
 
 func readRuntimeState(req vmkit.Request) (runtimeState, error) {

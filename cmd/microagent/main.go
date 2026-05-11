@@ -25,6 +25,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	"gopkg.in/yaml.v3"
@@ -62,6 +63,9 @@ func main() {
 func run(ctx context.Context, args []string, stdout *os.File) error {
 	outputFormat = ""
 	args = parseGlobalFlags(args)
+	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
+		return runWindowsHyperVListener(ctx, args[1:])
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printHelp(stdout)
 		return nil
@@ -172,6 +176,20 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return encodeErr
 	}
 	return err
+}
+
+func runWindowsHyperVListener(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("windows-hyperv-listener", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stateDir := fs.String("state-dir", "", "State directory")
+	name := fs.String("name", "", "Workspace name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *stateDir == "" || *name == "" {
+		return fmt.Errorf("usage: microagent --windows-hyperv-listener --state-dir <dir> --name <name>")
+	}
+	return windowshyperv.RunRuntimeListeners(ctx, windowshyperv.Options{StateDir: *stateDir, Name: *name})
 }
 
 type doctorOptions struct {

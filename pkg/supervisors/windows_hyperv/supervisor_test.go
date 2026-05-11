@@ -183,10 +183,13 @@ func TestRunCommandWaitsForResultListenerAndReturnsResult(t *testing.T) {
 			Backend:   vmkit.BackendWindowsHyperV,
 		},
 		Config: &vmkit.Config{
-			KernelPath:     "C:\\microagent\\Image",
-			RootfsPath:     "C:\\microagent\\rootfs.vhd",
-			StateDir:       stateDir,
-			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")}},
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			VsockListeners: []vmkit.VsockListener{
+				{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")},
+				{Port: 2048, Target: "127.0.0.1:9900"},
+			},
 		},
 	}
 	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
@@ -206,13 +209,69 @@ func TestStartCommandDoesNotWaitForResultListener(t *testing.T) {
 		t.Skip("windows-hyperv start path is windows-only")
 	}
 	oldHook := startRuntimeListenersHook
-	t.Cleanup(func() { startRuntimeListenersHook = oldHook })
+	oldProcessHook := startRuntimeListenerProcessHook
+	t.Cleanup(func() {
+		startRuntimeListenersHook = oldHook
+		startRuntimeListenerProcessHook = oldProcessHook
+	})
 	waited := false
 	startRuntimeListenersHook = func(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
+		t.Fatal("detached start must use helper process instead of in-process listener")
+		return nil, nil
+	}
+	startRuntimeListenerProcessHook = func(req vmkit.Request) (int, error) {
 		return fakeListenerSet{wait: func() error {
 			waited = true
 			return fmt.Errorf("start must not wait for result")
-		}}, nil
+		}}.pid(), nil
+	}
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			VsockListeners: []vmkit.VsockListener{
+				{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")},
+				{Port: 2048, Target: "127.0.0.1:9900"},
+			},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("start resp=%#v err=%v", resp, err)
+	}
+	if waited {
+		t.Fatal("start waited for result listener")
+	}
+	if adapter.waits != 0 {
+		t.Fatalf("adapter waits = %d, want 0", adapter.waits)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Event.State != vmkit.StateRunning || state.ComputeSystemID != "fake" || state.ComputeSystemRuntimeID == "" || state.VsockListenerPID == 0 {
+		t.Fatalf("runtime state = %#v", state)
+	}
+}
+
+func TestStartCommandDoesNotLaunchListenerHelperForResultOnlyListener(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	oldProcessHook := startRuntimeListenerProcessHook
+	t.Cleanup(func() { startRuntimeListenerProcessHook = oldProcessHook })
+	startRuntimeListenerProcessHook = func(req vmkit.Request) (int, error) {
+		t.Fatal("result-only detached start should not launch listener helper")
+		return 0, nil
 	}
 
 	stateDir := t.TempDir()
@@ -236,16 +295,58 @@ func TestStartCommandDoesNotWaitForResultListener(t *testing.T) {
 	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
 		t.Fatalf("start resp=%#v err=%v", resp, err)
 	}
-	if waited {
-		t.Fatal("start waited for result listener")
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.VsockListenerPID != 0 {
+		t.Fatalf("result-only VsockListenerPID = %d, want 0", state.VsockListenerPID)
 	}
-	if adapter.waits != 0 {
-		t.Fatalf("adapter waits = %d, want 0", adapter.waits)
+}
+
+func TestStopTerminatesRuntimeListenerProcess(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	oldTerminateHook := terminateRuntimeListenerProcessHook
+	t.Cleanup(func() { terminateRuntimeListenerProcessHook = oldTerminateHook })
+	var terminated []int
+	terminateRuntimeListenerProcessHook = func(pid int) {
+		terminated = append(terminated, pid)
+	}
+
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "stop",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			StateDir: stateDir,
+		},
+	}
+	startReq := req
+	startReq.Command = "start"
+	startReq.Config.KernelPath = "C:\\microagent\\Image"
+	startReq.Config.RootfsPath = "C:\\microagent\\rootfs.vhd"
+	startReq.Config.VsockListeners = []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")}}
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(startReq, vmkit.StateRunning, "serial="+serialLogPath(startReq), "", "fake", "11111111-1111-1111-1111-111111111111", 4321)
+	if err != nil || event.State != vmkit.StateRunning {
+		t.Fatalf("writeRuntimeTransitionWithComputeIDsAndListenerPID event=%#v err=%v", event, err)
+	}
+	adapter := &fakeAdapter{}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("stop resp=%#v err=%v", resp, err)
+	}
+	if len(terminated) != 1 || terminated[0] != 4321 {
+		t.Fatalf("terminated listener pids = %#v, want [4321]", terminated)
 	}
 	var state runtimeState
 	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
-	if state.Event.State != vmkit.StateRunning || state.ComputeSystemID != "fake" || state.ComputeSystemRuntimeID == "" {
-		t.Fatalf("runtime state = %#v", state)
+	if state.VsockListenerPID != 0 {
+		t.Fatalf("VsockListenerPID after stop = %d, want 0", state.VsockListenerPID)
 	}
 }
 
@@ -599,6 +700,10 @@ var _ runtimeAdapter = (*fakeAdapter)(nil)
 
 type fakeListenerSet struct {
 	wait func() error
+}
+
+func (f fakeListenerSet) pid() int {
+	return 4321
 }
 
 func (f fakeListenerSet) Wait(ctx context.Context) error {
