@@ -29,6 +29,8 @@ type runtimeState struct {
 	Error           string                 `json:"error,omitempty"`
 }
 
+var startRuntimeListenersHook = startRuntimeListeners
+
 func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
 	adapter := s.runtimeAdapter()
 	spec := computeSystemSpec{
@@ -44,12 +46,33 @@ func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response,
 	if err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("create failed: %s", err), err)
 	}
+	listeners, err := startRuntimeListenersHook(ctx, handle, req)
+	if err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("listener setup failed: %s", err), err)
+	}
+	if listeners != nil {
+		defer listeners.Close()
+	}
 	if err := adapter.Start(ctx, handle.ID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("start failed: %s", err), err)
 	}
 	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateRunning, "serial="+serialLogPath(req), "", handle.ID)
 	if err != nil {
 		return vmkit.Response{}, err
+	}
+	if listeners != nil {
+		if err := listeners.Wait(ctx); err != nil {
+			return failRun(req, vmkit.StateFailed, fmt.Sprintf("result listener failed: %s", err), err)
+		}
+		event, err = writeRuntimeTransitionWithComputeID(req, vmkit.StateStopped, "windows-hyperv result received", "", handle.ID)
+		if err != nil {
+			return vmkit.Response{}, err
+		}
+		resp := vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}
+		if result, resultErr := readRuntimeResult(req, event.Identity); resultErr == nil {
+			resp.Result = &result
+		}
+		return resp, nil
 	}
 	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
 }

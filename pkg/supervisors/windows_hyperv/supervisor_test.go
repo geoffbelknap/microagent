@@ -155,6 +155,74 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 	}
 }
 
+func TestRunCommandWaitsForResultListenerAndReturnsResult(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv run path is windows-only")
+	}
+	oldHook := startRuntimeListenersHook
+	t.Cleanup(func() { startRuntimeListenersHook = oldHook })
+	startRuntimeListenersHook = func(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
+		return fakeListenerSet{wait: func() error {
+			return os.WriteFile(filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "result.json"), []byte(`{"exitCode":0,"stdout":"ok\n"}`+"\n"), 0o644)
+		}}, nil
+	}
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath:     "C:\\microagent\\Image",
+			RootfsPath:     "C:\\microagent\\rootfs.vhd",
+			StateDir:       stateDir,
+			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")}},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	if resp.Result == nil || resp.Result.Stdout != "ok\n" || resp.Result.Backend != vmkit.BackendWindowsHyperV {
+		t.Fatalf("result = %#v", resp.Result)
+	}
+}
+
+func TestRunCommandFailsClosedForUnsupportedWindowsHyperVVsockTarget(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv listener path is windows-only")
+	}
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath:     "C:\\microagent\\Image",
+			RootfsPath:     "C:\\microagent\\rootfs.vhd",
+			StateDir:       stateDir,
+			VsockListeners: []vmkit.VsockListener{{Port: 2048, Target: "127.0.0.1:9900"}},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "target must be the workspace result path") {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	if adapter.starts != 0 {
+		t.Fatalf("adapter starts = %d, want listener failure before start", adapter.starts)
+	}
+}
+
 func TestInspectAndControlCommandsUseRuntimeState(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv lifecycle path is windows-only")
@@ -275,6 +343,7 @@ func TestSupervisorUsesInjectedAdapterForHostAndCheck(t *testing.T) {
 
 type fakeAdapter struct {
 	host       vmkit.HostSupport
+	handle     computeSystemHandle
 	checks     int
 	creates    int
 	starts     int
@@ -300,6 +369,9 @@ func (f *fakeAdapter) Check(ctx context.Context) error {
 func (f *fakeAdapter) Create(ctx context.Context, spec computeSystemSpec) (computeSystemHandle, error) {
 	f.creates++
 	f.spec = spec
+	if f.handle.ID != "" {
+		return f.handle, nil
+	}
 	return computeSystemHandle{ID: "fake"}, nil
 }
 
@@ -328,6 +400,21 @@ func (f *fakeAdapter) Delete(ctx context.Context, id string) error {
 }
 
 var _ runtimeAdapter = (*fakeAdapter)(nil)
+
+type fakeListenerSet struct {
+	wait func() error
+}
+
+func (f fakeListenerSet) Wait(ctx context.Context) error {
+	if f.wait != nil {
+		return f.wait()
+	}
+	return nil
+}
+
+func (f fakeListenerSet) Close() error {
+	return nil
+}
 
 func TestInjectedAdapterHostErrorsBecomeStructuredResponses(t *testing.T) {
 	supervisor := Supervisor{adapter: failingAdapter{}}

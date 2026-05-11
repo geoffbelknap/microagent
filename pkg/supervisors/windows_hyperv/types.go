@@ -38,6 +38,11 @@ type computeSystemHandle struct {
 	RuntimeID string
 }
 
+type runtimeListenerSet interface {
+	Wait(ctx context.Context) error
+	Close() error
+}
+
 type hcsClient interface {
 	CreateComputeSystem(ctx context.Context, id string, document []byte) (computeSystemHandle, error)
 	StartComputeSystem(ctx context.Context, id string) error
