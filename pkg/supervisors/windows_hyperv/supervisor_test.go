@@ -185,6 +185,17 @@ func TestInspectAndControlCommandsUseRuntimeState(t *testing.T) {
 	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
 		t.Fatalf("inspect resp=%#v err=%v", resp, err)
 	}
+	resultPath := filepath.Join(stateDir, "agent-1", "result.json")
+	if err := os.WriteFile(resultPath, []byte(`{"exitCode":0,"stdout":"ok\n","stderr":"","error":""}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write result.json: %v", err)
+	}
+	resp, err = supervisor.Do(context.Background(), inspectReq)
+	if err != nil || !resp.OK || resp.Result == nil || resp.Result.ResultPath != resultPath || resp.Result.Stdout != "ok\n" {
+		t.Fatalf("inspect result resp=%#v err=%v", resp, err)
+	}
+	if resp.Readiness == nil || !resp.Readiness.ResultReady.Ready {
+		t.Fatalf("inspect readiness = %#v", resp.Readiness)
+	}
 
 	stopReq := req
 	stopReq.Command = "stop"

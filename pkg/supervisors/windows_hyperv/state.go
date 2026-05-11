@@ -64,6 +64,19 @@ func inspect(req vmkit.Request) (vmkit.Response, error) {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
 	resp := vmkit.Response{OK: state.Event.State != vmkit.StateFailed, Backend: vmkit.BackendWindowsHyperV, Event: &event, Readiness: &state.Readiness}
+	if result, resultErr := readRuntimeResult(req, event.Identity); resultErr == nil {
+		resp.Result = &result
+		now := time.Now().UTC()
+		if resp.Readiness == nil {
+			resp.Readiness = &vmkit.RuntimeReadiness{}
+		}
+		resp.Readiness.ResultReady = vmkit.ReadinessSignal{Ready: true, ObservedAt: &now, Detail: "result.json present"}
+	} else if !os.IsNotExist(resultErr) {
+		if resp.Readiness == nil {
+			resp.Readiness = &vmkit.RuntimeReadiness{}
+		}
+		resp.Readiness.ResultReady = vmkit.ReadinessSignal{Error: resultErr.Error()}
+	}
 	if state.Error != "" {
 		resp.Error = state.Error
 	}
@@ -207,6 +220,22 @@ func readRuntimeState(req vmkit.Request) (runtimeState, error) {
 	return state, nil
 }
 
+func readRuntimeResult(req vmkit.Request, identity vmkit.Identity) (vmkit.RuntimeResult, error) {
+	path := resultPath(req)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return vmkit.RuntimeResult{}, err
+	}
+	var result vmkit.RuntimeResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return vmkit.RuntimeResult{}, err
+	}
+	result.Identity = identity
+	result.Backend = vmkit.BackendWindowsHyperV
+	result.ResultPath = path
+	return result, nil
+}
+
 func eventFromFile(file eventFile) (vmkit.Event, error) {
 	observedAt := time.Now().UTC()
 	if file.ObservedAt != "" {
@@ -225,6 +254,10 @@ func runtimeDir(req vmkit.Request) string {
 
 func serialLogPath(req vmkit.Request) string {
 	return filepath.Join(runtimeDir(req), "serial.log")
+}
+
+func resultPath(req vmkit.Request) string {
+	return filepath.Join(runtimeDir(req), "result.json")
 }
 
 func writeJSONFile(path string, value any) error {
