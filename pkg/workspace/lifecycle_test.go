@@ -161,6 +161,31 @@ func TestBuildRootfsRequestCanUseServiceCommandForPreparedWorkspace(t *testing.T
 	}
 }
 
+func TestBuildRootfsRequestRunsSetupBeforeManagedService(t *testing.T) {
+	req := buildRootfsRequest(Options{
+		Name:            "homebridge",
+		StateDir:        "/tmp/microagent",
+		ImageRef:        "docker.io/library/ubuntu:24.04",
+		Architecture:    "arm64",
+		SizeMiB:         4096,
+		ResultPort:      1024,
+		PrepareForStart: true,
+		SetupCommands:   []string{"echo setup"},
+		ServiceCommand:  "/usr/local/bin/microagent-homebridge",
+	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
+
+	if req.Mode != "" {
+		t.Fatalf("Mode = %q, want setup foreground mode", req.Mode)
+	}
+	if req.ResultPort != 1024 {
+		t.Fatalf("ResultPort = %d, want 1024", req.ResultPort)
+	}
+	joined := strings.Join(req.Command, " ")
+	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, `"mode":"managed-service"`) {
+		t.Fatalf("Command = %#v", req.Command)
+	}
+}
+
 func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 	dir := t.TempDir()
 	kernelPath := filepath.Join(dir, "Image")

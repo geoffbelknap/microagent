@@ -785,7 +785,13 @@ func Command(opts Options) string {
 		lines = append(lines, execCommand)
 	}
 	if opts.PrepareForStart {
-		lines = append(lines, ResetGuestConfigCommand(ShellCommand(opts.Entrypoint), opts.Env, opts.ResultPort, ShellPort(opts), Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
+		finalCommand := ShellCommand(opts.Entrypoint)
+		finalMode := ""
+		if strings.TrimSpace(opts.ServiceCommand) != "" {
+			finalCommand = ShellCommand(opts.ServiceCommand)
+			finalMode = "managed-service"
+		}
+		lines = append(lines, ResetGuestConfigCommand(finalCommand, finalMode, opts.Env, opts.ResultPort, ShellPort(opts), Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -794,7 +800,7 @@ func Command(opts Options) string {
 }
 
 func BuildCommandAndPort(opts Options) ([]string, uint32) {
-	if strings.TrimSpace(opts.ServiceCommand) != "" {
+	if strings.TrimSpace(opts.ServiceCommand) != "" && !HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
 		return ShellCommand(opts.ServiceCommand), 0
 	}
 	if opts.PrepareForStart && !HasGuestCommand(opts) {
@@ -803,12 +809,13 @@ func BuildCommandAndPort(opts Options) ([]string, uint32) {
 	return ShellCommand(Command(opts)), opts.ResultPort
 }
 
-func ResetGuestConfigCommand(command []string, env map[string]string, port uint32, shellPort uint16, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
+func ResetGuestConfigCommand(command []string, mode string, env map[string]string, port uint32, shellPort uint16, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
 	if command == nil {
 		command = []string{}
 	}
 	data, err := json.Marshal(struct {
 		Command      []string             `json:"command"`
+		Mode         string               `json:"mode,omitempty"`
 		Env          []string             `json:"env,omitempty"`
 		Port         uint32               `json:"port"`
 		ShellPort    uint16               `json:"shellPort,omitempty"`
@@ -818,6 +825,7 @@ func ResetGuestConfigCommand(command []string, env map[string]string, port uint3
 		Hostname     string               `json:"hostname,omitempty"`
 	}{
 		Command:      command,
+		Mode:         strings.TrimSpace(mode),
 		Env:          envList(env),
 		Port:         port,
 		ShellPort:    shellPort,
@@ -839,6 +847,10 @@ func HasGuestCommand(opts Options) bool {
 	if strings.TrimSpace(opts.ExecCommand) != "" {
 		return true
 	}
+	return HasSetupCommand(opts)
+}
+
+func HasSetupCommand(opts Options) bool {
 	for _, command := range opts.SetupCommands {
 		if strings.TrimSpace(command) != "" {
 			return true

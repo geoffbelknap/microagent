@@ -3168,6 +3168,25 @@ func TestCreateWorkspaceRootfsCanUseServiceCommand(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceRootfsRunsSetupBeforeManagedService(t *testing.T) {
+	opts := workspaceOptions{
+		ImageRef:        "docker.io/library/ubuntu:24.04",
+		Architecture:    "arm64",
+		ResultPort:      1024,
+		PrepareForStart: true,
+		SetupCommands:   []string{"echo setup"},
+		ServiceCommand:  "/usr/local/bin/microagent-homebridge",
+	}
+	command, port := workspaceBuildCommandAndPort(opts)
+	if port != 1024 {
+		t.Fatalf("port = %d, want 1024", port)
+	}
+	joined := strings.Join(command, " ")
+	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, "/usr/local/bin/microagent-homebridge") || !strings.Contains(joined, `"mode":"managed-service"`) {
+		t.Fatalf("command = %#v", command)
+	}
+}
+
 func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"homebridge",

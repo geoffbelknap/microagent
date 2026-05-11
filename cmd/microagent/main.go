@@ -2484,7 +2484,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 	mode := ""
 	if opts.PrepareForStart && opts.UseImageCommand {
 		mode = "service"
-	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" {
+	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" && !workspace.HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
 		mode = "managed-service"
 	}
 	req := rootfs.BuildRequest{
@@ -4971,7 +4971,7 @@ func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
 }
 
 func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
-	return workspace.ResetGuestConfigCommand(command, env, port, 0, mounts, forwards, consoleShell, hostname)
+	return workspace.ResetGuestConfigCommand(command, "", env, port, 0, mounts, forwards, consoleShell, hostname)
 }
 
 func envList(env map[string]string) []string {

@@ -119,7 +119,7 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := WriteManifest(opts); err != nil {
 		return result, err
 	}
-	if HasGuestCommand(opts) && strings.TrimSpace(opts.ServiceCommand) == "" {
+	if HasGuestCommand(opts) && (strings.TrimSpace(opts.ServiceCommand) == "" || HasSetupCommand(opts) || strings.TrimSpace(opts.ExecCommand) != "") {
 		runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 		resp, runErr := runForeground(runCtx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
@@ -430,7 +430,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 	mode := ""
 	if opts.PrepareForStart && opts.UseImageCommand {
 		mode = "service"
-	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" {
+	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" && !HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
 		mode = "managed-service"
 	}
 	return rootfs.BuildRequest{
