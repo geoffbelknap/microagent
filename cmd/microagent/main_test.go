@@ -3111,6 +3111,44 @@ func TestWorkspaceBuildCommandUsesStartConfigWhenNoSetupIsNeeded(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceRootfsCanUseImageCommand(t *testing.T) {
+	opts := workspaceOptions{
+		ImageRef:        "local/busybox:baseline",
+		Architecture:    "arm64",
+		ResultPort:      1024,
+		PrepareForStart: true,
+		UseImageCommand: true,
+	}
+	command, port := workspaceBuildCommandAndPort(opts)
+	if len(command) != 0 {
+		t.Fatalf("command = %#v, want image command from OCI config", command)
+	}
+	if port != 0 {
+		t.Fatalf("port = %d, want 0", port)
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"homebridge",
+		"--image", "homebridge/homebridge:latest",
+		"--image-command",
+		"--network", "nat",
+		"--publish", "8581:8581",
+		"--size-mib", "4096",
+		"--restart", "always",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "homebridge" {
+		t.Fatalf("Name = %q", opts.Name)
+	}
+	if !opts.UseImageCommand {
+		t.Fatal("UseImageCommand = false")
+	}
+}
+
 func TestWorkspaceBuildCommandKeepsSetupResultPort(t *testing.T) {
 	command, port := workspaceBuildCommandAndPort(workspaceOptions{
 		Entrypoint:      "/app/entrypoint.sh",
@@ -3277,6 +3315,18 @@ func TestCopyConsoleInputNormalizesNewlines(t *testing.T) {
 	}
 }
 
+func TestCopyConsoleInputStripsBracketedPasteMarkers(t *testing.T) {
+	var dst bytes.Buffer
+	input := "\x1b[200~hostname -I\x1b[201~\n"
+	written, err := copyConsoleInput(&dst, strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	if written != int64(len("hostname -I\r")) || dst.String() != "hostname -I\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
 func TestCopyConsoleInputDetachesOnCtrlBracket(t *testing.T) {
 	var dst bytes.Buffer
 	written, err := copyConsoleInput(&dst, strings.NewReader("echo before\n"+string([]byte{consoleDetachByte})+"echo after\n"))
@@ -3284,6 +3334,29 @@ func TestCopyConsoleInputDetachesOnCtrlBracket(t *testing.T) {
 		t.Fatalf("copyConsoleInput: %v", err)
 	}
 	if written != int64(len("echo before\r")) || dst.String() != "echo before\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyConsoleInputDetachesOnCtrlPCtrlQ(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyConsoleInput(&dst, strings.NewReader("echo before\n"+string([]byte{consoleDetachPrefix, consoleDetachSuffix})+"echo after\n"))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	if written != int64(len("echo before\r")) || dst.String() != "echo before\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyConsoleInputKeepsCtrlPWithoutCtrlQ(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyConsoleInput(&dst, strings.NewReader("echo "+string([]byte{consoleDetachPrefix, 'x'})+"\n"))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	want := "echo " + string([]byte{consoleDetachPrefix, 'x'}) + "\r"
+	if written != int64(len(want)) || dst.String() != want {
 		t.Fatalf("written=%d dst=%q", written, dst.String())
 	}
 }

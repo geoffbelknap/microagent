@@ -133,7 +133,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 			ReadCloser: rc,
 			OnRead: func(n int64) {
 				layerBytes += n
-				progress.emitThrottled("extract-layers", fmt.Sprintf("layer %d/%d", i+1, len(manifest.Layers)), int64(i), int64(len(manifest.Layers)), fetchedLayerBytes+layerBytes, totalLayerBytes)
+				progress.emitThrottled("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes+layerBytes, totalLayerBytes)
 			},
 		}
 		if err := extractLayer(stageDir, layer.MediaType, reader); err != nil {
@@ -145,13 +145,13 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		}
 		provenance.LayerDigests = append(provenance.LayerDigests, layer.Digest.String())
 		fetchedLayerBytes += layerBytes
-		progress.emit("extract-layers", fmt.Sprintf("layer %d/%d", i+1, len(manifest.Layers)), int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes, totalLayerBytes)
+		progress.emit("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes, totalLayerBytes)
 	}
 
 	provenance.BuilderPhase = "write-init"
 	progress.emit("write-init", "writing guest init", 0, 0, 0, 0)
 	command := buildCommand(req, imageConfig)
-	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
+	if err := writeInit(stageDir, req.InitPath, command, req.Mode, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
 		return provenance, err
 	}
 	provenance.BuilderPhase = "write-files"
@@ -586,7 +586,7 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 	return nil
 }
 
-func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
+func writeInit(stageDir, initPath string, command []string, mode string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -603,7 +603,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		if err := copyFileToRoot(root, initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
-		return writeGuestRunConfig(stageDir, command, env, resultPort, mounts, forwards, consoleShell, hostname)
+		return writeGuestRunConfig(stageDir, command, mode, env, resultPort, mounts, forwards, consoleShell, hostname)
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -631,6 +631,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 
 type guestRunConfig struct {
 	Command      []string      `json:"command"`
+	Mode         string        `json:"mode,omitempty"`
 	Env          []string      `json:"env,omitempty"`
 	Port         uint32        `json:"port"`
 	Mounts       []Mount       `json:"mounts,omitempty"`
@@ -639,7 +640,7 @@ type guestRunConfig struct {
 	Hostname     string        `json:"hostname,omitempty"`
 }
 
-func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
+func writeGuestRunConfig(stageDir string, command []string, mode string, env map[string]string, resultPort uint32, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -652,7 +653,7 @@ func writeGuestRunConfig(stageDir string, command []string, env map[string]strin
 	if err := root.MkdirAll(path.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create guest config dir: %w", err)
 	}
-	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort, Mounts: mounts, HostForwards: forwards, ConsoleShell: strings.TrimSpace(consoleShell), Hostname: strings.TrimSpace(hostname)})
+	data, err := json.Marshal(guestRunConfig{Command: command, Mode: strings.TrimSpace(mode), Env: envList(env), Port: resultPort, Mounts: mounts, HostForwards: forwards, ConsoleShell: strings.TrimSpace(consoleShell), Hostname: strings.TrimSpace(hostname)})
 	if err != nil {
 		return err
 	}

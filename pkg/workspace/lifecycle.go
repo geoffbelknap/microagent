@@ -421,17 +421,22 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 
 func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 	command, resultPort := BuildCommandAndPort(opts)
+	mode := ""
+	if opts.PrepareForStart && opts.UseImageCommand {
+		mode = "service"
+	}
 	return rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
 		InitPath:       rootfs.DefaultInitPath,
 		Command:        command,
+		Mode:           mode,
 		ConsoleShell:   opts.ConsoleShell,
 		Hostname:       opts.Hostname,
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
-		NoImageCommand: opts.PrepareForStart && !HasGuestCommand(opts),
+		NoImageCommand: opts.PrepareForStart && !HasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:       filepath.Join(opts.StateDir, "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,

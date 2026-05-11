@@ -45,6 +45,8 @@ const (
 	defaultRestartPolicy       = workspace.DefaultRestartPolicy
 	defaultNetworkMode         = workspace.DefaultNetworkMode
 	consoleDetachByte          = byte(0x1d) // Ctrl-]
+	consoleDetachPrefix        = byte(0x10) // Ctrl-P
+	consoleDetachSuffix        = byte(0x11) // Ctrl-Q
 	consoleShellExitedMarker   = "microagent-init: console shell exited; closing connect session"
 )
 
@@ -1848,6 +1850,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
 	fs.StringVar(&opts.ExecCommand, "exec", "", "Shell command to run as guest init")
 	fs.StringVar(&opts.Entrypoint, "entrypoint", opts.Entrypoint, "Shell command to run when the workspace starts")
+	fs.BoolVar(&opts.UseImageCommand, "image-command", opts.UseImageCommand, "Run the image Entrypoint/Cmd when creating a prepared workspace")
 	fs.StringVar(&opts.ConsoleShell, "shell", opts.ConsoleShell, "Interactive console shell path")
 	fs.StringVar(&opts.Hostname, "hostname", opts.Hostname, "Guest hostname")
 	setupCommands := multiFlag(append([]string{}, opts.SetupCommands...))
@@ -2383,17 +2386,22 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		}
 	}
 	command, resultPort := workspaceBuildCommandAndPort(opts)
+	mode := ""
+	if opts.PrepareForStart && opts.UseImageCommand {
+		mode = "service"
+	}
 	req := rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
 		InitPath:       rootfs.DefaultInitPath,
 		Command:        command,
+		Mode:           mode,
 		ConsoleShell:   opts.ConsoleShell,
 		Hostname:       opts.Hostname,
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
-		NoImageCommand: opts.PrepareForStart && !workspaceHasGuestCommand(opts),
+		NoImageCommand: opts.PrepareForStart && !workspaceHasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:       filepath.Join(opts.StateDir, "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
@@ -3062,9 +3070,45 @@ func rootfsProgress(stdout *os.File, prefix string) rootfs.ProgressFunc {
 	if outputJSON(stdout) {
 		return nil
 	}
-	return func(event rootfs.ProgressEvent) {
-		fmt.Fprintf(os.Stderr, "%s: %s\n", prefix, formatProgressEvent(event))
+	printer := &progressPrinter{
+		out:         os.Stderr,
+		prefix:      prefix,
+		interactive: fileIsTerminal(os.Stderr),
 	}
+	return printer.print
+}
+
+type progressPrinter struct {
+	out         *os.File
+	prefix      string
+	interactive bool
+	active      bool
+}
+
+func (p *progressPrinter) print(event rootfs.ProgressEvent) {
+	line := fmt.Sprintf("%s: %s", p.prefix, formatProgressEvent(event))
+	if !p.interactive {
+		fmt.Fprintln(p.out, line)
+		return
+	}
+	if isProgressEvent(event) {
+		fmt.Fprintf(p.out, "\r\033[2K%s", line)
+		p.active = true
+		if event.Phase == "complete" {
+			fmt.Fprintln(p.out)
+			p.active = false
+		}
+		return
+	}
+	if p.active {
+		fmt.Fprintln(p.out)
+		p.active = false
+	}
+	fmt.Fprintln(p.out, line)
+}
+
+func isProgressEvent(event rootfs.ProgressEvent) bool {
+	return event.Total > 0 || event.TotalBytes > 0
 }
 
 func formatProgressEvent(event rootfs.ProgressEvent) string {
@@ -3094,6 +3138,9 @@ func formatProgressEvent(event rootfs.ProgressEvent) string {
 	}
 	bar := progressBar(done, total, 20)
 	if event.TotalBytes > 0 {
+		if event.Total > 0 {
+			return fmt.Sprintf("%s %s %s/%s (layer %d/%d)", bar, message, formatBytes(done), formatBytes(total), event.Current, event.Total)
+		}
 		return fmt.Sprintf("%s %s %s/%s", bar, message, formatBytes(done), formatBytes(total))
 	}
 	return fmt.Sprintf("%s %s %d/%d", bar, message, event.Current, event.Total)
@@ -3130,6 +3177,11 @@ func formatBytes(value int64) string {
 		}
 	}
 	return fmt.Sprintf("%.1fPiB", size/unit)
+}
+
+func fileIsTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func parseGlobalFlags(args []string) []string {
@@ -5013,22 +5065,19 @@ func consoleLooksReady(output string) bool {
 func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 	var total int64
 	buffer := make([]byte, 4096)
+	state := consoleInputState{}
 	for {
 		n, readErr := src.Read(buffer)
 		if n > 0 {
 			chunk := buffer[:n]
-			if idx := bytes.IndexByte(chunk, consoleDetachByte); idx >= 0 {
-				written, writeErr := writeConsoleInputChunk(dst, chunk[:idx])
-				total += written
-				if writeErr != nil {
-					return total, writeErr
-				}
-				return total, nil
-			}
-			written, writeErr := writeConsoleInputChunk(dst, chunk)
+			filtered, detach := filterConsoleInput(chunk, &state)
+			written, writeErr := writeConsoleInputChunk(dst, filtered)
 			total += written
 			if writeErr != nil {
 				return total, writeErr
+			}
+			if detach {
+				return total, nil
 			}
 		}
 		if readErr != nil {
@@ -5040,10 +5089,41 @@ func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 	}
 }
 
+type consoleInputState struct {
+	sawDetachPrefix bool
+}
+
+func filterConsoleInput(chunk []byte, state *consoleInputState) ([]byte, bool) {
+	if len(chunk) == 0 {
+		return chunk, false
+	}
+	var out []byte
+	for i := 0; i < len(chunk); i++ {
+		b := chunk[i]
+		if state.sawDetachPrefix {
+			state.sawDetachPrefix = false
+			if b == consoleDetachSuffix {
+				return out, true
+			}
+			out = append(out, consoleDetachPrefix)
+		}
+		if b == consoleDetachByte {
+			return out, true
+		}
+		if b == consoleDetachPrefix {
+			state.sawDetachPrefix = true
+			continue
+		}
+		out = append(out, b)
+	}
+	return out, false
+}
+
 func writeConsoleInputChunk(dst io.Writer, chunk []byte) (int64, error) {
 	if len(chunk) == 0 {
 		return 0, nil
 	}
+	chunk = stripBracketedPasteMarkers(chunk)
 	normalized := bytes.ReplaceAll(chunk, []byte("\n"), []byte("\r"))
 	written, err := dst.Write(normalized)
 	if err != nil {
@@ -5053,6 +5133,12 @@ func writeConsoleInputChunk(dst io.Writer, chunk []byte) (int64, error) {
 		return int64(written), io.ErrShortWrite
 	}
 	return int64(written), nil
+}
+
+func stripBracketedPasteMarkers(chunk []byte) []byte {
+	chunk = bytes.ReplaceAll(chunk, []byte("\x1b[200~"), nil)
+	chunk = bytes.ReplaceAll(chunk, []byte("\x1b[201~"), nil)
+	return chunk
 }
 
 func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, networkInterface string, publishes []string) (vmkit.Request, error) {
@@ -5200,7 +5286,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
+	case "-json", "-text", "-human", "-keep", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
 		return true
 	default:
 		return false
@@ -5495,6 +5581,7 @@ Options:
   -supervisor <path>    Override the supervisor path
   -json <path|- >       Read request JSON from a file or stdin
   -image <ref>          OCI image
+  -image-command        Run the image Entrypoint/Cmd instead of opening a shell
   -name <name>          Workspace name
   -id <id>              Workspace ID
   -entrypoint <command> Command to run on start

@@ -68,6 +68,7 @@ type Options struct {
 	SerialInput     bool
 	Verification    *vmkit.RuntimeVerification
 	Progress        rootfs.ProgressFunc
+	UseImageCommand bool
 }
 
 type Spec struct {

@@ -39,6 +39,7 @@ type BuildRequest struct {
 	InitPath       string            `json:"init_path,omitempty"`
 	InitBinaryPath string            `json:"init_binary_path,omitempty"`
 	Command        []string          `json:"command,omitempty"`
+	Mode           string            `json:"mode,omitempty"`
 	ConsoleShell   string            `json:"console_shell,omitempty"`
 	Hostname       string            `json:"hostname,omitempty"`
 	NoImageCommand bool              `json:"no_image_command,omitempty"`

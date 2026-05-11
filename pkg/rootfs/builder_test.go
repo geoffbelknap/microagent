@@ -13,7 +13,7 @@ import (
 
 func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	dir := t.TempDir()
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello world"}, map[string]string{
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello world"}, "", map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
 	}, "", 0, nil, nil, "", "research")
@@ -48,7 +48,7 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	if err := os.WriteFile(initBinary, []byte("guest-init"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, map[string]string{
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, "service", map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
 	}, initBinary, 1024, []Mount{{Device: "/dev/vdb", Mountpoint: "/config", Mode: "ro"}}, []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}, "/bin/bash", "research")
@@ -68,6 +68,7 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	}
 	text := string(config)
 	if !strings.Contains(text, `"port":1024`) ||
+		!strings.Contains(text, `"mode":"service"`) ||
 		!strings.Contains(text, `"/bin/echo"`) ||
 		!strings.Contains(text, `"GOOD_ENV=ok"`) ||
 		!strings.Contains(text, `"/config"`) ||
@@ -215,7 +216,7 @@ func TestWriteInitDoesNotFollowStageSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "sbin")); err != nil {
 		t.Fatal(err)
 	}
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, nil, "", 0, nil, nil, "", "")
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, "", nil, "", 0, nil, nil, "", "")
 	if err == nil {
 		t.Fatal("expected symlinked init parent to be rejected")
 	}

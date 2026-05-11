@@ -110,6 +110,28 @@ func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 	}
 }
 
+func TestBuildRootfsRequestCanUseImageCommandForPreparedWorkspace(t *testing.T) {
+	req := buildRootfsRequest(Options{
+		Name:            "homebridge",
+		StateDir:        "/tmp/microagent",
+		ImageRef:        "homebridge/homebridge:latest",
+		Architecture:    "arm64",
+		SizeMiB:         4096,
+		PrepareForStart: true,
+		UseImageCommand: true,
+	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
+
+	if req.NoImageCommand {
+		t.Fatal("NoImageCommand = true, want image Entrypoint/Cmd preserved")
+	}
+	if req.Mode != "service" {
+		t.Fatalf("Mode = %q, want service", req.Mode)
+	}
+	if len(req.Command) != 0 {
+		t.Fatalf("Command = %#v, want OCI image command", req.Command)
+	}
+}
+
 func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 	dir := t.TempDir()
 	kernelPath := filepath.Join(dir, "Image")

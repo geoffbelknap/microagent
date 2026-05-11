@@ -55,6 +55,9 @@ type result struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "host-forward-helper" {
+		os.Exit(runHostForwardHelper(os.Args[2:]))
+	}
 	code := run()
 	poweroff()
 	os.Exit(code)
@@ -118,7 +121,7 @@ func run() int {
 		_ = sendResult(cfg.Port, res)
 		return code
 	}
-	if err := startHostForwards(cfg.HostForwards); err != nil {
+	if err := startConfiguredHostForwards(cfg); err != nil {
 		code = 127
 		res.Error = err.Error()
 		fmt.Fprintln(os.Stderr, err)
@@ -127,7 +130,31 @@ func run() int {
 		_ = sendResult(cfg.Port, res)
 		return code
 	}
-	if len(cfg.Command) > 0 {
+	if cfg.Mode == "service" && len(cfg.Command) > 0 {
+		if err := attachConsole(); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = sendResult(cfg.Port, res)
+			return code
+		}
+		if err := startInteractiveShell(guestEnv(cfg.Env), cfg.ConsoleShell); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = sendResult(cfg.Port, res)
+			return code
+		}
+		if err := execServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+		}
+	} else if len(cfg.Command) > 0 {
 		log.Printf("microagent-init: handing off to %v", cfg.Command)
 		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 		cmd.Env = guestEnv(cfg.Env)
@@ -163,6 +190,36 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 	}
 	return code
+}
+
+func execServiceCommand(command []string, env []string) error {
+	log.Printf("microagent-init: exec service command %v", command)
+	closeExtraFiles()
+	return syscall.Exec(command[0], command, env)
+}
+
+func startInteractiveShell(env []string, shellPath string) error {
+	command, err := consoleShellCommand(shellPath)
+	if err != nil {
+		return err
+	}
+	log.Printf("microagent-init: starting console shell %v", command)
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start console shell: %w", err)
+	}
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			log.Printf("microagent-init: console shell exited: %v", err)
+			return
+		}
+		log.Println(consoleShellExitedMarker)
+	}()
+	return nil
 }
 
 func configureHostname(hostname string) error {
@@ -439,27 +496,106 @@ func startHostForwards(forwards []hostForward) error {
 		}
 	}
 	for _, forward := range forwards {
-		if forward.Protocol != "" && forward.Protocol != "tcp" {
-			return fmt.Errorf("host forward protocol must be tcp")
-		}
-		if forward.HostPort == 0 || forward.GuestPort == 0 {
-			return fmt.Errorf("host forward ports must be positive")
-		}
-		fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+		fd, err := openHostForwardListener(forward)
 		if err != nil {
-			return fmt.Errorf("open vsock listener for host port %d: %w", forward.HostPort, err)
-		}
-		if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(forward.HostPort)}); err != nil {
-			_ = unix.Close(fd)
-			return fmt.Errorf("bind vsock listener for host port %d: %w", forward.HostPort, err)
-		}
-		if err := unix.Listen(fd, 128); err != nil {
-			_ = unix.Close(fd)
-			return fmt.Errorf("listen on vsock host port %d: %w", forward.HostPort, err)
+			return err
 		}
 		go serveHostForward(fd, forward.GuestPort)
 	}
 	return nil
+}
+
+func startConfiguredHostForwards(cfg config) error {
+	if cfg.Mode == "service" && len(cfg.Command) > 0 {
+		return startHostForwardHelpers(cfg.HostForwards)
+	}
+	return startHostForwards(cfg.HostForwards)
+}
+
+func startHostForwardHelpers(forwards []hostForward) error {
+	if len(forwards) > 0 {
+		if err := bringUpLoopback(); err != nil {
+			return err
+		}
+	}
+	for _, forward := range forwards {
+		if err := validateHostForward(forward); err != nil {
+			return err
+		}
+		cmd := exec.Command(os.Args[0], "host-forward-helper", strconv.Itoa(int(forward.HostPort)), strconv.Itoa(int(forward.GuestPort)), nonEmpty(forward.Protocol, "tcp"))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start host forward helper for host port %d: %w", forward.HostPort, err)
+		}
+	}
+	return nil
+}
+
+func runHostForwardHelper(args []string) int {
+	if len(args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: microagent-init host-forward-helper <host-port> <guest-port> <protocol>")
+		return 127
+	}
+	hostPort, err := parseUint16(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse host port: %v\n", err)
+		return 127
+	}
+	guestPort, err := parseUint16(args[1])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse guest port: %v\n", err)
+		return 127
+	}
+	forward := hostForward{Protocol: args[2], HostPort: hostPort, GuestPort: guestPort}
+	fd, err := openHostForwardListener(forward)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	serveHostForward(fd, forward.GuestPort)
+	return 0
+}
+
+func openHostForwardListener(forward hostForward) (int, error) {
+	if err := validateHostForward(forward); err != nil {
+		return -1, err
+	}
+	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+	if err != nil {
+		return -1, fmt.Errorf("open vsock listener for host port %d: %w", forward.HostPort, err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(forward.HostPort)}); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("bind vsock listener for host port %d: %w", forward.HostPort, err)
+	}
+	if err := unix.Listen(fd, 128); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("listen on vsock host port %d: %w", forward.HostPort, err)
+	}
+	return fd, nil
+}
+
+func validateHostForward(forward hostForward) error {
+	if forward.Protocol != "" && forward.Protocol != "tcp" {
+		return fmt.Errorf("host forward protocol must be tcp")
+	}
+	if forward.HostPort == 0 || forward.GuestPort == 0 {
+		return fmt.Errorf("host forward ports must be positive")
+	}
+	return nil
+}
+
+func parseUint16(raw string) (uint16, error) {
+	value, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 16)
+	return uint16(value), err
+}
+
+func nonEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func configureBootNetwork() error {
@@ -926,6 +1062,20 @@ func attachConsole() error {
 		return nil
 	}
 	return fmt.Errorf("open guest console: /dev/hvc0 and /dev/console are unavailable")
+}
+
+func closeExtraFiles() {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		fd, err := strconv.Atoi(entry.Name())
+		if err != nil || fd <= 2 {
+			continue
+		}
+		_ = unix.Close(fd)
+	}
 }
 
 func readConfig() (config, error) {
