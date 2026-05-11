@@ -59,7 +59,7 @@ func (a defaultAdapter) hcsClient() hcsClient {
 	if a.client != nil {
 		return a.client
 	}
-	return unsupportedHCSClient{}
+	return newVMComputeClient()
 }
 
 func errHCSNotImplemented(operation string) error {

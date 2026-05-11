@@ -56,7 +56,7 @@ func TestCheckCommandFailsClosedOffWindows(t *testing.T) {
 	}
 }
 
-func TestLifecycleCommandsFailClosedBeforeHCSImplementation(t *testing.T) {
+func TestLifecycleCommandsFailClosedWithoutRunnableHCSGuest(t *testing.T) {
 	req := vmkit.Request{
 		Command: "run",
 		Identity: &vmkit.Identity{
@@ -75,7 +75,7 @@ func TestLifecycleCommandsFailClosedBeforeHCSImplementation(t *testing.T) {
 	if err == nil || resp.OK {
 		t.Fatalf("run resp=%#v err=%v, want fail-closed error", resp, err)
 	}
-	if runtime.GOOS == "windows" && !strings.Contains(resp.Error, "not implemented yet") {
+	if runtime.GOOS == "windows" && !strings.Contains(resp.Error, "windows-hyperv HCS") {
 		t.Fatalf("windows error = %q", resp.Error)
 	}
 	if runtime.GOOS != "windows" && !strings.Contains(resp.Error, "only supported on windows") {
