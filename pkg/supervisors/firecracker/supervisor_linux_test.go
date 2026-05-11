@@ -263,6 +263,80 @@ func TestStartVsockListenersWritesGuestResult(t *testing.T) {
 	}
 }
 
+func TestInspectReturnsRuntimeMetadata(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath:  "/tmp/kernel",
+			RootfsPath:  "/tmp/rootfs.ext4",
+			StateDir:    dir,
+			MemoryMiB:   512,
+			CPUCount:    2,
+			SerialInput: true,
+			Network: &vmkit.NetworkConfig{
+				Mode:   "nat",
+				IP:     "10.43.1.2/29",
+				Subnet: "10.43.1.0/29",
+			},
+			Mediation: &vmkit.MediationConfig{
+				Enabled:    true,
+				Required:   true,
+				Port:       2048,
+				Target:     "127.0.0.1:9900",
+				FailClosed: true,
+			},
+		},
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "agent-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(serialInputPath(opts), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := `{"started_at":"2026-05-02T00:00:00Z","exited_at":"2026-05-02T00:00:01Z","exit_code":0,"stdout":"ok\n"}`
+	if err := os.WriteFile(filepath.Join(dir, "agent-1", "result.json"), []byte(result), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "inspect",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err != nil {
+		t.Fatalf("inspect: resp=%+v err=%v", resp, err)
+	}
+	if resp.Readiness == nil || !resp.Readiness.GuestReady.Ready || !resp.Readiness.ShellReady.Ready || !resp.Readiness.ResultReady.Ready || !resp.Readiness.MediationReady.Ready {
+		t.Fatalf("readiness = %#v", resp.Readiness)
+	}
+	if resp.Result == nil || resp.Result.ExitCode != 0 || resp.Result.CompletedAt != "2026-05-02T00:00:01Z" || resp.Result.Stdout != "ok\n" {
+		t.Fatalf("result = %#v", resp.Result)
+	}
+	if resp.Network == nil || resp.Network.Mode != "nat" || resp.Network.IP != "10.43.1.2/29" {
+		t.Fatalf("network = %#v", resp.Network)
+	}
+	if resp.Mediation == nil || !resp.Mediation.Required || !resp.Mediation.FailClosed {
+		t.Fatalf("mediation = %#v", resp.Mediation)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Readiness.GuestReady.Ready || !state.Readiness.ShellReady.Ready || !state.Readiness.ResultReady.Ready || !state.Readiness.MediationReady.Ready {
+		t.Fatalf("persisted readiness = %#v", state.Readiness)
+	}
+}
+
 func TestSerialInputFIFOUsesFIFOType(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
 	file, err := openSerialInputFIFO(opts)
