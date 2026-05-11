@@ -132,8 +132,29 @@ func (c vmcomputeClient) CreateComputeSystem(ctx context.Context, id string, doc
 	return computeSystemHandle{ID: id}, nil
 }
 
+func (c vmcomputeClient) GrantVMAccess(ctx context.Context, vmID, path string) error {
+	if vmID == "" {
+		return fmt.Errorf("windows-hyperv HCS grant vm access requires vm ID")
+	}
+	if path == "" {
+		return fmt.Errorf("windows-hyperv HCS grant vm access requires path")
+	}
+	vmIDPtr, err := syscall.UTF16PtrFromString(vmID)
+	if err != nil {
+		return hcsCallError("grant vm access", "", err)
+	}
+	pathPtr, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return hcsCallError("grant vm access", "", err)
+	}
+	if err := callHRESULT(procGrantVMAccess, uintptr(unsafe.Pointer(vmIDPtr)), uintptr(unsafe.Pointer(pathPtr))); err != nil {
+		return hcsCallError("grant vm access", "", err)
+	}
+	return nil
+}
+
 func computeSystemRuntimeID(ctx context.Context, api vmcomputeAPI, handle uintptr) (string, error) {
-	query := `{"PropertyTypes":["Basic"]}`
+	query := `{}`
 	properties, result, err := api.GetComputeSystemProperties(ctx, handle, query)
 	if err != nil {
 		return "", hcsCallError("get properties", result, err)
@@ -149,13 +170,13 @@ func computeSystemRuntimeID(ctx context.Context, api vmcomputeAPI, handle uintpt
 
 func (c vmcomputeClient) StartComputeSystem(ctx context.Context, id string) error {
 	return c.withComputeSystem(ctx, id, "start", hcsNotificationSystemStartCompleted, func(handle uintptr) (string, error) {
-		return c.vmcomputeAPI().StartComputeSystem(ctx, handle, "{}")
+		return c.vmcomputeAPI().StartComputeSystem(ctx, handle, "")
 	})
 }
 
 func (c vmcomputeClient) ShutdownComputeSystem(ctx context.Context, id string) error {
 	return c.withComputeSystem(ctx, id, "shutdown", 0, func(handle uintptr) (string, error) {
-		return c.vmcomputeAPI().ShutdownComputeSystem(ctx, handle, "{}")
+		return c.vmcomputeAPI().ShutdownComputeSystem(ctx, handle, "")
 	})
 }
 
@@ -175,7 +196,7 @@ func (c vmcomputeClient) WaitComputeSystem(ctx context.Context, id string) error
 
 func (c vmcomputeClient) terminateComputeSystem(ctx context.Context, id, operation string) error {
 	return c.withComputeSystem(ctx, id, operation, 0, func(handle uintptr) (string, error) {
-		return c.vmcomputeAPI().TerminateComputeSystem(ctx, handle, "{}")
+		return c.vmcomputeAPI().TerminateComputeSystem(ctx, handle, "")
 	})
 }
 
@@ -312,6 +333,7 @@ var (
 	procHcsTerminateComputeSystem          = vmcomputeDLL.NewProc("HcsTerminateComputeSystem")
 	procHcsRegisterComputeSystemCallback   = vmcomputeDLL.NewProc("HcsRegisterComputeSystemCallback")
 	procHcsUnregisterComputeSystemCallback = vmcomputeDLL.NewProc("HcsUnregisterComputeSystemCallback")
+	procGrantVMAccess                      = vmcomputeDLL.NewProc("GrantVmAccess")
 )
 
 func (windowsVMComputeAPI) CreateComputeSystem(ctx context.Context, id, document string) (uintptr, string, error) {

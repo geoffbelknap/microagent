@@ -26,8 +26,9 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 		t.Fatal(err)
 	}
 	var doc struct {
-		Owner         string `json:"Owner"`
-		SchemaVersion struct {
+		Owner                             string `json:"Owner"`
+		ShouldTerminateOnLastHandleClosed bool   `json:"ShouldTerminateOnLastHandleClosed"`
+		SchemaVersion                     struct {
 			Major int `json:"Major"`
 			Minor int `json:"Minor"`
 		} `json:"SchemaVersion"`
@@ -65,6 +66,9 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 	}
 	if doc.Owner != "microagent" || doc.SchemaVersion.Major != 2 || doc.SchemaVersion.Minor != 1 {
 		t.Fatalf("document header = %#v", doc)
+	}
+	if doc.ShouldTerminateOnLastHandleClosed {
+		t.Fatal("document should keep the compute system alive after create handle close")
 	}
 	if doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelFilePath != "C:\\microagent\\Image" {
 		t.Fatalf("kernel path = %q", doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelFilePath)
@@ -190,15 +194,49 @@ func TestDefaultAdapterCreatePassesDocumentToHCSClient(t *testing.T) {
 	}
 }
 
+func TestDefaultAdapterCreateGrantsVMAccessToRootVHD(t *testing.T) {
+	client := &fakeHCSClient{
+		handle: computeSystemHandle{
+			ID:        "agent-1",
+			RuntimeID: "11111111-1111-1111-1111-111111111111",
+		},
+	}
+	_, err := (defaultAdapter{client: client}).Create(context.Background(), computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.grantVMID != "11111111-1111-1111-1111-111111111111" || client.grantPath != "C:\\microagent\\rootfs.vhd" {
+		t.Fatalf("grant vm access = (%q, %q), want runtime ID and root VHD path", client.grantVMID, client.grantPath)
+	}
+}
+
 type fakeHCSClient struct {
 	createdID string
 	document  []byte
+	handle    computeSystemHandle
+	grantVMID string
+	grantPath string
 }
 
 func (f *fakeHCSClient) CreateComputeSystem(ctx context.Context, id string, document []byte) (computeSystemHandle, error) {
 	f.createdID = id
 	f.document = append([]byte{}, document...)
+	if f.handle.ID != "" || f.handle.RuntimeID != "" {
+		return f.handle, nil
+	}
 	return computeSystemHandle{ID: id}, nil
+}
+
+func (f *fakeHCSClient) GrantVMAccess(ctx context.Context, vmID, path string) error {
+	f.grantVMID = vmID
+	f.grantPath = path
+	return nil
 }
 
 func (f *fakeHCSClient) StartComputeSystem(ctx context.Context, id string) error {

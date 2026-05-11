@@ -305,6 +305,10 @@ func configureHostname(hostname string) error {
 		return fmt.Errorf("set hostname %s: %w", hostname, err)
 	}
 	if err := os.WriteFile("/etc/hostname", []byte(hostname+"\n"), 0o644); err != nil {
+		if errors.Is(err, syscall.EROFS) {
+			log.Printf("microagent-init: /etc/hostname is read-only; kernel hostname set to %s", hostname)
+			return nil
+		}
 		return fmt.Errorf("write /etc/hostname: %w", err)
 	}
 	log.Printf("microagent-init: hostname set to %s", hostname)

@@ -46,6 +46,7 @@ type runtimeListenerSet interface {
 
 type hcsClient interface {
 	CreateComputeSystem(ctx context.Context, id string, document []byte) (computeSystemHandle, error)
+	GrantVMAccess(ctx context.Context, vmID, path string) error
 	StartComputeSystem(ctx context.Context, id string) error
 	ShutdownComputeSystem(ctx context.Context, id string) error
 	KillComputeSystem(ctx context.Context, id string) error

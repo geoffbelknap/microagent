@@ -986,7 +986,7 @@ func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.
 	resp, err := Dispatch(ctx, opts, req)
 	state := vmkit.StateStopped
 	errorText := ""
-	if opts.Backend == vmkit.BackendFirecracker {
+	if backendOwnsRuntimeState(opts.Backend) {
 		return resp, err
 	}
 	if err != nil || !resp.OK {
@@ -1000,6 +1000,10 @@ func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.
 		return resp, stateErr
 	}
 	return resp, err
+}
+
+func backendOwnsRuntimeState(backend string) bool {
+	return backend == vmkit.BackendFirecracker || backend == vmkit.BackendWindowsHyperV
 }
 
 func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {

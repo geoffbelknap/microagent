@@ -102,6 +102,17 @@ func TestValidateHostnameRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestBackendOwnsRuntimeState(t *testing.T) {
+	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendWindowsHyperV} {
+		if !backendOwnsRuntimeState(backend) {
+			t.Fatalf("backendOwnsRuntimeState(%q) = false, want true", backend)
+		}
+	}
+	if backendOwnsRuntimeState(vmkit.BackendAppleVF) {
+		t.Fatalf("backendOwnsRuntimeState(%q) = true, want false", vmkit.BackendAppleVF)
+	}
+}
+
 func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 	req := buildRootfsRequest(Options{
 		Name:         "research",

@@ -30,6 +30,9 @@ func TestVMComputeClientCreatePassesDocumentAndClosesHandle(t *testing.T) {
 	if api.createdID != "agent-1" || api.createdDocument != `{"Owner":"microagent"}` {
 		t.Fatalf("create id=%q document=%q", api.createdID, api.createdDocument)
 	}
+	if api.propertiesQuery != "{}" {
+		t.Fatalf("properties query = %q, want empty default query", api.propertiesQuery)
+	}
 	if len(api.closedHandles) != 1 || api.closedHandles[0] != 42 {
 		t.Fatalf("closed handles = %#v", api.closedHandles)
 	}
@@ -59,6 +62,9 @@ func TestVMComputeClientControlCommandsOpenOperateAndClose(t *testing.T) {
 			}
 			if len(api.operations) != 1 || api.operations[0] != tt.want {
 				t.Fatalf("operations = %#v, want %q", api.operations, tt.want)
+			}
+			if len(api.operationOptions) != 1 || api.operationOptions[0] != "" {
+				t.Fatalf("operation options = %#v, want empty string", api.operationOptions)
 			}
 			if len(api.closedHandles) != 1 || api.closedHandles[0] != 77 {
 				t.Fatalf("closed handles = %#v", api.closedHandles)
@@ -182,10 +188,12 @@ type fakeVMComputeAPI struct {
 	createdDocument    string
 	openedID           string
 	operations         []string
+	operationOptions   []string
 	closedHandles      []uintptr
 	createErr          error
 	startErr           error
 	propertiesResponse string
+	propertiesQuery    string
 	callbackContext    uintptr
 	registers          int
 	unregisters        int
@@ -209,20 +217,24 @@ func (f *fakeVMComputeAPI) CloseComputeSystem(ctx context.Context, handle uintpt
 
 func (f *fakeVMComputeAPI) StartComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	f.operations = append(f.operations, "start")
+	f.operationOptions = append(f.operationOptions, options)
 	return "", f.startErr
 }
 
 func (f *fakeVMComputeAPI) ShutdownComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	f.operations = append(f.operations, "shutdown")
+	f.operationOptions = append(f.operationOptions, options)
 	return "", nil
 }
 
 func (f *fakeVMComputeAPI) TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	f.operations = append(f.operations, "terminate")
+	f.operationOptions = append(f.operationOptions, options)
 	return "", nil
 }
 
 func (f *fakeVMComputeAPI) GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error) {
+	f.propertiesQuery = query
 	return f.propertiesResponse, "", nil
 }
 

@@ -155,6 +155,9 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	if err := writeInit(stageDir, req.InitPath, command, req.Mode, req.Env, req.InitBinaryPath, req.ResultPort, req.ShellPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
 		return provenance, err
 	}
+	if err := ensureGuestRuntimeDirs(stageDir); err != nil {
+		return provenance, err
+	}
 	provenance.BuilderPhase = "write-files"
 	progress.emit("write-files", "writing declared files", 0, 0, 0, 0)
 	if err := writeDeclaredFiles(stageDir, req.Files); err != nil {
@@ -523,7 +526,19 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 			return err
 		}
 		_ = root.RemoveAll(name)
-		return root.Symlink(linkTarget, name)
+		if err := root.Symlink(linkTarget, name); err != nil {
+			if !canFallbackToSymlinkMarker(err) {
+				return err
+			}
+			if err := writeSymlinkMarker(filepath.Join(root.Name(), filepath.FromSlash(name)), linkTarget); err != nil {
+				return err
+			}
+			return recordStageMode(root, name, 0o777)
+		}
+		if err := recordStageMode(root, name, 0o777); err != nil {
+			return err
+		}
+		return nil
 	case tar.TypeLink:
 		linkTarget, err := safeGuestRel(header.Linkname, false)
 		if err != nil {
@@ -539,7 +554,10 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 	default:
 		return nil
 	}
-	return root.Chmod(name, mode)
+	if err := root.Chmod(name, mode); err != nil {
+		return err
+	}
+	return recordStageMode(root, name, mode)
 }
 
 var errRootPath = errors.New("OCI layer path is root")
@@ -774,7 +792,10 @@ func copyFileToRoot(root *os.Root, src, dst string, mode os.FileMode) error {
 	if err := out.Close(); err != nil {
 		return err
 	}
-	return root.Chmod(dst, mode)
+	if err := root.Chmod(dst, mode); err != nil {
+		return err
+	}
+	return recordStageMode(root, dst, mode)
 }
 
 func writeBytesToRoot(root *os.Root, dst string, data []byte, mode os.FileMode) error {
@@ -789,7 +810,47 @@ func writeBytesToRoot(root *os.Root, dst string, data []byte, mode os.FileMode) 
 	if err := out.Close(); err != nil {
 		return err
 	}
-	return root.Chmod(dst, mode)
+	if err := root.Chmod(dst, mode); err != nil {
+		return err
+	}
+	return recordStageMode(root, dst, mode)
+}
+
+func recordStageMode(root *os.Root, name string, mode os.FileMode) error {
+	name = path.Clean(strings.TrimPrefix(filepath.ToSlash(name), "/"))
+	if name == "." || name == stageMetadataName {
+		return nil
+	}
+	out, err := root.OpenFile(stageMetadataName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open stage metadata: %w", err)
+	}
+	record := stageModeRecord{Path: name, Mode: int64(mode.Perm())}
+	if err := json.NewEncoder(out).Encode(record); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("write stage metadata: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close stage metadata: %w", err)
+	}
+	return nil
+}
+
+func ensureGuestRuntimeDirs(stageDir string) error {
+	root, err := os.OpenRoot(stageDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	for _, dir := range []string{"proc", "sys", "dev", "dev/pts"} {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create guest runtime dir %s: %w", dir, err)
+		}
+		if err := recordStageMode(root, dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func copyFileOverwrite(src, dst string, mode os.FileMode) error {

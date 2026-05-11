@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/Microsoft/go-winio"
 	"github.com/Microsoft/go-winio/pkg/guid"
@@ -41,12 +42,7 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 		return nil, fmt.Errorf("parse HCS runtime ID %q: %w", handle.RuntimeID, err)
 	}
 	set := &hvSocketListenerSet{done: make(chan error, len(req.Config.VsockListeners))}
-	serialListener, err := winio.ListenPipe(serialPipePath(req.Identity.RuntimeID), nil)
-	if err != nil {
-		return nil, fmt.Errorf("listen windows-hyperv serial pipe: %w", err)
-	}
-	set.listeners = append(set.listeners, serialListener)
-	go copySerial(serialListener, serialLogPath(req))
+	go copySerialPipe(serialPipePath(req.Identity.RuntimeID), serialLogPath(req))
 	started := 0
 	for _, listener := range req.Config.VsockListeners {
 		if listener.Target != resultPath(req) {
@@ -83,12 +79,7 @@ func hasResultTarget(req vmkit.Request) bool {
 	return false
 }
 
-func copySerial(listener net.Listener, target string) {
-	conn, err := listener.Accept()
-	if err != nil {
-		return
-	}
-	defer conn.Close()
+func copySerialPipe(pipePath, target string) {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return
 	}
@@ -97,6 +88,12 @@ func copySerial(listener net.Listener, target string) {
 		return
 	}
 	defer file.Close()
+	timeout := 30 * time.Second
+	conn, err := winio.DialPipe(pipePath, &timeout)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
 	_, _ = io.Copy(file, conn)
 }
 

@@ -258,7 +258,7 @@ func TestExtractLayerAllowsAbsoluteSymlinkWithinGuestRoot(t *testing.T) {
 	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
-	target, err := os.Readlink(filepath.Join(dir, "etc", "alternatives", "awk"))
+	target, err := readExtractedSymlinkTarget(filepath.Join(dir, "etc", "alternatives", "awk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,12 +304,111 @@ func TestExtractLayerAllowsRelativeSymlinkWithinGuestRoot(t *testing.T) {
 	if err := extractLayer(dir, "application/vnd.oci.image.layer.v1.tar", bytes.NewReader(buf.Bytes())); err != nil {
 		t.Fatalf("extractLayer: %v", err)
 	}
-	target, err := os.Readlink(filepath.Join(dir, "usr", "bin", "env"))
+	target, err := readExtractedSymlinkTarget(filepath.Join(dir, "usr", "bin", "env"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if target != "../../bin/env" {
 		t.Fatalf("symlink target = %q", target)
+	}
+}
+
+func TestWriteStageTarPreservesWindowsSymlinkMarker(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "usr", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSymlinkMarker(filepath.Join(dir, "usr", "bin", "env"), "../../bin/env"); err != nil {
+		t.Fatalf("writeSymlinkMarker: %v", err)
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := writeStageTar(dir, tw); err != nil {
+		t.Fatalf("writeStageTar: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	tr := tar.NewReader(bytes.NewReader(buf.Bytes()))
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			t.Fatalf("missing symlink entry: %v", err)
+		}
+		if header.Name != "usr/bin/env" {
+			continue
+		}
+		if header.Typeflag != tar.TypeSymlink || header.Linkname != "../../bin/env" {
+			t.Fatalf("header = %#v, want symlink to ../../bin/env", header)
+		}
+		return
+	}
+}
+
+func TestWriteStageTarPreservesRecordedMode(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "sbin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sbin", "microagent-init"), []byte("guest-init"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := recordStageMode(root, "sbin/microagent-init", 0o755); err != nil {
+		t.Fatalf("recordStageMode: %v", err)
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := writeStageTar(dir, tw); err != nil {
+		t.Fatalf("writeStageTar: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	tr := tar.NewReader(bytes.NewReader(buf.Bytes()))
+	for {
+		header, err := tr.Next()
+		if err != nil {
+			t.Fatalf("missing init entry: %v", err)
+		}
+		if header.Name != "sbin/microagent-init" {
+			continue
+		}
+		if os.FileMode(header.Mode).Perm() != 0o755 {
+			t.Fatalf("mode = %#o, want 0755", os.FileMode(header.Mode).Perm())
+		}
+		return
+	}
+}
+
+func TestEnsureGuestRuntimeDirsCreatesMountpointsAndRecordsModes(t *testing.T) {
+	dir := t.TempDir()
+	if err := ensureGuestRuntimeDirs(dir); err != nil {
+		t.Fatalf("ensureGuestRuntimeDirs: %v", err)
+	}
+	for _, rel := range []string{"proc", "sys", filepath.Join("dev", "pts")} {
+		info, err := os.Stat(filepath.Join(dir, rel))
+		if err != nil {
+			t.Fatalf("stat %s: %v", rel, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("%s is not a directory", rel)
+		}
+	}
+	modes, err := readStageModes(dir)
+	if err != nil {
+		t.Fatalf("readStageModes: %v", err)
+	}
+	if modes["proc"] != 0o755 || modes["sys"] != 0o755 || modes["dev/pts"] != 0o755 {
+		t.Fatalf("runtime dir modes = %#v", modes)
 	}
 }
 
@@ -381,4 +480,15 @@ func addTarFile(tw *tar.Writer, name, body string) error {
 	}
 	_, err := tw.Write([]byte(body))
 	return err
+}
+
+func readExtractedSymlinkTarget(path string) (string, error) {
+	target, err := os.Readlink(path)
+	if err == nil {
+		return target, nil
+	}
+	if markerTarget, ok, markerErr := readSymlinkMarker(path); markerErr == nil && ok {
+		return markerTarget, nil
+	}
+	return "", err
 }

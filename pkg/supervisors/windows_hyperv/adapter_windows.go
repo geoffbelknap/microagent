@@ -38,7 +38,17 @@ func (a defaultAdapter) Create(ctx context.Context, spec computeSystemSpec) (com
 	if err != nil {
 		return computeSystemHandle{}, err
 	}
-	return a.hcsClient().CreateComputeSystem(ctx, spec.Name, document)
+	client := a.hcsClient()
+	handle, err := client.CreateComputeSystem(ctx, spec.Name, document)
+	if err != nil {
+		return computeSystemHandle{}, err
+	}
+	if handle.RuntimeID != "" {
+		if err := client.GrantVMAccess(ctx, handle.RuntimeID, spec.Config.RootfsPath); err != nil {
+			return computeSystemHandle{}, err
+		}
+	}
+	return handle, nil
 }
 
 func (a defaultAdapter) Start(ctx context.Context, id string) error {
@@ -188,7 +198,7 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	doc := computeSystemDocument{
 		Owner:                             "microagent",
 		SchemaVersion:                     versionDocument{Major: 2, Minor: 1},
-		ShouldTerminateOnLastHandleClosed: true,
+		ShouldTerminateOnLastHandleClosed: false,
 		VirtualMachine: virtualMachine{
 			StopOnReset: true,
 			Chipset: chipset{LinuxKernelDirect: linuxKernelDirect{
@@ -239,6 +249,10 @@ type unsupportedHCSClient struct{}
 
 func (unsupportedHCSClient) CreateComputeSystem(ctx context.Context, id string, document []byte) (computeSystemHandle, error) {
 	return computeSystemHandle{}, errHCSNotImplemented("create")
+}
+
+func (unsupportedHCSClient) GrantVMAccess(ctx context.Context, vmID, path string) error {
+	return errHCSNotImplemented("grant vm access")
 }
 
 func (unsupportedHCSClient) StartComputeSystem(ctx context.Context, id string) error {
