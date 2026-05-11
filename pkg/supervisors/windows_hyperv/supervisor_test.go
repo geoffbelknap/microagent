@@ -91,7 +91,7 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 		t.Skip("windows-hyperv run path is windows-only")
 	}
 	stateDir := t.TempDir()
-	adapter := &fakeAdapter{}
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
 	req := vmkit.Request{
 		Command: "run",
 		Identity: &vmkit.Identity{
@@ -133,12 +133,17 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 		Event struct {
 			State vmkit.VMState `json:"state"`
 		} `json:"event"`
-		Config        vmkit.Config `json:"config"`
-		SerialLogPath string       `json:"serialLogPath"`
+		Config                 vmkit.Config `json:"config"`
+		ComputeSystemID        string       `json:"computeSystemID"`
+		ComputeSystemRuntimeID string       `json:"computeSystemRuntimeID"`
+		SerialLogPath          string       `json:"serialLogPath"`
 	}
 	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &runtimeState)
 	if runtimeState.Event.State != vmkit.StateRunning || runtimeState.Config.RootfsPath != req.Config.RootfsPath {
 		t.Fatalf("runtime.json = %#v", runtimeState)
+	}
+	if runtimeState.ComputeSystemID != "fake" || runtimeState.ComputeSystemRuntimeID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("runtime compute IDs = %q %q", runtimeState.ComputeSystemID, runtimeState.ComputeSystemRuntimeID)
 	}
 	if runtimeState.SerialLogPath != filepath.Join(stateDir, "agent-1", "serial.log") {
 		t.Fatalf("serialLogPath = %q", runtimeState.SerialLogPath)

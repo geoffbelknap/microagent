@@ -187,6 +187,13 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 			ConnectSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
 		}
 	}
+	if spec.Config.ShellPort != 0 {
+		serviceTable[winio.VsockServiceID(uint32(spec.Config.ShellPort)).String()] = hvSocketServiceConfig{
+			AllowWildcardBinds:        true,
+			BindSecurityDescriptor:    "D:P(A;;FA;;;WD)",
+			ConnectSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
+		}
+	}
 	kernelCmdLine := "root=/dev/sda ro rootwait init=/sbin/microagent-init initcall_blacklist=virtio_vsock_init pci=off"
 	comPorts := map[string]comPort(nil)
 	if hasResultListener(spec) {

@@ -177,6 +177,28 @@ func TestBuildComputeSystemDocumentAddsHvSocketServicesForVsockListeners(t *test
 	}
 }
 
+func TestBuildComputeSystemDocumentAddsHvSocketServiceForShellPort(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			ShellPort:  22001,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc computeSystemDocument
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	serviceID := winio.VsockServiceID(22001).String()
+	if _, ok := doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable[serviceID]; !ok {
+		t.Fatalf("shell service %s missing from %#v", serviceID, doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable)
+	}
+}
+
 func TestDefaultAdapterCreatePassesDocumentToHCSClient(t *testing.T) {
 	client := &fakeHCSClient{}
 	handle, err := (defaultAdapter{client: client}).Create(context.Background(), computeSystemSpec{

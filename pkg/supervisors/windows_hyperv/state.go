@@ -19,14 +19,15 @@ type eventFile struct {
 }
 
 type runtimeState struct {
-	Event           eventFile              `json:"event"`
-	Config          vmkit.Config           `json:"config"`
-	ComputeSystemID string                 `json:"computeSystemID,omitempty"`
-	SerialLogPath   string                 `json:"serialLogPath"`
-	StartedAt       string                 `json:"startedAt,omitempty"`
-	UpdatedAt       string                 `json:"updatedAt"`
-	Readiness       vmkit.RuntimeReadiness `json:"readiness,omitempty"`
-	Error           string                 `json:"error,omitempty"`
+	Event                  eventFile              `json:"event"`
+	Config                 vmkit.Config           `json:"config"`
+	ComputeSystemID        string                 `json:"computeSystemID,omitempty"`
+	ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID,omitempty"`
+	SerialLogPath          string                 `json:"serialLogPath"`
+	StartedAt              string                 `json:"startedAt,omitempty"`
+	UpdatedAt              string                 `json:"updatedAt"`
+	Readiness              vmkit.RuntimeReadiness `json:"readiness,omitempty"`
+	Error                  string                 `json:"error,omitempty"`
 }
 
 var startRuntimeListenersHook = startRuntimeListeners
@@ -56,7 +57,7 @@ func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response,
 	if err := adapter.Start(ctx, handle.ID); err != nil {
 		return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("start failed: %s", err), err)
 	}
-	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateRunning, "serial="+serialLogPath(req), "", handle.ID)
+	event, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateRunning, "serial="+serialLogPath(req), "", handle.ID, handle.RuntimeID)
 	if err != nil {
 		return vmkit.Response{}, err
 	}
@@ -67,7 +68,7 @@ func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response,
 		if err := adapter.Wait(ctx, handle.ID); err != nil {
 			return failRunWithCleanup(ctx, req, adapter, handle, true, fmt.Sprintf("wait failed: %s", err), err)
 		}
-		event, err = writeRuntimeTransitionWithComputeID(req, vmkit.StateStopped, "windows-hyperv result received", "", handle.ID)
+		event, err = writeRuntimeTransitionWithComputeIDs(req, vmkit.StateStopped, "windows-hyperv result received", "", handle.ID, handle.RuntimeID)
 		if err != nil {
 			return vmkit.Response{}, err
 		}
@@ -198,7 +199,7 @@ func failRunWithCleanup(ctx context.Context, req vmkit.Request, adapter runtimeA
 	if cleanupErr := cleanupComputeSystem(ctx, adapter, handle, started); cleanupErr != nil {
 		cleanupDetail = fmt.Sprintf("%s; cleanup failed: %s", detail, cleanupErr)
 	}
-	event, writeErr := writeRuntimeTransitionWithComputeID(req, vmkit.StateFailed, cleanupDetail, cause.Error(), handle.ID)
+	event, writeErr := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateFailed, cleanupDetail, cause.Error(), handle.ID, handle.RuntimeID)
 	resp := vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: cause.Error()}
 	if writeErr == nil {
 		resp.Event = &event
@@ -221,6 +222,10 @@ func writeRuntimeTransition(req vmkit.Request, state vmkit.VMState, detail, erro
 }
 
 func writeRuntimeTransitionWithComputeID(req vmkit.Request, state vmkit.VMState, detail, errorText, computeSystemID string) (vmkit.Event, error) {
+	return writeRuntimeTransitionWithComputeIDs(req, state, detail, errorText, computeSystemID, "")
+}
+
+func writeRuntimeTransitionWithComputeIDs(req vmkit.Request, state vmkit.VMState, detail, errorText, computeSystemID, computeSystemRuntimeID string) (vmkit.Event, error) {
 	if req.Identity == nil || req.Config == nil {
 		return vmkit.Event{}, fmt.Errorf("windows-hyperv request is missing identity or config")
 	}
@@ -268,15 +273,21 @@ func writeRuntimeTransitionWithComputeID(req vmkit.Request, state vmkit.VMState,
 			computeSystemID = previous.ComputeSystemID
 		}
 	}
+	if computeSystemRuntimeID == "" {
+		if previous, err := readRuntimeState(req); err == nil {
+			computeSystemRuntimeID = previous.ComputeSystemRuntimeID
+		}
+	}
 	runtime := runtimeState{
-		Event:           fileEvent,
-		Config:          *req.Config,
-		ComputeSystemID: computeSystemID,
-		SerialLogPath:   serialPath,
-		StartedAt:       startedAt,
-		UpdatedAt:       now.Format(time.RFC3339),
-		Readiness:       readiness,
-		Error:           errorText,
+		Event:                  fileEvent,
+		Config:                 *req.Config,
+		ComputeSystemID:        computeSystemID,
+		ComputeSystemRuntimeID: computeSystemRuntimeID,
+		SerialLogPath:          serialPath,
+		StartedAt:              startedAt,
+		UpdatedAt:              now.Format(time.RFC3339),
+		Readiness:              readiness,
+		Error:                  errorText,
 	}
 	if err := writeJSONFile(filepath.Join(dir, "runtime.json"), runtime); err != nil {
 		return vmkit.Event{}, err

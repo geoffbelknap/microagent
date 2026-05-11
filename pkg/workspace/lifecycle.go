@@ -61,15 +61,16 @@ type EventFile struct {
 }
 
 type RuntimeState struct {
-	Event           EventFile              `json:"event"`
-	Config          vmkit.Config           `json:"config"`
-	PID             int                    `json:"pid,omitempty"`
-	SerialLogPath   string                 `json:"serialLogPath"`
-	SerialInputPath string                 `json:"serialInputPath,omitempty"`
-	StartedAt       string                 `json:"startedAt,omitempty"`
-	UpdatedAt       string                 `json:"updatedAt"`
-	Readiness       vmkit.RuntimeReadiness `json:"readiness,omitempty"`
-	Error           string                 `json:"error,omitempty"`
+	Event                  EventFile              `json:"event"`
+	Config                 vmkit.Config           `json:"config"`
+	PID                    int                    `json:"pid,omitempty"`
+	ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID,omitempty"`
+	SerialLogPath          string                 `json:"serialLogPath"`
+	SerialInputPath        string                 `json:"serialInputPath,omitempty"`
+	StartedAt              string                 `json:"startedAt,omitempty"`
+	UpdatedAt              string                 `json:"updatedAt"`
+	Readiness              vmkit.RuntimeReadiness `json:"readiness,omitempty"`
+	Error                  string                 `json:"error,omitempty"`
 }
 
 type ListEntry struct {
