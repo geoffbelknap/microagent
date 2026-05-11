@@ -3042,6 +3042,35 @@ func TestWorkspaceSupervisorSelectsSymmetricBackends(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsClearsAppleVFDefaultForFirecracker(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"--backend", vmkit.BackendFirecracker,
+		"--image", "docker.io/library/busybox:1.36",
+		"--exec", "true",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.SupervisorPath != "" {
+		t.Fatalf("SupervisorPath = %q, want empty Firecracker default", opts.SupervisorPath)
+	}
+}
+
+func TestParseWorkspaceOptionsPreservesExplicitFirecrackerSupervisor(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"--backend", vmkit.BackendFirecracker,
+		"--supervisor", "/tmp/microagent-firecracker-supervisor",
+		"--image", "docker.io/library/busybox:1.36",
+		"--exec", "true",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.SupervisorPath != "/tmp/microagent-firecracker-supervisor" {
+		t.Fatalf("SupervisorPath = %q", opts.SupervisorPath)
+	}
+}
+
 func firecrackerSupervisorHelper(t *testing.T) string {
 	t.Helper()
 	executable, err := os.Executable()
@@ -4125,6 +4154,19 @@ func TestDefaultKernelManifestHasFirecrackerAMD64(t *testing.T) {
 		t.Fatalf("url = %q", kernel.URL)
 	}
 	if kernel.SHA256 != "4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0" {
+		t.Fatalf("sha256 = %q", kernel.SHA256)
+	}
+}
+
+func TestDefaultKernelManifestHasFirecrackerARM64(t *testing.T) {
+	kernel, ok := defaultKernel(vmkit.BackendFirecracker, "arm64")
+	if !ok {
+		t.Fatal("missing firecracker arm64 kernel")
+	}
+	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r3/microagent-kernel-6.1.155-firecracker-arm64" {
+		t.Fatalf("url = %q", kernel.URL)
+	}
+	if kernel.SHA256 != "bd91c4f5c15e497b99ac0c96977a92e68a0c11d3c72267104f5fb968994c4a71" {
 		t.Fatalf("sha256 = %q", kernel.SHA256)
 	}
 }
