@@ -284,7 +284,17 @@ type runtimeState struct {
 	SerialInputPath  string                   `json:"serialInputPath,omitempty"`
 	StartedAt        string                   `json:"startedAt,omitempty"`
 	UpdatedAt        string                   `json:"updatedAt"`
+	Readiness        vmkit.RuntimeReadiness   `json:"readiness,omitempty"`
 	Error            string                   `json:"error,omitempty"`
+}
+
+type guestResult struct {
+	StartedAt string `json:"started_at"`
+	ExitedAt  string `json:"exited_at"`
+	ExitCode  int    `json:"exit_code"`
+	Stdout    string `json:"stdout,omitempty"`
+	Stderr    string `json:"stderr,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 func prepareWorkspace(opts Options, req vmkit.Request) error {
@@ -1715,7 +1725,7 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		}
 		return responseFromEvent(event, ""), nil
 	}
-	return responseFromEvent(state.Event, state.Error), nil
+	return responseFromRuntimeState(opts, state), nil
 }
 
 func responseFromEvent(file eventFile, errorText string) vmkit.Response {
@@ -1728,6 +1738,45 @@ func responseFromEvent(file eventFile, errorText string) vmkit.Response {
 		resp.Error = errorText
 	}
 	return resp
+}
+
+func responseFromRuntimeState(opts Options, state runtimeState) vmkit.Response {
+	resp := responseFromEvent(state.Event, state.Error)
+	readiness := readinessFromRuntimeState(state)
+	resp.Readiness = &readiness
+	if state.Config.Network != nil {
+		network := *state.Config.Network
+		network.Runtime = nil
+		resp.Network = &network
+	}
+	resp.Mediation = state.Config.Mediation
+	if result, err := runtimeResultFromState(opts, state); err == nil {
+		resp.Result = &result
+	}
+	return resp
+}
+
+func runtimeResultFromState(opts Options, state runtimeState) (vmkit.RuntimeResult, error) {
+	path := resultPathFromState(opts, state)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return vmkit.RuntimeResult{}, err
+	}
+	var guest guestResult
+	if err := json.Unmarshal(data, &guest); err != nil {
+		return vmkit.RuntimeResult{}, err
+	}
+	return vmkit.RuntimeResult{
+		Identity:    state.Event.Identity,
+		Backend:     vmkit.BackendFirecracker,
+		ResultPath:  path,
+		StartedAt:   guest.StartedAt,
+		CompletedAt: guest.ExitedAt,
+		ExitCode:    guest.ExitCode,
+		Stdout:      guest.Stdout,
+		Stderr:      guest.Stderr,
+		Error:       guest.Error,
+	}, nil
 }
 
 func writeProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {
@@ -1779,7 +1828,86 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 	if state == vmkit.StateStarting || state == vmkit.StateRunning {
 		runtime.StartedAt = now.Format(time.RFC3339)
 	}
+	runtime.Readiness = readinessFromRuntimeState(runtime)
 	return writeJSONFile(filepath.Join(dir, "runtime.json"), runtime)
+}
+
+func readinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
+	readiness := vmkit.RuntimeReadiness{}
+	if state.StartedAt != "" || state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateHalted || state.Event.State == vmkit.StateStopped || state.Event.State == vmkit.StateQuarantined {
+		readiness.GuestReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: firstEventTime(state.StartedAt, state.Event.ObservedAt),
+			Detail:     "workspace reached runtime state " + string(state.Event.State),
+		}
+	}
+	if state.Event.State == vmkit.StateRunning && state.SerialInputPath != "" {
+		if _, err := os.Stat(state.SerialInputPath); err == nil {
+			readiness.ShellReady = vmkit.ReadinessSignal{
+				Ready:      true,
+				ObservedAt: fileModTime(state.SerialInputPath),
+				Detail:     "console input is available",
+			}
+		} else if !os.IsNotExist(err) {
+			readiness.ShellReady = vmkit.ReadinessSignal{Error: err.Error()}
+		}
+	}
+	resultPath := resultPathFromState(Options{}, state)
+	if _, err := os.Stat(resultPath); err == nil {
+		readiness.ResultReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: fileModTime(resultPath),
+			Detail:     "guest result is available",
+		}
+	} else if !os.IsNotExist(err) {
+		readiness.ResultReady = vmkit.ReadinessSignal{Error: err.Error()}
+	}
+	if state.Config.Mediation != nil && state.Config.Mediation.Enabled {
+		readiness.MediationReady = mediationReadiness(*state.Config.Mediation, state.Event.State, firstEventTime(state.StartedAt, state.Event.ObservedAt))
+	}
+	return readiness
+}
+
+func mediationReadiness(mediation vmkit.MediationConfig, state vmkit.VMState, observedAt *time.Time) vmkit.ReadinessSignal {
+	signal := vmkit.ReadinessSignal{
+		Ready:      state == vmkit.StateRunning,
+		ObservedAt: observedAt,
+		Detail:     fmt.Sprintf("mediation required=%t failClosed=%t port=%d target=%s", mediation.Required, mediation.FailClosed, mediation.Port, mediation.Target),
+	}
+	if !signal.Ready && mediation.Required {
+		signal.Error = "required mediation is not ready"
+	}
+	return signal
+}
+
+func resultPathFromState(opts Options, state runtimeState) string {
+	stateDir := state.Config.StateDir
+	if stateDir == "" {
+		stateDir = opts.StateDir
+	}
+	name := state.Event.Identity.RuntimeID
+	if name == "" {
+		name = opts.Name
+	}
+	return filepath.Join(stateDir, name, "result.json")
+}
+
+func fileModTime(path string) *time.Time {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	modified := info.ModTime().UTC()
+	return &modified
+}
+
+func firstEventTime(values ...string) *time.Time {
+	for _, value := range values {
+		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+			return &parsed
+		}
+	}
+	return nil
 }
 
 func appendEvent(path string, event eventFile) error {
