@@ -1008,8 +1008,8 @@ func backendOwnsRuntimeState(backend string) bool {
 }
 
 func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
-	if opts.Backend == vmkit.BackendFirecracker {
-		req.Command = "start"
+	if command := detachedSupervisorCommand(opts.Backend); command != "run" {
+		req.Command = command
 		return Dispatch(context.Background(), opts, req)
 	}
 	if opts.Backend != vmkit.BackendAppleVF {
@@ -1052,6 +1052,15 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		ObservedAt: time.Now().UTC(),
 	}
 	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
+}
+
+func detachedSupervisorCommand(backend string) string {
+	switch backend {
+	case vmkit.BackendFirecracker, vmkit.BackendWindowsHyperV:
+		return "start"
+	default:
+		return "run"
+	}
 }
 
 func WriteProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {

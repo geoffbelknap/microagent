@@ -259,6 +259,17 @@ func TestEnsureCanCreateRejectsRunningWorkspace(t *testing.T) {
 	}
 }
 
+func TestDetachedSupervisorCommandUsesStartForPersistentBackends(t *testing.T) {
+	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendWindowsHyperV} {
+		if got := detachedSupervisorCommand(backend); got != "start" {
+			t.Fatalf("detachedSupervisorCommand(%q) = %q, want start", backend, got)
+		}
+	}
+	if got := detachedSupervisorCommand(vmkit.BackendAppleVF); got != "run" {
+		t.Fatalf("detachedSupervisorCommand(%q) = %q, want run", vmkit.BackendAppleVF, got)
+	}
+}
+
 func TestEnsureCanCreateRejectsUnavailableHostPort(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

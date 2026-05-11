@@ -33,6 +33,14 @@ type runtimeState struct {
 var startRuntimeListenersHook = startRuntimeListeners
 
 func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
+	return s.startComputeSystem(ctx, req, true)
+}
+
+func (s Supervisor) start(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
+	return s.startComputeSystem(ctx, req, false)
+}
+
+func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, foreground bool) (vmkit.Response, error) {
 	adapter := s.runtimeAdapter()
 	spec := computeSystemSpec{
 		Name:     req.Identity.RuntimeID,
@@ -52,16 +60,24 @@ func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response,
 		return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("listener setup failed: %s", err), err)
 	}
 	if listeners != nil {
-		defer listeners.Close()
+		if foreground {
+			defer listeners.Close()
+		}
 	}
 	if err := adapter.Start(ctx, handle.ID); err != nil {
+		if listeners != nil {
+			_ = listeners.Close()
+		}
 		return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("start failed: %s", err), err)
 	}
 	event, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateRunning, "serial="+serialLogPath(req), "", handle.ID, handle.RuntimeID)
 	if err != nil {
+		if listeners != nil && foreground {
+			_ = listeners.Close()
+		}
 		return vmkit.Response{}, err
 	}
-	if listeners != nil {
+	if foreground && listeners != nil {
 		if err := listeners.Wait(ctx); err != nil {
 			return failRunWithCleanup(ctx, req, adapter, handle, true, fmt.Sprintf("result listener failed: %s", err), err)
 		}

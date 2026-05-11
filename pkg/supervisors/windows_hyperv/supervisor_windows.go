@@ -27,6 +27,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV}, nil
 	case "run":
 		return s.run(ctx, req)
+	case "start":
+		return s.start(ctx, req)
 	case "inspect":
 		return inspect(req)
 	case "halt":

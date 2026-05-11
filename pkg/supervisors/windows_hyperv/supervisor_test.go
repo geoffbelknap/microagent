@@ -201,6 +201,54 @@ func TestRunCommandWaitsForResultListenerAndReturnsResult(t *testing.T) {
 	}
 }
 
+func TestStartCommandDoesNotWaitForResultListener(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	oldHook := startRuntimeListenersHook
+	t.Cleanup(func() { startRuntimeListenersHook = oldHook })
+	waited := false
+	startRuntimeListenersHook = func(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
+		return fakeListenerSet{wait: func() error {
+			waited = true
+			return fmt.Errorf("start must not wait for result")
+		}}, nil
+	}
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath:     "C:\\microagent\\Image",
+			RootfsPath:     "C:\\microagent\\rootfs.vhd",
+			StateDir:       stateDir,
+			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")}},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("start resp=%#v err=%v", resp, err)
+	}
+	if waited {
+		t.Fatal("start waited for result listener")
+	}
+	if adapter.waits != 0 {
+		t.Fatalf("adapter waits = %d, want 0", adapter.waits)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Event.State != vmkit.StateRunning || state.ComputeSystemID != "fake" || state.ComputeSystemRuntimeID == "" {
+		t.Fatalf("runtime state = %#v", state)
+	}
+}
+
 func TestRunCommandFailsClosedForUnsupportedWindowsHyperVVsockTarget(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv listener path is windows-only")

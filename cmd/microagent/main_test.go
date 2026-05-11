@@ -3797,24 +3797,35 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	runDone := make(chan error, 1)
-	go func() {
-		_, err := workspace.Run(ctx, workspace.Options{
-			Name:          "windows-hyperv-connect",
-			Backend:       vmkit.BackendWindowsHyperV,
-			Architecture:  "amd64",
-			StateDir:      stateDir,
-			KernelPath:    kernelPath,
-			GuestInitPath: guestInitPath,
-			ImageRef:      "docker.io/library/busybox:1.36",
-			ExecCommand:   "sleep 15",
-			Timeout:       time.Minute,
-			Keep:          true,
-			MemoryMiB:     512,
-			CPUCount:      2,
-		})
-		runDone <- err
-	}()
+	workspaceOpts := workspace.Options{
+		Name:            "windows-hyperv-connect",
+		Backend:         vmkit.BackendWindowsHyperV,
+		Architecture:    "amd64",
+		StateDir:        stateDir,
+		KernelPath:      kernelPath,
+		GuestInitPath:   guestInitPath,
+		ImageRef:        "docker.io/library/busybox:1.36",
+		ServiceCommand:  "sleep 30",
+		PrepareForStart: true,
+		Timeout:         time.Minute,
+		Keep:            true,
+		MemoryMiB:       512,
+		CPUCount:        2,
+		Network:         vmkit.NetworkConfig{Mode: "user"},
+	}
+	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
+		t.Fatalf("BuildRootfs: %v", err)
+	}
+	if err := workspace.WriteManifest(workspaceOpts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	if _, err := workspace.Start(ctx, workspaceOpts); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = workspace.Control(context.Background(), workspaceOpts, "stop")
+		_, _ = workspace.Control(context.Background(), workspaceOpts, "delete")
+	})
 	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
 	if err := waitForSerialContains(ctx, filepath.Join(stateDir, "windows-hyperv-connect", "serial.log"), "shell helper listening", 15*time.Second); err != nil {
 		t.Fatal(err)
@@ -3838,14 +3849,6 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "CONNECT_SMOKE") {
 		t.Fatalf("connect output = %q", data)
-	}
-	select {
-	case err := <-runDone:
-		if err != nil {
-			t.Fatalf("workspace run: %v", err)
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
 	}
 }
 
