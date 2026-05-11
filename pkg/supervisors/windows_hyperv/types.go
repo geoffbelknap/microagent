@@ -37,6 +37,14 @@ type computeSystemHandle struct {
 	ID string
 }
 
+type hcsClient interface {
+	CreateComputeSystem(ctx context.Context, id string, document []byte) (computeSystemHandle, error)
+	StartComputeSystem(ctx context.Context, id string) error
+	ShutdownComputeSystem(ctx context.Context, id string) error
+	KillComputeSystem(ctx context.Context, id string) error
+	DeleteComputeSystem(ctx context.Context, id string) error
+}
+
 func (s Supervisor) runtimeAdapter() runtimeAdapter {
 	if s.adapter != nil {
 		return s.adapter
