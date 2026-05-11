@@ -70,6 +70,12 @@ var Defaults = []ManifestEntry{
 		URL:          "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r3/microagent-kernel-6.1.155-firecracker-arm64",
 		SHA256:       "bd91c4f5c15e497b99ac0c96977a92e68a0c11d3c72267104f5fb968994c4a71",
 	},
+	{
+		Backend:      vmkit.BackendWindowsHyperV,
+		Architecture: "amd64",
+		URL:          "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-windows-hyperv-amd64",
+		SHA256:       "8623b349a95fa536891e0d292d198396504aad8308c7619083994f7553707a92",
+	},
 }
 
 func Default(backend, arch string) (ManifestEntry, bool) {

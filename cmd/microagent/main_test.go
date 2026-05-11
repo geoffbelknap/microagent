@@ -4406,6 +4406,19 @@ func TestDefaultKernelManifestHasFirecrackerARM64(t *testing.T) {
 	}
 }
 
+func TestDefaultKernelManifestHasWindowsHyperVAMD64(t *testing.T) {
+	kernel, ok := defaultKernel(vmkit.BackendWindowsHyperV, "amd64")
+	if !ok {
+		t.Fatal("missing windows-hyperv amd64 kernel")
+	}
+	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-windows-hyperv-amd64" {
+		t.Fatalf("url = %q", kernel.URL)
+	}
+	if kernel.SHA256 != "8623b349a95fa536891e0d292d198396504aad8308c7619083994f7553707a92" {
+		t.Fatalf("sha256 = %q", kernel.SHA256)
+	}
+}
+
 func TestDefaultKernelSupportReportsDownloadable(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "Image")
