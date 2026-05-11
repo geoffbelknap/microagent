@@ -194,8 +194,12 @@ func TestBuildComputeSystemDocumentAddsHvSocketServiceForShellPort(t *testing.T)
 		t.Fatal(err)
 	}
 	serviceID := winio.VsockServiceID(22001).String()
-	if _, ok := doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable[serviceID]; !ok {
+	service, ok := doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable[serviceID]
+	if !ok {
 		t.Fatalf("shell service %s missing from %#v", serviceID, doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable)
+	}
+	if service.ConnectSecurityDescriptor != "D:P(A;;FA;;;WD)" {
+		t.Fatalf("shell service connect security descriptor = %q", service.ConnectSecurityDescriptor)
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func TestMain(m *testing.M) {
@@ -3764,6 +3765,123 @@ func TestRunConnectRejectsNegativeReadyTimeoutForInteractive(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "ready-timeout must not be negative") {
 		t.Fatalf("runConnect err = %v", err)
+	}
+}
+
+func TestWindowsHyperVConnectSmoke(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V connect smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	guestInitPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_GUESTINIT"))
+	if guestInitPath == "" {
+		guestInitPath = filepath.Join("..", "..", ".build", "dev", "microagent-guestinit-amd64")
+	}
+	if _, err := os.Stat(guestInitPath); err != nil {
+		t.Fatalf("guest init %q: %v", guestInitPath, err)
+	}
+	stateDir := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_STATE_DIR"))
+	if stateDir == "" {
+		var err error
+		stateDir, err = os.MkdirTemp("", "microagent-windows-hyperv-connect-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("state dir: %s", stateDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := workspace.Run(ctx, workspace.Options{
+			Name:          "windows-hyperv-connect",
+			Backend:       vmkit.BackendWindowsHyperV,
+			Architecture:  "amd64",
+			StateDir:      stateDir,
+			KernelPath:    kernelPath,
+			GuestInitPath: guestInitPath,
+			ImageRef:      "docker.io/library/busybox:1.36",
+			ExecCommand:   "sleep 15",
+			Timeout:       time.Minute,
+			Keep:          true,
+			MemoryMiB:     512,
+			CPUCount:      2,
+		})
+		runDone <- err
+	}()
+	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
+	if err := waitForSerialContains(ctx, filepath.Join(stateDir, "windows-hyperv-connect", "serial.log"), "shell helper listening", 15*time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	stdoutPath := filepath.Join(stateDir, "connect.out")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runConnect(ctx, []string{"windows-hyperv-connect", "--state-dir", stateDir, "--send", "echo CONNECT_SMOKE", "--timeout", "3"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runConnect: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "CONNECT_SMOKE") {
+		t.Fatalf("connect output = %q", data)
+	}
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("workspace run: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func waitForSerialContains(ctx context.Context, path, needle string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && strings.Contains(string(data), needle) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("serial log did not contain %q before timeout: %w", needle, err)
+			}
+			return fmt.Errorf("serial log did not contain %q before timeout: %s", needle, path)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func waitForWorkspaceState(t *testing.T, stateDir, name string, want vmkit.VMState, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		state, _, err := workspace.LatestStartState(stateDir, name)
+		if err == nil && state == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("workspace %s did not reach %s before timeout; last state=%s err=%v", name, want, state, err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
