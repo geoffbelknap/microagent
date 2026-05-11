@@ -1,15 +1,17 @@
 ---
 title: Runtime contract
-description: Backend-neutral agent runtime semantics shared by Firecracker and Apple VF.
+description: Backend-neutral agent runtime semantics shared by microagent backends.
 ---
 
 `microagent --json contract` is the JSON source for the shared runtime
 contract. Agent-runtime builders can depend on one set of semantics across
-Firecracker and Apple VF.
+Firecracker, Apple VF, and experimental Windows Hyper-V support.
 
 ## Scope
 
-Both backends expose the same public runtime primitives:
+Stable backends expose the same public runtime primitives. Experimental
+backends may advertise a smaller command surface while preserving the same
+state, result, readiness, and diagnostic field shapes for supported commands:
 
 | Primitive | Contract |
 |---|---|
@@ -23,7 +25,12 @@ Both backends expose the same public runtime primitives:
 
 ## Backend rules
 
-Backend-specific mechanics stay behind supervisor boundaries. Firecracker may use PIDs, TAP devices, Unix sockets, and process groups; Apple VF may use Virtualization.framework process state. Public output stays the same across both: structured requests, responses, state events, readiness, results, artifact declarations, mediation declaration, and verification.
+Backend-specific mechanics stay behind supervisor boundaries. Firecracker may
+use PIDs, TAP devices, Unix sockets, and process groups; Apple VF may use
+Virtualization.framework process state; Windows Hyper-V may use HCS compute
+systems and VHD root disks. Public output stays backend-neutral: structured
+requests, responses, state events, readiness, results, artifact declarations,
+mediation declaration, and verification.
 
 `start` is disk-state resume. It may boot from `prepared`, `halted`,
 `stopped`, or `failed`; it must reject `starting` and `running`.
@@ -51,3 +58,4 @@ fields instead of scraping documentation prose.
 - [Supervisor protocol](/protocol/)
 - [Firecracker supervisor](/protocol/firecracker/)
 - [Apple VF supervisor](/protocol/applevf/)
+- [Windows Hyper-V supervisor](/protocol/windows-hyperv/)
