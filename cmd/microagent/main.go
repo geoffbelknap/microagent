@@ -1628,6 +1628,9 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	}
 	opts.VsockListeners = listeners
 	result, err := workspace.Start(ctx, opts)
+	if err != nil && result.Workspace == "" {
+		return err
+	}
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
@@ -1811,6 +1814,9 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	}
 	opts.Progress = rootfsProgress(stdout, "create")
 	result, err := workspace.Create(ctx, opts)
+	if err != nil && result.Workspace == "" {
+		return err
+	}
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
@@ -3207,13 +3213,24 @@ func (p *progressPrinter) print(event rootfs.ProgressEvent) {
 }
 
 func isProgressEvent(event rootfs.ProgressEvent) bool {
-	return event.Total > 0 || event.TotalBytes > 0
+	return event.Indeterminate || event.Total > 0 || event.TotalBytes > 0
 }
 
 func formatProgressEvent(event rootfs.ProgressEvent) string {
 	message := strings.TrimSpace(event.Message)
 	if message == "" {
 		message = event.Phase
+	}
+	if event.Indeterminate {
+		elapsed := event.Current
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		spinner := []string{"|", "/", "-", "\\"}
+		if elapsed > 0 {
+			return fmt.Sprintf("[%s] %s (%s)", spinner[elapsed%int64(len(spinner))], message, formatElapsed(elapsed))
+		}
+		return fmt.Sprintf("[%s] %s", spinner[0], message)
 	}
 	if event.Total <= 0 && event.TotalBytes <= 0 {
 		return message
@@ -3260,6 +3277,20 @@ func progressBar(done, total int64, width int) string {
 		filled = width
 	}
 	return "[" + strings.Repeat("=", filled) + strings.Repeat("-", width-filled) + "]"
+}
+
+func formatElapsed(seconds int64) string {
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	minutes := seconds / 60
+	seconds = seconds % 60
+	if minutes < 60 {
+		return fmt.Sprintf("%dm%02ds", minutes, seconds)
+	}
+	hours := minutes / 60
+	minutes = minutes % 60
+	return fmt.Sprintf("%dh%02dm%02ds", hours, minutes, seconds)
 }
 
 func formatBytes(value int64) string {

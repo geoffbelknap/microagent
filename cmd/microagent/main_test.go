@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -3184,6 +3185,78 @@ func TestCreateWorkspaceRootfsRunsSetupBeforeManagedService(t *testing.T) {
 	joined := strings.Join(command, " ")
 	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, "/usr/local/bin/microagent-homebridge") || !strings.Contains(joined, `"mode":"managed-service"`) {
 		t.Fatalf("command = %#v", command)
+	}
+}
+
+func TestRunHighLevelCreateDoesNotRenderEmptyResultOnPreflightFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runHighLevelCreate(t.Context(), []string{
+		"port-check",
+		"--state-dir", dir,
+		"--publish", portText + ":80",
+		"--size-mib", "512",
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "host port 127.0.0.1:"+portText+" is unavailable") {
+		t.Fatalf("runHighLevelCreate err = %v", err)
+	}
+	out, readErr := os.ReadFile(stdoutPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(out), "Workspace:") {
+		t.Fatalf("stdout = %q", string(out))
+	}
+}
+
+func TestRunStartWorkspaceDoesNotRenderEmptyResultOnMissingWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runStartWorkspace(t.Context(), []string{"missing", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "workspace.json") {
+		t.Fatalf("runStartWorkspace err = %v", err)
+	}
+	out, readErr := os.ReadFile(stdoutPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(out), "Workspace:") {
+		t.Fatalf("stdout = %q", string(out))
+	}
+}
+
+func TestFormatProgressEventSupportsIndeterminateGuestSetup(t *testing.T) {
+	got := formatProgressEvent(rootfs.ProgressEvent{
+		Phase:         "guest-setup",
+		Message:       "running guest setup",
+		Current:       65,
+		Indeterminate: true,
+	})
+	if !strings.Contains(got, "running guest setup") || !strings.Contains(got, "1m05s") {
+		t.Fatalf("progress = %q", got)
 	}
 }
 

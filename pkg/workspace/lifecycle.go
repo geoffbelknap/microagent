@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -100,6 +102,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	if err := EnsureCanCreate(opts); err != nil {
+		return Result{}, err
+	}
 	disks, err := PrepareDisks(ctx, opts)
 	if err != nil {
 		return Result{}, err
@@ -122,8 +127,14 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if HasGuestCommand(opts) && (strings.TrimSpace(opts.ServiceCommand) == "" || HasSetupCommand(opts) || strings.TrimSpace(opts.ExecCommand) != "") {
 		runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
+		stopProgress := startIndeterminateProgress(opts.Progress, "guest-setup", "running guest setup")
 		resp, runErr := runForeground(runCtx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
 		result.Response = resp
+		if runErr != nil {
+			stopProgress("guest setup failed")
+		} else {
+			stopProgress("guest setup complete")
+		}
 		result.SerialPath = SerialLogPath(opts.StateDir, opts.Name)
 		if runErr != nil {
 			return result, runErr
@@ -139,6 +150,82 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	resp, err := Dispatch(ctx, opts, Request(opts, "prepare", result.RootfsPath, NewRequestID()))
 	result.Response = resp
 	return result, err
+}
+
+func EnsureCanCreate(opts Options) error {
+	state, _, err := LatestStartState(opts.StateDir, opts.Name)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case vmkit.StateStarting, vmkit.StateRunning:
+		return fmt.Errorf("workspace %s is already %s; stop or delete it before create", opts.Name, state)
+	}
+	return ensureHostPortsAvailable(opts.Network.PortForwards)
+}
+
+func ensureHostPortsAvailable(forwards []vmkit.PortForward) error {
+	for _, forward := range forwards {
+		protocol := strings.TrimSpace(forward.Protocol)
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		if protocol != "tcp" || forward.HostPort == 0 {
+			continue
+		}
+		host := strings.TrimSpace(forward.Host)
+		if host == "" || host == "localhost" {
+			host = "127.0.0.1"
+		}
+		addr := net.JoinHostPort(host, strconv.Itoa(int(forward.HostPort)))
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("host port %s is unavailable; stop the process using it or choose another publish port: %w", addr, err)
+		}
+		_ = listener.Close()
+	}
+	return nil
+}
+
+func startIndeterminateProgress(progress rootfs.ProgressFunc, phase, message string) func(string) {
+	if progress == nil {
+		return func(string) {}
+	}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	started := time.Now()
+	progress(rootfs.ProgressEvent{
+		Phase:         phase,
+		Message:       message,
+		Indeterminate: true,
+	})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				progress(rootfs.ProgressEvent{
+					Phase:         phase,
+					Message:       message,
+					Current:       int64(time.Since(started).Round(time.Second) / time.Second),
+					Indeterminate: true,
+				})
+			}
+		}
+	}()
+	return func(finalMessage string) {
+		close(done)
+		<-stopped
+		progress(rootfs.ProgressEvent{
+			Phase:   phase,
+			Message: finalMessage,
+			Current: int64(time.Since(started).Round(time.Second) / time.Second),
+		})
+	}
 }
 
 func Run(ctx context.Context, opts Options) (Result, error) {

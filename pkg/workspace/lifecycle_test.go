@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -183,6 +185,46 @@ func TestBuildRootfsRequestRunsSetupBeforeManagedService(t *testing.T) {
 	joined := strings.Join(req.Command, " ")
 	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, `"mode":"managed-service"`) {
 		t.Fatalf("Command = %#v", req.Command)
+	}
+}
+
+func TestEnsureCanCreateRejectsRunningWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "homebridge"}
+	req := Request(opts, "start", filepath.Join(dir, "rootfs.ext4"), NewRequestID())
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
+		t.Fatalf("WriteProcessState: %v", err)
+	}
+	err := EnsureCanCreate(opts)
+	if err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("EnsureCanCreate err = %v", err)
+	}
+}
+
+func TestEnsureCanCreateRejectsUnavailableHostPort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = EnsureCanCreate(Options{
+		StateDir: t.TempDir(),
+		Name:     "homebridge",
+		Network: vmkit.NetworkConfig{
+			Mode:         "nat",
+			PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: uint16(port), GuestPort: 8581}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "host port 127.0.0.1:"+portText+" is unavailable") {
+		t.Fatalf("EnsureCanCreate err = %v", err)
 	}
 }
 

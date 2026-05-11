@@ -350,6 +350,9 @@ func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Re
         if kill(pid, signal) != 0 && errno != ESRCH {
             throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
         }
+        if !waitForProcessExit(pid: pid, timeout: signal == SIGKILL ? 2.0 : 5.0) {
+            throw ProtocolError.invalid("workspace \(identity.runtimeID) did not stop after signal \(signal)")
+        }
         try writeState(event: event, config: runtime.config)
         try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: nil)
         return response(event: event, config: runtime.config, error: nil)
@@ -776,6 +779,17 @@ func processAlive(_ pid: Int32?) -> Bool {
         return true
     }
     return errno == EPERM
+}
+
+func waitForProcessExit(pid: Int32, timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if !processAlive(pid) {
+            return true
+        }
+        usleep(20_000)
+    }
+    return !processAlive(pid)
 }
 
 struct TCPHostPort {

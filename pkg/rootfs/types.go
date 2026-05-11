@@ -22,12 +22,13 @@ type Platform struct {
 }
 
 type ProgressEvent struct {
-	Phase      string
-	Message    string
-	Current    int64
-	Total      int64
-	Bytes      int64
-	TotalBytes int64
+	Phase         string
+	Message       string
+	Current       int64
+	Total         int64
+	Bytes         int64
+	TotalBytes    int64
+	Indeterminate bool
 }
 
 type ProgressFunc func(ProgressEvent)
