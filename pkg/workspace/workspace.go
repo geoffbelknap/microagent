@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	DefaultWorkspaceImageArm64 = "docker.io/library/busybox@sha256:bd44eb136a95dcc8dc58995e43abc40a413f2e8e3d4a2aae6bccbe94686acb05"
-	DefaultWorkspaceImageAMD64 = "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
-	DefaultWorkspaceImageOther = "docker.io/library/busybox:1.36.1"
+	DefaultWorkspaceImageArm64 = "docker.io/library/python@sha256:fe7dfda0f28395abfacca893065882031469eef7269a1bb017e5e59c130edd92"
+	DefaultWorkspaceImageAMD64 = "docker.io/library/python@sha256:0ee2df98db454606ca92bb7a79d47ff7dc9cc0c8d5901e32eb71e6b5203377b2"
+	DefaultWorkspaceImageOther = "docker.io/library/python:3.13-slim"
 	DefaultWorkspaceMemoryMiB  = 512
 	DefaultWorkspaceCPUCount   = 2
 	DefaultWorkspaceProfile    = "small"

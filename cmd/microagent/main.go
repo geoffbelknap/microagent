@@ -5442,7 +5442,7 @@ Commands:
   steady               Sample host process RSS over time
 
 Boot options:
-  -image <ref>          OCI image; defaults to the small BusyBox baseline
+  -image <ref>          OCI image; defaults to Python 3.13 slim
   -exec <command>       Guest command used to mark boot completion; defaults to true
   -iterations <n>       Number of boot measurements
   -profile <name>       Resource profile: tiny, small, medium, or large
@@ -5504,7 +5504,7 @@ func printCreateHelp(stdout *os.File) {
 Create a workspace from an image.
 
 Options:
-  -image <ref>          OCI image; defaults to a small BusyBox image
+  -image <ref>          OCI image; defaults to Python 3.13 slim
   -name <name>          Workspace name
   -setup <command>      Shell command to run before first start
   -entrypoint <command> Command to run on start
