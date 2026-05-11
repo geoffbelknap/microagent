@@ -3361,6 +3361,28 @@ func TestCopyConsoleInputKeepsCtrlPWithoutCtrlQ(t *testing.T) {
 	}
 }
 
+func TestCopyShellInputNormalizesCarriageReturns(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyShellInput(&dst, strings.NewReader("echo ready\r"))
+	if err != nil {
+		t.Fatalf("copyShellInput: %v", err)
+	}
+	if written != int64(len("echo ready\n")) || dst.String() != "echo ready\n" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyShellInputDetachesOnCtrlPCtrlQ(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyShellInput(&dst, strings.NewReader("echo before\n"+string([]byte{consoleDetachPrefix, consoleDetachSuffix})+"echo after\n"))
+	if err != nil {
+		t.Fatalf("copyShellInput: %v", err)
+	}
+	if written != int64(len("echo before\n")) || dst.String() != "echo before\n" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
 func TestDataAfterOffsetIgnoresOldConsoleMarkers(t *testing.T) {
 	data := []byte("old marker\nnew marker\n")
 	got := dataAfterOffset(data, int64(len(data)), int64(len("old marker\n")))

@@ -26,6 +26,8 @@ const (
 	DefaultRestartPolicy       = "never"
 	DefaultNetworkMode         = "user"
 	DefaultResultPort          = 1024
+	DefaultShellPortBase       = 22000
+	DefaultShellPortSpan       = 20000
 	DefaultTimeout             = 5 * time.Minute
 )
 
@@ -55,6 +57,7 @@ type Options struct {
 	Mediation       *vmkit.MediationConfig
 	Timeout         time.Duration
 	ResultPort      uint32
+	ShellPort       uint16
 	Disks           []Disk
 	Outputs         []Output
 	VsockListeners  []vmkit.VsockListener
@@ -569,6 +572,22 @@ func RootfsPortForwards(forwards []vmkit.PortForward) []rootfs.PortForward {
 	return out
 }
 
+func ShellPortForName(name string) uint16 {
+	var hash uint32 = 2166136261
+	for _, b := range []byte(strings.TrimSpace(name)) {
+		hash ^= uint32(b)
+		hash *= 16777619
+	}
+	return uint16(DefaultShellPortBase + int(hash%DefaultShellPortSpan))
+}
+
+func ShellPort(opts Options) uint16 {
+	if opts.ShellPort != 0 {
+		return opts.ShellPort
+	}
+	return ShellPortForName(opts.Name)
+}
+
 func Request(opts Options, command, rootfsPath string, requestID string) vmkit.Request {
 	var listeners []vmkit.VsockListener
 	if opts.ResultPort != 0 {
@@ -605,6 +624,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			VsockListeners: listeners,
 			Mediation:      opts.Mediation,
 			Network:        NetworkConfigPtr(opts.Network),
+			ShellPort:      ShellPort(opts),
 			SerialInput:    opts.SerialInput,
 			TimeoutSeconds: int(opts.Timeout.Seconds()),
 		},
@@ -633,6 +653,7 @@ func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, erro
 		CPUCount:       req.Config.CPUCount,
 		Network:        network,
 		Mediation:      req.Config.Mediation,
+		ShellPort:      req.Config.ShellPort,
 		Disks:          ConfigDisks(req.Config.Disks),
 	}, nil
 }
@@ -706,7 +727,7 @@ func Command(opts Options) string {
 		lines = append(lines, execCommand)
 	}
 	if opts.PrepareForStart {
-		lines = append(lines, ResetGuestConfigCommand(ShellCommand(opts.Entrypoint), opts.Env, opts.ResultPort, Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
+		lines = append(lines, ResetGuestConfigCommand(ShellCommand(opts.Entrypoint), opts.Env, opts.ResultPort, ShellPort(opts), Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -721,7 +742,7 @@ func BuildCommandAndPort(opts Options) ([]string, uint32) {
 	return ShellCommand(Command(opts)), opts.ResultPort
 }
 
-func ResetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
+func ResetGuestConfigCommand(command []string, env map[string]string, port uint32, shellPort uint16, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
 	if command == nil {
 		command = []string{}
 	}
@@ -729,6 +750,7 @@ func ResetGuestConfigCommand(command []string, env map[string]string, port uint3
 		Command      []string             `json:"command"`
 		Env          []string             `json:"env,omitempty"`
 		Port         uint32               `json:"port"`
+		ShellPort    uint16               `json:"shellPort,omitempty"`
 		Mounts       []rootfs.Mount       `json:"mounts,omitempty"`
 		HostForwards []rootfs.PortForward `json:"hostForwards,omitempty"`
 		ConsoleShell string               `json:"consoleShell,omitempty"`
@@ -737,6 +759,7 @@ func ResetGuestConfigCommand(command []string, env map[string]string, port uint3
 		Command:      command,
 		Env:          envList(env),
 		Port:         port,
+		ShellPort:    shellPort,
 		Mounts:       mounts,
 		HostForwards: forwards,
 		ConsoleShell: strings.TrimSpace(consoleShell),

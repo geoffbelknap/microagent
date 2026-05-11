@@ -7,9 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1487,54 +1489,35 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if state != vmkit.StateRunning {
 		return fmt.Errorf("workspace %s is not running; console input is unavailable in state %s", name, state)
 	}
-	inputPath := serialInputPath(opts.StateDir, name)
-	logPath := filepath.Join(opts.StateDir, name, "serial.log")
 	if strings.TrimSpace(*send) != "" {
 		if *timeoutSeconds < 0 {
 			return fmt.Errorf("connect timeout must not be negative")
 		}
-		if err := waitForPath(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second); err != nil {
-			return fmt.Errorf("console input is not ready for workspace %s: %w", name, err)
-		}
-		if *readyTimeoutSeconds > 0 {
-			if err := waitForConsoleReady(ctx, logPath, time.Duration(*readyTimeoutSeconds)*time.Second); err != nil {
-				return fmt.Errorf("guest shell is not ready for workspace %s: %w; check microagent logs %s", name, err, name)
-			}
-		}
-		before := fileSize(logPath)
-		input, err := openFIFOForWrite(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second)
+		conn, err := dialConnectShell(ctx, name, time.Duration(*readyTimeoutSeconds)*time.Second)
 		if err != nil {
-			return fmt.Errorf("open console input for workspace %s: %w", name, err)
-		}
-		text := *send
-		text = strings.ReplaceAll(text, "\n", "\r")
-		if !strings.HasSuffix(text, "\r") {
-			text += "\r"
-		}
-		if _, err := io.WriteString(input, text); err != nil {
-			_ = input.Close()
 			return err
 		}
-		if err := input.Close(); err != nil {
+		defer conn.Close()
+		text := strings.ReplaceAll(*send, "\r", "\n")
+		if !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += "exit\n"
+		if _, err := io.WriteString(conn, text); err != nil {
 			return err
 		}
-		tailCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeoutSeconds)*time.Second)
-		defer cancel()
-		return tailFile(tailCtx, logPath, stdout, before)
-	}
-	if err := waitForPath(ctx, inputPath, 0); err != nil {
-		return fmt.Errorf("console input is not ready for workspace %s: %w", name, err)
-	}
-	if *readyTimeoutSeconds > 0 {
-		if err := waitForConsoleReady(ctx, logPath, time.Duration(*readyTimeoutSeconds)*time.Second); err != nil {
-			return fmt.Errorf("guest shell is not ready for workspace %s: %w; check microagent logs %s", name, err, name)
+		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(*timeoutSeconds) * time.Second))
+		_, err = io.Copy(stdout, conn)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return nil
 		}
+		return err
 	}
-	input, err := openFIFOForWrite(ctx, inputPath, 0)
+	conn, err := dialConnectShell(ctx, name, time.Duration(*readyTimeoutSeconds)*time.Second)
 	if err != nil {
-		return fmt.Errorf("open console input for workspace %s: %w", name, err)
+		return err
 	}
-	defer input.Close()
+	defer conn.Close()
 	if stdinIsTerminal() {
 		restoreTerminal, err := makeRawTerminal(os.Stdin)
 		if err != nil {
@@ -1542,29 +1525,54 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		defer restoreTerminal()
 	}
-	tailCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	sessionStart := fileSize(logPath)
 	type connectResult struct {
-		source string
-		err    error
+		err error
 	}
 	results := make(chan connectResult, 2)
 	go func() {
-		results <- connectResult{source: "tail", err: tailFileUntil(tailCtx, logPath, stdout, 0, sessionStart, consoleShellExitedMarker)}
+		_, err := io.Copy(stdout, conn)
+		results <- connectResult{err: err}
 	}()
 	go func() {
-		_, err := copyConsoleInput(input, os.Stdin)
-		results <- connectResult{source: "input", err: err}
+		_, err := copyShellInput(conn, os.Stdin)
+		results <- connectResult{err: err}
 	}()
 	result := <-results
-	cancel()
-	if result.source == "input" {
-		if tailResult := <-results; result.err == nil {
-			result.err = tailResult.err
+	_ = conn.Close()
+	if result.err != nil && !errors.Is(result.err, net.ErrClosed) {
+		return result.err
+	}
+	return nil
+}
+
+func dialConnectShell(ctx context.Context, name string, timeout time.Duration) (net.Conn, error) {
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(workspace.ShellPortForName(name))))
+	if timeout <= 0 {
+		conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", target)
+		if err != nil {
+			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, target, err)
+		}
+		return conn, nil
+	}
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", target)
+		cancel()
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, target, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return result.err
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
@@ -4872,7 +4880,7 @@ func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
 }
 
 func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
-	return workspace.ResetGuestConfigCommand(command, env, port, mounts, forwards, consoleShell, hostname)
+	return workspace.ResetGuestConfigCommand(command, env, port, 0, mounts, forwards, consoleShell, hostname)
 }
 
 func envList(env map[string]string) []string {
@@ -5087,6 +5095,48 @@ func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 			return total, readErr
 		}
 	}
+}
+
+func copyShellInput(dst io.Writer, src io.Reader) (int64, error) {
+	var total int64
+	buffer := make([]byte, 4096)
+	state := consoleInputState{}
+	for {
+		n, readErr := src.Read(buffer)
+		if n > 0 {
+			chunk := buffer[:n]
+			filtered, detach := filterConsoleInput(chunk, &state)
+			filtered = normalizeShellInputChunk(filtered)
+			written, writeErr := dst.Write(filtered)
+			total += int64(written)
+			if writeErr != nil {
+				return total, writeErr
+			}
+			if detach {
+				return total, nil
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return total, nil
+			}
+			return total, readErr
+		}
+	}
+}
+
+func normalizeShellInputChunk(chunk []byte) []byte {
+	if len(chunk) == 0 {
+		return chunk
+	}
+	out := make([]byte, len(chunk))
+	copy(out, chunk)
+	for i := range out {
+		if out[i] == '\r' {
+			out[i] = '\n'
+		}
+	}
+	return out
 }
 
 type consoleInputState struct {

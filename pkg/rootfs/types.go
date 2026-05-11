@@ -42,6 +42,7 @@ type BuildRequest struct {
 	Mode           string            `json:"mode,omitempty"`
 	ConsoleShell   string            `json:"console_shell,omitempty"`
 	Hostname       string            `json:"hostname,omitempty"`
+	ShellPort      uint16            `json:"shell_port,omitempty"`
 	NoImageCommand bool              `json:"no_image_command,omitempty"`
 	ResultPort     uint32            `json:"result_port,omitempty"`
 	StateDir       string            `json:"state_dir,omitempty"`

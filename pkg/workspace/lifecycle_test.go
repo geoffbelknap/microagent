@@ -127,6 +127,9 @@ func TestBuildRootfsRequestCanUseImageCommandForPreparedWorkspace(t *testing.T) 
 	if req.Mode != "service" {
 		t.Fatalf("Mode = %q, want service", req.Mode)
 	}
+	if req.ShellPort != ShellPortForName("homebridge") {
+		t.Fatalf("ShellPort = %d, want %d", req.ShellPort, ShellPortForName("homebridge"))
+	}
 	if len(req.Command) != 0 {
 		t.Fatalf("Command = %#v, want OCI image command", req.Command)
 	}

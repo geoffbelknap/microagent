@@ -434,6 +434,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		Mode:           mode,
 		ConsoleShell:   opts.ConsoleShell,
 		Hostname:       opts.Hostname,
+		ShellPort:      ShellPort(opts),
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
 		NoImageCommand: opts.PrepareForStart && !HasGuestCommand(opts) && !opts.UseImageCommand,

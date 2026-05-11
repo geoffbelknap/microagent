@@ -43,6 +43,7 @@ struct Config: Codable {
     var vsockListeners: [VsockListener]?
     var mediation: MediationConfig?
     var network: NetworkConfig?
+    var shellPort: UInt16?
     var serialInput: Bool?
 }
 
@@ -1312,7 +1313,10 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
 
 @available(macOS 13.0, *)
 func installTCPPublishForwarder(vm: VZVirtualMachine, config: Config) throws -> TCPPublishForwarder? {
-    let forwards = config.network?.portForwards ?? []
+    var forwards = config.network?.portForwards ?? []
+    if let shellPort = config.shellPort, shellPort > 0 {
+        forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: shellPort, guestPort: shellPort))
+    }
     if forwards.isEmpty {
         return nil
     }

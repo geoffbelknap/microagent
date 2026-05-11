@@ -35,6 +35,7 @@ type config struct {
 	Mode         string        `json:"mode,omitempty"`
 	Mounts       []mount       `json:"mounts,omitempty"`
 	HostForwards []hostForward `json:"hostForwards,omitempty"`
+	ShellPort    uint16        `json:"shellPort,omitempty"`
 	ConsoleShell string        `json:"consoleShell,omitempty"`
 	Hostname     string        `json:"hostname,omitempty"`
 }
@@ -57,6 +58,9 @@ type result struct {
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "host-forward-helper" {
 		os.Exit(runHostForwardHelper(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "shell-helper" {
+		os.Exit(runShellHelper(os.Args[2:]))
 	}
 	code := run()
 	poweroff()
@@ -130,17 +134,17 @@ func run() int {
 		_ = sendResult(cfg.Port, res)
 		return code
 	}
+	if err := startShellHelper(cfg.ShellPort, cfg.ConsoleShell, guestEnv(cfg.Env)); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
 	if cfg.Mode == "service" && len(cfg.Command) > 0 {
 		if err := attachConsole(); err != nil {
-			code = 127
-			res.Error = err.Error()
-			fmt.Fprintln(os.Stderr, err)
-			res.ExitCode = code
-			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			_ = sendResult(cfg.Port, res)
-			return code
-		}
-		if err := startInteractiveShell(guestEnv(cfg.Env), cfg.ConsoleShell); err != nil {
 			code = 127
 			res.Error = err.Error()
 			fmt.Fprintln(os.Stderr, err)
@@ -510,6 +514,97 @@ func startConfiguredHostForwards(cfg config) error {
 		return startHostForwardHelpers(cfg.HostForwards)
 	}
 	return startHostForwards(cfg.HostForwards)
+}
+
+func startShellHelper(port uint16, shellPath string, env []string) error {
+	if port == 0 {
+		return nil
+	}
+	cmd := exec.Command(os.Args[0], "shell-helper", strconv.Itoa(int(port)), shellPath)
+	cmd.Env = env
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start shell helper on port %d: %w", port, err)
+	}
+	return nil
+}
+
+func runShellHelper(args []string) int {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, "usage: microagent-init shell-helper <port> [shell]")
+		return 127
+	}
+	port, err := parseUint16(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse shell port: %v\n", err)
+		return 127
+	}
+	shellPath := ""
+	if len(args) == 2 {
+		shellPath = args[1]
+	}
+	fd, err := openShellListener(port)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	serveShellSessions(fd, shellPath)
+	return 0
+}
+
+func openShellListener(port uint16) (int, error) {
+	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+	if err != nil {
+		return -1, fmt.Errorf("open vsock shell listener for port %d: %w", port, err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(port)}); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("bind vsock shell listener for port %d: %w", port, err)
+	}
+	if err := unix.Listen(fd, 8); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("listen on vsock shell port %d: %w", port, err)
+	}
+	log.Printf("microagent-init: shell helper listening on vsock port %d", port)
+	return fd, nil
+}
+
+func serveShellSessions(fd int, shellPath string) {
+	for {
+		connFD, _, err := unix.Accept(fd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "accept shell session: %v\n", err)
+			_ = unix.Close(fd)
+			return
+		}
+		go runShellSession(connFD, shellPath)
+	}
+}
+
+func runShellSession(fd int, shellPath string) {
+	file := os.NewFile(uintptr(fd), "shell-session-vsock")
+	if file == nil {
+		_ = unix.Close(fd)
+		return
+	}
+	defer file.Close()
+	command, err := consoleShellCommand(shellPath)
+	if err != nil {
+		fmt.Fprintf(file, "microagent-init: %v\n", err)
+		return
+	}
+	log.Printf("microagent-init: starting connect shell %v", command)
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Env = os.Environ()
+	cmd.Stdin = file
+	cmd.Stdout = file
+	cmd.Stderr = file
+	if err := cmd.Run(); err != nil {
+		log.Printf("microagent-init: connect shell exited: %v", err)
+		return
+	}
+	log.Println("microagent-init: connect shell exited")
 }
 
 func startHostForwardHelpers(forwards []hostForward) error {
@@ -980,11 +1075,12 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 		return
 	}
 	defer file.Close()
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(int(guestPort)), 10*time.Second)
+	target, conn, err := dialGuestTCP(guestPort, 10*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect guest tcp port %d: %v\n", guestPort, err)
 		return
 	}
+	log.Printf("microagent-init: host forward connected guest tcp %s", target)
 	defer conn.Close()
 	done := make(chan struct{}, 2)
 	go func() {
@@ -1004,6 +1100,63 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 	<-done
 	_ = conn.Close()
 	_ = file.Close()
+}
+
+func dialGuestTCP(port uint16, timeout time.Duration) (string, net.Conn, error) {
+	var lastErr error
+	for _, host := range guestTCPForwardTargets() {
+		target := net.JoinHostPort(host, strconv.Itoa(int(port)))
+		conn, err := net.DialTimeout("tcp", target, timeout)
+		if err == nil {
+			return target, conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no guest tcp targets")
+	}
+	return "", nil, lastErr
+}
+
+func guestTCPForwardTargets() []string {
+	targets := []string{"127.0.0.1"}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return targets
+	}
+	seen := map[string]bool{"127.0.0.1": true}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch value := addr.(type) {
+			case *net.IPNet:
+				ip = value.IP
+			case *net.IPAddr:
+				ip = value.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			ip = ip.To4()
+			if ip == nil {
+				continue
+			}
+			raw := ip.String()
+			if seen[raw] {
+				continue
+			}
+			seen[raw] = true
+			targets = append(targets, raw)
+		}
+	}
+	return targets
 }
 
 func closeWriteConn(conn net.Conn) {

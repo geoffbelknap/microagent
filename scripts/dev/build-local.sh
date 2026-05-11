@@ -7,8 +7,9 @@ usage() {
   cat >&2 <<'USAGE'
 usage: scripts/dev/build-local.sh [--output PATH] [--arch ARCH]
 
-Builds a local microagent CLI plus the Linux guest-init companion expected by
-the CLI resolver. The default CLI path is .build/dev/microagent.
+Builds a local microagent CLI plus the Apple VF supervisor and Linux guest-init
+companions expected by the CLI resolver. The default CLI path is
+.build/dev/microagent.
 
 Options:
   --output PATH   CLI output path (default: .build/dev/microagent)
@@ -78,6 +79,7 @@ output_dir="$(cd "$(dirname "$output")" && pwd -P)"
 output_name="$(basename "$output")"
 cli_path="$output_dir/$output_name"
 guest_init_path="$output_dir/microagent-guestinit-$arch"
+supervisor_path="$output_dir/microagent-applevf-supervisor"
 
 (
   cd "$ROOT"
@@ -85,5 +87,13 @@ guest_init_path="$output_dir/microagent-guestinit-$arch"
   GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -o "$guest_init_path" ./cmd/microagent-guestinit
 )
 
+if [ "$(uname -s)" = "Darwin" ]; then
+  "$ROOT/scripts/dev/applevf-supervisor-build.sh" >/dev/null
+  cp "$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor" "$supervisor_path"
+fi
+
 echo "CLI: $cli_path"
+if [ -f "$supervisor_path" ]; then
+  echo "Apple VF supervisor: $supervisor_path"
+fi
 echo "Guest init: $guest_init_path"

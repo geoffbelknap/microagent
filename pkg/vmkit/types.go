@@ -51,6 +51,7 @@ type Config struct {
 	VsockListeners []VsockListener  `json:"vsockListeners,omitempty"`
 	Mediation      *MediationConfig `json:"mediation,omitempty"`
 	Network        *NetworkConfig   `json:"network,omitempty"`
+	ShellPort      uint16           `json:"shellPort,omitempty"`
 	SerialInput    bool             `json:"serialInput,omitempty"`
 	TimeoutSeconds int              `json:"timeoutSeconds,omitempty"`
 }
