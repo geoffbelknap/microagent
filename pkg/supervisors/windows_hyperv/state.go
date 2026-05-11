@@ -48,13 +48,13 @@ func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response,
 	}
 	listeners, err := startRuntimeListenersHook(ctx, handle, req)
 	if err != nil {
-		return failRun(req, vmkit.StateFailed, fmt.Sprintf("listener setup failed: %s", err), err)
+		return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("listener setup failed: %s", err), err)
 	}
 	if listeners != nil {
 		defer listeners.Close()
 	}
 	if err := adapter.Start(ctx, handle.ID); err != nil {
-		return failRun(req, vmkit.StateFailed, fmt.Sprintf("start failed: %s", err), err)
+		return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("start failed: %s", err), err)
 	}
 	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateRunning, "serial="+serialLogPath(req), "", handle.ID)
 	if err != nil {
@@ -62,10 +62,10 @@ func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response,
 	}
 	if listeners != nil {
 		if err := listeners.Wait(ctx); err != nil {
-			return failRun(req, vmkit.StateFailed, fmt.Sprintf("result listener failed: %s", err), err)
+			return failRunWithCleanup(ctx, req, adapter, handle, true, fmt.Sprintf("result listener failed: %s", err), err)
 		}
 		if err := adapter.Wait(ctx, handle.ID); err != nil {
-			return failRun(req, vmkit.StateFailed, fmt.Sprintf("wait failed: %s", err), err)
+			return failRunWithCleanup(ctx, req, adapter, handle, true, fmt.Sprintf("wait failed: %s", err), err)
 		}
 		event, err = writeRuntimeTransitionWithComputeID(req, vmkit.StateStopped, "windows-hyperv result received", "", handle.ID)
 		if err != nil {
@@ -124,6 +124,33 @@ func (s Supervisor) stop(ctx context.Context, req vmkit.Request) (vmkit.Response
 	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
 }
 
+func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
+	state, err := readRuntimeState(req)
+	if err != nil {
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
+	}
+	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateHalted, "windows-hyperv compute system halted", "", state.ComputeSystemID)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
+}
+
+func (s Supervisor) quarantine(req vmkit.Request) (vmkit.Response, error) {
+	state, err := readRuntimeState(req)
+	if err != nil {
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	event, err := writeRuntimeTransitionWithComputeID(req, vmkit.StateQuarantined, "windows-hyperv compute system quarantined", "", state.ComputeSystemID)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
+}
+
 func (s Supervisor) kill(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
 	state, err := readRuntimeState(req)
 	if err != nil {
@@ -164,6 +191,29 @@ func failRun(req vmkit.Request, state vmkit.VMState, detail string, cause error)
 		resp.Event = &event
 	}
 	return resp, cause
+}
+
+func failRunWithCleanup(ctx context.Context, req vmkit.Request, adapter runtimeAdapter, handle computeSystemHandle, started bool, detail string, cause error) (vmkit.Response, error) {
+	cleanupDetail := detail
+	if cleanupErr := cleanupComputeSystem(ctx, adapter, handle, started); cleanupErr != nil {
+		cleanupDetail = fmt.Sprintf("%s; cleanup failed: %s", detail, cleanupErr)
+	}
+	event, writeErr := writeRuntimeTransitionWithComputeID(req, vmkit.StateFailed, cleanupDetail, cause.Error(), handle.ID)
+	resp := vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: cause.Error()}
+	if writeErr == nil {
+		resp.Event = &event
+	}
+	return resp, cause
+}
+
+func cleanupComputeSystem(ctx context.Context, adapter runtimeAdapter, handle computeSystemHandle, started bool) error {
+	if handle.ID == "" {
+		return nil
+	}
+	if started {
+		return adapter.Kill(ctx, handle.ID)
+	}
+	return adapter.Delete(ctx, handle.ID)
 }
 
 func writeRuntimeTransition(req vmkit.Request, state vmkit.VMState, detail, errorText string) (vmkit.Event, error) {

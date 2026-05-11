@@ -224,6 +224,81 @@ func TestRunCommandFailsClosedForUnsupportedWindowsHyperVVsockTarget(t *testing.
 	if adapter.starts != 0 {
 		t.Fatalf("adapter starts = %d, want listener failure before start", adapter.starts)
 	}
+	if adapter.deletes != 1 || adapter.deleteID != "fake" {
+		t.Fatalf("cleanup deletes=%d deleteID=%q, want created compute system deleted", adapter.deletes, adapter.deleteID)
+	}
+}
+
+func TestRunCommandCleansUpComputeSystemWhenStartFails(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv run path is windows-only")
+	}
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{startErr: fmt.Errorf("start failed")}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "start failed") {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	if adapter.deletes != 1 || adapter.deleteID != "fake" {
+		t.Fatalf("cleanup deletes=%d deleteID=%q, want created compute system deleted", adapter.deletes, adapter.deleteID)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Event.State != vmkit.StateFailed || state.ComputeSystemID != "fake" {
+		t.Fatalf("runtime state = %#v, want failed with compute system ID", state)
+	}
+}
+
+func TestRunCommandCleansUpComputeSystemWhenResultWaitFails(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv run path is windows-only")
+	}
+	oldHook := startRuntimeListenersHook
+	t.Cleanup(func() { startRuntimeListenersHook = oldHook })
+	startRuntimeListenersHook = func(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
+		return fakeListenerSet{wait: func() error {
+			return fmt.Errorf("result wait failed")
+		}}, nil
+	}
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath:     "C:\\microagent\\Image",
+			RootfsPath:     "C:\\microagent\\rootfs.vhd",
+			StateDir:       stateDir,
+			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")}},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "result wait failed") {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	if adapter.kills != 1 || adapter.killID != "fake" {
+		t.Fatalf("cleanup kills=%d killID=%q, want running compute system killed", adapter.kills, adapter.killID)
+	}
 }
 
 func TestInspectAndControlCommandsUseRuntimeState(t *testing.T) {
@@ -308,6 +383,59 @@ func TestInspectAndControlCommandsUseRuntimeState(t *testing.T) {
 	}
 }
 
+func TestHaltAndQuarantineUseRuntimeState(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{}
+	supervisor := Supervisor{adapter: adapter}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if resp, err := supervisor.Do(context.Background(), req); err != nil || !resp.OK {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	haltReq := req
+	haltReq.Command = "halt"
+	resp, err := supervisor.Do(context.Background(), haltReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateHalted {
+		t.Fatalf("halt resp=%#v err=%v", resp, err)
+	}
+	if adapter.shutdowns != 1 || adapter.shutdownID != "fake" {
+		t.Fatalf("shutdowns=%d shutdownID=%q", adapter.shutdowns, adapter.shutdownID)
+	}
+
+	if _, err := supervisor.Do(context.Background(), req); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	quarantineReq := req
+	quarantineReq.Command = "quarantine"
+	resp, err = supervisor.Do(context.Background(), quarantineReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateQuarantined {
+		t.Fatalf("quarantine resp=%#v err=%v", resp, err)
+	}
+	if adapter.kills != 0 || adapter.deletes != 0 {
+		t.Fatalf("quarantine terminated compute system: kills=%d deletes=%d", adapter.kills, adapter.deletes)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Event.State != vmkit.StateQuarantined || state.ComputeSystemID != "fake" {
+		t.Fatalf("runtime state = %#v, want quarantined with compute system ID", state)
+	}
+}
+
 func TestSupervisorUsesInjectedAdapterForHostAndCheck(t *testing.T) {
 	adapter := &fakeAdapter{
 		host: vmkit.HostSupport{
@@ -360,6 +488,7 @@ type fakeAdapter struct {
 	deleteID   string
 	waits      int
 	waitID     string
+	startErr   error
 }
 
 func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
@@ -383,6 +512,9 @@ func (f *fakeAdapter) Create(ctx context.Context, spec computeSystemSpec) (compu
 func (f *fakeAdapter) Start(ctx context.Context, id string) error {
 	f.starts++
 	f.startedID = id
+	if f.startErr != nil {
+		return f.startErr
+	}
 	return nil
 }
 

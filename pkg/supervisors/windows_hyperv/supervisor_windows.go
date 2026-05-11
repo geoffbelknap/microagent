@@ -29,6 +29,10 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return s.run(ctx, req)
 	case "inspect":
 		return inspect(req)
+	case "halt":
+		return s.halt(ctx, req)
+	case "quarantine":
+		return s.quarantine(req)
 	case "stop":
 		return s.stop(ctx, req)
 	case "kill":
