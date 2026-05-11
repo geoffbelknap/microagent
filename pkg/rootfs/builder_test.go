@@ -102,6 +102,76 @@ func TestBuildCommandUsesImageCommandByDefault(t *testing.T) {
 	}
 }
 
+func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
+	tests := []struct {
+		name          string
+		raw           string
+		wantRepoRef   string
+		wantReference string
+	}{
+		{
+			name:          "official image with tag",
+			raw:           "ubuntu:24.04",
+			wantRepoRef:   "docker.io/library/ubuntu",
+			wantReference: "24.04",
+		},
+		{
+			name:          "official image with digest",
+			raw:           "ubuntu@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			wantRepoRef:   "docker.io/library/ubuntu",
+			wantReference: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		{
+			name:          "docker hub namespace with tag",
+			raw:           "homebridge/homebridge:latest",
+			wantRepoRef:   "docker.io/homebridge/homebridge",
+			wantReference: "latest",
+		},
+		{
+			name:          "docker hub namespace without tag",
+			raw:           "homebridge/homebridge",
+			wantRepoRef:   "docker.io/homebridge/homebridge",
+			wantReference: "latest",
+		},
+		{
+			name:          "docker io official shorthand",
+			raw:           "docker.io/ubuntu:24.04",
+			wantRepoRef:   "docker.io/library/ubuntu",
+			wantReference: "24.04",
+		},
+		{
+			name:          "explicit docker io namespace",
+			raw:           "docker.io/homebridge/homebridge:latest",
+			wantRepoRef:   "docker.io/homebridge/homebridge",
+			wantReference: "latest",
+		},
+		{
+			name:          "explicit ghcr registry",
+			raw:           "ghcr.io/example/agent:latest",
+			wantRepoRef:   "ghcr.io/example/agent",
+			wantReference: "latest",
+		},
+		{
+			name:          "explicit localhost registry",
+			raw:           "localhost:5000/example/agent:latest",
+			wantRepoRef:   "localhost:5000/example/agent",
+			wantReference: "latest",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotRepoRef, gotReference, err := splitRegistryReference(tc.raw)
+			if err != nil {
+				t.Fatalf("splitRegistryReference: %v", err)
+			}
+			if gotRepoRef != tc.wantRepoRef || gotReference != tc.wantReference {
+				t.Fatalf("splitRegistryReference(%q) = %q, %q; want %q, %q", tc.raw, gotRepoRef, gotReference, tc.wantRepoRef, tc.wantReference)
+			}
+		})
+	}
+}
+
 func TestWriteDeclaredFilesCopiesSourceIntoStage(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "source.sh")

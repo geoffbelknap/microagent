@@ -404,6 +404,7 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	if strings.TrimSpace(execCommand) != "" {
 		req.Command = []string{"/bin/sh", "-lc", execCommand}
 	}
+	req.Progress = rootfsProgress(stdout, "rootfs")
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	if provenance.ImageRef != "" {
 		enc := json.NewEncoder(stdout)
@@ -1532,6 +1533,13 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		return fmt.Errorf("open console input for workspace %s: %w", name, err)
 	}
 	defer input.Close()
+	if stdinIsTerminal() {
+		restoreTerminal, err := makeRawTerminal(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("enable raw terminal mode: %w", err)
+		}
+		defer restoreTerminal()
+	}
 	tailCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	sessionStart := fileSize(logPath)
@@ -1791,6 +1799,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil {
 		return err
 	}
+	opts.Progress = rootfsProgress(stdout, "create")
 	result, err := workspace.Create(ctx, opts)
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
@@ -2393,6 +2402,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Mounts:         workspaceMounts(opts.Disks),
 		HostForwards:   rootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,
+		Progress:       opts.Progress,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := workspaceResult{
@@ -3046,6 +3056,80 @@ func outputJSON(stdout *os.File) bool {
 		return true
 	}
 	return info.Mode()&os.ModeCharDevice == 0
+}
+
+func rootfsProgress(stdout *os.File, prefix string) rootfs.ProgressFunc {
+	if outputJSON(stdout) {
+		return nil
+	}
+	return func(event rootfs.ProgressEvent) {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", prefix, formatProgressEvent(event))
+	}
+}
+
+func formatProgressEvent(event rootfs.ProgressEvent) string {
+	message := strings.TrimSpace(event.Message)
+	if message == "" {
+		message = event.Phase
+	}
+	if event.Total <= 0 && event.TotalBytes <= 0 {
+		return message
+	}
+	var done, total int64
+	if event.TotalBytes > 0 {
+		done = event.Bytes
+		total = event.TotalBytes
+	} else {
+		done = event.Current
+		total = event.Total
+	}
+	if total <= 0 {
+		return message
+	}
+	if done < 0 {
+		done = 0
+	}
+	if done > total {
+		done = total
+	}
+	bar := progressBar(done, total, 20)
+	if event.TotalBytes > 0 {
+		return fmt.Sprintf("%s %s %s/%s", bar, message, formatBytes(done), formatBytes(total))
+	}
+	return fmt.Sprintf("%s %s %d/%d", bar, message, event.Current, event.Total)
+}
+
+func progressBar(done, total int64, width int) string {
+	if width <= 0 {
+		width = 20
+	}
+	filled := 0
+	if total > 0 {
+		filled = int(done * int64(width) / total)
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > width {
+		filled = width
+	}
+	return "[" + strings.Repeat("=", filled) + strings.Repeat("-", width-filled) + "]"
+}
+
+func formatBytes(value int64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%dB", value)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	size := float64(value)
+	for _, suffix := range units {
+		size /= unit
+		if size < unit {
+			return fmt.Sprintf("%.1f%s", size, suffix)
+		}
+	}
+	return fmt.Sprintf("%.1fPiB", size/unit)
 }
 
 func parseGlobalFlags(args []string) []string {

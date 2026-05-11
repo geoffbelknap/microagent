@@ -21,6 +21,17 @@ type Platform struct {
 	Variant      string `json:"variant,omitempty"`
 }
 
+type ProgressEvent struct {
+	Phase      string
+	Message    string
+	Current    int64
+	Total      int64
+	Bytes      int64
+	TotalBytes int64
+}
+
+type ProgressFunc func(ProgressEvent)
+
 type BuildRequest struct {
 	ImageRef       string            `json:"image_ref"`
 	Platform       Platform          `json:"platform"`
@@ -42,6 +53,7 @@ type BuildRequest struct {
 	AllowMutable   bool              `json:"allow_mutable,omitempty"`
 	KeepStage      bool              `json:"keep_stage,omitempty"`
 	StageSnapshot  string            `json:"stage_snapshot,omitempty"`
+	Progress       ProgressFunc      `json:"-"`
 }
 
 type File struct {

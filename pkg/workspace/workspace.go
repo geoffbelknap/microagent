@@ -67,6 +67,7 @@ type Options struct {
 	PrepareForStart bool
 	SerialInput     bool
 	Verification    *vmkit.RuntimeVerification
+	Progress        rootfs.ProgressFunc
 }
 
 type Spec struct {

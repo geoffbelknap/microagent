@@ -440,6 +440,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		Mounts:         Mounts(opts.Disks),
 		HostForwards:   RootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,
+		Progress:       opts.Progress,
 	}
 }
 
