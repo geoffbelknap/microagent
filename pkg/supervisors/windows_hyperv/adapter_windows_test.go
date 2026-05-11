@@ -54,6 +54,9 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 						ReadOnly bool   `json:"ReadOnly"`
 					} `json:"Attachments"`
 				} `json:"Scsi"`
+				ComPorts map[string]struct {
+					NamedPipe string `json:"NamedPipe"`
+				} `json:"ComPorts"`
 			} `json:"Devices"`
 		} `json:"VirtualMachine"`
 	}
@@ -72,12 +75,56 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 			t.Fatalf("kernel cmdline %q missing %q", cmdline, want)
 		}
 	}
+	if len(doc.VirtualMachine.Devices.ComPorts) != 0 {
+		t.Fatalf("unexpected com ports without result listener: %#v", doc.VirtualMachine.Devices.ComPorts)
+	}
 	attachment := doc.VirtualMachine.Devices.Scsi["0"].Attachments["0"]
 	if attachment.Type != "VirtualDisk" || attachment.Path != "C:\\microagent\\rootfs.vhd" || !attachment.ReadOnly {
 		t.Fatalf("root attachment = %#v", attachment)
 	}
 	if doc.VirtualMachine.ComputeTopology.Memory.SizeInMB != 768 || doc.VirtualMachine.ComputeTopology.Processor.Count != 3 {
 		t.Fatalf("topology = %#v", doc.VirtualMachine.ComputeTopology)
+	}
+}
+
+func TestBuildComputeSystemDocumentAddsSerialPipeForResultRuns(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Identity: vmkit.Identity{
+			RuntimeID: "agent-1",
+		},
+		Config: vmkit.Config{
+			KernelPath:     "C:\\microagent\\Image",
+			RootfsPath:     "C:\\microagent\\rootfs.vhd",
+			StateDir:       "C:\\state",
+			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: "C:\\state\\agent-1\\result.json"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		VirtualMachine struct {
+			Chipset struct {
+				LinuxKernelDirect struct {
+					KernelCmdLine string `json:"KernelCmdLine"`
+				} `json:"LinuxKernelDirect"`
+			} `json:"Chipset"`
+			Devices struct {
+				ComPorts map[string]struct {
+					NamedPipe string `json:"NamedPipe"`
+				} `json:"ComPorts"`
+			} `json:"Devices"`
+		} `json:"VirtualMachine"`
+	}
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelCmdLine, "console=ttyS0,115200") {
+		t.Fatalf("kernel cmdline = %q", doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelCmdLine)
+	}
+	if got := doc.VirtualMachine.Devices.ComPorts["0"].NamedPipe; got != serialPipePath("agent-1") {
+		t.Fatalf("serial pipe = %q, want %q", got, serialPipePath("agent-1"))
 	}
 }
 

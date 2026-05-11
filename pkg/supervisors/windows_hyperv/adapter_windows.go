@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -113,6 +114,7 @@ type devices struct {
 	Scsi     map[string]scsiController `json:"Scsi,omitempty"`
 	HvSocket hvSocket                  `json:"HvSocket"`
 	Plan9    map[string]any            `json:"Plan9"`
+	ComPorts map[string]comPort        `json:"ComPorts,omitempty"`
 }
 
 type scsiController struct {
@@ -141,6 +143,10 @@ type hvSocketServiceConfig struct {
 	ConnectSecurityDescriptor string `json:"ConnectSecurityDescriptor"`
 }
 
+type comPort struct {
+	NamedPipe string `json:"NamedPipe"`
+}
+
 func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	if strings.TrimSpace(spec.Name) == "" {
 		return nil, fmt.Errorf("compute system name is required")
@@ -167,6 +173,14 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 			ConnectSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
 		}
 	}
+	kernelCmdLine := "root=/dev/sda ro rootwait init=/sbin/microagent-init initcall_blacklist=virtio_vsock_init pci=off"
+	comPorts := map[string]comPort(nil)
+	if hasResultListener(spec) {
+		kernelCmdLine += " 8250_core.nr_uarts=1 8250_core.skip_txen_test=1 console=ttyS0,115200"
+		comPorts = map[string]comPort{"0": {NamedPipe: serialPipePath(spec.Identity.RuntimeID)}}
+	} else {
+		kernelCmdLine += " 8250_core.nr_uarts=0 panic=-1 quiet"
+	}
 	doc := computeSystemDocument{
 		Owner:                             "microagent",
 		SchemaVersion:                     versionDocument{Major: 2, Minor: 1},
@@ -175,7 +189,7 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 			StopOnReset: true,
 			Chipset: chipset{LinuxKernelDirect: linuxKernelDirect{
 				KernelFilePath: spec.Config.KernelPath,
-				KernelCmdLine:  "root=/dev/sda ro rootwait init=/sbin/microagent-init initcall_blacklist=virtio_vsock_init panic=-1 quiet pci=off",
+				KernelCmdLine:  kernelCmdLine,
 			}},
 			ComputeTopology: computeTopology{
 				Memory:    virtualMachineMemory{SizeInMB: memoryMiB, AllowOvercommit: true},
@@ -192,11 +206,29 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 					DefaultConnectSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
 					ServiceTable:                     serviceTable,
 				}},
-				Plan9: map[string]any{},
+				Plan9:    map[string]any{},
+				ComPorts: comPorts,
 			},
 		},
 	}
 	return json.Marshal(doc)
+}
+
+func hasResultListener(spec computeSystemSpec) bool {
+	if strings.TrimSpace(spec.Config.StateDir) == "" || strings.TrimSpace(spec.Identity.RuntimeID) == "" {
+		return false
+	}
+	target := filepath.Join(spec.Config.StateDir, spec.Identity.RuntimeID, "result.json")
+	for _, listener := range spec.Config.VsockListeners {
+		if listener.Target == target {
+			return true
+		}
+	}
+	return false
+}
+
+func serialPipePath(runtimeID string) string {
+	return `\\.\pipe\microagent-` + runtimeID + `-serial`
 }
 
 type unsupportedHCSClient struct{}

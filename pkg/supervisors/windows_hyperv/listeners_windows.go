@@ -28,11 +28,25 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 	if req.Config == nil || len(req.Config.VsockListeners) == 0 {
 		return nil, nil
 	}
+	if !hasResultTarget(req) {
+		for _, listener := range req.Config.VsockListeners {
+			if listener.Target != resultPath(req) {
+				return nil, fmt.Errorf("windows-hyperv vsock listener %d target must be the workspace result path", listener.Port)
+			}
+		}
+		return nil, nil
+	}
 	vmID, err := guid.FromString(handle.RuntimeID)
 	if err != nil {
 		return nil, fmt.Errorf("parse HCS runtime ID %q: %w", handle.RuntimeID, err)
 	}
 	set := &hvSocketListenerSet{done: make(chan error, len(req.Config.VsockListeners))}
+	serialListener, err := winio.ListenPipe(serialPipePath(req.Identity.RuntimeID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("listen windows-hyperv serial pipe: %w", err)
+	}
+	set.listeners = append(set.listeners, serialListener)
+	go copySerial(serialListener, serialLogPath(req))
 	started := 0
 	for _, listener := range req.Config.VsockListeners {
 		if listener.Target != resultPath(req) {
@@ -55,6 +69,35 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 		return nil, nil
 	}
 	return set, nil
+}
+
+func hasResultTarget(req vmkit.Request) bool {
+	if req.Config == nil || req.Identity == nil {
+		return false
+	}
+	for _, listener := range req.Config.VsockListeners {
+		if listener.Target == resultPath(req) {
+			return true
+		}
+	}
+	return false
+}
+
+func copySerial(listener net.Listener, target string) {
+	conn, err := listener.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return
+	}
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	_, _ = io.Copy(file, conn)
 }
 
 func (s *hvSocketListenerSet) acceptResult(listener net.Listener, target string) {
