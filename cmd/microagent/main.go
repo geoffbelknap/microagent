@@ -19,7 +19,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
@@ -2954,7 +2953,7 @@ func startWorkspaceDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Res
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Stdout = supervisorLog
 	cmd.Stderr = supervisorLog
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = detachedSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return vmkit.Response{}, err
 	}

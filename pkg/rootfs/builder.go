@@ -46,6 +46,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		ImageRef:   req.ImageRef,
 		Platform:   req.Platform,
 		OutputPath: req.OutputPath,
+		Format:     req.Format,
 		InitPath:   req.InitPath,
 		Builder:    name,
 	}
@@ -168,21 +169,8 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		provenance.StageSnapshot = req.StageSnapshot
 	}
 
-	provenance.BuilderPhase = "build-ext4"
-	progress.emit("build-ext4", "building ext4 image", 0, 0, 0, 0)
-	if err := os.MkdirAll(filepath.Dir(req.OutputPath), 0o755); err != nil {
-		return provenance, fmt.Errorf("create output dir: %w", err)
-	}
-	tmpImage := filepath.Join(tmpDir, "rootfs.ext4")
-	if err := allocateFile(tmpImage, req.SizeMiB*1024*1024); err != nil {
-		return provenance, fmt.Errorf("allocate rootfs image: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, req.Mke2fsPath, "-q", "-t", "ext4", "-d", stageDir, tmpImage)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return provenance, fmt.Errorf("build ext4 rootfs: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	if err := os.Rename(tmpImage, req.OutputPath); err != nil {
-		return provenance, fmt.Errorf("commit rootfs image: %w", err)
+	if err := buildRootfsImage(ctx, req, stageDir, tmpDir, progress, &provenance); err != nil {
+		return provenance, err
 	}
 	info, err := os.Stat(req.OutputPath)
 	if err != nil {
@@ -208,6 +196,7 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	provenance := BundleProvenance{
 		SourcePath:   req.SourcePath,
 		OutputPath:   req.OutputPath,
+		Format:       req.Format,
 		Builder:      b.Name,
 		BuilderPhase: "validate",
 	}
@@ -249,20 +238,8 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	if err := source.Close(); err != nil {
 		return provenance, fmt.Errorf("close bundle: %w", err)
 	}
-	provenance.BuilderPhase = "build-ext4"
-	if err := os.MkdirAll(filepath.Dir(req.OutputPath), 0o755); err != nil {
-		return provenance, fmt.Errorf("create output dir: %w", err)
-	}
-	tmpImage := filepath.Join(tmpDir, "bundle.ext4")
-	if err := allocateFile(tmpImage, req.SizeMiB*1024*1024); err != nil {
-		return provenance, fmt.Errorf("allocate bundle image: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, req.Mke2fsPath, "-q", "-t", "ext4", "-d", stageDir, tmpImage)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return provenance, fmt.Errorf("build ext4 bundle: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	if err := os.Rename(tmpImage, req.OutputPath); err != nil {
-		return provenance, fmt.Errorf("commit bundle image: %w", err)
+	if err := buildBundleImage(ctx, req, stageDir, tmpDir, &provenance); err != nil {
+		return provenance, err
 	}
 	info, err := os.Stat(req.OutputPath)
 	if err != nil {
@@ -271,6 +248,51 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	provenance.SizeBytes = info.Size()
 	provenance.BuilderPhase = "complete"
 	return provenance, nil
+}
+
+func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir string, progress *progressReporter, provenance *Provenance) error {
+	switch req.Format {
+	case FormatExt4:
+		provenance.BuilderPhase = "build-ext4"
+		progress.emit("build-ext4", "building ext4 image", 0, 0, 0, 0)
+		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "rootfs.ext4"), req.OutputPath, req.SizeMiB*1024*1024, "rootfs")
+	case FormatVHD:
+		provenance.BuilderPhase = "build-vhd"
+		progress.emit("build-vhd", "building vhd image", 0, 0, 0, 0)
+		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "rootfs.vhd"), req.OutputPath, req.SizeMiB*1024*1024)
+	default:
+		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
+	}
+}
+
+func buildBundleImage(ctx context.Context, req BundleRequest, stageDir, tmpDir string, provenance *BundleProvenance) error {
+	switch req.Format {
+	case FormatExt4:
+		provenance.BuilderPhase = "build-ext4"
+		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "bundle.ext4"), req.OutputPath, req.SizeMiB*1024*1024, "bundle")
+	case FormatVHD:
+		provenance.BuilderPhase = "build-vhd"
+		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "bundle.vhd"), req.OutputPath, req.SizeMiB*1024*1024)
+	default:
+		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
+	}
+}
+
+func buildExt4Image(ctx context.Context, mke2fsPath, stageDir, tmpImage, outputPath string, sizeBytes int64, label string) error {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+	if err := allocateFile(tmpImage, sizeBytes); err != nil {
+		return fmt.Errorf("allocate %s image: %w", label, err)
+	}
+	cmd := exec.CommandContext(ctx, mke2fsPath, "-q", "-t", "ext4", "-d", stageDir, tmpImage)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build ext4 %s: %w: %s", label, err, strings.TrimSpace(string(out)))
+	}
+	if err := os.Rename(tmpImage, outputPath); err != nil {
+		return fmt.Errorf("commit %s image: %w", label, err)
+	}
+	return nil
 }
 
 func allocateFile(path string, sizeBytes int64) error {

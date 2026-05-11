@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
@@ -325,7 +324,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := ValidateResources(Resources{MemoryMiB: opts.MemoryMiB, CPUCount: opts.CPUCount}, false); err != nil {
 		return Result{}, err
 	}
-	rootfsPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4")
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	if _, err := os.Stat(rootfsPath); err != nil {
 		return Result{}, err
 	}
@@ -447,9 +446,11 @@ func List(stateDir string) ([]ListEntry, error) {
 			entry.Backend = event.Identity.Backend
 			entry.ObservedAt = event.ObservedAt
 		}
-		rootfsPath := filepath.Join(stateDir, "workspaces", name, "rootfs.ext4")
-		if _, err := os.Stat(rootfsPath); err == nil {
-			entry.RootfsPath = rootfsPath
+		for _, rootfsPath := range CandidateWorkspaceRootfsPaths(stateDir, name, entry.Backend) {
+			if _, err := os.Stat(rootfsPath); err == nil {
+				entry.RootfsPath = rootfsPath
+				break
+			}
 		}
 		serialPath := SerialLogPath(stateDir, name)
 		if _, err := os.Stat(serialPath); err == nil {
@@ -490,8 +491,7 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 }
 
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
-	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
-	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	req := buildRootfsRequest(opts, rootfsPath)
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := Result{
@@ -524,6 +524,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
+		Format:         WorkspaceRootfsFormat(opts.Backend),
 		InitPath:       rootfs.DefaultInitPath,
 		Command:        command,
 		Mode:           mode,
@@ -543,6 +544,33 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		AllowMutable:   true,
 		Progress:       opts.Progress,
 	}
+}
+
+func WorkspaceRootfsFormat(backend string) string {
+	if backend == vmkit.BackendWindowsHyperV {
+		return rootfs.FormatVHD
+	}
+	return rootfs.FormatExt4
+}
+
+func WorkspaceRootfsFilename(backend string) string {
+	if WorkspaceRootfsFormat(backend) == rootfs.FormatVHD {
+		return "rootfs.vhd"
+	}
+	return "rootfs.ext4"
+}
+
+func WorkspaceRootfsPath(stateDir, name, backend string) string {
+	return filepath.Join(stateDir, "workspaces", name, WorkspaceRootfsFilename(backend))
+}
+
+func CandidateWorkspaceRootfsPaths(stateDir, name, backend string) []string {
+	primary := WorkspaceRootfsPath(stateDir, name, backend)
+	secondary := WorkspaceRootfsPath(stateDir, name, "")
+	if primary == secondary {
+		return []string{primary, filepath.Join(stateDir, "workspaces", name, "rootfs.vhd")}
+	}
+	return []string{primary, secondary}
 }
 
 func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
@@ -1003,7 +1031,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Stdout = supervisorLog
 	cmd.Stderr = supervisorLog
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = detachedSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return vmkit.Response{}, err
 	}
@@ -1129,7 +1157,7 @@ func VerificationForStatus(opts Options, name string, manifest Manifest, state v
 		rootfsPath = recorded.Rootfs.Path
 	}
 	if rootfsPath == "" {
-		rootfsPath = filepath.Join(opts.StateDir, "workspaces", name, "rootfs.ext4")
+		rootfsPath = WorkspaceRootfsPath(opts.StateDir, name, opts.Backend)
 	}
 	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification, true)
 	verification.Rootfs = currentArtifact("rootfs", rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification, shouldCompareRootfs(state))

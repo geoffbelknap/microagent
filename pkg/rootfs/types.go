@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -13,6 +12,8 @@ import (
 const (
 	DefaultInitPath = "/sbin/microagent-init"
 	DefaultSizeMiB  = 1024
+	FormatExt4      = "ext4"
+	FormatVHD       = "vhd"
 )
 
 type Platform struct {
@@ -37,6 +38,7 @@ type BuildRequest struct {
 	ImageRef       string            `json:"image_ref"`
 	Platform       Platform          `json:"platform"`
 	OutputPath     string            `json:"output_path"`
+	Format         string            `json:"format,omitempty"`
 	InitPath       string            `json:"init_path,omitempty"`
 	InitBinaryPath string            `json:"init_binary_path,omitempty"`
 	Command        []string          `json:"command,omitempty"`
@@ -80,6 +82,7 @@ type PortForward struct {
 type BundleRequest struct {
 	SourcePath string `json:"source_path"`
 	OutputPath string `json:"output_path"`
+	Format     string `json:"format,omitempty"`
 	StateDir   string `json:"state_dir,omitempty"`
 	Mke2fsPath string `json:"mke2fs_path,omitempty"`
 	SizeMiB    int64  `json:"size_mib,omitempty"`
@@ -88,6 +91,7 @@ type BundleRequest struct {
 type BundleProvenance struct {
 	SourcePath   string `json:"source_path"`
 	OutputPath   string `json:"output_path"`
+	Format       string `json:"format,omitempty"`
 	SizeBytes    int64  `json:"size_bytes,omitempty"`
 	Builder      string `json:"builder"`
 	BuilderPhase string `json:"builder_phase"`
@@ -99,6 +103,7 @@ type Provenance struct {
 	Digest        string   `json:"digest,omitempty"`
 	Platform      Platform `json:"platform"`
 	OutputPath    string   `json:"output_path"`
+	Format        string   `json:"format,omitempty"`
 	InitPath      string   `json:"init_path,omitempty"`
 	SizeBytes     int64    `json:"size_bytes,omitempty"`
 	Builder       string   `json:"builder"`
@@ -114,6 +119,11 @@ func ValidateBundleRequest(req BundleRequest) error {
 	}
 	if strings.TrimSpace(req.OutputPath) == "" {
 		return errors.New("output_path is required")
+	}
+	switch req.Format {
+	case "", FormatExt4, FormatVHD:
+	default:
+		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
 	}
 	if req.SizeMiB < 0 {
 		return errors.New("size_mib must not be negative")
@@ -136,6 +146,11 @@ func ValidateRequest(req BuildRequest) error {
 	}
 	if strings.TrimSpace(req.OutputPath) == "" {
 		return errors.New("output_path is required")
+	}
+	switch req.Format {
+	case "", FormatExt4, FormatVHD:
+	default:
+		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
 	}
 	if req.SizeMiB < 0 {
 		return errors.New("size_mib must not be negative")
@@ -196,14 +211,14 @@ func ValidateFiles(files []File) error {
 		if target == "" {
 			return fmt.Errorf("file dst is required for %s", source)
 		}
-		if !filepath.IsAbs(target) {
+		clean := path.Clean(strings.ReplaceAll(target, "\\", "/"))
+		if !path.IsAbs(clean) {
 			return fmt.Errorf("file dst must be absolute: %s", target)
 		}
 		if strings.ContainsRune(target, 0) {
 			return fmt.Errorf("file dst contains NUL")
 		}
-		clean := filepath.Clean(target)
-		if clean == string(os.PathSeparator) {
+		if clean == "/" {
 			return fmt.Errorf("file dst must name a file: %s", target)
 		}
 		if seen[clean] {
@@ -249,6 +264,7 @@ func looksMutable(ref string) bool {
 func NormalizeRequest(req BuildRequest) BuildRequest {
 	req.ImageRef = strings.TrimSpace(req.ImageRef)
 	req.OutputPath = strings.TrimSpace(req.OutputPath)
+	req.Format = strings.TrimSpace(req.Format)
 	req.InitPath = strings.TrimSpace(req.InitPath)
 	req.InitBinaryPath = strings.TrimSpace(req.InitBinaryPath)
 	req.StateDir = strings.TrimSpace(req.StateDir)
@@ -268,6 +284,9 @@ func NormalizeRequest(req BuildRequest) BuildRequest {
 	if req.InitPath == "" {
 		req.InitPath = DefaultInitPath
 	}
+	if req.Format == "" {
+		req.Format = FormatExt4
+	}
 	if req.SizeMiB == 0 {
 		req.SizeMiB = DefaultSizeMiB
 	}
@@ -280,8 +299,12 @@ func NormalizeRequest(req BuildRequest) BuildRequest {
 func NormalizeBundleRequest(req BundleRequest) BundleRequest {
 	req.SourcePath = strings.TrimSpace(req.SourcePath)
 	req.OutputPath = strings.TrimSpace(req.OutputPath)
+	req.Format = strings.TrimSpace(req.Format)
 	req.StateDir = strings.TrimSpace(req.StateDir)
 	req.Mke2fsPath = strings.TrimSpace(req.Mke2fsPath)
+	if req.Format == "" {
+		req.Format = FormatExt4
+	}
 	if req.SizeMiB == 0 {
 		req.SizeMiB = 64
 	}

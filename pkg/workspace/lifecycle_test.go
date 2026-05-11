@@ -116,6 +116,53 @@ func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRootfsPathUsesBackendFormat(t *testing.T) {
+	tests := []struct {
+		name       string
+		backend    string
+		wantSuffix string
+		wantFormat string
+	}{
+		{
+			name:       "firecracker",
+			backend:    vmkit.BackendFirecracker,
+			wantSuffix: filepath.Join("workspaces", "research", "rootfs.ext4"),
+			wantFormat: rootfs.FormatExt4,
+		},
+		{
+			name:       "apple-vf",
+			backend:    vmkit.BackendAppleVF,
+			wantSuffix: filepath.Join("workspaces", "research", "rootfs.ext4"),
+			wantFormat: rootfs.FormatExt4,
+		},
+		{
+			name:       "windows-hyperv",
+			backend:    vmkit.BackendWindowsHyperV,
+			wantSuffix: filepath.Join("workspaces", "research", "rootfs.vhd"),
+			wantFormat: rootfs.FormatVHD,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPath := WorkspaceRootfsPath("/tmp/microagent", "research", tt.backend)
+			if !strings.HasSuffix(gotPath, tt.wantSuffix) {
+				t.Fatalf("WorkspaceRootfsPath = %q, want suffix %q", gotPath, tt.wantSuffix)
+			}
+			req := buildRootfsRequest(Options{
+				Name:         "research",
+				StateDir:     "/tmp/microagent",
+				Backend:      tt.backend,
+				ImageRef:     "docker.io/library/ubuntu:24.04",
+				Architecture: "arm64",
+				SizeMiB:      1024,
+			}, gotPath)
+			if req.Format != tt.wantFormat {
+				t.Fatalf("BuildRequest.Format = %q, want %q", req.Format, tt.wantFormat)
+			}
+		})
+	}
+}
+
 func TestBuildRootfsRequestCanUseImageCommandForPreparedWorkspace(t *testing.T) {
 	req := buildRootfsRequest(Options{
 		Name:            "homebridge",

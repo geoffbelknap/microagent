@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/kernel"
+	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -67,6 +68,11 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 		})
 		AugmentHostSupport(&resp, opts)
 		return resp, err
+	case vmkit.BackendWindowsHyperV:
+		resp := windowshyperv.HostResponse()
+		resp.Kernel = kernel.Support(opts.Backend, opts.Arch)
+		AugmentHostSupport(&resp, opts)
+		return resp, nil
 	default:
 		resp := vmkit.Response{
 			OK:      false,
@@ -210,6 +216,9 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		}
 		resp.Host.ConsoleAvailable = true
 		resp.Host.ConsoleMode = "interactive"
+	case vmkit.BackendWindowsHyperV:
+		resp.Host.ConsoleAvailable = false
+		resp.Host.ConsoleMode = "unsupported"
 	}
 }
 

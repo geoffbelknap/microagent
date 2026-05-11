@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"gopkg.in/yaml.v3"
 )
@@ -247,6 +248,8 @@ func HostBackend() string {
 		return vmkit.BackendAppleVF
 	case "linux":
 		return vmkit.BackendFirecracker
+	case "windows":
+		return vmkit.BackendWindowsHyperV
 	default:
 		return ""
 	}
@@ -765,6 +768,8 @@ func Supervisor(opts Options) (vmkit.Supervisor, error) {
 		return vmkit.ExecutableSupervisor{Path: FirecrackerSupervisorPath(opts)}, nil
 	case vmkit.BackendAppleVF:
 		return vmkit.ExecutableSupervisor{Path: opts.SupervisorPath}, nil
+	case vmkit.BackendWindowsHyperV:
+		return windowshyperv.Supervisor{Options: windowshyperv.Options{Name: opts.Name, StateDir: opts.StateDir}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported backend: %s", opts.Backend)
 	}

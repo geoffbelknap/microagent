@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -267,7 +268,7 @@ func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, 
 	if err := reconcileExt4Journal(imagePath); err != nil {
 		return CopyResult{}, err
 	}
-	target, err := localCopyTarget(localTarget, filepath.Base(remote.Path))
+	target, err := localCopyTarget(localTarget, path.Base(remote.Path))
 	if err != nil {
 		return CopyResult{}, err
 	}
@@ -376,7 +377,7 @@ func workspaceImagePath(stateDir string, remote remoteCopyEndpoint) (string, err
 }
 
 func ensureDebugFSParentDir(debugfsPath, imagePath, target string) error {
-	parent := filepath.Dir(target)
+	parent := path.Dir(target)
 	if parent == "." || parent == "/" {
 		return nil
 	}

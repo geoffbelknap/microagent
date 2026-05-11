@@ -12,6 +12,7 @@ fails before it builds a rootfs or talks to a supervisor.
 |---|---|---|---|---|
 | `firecracker` | Linux | Go executable supervisor (`microagent-firecracker-supervisor`) | supported | Supervisor records VM PID; `quarantine` preserves it, `stop` sends SIGTERM, `kill` sends SIGKILL |
 | `apple-vf` | macOS | Swift executable supervisor (`microagent-applevf-supervisor`) | supported | One supervisor invocation per request |
+| `windows-hyperv` | Windows | Experimental Go supervisor boundary for Linux guests on Hyper-V / Windows Hypervisor Platform | not implemented | Host detection and routing are present; VM lifecycle commands fail closed until the supervisor implementation lands |
 
 Both backends expose the same lifecycle surface: `run`, `create`, `start`,
 `status`, `halt`, `quarantine`, `stop`, `kill`, `delete`. Both record state
@@ -42,6 +43,15 @@ executable supervisor-shaped request/response boundary.
   `--supervisor` or `MICROAGENT_APPLEVF_SUPERVISOR`.
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
+
+## Windows Hyper-V (experimental)
+
+- Targets Linux microVM-style workspaces on Windows without WSL.
+- Uses the backend name `windows-hyperv`.
+- The current implementation wires backend selection, contract reporting, host
+  diagnostics, and supervisor dispatch.
+- Lifecycle commands intentionally fail closed with a structured error until
+  the Hyper-V / Windows Hypervisor Platform launch path is implemented.
 
 ## Selecting a host
 

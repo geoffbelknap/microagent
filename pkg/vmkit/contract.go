@@ -41,7 +41,7 @@ type ContractParity struct {
 func NewRuntimeContract() RuntimeContract {
 	return RuntimeContract{
 		Version:  "agent-runtime.v1",
-		Backends: []string{BackendAppleVF, BackendFirecracker},
+		Backends: []string{BackendAppleVF, BackendFirecracker, BackendWindowsHyperV},
 		Commands: []ContractItem{
 			{Name: "prepare", Description: "write backend state/config without booting"},
 			{Name: "start", Description: "start a prepared, halted, stopped, or failed workspace with preserved disk state; quarantined workspaces must be halted, stopped, or killed first"},

@@ -18,13 +18,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
+	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -3187,9 +3187,21 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 		t.Fatalf("apple vf supervisor path = %q", executable.Path)
 	}
 
+	if hostBackend() == vmkit.BackendWindowsHyperV {
+		windowsHyperV, err := workspaceSupervisor(workspaceOptions{Backend: vmkit.BackendWindowsHyperV, Name: "research", StateDir: t.TempDir()})
+		if err != nil {
+			t.Fatalf("windows hyper-v supervisor: %v", err)
+		}
+		if _, ok := windowsHyperV.(windowshyperv.Supervisor); !ok {
+			t.Fatalf("windows hyper-v supervisor = %T, want windowshyperv.Supervisor", windowsHyperV)
+		}
+	}
+
 	otherBackend := vmkit.BackendFirecracker
 	if hostBackend() == vmkit.BackendFirecracker {
 		otherBackend = vmkit.BackendAppleVF
+	} else if hostBackend() == vmkit.BackendWindowsHyperV {
+		otherBackend = vmkit.BackendFirecracker
 	}
 	if _, err := workspaceSupervisor(workspaceOptions{Backend: otherBackend}); err == nil {
 		t.Fatalf("workspaceSupervisor(%q) err = nil, want host-only rejection", otherBackend)
@@ -3242,8 +3254,8 @@ func processStillActive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	if err := syscall.Kill(pid, 0); err != nil {
-		return err != syscall.ESRCH
+	if !platformProcessStillActive(pid) {
+		return false
 	}
 	if data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat")); err == nil {
 		fields := strings.Fields(string(data))
