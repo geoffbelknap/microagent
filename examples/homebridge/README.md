@@ -46,6 +46,8 @@ To inspect the guest:
 - The Debian/Ubuntu package's `/usr/local/bin/hb-service` wrapper expects
   `systemd`. The recipe runs the underlying Homebridge UI service helper in the
   foreground instead, so `microagent-init` can supervise it directly.
+- Homebridge writes logs to `/var/lib/homebridge/homebridge.log`, which is the
+  path the Homebridge UI expects for its native log viewer.
 - Bonjour/mDNS discovery is not expected to work through Apple VF NAT.
 - The Homebridge web UI can still be useful for plugin and config management,
   but HomeKit pairing/discovery may need additional host-network support that

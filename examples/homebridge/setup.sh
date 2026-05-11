@@ -7,6 +7,7 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates curl gpg
 
 install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d /var/lib/homebridge
+touch /var/lib/homebridge/homebridge.log
 
 curl -fsSL https://repo.homebridge.io/KEY.gpg \
   | gpg --dearmor -o /usr/share/keyrings/homebridge.gpg
