@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,7 +23,7 @@ const maxWindowsHyperVResultBytes = 16 * 1024 * 1024
 
 type hvSocketListenerSet struct {
 	listeners []net.Listener
-	done      chan error
+	result    chan error
 	once      sync.Once
 }
 
@@ -29,26 +31,22 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 	if req.Config == nil || len(req.Config.VsockListeners) == 0 {
 		return nil, nil
 	}
-	if !hasResultTarget(req) {
-		for _, listener := range req.Config.VsockListeners {
-			if listener.Target != resultPath(req) {
-				return nil, fmt.Errorf("windows-hyperv vsock listener %d target must be the workspace result path", listener.Port)
-			}
+	for _, listener := range req.Config.VsockListeners {
+		if !isAllowedHVSockTarget(req, listener.Target) {
+			return nil, fmt.Errorf("windows-hyperv vsock listener %d target must be host:port or the workspace result path", listener.Port)
 		}
-		return nil, nil
 	}
 	vmID, err := guid.FromString(handle.RuntimeID)
 	if err != nil {
 		return nil, fmt.Errorf("parse HCS runtime ID %q: %w", handle.RuntimeID, err)
 	}
-	set := &hvSocketListenerSet{done: make(chan error, len(req.Config.VsockListeners))}
+	set := &hvSocketListenerSet{}
+	if hasResultTarget(req) {
+		set.result = make(chan error, 1)
+	}
 	go copySerialPipe(serialPipePath(req.Identity.RuntimeID), serialLogPath(req))
 	started := 0
 	for _, listener := range req.Config.VsockListeners {
-		if listener.Target != resultPath(req) {
-			_ = set.Close()
-			return nil, fmt.Errorf("windows-hyperv vsock listener %d target must be the workspace result path", listener.Port)
-		}
 		l, err := winio.ListenHvsock(&winio.HvsockAddr{
 			VMID:      vmID,
 			ServiceID: winio.VsockServiceID(listener.Port),
@@ -59,7 +57,7 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 		}
 		set.listeners = append(set.listeners, l)
 		started++
-		go set.acceptResult(l, listener.Target)
+		go set.serve(l, listener.Target, listener.Target == resultPath(req))
 	}
 	if started == 0 {
 		return nil, nil
@@ -77,6 +75,13 @@ func hasResultTarget(req vmkit.Request) bool {
 		}
 	}
 	return false
+}
+
+func isAllowedHVSockTarget(req vmkit.Request, target string) bool {
+	if _, ok := parseTCPAddr(target); ok {
+		return true
+	}
+	return target == resultPath(req)
 }
 
 func copySerialPipe(pipePath, target string) {
@@ -97,52 +102,87 @@ func copySerialPipe(pipePath, target string) {
 	_, _ = io.Copy(file, conn)
 }
 
-func (s *hvSocketListenerSet) acceptResult(listener net.Listener, target string) {
-	conn, err := listener.Accept()
-	if err != nil {
-		s.done <- err
+func (s *hvSocketListenerSet) serve(listener net.Listener, target string, resultTarget bool) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			if resultTarget {
+				s.result <- err
+			}
+			return
+		}
+		if resultTarget {
+			s.acceptResult(conn, target)
+			return
+		}
+		go handleHVSockConnection(conn, target)
+	}
+}
+
+func (s *hvSocketListenerSet) acceptResult(conn net.Conn, target string) {
+	defer conn.Close()
+	s.result <- writeHVSockResult(conn, target)
+}
+
+func handleHVSockConnection(conn net.Conn, target string) {
+	defer conn.Close()
+	if tcpTarget, ok := parseTCPAddr(target); ok {
+		remote, err := net.Dial("tcp", tcpTarget)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "connect windows-hyperv hvsocket target %s: %v\n", tcpTarget, err)
+			return
+		}
+		defer remote.Close()
+		go func() {
+			_, _ = io.Copy(remote, conn)
+			closeWriteConn(remote)
+		}()
+		_, _ = io.Copy(conn, remote)
+		closeWriteConn(conn)
 		return
 	}
-	defer conn.Close()
+	if err := writeHVSockResult(conn, target); err != nil {
+		fmt.Fprintf(os.Stderr, "write windows-hyperv hvsocket result %s: %v\n", target, err)
+	}
+}
+
+func writeHVSockResult(conn net.Conn, target string) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		s.done <- err
-		return
+		return err
 	}
 	tmp := target + ".tmp"
 	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
-		s.done <- err
-		return
+		return err
 	}
 	_, copyErr := io.Copy(file, io.LimitReader(conn, maxWindowsHyperVResultBytes+1))
 	closeErr := file.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmp)
-		s.done <- copyErr
-		return
+		return copyErr
 	}
 	if closeErr != nil {
 		_ = os.Remove(tmp)
-		s.done <- closeErr
-		return
+		return closeErr
 	}
 	info, err := os.Stat(tmp)
 	if err != nil {
 		_ = os.Remove(tmp)
-		s.done <- err
-		return
+		return err
 	}
 	if info.Size() > maxWindowsHyperVResultBytes {
 		_ = os.Remove(tmp)
-		s.done <- fmt.Errorf("windows-hyperv result for %s exceeded %d bytes", target, maxWindowsHyperVResultBytes)
-		return
+		return fmt.Errorf("windows-hyperv result for %s exceeded %d bytes", target, maxWindowsHyperVResultBytes)
 	}
-	s.done <- os.Rename(tmp, target)
+	return os.Rename(tmp, target)
 }
 
 func (s *hvSocketListenerSet) Wait(ctx context.Context) error {
+	if s.result == nil {
+		return nil
+	}
 	select {
-	case err := <-s.done:
+	case err := <-s.result:
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
@@ -159,4 +199,24 @@ func (s *hvSocketListenerSet) Close() error {
 		}
 	})
 	return err
+}
+
+func parseTCPAddr(target string) (string, bool) {
+	host, port, err := net.SplitHostPort(target)
+	if err != nil || host == "" || port == "" || strings.ContainsAny(host, `/\`) {
+		return "", false
+	}
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return "", false
+	}
+	return net.JoinHostPort(host, port), true
+}
+
+func closeWriteConn(conn net.Conn) {
+	type closeWriter interface {
+		CloseWrite() error
+	}
+	if writer, ok := conn.(closeWriter); ok {
+		_ = writer.CloseWrite()
+	}
 }

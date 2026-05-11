@@ -214,11 +214,11 @@ func TestRunCommandFailsClosedForUnsupportedWindowsHyperVVsockTarget(t *testing.
 			KernelPath:     "C:\\microagent\\Image",
 			RootfsPath:     "C:\\microagent\\rootfs.vhd",
 			StateDir:       stateDir,
-			VsockListeners: []vmkit.VsockListener{{Port: 2048, Target: "127.0.0.1:9900"}},
+			VsockListeners: []vmkit.VsockListener{{Port: 2048, Target: filepath.Join(stateDir, "agent-1", "not-result.json")}},
 		},
 	}
 	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
-	if err == nil || resp.OK || !strings.Contains(resp.Error, "target must be the workspace result path") {
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "target must be host:port or the workspace result path") {
 		t.Fatalf("run resp=%#v err=%v", resp, err)
 	}
 	if adapter.starts != 0 {
