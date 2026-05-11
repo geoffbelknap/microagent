@@ -25,6 +25,16 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 			return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 		}
 		return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV}, nil
+	case "run":
+		return s.run(ctx, req)
+	case "inspect":
+		return inspect(req)
+	case "stop":
+		return s.stop(ctx, req)
+	case "kill":
+		return s.kill(ctx, req)
+	case "delete":
+		return s.delete(ctx, req)
 	default:
 		err := fmt.Errorf("windows-hyperv supervisor command %q is experimental and not implemented yet", req.Command)
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err

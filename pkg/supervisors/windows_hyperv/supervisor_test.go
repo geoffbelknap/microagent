@@ -2,7 +2,10 @@ package windows_hyperv
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -80,6 +83,146 @@ func TestLifecycleCommandsFailClosedBeforeHCSImplementation(t *testing.T) {
 	}
 }
 
+func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv run path is windows-only")
+	}
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	if adapter.creates != 1 || adapter.starts != 1 || adapter.startedID != "fake" {
+		t.Fatalf("adapter calls creates=%d starts=%d startedID=%q", adapter.creates, adapter.starts, adapter.startedID)
+	}
+	if adapter.spec.Name != "agent-1" || adapter.spec.Config.RootfsPath != req.Config.RootfsPath {
+		t.Fatalf("adapter spec = %#v", adapter.spec)
+	}
+
+	var event struct {
+		Identity vmkit.Identity `json:"identity"`
+		State    vmkit.VMState  `json:"state"`
+		Detail   string         `json:"detail"`
+	}
+	readJSON(t, filepath.Join(stateDir, "agent-1", "event.json"), &event)
+	if event.Identity.RuntimeID != "agent-1" || event.State != vmkit.StateRunning || !strings.Contains(event.Detail, "serial=") {
+		t.Fatalf("event.json = %#v", event)
+	}
+
+	var runtimeState struct {
+		Event struct {
+			State vmkit.VMState `json:"state"`
+		} `json:"event"`
+		Config        vmkit.Config `json:"config"`
+		SerialLogPath string       `json:"serialLogPath"`
+	}
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &runtimeState)
+	if runtimeState.Event.State != vmkit.StateRunning || runtimeState.Config.RootfsPath != req.Config.RootfsPath {
+		t.Fatalf("runtime.json = %#v", runtimeState)
+	}
+	if runtimeState.SerialLogPath != filepath.Join(stateDir, "agent-1", "serial.log") {
+		t.Fatalf("serialLogPath = %q", runtimeState.SerialLogPath)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "agent-1", "serial.log")); err != nil {
+		t.Fatalf("serial.log: %v", err)
+	}
+	eventsData, err := os.ReadFile(filepath.Join(stateDir, "agent-1", "events.json"))
+	if err != nil {
+		t.Fatalf("events.json: %v", err)
+	}
+	if got := strings.Count(string(eventsData), "\n"); got != 2 {
+		t.Fatalf("events.json lines = %d, want starting and running events: %q", got, eventsData)
+	}
+}
+
+func TestInspectAndControlCommandsUseRuntimeState(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{}
+	supervisor := Supervisor{adapter: adapter}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if resp, err := supervisor.Do(context.Background(), req); err != nil || !resp.OK {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	inspectReq := req
+	inspectReq.Command = "inspect"
+	resp, err := supervisor.Do(context.Background(), inspectReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("inspect resp=%#v err=%v", resp, err)
+	}
+
+	stopReq := req
+	stopReq.Command = "stop"
+	resp, err = supervisor.Do(context.Background(), stopReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("stop resp=%#v err=%v", resp, err)
+	}
+	if adapter.shutdowns != 1 || adapter.shutdownID != "fake" {
+		t.Fatalf("shutdowns=%d shutdownID=%q", adapter.shutdowns, adapter.shutdownID)
+	}
+
+	if _, err := supervisor.Do(context.Background(), req); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	killReq := req
+	killReq.Command = "kill"
+	resp, err = supervisor.Do(context.Background(), killReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("kill resp=%#v err=%v", resp, err)
+	}
+	if adapter.kills != 1 || adapter.killID != "fake" {
+		t.Fatalf("kills=%d killID=%q", adapter.kills, adapter.killID)
+	}
+
+	if _, err := supervisor.Do(context.Background(), req); err != nil {
+		t.Fatalf("third run: %v", err)
+	}
+	deleteReq := req
+	deleteReq.Command = "delete"
+	resp, err = supervisor.Do(context.Background(), deleteReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("delete resp=%#v err=%v", resp, err)
+	}
+	if adapter.deletes != 1 || adapter.deleteID != "fake" {
+		t.Fatalf("deletes=%d deleteID=%q", adapter.deletes, adapter.deleteID)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "agent-1")); !os.IsNotExist(err) {
+		t.Fatalf("runtime dir after delete err=%v, want removed", err)
+	}
+}
+
 func TestSupervisorUsesInjectedAdapterForHostAndCheck(t *testing.T) {
 	adapter := &fakeAdapter{
 		host: vmkit.HostSupport{
@@ -117,8 +260,18 @@ func TestSupervisorUsesInjectedAdapterForHostAndCheck(t *testing.T) {
 }
 
 type fakeAdapter struct {
-	host   vmkit.HostSupport
-	checks int
+	host       vmkit.HostSupport
+	checks     int
+	creates    int
+	starts     int
+	startedID  string
+	spec       computeSystemSpec
+	shutdowns  int
+	shutdownID string
+	kills      int
+	killID     string
+	deletes    int
+	deleteID   string
 }
 
 func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
@@ -131,22 +284,32 @@ func (f *fakeAdapter) Check(ctx context.Context) error {
 }
 
 func (f *fakeAdapter) Create(ctx context.Context, spec computeSystemSpec) (computeSystemHandle, error) {
+	f.creates++
+	f.spec = spec
 	return computeSystemHandle{ID: "fake"}, nil
 }
 
 func (f *fakeAdapter) Start(ctx context.Context, id string) error {
+	f.starts++
+	f.startedID = id
 	return nil
 }
 
 func (f *fakeAdapter) Shutdown(ctx context.Context, id string) error {
+	f.shutdowns++
+	f.shutdownID = id
 	return nil
 }
 
 func (f *fakeAdapter) Kill(ctx context.Context, id string) error {
+	f.kills++
+	f.killID = id
 	return nil
 }
 
 func (f *fakeAdapter) Delete(ctx context.Context, id string) error {
+	f.deletes++
+	f.deleteID = id
 	return nil
 }
 
@@ -188,4 +351,15 @@ func (failingAdapter) Kill(ctx context.Context, id string) error {
 
 func (failingAdapter) Delete(ctx context.Context, id string) error {
 	return fmt.Errorf("delete unavailable")
+}
+
+func readJSON(t *testing.T, path string, out any) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
 }
