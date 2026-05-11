@@ -27,7 +27,7 @@ host resident set size for the recorded backend process of a running workspace.
 
 | Flag | Description |
 |---|---|
-| `--image <ref>` | OCI image reference. Defaults to the small BusyBox baseline |
+| `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |
 | `--exec <command>` | Guest command used to mark boot completion. Defaults to `true` |
 | `--iterations <n>` | Number of boot measurements. Defaults to 1 |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |

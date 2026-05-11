@@ -7,9 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,6 +47,8 @@ const (
 	defaultRestartPolicy       = workspace.DefaultRestartPolicy
 	defaultNetworkMode         = workspace.DefaultNetworkMode
 	consoleDetachByte          = byte(0x1d) // Ctrl-]
+	consoleDetachPrefix        = byte(0x10) // Ctrl-P
+	consoleDetachSuffix        = byte(0x11) // Ctrl-Q
 	consoleShellExitedMarker   = "microagent-init: console shell exited; closing connect session"
 )
 
@@ -138,7 +142,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "create" && shouldUseHighLevelCreate(args[1:]) {
 		return runHighLevelCreate(ctx, args[1:], stdout)
 	}
-	supervisorPath := os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	supervisorPath := defaultAppleVFSupervisorPath()
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
@@ -184,7 +188,7 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	opts := doctorOptions{
 		Backend:        hostBackend(),
 		Arch:           defaultGuestArch(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -208,7 +212,7 @@ func runHost(ctx context.Context, args []string, stdout *os.File) error {
 	opts := doctorOptions{
 		Backend:        hostBackend(),
 		Arch:           defaultGuestArch(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 	}
 	fs := flag.NewFlagSet("host", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -404,6 +408,7 @@ func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	if strings.TrimSpace(execCommand) != "" {
 		req.Command = []string{"/bin/sh", "-lc", execCommand}
 	}
+	req.Progress = rootfsProgress(stdout, "rootfs")
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	if provenance.ImageRef != "" {
 		enc := json.NewEncoder(stdout)
@@ -909,7 +914,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 		Iterations:     1,
 		TimeoutSeconds: 120,
 		Mke2fsPath:     defaultMke2fsPath(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 	}
 	fs := flag.NewFlagSet("perf boot", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -1277,7 +1282,7 @@ func runNetwork(args []string, stdout *os.File) error {
 
 func runWorkspaceStateCommand(ctx context.Context, command string, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	supervisorPath := os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	supervisorPath := defaultAppleVFSupervisorPath()
 	backend := hostBackend()
 	name := ""
 	yes := false
@@ -1484,77 +1489,90 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if state != vmkit.StateRunning {
 		return fmt.Errorf("workspace %s is not running; console input is unavailable in state %s", name, state)
 	}
-	inputPath := serialInputPath(opts.StateDir, name)
-	logPath := filepath.Join(opts.StateDir, name, "serial.log")
 	if strings.TrimSpace(*send) != "" {
 		if *timeoutSeconds < 0 {
 			return fmt.Errorf("connect timeout must not be negative")
 		}
-		if err := waitForPath(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second); err != nil {
-			return fmt.Errorf("console input is not ready for workspace %s: %w", name, err)
-		}
-		if *readyTimeoutSeconds > 0 {
-			if err := waitForConsoleReady(ctx, logPath, time.Duration(*readyTimeoutSeconds)*time.Second); err != nil {
-				return fmt.Errorf("guest shell is not ready for workspace %s: %w; check microagent logs %s", name, err, name)
-			}
-		}
-		before := fileSize(logPath)
-		input, err := openFIFOForWrite(ctx, inputPath, time.Duration(*timeoutSeconds)*time.Second)
+		conn, err := dialConnectShell(ctx, name, time.Duration(*readyTimeoutSeconds)*time.Second)
 		if err != nil {
-			return fmt.Errorf("open console input for workspace %s: %w", name, err)
+			return err
 		}
-		text := *send
-		text = strings.ReplaceAll(text, "\n", "\r")
+		defer conn.Close()
+		text := strings.ReplaceAll(*send, "\n", "\r")
 		if !strings.HasSuffix(text, "\r") {
 			text += "\r"
 		}
-		if _, err := io.WriteString(input, text); err != nil {
-			_ = input.Close()
+		text += "exit\r"
+		if _, err := io.WriteString(conn, text); err != nil {
 			return err
 		}
-		if err := input.Close(); err != nil {
-			return err
+		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(*timeoutSeconds) * time.Second))
+		_, err = io.Copy(stdout, conn)
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			return nil
 		}
-		tailCtx, cancel := context.WithTimeout(ctx, time.Duration(*timeoutSeconds)*time.Second)
-		defer cancel()
-		return tailFile(tailCtx, logPath, stdout, before)
+		return err
 	}
-	if err := waitForPath(ctx, inputPath, 0); err != nil {
-		return fmt.Errorf("console input is not ready for workspace %s: %w", name, err)
-	}
-	if *readyTimeoutSeconds > 0 {
-		if err := waitForConsoleReady(ctx, logPath, time.Duration(*readyTimeoutSeconds)*time.Second); err != nil {
-			return fmt.Errorf("guest shell is not ready for workspace %s: %w; check microagent logs %s", name, err, name)
-		}
-	}
-	input, err := openFIFOForWrite(ctx, inputPath, 0)
+	conn, err := dialConnectShell(ctx, name, time.Duration(*readyTimeoutSeconds)*time.Second)
 	if err != nil {
-		return fmt.Errorf("open console input for workspace %s: %w", name, err)
+		return err
 	}
-	defer input.Close()
-	tailCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	sessionStart := fileSize(logPath)
+	defer conn.Close()
+	if stdinIsTerminal() {
+		restoreTerminal, err := makeRawTerminal(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("enable raw terminal mode: %w", err)
+		}
+		defer restoreTerminal()
+	}
 	type connectResult struct {
-		source string
-		err    error
+		err error
 	}
 	results := make(chan connectResult, 2)
 	go func() {
-		results <- connectResult{source: "tail", err: tailFileUntil(tailCtx, logPath, stdout, 0, sessionStart, consoleShellExitedMarker)}
+		_, err := io.Copy(stdout, conn)
+		results <- connectResult{err: err}
 	}()
 	go func() {
-		_, err := copyConsoleInput(input, os.Stdin)
-		results <- connectResult{source: "input", err: err}
+		_, err := copyShellInput(conn, os.Stdin)
+		results <- connectResult{err: err}
 	}()
 	result := <-results
-	cancel()
-	if result.source == "input" {
-		if tailResult := <-results; result.err == nil {
-			result.err = tailResult.err
+	_ = conn.Close()
+	if result.err != nil && !errors.Is(result.err, net.ErrClosed) {
+		return result.err
+	}
+	return nil
+}
+
+func dialConnectShell(ctx context.Context, name string, timeout time.Duration) (net.Conn, error) {
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(workspace.ShellPortForName(name))))
+	if timeout <= 0 {
+		conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", target)
+		if err != nil {
+			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, target, err)
+		}
+		return conn, nil
+	}
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", target)
+		cancel()
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, target, lastErr)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
-	return result.err
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
@@ -1568,7 +1586,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		Profile:        defaultWorkspaceProfile,
 		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		StateDir:       defaultStateDir(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 		ResultPort:     workspace.DefaultResultPort,
 		SerialInput:    backendSupportsConsoleInput(backend),
 	}
@@ -1610,6 +1628,9 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	}
 	opts.VsockListeners = listeners
 	result, err := workspace.Start(ctx, opts)
+	if err != nil && result.Workspace == "" {
+		return err
+	}
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
@@ -1660,7 +1681,7 @@ type superviseResult = workspace.SuperviseResult
 func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	opts := superviseOptions{
 		StateDir:       defaultStateDir(),
-		SupervisorPath: os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR"),
+		SupervisorPath: defaultAppleVFSupervisorPath(),
 		Backend:        hostBackend(),
 		Architecture:   defaultGuestArch(),
 		Interval:       time.Second,
@@ -1791,7 +1812,11 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil {
 		return err
 	}
+	opts.Progress = rootfsProgress(stdout, "create")
 	result, err := workspace.Create(ctx, opts)
+	if err != nil && result.Workspace == "" {
+		return err
+	}
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
@@ -1824,7 +1849,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	opts.Mke2fsPath = defaultMke2fsPath()
 	opts.GuestInitPath = defaultGuestInitPath(opts.Architecture)
-	opts.SupervisorPath = os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	opts.SupervisorPath = defaultAppleVFSupervisorPath()
 	specPath := workspaceSpecPath(command, args)
 	if specPath != "" {
 		if err := applyWorkspaceSpecFile(&opts, specPath, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
@@ -1838,11 +1863,15 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Name, "id", opts.Name, "Workspace ID")
 	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
 	fs.StringVar(&opts.ExecCommand, "exec", "", "Shell command to run as guest init")
+	fs.StringVar(&opts.ServiceCommand, "service-command", opts.ServiceCommand, "Long-running shell command to run as the VM service")
 	fs.StringVar(&opts.Entrypoint, "entrypoint", opts.Entrypoint, "Shell command to run when the workspace starts")
+	fs.BoolVar(&opts.UseImageCommand, "image-command", opts.UseImageCommand, "Run the image Entrypoint/Cmd when creating a prepared workspace")
 	fs.StringVar(&opts.ConsoleShell, "shell", opts.ConsoleShell, "Interactive console shell path")
 	fs.StringVar(&opts.Hostname, "hostname", opts.Hostname, "Guest hostname")
 	setupCommands := multiFlag(append([]string{}, opts.SetupCommands...))
 	fs.Var(&setupCommands, "setup", "Shell command to run before --exec")
+	var setupFiles multiFlag
+	fs.Var(&setupFiles, "setup-file", "Shell script file to run before --exec")
 	var envVars multiFlag
 	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
 	var diskFlags multiFlag
@@ -1887,6 +1916,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		}
 	}
 	opts.SetupCommands = append([]string{}, setupCommands...)
+	setupFileCommands, err := setupCommandsFromFiles(setupFiles, ".")
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.SetupCommands = append(opts.SetupCommands, setupFileCommands...)
 	env, err := parseEnvFlags(envVars)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -1949,6 +1983,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.Network = normalizeNetworkConfig(opts.Network)
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
 		return workspaceOptions{}, err
+	}
+	if command != "create" && strings.TrimSpace(opts.ServiceCommand) != "" {
+		return workspaceOptions{}, fmt.Errorf("%s does not support --service-command", command)
+	}
+	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
+		return workspaceOptions{}, fmt.Errorf("%s cannot use both --image-command and --service-command", command)
 	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if specExplicit && specPath == "" {
@@ -2065,14 +2105,21 @@ func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit,
 	if strings.TrimSpace(spec.Entrypoint) != "" {
 		opts.Entrypoint = spec.Entrypoint
 	}
+	if strings.TrimSpace(spec.Service) != "" {
+		opts.ServiceCommand = strings.TrimSpace(spec.Service)
+	}
 	if strings.TrimSpace(spec.Shell) != "" {
 		opts.ConsoleShell = strings.TrimSpace(spec.Shell)
 	}
 	if strings.TrimSpace(spec.Hostname) != "" {
 		opts.Hostname = strings.TrimSpace(spec.Hostname)
 	}
-	if len(spec.Setup) != 0 {
-		opts.SetupCommands = append([]string{}, spec.Setup...)
+	if len(spec.Setup) != 0 || len(spec.SetupFiles) != 0 {
+		setupCommands, err := setupCommandsFromSpec(spec.Setup, spec.SetupFiles, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		opts.SetupCommands = setupCommands
 	}
 	opts.Env = mergeEnv(opts.Env, spec.Env)
 	files, err := validateWorkspaceFiles(spec.Files, filepath.Dir(path))
@@ -2103,6 +2150,72 @@ func readWorkspaceSpec(path string) (workspaceSpec, error) {
 		return workspaceSpec{}, err
 	}
 	return spec, nil
+}
+
+func setupCommandsFromSpec(steps workspace.SetupSteps, setupFiles []string, baseDir string) ([]string, error) {
+	commands := make([]string, 0, len(steps)+len(setupFiles))
+	for _, step := range steps {
+		run := strings.TrimSpace(step.Run)
+		file := strings.TrimSpace(step.File)
+		if run != "" && file != "" {
+			return nil, fmt.Errorf("setup entry cannot use both run and file")
+		}
+		if run != "" {
+			commands = append(commands, run)
+			continue
+		}
+		if file != "" {
+			command, err := setupCommandFromFile(file, baseDir)
+			if err != nil {
+				return nil, err
+			}
+			commands = append(commands, command)
+		}
+	}
+	fileCommands, err := setupCommandsFromFiles(setupFiles, baseDir)
+	if err != nil {
+		return nil, err
+	}
+	commands = append(commands, fileCommands...)
+	return commands, nil
+}
+
+func setupCommandsFromFiles(files []string, baseDir string) ([]string, error) {
+	commands := make([]string, 0, len(files))
+	for _, file := range files {
+		command, err := setupCommandFromFile(file, baseDir)
+		if err != nil {
+			return nil, err
+		}
+		commands = append(commands, command)
+	}
+	return commands, nil
+}
+
+func setupCommandFromFile(path, baseDir string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("setup file path is required")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("setup file %q: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("setup file must be a regular file: %s", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read setup file %q: %w", path, err)
+	}
+	command := strings.TrimSpace(string(data))
+	if command == "" {
+		return "", fmt.Errorf("setup file is empty: %s", path)
+	}
+	return command, nil
 }
 
 func workspaceSpecDisks(spec workspaceSpec) ([]workspaceDisk, error) {
@@ -2374,17 +2487,25 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		}
 	}
 	command, resultPort := workspaceBuildCommandAndPort(opts)
+	mode := ""
+	if opts.PrepareForStart && opts.UseImageCommand {
+		mode = "service"
+	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" && !workspace.HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
+		mode = "managed-service"
+	}
 	req := rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
 		InitPath:       rootfs.DefaultInitPath,
 		Command:        command,
+		Mode:           mode,
 		ConsoleShell:   opts.ConsoleShell,
 		Hostname:       opts.Hostname,
+		ShellPort:      workspace.ShellPort(opts),
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
-		NoImageCommand: opts.PrepareForStart && !workspaceHasGuestCommand(opts),
+		NoImageCommand: opts.PrepareForStart && !workspaceHasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:       filepath.Join(opts.StateDir, "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
@@ -2393,6 +2514,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		Mounts:         workspaceMounts(opts.Disks),
 		HostForwards:   rootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,
+		Progress:       opts.Progress,
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := workspaceResult{
@@ -2479,6 +2601,7 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 		Restart:      normalizeRestartPolicy(opts.RestartPolicy),
 		Resources:    workspaceResources(opts),
 		Network:      networkSpecFromConfig(opts.Network),
+		Service:      strings.TrimSpace(opts.ServiceCommand),
 		Mediation:    opts.Mediation,
 		Disks:        opts.Disks,
 		Artifacts:    workspaceArtifactsFromOptions(opts),
@@ -3046,6 +3169,149 @@ func outputJSON(stdout *os.File) bool {
 		return true
 	}
 	return info.Mode()&os.ModeCharDevice == 0
+}
+
+func rootfsProgress(stdout *os.File, prefix string) rootfs.ProgressFunc {
+	if outputJSON(stdout) {
+		return nil
+	}
+	printer := &progressPrinter{
+		out:         os.Stderr,
+		prefix:      prefix,
+		interactive: fileIsTerminal(os.Stderr),
+	}
+	return printer.print
+}
+
+type progressPrinter struct {
+	out         *os.File
+	prefix      string
+	interactive bool
+	active      bool
+}
+
+func (p *progressPrinter) print(event rootfs.ProgressEvent) {
+	line := fmt.Sprintf("%s: %s", p.prefix, formatProgressEvent(event))
+	if !p.interactive {
+		fmt.Fprintln(p.out, line)
+		return
+	}
+	if isProgressEvent(event) {
+		fmt.Fprintf(p.out, "\r\033[2K%s", line)
+		p.active = true
+		if event.Phase == "complete" {
+			fmt.Fprintln(p.out)
+			p.active = false
+		}
+		return
+	}
+	if p.active {
+		fmt.Fprintln(p.out)
+		p.active = false
+	}
+	fmt.Fprintln(p.out, line)
+}
+
+func isProgressEvent(event rootfs.ProgressEvent) bool {
+	return event.Indeterminate || event.Total > 0 || event.TotalBytes > 0
+}
+
+func formatProgressEvent(event rootfs.ProgressEvent) string {
+	message := strings.TrimSpace(event.Message)
+	if message == "" {
+		message = event.Phase
+	}
+	if event.Indeterminate {
+		elapsed := event.Current
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		spinner := []string{"|", "/", "-", "\\"}
+		if elapsed > 0 {
+			return fmt.Sprintf("[%s] %s (%s)", spinner[elapsed%int64(len(spinner))], message, formatElapsed(elapsed))
+		}
+		return fmt.Sprintf("[%s] %s", spinner[0], message)
+	}
+	if event.Total <= 0 && event.TotalBytes <= 0 {
+		return message
+	}
+	var done, total int64
+	if event.TotalBytes > 0 {
+		done = event.Bytes
+		total = event.TotalBytes
+	} else {
+		done = event.Current
+		total = event.Total
+	}
+	if total <= 0 {
+		return message
+	}
+	if done < 0 {
+		done = 0
+	}
+	if done > total {
+		done = total
+	}
+	bar := progressBar(done, total, 20)
+	if event.TotalBytes > 0 {
+		if event.Total > 0 {
+			return fmt.Sprintf("%s %s %s/%s (layer %d/%d)", bar, message, formatBytes(done), formatBytes(total), event.Current, event.Total)
+		}
+		return fmt.Sprintf("%s %s %s/%s", bar, message, formatBytes(done), formatBytes(total))
+	}
+	return fmt.Sprintf("%s %s %d/%d", bar, message, event.Current, event.Total)
+}
+
+func progressBar(done, total int64, width int) string {
+	if width <= 0 {
+		width = 20
+	}
+	filled := 0
+	if total > 0 {
+		filled = int(done * int64(width) / total)
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > width {
+		filled = width
+	}
+	return "[" + strings.Repeat("=", filled) + strings.Repeat("-", width-filled) + "]"
+}
+
+func formatElapsed(seconds int64) string {
+	if seconds < 60 {
+		return fmt.Sprintf("%ds", seconds)
+	}
+	minutes := seconds / 60
+	seconds = seconds % 60
+	if minutes < 60 {
+		return fmt.Sprintf("%dm%02ds", minutes, seconds)
+	}
+	hours := minutes / 60
+	minutes = minutes % 60
+	return fmt.Sprintf("%dh%02dm%02ds", hours, minutes, seconds)
+}
+
+func formatBytes(value int64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%dB", value)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	size := float64(value)
+	for _, suffix := range units {
+		size /= unit
+		if size < unit {
+			return fmt.Sprintf("%.1f%s", size, suffix)
+		}
+	}
+	return fmt.Sprintf("%.1fPiB", size/unit)
+}
+
+func fileIsTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func parseGlobalFlags(args []string) []string {
@@ -4579,7 +4845,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
 		return true
 	}
-	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
+	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "setup-file") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
 }
 
 func hasLowLevelCreateFlag(args []string) bool {
@@ -4630,6 +4896,10 @@ func defaultWritableKernelPath(backend, arch string) string {
 
 func defaultLegacyKernelPath(backend string) string {
 	return workspace.LegacyKernelPath(backend)
+}
+
+func defaultAppleVFSupervisorPath() string {
+	return workspace.AppleVFSupervisorPath()
 }
 
 func defaultPackagedKernelPath(backend, arch string) string {
@@ -4732,7 +5002,7 @@ func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
 }
 
 func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
-	return workspace.ResetGuestConfigCommand(command, env, port, mounts, forwards, consoleShell, hostname)
+	return workspace.ResetGuestConfigCommand(command, "", env, port, 0, mounts, forwards, consoleShell, hostname)
 }
 
 func envList(env map[string]string) []string {
@@ -4925,22 +5195,19 @@ func consoleLooksReady(output string) bool {
 func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 	var total int64
 	buffer := make([]byte, 4096)
+	state := consoleInputState{}
 	for {
 		n, readErr := src.Read(buffer)
 		if n > 0 {
 			chunk := buffer[:n]
-			if idx := bytes.IndexByte(chunk, consoleDetachByte); idx >= 0 {
-				written, writeErr := writeConsoleInputChunk(dst, chunk[:idx])
-				total += written
-				if writeErr != nil {
-					return total, writeErr
-				}
-				return total, nil
-			}
-			written, writeErr := writeConsoleInputChunk(dst, chunk)
+			filtered, detach := filterConsoleInput(chunk, &state)
+			written, writeErr := writeConsoleInputChunk(dst, filtered)
 			total += written
 			if writeErr != nil {
 				return total, writeErr
+			}
+			if detach {
+				return total, nil
 			}
 		}
 		if readErr != nil {
@@ -4952,10 +5219,68 @@ func copyConsoleInput(dst io.Writer, src io.Reader) (int64, error) {
 	}
 }
 
+func copyShellInput(dst io.Writer, src io.Reader) (int64, error) {
+	var total int64
+	buffer := make([]byte, 4096)
+	state := consoleInputState{}
+	for {
+		n, readErr := src.Read(buffer)
+		if n > 0 {
+			chunk := buffer[:n]
+			filtered, detach := filterConsoleInput(chunk, &state)
+			written, writeErr := dst.Write(filtered)
+			total += int64(written)
+			if writeErr != nil {
+				return total, writeErr
+			}
+			if detach {
+				return total, nil
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return total, nil
+			}
+			return total, readErr
+		}
+	}
+}
+
+type consoleInputState struct {
+	sawDetachPrefix bool
+}
+
+func filterConsoleInput(chunk []byte, state *consoleInputState) ([]byte, bool) {
+	if len(chunk) == 0 {
+		return chunk, false
+	}
+	var out []byte
+	for i := 0; i < len(chunk); i++ {
+		b := chunk[i]
+		if state.sawDetachPrefix {
+			state.sawDetachPrefix = false
+			if b == consoleDetachSuffix {
+				return out, true
+			}
+			out = append(out, consoleDetachPrefix)
+		}
+		if b == consoleDetachByte {
+			return out, true
+		}
+		if b == consoleDetachPrefix {
+			state.sawDetachPrefix = true
+			continue
+		}
+		out = append(out, b)
+	}
+	return out, false
+}
+
 func writeConsoleInputChunk(dst io.Writer, chunk []byte) (int64, error) {
 	if len(chunk) == 0 {
 		return 0, nil
 	}
+	chunk = stripBracketedPasteMarkers(chunk)
 	normalized := bytes.ReplaceAll(chunk, []byte("\n"), []byte("\r"))
 	written, err := dst.Write(normalized)
 	if err != nil {
@@ -4965,6 +5290,12 @@ func writeConsoleInputChunk(dst io.Writer, chunk []byte) (int64, error) {
 		return int64(written), io.ErrShortWrite
 	}
 	return int64(written), nil
+}
+
+func stripBracketedPasteMarkers(chunk []byte) []byte {
+	chunk = bytes.ReplaceAll(chunk, []byte("\x1b[200~"), nil)
+	chunk = bytes.ReplaceAll(chunk, []byte("\x1b[201~"), nil)
+	return chunk
 }
 
 func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, networkInterface string, publishes []string) (vmkit.Request, error) {
@@ -5036,6 +5367,8 @@ func reorderFlagArgs(args []string) []string {
 		"-name":              true,
 		"-image":             true,
 		"-exec":              true,
+		"-setup-file":        true,
+		"-service-command":   true,
 		"-entrypoint":        true,
 		"-shell":             true,
 		"-hostname":          true,
@@ -5112,7 +5445,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
+	case "-json", "-text", "-human", "-keep", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
 		return true
 	default:
 		return false
@@ -5407,6 +5740,8 @@ Options:
   -supervisor <path>    Override the supervisor path
   -json <path|- >       Read request JSON from a file or stdin
   -image <ref>          OCI image
+  -image-command        Run the image Entrypoint/Cmd instead of opening a shell
+  -service-command <cmd> Long-running command to run as the VM service
   -name <name>          Workspace name
   -id <id>              Workspace ID
   -entrypoint <command> Command to run on start
@@ -5442,7 +5777,7 @@ Commands:
   steady               Sample host process RSS over time
 
 Boot options:
-  -image <ref>          OCI image; defaults to the small BusyBox baseline
+  -image <ref>          OCI image; defaults to Python 3.13 slim
   -exec <command>       Guest command used to mark boot completion; defaults to true
   -iterations <n>       Number of boot measurements
   -profile <name>       Resource profile: tiny, small, medium, or large
@@ -5470,6 +5805,7 @@ Options:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
+  -setup-file <path>    Shell script file to run before --exec
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
@@ -5504,9 +5840,11 @@ func printCreateHelp(stdout *os.File) {
 Create a workspace from an image.
 
 Options:
-  -image <ref>          OCI image; defaults to a small BusyBox image
+  -image <ref>          OCI image; defaults to Python 3.13 slim
   -name <name>          Workspace name
   -setup <command>      Shell command to run before first start
+  -setup-file <path>    Shell script file to run before first start
+  -service-command <cmd> Long-running command to run as the VM service
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname

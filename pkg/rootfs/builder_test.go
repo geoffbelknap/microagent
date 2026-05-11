@@ -13,10 +13,10 @@ import (
 
 func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
 	dir := t.TempDir()
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello world"}, map[string]string{
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello world"}, "", map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	}, "", 0, nil, nil, "", "research")
+	}, "", 0, 0, nil, nil, "", "research")
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -48,10 +48,10 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	if err := os.WriteFile(initBinary, []byte("guest-init"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, map[string]string{
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo", "hello"}, "service", map[string]string{
 		"GOOD_ENV": "ok",
 		"bad-env":  "ignored",
-	}, initBinary, 1024, []Mount{{Device: "/dev/vdb", Mountpoint: "/config", Mode: "ro"}}, []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}, "/bin/bash", "research")
+	}, initBinary, 1024, 22222, []Mount{{Device: "/dev/vdb", Mountpoint: "/config", Mode: "ro"}}, []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}}, "/bin/bash", "research")
 	if err != nil {
 		t.Fatalf("writeInit: %v", err)
 	}
@@ -68,6 +68,8 @@ func TestWriteInitCopiesGuestBinaryAndConfig(t *testing.T) {
 	}
 	text := string(config)
 	if !strings.Contains(text, `"port":1024`) ||
+		!strings.Contains(text, `"shellPort":22222`) ||
+		!strings.Contains(text, `"mode":"service"`) ||
 		!strings.Contains(text, `"/bin/echo"`) ||
 		!strings.Contains(text, `"GOOD_ENV=ok"`) ||
 		!strings.Contains(text, `"/config"`) ||
@@ -99,6 +101,76 @@ func TestBuildCommandUsesImageCommandByDefault(t *testing.T) {
 	want := []string{"/entrypoint", "serve"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("buildCommand = %#v, want %#v", got, want)
+	}
+}
+
+func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
+	tests := []struct {
+		name          string
+		raw           string
+		wantRepoRef   string
+		wantReference string
+	}{
+		{
+			name:          "official image with tag",
+			raw:           "ubuntu:24.04",
+			wantRepoRef:   "docker.io/library/ubuntu",
+			wantReference: "24.04",
+		},
+		{
+			name:          "official image with digest",
+			raw:           "ubuntu@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			wantRepoRef:   "docker.io/library/ubuntu",
+			wantReference: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		{
+			name:          "docker hub namespace with tag",
+			raw:           "homebridge/homebridge:latest",
+			wantRepoRef:   "docker.io/homebridge/homebridge",
+			wantReference: "latest",
+		},
+		{
+			name:          "docker hub namespace without tag",
+			raw:           "homebridge/homebridge",
+			wantRepoRef:   "docker.io/homebridge/homebridge",
+			wantReference: "latest",
+		},
+		{
+			name:          "docker io official shorthand",
+			raw:           "docker.io/ubuntu:24.04",
+			wantRepoRef:   "docker.io/library/ubuntu",
+			wantReference: "24.04",
+		},
+		{
+			name:          "explicit docker io namespace",
+			raw:           "docker.io/homebridge/homebridge:latest",
+			wantRepoRef:   "docker.io/homebridge/homebridge",
+			wantReference: "latest",
+		},
+		{
+			name:          "explicit ghcr registry",
+			raw:           "ghcr.io/example/agent:latest",
+			wantRepoRef:   "ghcr.io/example/agent",
+			wantReference: "latest",
+		},
+		{
+			name:          "explicit localhost registry",
+			raw:           "localhost:5000/example/agent:latest",
+			wantRepoRef:   "localhost:5000/example/agent",
+			wantReference: "latest",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotRepoRef, gotReference, err := splitRegistryReference(tc.raw)
+			if err != nil {
+				t.Fatalf("splitRegistryReference: %v", err)
+			}
+			if gotRepoRef != tc.wantRepoRef || gotReference != tc.wantReference {
+				t.Fatalf("splitRegistryReference(%q) = %q, %q; want %q, %q", tc.raw, gotRepoRef, gotReference, tc.wantRepoRef, tc.wantReference)
+			}
+		})
 	}
 }
 
@@ -145,7 +217,7 @@ func TestWriteInitDoesNotFollowStageSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dir, "sbin")); err != nil {
 		t.Fatal(err)
 	}
-	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, nil, "", 0, nil, nil, "", "")
+	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, "", nil, "", 0, 0, nil, nil, "", "")
 	if err == nil {
 		t.Fatal("expected symlinked init parent to be rejected")
 	}

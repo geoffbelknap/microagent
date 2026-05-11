@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -13,15 +15,16 @@ import (
 func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{
-		Name:          "agency-task",
-		StateDir:      dir,
-		Backend:       vmkit.BackendFirecracker,
-		Profile:       "small",
-		RestartPolicy: "never",
-		MemoryMiB:     512,
-		CPUCount:      2,
-		SizeMiB:       1024,
-		Network:       vmkit.NetworkConfig{Mode: "nat"},
+		Name:           "agency-task",
+		StateDir:       dir,
+		Backend:        vmkit.BackendFirecracker,
+		Profile:        "small",
+		RestartPolicy:  "never",
+		MemoryMiB:      512,
+		CPUCount:       2,
+		SizeMiB:        1024,
+		Network:        vmkit.NetworkConfig{Mode: "nat"},
+		ServiceCommand: "/opt/homebridge/start.sh --allow-root",
 		Disks: []Disk{{
 			Name:       "work",
 			Path:       "/tmp/work.ext4",
@@ -39,6 +42,9 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	}
 	if manifest.Name != "agency-task" || manifest.Artifacts.Egress[0].Name != "result" {
 		t.Fatalf("manifest = %#v", manifest)
+	}
+	if manifest.Service != "/opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("manifest Service = %q", manifest.Service)
 	}
 
 	req := Request(opts, "run", filepath.Join(dir, "workspaces", "agency-task", "rootfs.ext4"), "req-1")
@@ -107,6 +113,118 @@ func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 
 	if !req.AllowMutable {
 		t.Fatal("workspace rootfs builds should allow mutable image tags")
+	}
+}
+
+func TestBuildRootfsRequestCanUseImageCommandForPreparedWorkspace(t *testing.T) {
+	req := buildRootfsRequest(Options{
+		Name:            "homebridge",
+		StateDir:        "/tmp/microagent",
+		ImageRef:        "homebridge/homebridge:latest",
+		Architecture:    "arm64",
+		SizeMiB:         4096,
+		PrepareForStart: true,
+		UseImageCommand: true,
+	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
+
+	if req.NoImageCommand {
+		t.Fatal("NoImageCommand = true, want image Entrypoint/Cmd preserved")
+	}
+	if req.Mode != "service" {
+		t.Fatalf("Mode = %q, want service", req.Mode)
+	}
+	if req.ShellPort != ShellPortForName("homebridge") {
+		t.Fatalf("ShellPort = %d, want %d", req.ShellPort, ShellPortForName("homebridge"))
+	}
+	if len(req.Command) != 0 {
+		t.Fatalf("Command = %#v, want OCI image command", req.Command)
+	}
+}
+
+func TestBuildRootfsRequestCanUseServiceCommandForPreparedWorkspace(t *testing.T) {
+	req := buildRootfsRequest(Options{
+		Name:            "homebridge",
+		StateDir:        "/tmp/microagent",
+		ImageRef:        "homebridge/homebridge:latest",
+		Architecture:    "arm64",
+		SizeMiB:         4096,
+		PrepareForStart: true,
+		ServiceCommand:  "/opt/homebridge/start.sh --allow-root",
+	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
+
+	if req.Mode != "managed-service" {
+		t.Fatalf("Mode = %q, want managed-service", req.Mode)
+	}
+	if strings.Join(req.Command, " ") != "/bin/sh -lc /opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("Command = %#v", req.Command)
+	}
+	if req.ResultPort != 0 {
+		t.Fatalf("ResultPort = %d, want 0", req.ResultPort)
+	}
+}
+
+func TestBuildRootfsRequestRunsSetupBeforeManagedService(t *testing.T) {
+	req := buildRootfsRequest(Options{
+		Name:            "homebridge",
+		StateDir:        "/tmp/microagent",
+		ImageRef:        "docker.io/library/ubuntu:24.04",
+		Architecture:    "arm64",
+		SizeMiB:         4096,
+		ResultPort:      1024,
+		PrepareForStart: true,
+		SetupCommands:   []string{"echo setup"},
+		ServiceCommand:  "/usr/local/bin/microagent-homebridge",
+	}, "/tmp/microagent/workspaces/homebridge/rootfs.ext4")
+
+	if req.Mode != "" {
+		t.Fatalf("Mode = %q, want setup foreground mode", req.Mode)
+	}
+	if req.ResultPort != 1024 {
+		t.Fatalf("ResultPort = %d, want 1024", req.ResultPort)
+	}
+	joined := strings.Join(req.Command, " ")
+	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, `"mode":"managed-service"`) {
+		t.Fatalf("Command = %#v", req.Command)
+	}
+}
+
+func TestEnsureCanCreateRejectsRunningWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "homebridge"}
+	req := Request(opts, "start", filepath.Join(dir, "rootfs.ext4"), NewRequestID())
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
+		t.Fatalf("WriteProcessState: %v", err)
+	}
+	err := EnsureCanCreate(opts)
+	if err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("EnsureCanCreate err = %v", err)
+	}
+}
+
+func TestEnsureCanCreateRejectsUnavailableHostPort(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = EnsureCanCreate(Options{
+		StateDir: t.TempDir(),
+		Name:     "homebridge",
+		Network: vmkit.NetworkConfig{
+			Mode:         "nat",
+			PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: uint16(port), GuestPort: 8581}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "host port 127.0.0.1:"+portText+" is unavailable") {
+		t.Fatalf("EnsureCanCreate err = %v", err)
 	}
 }
 

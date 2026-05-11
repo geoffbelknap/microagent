@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1104,11 +1105,17 @@ func TestRootFSExecMapsToShellCommand(t *testing.T) {
 }
 
 func TestParseWorkspaceOptionsForRun(t *testing.T) {
+	dir := t.TempDir()
+	setupPath := filepath.Join(dir, "setup.sh")
+	if err := os.WriteFile(setupPath, []byte("#!/bin/sh\necho from-file\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	opts, err := parseWorkspaceOptions("run", []string{
 		"--image", "docker.io/library/ubuntu:24.04",
 		"--exec", "uname -a",
 		"--setup", "apt-get update",
 		"--setup", "apt-get install -y git",
+		"--setup-file", setupPath,
 		"--entrypoint", "/app/entrypoint.sh",
 		"--shell", "/bin/bash",
 		"--hostname", "research-vm",
@@ -1132,7 +1139,7 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	if opts.ExecCommand != "uname -a" {
 		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
 	}
-	if len(opts.SetupCommands) != 2 || opts.SetupCommands[0] != "apt-get update" || opts.SetupCommands[1] != "apt-get install -y git" {
+	if len(opts.SetupCommands) != 3 || opts.SetupCommands[0] != "apt-get update" || opts.SetupCommands[1] != "apt-get install -y git" || !strings.Contains(opts.SetupCommands[2], "echo from-file") {
 		t.Fatalf("SetupCommands = %#v", opts.SetupCommands)
 	}
 	if opts.Entrypoint != "/app/entrypoint.sh" {
@@ -1367,7 +1374,8 @@ shell: /bin/bash
 hostname: research-vm
 setup:
   - mkdir -p /workspace
-  - echo ready > /workspace/status
+  - file: ./setup.sh
+  - run: echo ready > /workspace/status
 env:
   MICROAGENT_NAME: research
 resources:
@@ -1412,6 +1420,9 @@ files:
 	if err := os.WriteFile(filepath.Join(dir, "body.py"), []byte("print('ok')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "setup.sh"), []byte("#!/bin/sh\napt-get update\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1422,8 +1433,11 @@ files:
 	if opts.Name != "research" || opts.ImageRef != "docker.io/library/ubuntu:24.04" || opts.Profile != "medium" || opts.RestartPolicy != "on-failure" {
 		t.Fatalf("identity/image/profile = %#v", opts)
 	}
-	if opts.Entrypoint != "/app/start.sh" || opts.ConsoleShell != "/bin/bash" || opts.Hostname != "research-vm" || len(opts.SetupCommands) != 2 {
+	if opts.Entrypoint != "/app/start.sh" || opts.ConsoleShell != "/bin/bash" || opts.Hostname != "research-vm" || len(opts.SetupCommands) != 3 {
 		t.Fatalf("commands = entrypoint %q shell %q hostname %q setup %#v", opts.Entrypoint, opts.ConsoleShell, opts.Hostname, opts.SetupCommands)
+	}
+	if !strings.Contains(opts.SetupCommands[1], "apt-get update") {
+		t.Fatalf("setup file command = %q", opts.SetupCommands[1])
 	}
 	if opts.Env["MICROAGENT_NAME"] != "research" {
 		t.Fatalf("env = %#v", opts.Env)
@@ -1473,6 +1487,16 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 			name: "duplicate dst",
 			spec: "name: bad\nfiles:\n  - src: ./body.py\n    dst: /app/body.py\n  - src: ./body.py\n    dst: /app/body.py\n",
 			want: "duplicate file dst",
+		},
+		{
+			name: "missing setup file",
+			spec: "name: bad\nsetup:\n  - file: ./missing.sh\n",
+			want: "setup file",
+		},
+		{
+			name: "ambiguous setup entry",
+			spec: "name: bad\nsetup:\n  - run: echo ok\n    file: ./body.py\n",
+			want: "cannot use both run and file",
 		},
 	}
 	for _, tt := range tests {
@@ -3111,6 +3135,185 @@ func TestWorkspaceBuildCommandUsesStartConfigWhenNoSetupIsNeeded(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspaceRootfsCanUseImageCommand(t *testing.T) {
+	opts := workspaceOptions{
+		ImageRef:        "local/busybox:baseline",
+		Architecture:    "arm64",
+		ResultPort:      1024,
+		PrepareForStart: true,
+		UseImageCommand: true,
+	}
+	command, port := workspaceBuildCommandAndPort(opts)
+	if len(command) != 0 {
+		t.Fatalf("command = %#v, want image command from OCI config", command)
+	}
+	if port != 0 {
+		t.Fatalf("port = %d, want 0", port)
+	}
+}
+
+func TestCreateWorkspaceRootfsCanUseServiceCommand(t *testing.T) {
+	opts := workspaceOptions{
+		ImageRef:        "homebridge/homebridge:latest",
+		Architecture:    "arm64",
+		ResultPort:      1024,
+		PrepareForStart: true,
+		ServiceCommand:  "/opt/homebridge/start.sh --allow-root",
+	}
+	command, port := workspaceBuildCommandAndPort(opts)
+	if strings.Join(command, " ") != "/bin/sh -lc /opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("command = %#v", command)
+	}
+	if port != 0 {
+		t.Fatalf("port = %d, want 0", port)
+	}
+}
+
+func TestCreateWorkspaceRootfsRunsSetupBeforeManagedService(t *testing.T) {
+	opts := workspaceOptions{
+		ImageRef:        "docker.io/library/ubuntu:24.04",
+		Architecture:    "arm64",
+		ResultPort:      1024,
+		PrepareForStart: true,
+		SetupCommands:   []string{"echo setup"},
+		ServiceCommand:  "/usr/local/bin/microagent-homebridge",
+	}
+	command, port := workspaceBuildCommandAndPort(opts)
+	if port != 1024 {
+		t.Fatalf("port = %d, want 1024", port)
+	}
+	joined := strings.Join(command, " ")
+	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, "/usr/local/bin/microagent-homebridge") || !strings.Contains(joined, `"mode":"managed-service"`) {
+		t.Fatalf("command = %#v", command)
+	}
+}
+
+func TestRunHighLevelCreateDoesNotRenderEmptyResultOnPreflightFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runHighLevelCreate(t.Context(), []string{
+		"port-check",
+		"--state-dir", dir,
+		"--publish", portText + ":80",
+		"--size-mib", "512",
+	}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "host port 127.0.0.1:"+portText+" is unavailable") {
+		t.Fatalf("runHighLevelCreate err = %v", err)
+	}
+	out, readErr := os.ReadFile(stdoutPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(out), "Workspace:") {
+		t.Fatalf("stdout = %q", string(out))
+	}
+}
+
+func TestRunStartWorkspaceDoesNotRenderEmptyResultOnMissingWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runStartWorkspace(t.Context(), []string{"missing", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "workspace.json") {
+		t.Fatalf("runStartWorkspace err = %v", err)
+	}
+	out, readErr := os.ReadFile(stdoutPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if strings.Contains(string(out), "Workspace:") {
+		t.Fatalf("stdout = %q", string(out))
+	}
+}
+
+func TestFormatProgressEventSupportsIndeterminateGuestSetup(t *testing.T) {
+	got := formatProgressEvent(rootfs.ProgressEvent{
+		Phase:         "guest-setup",
+		Message:       "running guest setup",
+		Current:       65,
+		Indeterminate: true,
+	})
+	if !strings.Contains(got, "running guest setup") || !strings.Contains(got, "1m05s") {
+		t.Fatalf("progress = %q", got)
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"homebridge",
+		"--image", "homebridge/homebridge:latest",
+		"--image-command",
+		"--network", "nat",
+		"--publish", "8581:8581",
+		"--size-mib", "4096",
+		"--restart", "always",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "homebridge" {
+		t.Fatalf("Name = %q", opts.Name)
+	}
+	if !opts.UseImageCommand {
+		t.Fatal("UseImageCommand = false")
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsServiceCommand(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"homebridge",
+		"--image", "homebridge/homebridge:latest",
+		"--service-command", "/opt/homebridge/start.sh --allow-root",
+		"--network", "nat",
+		"--publish", "8581:8581",
+		"--size-mib", "4096",
+		"--restart", "always",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "homebridge" {
+		t.Fatalf("Name = %q", opts.Name)
+	}
+	if opts.ServiceCommand != "/opt/homebridge/start.sh --allow-root" {
+		t.Fatalf("ServiceCommand = %q", opts.ServiceCommand)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsImageAndServiceCommand(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{
+		"homebridge",
+		"--image", "homebridge/homebridge:latest",
+		"--image-command",
+		"--service-command", "/opt/homebridge/start.sh --allow-root",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot use both") {
+		t.Fatalf("parseWorkspaceOptions err = %v", err)
+	}
+}
+
 func TestWorkspaceBuildCommandKeepsSetupResultPort(t *testing.T) {
 	command, port := workspaceBuildCommandAndPort(workspaceOptions{
 		Entrypoint:      "/app/entrypoint.sh",
@@ -3217,6 +3420,9 @@ func TestWorkspaceHasGuestCommand(t *testing.T) {
 	if !workspaceHasGuestCommand(workspaceOptions{ExecCommand: "echo run"}) {
 		t.Fatal("exec command should count as guest work")
 	}
+	if !workspaceHasGuestCommand(workspaceOptions{ServiceCommand: "sleep infinity"}) {
+		t.Fatal("service command should count as guest work")
+	}
 	if workspaceHasGuestCommand(workspaceOptions{SetupCommands: []string{"  "}}) {
 		t.Fatal("blank setup command should not count as guest work")
 	}
@@ -3277,6 +3483,18 @@ func TestCopyConsoleInputNormalizesNewlines(t *testing.T) {
 	}
 }
 
+func TestCopyConsoleInputStripsBracketedPasteMarkers(t *testing.T) {
+	var dst bytes.Buffer
+	input := "\x1b[200~hostname -I\x1b[201~\n"
+	written, err := copyConsoleInput(&dst, strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	if written != int64(len("hostname -I\r")) || dst.String() != "hostname -I\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
 func TestCopyConsoleInputDetachesOnCtrlBracket(t *testing.T) {
 	var dst bytes.Buffer
 	written, err := copyConsoleInput(&dst, strings.NewReader("echo before\n"+string([]byte{consoleDetachByte})+"echo after\n"))
@@ -3284,6 +3502,51 @@ func TestCopyConsoleInputDetachesOnCtrlBracket(t *testing.T) {
 		t.Fatalf("copyConsoleInput: %v", err)
 	}
 	if written != int64(len("echo before\r")) || dst.String() != "echo before\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyConsoleInputDetachesOnCtrlPCtrlQ(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyConsoleInput(&dst, strings.NewReader("echo before\n"+string([]byte{consoleDetachPrefix, consoleDetachSuffix})+"echo after\n"))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	if written != int64(len("echo before\r")) || dst.String() != "echo before\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyConsoleInputKeepsCtrlPWithoutCtrlQ(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyConsoleInput(&dst, strings.NewReader("echo "+string([]byte{consoleDetachPrefix, 'x'})+"\n"))
+	if err != nil {
+		t.Fatalf("copyConsoleInput: %v", err)
+	}
+	want := "echo " + string([]byte{consoleDetachPrefix, 'x'}) + "\r"
+	if written != int64(len(want)) || dst.String() != want {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyShellInputPreservesCarriageReturns(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyShellInput(&dst, strings.NewReader("echo ready\r"))
+	if err != nil {
+		t.Fatalf("copyShellInput: %v", err)
+	}
+	if written != int64(len("echo ready\r")) || dst.String() != "echo ready\r" {
+		t.Fatalf("written=%d dst=%q", written, dst.String())
+	}
+}
+
+func TestCopyShellInputDetachesOnCtrlPCtrlQ(t *testing.T) {
+	var dst bytes.Buffer
+	written, err := copyShellInput(&dst, strings.NewReader("echo before\n"+string([]byte{consoleDetachPrefix, consoleDetachSuffix})+"echo after\n"))
+	if err != nil {
+		t.Fatalf("copyShellInput: %v", err)
+	}
+	if written != int64(len("echo before\n")) || dst.String() != "echo before\n" {
 		t.Fatalf("written=%d dst=%q", written, dst.String())
 	}
 }

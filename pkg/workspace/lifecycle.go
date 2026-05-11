@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +29,7 @@ type Result struct {
 	Restart      string                     `json:"restart"`
 	Resources    Resources                  `json:"resources"`
 	Network      NetworkSpec                `json:"network,omitempty"`
+	Service      string                     `json:"service_command,omitempty"`
 	ConsoleShell string                     `json:"shell,omitempty"`
 	Hostname     string                     `json:"hostname,omitempty"`
 	RootfsPath   string                     `json:"rootfs_path"`
@@ -93,7 +96,13 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if opts.ImageRef == "" {
 		opts.ImageRef = DefaultImage(opts.Architecture)
 	}
+	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
+		return Result{}, fmt.Errorf("create cannot use both image command and service command")
+	}
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureCanCreate(opts); err != nil {
 		return Result{}, err
 	}
 	disks, err := PrepareDisks(ctx, opts)
@@ -115,11 +124,17 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := WriteManifest(opts); err != nil {
 		return result, err
 	}
-	if HasGuestCommand(opts) {
+	if HasGuestCommand(opts) && (strings.TrimSpace(opts.ServiceCommand) == "" || HasSetupCommand(opts) || strings.TrimSpace(opts.ExecCommand) != "") {
 		runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
+		stopProgress := startIndeterminateProgress(opts.Progress, "guest-setup", "running guest setup")
 		resp, runErr := runForeground(runCtx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
 		result.Response = resp
+		if runErr != nil {
+			stopProgress("guest setup failed")
+		} else {
+			stopProgress("guest setup complete")
+		}
 		result.SerialPath = SerialLogPath(opts.StateDir, opts.Name)
 		if runErr != nil {
 			return result, runErr
@@ -135,6 +150,82 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	resp, err := Dispatch(ctx, opts, Request(opts, "prepare", result.RootfsPath, NewRequestID()))
 	result.Response = resp
 	return result, err
+}
+
+func EnsureCanCreate(opts Options) error {
+	state, _, err := LatestStartState(opts.StateDir, opts.Name)
+	if err != nil {
+		return err
+	}
+	switch state {
+	case vmkit.StateStarting, vmkit.StateRunning:
+		return fmt.Errorf("workspace %s is already %s; stop or delete it before create", opts.Name, state)
+	}
+	return ensureHostPortsAvailable(opts.Network.PortForwards)
+}
+
+func ensureHostPortsAvailable(forwards []vmkit.PortForward) error {
+	for _, forward := range forwards {
+		protocol := strings.TrimSpace(forward.Protocol)
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		if protocol != "tcp" || forward.HostPort == 0 {
+			continue
+		}
+		host := strings.TrimSpace(forward.Host)
+		if host == "" || host == "localhost" {
+			host = "127.0.0.1"
+		}
+		addr := net.JoinHostPort(host, strconv.Itoa(int(forward.HostPort)))
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("host port %s is unavailable; stop the process using it or choose another publish port: %w", addr, err)
+		}
+		_ = listener.Close()
+	}
+	return nil
+}
+
+func startIndeterminateProgress(progress rootfs.ProgressFunc, phase, message string) func(string) {
+	if progress == nil {
+		return func(string) {}
+	}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	started := time.Now()
+	progress(rootfs.ProgressEvent{
+		Phase:         phase,
+		Message:       message,
+		Indeterminate: true,
+	})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				progress(rootfs.ProgressEvent{
+					Phase:         phase,
+					Message:       message,
+					Current:       int64(time.Since(started).Round(time.Second) / time.Second),
+					Indeterminate: true,
+				})
+			}
+		}
+	}()
+	return func(finalMessage string) {
+		close(done)
+		<-stopped
+		progress(rootfs.ProgressEvent{
+			Phase:   phase,
+			Message: finalMessage,
+			Current: int64(time.Since(started).Round(time.Second) / time.Second),
+		})
+	}
 }
 
 func Run(ctx context.Context, opts Options) (Result, error) {
@@ -249,6 +340,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		Restart:      opts.RestartPolicy,
 		Resources:    ResourcesFromOptions(opts),
 		Network:      NetworkSpecFromConfig(opts.Network),
+		Service:      strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
 		Hostname:     strings.TrimSpace(opts.Hostname),
 		RootfsPath:   rootfsPath,
@@ -409,6 +501,7 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		Restart:      opts.RestartPolicy,
 		Resources:    ResourcesFromOptions(opts),
 		Network:      NetworkSpecFromConfig(opts.Network),
+		Service:      strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
 		Hostname:     strings.TrimSpace(opts.Hostname),
 		RootfsPath:   rootfsPath,
@@ -421,17 +514,25 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 
 func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 	command, resultPort := BuildCommandAndPort(opts)
+	mode := ""
+	if opts.PrepareForStart && opts.UseImageCommand {
+		mode = "service"
+	} else if opts.PrepareForStart && strings.TrimSpace(opts.ServiceCommand) != "" && !HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
+		mode = "managed-service"
+	}
 	return rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
 		InitPath:       rootfs.DefaultInitPath,
 		Command:        command,
+		Mode:           mode,
 		ConsoleShell:   opts.ConsoleShell,
 		Hostname:       opts.Hostname,
+		ShellPort:      ShellPort(opts),
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
-		NoImageCommand: opts.PrepareForStart && !HasGuestCommand(opts),
+		NoImageCommand: opts.PrepareForStart && !HasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:       filepath.Join(opts.StateDir, "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
@@ -440,6 +541,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		Mounts:         Mounts(opts.Disks),
 		HostForwards:   RootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,
+		Progress:       opts.Progress,
 	}
 }
 
@@ -492,6 +594,7 @@ func WriteManifest(opts Options) error {
 		Restart:      NormalizeRestartPolicy(opts.RestartPolicy),
 		Resources:    ResourcesFromOptions(opts),
 		Network:      NetworkSpecFromConfig(opts.Network),
+		Service:      strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
 		Hostname:     strings.TrimSpace(opts.Hostname),
 		Mediation:    opts.Mediation,
@@ -828,6 +931,9 @@ func applyManifest(opts *Options, manifest Manifest) {
 	}
 	if strings.TrimSpace(manifest.ConsoleShell) != "" {
 		opts.ConsoleShell = strings.TrimSpace(manifest.ConsoleShell)
+	}
+	if strings.TrimSpace(manifest.Service) != "" {
+		opts.ServiceCommand = strings.TrimSpace(manifest.Service)
 	}
 	if strings.TrimSpace(manifest.Hostname) != "" {
 		opts.Hostname = strings.TrimSpace(manifest.Hostname)

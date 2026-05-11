@@ -35,6 +35,7 @@ type config struct {
 	Mode         string        `json:"mode,omitempty"`
 	Mounts       []mount       `json:"mounts,omitempty"`
 	HostForwards []hostForward `json:"hostForwards,omitempty"`
+	ShellPort    uint16        `json:"shellPort,omitempty"`
 	ConsoleShell string        `json:"consoleShell,omitempty"`
 	Hostname     string        `json:"hostname,omitempty"`
 }
@@ -55,6 +56,12 @@ type result struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "host-forward-helper" {
+		os.Exit(runHostForwardHelper(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "shell-helper" {
+		os.Exit(runShellHelper(os.Args[2:]))
+	}
 	code := run()
 	poweroff()
 	os.Exit(code)
@@ -118,7 +125,7 @@ func run() int {
 		_ = sendResult(cfg.Port, res)
 		return code
 	}
-	if err := startHostForwards(cfg.HostForwards); err != nil {
+	if err := startConfiguredHostForwards(cfg); err != nil {
 		code = 127
 		res.Error = err.Error()
 		fmt.Fprintln(os.Stderr, err)
@@ -127,7 +134,46 @@ func run() int {
 		_ = sendResult(cfg.Port, res)
 		return code
 	}
-	if len(cfg.Command) > 0 {
+	if err := startShellHelper(cfg.ShellPort, cfg.ConsoleShell, guestEnv(cfg.Env)); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
+	if cfg.Mode == "service" && len(cfg.Command) > 0 {
+		if err := attachConsole(); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = sendResult(cfg.Port, res)
+			return code
+		}
+		if err := execServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+		}
+	} else if cfg.Mode == "managed-service" && len(cfg.Command) > 0 {
+		if err := attachConsole(); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = sendResult(cfg.Port, res)
+			return code
+		}
+		if err := runManagedServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+		}
+	} else if len(cfg.Command) > 0 {
 		log.Printf("microagent-init: handing off to %v", cfg.Command)
 		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 		cmd.Env = guestEnv(cfg.Env)
@@ -163,6 +209,88 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 	}
 	return code
+}
+
+func execServiceCommand(command []string, env []string) error {
+	log.Printf("microagent-init: exec service command %v", command)
+	closeExtraFiles()
+	return syscall.Exec(command[0], command, env)
+}
+
+func runManagedServiceCommand(command []string, env []string) error {
+	backoff := time.Second
+	for {
+		reapExitedChildren()
+		log.Printf("microagent-init: starting managed service command %v", command)
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Env = env
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		startedAt := time.Now()
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start managed service command: %w", err)
+		}
+		if err := cmd.Wait(); err != nil {
+			log.Printf("microagent-init: managed service command exited: %v", err)
+		} else {
+			log.Println("microagent-init: managed service command exited")
+		}
+		reapExitedChildren()
+		if time.Since(startedAt) > 30*time.Second {
+			backoff = time.Second
+		}
+		log.Printf("microagent-init: restarting managed service command in %s", backoff)
+		time.Sleep(backoff)
+		if backoff < 30*time.Second {
+			backoff *= 2
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
+			}
+		}
+	}
+}
+
+func reapExitedChildren() {
+	for {
+		var status unix.WaitStatus
+		pid, err := unix.Wait4(-1, &status, unix.WNOHANG, nil)
+		if err == nil && pid > 0 {
+			log.Printf("microagent-init: reaped child pid %d", pid)
+			continue
+		}
+		if err == nil {
+			return
+		}
+		if err != unix.ECHILD {
+			log.Printf("microagent-init: reap child: %v", err)
+		}
+		return
+	}
+}
+
+func startInteractiveShell(env []string, shellPath string) error {
+	command, err := consoleShellCommand(shellPath)
+	if err != nil {
+		return err
+	}
+	log.Printf("microagent-init: starting console shell %v", command)
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Env = env
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start console shell: %w", err)
+	}
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			log.Printf("microagent-init: console shell exited: %v", err)
+			return
+		}
+		log.Println(consoleShellExitedMarker)
+	}()
+	return nil
 }
 
 func configureHostname(hostname string) error {
@@ -439,27 +567,279 @@ func startHostForwards(forwards []hostForward) error {
 		}
 	}
 	for _, forward := range forwards {
-		if forward.Protocol != "" && forward.Protocol != "tcp" {
-			return fmt.Errorf("host forward protocol must be tcp")
-		}
-		if forward.HostPort == 0 || forward.GuestPort == 0 {
-			return fmt.Errorf("host forward ports must be positive")
-		}
-		fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+		fd, err := openHostForwardListener(forward)
 		if err != nil {
-			return fmt.Errorf("open vsock listener for host port %d: %w", forward.HostPort, err)
-		}
-		if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(forward.HostPort)}); err != nil {
-			_ = unix.Close(fd)
-			return fmt.Errorf("bind vsock listener for host port %d: %w", forward.HostPort, err)
-		}
-		if err := unix.Listen(fd, 128); err != nil {
-			_ = unix.Close(fd)
-			return fmt.Errorf("listen on vsock host port %d: %w", forward.HostPort, err)
+			return err
 		}
 		go serveHostForward(fd, forward.GuestPort)
 	}
 	return nil
+}
+
+func startConfiguredHostForwards(cfg config) error {
+	if cfg.Mode == "service" && len(cfg.Command) > 0 {
+		return startHostForwardHelpers(cfg.HostForwards)
+	}
+	return startHostForwards(cfg.HostForwards)
+}
+
+func startShellHelper(port uint16, shellPath string, env []string) error {
+	if port == 0 {
+		return nil
+	}
+	cmd := exec.Command(os.Args[0], "shell-helper", strconv.Itoa(int(port)), shellPath)
+	cmd.Env = env
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start shell helper on port %d: %w", port, err)
+	}
+	return nil
+}
+
+func runShellHelper(args []string) int {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, "usage: microagent-init shell-helper <port> [shell]")
+		return 127
+	}
+	port, err := parseUint16(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse shell port: %v\n", err)
+		return 127
+	}
+	shellPath := ""
+	if len(args) == 2 {
+		shellPath = args[1]
+	}
+	fd, err := openShellListener(port)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	serveShellSessions(fd, shellPath)
+	return 0
+}
+
+func openShellListener(port uint16) (int, error) {
+	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+	if err != nil {
+		return -1, fmt.Errorf("open vsock shell listener for port %d: %w", port, err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(port)}); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("bind vsock shell listener for port %d: %w", port, err)
+	}
+	if err := unix.Listen(fd, 8); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("listen on vsock shell port %d: %w", port, err)
+	}
+	log.Printf("microagent-init: shell helper listening on vsock port %d", port)
+	return fd, nil
+}
+
+func serveShellSessions(fd int, shellPath string) {
+	for {
+		connFD, _, err := unix.Accept(fd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "accept shell session: %v\n", err)
+			_ = unix.Close(fd)
+			return
+		}
+		go runShellSession(connFD, shellPath)
+	}
+}
+
+func runShellSession(fd int, shellPath string) {
+	file := os.NewFile(uintptr(fd), "shell-session-vsock")
+	if file == nil {
+		_ = unix.Close(fd)
+		return
+	}
+	defer file.Close()
+	command, err := consoleShellCommand(shellPath)
+	if err != nil {
+		fmt.Fprintf(file, "microagent-init: %v\n", err)
+		return
+	}
+	master, slave, err := openPTY()
+	if err != nil {
+		fmt.Fprintf(file, "microagent-init: open shell pty: %v\n", err)
+		return
+	}
+	defer master.Close()
+	defer slave.Close()
+	log.Printf("microagent-init: starting connect shell %v", command)
+	cmd := exec.Command(command[0], command[1:]...)
+	cmd.Env = shellSessionEnv()
+	cmd.Stdin = slave
+	cmd.Stdout = slave
+	cmd.Stderr = slave
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid:  true,
+		Setctty: true,
+		Ctty:    0,
+	}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(file, "microagent-init: start connect shell: %v\n", err)
+		return
+	}
+	_ = slave.Close()
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(master, file)
+		_ = master.Close()
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(file, master)
+		closeWriteFile(file)
+		done <- struct{}{}
+	}()
+	err = cmd.Wait()
+	_ = master.Close()
+	_ = file.Close()
+	<-done
+	if err != nil {
+		log.Printf("microagent-init: connect shell exited: %v", err)
+		return
+	}
+	log.Println("microagent-init: connect shell exited")
+}
+
+func openPTY() (*os.File, *os.File, error) {
+	masterFD, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	unlock := 0
+	if err := unix.IoctlSetPointerInt(masterFD, unix.TIOCSPTLCK, unlock); err != nil {
+		_ = unix.Close(masterFD)
+		return nil, nil, err
+	}
+	ptyNumber, err := unix.IoctlGetInt(masterFD, unix.TIOCGPTN)
+	if err != nil {
+		_ = unix.Close(masterFD)
+		return nil, nil, err
+	}
+	slavePath := fmt.Sprintf("/dev/pts/%d", ptyNumber)
+	slaveFD, err := unix.Open(slavePath, unix.O_RDWR|unix.O_NOCTTY, 0)
+	if err != nil {
+		_ = unix.Close(masterFD)
+		return nil, nil, err
+	}
+	master := os.NewFile(uintptr(masterFD), "connect-pty-master")
+	slave := os.NewFile(uintptr(slaveFD), "connect-pty-slave")
+	if master == nil || slave == nil {
+		if master != nil {
+			_ = master.Close()
+		} else {
+			_ = unix.Close(masterFD)
+		}
+		if slave != nil {
+			_ = slave.Close()
+		} else {
+			_ = unix.Close(slaveFD)
+		}
+		return nil, nil, fmt.Errorf("wrap pty files")
+	}
+	_ = unix.IoctlSetWinsize(masterFD, unix.TIOCSWINSZ, &unix.Winsize{Row: 24, Col: 80})
+	return master, slave, nil
+}
+
+func shellSessionEnv() []string {
+	env := os.Environ()
+	for _, item := range env {
+		if strings.HasPrefix(item, "TERM=") {
+			return env
+		}
+	}
+	return append(env, "TERM=xterm-256color")
+}
+
+func startHostForwardHelpers(forwards []hostForward) error {
+	if len(forwards) > 0 {
+		if err := bringUpLoopback(); err != nil {
+			return err
+		}
+	}
+	for _, forward := range forwards {
+		if err := validateHostForward(forward); err != nil {
+			return err
+		}
+		cmd := exec.Command(os.Args[0], "host-forward-helper", strconv.Itoa(int(forward.HostPort)), strconv.Itoa(int(forward.GuestPort)), nonEmpty(forward.Protocol, "tcp"))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start host forward helper for host port %d: %w", forward.HostPort, err)
+		}
+	}
+	return nil
+}
+
+func runHostForwardHelper(args []string) int {
+	if len(args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: microagent-init host-forward-helper <host-port> <guest-port> <protocol>")
+		return 127
+	}
+	hostPort, err := parseUint16(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse host port: %v\n", err)
+		return 127
+	}
+	guestPort, err := parseUint16(args[1])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse guest port: %v\n", err)
+		return 127
+	}
+	forward := hostForward{Protocol: args[2], HostPort: hostPort, GuestPort: guestPort}
+	fd, err := openHostForwardListener(forward)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	serveHostForward(fd, forward.GuestPort)
+	return 0
+}
+
+func openHostForwardListener(forward hostForward) (int, error) {
+	if err := validateHostForward(forward); err != nil {
+		return -1, err
+	}
+	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+	if err != nil {
+		return -1, fmt.Errorf("open vsock listener for host port %d: %w", forward.HostPort, err)
+	}
+	if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(forward.HostPort)}); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("bind vsock listener for host port %d: %w", forward.HostPort, err)
+	}
+	if err := unix.Listen(fd, 128); err != nil {
+		_ = unix.Close(fd)
+		return -1, fmt.Errorf("listen on vsock host port %d: %w", forward.HostPort, err)
+	}
+	return fd, nil
+}
+
+func validateHostForward(forward hostForward) error {
+	if forward.Protocol != "" && forward.Protocol != "tcp" {
+		return fmt.Errorf("host forward protocol must be tcp")
+	}
+	if forward.HostPort == 0 || forward.GuestPort == 0 {
+		return fmt.Errorf("host forward ports must be positive")
+	}
+	return nil
+}
+
+func parseUint16(raw string) (uint16, error) {
+	value, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 16)
+	return uint16(value), err
+}
+
+func nonEmpty(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func configureBootNetwork() error {
@@ -844,11 +1224,12 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 		return
 	}
 	defer file.Close()
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(int(guestPort)), 10*time.Second)
+	target, conn, err := dialGuestTCP(guestPort, 10*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect guest tcp port %d: %v\n", guestPort, err)
 		return
 	}
+	log.Printf("microagent-init: host forward connected guest tcp %s", target)
 	defer conn.Close()
 	done := make(chan struct{}, 2)
 	go func() {
@@ -868,6 +1249,63 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 	<-done
 	_ = conn.Close()
 	_ = file.Close()
+}
+
+func dialGuestTCP(port uint16, timeout time.Duration) (string, net.Conn, error) {
+	var lastErr error
+	for _, host := range guestTCPForwardTargets() {
+		target := net.JoinHostPort(host, strconv.Itoa(int(port)))
+		conn, err := net.DialTimeout("tcp", target, timeout)
+		if err == nil {
+			return target, conn, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no guest tcp targets")
+	}
+	return "", nil, lastErr
+}
+
+func guestTCPForwardTargets() []string {
+	targets := []string{"127.0.0.1"}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return targets
+	}
+	seen := map[string]bool{"127.0.0.1": true}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch value := addr.(type) {
+			case *net.IPNet:
+				ip = value.IP
+			case *net.IPAddr:
+				ip = value.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			ip = ip.To4()
+			if ip == nil {
+				continue
+			}
+			raw := ip.String()
+			if seen[raw] {
+				continue
+			}
+			seen[raw] = true
+			targets = append(targets, raw)
+		}
+	}
+	return targets
 }
 
 func closeWriteConn(conn net.Conn) {
@@ -926,6 +1364,20 @@ func attachConsole() error {
 		return nil
 	}
 	return fmt.Errorf("open guest console: /dev/hvc0 and /dev/console are unavailable")
+}
+
+func closeExtraFiles() {
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		fd, err := strconv.Atoi(entry.Name())
+		if err != nil || fd <= 2 {
+			continue
+		}
+		_ = unix.Close(fd)
+	}
 }
 
 func readConfig() (config, error) {

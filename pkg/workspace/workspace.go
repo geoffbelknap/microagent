@@ -14,18 +14,21 @@ import (
 
 	"github.com/geoffbelknap/microagent-kit/pkg/rootfs"
 	"github.com/geoffbelknap/microagent-kit/pkg/vmkit"
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	DefaultWorkspaceImageArm64 = "docker.io/library/busybox@sha256:bd44eb136a95dcc8dc58995e43abc40a413f2e8e3d4a2aae6bccbe94686acb05"
-	DefaultWorkspaceImageAMD64 = "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
-	DefaultWorkspaceImageOther = "docker.io/library/busybox:1.36.1"
+	DefaultWorkspaceImageArm64 = "docker.io/library/python@sha256:fe7dfda0f28395abfacca893065882031469eef7269a1bb017e5e59c130edd92"
+	DefaultWorkspaceImageAMD64 = "docker.io/library/python@sha256:0ee2df98db454606ca92bb7a79d47ff7dc9cc0c8d5901e32eb71e6b5203377b2"
+	DefaultWorkspaceImageOther = "docker.io/library/python:3.13-slim"
 	DefaultWorkspaceMemoryMiB  = 512
 	DefaultWorkspaceCPUCount   = 2
 	DefaultWorkspaceProfile    = "small"
 	DefaultRestartPolicy       = "never"
 	DefaultNetworkMode         = "user"
 	DefaultResultPort          = 1024
+	DefaultShellPortBase       = 22000
+	DefaultShellPortSpan       = 20000
 	DefaultTimeout             = 5 * time.Minute
 )
 
@@ -33,6 +36,7 @@ type Options struct {
 	Name            string
 	ImageRef        string
 	ExecCommand     string
+	ServiceCommand  string
 	Entrypoint      string
 	ConsoleShell    string
 	Hostname        string
@@ -55,6 +59,7 @@ type Options struct {
 	Mediation       *vmkit.MediationConfig
 	Timeout         time.Duration
 	ResultPort      uint32
+	ShellPort       uint16
 	Disks           []Disk
 	Outputs         []Output
 	VsockListeners  []vmkit.VsockListener
@@ -67,6 +72,8 @@ type Options struct {
 	PrepareForStart bool
 	SerialInput     bool
 	Verification    *vmkit.RuntimeVerification
+	Progress        rootfs.ProgressFunc
+	UseImageCommand bool
 }
 
 type Spec struct {
@@ -75,9 +82,11 @@ type Spec struct {
 	Profile    string                `yaml:"profile"`
 	Restart    string                `yaml:"restart"`
 	Entrypoint string                `yaml:"entrypoint"`
+	Service    string                `json:"service_command,omitempty" yaml:"service"`
 	Shell      string                `yaml:"shell"`
 	Hostname   string                `yaml:"hostname"`
-	Setup      []string              `yaml:"setup"`
+	Setup      SetupSteps            `yaml:"setup"`
+	SetupFiles []string              `yaml:"setupFiles"`
 	Env        map[string]string     `yaml:"env"`
 	Resources  Resources             `yaml:"resources"`
 	Network    NetworkSpec           `yaml:"network"`
@@ -119,6 +128,59 @@ type File struct {
 	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty"`
 }
 
+type SetupStep struct {
+	Run  string `json:"run,omitempty" yaml:"run,omitempty"`
+	File string `json:"file,omitempty" yaml:"file,omitempty"`
+}
+
+type SetupSteps []SetupStep
+
+func (steps *SetupSteps) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var raw string
+		if err := value.Decode(&raw); err != nil {
+			return err
+		}
+		*steps = SetupSteps{{Run: raw}}
+		return nil
+	case yaml.SequenceNode:
+		out := make([]SetupStep, 0, len(value.Content))
+		for _, item := range value.Content {
+			switch item.Kind {
+			case yaml.ScalarNode:
+				var raw string
+				if err := item.Decode(&raw); err != nil {
+					return err
+				}
+				out = append(out, SetupStep{Run: raw})
+			case yaml.MappingNode:
+				var decoded struct {
+					Run     string `yaml:"run"`
+					Command string `yaml:"command"`
+					File    string `yaml:"file"`
+				}
+				if err := item.Decode(&decoded); err != nil {
+					return err
+				}
+				step := SetupStep{Run: decoded.Run, File: decoded.File}
+				if strings.TrimSpace(step.Run) == "" {
+					step.Run = decoded.Command
+				}
+				out = append(out, step)
+			default:
+				return fmt.Errorf("setup entries must be strings or maps")
+			}
+		}
+		*steps = out
+		return nil
+	case 0:
+		return nil
+	default:
+		return fmt.Errorf("setup must be a string or list")
+	}
+}
+
 type Artifacts struct {
 	Ingress []Disk   `json:"ingress,omitempty"`
 	Egress  []Output `json:"egress,omitempty"`
@@ -130,6 +192,7 @@ type Manifest struct {
 	Restart      string                     `json:"restart"`
 	Resources    Resources                  `json:"resources"`
 	Network      NetworkSpec                `json:"network,omitempty"`
+	Service      string                     `json:"service_command,omitempty"`
 	ConsoleShell string                     `json:"shell,omitempty"`
 	Hostname     string                     `json:"hostname,omitempty"`
 	Mediation    *vmkit.MediationConfig     `json:"mediation,omitempty"`
@@ -171,7 +234,7 @@ func DefaultOptions() Options {
 	}
 	opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)
 	opts.GuestInitPath = GuestInitPath(opts.Architecture)
-	opts.SupervisorPath = os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")
+	opts.SupervisorPath = AppleVFSupervisorPath()
 	_ = ApplyProfile(&opts, false, false, false)
 	return opts
 }
@@ -283,6 +346,34 @@ func Mke2fsPath() string {
 		return "/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
 	}
 	return "mke2fs"
+}
+
+func AppleVFSupervisorPath() string {
+	if path := strings.TrimSpace(os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")); path != "" {
+		return path
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return "microagent-applevf-supervisor"
+	}
+	return AppleVFSupervisorPathFromExecutable(executable)
+}
+
+func AppleVFSupervisorPathFromExecutable(executable string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	dir := filepath.Dir(executable)
+	candidates := []string{
+		filepath.Join(dir, "microagent-applevf-supervisor"),
+		filepath.Join(filepath.Clean(filepath.Join(dir, "..", "..")), "supervisors", "applevf", ".build", "release", "microagent-applevf-supervisor"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return "microagent-applevf-supervisor"
 }
 
 func GuestInitPath(arch string) string {
@@ -539,6 +630,22 @@ func RootfsPortForwards(forwards []vmkit.PortForward) []rootfs.PortForward {
 	return out
 }
 
+func ShellPortForName(name string) uint16 {
+	var hash uint32 = 2166136261
+	for _, b := range []byte(strings.TrimSpace(name)) {
+		hash ^= uint32(b)
+		hash *= 16777619
+	}
+	return uint16(DefaultShellPortBase + int(hash%DefaultShellPortSpan))
+}
+
+func ShellPort(opts Options) uint16 {
+	if opts.ShellPort != 0 {
+		return opts.ShellPort
+	}
+	return ShellPortForName(opts.Name)
+}
+
 func Request(opts Options, command, rootfsPath string, requestID string) vmkit.Request {
 	var listeners []vmkit.VsockListener
 	if opts.ResultPort != 0 {
@@ -575,6 +682,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			VsockListeners: listeners,
 			Mediation:      opts.Mediation,
 			Network:        NetworkConfigPtr(opts.Network),
+			ShellPort:      ShellPort(opts),
 			SerialInput:    opts.SerialInput,
 			TimeoutSeconds: int(opts.Timeout.Seconds()),
 		},
@@ -603,6 +711,7 @@ func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, erro
 		CPUCount:       req.Config.CPUCount,
 		Network:        network,
 		Mediation:      req.Config.Mediation,
+		ShellPort:      req.Config.ShellPort,
 		Disks:          ConfigDisks(req.Config.Disks),
 	}, nil
 }
@@ -676,7 +785,13 @@ func Command(opts Options) string {
 		lines = append(lines, execCommand)
 	}
 	if opts.PrepareForStart {
-		lines = append(lines, ResetGuestConfigCommand(ShellCommand(opts.Entrypoint), opts.Env, opts.ResultPort, Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
+		finalCommand := ShellCommand(opts.Entrypoint)
+		finalMode := ""
+		if strings.TrimSpace(opts.ServiceCommand) != "" {
+			finalCommand = ShellCommand(opts.ServiceCommand)
+			finalMode = "managed-service"
+		}
+		lines = append(lines, ResetGuestConfigCommand(finalCommand, finalMode, opts.Env, opts.ResultPort, ShellPort(opts), Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -685,28 +800,35 @@ func Command(opts Options) string {
 }
 
 func BuildCommandAndPort(opts Options) ([]string, uint32) {
+	if strings.TrimSpace(opts.ServiceCommand) != "" && !HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
+		return ShellCommand(opts.ServiceCommand), 0
+	}
 	if opts.PrepareForStart && !HasGuestCommand(opts) {
 		return ShellCommand(opts.Entrypoint), 0
 	}
 	return ShellCommand(Command(opts)), opts.ResultPort
 }
 
-func ResetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
+func ResetGuestConfigCommand(command []string, mode string, env map[string]string, port uint32, shellPort uint16, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
 	if command == nil {
 		command = []string{}
 	}
 	data, err := json.Marshal(struct {
 		Command      []string             `json:"command"`
+		Mode         string               `json:"mode,omitempty"`
 		Env          []string             `json:"env,omitempty"`
 		Port         uint32               `json:"port"`
+		ShellPort    uint16               `json:"shellPort,omitempty"`
 		Mounts       []rootfs.Mount       `json:"mounts,omitempty"`
 		HostForwards []rootfs.PortForward `json:"hostForwards,omitempty"`
 		ConsoleShell string               `json:"consoleShell,omitempty"`
 		Hostname     string               `json:"hostname,omitempty"`
 	}{
 		Command:      command,
+		Mode:         strings.TrimSpace(mode),
 		Env:          envList(env),
 		Port:         port,
+		ShellPort:    shellPort,
 		Mounts:       mounts,
 		HostForwards: forwards,
 		ConsoleShell: strings.TrimSpace(consoleShell),
@@ -719,9 +841,16 @@ func ResetGuestConfigCommand(command []string, env map[string]string, port uint3
 }
 
 func HasGuestCommand(opts Options) bool {
+	if strings.TrimSpace(opts.ServiceCommand) != "" {
+		return true
+	}
 	if strings.TrimSpace(opts.ExecCommand) != "" {
 		return true
 	}
+	return HasSetupCommand(opts)
+}
+
+func HasSetupCommand(opts Options) bool {
 	for _, command := range opts.SetupCommands {
 		if strings.TrimSpace(command) != "" {
 			return true

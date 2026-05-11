@@ -21,6 +21,18 @@ type Platform struct {
 	Variant      string `json:"variant,omitempty"`
 }
 
+type ProgressEvent struct {
+	Phase         string
+	Message       string
+	Current       int64
+	Total         int64
+	Bytes         int64
+	TotalBytes    int64
+	Indeterminate bool
+}
+
+type ProgressFunc func(ProgressEvent)
+
 type BuildRequest struct {
 	ImageRef       string            `json:"image_ref"`
 	Platform       Platform          `json:"platform"`
@@ -28,8 +40,10 @@ type BuildRequest struct {
 	InitPath       string            `json:"init_path,omitempty"`
 	InitBinaryPath string            `json:"init_binary_path,omitempty"`
 	Command        []string          `json:"command,omitempty"`
+	Mode           string            `json:"mode,omitempty"`
 	ConsoleShell   string            `json:"console_shell,omitempty"`
 	Hostname       string            `json:"hostname,omitempty"`
+	ShellPort      uint16            `json:"shell_port,omitempty"`
 	NoImageCommand bool              `json:"no_image_command,omitempty"`
 	ResultPort     uint32            `json:"result_port,omitempty"`
 	StateDir       string            `json:"state_dir,omitempty"`
@@ -42,6 +56,7 @@ type BuildRequest struct {
 	AllowMutable   bool              `json:"allow_mutable,omitempty"`
 	KeepStage      bool              `json:"keep_stage,omitempty"`
 	StageSnapshot  string            `json:"stage_snapshot,omitempty"`
+	Progress       ProgressFunc      `json:"-"`
 }
 
 type File struct {

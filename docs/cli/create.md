@@ -17,7 +17,7 @@ first.
 
 | Flag | Description |
 |---|---|
-| `--image <ref>` | OCI image reference. Defaults to a small BusyBox image |
+| `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |
 | `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
 | `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |

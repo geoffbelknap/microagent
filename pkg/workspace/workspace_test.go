@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -53,8 +54,18 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	if req.Config.Network == nil || req.Config.Network.Mode != "nat" {
 		t.Fatalf("Network = %#v", req.Config.Network)
 	}
+	if req.Config.ShellPort != ShellPortForName("agent-1") {
+		t.Fatalf("ShellPort = %d, want %d", req.Config.ShellPort, ShellPortForName("agent-1"))
+	}
 	if !req.Config.SerialInput {
 		t.Fatal("SerialInput = false")
+	}
+}
+
+func TestShellPortCanBeExplicit(t *testing.T) {
+	opts := Options{Name: "agent-1", ShellPort: 25000}
+	if got := ShellPort(opts); got != 25000 {
+		t.Fatalf("ShellPort = %d, want 25000", got)
 	}
 }
 
@@ -62,6 +73,52 @@ func TestDefaultOptionsUseUserNetworkMode(t *testing.T) {
 	opts := DefaultOptions()
 	if opts.Network.Mode != "user" {
 		t.Fatalf("default network mode = %q", opts.Network.Mode)
+	}
+}
+
+func TestAppleVFSupervisorPathResolvesDevBuildSupervisor(t *testing.T) {
+	dir := t.TempDir()
+	devDir := filepath.Join(dir, ".build", "dev")
+	releaseDir := filepath.Join(dir, "supervisors", "applevf", ".build", "release")
+	if err := os.MkdirAll(devDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(releaseDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(devDir, "microagent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := filepath.Join(releaseDir, "microagent-applevf-supervisor")
+	if err := os.WriteFile(supervisor, []byte("supervisor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedSupervisor, err := filepath.EvalSymlinks(supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := AppleVFSupervisorPathFromExecutable(executable); got != resolvedSupervisor {
+		t.Fatalf("AppleVFSupervisorPathFromExecutable() = %q, want %q", got, resolvedSupervisor)
+	}
+}
+
+func TestAppleVFSupervisorPathResolvesSiblingSupervisor(t *testing.T) {
+	dir := t.TempDir()
+	executable := filepath.Join(dir, "microagent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := filepath.Join(dir, "microagent-applevf-supervisor")
+	if err := os.WriteFile(supervisor, []byte("supervisor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	resolvedSupervisor, err := filepath.EvalSymlinks(supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := AppleVFSupervisorPathFromExecutable(executable); got != resolvedSupervisor {
+		t.Fatalf("AppleVFSupervisorPathFromExecutable() = %q, want %q", got, resolvedSupervisor)
 	}
 }
 

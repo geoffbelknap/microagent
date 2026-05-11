@@ -1,0 +1,26 @@
+name: homebridge
+image: docker.io/library/ubuntu:24.04
+restart: always
+hostname: homebridge
+
+resources:
+  memoryMiB: 1024
+  cpuCount: 1
+  sizeMiB: 4096
+
+network:
+  mode: nat
+  forwards:
+    - hostPort: 8581
+      guestPort: 8581
+      protocol: tcp
+
+setup:
+  - file: ./setup.sh
+
+files:
+  - src: ./start.sh
+    dst: /usr/local/bin/microagent-homebridge
+    mode: "0755"
+
+service: /usr/local/bin/microagent-homebridge

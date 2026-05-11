@@ -43,6 +43,7 @@ struct Config: Codable {
     var vsockListeners: [VsockListener]?
     var mediation: MediationConfig?
     var network: NetworkConfig?
+    var shellPort: UInt16?
     var serialInput: Bool?
 }
 
@@ -348,6 +349,9 @@ func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Re
         let signal = detail == "forced" ? SIGKILL : SIGTERM
         if kill(pid, signal) != 0 && errno != ESRCH {
             throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
+        }
+        if !waitForProcessExit(pid: pid, timeout: signal == SIGKILL ? 2.0 : 5.0) {
+            throw ProtocolError.invalid("workspace \(identity.runtimeID) did not stop after signal \(signal)")
         }
         try writeState(event: event, config: runtime.config)
         try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: nil)
@@ -775,6 +779,17 @@ func processAlive(_ pid: Int32?) -> Bool {
         return true
     }
     return errno == EPERM
+}
+
+func waitForProcessExit(pid: Int32, timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if !processAlive(pid) {
+            return true
+        }
+        usleep(20_000)
+    }
+    return !processAlive(pid)
 }
 
 struct TCPHostPort {
@@ -1312,7 +1327,10 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
 
 @available(macOS 13.0, *)
 func installTCPPublishForwarder(vm: VZVirtualMachine, config: Config) throws -> TCPPublishForwarder? {
-    let forwards = config.network?.portForwards ?? []
+    var forwards = config.network?.portForwards ?? []
+    if let shellPort = config.shellPort, shellPort > 0 {
+        forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: shellPort, guestPort: shellPort))
+    }
     if forwards.isEmpty {
         return nil
     }
@@ -1565,26 +1583,36 @@ func prepareSerialInput(path: String) throws {
 func bridgeSerialInput(path: String, to output: FileHandle) {
     DispatchQueue.global(qos: .utility).async {
         var buffer = [UInt8](repeating: 0, count: 4096)
+        let readFD = open(path, O_RDONLY)
+        if readFD < 0 {
+            output.closeFile()
+            return
+        }
+        let keepaliveFD = open(path, O_WRONLY | O_NONBLOCK)
+        defer {
+            close(readFD)
+            if keepaliveFD >= 0 {
+                close(keepaliveFD)
+            }
+            output.closeFile()
+        }
         while true {
-            let fd = open(path, O_RDONLY)
-            if fd < 0 {
-                usleep(100_000)
+            let n = read(readFD, &buffer, buffer.count)
+            if n > 0 {
+                if !FileManager.default.fileExists(atPath: path) {
+                    return
+                }
+                output.write(Data(buffer.prefix(n)))
                 continue
             }
-            while true {
-                let n = read(fd, &buffer, buffer.count)
-                if n > 0 {
-                    if !FileManager.default.fileExists(atPath: path) {
-                        close(fd)
-                        output.closeFile()
-                        return
-                    }
-                    output.write(Data(buffer.prefix(n)))
-                    continue
-                }
-                break
+            if n == 0 {
+                return
             }
-            close(fd)
+            if errno == EINTR {
+                usleep(10_000)
+                continue
+            }
+            return
         }
     }
 }

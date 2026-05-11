@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
@@ -36,6 +37,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	if err := ValidateRequest(req); err != nil {
 		return Provenance{}, err
 	}
+	progress := newProgressReporter(req.Progress)
 	name := b.Name
 	if name == "" {
 		name = "microagent-rootfs"
@@ -62,6 +64,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		Variant:      req.Platform.Variant,
 	}
 	provenance.BuilderPhase = "fetch-manifest"
+	progress.emit("fetch-manifest", "fetching manifest", 0, 0, 0, 0)
 	manifestDesc, manifestBytes, err := oras.FetchBytes(ctx, repo, reference, oras.FetchBytesOptions{
 		FetchOptions: oras.FetchOptions{
 			ResolveOptions: oras.ResolveOptions{TargetPlatform: &platform},
@@ -77,6 +80,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
 		return provenance, fmt.Errorf("parse OCI image manifest: %w", err)
 	}
+	progress.emit("fetch-config", "fetching image config", 0, 0, 0, 0)
 	configBytes, err := fetchBytes(ctx, repo, manifest.Config)
 	if err != nil {
 		return provenance, fmt.Errorf("fetch OCI image config: %w", err)
@@ -116,12 +120,23 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	}
 
 	provenance.BuilderPhase = "extract-layers"
-	for _, layer := range manifest.Layers {
+	totalLayerBytes := descriptorSize(manifest.Layers...)
+	progress.emit("extract-layers", "extracting layers", 0, int64(len(manifest.Layers)), 0, totalLayerBytes)
+	var fetchedLayerBytes int64
+	for i, layer := range manifest.Layers {
 		rc, err := repo.Fetch(ctx, layer)
 		if err != nil {
 			return provenance, fmt.Errorf("fetch OCI layer %s: %w", layer.Digest, err)
 		}
-		if err := extractLayer(stageDir, layer.MediaType, rc); err != nil {
+		var layerBytes int64
+		reader := &progressReadCloser{
+			ReadCloser: rc,
+			OnRead: func(n int64) {
+				layerBytes += n
+				progress.emitThrottled("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes+layerBytes, totalLayerBytes)
+			},
+		}
+		if err := extractLayer(stageDir, layer.MediaType, reader); err != nil {
 			_ = rc.Close()
 			return provenance, fmt.Errorf("extract OCI layer %s: %w", layer.Digest, err)
 		}
@@ -129,19 +144,24 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 			return provenance, fmt.Errorf("close OCI layer %s: %w", layer.Digest, err)
 		}
 		provenance.LayerDigests = append(provenance.LayerDigests, layer.Digest.String())
+		fetchedLayerBytes += layerBytes
+		progress.emit("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes, totalLayerBytes)
 	}
 
 	provenance.BuilderPhase = "write-init"
+	progress.emit("write-init", "writing guest init", 0, 0, 0, 0)
 	command := buildCommand(req, imageConfig)
-	if err := writeInit(stageDir, req.InitPath, command, req.Env, req.InitBinaryPath, req.ResultPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
+	if err := writeInit(stageDir, req.InitPath, command, req.Mode, req.Env, req.InitBinaryPath, req.ResultPort, req.ShellPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
 		return provenance, err
 	}
 	provenance.BuilderPhase = "write-files"
+	progress.emit("write-files", "writing declared files", 0, 0, 0, 0)
 	if err := writeDeclaredFiles(stageDir, req.Files); err != nil {
 		return provenance, err
 	}
 	if req.StageSnapshot != "" {
 		provenance.BuilderPhase = "snapshot-stage"
+		progress.emit("snapshot-stage", "snapshotting unpacked stage", 0, 0, 0, 0)
 		if err := copyStage(stageDir, req.StageSnapshot); err != nil {
 			return provenance, err
 		}
@@ -149,6 +169,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	}
 
 	provenance.BuilderPhase = "build-ext4"
+	progress.emit("build-ext4", "building ext4 image", 0, 0, 0, 0)
 	if err := os.MkdirAll(filepath.Dir(req.OutputPath), 0o755); err != nil {
 		return provenance, fmt.Errorf("create output dir: %w", err)
 	}
@@ -169,6 +190,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	}
 	provenance.SizeBytes = info.Size()
 	provenance.BuilderPhase = "complete"
+	progress.emit("complete", "rootfs complete", 1, 1, provenance.SizeBytes, provenance.SizeBytes)
 	return provenance, nil
 }
 
@@ -263,7 +285,65 @@ func allocateFile(path string, sizeBytes int64) error {
 	return f.Close()
 }
 
+type progressReporter struct {
+	fn       ProgressFunc
+	lastEmit time.Time
+}
+
+func newProgressReporter(fn ProgressFunc) *progressReporter {
+	return &progressReporter{fn: fn}
+}
+
+func (p *progressReporter) emit(phase, message string, current, total, bytesDone, totalBytes int64) {
+	if p == nil || p.fn == nil {
+		return
+	}
+	p.lastEmit = time.Now()
+	p.fn(ProgressEvent{
+		Phase:      phase,
+		Message:    message,
+		Current:    current,
+		Total:      total,
+		Bytes:      bytesDone,
+		TotalBytes: totalBytes,
+	})
+}
+
+func (p *progressReporter) emitThrottled(phase, message string, current, total, bytesDone, totalBytes int64) {
+	if p == nil || p.fn == nil {
+		return
+	}
+	if time.Since(p.lastEmit) < 500*time.Millisecond {
+		return
+	}
+	p.emit(phase, message, current, total, bytesDone, totalBytes)
+}
+
+type progressReadCloser struct {
+	io.ReadCloser
+	OnRead func(int64)
+}
+
+func (r *progressReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 && r.OnRead != nil {
+		r.OnRead(int64(n))
+	}
+	return n, err
+}
+
+func descriptorSize(descriptors ...ocispec.Descriptor) int64 {
+	var total int64
+	for _, descriptor := range descriptors {
+		if descriptor.Size > 0 {
+			total += descriptor.Size
+		}
+	}
+	return total
+}
+
 func splitRegistryReference(raw string) (repoRef, reference string, err error) {
+	raw = normalizeRegistryReference(raw)
 	ref, err := registry.ParseReference(raw)
 	if err != nil {
 		return "", "", fmt.Errorf("parse OCI image ref %q: %w", raw, err)
@@ -273,6 +353,28 @@ func splitRegistryReference(raw string) (repoRef, reference string, err error) {
 		reference = "latest"
 	}
 	return ref.Registry + "/" + ref.Repository, reference, nil
+}
+
+func normalizeRegistryReference(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return raw
+	}
+	first, rest, hasSlash := strings.Cut(raw, "/")
+	if !hasSlash {
+		return "docker.io/library/" + raw
+	}
+	if isExplicitRegistry(first) {
+		if first == "docker.io" && !strings.Contains(rest, "/") {
+			return "docker.io/library/" + rest
+		}
+		return raw
+	}
+	return "docker.io/" + raw
+}
+
+func isExplicitRegistry(component string) bool {
+	return component == "localhost" || strings.Contains(component, ".") || strings.Contains(component, ":")
 }
 
 func newRepository(repoRef string) (*remote.Repository, error) {
@@ -484,7 +586,7 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 	return nil
 }
 
-func writeInit(stageDir, initPath string, command []string, env map[string]string, initBinaryPath string, resultPort uint32, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
+func writeInit(stageDir, initPath string, command []string, mode string, env map[string]string, initBinaryPath string, resultPort uint32, shellPort uint16, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -501,7 +603,7 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 		if err := copyFileToRoot(root, initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
-		return writeGuestRunConfig(stageDir, command, env, resultPort, mounts, forwards, consoleShell, hostname)
+		return writeGuestRunConfig(stageDir, command, mode, env, resultPort, shellPort, mounts, forwards, consoleShell, hostname)
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -529,15 +631,17 @@ func writeInit(stageDir, initPath string, command []string, env map[string]strin
 
 type guestRunConfig struct {
 	Command      []string      `json:"command"`
+	Mode         string        `json:"mode,omitempty"`
 	Env          []string      `json:"env,omitempty"`
 	Port         uint32        `json:"port"`
+	ShellPort    uint16        `json:"shellPort,omitempty"`
 	Mounts       []Mount       `json:"mounts,omitempty"`
 	HostForwards []PortForward `json:"hostForwards,omitempty"`
 	ConsoleShell string        `json:"consoleShell,omitempty"`
 	Hostname     string        `json:"hostname,omitempty"`
 }
 
-func writeGuestRunConfig(stageDir string, command []string, env map[string]string, resultPort uint32, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
+func writeGuestRunConfig(stageDir string, command []string, mode string, env map[string]string, resultPort uint32, shellPort uint16, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -550,7 +654,7 @@ func writeGuestRunConfig(stageDir string, command []string, env map[string]strin
 	if err := root.MkdirAll(path.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create guest config dir: %w", err)
 	}
-	data, err := json.Marshal(guestRunConfig{Command: command, Env: envList(env), Port: resultPort, Mounts: mounts, HostForwards: forwards, ConsoleShell: strings.TrimSpace(consoleShell), Hostname: strings.TrimSpace(hostname)})
+	data, err := json.Marshal(guestRunConfig{Command: command, Mode: strings.TrimSpace(mode), Env: envList(env), Port: resultPort, ShellPort: shellPort, Mounts: mounts, HostForwards: forwards, ConsoleShell: strings.TrimSpace(consoleShell), Hostname: strings.TrimSpace(hostname)})
 	if err != nil {
 		return err
 	}
