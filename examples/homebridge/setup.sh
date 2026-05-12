@@ -4,7 +4,7 @@ set -eu
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl gpg
+apt-get install -y --no-install-recommends ca-certificates curl gpg sudo
 
 install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d /var/lib/homebridge
 touch /var/lib/homebridge/homebridge.log

@@ -46,6 +46,8 @@ To inspect the guest:
 - The Debian/Ubuntu package's `/usr/local/bin/hb-service` wrapper expects
   `systemd`. The recipe runs the underlying Homebridge UI service helper in the
   foreground instead, so `microagent-init` can supervise it directly.
+- The setup installs `sudo` because the Homebridge UI invokes plugin installs
+  through `sudo -E -n npm install`, even when the service is running as root.
 - On Linux Firecracker hosts the recipe uses `network.mode: user`, which keeps
   the normal Homebrew install path unprivileged while still allowing outbound
   traffic and the `8581` TCP forward.
