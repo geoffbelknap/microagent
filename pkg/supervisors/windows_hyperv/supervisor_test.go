@@ -154,8 +154,14 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 	if runtimeState.SerialInputPath != filepath.Join(stateDir, "agent-1", "serial.in") {
 		t.Fatalf("serialInputPath = %q", runtimeState.SerialInputPath)
 	}
-	if !runtimeState.Readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v", runtimeState.Readiness.ShellReady)
+	if runtimeState.Readiness.GuestReady.Ready || runtimeState.Readiness.ShellReady.Ready {
+		t.Fatalf("readiness = %#v, want HCS running without guest/shell readiness", runtimeState.Readiness)
+	}
+	if !strings.Contains(runtimeState.Readiness.GuestReady.Detail, "compute system started") {
+		t.Fatalf("guest readiness detail = %q", runtimeState.Readiness.GuestReady.Detail)
+	}
+	if !strings.Contains(runtimeState.Readiness.ShellReady.Detail, "shell socket configured") {
+		t.Fatalf("shell readiness detail = %q", runtimeState.Readiness.ShellReady.Detail)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "agent-1", "serial.log")); err != nil {
 		t.Fatalf("serial.log: %v", err)
@@ -292,6 +298,54 @@ func TestDeleteStoppedWindowsHyperVMissingComputeSystemSucceeds(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "agent-1")); !os.IsNotExist(err) {
 		t.Fatalf("runtime dir after delete err=%v, want removed", err)
+	}
+}
+
+func TestTerminalWindowsHyperVControlToleratesMissingComputeSystem(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	tests := []struct {
+		name         string
+		initialState vmkit.VMState
+		command      string
+		finalState   vmkit.VMState
+	}{
+		{name: "stop stopped", initialState: vmkit.StateStopped, command: "stop", finalState: vmkit.StateStopped},
+		{name: "halt halted", initialState: vmkit.StateHalted, command: "halt", finalState: vmkit.StateHalted},
+		{name: "kill stopped", initialState: vmkit.StateStopped, command: "kill", finalState: vmkit.StateStopped},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			req := vmkit.Request{
+				Command: "start",
+				Identity: &vmkit.Identity{
+					RequestID: "req-1",
+					RuntimeID: "agent-1",
+					Role:      vmkit.RoleWorkload,
+					Backend:   vmkit.BackendWindowsHyperV,
+				},
+				Config: &vmkit.Config{
+					KernelPath: "C:\\microagent\\Image",
+					RootfsPath: "C:\\microagent\\rootfs.vhd",
+					StateDir:   stateDir,
+				},
+			}
+			if _, err := writeRuntimeTransitionWithComputeIDs(req, tt.initialState, "terminal state", "", "fake", "11111111-1111-1111-1111-111111111111"); err != nil {
+				t.Fatalf("write terminal state: %v", err)
+			}
+			adapter := &fakeAdapter{
+				shutdownErr: fmt.Errorf("windows-hyperv HCS shutdown open: A virtual machine or container with the specified identifier does not exist."),
+				killErr:     fmt.Errorf("windows-hyperv HCS kill open: A virtual machine or container with the specified identifier does not exist."),
+			}
+			controlReq := req
+			controlReq.Command = tt.command
+			resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), controlReq)
+			if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != tt.finalState {
+				t.Fatalf("%s resp=%#v err=%v", tt.command, resp, err)
+			}
+		})
 	}
 }
 
@@ -1011,26 +1065,28 @@ func TestSupervisorUsesInjectedAdapterForHostAndCheck(t *testing.T) {
 }
 
 type fakeAdapter struct {
-	host       vmkit.HostSupport
-	handle     computeSystemHandle
-	network    networkAttachment
-	checks     int
-	networks   int
-	cleanups   int
-	creates    int
-	starts     int
-	startedID  string
-	spec       computeSystemSpec
-	shutdowns  int
-	shutdownID string
-	kills      int
-	killID     string
-	deletes    int
-	deleteID   string
-	waits      int
-	waitID     string
-	startErr   error
-	deleteErr  error
+	host        vmkit.HostSupport
+	handle      computeSystemHandle
+	network     networkAttachment
+	checks      int
+	networks    int
+	cleanups    int
+	creates     int
+	starts      int
+	startedID   string
+	spec        computeSystemSpec
+	shutdowns   int
+	shutdownID  string
+	shutdownErr error
+	kills       int
+	killID      string
+	killErr     error
+	deletes     int
+	deleteID    string
+	waits       int
+	waitID      string
+	startErr    error
+	deleteErr   error
 }
 
 func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
@@ -1078,12 +1134,18 @@ func (f *fakeAdapter) Start(ctx context.Context, id string) error {
 func (f *fakeAdapter) Shutdown(ctx context.Context, id string) error {
 	f.shutdowns++
 	f.shutdownID = id
+	if f.shutdownErr != nil {
+		return f.shutdownErr
+	}
 	return nil
 }
 
 func (f *fakeAdapter) Kill(ctx context.Context, id string) error {
 	f.kills++
 	f.killID = id
+	if f.killErr != nil {
+		return f.killErr
+	}
 	return nil
 }
 

@@ -188,7 +188,9 @@ func (s Supervisor) stop(ctx context.Context, req vmkit.Request) (vmkit.Response
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateStopped, "windows-hyperv compute system stopped")
 	}
 	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
-		return failRun(req, vmkit.StateFailed, fmt.Sprintf("stop failed: %s", err), err)
+		if !isTerminalState(state.Event.State) || !isMissingComputeSystem(err) {
+			return failRun(req, vmkit.StateFailed, fmt.Sprintf("stop failed: %s", err), err)
+		}
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
@@ -210,7 +212,9 @@ func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateHalted, "windows-hyperv compute system halted")
 	}
 	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
-		return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
+		if !isTerminalState(state.Event.State) || !isMissingComputeSystem(err) {
+			return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
+		}
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
@@ -251,7 +255,9 @@ func (s Supervisor) kill(ctx context.Context, req vmkit.Request) (vmkit.Response
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateStopped, "windows-hyperv compute system killed")
 	}
 	if err := s.runtimeAdapter().Kill(ctx, state.ComputeSystemID); err != nil {
-		return failRun(req, vmkit.StateFailed, fmt.Sprintf("kill failed: %s", err), err)
+		if !isTerminalState(state.Event.State) || !isMissingComputeSystem(err) {
+			return failRun(req, vmkit.StateFailed, fmt.Sprintf("kill failed: %s", err), err)
+		}
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
@@ -296,6 +302,15 @@ func isMissingComputeSystem(err error) bool {
 	text := strings.ToLower(err.Error())
 	return strings.Contains(text, "compute system") && strings.Contains(text, "does not exist") ||
 		strings.Contains(text, "virtual machine or container") && strings.Contains(text, "does not exist")
+}
+
+func isTerminalState(state vmkit.VMState) bool {
+	switch state {
+	case vmkit.StatePrepared, vmkit.StateHalted, vmkit.StateStopped, vmkit.StateFailed, vmkit.StateQuarantined:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s Supervisor) transitionWithoutComputeSystem(ctx context.Context, req vmkit.Request, state runtimeState, finalState vmkit.VMState, detail string) (vmkit.Response, error) {
@@ -432,9 +447,9 @@ func writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req vmkit.Request
 	}
 	readiness := vmkit.RuntimeReadiness{}
 	if state == vmkit.StateRunning {
-		readiness.GuestReady = vmkit.ReadinessSignal{Ready: true, ObservedAt: &now, Detail: "windows-hyperv compute system started"}
+		readiness.GuestReady = vmkit.ReadinessSignal{ObservedAt: &now, Detail: "windows-hyperv compute system started; guest readiness not signaled"}
 		if req.Config.SerialInput {
-			readiness.ShellReady = vmkit.ReadinessSignal{Ready: true, ObservedAt: &now, Detail: "windows-hyperv shell socket is available"}
+			readiness.ShellReady = vmkit.ReadinessSignal{ObservedAt: &now, Detail: "windows-hyperv shell socket configured; shell readiness not signaled"}
 		}
 	}
 	if computeSystemID == "" {

@@ -126,9 +126,10 @@ Important files include:
 | `result.json` | structured guest result when delivered |
 | `hvsock-listener.log` | detached Hyper-V socket listener helper log |
 
-`inspect` returns the latest event and readiness state. If `result.json`
-exists, `inspect` also returns the backend-neutral `result` object and marks
-`readiness.resultReady.ready` true.
+`inspect` returns the latest event and readiness state. HCS `running` records
+that the compute system started, but it does not by itself mark guest or shell
+readiness true. If `result.json` exists, `inspect` also returns the
+backend-neutral `result` object and marks `readiness.resultReady.ready` true.
 
 ## Current Limitations
 
