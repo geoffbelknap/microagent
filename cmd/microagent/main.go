@@ -1668,7 +1668,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
+	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -3789,6 +3789,14 @@ func writeResultResponse(stdout *os.File, resp vmkit.Response) error {
 }
 
 func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
+	return writeWorkspaceResultWithOptions(stdout, result, workspaceResultOptions{})
+}
+
+type workspaceResultOptions struct {
+	SuppressSuccessfulResult bool
+}
+
+func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, opts workspaceResultOptions) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, result)
 	}
@@ -3832,7 +3840,7 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	if result.SerialPath != "" {
 		fmt.Fprintf(stdout, "Console log: %s\n", result.SerialPath)
 	}
-	if result.Result != nil {
+	if result.Result != nil && !(opts.SuppressSuccessfulResult && result.Result.ExitCode == 0 && strings.TrimSpace(result.Result.Error) == "") {
 		fmt.Fprintf(stdout, "Exit code: %d\n", result.Result.ExitCode)
 		if strings.TrimSpace(result.Result.Stdout) != "" {
 			fmt.Fprintf(stdout, "\n%s", sanitizeHumanOutput(result.Result.Stdout))
@@ -3851,6 +3859,12 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 		fmt.Fprintf(stdout, "Error: %s\n", result.Response.Error)
 	}
 	return nil
+}
+
+func writeCreateResult(stdout *os.File, result workspaceResult, err error) error {
+	return writeWorkspaceResultWithOptions(stdout, result, workspaceResultOptions{
+		SuppressSuccessfulResult: err == nil,
+	})
 }
 
 func writeApplyResult(stdout *os.File, result applyResult) error {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -3438,6 +3439,76 @@ func TestFormatProgressEventSupportsIndeterminateGuestSetup(t *testing.T) {
 	})
 	if !strings.Contains(got, "running guest setup") || !strings.Contains(got, "1m05s") {
 		t.Fatalf("progress = %q", got)
+	}
+}
+
+func TestWriteCreateResultSuppressesSuccessfulSetupLogs(t *testing.T) {
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := workspaceResult{
+		Workspace: "homebridge",
+		Network:   networkSpec{Mode: "user"},
+		Result: &guestResult{
+			ExitCode: 0,
+			Stdout:   "Homebridge Installation Complete!\n",
+			Stderr:   "debconf: delaying package configuration\n",
+		},
+	}
+	if err := writeCreateResult(stdout, result, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if strings.Contains(text, "Homebridge Installation Complete") || strings.Contains(text, "debconf") || strings.Contains(text, "Exit code") {
+		t.Fatalf("create output included setup logs: %q", text)
+	}
+	if !strings.Contains(text, "Workspace: homebridge") || !strings.Contains(text, "Network: user") {
+		t.Fatalf("create output missing summary: %q", text)
+	}
+}
+
+func TestWriteCreateResultKeepsFailedSetupLogs(t *testing.T) {
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := workspaceResult{
+		Workspace: "homebridge",
+		Result: &guestResult{
+			ExitCode: 127,
+			Stderr:   "setup failed\n",
+			Error:    "exit status 127",
+		},
+	}
+	if err := writeCreateResult(stdout, result, errors.New("exit status 127")); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "Exit code: 127") || !strings.Contains(text, "setup failed") {
+		t.Fatalf("create output omitted failure logs: %q", text)
 	}
 }
 
