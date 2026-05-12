@@ -142,6 +142,34 @@ func TestReadinessFromRuntimeReportsWindowsHyperVMediation(t *testing.T) {
 	}
 }
 
+func TestReadinessFromRuntimeReportsWindowsHyperVShell(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "agent", "serial.in")
+	if err := os.MkdirAll(filepath.Dir(inputPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inputPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := RuntimeState{
+		Event: EventFile{
+			Identity:   vmkit.Identity{RuntimeID: "agent", Backend: vmkit.BackendWindowsHyperV},
+			State:      vmkit.StateRunning,
+			ObservedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		Config:          vmkit.Config{StateDir: dir, SerialInput: true},
+		SerialInputPath: inputPath,
+		StartedAt:       time.Now().UTC().Format(time.RFC3339),
+	}
+	readiness := readinessFromRuntime(state)
+	if !readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v", readiness.ShellReady)
+	}
+	if readiness.ShellReady.Detail != "console input is available" {
+		t.Fatalf("shell readiness detail = %q", readiness.ShellReady.Detail)
+	}
+}
+
 func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 	req := buildRootfsRequest(Options{
 		Name:         "research",

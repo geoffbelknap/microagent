@@ -3828,6 +3828,17 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 		_, _ = workspace.Control(context.Background(), workspaceOpts, "delete")
 	})
 	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
+	status, err := workspace.Status(workspace.Options{
+		Name:     "windows-hyperv-connect",
+		Backend:  vmkit.BackendWindowsHyperV,
+		StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Readiness == nil || !status.Readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v", status.Readiness)
+	}
 
 	stdoutPath := filepath.Join(stateDir, "connect.out")
 	stdout, err := os.Create(stdoutPath)

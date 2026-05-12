@@ -28,6 +28,7 @@ type runtimeState struct {
 	ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID,omitempty"`
 	VsockListenerPID       int                    `json:"vsockListenerPid,omitempty"`
 	SerialLogPath          string                 `json:"serialLogPath"`
+	SerialInputPath        string                 `json:"serialInputPath,omitempty"`
 	StartedAt              string                 `json:"startedAt,omitempty"`
 	UpdatedAt              string                 `json:"updatedAt"`
 	Readiness              vmkit.RuntimeReadiness `json:"readiness,omitempty"`
@@ -285,6 +286,17 @@ func writeRuntimeTransitionWithComputeIDsAndListenerPID(req vmkit.Request, state
 	if err := serialFile.Close(); err != nil {
 		return vmkit.Event{}, fmt.Errorf("close serial log: %w", err)
 	}
+	serialInput := ""
+	if req.Config.SerialInput {
+		serialInput = serialInputPath(req)
+		inputFile, err := os.OpenFile(serialInput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			return vmkit.Event{}, fmt.Errorf("create serial input marker: %w", err)
+		}
+		if err := inputFile.Close(); err != nil {
+			return vmkit.Event{}, fmt.Errorf("close serial input marker: %w", err)
+		}
+	}
 	now := time.Now().UTC()
 	event := vmkit.Event{
 		Identity:   *req.Identity,
@@ -311,6 +323,9 @@ func writeRuntimeTransitionWithComputeIDsAndListenerPID(req vmkit.Request, state
 	readiness := vmkit.RuntimeReadiness{}
 	if state == vmkit.StateRunning {
 		readiness.GuestReady = vmkit.ReadinessSignal{Ready: true, ObservedAt: &now, Detail: "windows-hyperv compute system started"}
+		if req.Config.SerialInput {
+			readiness.ShellReady = vmkit.ReadinessSignal{Ready: true, ObservedAt: &now, Detail: "windows-hyperv shell socket is available"}
+		}
 	}
 	if computeSystemID == "" {
 		if previous, err := readRuntimeState(req); err == nil {
@@ -336,6 +351,7 @@ func writeRuntimeTransitionWithComputeIDsAndListenerPID(req vmkit.Request, state
 		ComputeSystemRuntimeID: computeSystemRuntimeID,
 		VsockListenerPID:       vsockListenerPID,
 		SerialLogPath:          serialPath,
+		SerialInputPath:        serialInput,
 		StartedAt:              startedAt,
 		UpdatedAt:              now.Format(time.RFC3339),
 		Readiness:              readiness,
@@ -491,6 +507,10 @@ func runtimeDir(req vmkit.Request) string {
 
 func serialLogPath(req vmkit.Request) string {
 	return filepath.Join(runtimeDir(req), "serial.log")
+}
+
+func serialInputPath(req vmkit.Request) string {
+	return filepath.Join(runtimeDir(req), "serial.in")
 }
 
 func resultPath(req vmkit.Request) string {

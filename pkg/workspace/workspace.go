@@ -429,7 +429,7 @@ func GuestInitPathFromExecutable(executable, arch string) string {
 }
 
 func BackendSupportsConsoleInput(backend string) bool {
-	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendFirecracker
+	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendFirecracker || backend == vmkit.BackendWindowsHyperV
 }
 
 func LookupProfile(name string) (Profile, bool) {

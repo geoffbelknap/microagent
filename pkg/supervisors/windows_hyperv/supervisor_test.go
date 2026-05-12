@@ -101,11 +101,12 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 			Backend:   vmkit.BackendWindowsHyperV,
 		},
 		Config: &vmkit.Config{
-			KernelPath: "C:\\microagent\\Image",
-			RootfsPath: "C:\\microagent\\rootfs.vhd",
-			StateDir:   stateDir,
-			MemoryMiB:  512,
-			CPUCount:   2,
+			KernelPath:  "C:\\microagent\\Image",
+			RootfsPath:  "C:\\microagent\\rootfs.vhd",
+			StateDir:    stateDir,
+			MemoryMiB:   512,
+			CPUCount:    2,
+			SerialInput: true,
 		},
 	}
 	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
@@ -133,10 +134,12 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 		Event struct {
 			State vmkit.VMState `json:"state"`
 		} `json:"event"`
-		Config                 vmkit.Config `json:"config"`
-		ComputeSystemID        string       `json:"computeSystemID"`
-		ComputeSystemRuntimeID string       `json:"computeSystemRuntimeID"`
-		SerialLogPath          string       `json:"serialLogPath"`
+		Config                 vmkit.Config           `json:"config"`
+		ComputeSystemID        string                 `json:"computeSystemID"`
+		ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID"`
+		SerialLogPath          string                 `json:"serialLogPath"`
+		SerialInputPath        string                 `json:"serialInputPath"`
+		Readiness              vmkit.RuntimeReadiness `json:"readiness"`
 	}
 	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &runtimeState)
 	if runtimeState.Event.State != vmkit.StateRunning || runtimeState.Config.RootfsPath != req.Config.RootfsPath {
@@ -148,8 +151,17 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 	if runtimeState.SerialLogPath != filepath.Join(stateDir, "agent-1", "serial.log") {
 		t.Fatalf("serialLogPath = %q", runtimeState.SerialLogPath)
 	}
+	if runtimeState.SerialInputPath != filepath.Join(stateDir, "agent-1", "serial.in") {
+		t.Fatalf("serialInputPath = %q", runtimeState.SerialInputPath)
+	}
+	if !runtimeState.Readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v", runtimeState.Readiness.ShellReady)
+	}
 	if _, err := os.Stat(filepath.Join(stateDir, "agent-1", "serial.log")); err != nil {
 		t.Fatalf("serial.log: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "agent-1", "serial.in")); err != nil {
+		t.Fatalf("serial.in: %v", err)
 	}
 	eventsData, err := os.ReadFile(filepath.Join(stateDir, "agent-1", "events.json"))
 	if err != nil {
