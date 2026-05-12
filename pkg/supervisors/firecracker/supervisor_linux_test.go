@@ -618,6 +618,30 @@ func TestDetachedUserNetworkRequestPreservesConfiguredTimeout(t *testing.T) {
 	}
 }
 
+func TestPortForwarderIncludesShellPort(t *testing.T) {
+	forwards := portForwarderForwards(vmkit.Config{
+		ShellPort: 24279,
+		Network: &vmkit.NetworkConfig{
+			PortForwards: []vmkit.PortForward{{
+				Protocol:  "tcp",
+				Host:      "0.0.0.0",
+				HostPort:  8581,
+				GuestPort: 8581,
+			}},
+		},
+	})
+	if len(forwards) != 2 {
+		t.Fatalf("forwards len = %d, want 2", len(forwards))
+	}
+	shell := forwards[1]
+	if shell.Protocol != "tcp" || shell.Host != "127.0.0.1" || shell.HostPort != 24279 || shell.GuestPort != 24279 {
+		t.Fatalf("shell forward = %#v", shell)
+	}
+	if !needsPortForwarder(&vmkit.Config{ShellPort: 24279}) {
+		t.Fatal("shell port should require port forwarder")
+	}
+}
+
 func TestUserNetworkDisableRunTimeoutEnvOnlyDisablesRunTimeout(t *testing.T) {
 	t.Setenv(userNetworkDisableRunTimeoutEnv, "1")
 	req := vmkit.Request{

@@ -442,7 +442,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return vmkit.Response{}, err
 		}
 	}
-	if detached && hasPortForwards(req.Config) {
+	if detached && needsPortForwarder(req.Config) {
 		pid, err := startPortForwarderProcess(opts)
 		if err != nil {
 			if vsockListenerPID != 0 {
@@ -733,6 +733,10 @@ func hasPortForwards(config *vmkit.Config) bool {
 	return config != nil && config.Network != nil && len(config.Network.PortForwards) != 0
 }
 
+func needsPortForwarder(config *vmkit.Config) bool {
+	return hasPortForwards(config) || (config != nil && config.ShellPort != 0)
+}
+
 func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	state, err := readRuntimeState(opts)
 	if err != nil {
@@ -755,7 +759,7 @@ func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, erro
 	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
 		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 	}
-	if hasPortForwards(req.Config) {
+	if needsPortForwarder(req.Config) {
 		pid, err := startPortForwarderProcess(opts)
 		if err != nil {
 			_ = writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, err.Error())
@@ -1579,11 +1583,12 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if state.Config.Network == nil || len(state.Config.Network.PortForwards) == 0 {
+	if !needsPortForwarder(&state.Config) {
 		return nil
 	}
-	listeners := make([]net.Listener, 0, len(state.Config.Network.PortForwards))
-	for _, forward := range state.Config.Network.PortForwards {
+	forwards := portForwarderForwards(state.Config)
+	listeners := make([]net.Listener, 0, len(forwards))
+	for _, forward := range forwards {
 		if forward.Protocol != "" && forward.Protocol != "tcp" {
 			continue
 		}
@@ -1608,6 +1613,22 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 		_ = listener.Close()
 	}
 	return ctx.Err()
+}
+
+func portForwarderForwards(config vmkit.Config) []vmkit.PortForward {
+	forwards := []vmkit.PortForward{}
+	if config.Network != nil {
+		forwards = append(forwards, config.Network.PortForwards...)
+	}
+	if config.ShellPort != 0 {
+		forwards = append(forwards, vmkit.PortForward{
+			Protocol:  "tcp",
+			Host:      "127.0.0.1",
+			HostPort:  config.ShellPort,
+			GuestPort: config.ShellPort,
+		})
+	}
+	return forwards
 }
 
 type vsockListenerSet struct {
