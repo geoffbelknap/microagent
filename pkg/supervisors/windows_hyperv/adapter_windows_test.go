@@ -203,6 +203,36 @@ func TestBuildComputeSystemDocumentAddsHvSocketServiceForShellPort(t *testing.T)
 	}
 }
 
+func TestBuildComputeSystemDocumentAddsNetworkAdapterForEndpoint(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name:              "agent-1",
+		NetworkEndpointID: "endpoint-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		VirtualMachine struct {
+			Devices struct {
+				NetworkAdapters map[string]struct {
+					EndpointID string `json:"EndpointId"`
+				} `json:"NetworkAdapters"`
+			} `json:"Devices"`
+		} `json:"VirtualMachine"`
+	}
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	adapter, ok := doc.VirtualMachine.Devices.NetworkAdapters["0"]
+	if !ok || adapter.EndpointID != "endpoint-1" {
+		t.Fatalf("network adapters = %#v", doc.VirtualMachine.Devices.NetworkAdapters)
+	}
+}
+
 func TestDefaultAdapterCreatePassesDocumentToHCSClient(t *testing.T) {
 	client := &fakeHCSClient{}
 	handle, err := (defaultAdapter{client: client}).Create(context.Background(), computeSystemSpec{

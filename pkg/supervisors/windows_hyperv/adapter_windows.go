@@ -11,7 +11,18 @@ import (
 	"strings"
 
 	"github.com/Microsoft/go-winio"
+	"github.com/Microsoft/hcsshim/hcn"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+)
+
+const (
+	managedNATNetworkName     = "microagent-nat"
+	managedNATSubnet          = "192.168.127.0/24"
+	managedNATGateway         = "192.168.127.1"
+	managedNATRoute           = "0.0.0.0/0"
+	managedNATStartMAC        = "00-15-5D-52-D0-00"
+	managedNATEndMAC          = "00-15-5D-52-DF-FF"
+	managedEndpointNamePrefix = "microagent-"
 )
 
 type defaultAdapter struct {
@@ -49,6 +60,54 @@ func (a defaultAdapter) Create(ctx context.Context, spec computeSystemSpec) (com
 		}
 	}
 	return handle, nil
+}
+
+func (a defaultAdapter) PrepareNetwork(ctx context.Context, spec computeSystemSpec) (networkAttachment, error) {
+	network := normalizedNetwork(spec.Config.Network)
+	switch network.Mode {
+	case "isolated":
+		return networkAttachment{RuntimeNetwork: &network}, nil
+	case "bridged":
+		hcnNetwork, err := hcn.GetNetworkByName(network.Interface)
+		if err != nil {
+			return networkAttachment{}, fmt.Errorf("resolve bridged HNS network %q: %w", network.Interface, err)
+		}
+		return createNetworkEndpoint(hcnNetwork, spec.Name, network)
+	case "user", "nat":
+		hcnNetwork, err := ensureManagedNATNetwork()
+		if err != nil {
+			return networkAttachment{}, err
+		}
+		network.Mode = "nat"
+		network.Subnet = firstSubnet(hcnNetwork)
+		network.Gateway = firstGateway(hcnNetwork)
+		if len(network.DNS) == 0 && network.Gateway != "" {
+			network.DNS = []string{network.Gateway}
+		}
+		if len(network.Routes) == 0 {
+			network.Routes = []string{managedNATRoute}
+		}
+		return createNetworkEndpoint(hcnNetwork, spec.Name, network)
+	default:
+		return networkAttachment{}, fmt.Errorf("unsupported windows-hyperv network mode %q", network.Mode)
+	}
+}
+
+func (a defaultAdapter) CleanupNetwork(ctx context.Context, state runtimeState) error {
+	if strings.TrimSpace(state.NetworkEndpointID) == "" {
+		return nil
+	}
+	endpoint, err := hcn.GetEndpointByID(state.NetworkEndpointID)
+	if err != nil {
+		if hcn.IsNotFoundError(err) {
+			return nil
+		}
+		return fmt.Errorf("find HNS endpoint %q: %w", state.NetworkEndpointID, err)
+	}
+	if err := endpoint.Delete(); err != nil && !hcn.IsNotFoundError(err) {
+		return fmt.Errorf("delete HNS endpoint %q: %w", state.NetworkEndpointID, err)
+	}
+	return nil
 }
 
 func (a defaultAdapter) Start(ctx context.Context, id string) error {
@@ -125,10 +184,11 @@ type virtualMachineProcessor struct {
 }
 
 type devices struct {
-	Scsi     map[string]scsiController `json:"Scsi,omitempty"`
-	HvSocket hvSocket                  `json:"HvSocket"`
-	Plan9    map[string]any            `json:"Plan9"`
-	ComPorts map[string]comPort        `json:"ComPorts,omitempty"`
+	Scsi            map[string]scsiController `json:"Scsi,omitempty"`
+	HvSocket        hvSocket                  `json:"HvSocket"`
+	Plan9           map[string]any            `json:"Plan9"`
+	ComPorts        map[string]comPort        `json:"ComPorts,omitempty"`
+	NetworkAdapters map[string]networkAdapter `json:"NetworkAdapters,omitempty"`
 }
 
 type scsiController struct {
@@ -159,6 +219,10 @@ type hvSocketServiceConfig struct {
 
 type comPort struct {
 	NamedPipe string `json:"NamedPipe"`
+}
+
+type networkAdapter struct {
+	EndpointID string `json:"EndpointId,omitempty"`
 }
 
 func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
@@ -202,6 +266,10 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	} else {
 		kernelCmdLine += " 8250_core.nr_uarts=0 panic=-1 quiet"
 	}
+	networkAdapters := map[string]networkAdapter(nil)
+	if strings.TrimSpace(spec.NetworkEndpointID) != "" {
+		networkAdapters = map[string]networkAdapter{"0": {EndpointID: spec.NetworkEndpointID}}
+	}
 	doc := computeSystemDocument{
 		Owner:                             "microagent",
 		SchemaVersion:                     versionDocument{Major: 2, Minor: 1},
@@ -227,8 +295,9 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 					DefaultConnectSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
 					ServiceTable:                     serviceTable,
 				}},
-				Plan9:    map[string]any{},
-				ComPorts: comPorts,
+				Plan9:           map[string]any{},
+				ComPorts:        comPorts,
+				NetworkAdapters: networkAdapters,
 			},
 		},
 	}
@@ -250,6 +319,162 @@ func hasResultListener(spec computeSystemSpec) bool {
 
 func serialPipePath(runtimeID string) string {
 	return `\\.\pipe\microagent-` + runtimeID + `-serial`
+}
+
+func normalizedNetwork(network *vmkit.NetworkConfig) vmkit.NetworkConfig {
+	if network == nil {
+		return vmkit.NetworkConfig{Mode: "user"}
+	}
+	normalized := *network
+	normalized.Mode = strings.TrimSpace(normalized.Mode)
+	if normalized.Mode == "" {
+		normalized.Mode = "user"
+	}
+	normalized.Interface = strings.TrimSpace(normalized.Interface)
+	return normalized
+}
+
+func ensureManagedNATNetwork() (*hcn.HostComputeNetwork, error) {
+	network, err := hcn.GetNetworkByName(managedNATNetworkName)
+	if err == nil {
+		return network, nil
+	}
+	if !hcn.IsNotFoundError(err) {
+		return nil, fmt.Errorf("find HNS NAT network %q: %w", managedNATNetworkName, err)
+	}
+	network = &hcn.HostComputeNetwork{
+		Type: hcn.NAT,
+		Name: managedNATNetworkName,
+		MacPool: hcn.MacPool{Ranges: []hcn.MacRange{{
+			StartMacAddress: managedNATStartMAC,
+			EndMacAddress:   managedNATEndMAC,
+		}}},
+		Ipams: []hcn.Ipam{{
+			Type: "Static",
+			Subnets: []hcn.Subnet{{
+				IpAddressPrefix: managedNATSubnet,
+				Routes: []hcn.Route{{
+					NextHop:           managedNATGateway,
+					DestinationPrefix: managedNATRoute,
+				}},
+			}},
+		}},
+		SchemaVersion: hcn.SchemaVersion{Major: 2, Minor: 0},
+	}
+	created, err := network.Create()
+	if err != nil {
+		return nil, fmt.Errorf("create HNS NAT network %q: %w", managedNATNetworkName, err)
+	}
+	return created, nil
+}
+
+func createNetworkEndpoint(network *hcn.HostComputeNetwork, runtimeID string, runtimeNetwork vmkit.NetworkConfig) (networkAttachment, error) {
+	name := managedEndpointNamePrefix + runtimeID
+	if old, err := hcn.GetEndpointByName(name); err == nil {
+		_ = old.Delete()
+	} else if !hcn.IsNotFoundError(err) {
+		return networkAttachment{}, fmt.Errorf("find stale HNS endpoint %q: %w", name, err)
+	}
+	endpoint := &hcn.HostComputeEndpoint{
+		Name:               name,
+		HostComputeNetwork: network.Id,
+		SchemaVersion:      hcn.V2SchemaVersion(),
+	}
+	created, err := endpoint.Create()
+	if err != nil {
+		return networkAttachment{}, fmt.Errorf("create HNS endpoint %q: %w", name, err)
+	}
+	runtimeNetwork.IP = firstEndpointIP(created)
+	if runtimeNetwork.Subnet == "" {
+		runtimeNetwork.Subnet = firstSubnet(network)
+	}
+	if runtimeNetwork.Gateway == "" {
+		runtimeNetwork.Gateway = firstGateway(network)
+	}
+	if len(runtimeNetwork.DNS) == 0 {
+		runtimeNetwork.DNS = append([]string{}, created.Dns.ServerList...)
+		if len(runtimeNetwork.DNS) == 0 && network.Dns.ServerList != nil {
+			runtimeNetwork.DNS = append([]string{}, network.Dns.ServerList...)
+		}
+	}
+	if len(runtimeNetwork.Routes) == 0 {
+		runtimeNetwork.Routes = routesFromEndpoint(created)
+		if len(runtimeNetwork.Routes) == 0 {
+			runtimeNetwork.Routes = routesFromNetwork(network)
+		}
+	}
+	return networkAttachment{
+		NetworkID:         network.Id,
+		NetworkEndpointID: created.Id,
+		RuntimeNetwork:    &runtimeNetwork,
+	}, nil
+}
+
+func firstEndpointIP(endpoint *hcn.HostComputeEndpoint) string {
+	if endpoint == nil || len(endpoint.IpConfigurations) == 0 {
+		return ""
+	}
+	return endpoint.IpConfigurations[0].IpAddress
+}
+
+func firstSubnet(network *hcn.HostComputeNetwork) string {
+	if network == nil {
+		return ""
+	}
+	for _, ipam := range network.Ipams {
+		for _, subnet := range ipam.Subnets {
+			if subnet.IpAddressPrefix != "" {
+				return subnet.IpAddressPrefix
+			}
+		}
+	}
+	return ""
+}
+
+func firstGateway(network *hcn.HostComputeNetwork) string {
+	if network == nil {
+		return ""
+	}
+	for _, ipam := range network.Ipams {
+		for _, subnet := range ipam.Subnets {
+			for _, route := range subnet.Routes {
+				if route.DestinationPrefix == managedNATRoute && route.NextHop != "" {
+					return route.NextHop
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func routesFromEndpoint(endpoint *hcn.HostComputeEndpoint) []string {
+	if endpoint == nil {
+		return nil
+	}
+	routes := make([]string, 0, len(endpoint.Routes))
+	for _, route := range endpoint.Routes {
+		if route.DestinationPrefix != "" {
+			routes = append(routes, route.DestinationPrefix)
+		}
+	}
+	return routes
+}
+
+func routesFromNetwork(network *hcn.HostComputeNetwork) []string {
+	if network == nil {
+		return nil
+	}
+	var routes []string
+	for _, ipam := range network.Ipams {
+		for _, subnet := range ipam.Subnets {
+			for _, route := range subnet.Routes {
+				if route.DestinationPrefix != "" {
+					routes = append(routes, route.DestinationPrefix)
+				}
+			}
+		}
+	}
+	return routes
 }
 
 type unsupportedHCSClient struct{}

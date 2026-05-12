@@ -73,6 +73,25 @@ the guest exits successfully. `start` creates a detached HCS compute system and
 records enough HCS identity in `runtime.json` for later `inspect`, `connect`,
 `halt`, `quarantine`, `stop`, `kill`, and `delete`.
 
+## Networking
+
+Windows-HyperV uses HNS/HCN networking for guest NIC attachment:
+
+| Mode | Behavior |
+|---|---|
+| `user` | uses the managed `microagent-nat` HNS NAT network |
+| `nat` | uses the managed `microagent-nat` HNS NAT network |
+| `isolated` | starts without an external network adapter |
+| `bridged` | attaches to the named HNS network from `network.interface` |
+
+The managed NAT network uses `192.168.127.0/24` with gateway
+`192.168.127.1`. Runtime network details, including the HNS network and
+endpoint IDs, are recorded in `runtime.json`.
+
+Bridged mode fails closed unless `network.interface` names an existing HNS
+network or Hyper-V switch. Endpoint cleanup runs when foreground `run`
+completes and during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
+
 ## State
 
 The supervisor writes backend runtime files under:

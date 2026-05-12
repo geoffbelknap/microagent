@@ -172,6 +172,83 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 	}
 }
 
+func TestStartCommandRecordsRuntimeNetworkState(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{
+		handle: computeSystemHandle{
+			ID:        "fake",
+			RuntimeID: "11111111-1111-1111-1111-111111111111",
+		},
+		network: networkAttachment{
+			NetworkID:         "network-1",
+			NetworkEndpointID: "endpoint-1",
+			RuntimeNetwork: &vmkit.NetworkConfig{
+				Mode:    "nat",
+				IP:      "192.168.127.2",
+				Subnet:  "192.168.127.0/24",
+				Gateway: "192.168.127.1",
+				DNS:     []string{"192.168.127.1"},
+				Routes:  []string{"0.0.0.0/0"},
+			},
+		},
+	}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			Network:    &vmkit.NetworkConfig{Mode: "nat"},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("start resp=%#v err=%v", resp, err)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.NetworkID != "network-1" || state.NetworkEndpointID != "endpoint-1" {
+		t.Fatalf("runtime network IDs = %q %q", state.NetworkID, state.NetworkEndpointID)
+	}
+	if state.Config.Network == nil || state.Config.Network.Mode != "nat" || state.Config.Network.IP != "192.168.127.2" || state.Config.Network.Gateway != "192.168.127.1" {
+		t.Fatalf("runtime network = %#v", state.Config.Network)
+	}
+}
+
+func TestStartCommandRejectsWindowsHyperVBridgedWithoutInterface(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   t.TempDir(),
+			Network:    &vmkit.NetworkConfig{Mode: "bridged"},
+		},
+	}
+	resp, err := (Supervisor{adapter: &fakeAdapter{}}).Do(context.Background(), req)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "bridged network requires network.interface") {
+		t.Fatalf("start resp=%#v err=%v", resp, err)
+	}
+}
+
 func TestRunCommandWaitsForResultListenerAndReturnsResult(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv run path is windows-only")
@@ -213,6 +290,52 @@ func TestRunCommandWaitsForResultListenerAndReturnsResult(t *testing.T) {
 	}
 	if adapter.waits != 1 || adapter.waitID != "fake" {
 		t.Fatalf("waits=%d waitID=%q", adapter.waits, adapter.waitID)
+	}
+}
+
+func TestRunCommandCleansUpNetworkAfterForegroundResult(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv run path is windows-only")
+	}
+	oldHook := startRuntimeListenersHook
+	t.Cleanup(func() { startRuntimeListenersHook = oldHook })
+	startRuntimeListenersHook = func(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
+		return fakeListenerSet{wait: func() error {
+			return os.WriteFile(filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "result.json"), []byte(`{"exitCode":0}`+"\n"), 0o644)
+		}}, nil
+	}
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{
+		handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"},
+		network: networkAttachment{
+			NetworkID:         "network-1",
+			NetworkEndpointID: "endpoint-1",
+			RuntimeNetwork:    &vmkit.NetworkConfig{Mode: "nat"},
+		},
+	}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath:     "C:\\microagent\\Image",
+			RootfsPath:     "C:\\microagent\\rootfs.vhd",
+			StateDir:       stateDir,
+			Network:        &vmkit.NetworkConfig{Mode: "nat"},
+			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")}},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	if adapter.cleanups != 1 {
+		t.Fatalf("network cleanups = %d, want 1", adapter.cleanups)
 	}
 }
 
@@ -359,6 +482,39 @@ func TestStopTerminatesRuntimeListenerProcess(t *testing.T) {
 	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
 	if state.VsockListenerPID != 0 {
 		t.Fatalf("VsockListenerPID after stop = %d, want 0", state.VsockListenerPID)
+	}
+}
+
+func TestStopCleansUpRuntimeNetworkState(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "stop",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{StateDir: stateDir},
+	}
+	startReq := req
+	startReq.Command = "start"
+	startReq.Config.KernelPath = "C:\\microagent\\Image"
+	startReq.Config.RootfsPath = "C:\\microagent\\rootfs.vhd"
+	startReq.Config.Network = &vmkit.NetworkConfig{Mode: "nat"}
+	if _, err := writeRuntimeTransitionWithComputeIDsNetwork(startReq, vmkit.StateRunning, "serial="+serialLogPath(startReq), "", "fake", "11111111-1111-1111-1111-111111111111", "network-1", "endpoint-1"); err != nil {
+		t.Fatalf("write runtime state: %v", err)
+	}
+	adapter := &fakeAdapter{}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("stop resp=%#v err=%v", resp, err)
+	}
+	if adapter.shutdowns != 1 || adapter.cleanups != 1 {
+		t.Fatalf("shutdowns=%d cleanups=%d, want 1 and 1", adapter.shutdowns, adapter.cleanups)
 	}
 }
 
@@ -641,7 +797,10 @@ func TestSupervisorUsesInjectedAdapterForHostAndCheck(t *testing.T) {
 type fakeAdapter struct {
 	host       vmkit.HostSupport
 	handle     computeSystemHandle
+	network    networkAttachment
 	checks     int
+	networks   int
+	cleanups   int
 	creates    int
 	starts     int
 	startedID  string
@@ -663,6 +822,21 @@ func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
 
 func (f *fakeAdapter) Check(ctx context.Context) error {
 	f.checks++
+	return nil
+}
+
+func (f *fakeAdapter) PrepareNetwork(ctx context.Context, spec computeSystemSpec) (networkAttachment, error) {
+	f.networks++
+	if f.network.NetworkID != "" || f.network.NetworkEndpointID != "" || f.network.RuntimeNetwork != nil {
+		return f.network, nil
+	}
+	return networkAttachment{}, nil
+}
+
+func (f *fakeAdapter) CleanupNetwork(ctx context.Context, state runtimeState) error {
+	if state.NetworkEndpointID != "" {
+		f.cleanups++
+	}
 	return nil
 }
 
@@ -745,6 +919,14 @@ func (failingAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
 
 func (failingAdapter) Check(ctx context.Context) error {
 	return fmt.Errorf("check unavailable")
+}
+
+func (failingAdapter) PrepareNetwork(ctx context.Context, spec computeSystemSpec) (networkAttachment, error) {
+	return networkAttachment{}, nil
+}
+
+func (failingAdapter) CleanupNetwork(ctx context.Context, state runtimeState) error {
+	return nil
 }
 
 func (failingAdapter) Create(ctx context.Context, spec computeSystemSpec) (computeSystemHandle, error) {

@@ -19,6 +19,8 @@ type Supervisor struct {
 type runtimeAdapter interface {
 	Host(ctx context.Context) (vmkit.HostSupport, error)
 	Check(ctx context.Context) error
+	PrepareNetwork(ctx context.Context, spec computeSystemSpec) (networkAttachment, error)
+	CleanupNetwork(ctx context.Context, state runtimeState) error
 	Create(ctx context.Context, spec computeSystemSpec) (computeSystemHandle, error)
 	Start(ctx context.Context, id string) error
 	Shutdown(ctx context.Context, id string) error
@@ -28,15 +30,26 @@ type runtimeAdapter interface {
 }
 
 type computeSystemSpec struct {
-	Name     string
-	StateDir string
-	Identity vmkit.Identity
-	Config   vmkit.Config
+	Name              string
+	StateDir          string
+	Identity          vmkit.Identity
+	Config            vmkit.Config
+	NetworkID         string
+	NetworkEndpointID string
 }
 
 type computeSystemHandle struct {
-	ID        string
-	RuntimeID string
+	ID                string
+	RuntimeID         string
+	NetworkID         string
+	NetworkEndpointID string
+	RuntimeNetwork    *vmkit.NetworkConfig
+}
+
+type networkAttachment struct {
+	NetworkID         string
+	NetworkEndpointID string
+	RuntimeNetwork    *vmkit.NetworkConfig
 }
 
 type runtimeListenerSet interface {

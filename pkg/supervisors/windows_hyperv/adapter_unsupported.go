@@ -27,6 +27,14 @@ func (defaultAdapter) Check(ctx context.Context) error {
 	return errUnsupportedHost()
 }
 
+func (defaultAdapter) PrepareNetwork(ctx context.Context, spec computeSystemSpec) (networkAttachment, error) {
+	return networkAttachment{}, nil
+}
+
+func (defaultAdapter) CleanupNetwork(ctx context.Context, state runtimeState) error {
+	return nil
+}
+
 func ProbeHCSAccess(ctx context.Context) error {
 	return errUnsupportedHost()
 }

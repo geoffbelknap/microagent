@@ -26,6 +26,8 @@ type runtimeState struct {
 	Config                 vmkit.Config           `json:"config"`
 	ComputeSystemID        string                 `json:"computeSystemID,omitempty"`
 	ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID,omitempty"`
+	NetworkID              string                 `json:"networkID,omitempty"`
+	NetworkEndpointID      string                 `json:"networkEndpointID,omitempty"`
 	VsockListenerPID       int                    `json:"vsockListenerPid,omitempty"`
 	SerialLogPath          string                 `json:"serialLogPath"`
 	SerialInputPath        string                 `json:"serialInputPath,omitempty"`
@@ -48,6 +50,9 @@ func (s Supervisor) start(ctx context.Context, req vmkit.Request) (vmkit.Respons
 }
 
 func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, foreground bool) (vmkit.Response, error) {
+	if err := validateNetwork(req); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network validation failed: %s", err), err)
+	}
 	adapter := s.runtimeAdapter()
 	spec := computeSystemSpec{
 		Name:     req.Identity.RuntimeID,
@@ -58,16 +63,31 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 	if _, err := writeRuntimeTransition(req, vmkit.StateStarting, "creating windows-hyperv compute system", ""); err != nil {
 		return vmkit.Response{}, err
 	}
+	network, err := adapter.PrepareNetwork(ctx, spec)
+	if err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network setup failed: %s", err), err)
+	}
+	if network.RuntimeNetwork != nil {
+		spec.Config.Network = network.RuntimeNetwork
+	}
+	runtimeReq := req
+	runtimeReq.Config = &spec.Config
+	spec.NetworkID = network.NetworkID
+	spec.NetworkEndpointID = network.NetworkEndpointID
 	handle, err := adapter.Create(ctx, spec)
 	if err != nil {
+		_ = adapter.CleanupNetwork(ctx, runtimeState{NetworkID: network.NetworkID, NetworkEndpointID: network.NetworkEndpointID})
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("create failed: %s", err), err)
 	}
+	handle.NetworkID = network.NetworkID
+	handle.NetworkEndpointID = network.NetworkEndpointID
+	handle.RuntimeNetwork = network.RuntimeNetwork
 	listenerPID := 0
 	var listeners runtimeListenerSet
 	if foreground {
-		listeners, err = startRuntimeListenersHook(ctx, handle, req)
+		listeners, err = startRuntimeListenersHook(ctx, handle, runtimeReq)
 		if err != nil {
-			return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("listener setup failed: %s", err), err)
+			return failRunWithCleanup(ctx, runtimeReq, adapter, handle, false, fmt.Sprintf("listener setup failed: %s", err), err)
 		}
 		if listeners != nil {
 			defer listeners.Close()
@@ -90,7 +110,7 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 		}
 		return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("start failed: %s", err), err)
 	}
-	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateRunning, "serial="+serialLogPath(req), "", handle.ID, handle.RuntimeID, listenerPID)
+	event, err := writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(runtimeReq, vmkit.StateRunning, "serial="+serialLogPath(runtimeReq), "", handle.ID, handle.RuntimeID, handle.NetworkID, handle.NetworkEndpointID, listenerPID)
 	if err != nil {
 		if listeners != nil && foreground {
 			_ = listeners.Close()
@@ -99,12 +119,15 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 	}
 	if foreground && listeners != nil {
 		if err := listeners.Wait(ctx); err != nil {
-			return failRunWithCleanup(ctx, req, adapter, handle, true, fmt.Sprintf("result listener failed: %s", err), err)
+			return failRunWithCleanup(ctx, runtimeReq, adapter, handle, true, fmt.Sprintf("result listener failed: %s", err), err)
 		}
 		if err := adapter.Wait(ctx, handle.ID); err != nil {
-			return failRunWithCleanup(ctx, req, adapter, handle, true, fmt.Sprintf("wait failed: %s", err), err)
+			return failRunWithCleanup(ctx, runtimeReq, adapter, handle, true, fmt.Sprintf("wait failed: %s", err), err)
 		}
-		event, err = writeRuntimeTransitionWithComputeIDs(req, vmkit.StateStopped, "windows-hyperv result received", "", handle.ID, handle.RuntimeID)
+		if err := adapter.CleanupNetwork(ctx, runtimeState{NetworkID: handle.NetworkID, NetworkEndpointID: handle.NetworkEndpointID}); err != nil {
+			return failRunWithCleanup(ctx, runtimeReq, adapter, handle, true, fmt.Sprintf("network cleanup failed: %s", err), err)
+		}
+		event, err = writeRuntimeTransitionWithComputeIDsNetwork(runtimeReq, vmkit.StateStopped, "windows-hyperv result received", "", handle.ID, handle.RuntimeID, handle.NetworkID, handle.NetworkEndpointID)
 		if err != nil {
 			return vmkit.Response{}, err
 		}
@@ -155,6 +178,9 @@ func (s Supervisor) stop(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("stop failed: %s", err), err)
 	}
+	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
+	}
 	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system stopped", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
@@ -171,6 +197,9 @@ func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
 	}
+	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
+	}
 	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateHalted, "windows-hyperv compute system halted", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
@@ -184,6 +213,9 @@ func (s Supervisor) quarantine(req vmkit.Request) (vmkit.Response, error) {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
 	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
+	if err := s.runtimeAdapter().CleanupNetwork(context.Background(), state); err != nil {
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
 	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateQuarantined, "windows-hyperv compute system quarantined", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
@@ -200,6 +232,9 @@ func (s Supervisor) kill(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err := s.runtimeAdapter().Kill(ctx, state.ComputeSystemID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("kill failed: %s", err), err)
 	}
+	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
+	}
 	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system killed", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
 		return vmkit.Response{}, err
@@ -215,6 +250,9 @@ func (s Supervisor) delete(ctx context.Context, req vmkit.Request) (vmkit.Respon
 	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
 	if err := s.runtimeAdapter().Delete(ctx, state.ComputeSystemID); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("delete failed: %s", err), err)
+	}
+	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
 	}
 	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system deleted", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
 	if err != nil {
@@ -240,7 +278,7 @@ func failRunWithCleanup(ctx context.Context, req vmkit.Request, adapter runtimeA
 	if cleanupErr := cleanupComputeSystem(ctx, adapter, handle, started); cleanupErr != nil {
 		cleanupDetail = fmt.Sprintf("%s; cleanup failed: %s", detail, cleanupErr)
 	}
-	event, writeErr := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateFailed, cleanupDetail, cause.Error(), handle.ID, handle.RuntimeID)
+	event, writeErr := writeRuntimeTransitionWithComputeIDsNetwork(req, vmkit.StateFailed, cleanupDetail, cause.Error(), handle.ID, handle.RuntimeID, handle.NetworkID, handle.NetworkEndpointID)
 	resp := vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: cause.Error()}
 	if writeErr == nil {
 		resp.Event = &event
@@ -250,12 +288,29 @@ func failRunWithCleanup(ctx context.Context, req vmkit.Request, adapter runtimeA
 
 func cleanupComputeSystem(ctx context.Context, adapter runtimeAdapter, handle computeSystemHandle, started bool) error {
 	if handle.ID == "" {
-		return nil
+		return adapter.CleanupNetwork(ctx, runtimeState{NetworkID: handle.NetworkID, NetworkEndpointID: handle.NetworkEndpointID})
 	}
 	if started {
-		return adapter.Kill(ctx, handle.ID)
+		if err := adapter.Kill(ctx, handle.ID); err != nil {
+			return err
+		}
+	} else {
+		if err := adapter.Delete(ctx, handle.ID); err != nil {
+			return err
+		}
 	}
-	return adapter.Delete(ctx, handle.ID)
+	return adapter.CleanupNetwork(ctx, runtimeState{NetworkID: handle.NetworkID, NetworkEndpointID: handle.NetworkEndpointID})
+}
+
+func validateNetwork(req vmkit.Request) error {
+	if req.Config == nil || req.Config.Network == nil {
+		return nil
+	}
+	network := *req.Config.Network
+	if network.Mode == "bridged" && network.Interface == "" {
+		return fmt.Errorf("bridged network requires network.interface")
+	}
+	return nil
 }
 
 func writeRuntimeTransition(req vmkit.Request, state vmkit.VMState, detail, errorText string) (vmkit.Event, error) {
@@ -267,10 +322,18 @@ func writeRuntimeTransitionWithComputeID(req vmkit.Request, state vmkit.VMState,
 }
 
 func writeRuntimeTransitionWithComputeIDs(req vmkit.Request, state vmkit.VMState, detail, errorText, computeSystemID, computeSystemRuntimeID string) (vmkit.Event, error) {
-	return writeRuntimeTransitionWithComputeIDsAndListenerPID(req, state, detail, errorText, computeSystemID, computeSystemRuntimeID, 0)
+	return writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req, state, detail, errorText, computeSystemID, computeSystemRuntimeID, "", "", 0)
 }
 
 func writeRuntimeTransitionWithComputeIDsAndListenerPID(req vmkit.Request, state vmkit.VMState, detail, errorText, computeSystemID, computeSystemRuntimeID string, vsockListenerPID int) (vmkit.Event, error) {
+	return writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req, state, detail, errorText, computeSystemID, computeSystemRuntimeID, "", "", vsockListenerPID)
+}
+
+func writeRuntimeTransitionWithComputeIDsNetwork(req vmkit.Request, state vmkit.VMState, detail, errorText, computeSystemID, computeSystemRuntimeID, networkID, networkEndpointID string) (vmkit.Event, error) {
+	return writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req, state, detail, errorText, computeSystemID, computeSystemRuntimeID, networkID, networkEndpointID, 0)
+}
+
+func writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req vmkit.Request, state vmkit.VMState, detail, errorText, computeSystemID, computeSystemRuntimeID, networkID, networkEndpointID string, vsockListenerPID int) (vmkit.Event, error) {
 	if req.Identity == nil || req.Config == nil {
 		return vmkit.Event{}, fmt.Errorf("windows-hyperv request is missing identity or config")
 	}
@@ -337,6 +400,16 @@ func writeRuntimeTransitionWithComputeIDsAndListenerPID(req vmkit.Request, state
 			computeSystemRuntimeID = previous.ComputeSystemRuntimeID
 		}
 	}
+	if networkID == "" {
+		if previous, err := readRuntimeState(req); err == nil {
+			networkID = previous.NetworkID
+		}
+	}
+	if networkEndpointID == "" {
+		if previous, err := readRuntimeState(req); err == nil {
+			networkEndpointID = previous.NetworkEndpointID
+		}
+	}
 	if vsockListenerPID == clearVsockListenerPID {
 		vsockListenerPID = 0
 	} else if vsockListenerPID == 0 {
@@ -349,6 +422,8 @@ func writeRuntimeTransitionWithComputeIDsAndListenerPID(req vmkit.Request, state
 		Config:                 *req.Config,
 		ComputeSystemID:        computeSystemID,
 		ComputeSystemRuntimeID: computeSystemRuntimeID,
+		NetworkID:              networkID,
+		NetworkEndpointID:      networkEndpointID,
 		VsockListenerPID:       vsockListenerPID,
 		SerialLogPath:          serialPath,
 		SerialInputPath:        serialInput,
