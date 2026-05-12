@@ -1,0 +1,25 @@
+name: update homebrew tap
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "HOMEBREW_TAP_TOKEN is not configured; skipping homebrew tap update" >&2
+            exit 0
+          fi
+          gh api repos/geoffbelknap/homebrew-tap/dispatches \
+            --method POST \
+            --field event_type=microagent-release \
+            --raw-field client_payload="{\"tag\":\"${TAG}\"}"
