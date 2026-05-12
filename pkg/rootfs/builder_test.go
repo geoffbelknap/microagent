@@ -196,7 +196,13 @@ func TestWriteDeclaredFilesCopiesSourceIntoStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if info.Mode().Perm() != 0o700 {
-		t.Fatalf("mode = %#o, want 0700", info.Mode().Perm())
+		modes, err := readStageModes(dir)
+		if err != nil {
+			t.Fatalf("read stage modes after host mode %#o: %v", info.Mode().Perm(), err)
+		}
+		if modes["app/source.sh"] != 0o700 {
+			t.Fatalf("host mode = %#o and recorded mode = %#o, want recorded 0700", info.Mode().Perm(), modes["app/source.sh"])
+		}
 	}
 }
 
@@ -215,7 +221,7 @@ func TestWriteInitDoesNotFollowStageSymlink(t *testing.T) {
 	dir := t.TempDir()
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(dir, "sbin")); err != nil {
-		t.Fatal(err)
+		t.Skipf("host cannot create symlinks: %v", err)
 	}
 	err := writeInit(dir, "/sbin/microagent-init", []string{"/bin/echo"}, "", nil, "", 0, 0, nil, nil, "", "")
 	if err == nil {
@@ -234,7 +240,7 @@ func TestWriteDeclaredFilesDoesNotFollowStageSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(dir, "app")); err != nil {
-		t.Fatal(err)
+		t.Skipf("host cannot create symlinks: %v", err)
 	}
 	err := writeDeclaredFiles(dir, []File{{SourcePath: src, Path: "/app/source.txt"}})
 	if err == nil {

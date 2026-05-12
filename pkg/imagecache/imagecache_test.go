@@ -73,7 +73,7 @@ func TestPathInRootfsStoreRejectsSymlinkedParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(outside, filepath.Join(store, "link")); err != nil {
-		t.Fatal(err)
+		t.Skipf("host cannot create symlinks: %v", err)
 	}
 	if PathInRootfsStore(dir, filepath.Join(store, "link", "victim.ext4")) {
 		t.Fatal("symlinked image-store parent was accepted")
