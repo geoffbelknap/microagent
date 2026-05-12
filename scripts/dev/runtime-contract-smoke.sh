@@ -6,6 +6,18 @@ STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-runtime-contract.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 DEBUGFS="$STATE_DIR/debugfs"
 WORKSPACE="contract-smoke"
+case "$(uname -s)" in
+  Darwin)
+    HOST_BACKEND="apple-vf"
+    ;;
+  Linux)
+    HOST_BACKEND="firecracker"
+    ;;
+  *)
+    echo "runtime contract smoke requires macOS or Linux" >&2
+    exit 1
+    ;;
+esac
 
 export GOCACHE="${GOCACHE:-$ROOT/.cache/go-build}"
 mkdir -p "$GOCACHE"
@@ -45,14 +57,14 @@ chmod +x "$DEBUGFS"
 
 "$CLI" --json contract >"$STATE_DIR/contract.json"
 
-python3 - "$STATE_DIR" "$WORKSPACE" <<'PY'
+python3 - "$STATE_DIR" "$WORKSPACE" "$HOST_BACKEND" <<'PY'
 import datetime
 import hashlib
 import json
 import os
 import sys
 
-state_dir, workspace = sys.argv[1:]
+state_dir, workspace, host_backend = sys.argv[1:]
 runtime_dir = os.path.join(state_dir, workspace)
 workspace_dir = os.path.join(state_dir, "workspaces", workspace)
 disk_dir = os.path.join(workspace_dir, "disks")
@@ -83,7 +95,7 @@ identity = {
     "requestID": "req-contract-smoke",
     "runtimeID": workspace,
     "role": "workload",
-    "backend": "firecracker",
+    "backend": host_backend,
 }
 event = {
     "identity": identity,
@@ -195,8 +207,8 @@ assert "mediationReady" in {item["name"] for item in contract["readinessSignals"
 assert "egress" in {item["name"] for item in contract["artifactChannels"]}
 PY
 
-"$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" --backend firecracker >"$STATE_DIR/status.json"
-"$CLI" result "$WORKSPACE" --state-dir "$STATE_DIR" --backend firecracker >"$STATE_DIR/result.json"
+"$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status.json"
+"$CLI" result "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result.json"
 "$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts.json"
 mkdir -p "$STATE_DIR/out"
 "$CLI" artifacts get "$WORKSPACE" report "$STATE_DIR/out" --state-dir "$STATE_DIR" --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-get.json"
