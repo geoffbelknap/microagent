@@ -13,9 +13,22 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 	if err := vmkit.ValidateRequest(req); err != nil {
 		return vmkit.Response{}, err
 	}
-	resp := hostResponse(ctx, s.runtimeAdapter())
-	err := fmt.Errorf("%s", resp.Error)
-	return resp, err
+	switch req.Command {
+	case "host":
+		resp := hostResponse(ctx, s.runtimeAdapter())
+		if resp.Error != "" {
+			return resp, fmt.Errorf("%s", resp.Error)
+		}
+		return resp, nil
+	case "check":
+		if err := s.runtimeAdapter().Check(ctx); err != nil {
+			return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+		}
+		return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV}, nil
+	default:
+		resp := hostResponse(ctx, s.runtimeAdapter())
+		return resp, fmt.Errorf("%s", resp.Error)
+	}
 }
 
 func HostResponse() vmkit.Response {
