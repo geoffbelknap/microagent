@@ -24,11 +24,15 @@ capability report rather than a health check.
   console available.
 - **Windows Hyper-V (experimental):** Windows Host Compute Service available,
   Hyper-V / Windows Hypervisor Platform support available, HCS access allowed
-  for the current user, default kernel installed, guest-init available, and
-  interactive console reported as unsupported.
+  for the current user, HCN/HNS networking available, Hyper-V sockets
+  available, default kernel installed, guest-init available, and HVSock console
+  support available.
 
 On Linux, run `microagent doctor` outside sandboxed agent environments so KVM
 visibility is honest.
+On Windows, run it from the same user account that will start workspaces. HCS
+access usually requires Administrator or membership in the Hyper-V
+Administrators group.
 
 ## Flags
 

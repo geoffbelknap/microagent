@@ -66,6 +66,31 @@ microagent kernel verify --path ~/.microagent/kernels/<backend>/<arch>/Image \
 
 If `install` doesn't produce the expected SHA either, the source you're pulling from is wrong. Reinstall from a trusted kernel URL and pass the expected `--sha256` explicitly.
 
+### `microagent doctor --backend windows-hyperv` reports HCS access denied
+
+Windows-HyperV uses Windows Host Compute Service directly. The current user
+must be able to create and manage HCS compute systems.
+
+Common fixes:
+
+- Run from an elevated shell.
+- Add the user to the local **Hyper-V Administrators** group, then sign out and
+  back in so the new token has the group.
+- Confirm Windows features for Hyper-V and Windows Hypervisor Platform are
+  enabled.
+
+### `microagent doctor --backend windows-hyperv` reports HCN/HNS unavailable
+
+The Windows networking service used by Hyper-V is not reachable. Start with the
+Windows services for Host Network Service and Host Compute Service, then rerun:
+
+```powershell
+microagent --json doctor --backend windows-hyperv
+```
+
+For V1, published TCP networking is still unavailable even when HCN/HNS is
+healthy. Mediation and guest-to-host listener targets use Hyper-V sockets.
+
 ## Workspace lifecycle
 
 ### `microagent delete` refuses while the VM is running (Firecracker)

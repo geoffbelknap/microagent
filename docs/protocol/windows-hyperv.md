@@ -31,8 +31,8 @@ microagent doctor --backend windows-hyperv
 ```
 
 The doctor check reports HCS availability, virtualization support, HCS access
-errors, kernel support, guest-init availability, and the current lack of
-interactive console support.
+errors, HCN/HNS networking availability, Hyper-V socket availability, kernel
+support, guest-init availability, and console capability.
 
 ## Storage
 
@@ -48,7 +48,7 @@ rootfs builder converts those contents into a fixed VHD with an ext4 payload.
 
 ## Lifecycle
 
-The V1 lifecycle surface is intentionally narrow:
+The current lifecycle surface is:
 
 | Command | Status |
 |---|---|
@@ -56,21 +56,22 @@ The V1 lifecycle surface is intentionally narrow:
 | `check` | supported |
 | `run` | supported experimentally |
 | `inspect` | supported |
+| `start` | supported experimentally |
+| `halt` | supported experimentally |
+| `quarantine` | supported experimentally |
 | `stop` | supported |
 | `kill` | supported |
 | `delete` | supported |
 | `prepare` | unsupported |
-| `start` | unsupported |
 | `console` | unsupported |
-| `halt` | unsupported |
-| `quarantine` | unsupported |
 
 Unsupported commands fail closed with structured `ok: false` responses.
 
-`run` creates an HCS compute system, waits for pending HCS create/start
-completion notifications, records backend-neutral runtime state, and returns a
-running event. `stop`, `kill`, and `delete` use the recorded compute system ID
-from `runtime.json`.
+`run` creates an HCS compute system, waits for guest result delivery, records
+backend-neutral runtime state, and returns a stopped event with `result` when
+the guest exits successfully. `start` creates a detached HCS compute system and
+records enough HCS identity in `runtime.json` for later `inspect`, `connect`,
+`halt`, `quarantine`, `stop`, `kill`, and `delete`.
 
 ## State
 
@@ -87,8 +88,10 @@ Important files include:
 | `event.json` | latest lifecycle event |
 | `events.json` | append-only lifecycle history |
 | `runtime.json` | latest lifecycle state and HCS compute system ID |
+| `serial.in` | console input compatibility marker for running workspaces |
 | `serial.log` | guest serial output captured from the HCS COM1 named pipe |
 | `result.json` | structured guest result when delivered |
+| `hvsock-listener.log` | detached Hyper-V socket listener helper log |
 
 `inspect` returns the latest event and readiness state. If `result.json`
 exists, `inspect` also returns the backend-neutral `result` object and marks
@@ -98,15 +101,18 @@ exists, `inspect` also returns the backend-neutral `result` object and marks
 
 - No WSL dependency is used or required.
 - QEMU/WHPX is not used.
-- Interactive `microagent connect` is not available yet.
+- `microagent connect` and `connect --send` use Hyper-V sockets.
 - Published TCP networking is not available yet.
-- Mediation and arbitrary guest-to-host listener parity are not available yet.
-- `prepare` / `start`, `halt`, and `quarantine` are not implemented yet.
+- Mediation and guest-to-host TCP listener targets use Hyper-V socket listener
+  helpers.
+- `prepare` is not implemented yet.
+- Direct supervisor `console` is not implemented; use `microagent connect`.
 - Foreground `run` supports the configured result listener by mapping the guest
   AF_VSOCK result port to a Hyper-V socket service and writing the received
   payload to `result.json`.
 - Result runs configure COM1 as an HCS named pipe and append guest serial output
   to `serial.log`.
 
-Treat this backend as an implementation target for Windows Hyper-V Linux guest
-support, not as full Firecracker or Apple VF parity yet.
+Treat this backend as experimental. It is intended for Windows Hyper-V Linux
+guest support without WSL, and it should fail closed when a host prerequisite or
+unsupported feature is missing.
