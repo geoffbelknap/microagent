@@ -1516,6 +1516,16 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 			spec: "name: bad\nsetup:\n  - run: echo ok\n    file: ./body.py\n",
 			want: "cannot use both run and file",
 		},
+		{
+			name: "misnested network",
+			spec: "name: bad\nresources:\n  memoryMiB: 1024\n  network:\n    mode: user\n",
+			want: "field network not found",
+		},
+		{
+			name: "unknown top-level field",
+			spec: "name: bad\nnetwrok:\n  mode: user\n",
+			want: "field netwrok not found",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

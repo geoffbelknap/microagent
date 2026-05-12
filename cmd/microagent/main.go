@@ -2356,7 +2356,9 @@ func readWorkspaceSpec(path string) (workspaceSpec, error) {
 		return workspaceSpec{}, err
 	}
 	var spec workspaceSpec
-	if err := yaml.Unmarshal(data, &spec); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&spec); err != nil {
 		return workspaceSpec{}, err
 	}
 	return spec, nil
