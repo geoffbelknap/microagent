@@ -21,6 +21,8 @@ import (
 
 const maxWindowsHyperVResultBytes = 16 * 1024 * 1024
 
+var dialHVSockPortHook = dialHVSockPort
+
 type hvSocketListenerSet struct {
 	listeners []net.Listener
 	result    chan error
@@ -28,7 +30,7 @@ type hvSocketListenerSet struct {
 }
 
 func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
-	if req.Config == nil || len(req.Config.VsockListeners) == 0 {
+	if req.Config == nil || (len(req.Config.VsockListeners) == 0 && !hasPortForwards(req.Config)) {
 		return nil, nil
 	}
 	for _, listener := range req.Config.VsockListeners {
@@ -58,6 +60,26 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 		set.listeners = append(set.listeners, l)
 		started++
 		go set.serve(l, listener.Target, listener.Target == resultPath(req))
+	}
+	if req.Config.Network != nil {
+		for _, forward := range req.Config.Network.PortForwards {
+			if forward.Protocol != "" && forward.Protocol != "tcp" {
+				continue
+			}
+			host := strings.TrimSpace(forward.Host)
+			if host == "" {
+				host = "127.0.0.1"
+			}
+			addr := net.JoinHostPort(host, strconv.Itoa(int(forward.HostPort)))
+			l, err := net.Listen("tcp", addr)
+			if err != nil {
+				_ = set.Close()
+				return nil, fmt.Errorf("listen windows-hyperv published tcp %s: %w", addr, err)
+			}
+			set.listeners = append(set.listeners, l)
+			started++
+			go servePublishedPortForward(l, vmID, forward)
+		}
 	}
 	if started == 0 {
 		return nil, nil
@@ -144,6 +166,50 @@ func handleHVSockConnection(conn net.Conn, target string) {
 	if err := writeHVSockResult(conn, target); err != nil {
 		fmt.Fprintf(os.Stderr, "write windows-hyperv hvsocket result %s: %v\n", target, err)
 	}
+}
+
+func servePublishedPortForward(listener net.Listener, vmID guid.GUID, forward vmkit.PortForward) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "accept windows-hyperv published tcp connection: %v\n", err)
+			return
+		}
+		go proxyTCPToHVSock(conn, vmID, uint32(forward.HostPort))
+	}
+}
+
+func proxyTCPToHVSock(conn net.Conn, vmID guid.GUID, guestPort uint32) {
+	defer conn.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	hvsock, err := dialHVSockPortHook(ctx, vmID, guestPort)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "connect windows-hyperv guest hvsocket port %d: %v\n", guestPort, err)
+		return
+	}
+	defer hvsock.Close()
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(hvsock, conn)
+		closeWriteConn(hvsock)
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(conn, hvsock)
+		closeWriteConn(conn)
+		done <- struct{}{}
+	}()
+	<-done
+	_ = conn.Close()
+	_ = hvsock.Close()
+}
+
+func dialHVSockPort(ctx context.Context, vmID guid.GUID, guestPort uint32) (net.Conn, error) {
+	return winio.Dial(ctx, &winio.HvsockAddr{
+		VMID:      vmID,
+		ServiceID: winio.VsockServiceID(guestPort),
+	})
 }
 
 func writeHVSockResult(conn net.Conn, target string) error {

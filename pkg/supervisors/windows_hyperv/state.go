@@ -92,7 +92,7 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 		if listeners != nil {
 			defer listeners.Close()
 		}
-	} else if hasDetachedRuntimeListeners(req) {
+	} else if hasDetachedRuntimeServices(req) {
 		if _, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateStarting, "starting windows-hyperv runtime listener helper", "", handle.ID, handle.RuntimeID); err != nil {
 			return vmkit.Response{}, err
 		}
@@ -448,6 +448,14 @@ func hasDetachedRuntimeListeners(req vmkit.Request) bool {
 		}
 	}
 	return false
+}
+
+func hasDetachedRuntimeServices(req vmkit.Request) bool {
+	return hasDetachedRuntimeListeners(req) || hasPortForwards(req.Config)
+}
+
+func hasPortForwards(config *vmkit.Config) bool {
+	return config != nil && config.Network != nil && len(config.Network.PortForwards) != 0
 }
 
 func startRuntimeListenerProcess(req vmkit.Request) (int, error) {

@@ -88,6 +88,12 @@ The managed NAT network uses `192.168.127.0/24` with gateway
 `192.168.127.1`. Runtime network details, including the HNS network and
 endpoint IDs, are recorded in `runtime.json`.
 
+Published TCP ports from `network.portForwards` bind host TCP listeners and
+bridge accepted connections to the guest through Hyper-V sockets using the
+configured `hostPort` as the Hyper-V socket service. The guest-side init then
+proxies that stream to the configured `guestPort`. The listener helper is torn
+down during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
+
 Bridged mode fails closed unless `network.interface` names an existing HNS
 network or Hyper-V switch. Endpoint cleanup runs when foreground `run`
 completes and during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
@@ -121,7 +127,6 @@ exists, `inspect` also returns the backend-neutral `result` object and marks
 - No WSL dependency is used or required.
 - QEMU/WHPX is not used.
 - `microagent connect` and `connect --send` use Hyper-V sockets.
-- Published TCP networking is not available yet.
 - Mediation and guest-to-host TCP listener targets use Hyper-V socket listener
   helpers.
 - `prepare` is not implemented yet.

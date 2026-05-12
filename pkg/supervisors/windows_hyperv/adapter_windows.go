@@ -251,6 +251,15 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 			ConnectSecurityDescriptor: "D:P(A;;FA;;;SY)(A;;FA;;;BA)",
 		}
 	}
+	if spec.Config.Network != nil {
+		for _, forward := range spec.Config.Network.PortForwards {
+			serviceTable[winio.VsockServiceID(uint32(forward.HostPort)).String()] = hvSocketServiceConfig{
+				AllowWildcardBinds:        true,
+				BindSecurityDescriptor:    "D:P(A;;FA;;;WD)",
+				ConnectSecurityDescriptor: "D:P(A;;FA;;;WD)",
+			}
+		}
+	}
 	if spec.Config.ShellPort != 0 {
 		serviceTable[winio.VsockServiceID(uint32(spec.Config.ShellPort)).String()] = hvSocketServiceConfig{
 			AllowWildcardBinds:        true,

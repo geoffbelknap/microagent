@@ -203,6 +203,37 @@ func TestBuildComputeSystemDocumentAddsHvSocketServiceForShellPort(t *testing.T)
 	}
 }
 
+func TestBuildComputeSystemDocumentAddsHvSocketServicesForPortForwards(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Network: &vmkit.NetworkConfig{
+				Mode: "nat",
+				PortForwards: []vmkit.PortForward{
+					{Protocol: "tcp", Host: "127.0.0.1", HostPort: 18080, GuestPort: 8080},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc computeSystemDocument
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	serviceID := winio.VsockServiceID(18080).String()
+	service, ok := doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable[serviceID]
+	if !ok {
+		t.Fatalf("port forward service %s missing from %#v", serviceID, doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable)
+	}
+	if service.ConnectSecurityDescriptor != "D:P(A;;FA;;;WD)" {
+		t.Fatalf("port forward service connect security descriptor = %q", service.ConnectSecurityDescriptor)
+	}
+}
+
 func TestBuildComputeSystemDocumentAddsNetworkAdapterForEndpoint(t *testing.T) {
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name:              "agent-1",

@@ -437,6 +437,52 @@ func TestStartCommandDoesNotLaunchListenerHelperForResultOnlyListener(t *testing
 	}
 }
 
+func TestStartCommandLaunchesListenerHelperForPublishedPortForwards(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	oldProcessHook := startRuntimeListenerProcessHook
+	t.Cleanup(func() { startRuntimeListenerProcessHook = oldProcessHook })
+	helperStarted := false
+	startRuntimeListenerProcessHook = func(req vmkit.Request) (int, error) {
+		helperStarted = true
+		return 4321, nil
+	}
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			Network: &vmkit.NetworkConfig{
+				Mode:         "nat",
+				PortForwards: []vmkit.PortForward{{Protocol: "tcp", Host: "127.0.0.1", HostPort: 18080, GuestPort: 8080}},
+			},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("start resp=%#v err=%v", resp, err)
+	}
+	if !helperStarted {
+		t.Fatal("listener helper was not started for published port forwards")
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.VsockListenerPID != 4321 {
+		t.Fatalf("VsockListenerPID = %d, want helper pid 4321", state.VsockListenerPID)
+	}
+}
+
 func TestStopTerminatesRuntimeListenerProcess(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv lifecycle path is windows-only")
