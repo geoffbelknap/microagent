@@ -695,10 +695,10 @@ func TestWorkspaceRequestIncludesDisks(t *testing.T) {
 func TestRunUsesSupervisorOverride(t *testing.T) {
 	dir := t.TempDir()
 	supervisor := filepath.Join(dir, "supervisor")
-	script := `#!/usr/bin/env bash
+	script := fmt.Sprintf(`#!/usr/bin/env bash
 set -euo pipefail
-python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "prepared", "observedAt": "2026-05-02T00:00:00Z"}}))'
-`
+python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": True, "backend": %q, "event": {"identity": req["identity"], "state": "prepared", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`, hostBackend())
 	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": T
 	err = run(t.Context(), []string{
 		"create",
 		"--supervisor", supervisor,
-		"--backend", vmkit.BackendAppleVF,
+		"--backend", hostBackend(),
 		"--id", "agent-1",
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
@@ -1994,6 +1994,9 @@ func TestImagesRemoveDigestDeletesUnsharedBaseline(t *testing.T) {
 }
 
 func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("start state writing with a fake executable supervisor is Apple VF-specific")
+	}
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
@@ -2676,8 +2679,8 @@ func TestSuperviseWorkspaceSkipsNeverPolicy(t *testing.T) {
 	result, err := superviseWorkspace(t.Context(), superviseOptions{
 		StateDir:       dir,
 		Name:           "research",
-		Backend:        vmkit.BackendAppleVF,
-		Architecture:   "arm64",
+		Backend:        hostBackend(),
+		Architecture:   defaultGuestArch(),
 		KernelPath:     kernelPath,
 		KernelExplicit: true,
 		SupervisorPath: "/tmp/supervisor",
@@ -3035,7 +3038,11 @@ func TestCreateDispatchKeepsLowLevelSupervisorCreate(t *testing.T) {
 }
 
 func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
-	supervisor, err := workspaceSupervisor(workspaceOptions{Backend: hostBackend(), SupervisorPath: "/tmp/applevf"})
+	opts := workspaceOptions{Backend: hostBackend()}
+	if hostBackend() == vmkit.BackendAppleVF {
+		opts.SupervisorPath = "/tmp/applevf"
+	}
+	supervisor, err := workspaceSupervisor(opts)
 	if err != nil {
 		t.Fatalf("host supervisor: %v", err)
 	}
