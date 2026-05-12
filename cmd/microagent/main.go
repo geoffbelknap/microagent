@@ -2359,9 +2359,57 @@ func readWorkspaceSpec(path string) (workspaceSpec, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&spec); err != nil {
-		return workspaceSpec{}, err
+		return workspaceSpec{}, workspaceSpecDecodeError(path, err)
 	}
 	return spec, nil
+}
+
+func workspaceSpecDecodeError(path string, err error) error {
+	var typeErr *yaml.TypeError
+	if !errors.As(err, &typeErr) {
+		return fmt.Errorf("invalid workspace spec %s: %w", path, err)
+	}
+	messages := make([]string, 0, len(typeErr.Errors))
+	for _, msg := range typeErr.Errors {
+		messages = append(messages, humanWorkspaceSpecFieldError(msg))
+	}
+	return fmt.Errorf("invalid workspace spec %s: %s", path, strings.Join(messages, "; "))
+}
+
+func humanWorkspaceSpecFieldError(msg string) string {
+	line := ""
+	rest := msg
+	if strings.HasPrefix(rest, "line ") {
+		if index := strings.Index(rest, ": "); index >= 0 {
+			line = rest[:index]
+			rest = rest[index+2:]
+		}
+	}
+	const prefix = "field "
+	const separator = " not found in type "
+	if strings.HasPrefix(rest, prefix) && strings.Contains(rest, separator) {
+		parts := strings.SplitN(strings.TrimPrefix(rest, prefix), separator, 2)
+		field := parts[0]
+		typeName := parts[1]
+		var text string
+		switch typeName {
+		case "workspace.Spec":
+			text = fmt.Sprintf("unknown top-level field %q", field)
+		case "workspace.Resources":
+			if field == "network" {
+				text = `unknown field "network" under resources; move network to the top level, aligned with resources`
+			} else {
+				text = fmt.Sprintf("unknown field %q under resources", field)
+			}
+		default:
+			text = fmt.Sprintf("unknown field %q under %s", field, strings.TrimPrefix(typeName, "workspace."))
+		}
+		if line != "" {
+			return line + ": " + text
+		}
+		return text
+	}
+	return msg
 }
 
 func setupCommandsFromSpec(steps workspace.SetupSteps, setupFiles []string, baseDir string) ([]string, error) {

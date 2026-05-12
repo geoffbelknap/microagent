@@ -1519,12 +1519,12 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 		{
 			name: "misnested network",
 			spec: "name: bad\nresources:\n  memoryMiB: 1024\n  network:\n    mode: user\n",
-			want: "field network not found",
+			want: `unknown field "network" under resources; move network to the top level`,
 		},
 		{
 			name: "unknown top-level field",
 			spec: "name: bad\nnetwrok:\n  mode: user\n",
-			want: "field netwrok not found",
+			want: `unknown top-level field "netwrok"`,
 		},
 	}
 	for _, tt := range tests {
