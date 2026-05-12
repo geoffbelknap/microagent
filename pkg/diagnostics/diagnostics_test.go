@@ -127,7 +127,9 @@ func TestCheckWindowsHyperVReportsHostSuitability(t *testing.T) {
 			ResolveGuestInit: func(Options) (string, error) {
 				return `C:\microagent\microagent-guestinit-amd64`, nil
 			},
-			ProbeHCSAccess: func(context.Context) error { return nil },
+			ProbeHCSAccess:      func(context.Context) error { return nil },
+			ProbeHCNAccess:      func(context.Context) error { return nil },
+			ProbeHvSocketAccess: func(context.Context) error { return nil },
 		},
 	)
 	if err != nil {
@@ -136,8 +138,11 @@ func TestCheckWindowsHyperVReportsHostSuitability(t *testing.T) {
 	if !resp.OK || resp.Host == nil || !resp.Host.FrameworkAvailable || !resp.Host.VirtualizationSupported {
 		t.Fatalf("response = %#v", resp)
 	}
-	if resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "unsupported" {
+	if !resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "hvsock" {
 		t.Fatalf("console support = %#v", resp.Host)
+	}
+	if !resp.Host.UserNetworkingAvailable || !resp.Host.VsockAvailable {
+		t.Fatalf("network/socket support = %#v", resp.Host)
 	}
 	if !resp.Host.GuestInitAvailable || resp.Host.GuestInitPath != `C:\microagent\microagent-guestinit-amd64` {
 		t.Fatalf("guest init support = %#v", resp.Host)
@@ -174,6 +179,12 @@ func TestCheckWindowsHyperVReportsMissingSupport(t *testing.T) {
 			ProbeHCSAccess: func(context.Context) error {
 				return fmt.Errorf("HCS access denied; run as Administrator or join Hyper-V Administrators")
 			},
+			ProbeHCNAccess: func(context.Context) error {
+				return fmt.Errorf("HCN unavailable")
+			},
+			ProbeHvSocketAccess: func(context.Context) error {
+				return fmt.Errorf("Hyper-V sockets unavailable")
+			},
 		},
 	)
 	if err == nil {
@@ -187,10 +198,27 @@ func TestCheckWindowsHyperVReportsMissingSupport(t *testing.T) {
 		"windows-hyperv kernel is unavailable",
 		"microagent guest init not found",
 		"Hyper-V Administrators",
+		"HCN unavailable",
+		"Hyper-V sockets unavailable",
 	} {
 		if !strings.Contains(resp.Error, want) {
 			t.Fatalf("error = %q, missing %q", resp.Error, want)
 		}
+	}
+}
+
+func TestAugmentHostSupportPreservesWindowsHyperVConsoleSupport(t *testing.T) {
+	resp := vmkit.Response{
+		Backend: vmkit.BackendWindowsHyperV,
+		Host: &vmkit.HostSupport{
+			Backend:          vmkit.BackendWindowsHyperV,
+			ConsoleAvailable: true,
+			ConsoleMode:      "hvsock",
+		},
+	}
+	AugmentHostSupport(&resp, Options{Backend: vmkit.BackendWindowsHyperV, Arch: "amd64"})
+	if !resp.Host.ConsoleAvailable || resp.Host.ConsoleMode != "hvsock" {
+		t.Fatalf("host support = %#v", resp.Host)
 	}
 }
 

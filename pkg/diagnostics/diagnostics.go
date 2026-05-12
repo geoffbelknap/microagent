@@ -32,10 +32,12 @@ type FirecrackerProbe struct {
 }
 
 type WindowsHyperVProbe struct {
-	HostResponse     func() vmkit.Response
-	KernelSupport    func(string, string) *vmkit.KernelSupport
-	ResolveGuestInit func(Options) (string, error)
-	ProbeHCSAccess   func(context.Context) error
+	HostResponse        func() vmkit.Response
+	KernelSupport       func(string, string) *vmkit.KernelSupport
+	ResolveGuestInit    func(Options) (string, error)
+	ProbeHCSAccess      func(context.Context) error
+	ProbeHCNAccess      func(context.Context) error
+	ProbeHvSocketAccess func(context.Context) error
 }
 
 func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
@@ -104,6 +106,12 @@ func CheckWindowsHyperV(ctx context.Context, opts Options, probe WindowsHyperVPr
 	if probe.ProbeHCSAccess == nil {
 		probe.ProbeHCSAccess = windowshyperv.ProbeHCSAccess
 	}
+	if probe.ProbeHCNAccess == nil {
+		probe.ProbeHCNAccess = windowshyperv.ProbeHCNAccess
+	}
+	if probe.ProbeHvSocketAccess == nil {
+		probe.ProbeHvSocketAccess = windowshyperv.ProbeHvSocketAccess
+	}
 	if opts.Backend == "" {
 		opts.Backend = vmkit.BackendWindowsHyperV
 	}
@@ -144,8 +152,22 @@ func CheckWindowsHyperV(ctx context.Context, opts Options, probe WindowsHyperVPr
 	if err := probe.ProbeHCSAccess(ctx); err != nil {
 		issues = append(issues, err.Error())
 	}
-	resp.Host.ConsoleAvailable = false
-	resp.Host.ConsoleMode = "unsupported"
+	if err := probe.ProbeHCNAccess(ctx); err != nil {
+		resp.Host.UserNetworkingAvailable = false
+		issues = append(issues, err.Error())
+	} else {
+		resp.Host.UserNetworkingAvailable = true
+	}
+	if err := probe.ProbeHvSocketAccess(ctx); err != nil {
+		resp.Host.VsockAvailable = false
+		resp.Host.ConsoleAvailable = false
+		resp.Host.ConsoleMode = "unavailable"
+		issues = append(issues, err.Error())
+	} else {
+		resp.Host.VsockAvailable = true
+		resp.Host.ConsoleAvailable = true
+		resp.Host.ConsoleMode = "hvsock"
+	}
 	if len(issues) > 0 {
 		resp.OK = false
 		resp.Error = strings.Join(dedupeIssues(issues), "; ")
@@ -302,8 +324,9 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		resp.Host.ConsoleAvailable = true
 		resp.Host.ConsoleMode = "interactive"
 	case vmkit.BackendWindowsHyperV:
-		resp.Host.ConsoleAvailable = false
-		resp.Host.ConsoleMode = "unsupported"
+		if resp.Host.ConsoleMode == "" {
+			resp.Host.ConsoleMode = "unsupported"
+		}
 	}
 }
 

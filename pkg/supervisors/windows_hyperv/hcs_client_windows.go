@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/Microsoft/hcsshim/hcn"
 	"golang.org/x/sys/windows"
 )
 
@@ -86,6 +87,18 @@ func ProbeHCSAccess(ctx context.Context) error {
 		return nil
 	}
 	return hcsCallError("probe access", result, err)
+}
+
+func ProbeHCNAccess(ctx context.Context) error {
+	_, err := hcn.ListNetworks()
+	if err != nil {
+		return fmt.Errorf("probe HCN/HNS access: %w", err)
+	}
+	return nil
+}
+
+func ProbeHvSocketAccess(ctx context.Context) error {
+	return nil
 }
 
 func (c vmcomputeClient) vmcomputeAPI() vmcomputeAPI {
