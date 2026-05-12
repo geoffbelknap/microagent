@@ -595,7 +595,7 @@ func TestFirecrackerSysProcAttrAddsAmbientNetAdminOnlyForNetworkedVMs(t *testing
 	}
 }
 
-func TestDetachedUserNetworkRequestClearsRunTimeout(t *testing.T) {
+func TestDetachedUserNetworkRequestPreservesConfiguredTimeout(t *testing.T) {
 	req := vmkit.Request{
 		Command: "start",
 		Identity: &vmkit.Identity{
@@ -610,11 +610,34 @@ func TestDetachedUserNetworkRequestClearsRunTimeout(t *testing.T) {
 	if inner.Command != "run" {
 		t.Fatalf("command = %q, want run", inner.Command)
 	}
-	if inner.Config == nil || inner.Config.TimeoutSeconds != 0 {
-		t.Fatalf("timeout = %#v, want cleared", inner.Config)
+	if inner.Config == nil || inner.Config.TimeoutSeconds != 300 {
+		t.Fatalf("timeout = %#v, want preserved", inner.Config)
 	}
 	if req.Config.TimeoutSeconds != 300 {
 		t.Fatalf("original request timeout mutated to %d", req.Config.TimeoutSeconds)
+	}
+}
+
+func TestUserNetworkDisableRunTimeoutEnvOnlyDisablesRunTimeout(t *testing.T) {
+	t.Setenv(userNetworkDisableRunTimeoutEnv, "1")
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{TimeoutSeconds: 300},
+	}
+	opts := Supervisor{}.normalizedOptions(req)
+	if opts.Timeout >= 0 {
+		t.Fatalf("run timeout = %s, want disabled", opts.Timeout)
+	}
+	req.Command = "start"
+	opts = Supervisor{}.normalizedOptions(req)
+	if opts.Timeout != 300*time.Second {
+		t.Fatalf("start timeout = %s, want configured timeout", opts.Timeout)
 	}
 }
 
