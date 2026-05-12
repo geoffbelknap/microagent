@@ -2171,7 +2171,7 @@ func TestStartRejectsRunningWorkspace(t *testing.T) {
 }
 
 func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
-	outputFormat = "json"
+	outputFormat = "text"
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
 	if err := writeWorkspaceManifest(workspaceOptions{
@@ -2221,7 +2221,7 @@ func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, `"hostPort": 8080`) || !strings.Contains(text, `"ip": "192.168.64.2"`) {
+	if !strings.Contains(text, "Forward: tcp 127.0.0.1:8080 -> guest:80") || !strings.Contains(text, "IP: 192.168.64.2") {
 		t.Fatalf("network output = %s", data)
 	}
 }

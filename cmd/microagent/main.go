@@ -3971,7 +3971,11 @@ func writeNetworkConfig(stdout *os.File, label string, network vmkit.NetworkConf
 		if host == "" {
 			host = "*"
 		}
-		fmt.Fprintf(stdout, "Forward: %s %s:%d -> :%d\n", forward.Protocol, host, forward.HostPort, forward.GuestPort)
+		protocol := strings.TrimSpace(forward.Protocol)
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		fmt.Fprintf(stdout, "Forward: %s %s:%d -> guest:%d\n", protocol, host, forward.HostPort, forward.GuestPort)
 	}
 }
 
