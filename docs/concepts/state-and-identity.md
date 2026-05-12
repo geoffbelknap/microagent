@@ -48,7 +48,7 @@ gets its own subdirectory containing:
 - a JSON state file with the latest event
 - a durable JSON event timeline
 - backend-specific scratch (PID files for Firecracker, console sockets for
-  Apple VF)
+  Apple VF, HCS runtime IDs for Windows Hyper-V)
 
 `microagent ps` reads this directory. `microagent delete` removes a
 workspace's subdirectory.
@@ -77,8 +77,11 @@ hash checks for immutable runtime artifacts.
 Status responses include readiness signals so callers can sequence work without
 polling files or serial logs:
 
-- **`guestReady`** — the workspace reached a started runtime state.
-- **`shellReady`** — the workspace is running and console input is available.
+- **`guestReady`** — the backend has concrete evidence that the guest reached
+  a started runtime state. Backends do not have to treat a hypervisor process
+  state as guest readiness.
+- **`shellReady`** — console input is available and the configured shell has
+  reached the backend's readiness gate.
 - **`resultReady`** — the guest result file exists.
 - **`mediationReady`** — a declared mediation channel is ready for a running
   workspace.

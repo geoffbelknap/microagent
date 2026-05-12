@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -18,14 +19,15 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
+	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func TestMain(m *testing.M) {
@@ -226,10 +228,14 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
+	wantConsoleMode := "interactive"
+	if hostBackend() == vmkit.BackendWindowsHyperV {
+		wantConsoleMode = "hvsock"
+	}
 	if !strings.Contains(text, fmt.Sprintf(`"backend": "%s"`, hostBackend())) ||
 		!strings.Contains(text, `"kernel"`) ||
 		!strings.Contains(text, `"consoleAvailable": true`) ||
-		!strings.Contains(text, `"consoleMode": "interactive"`) {
+		!strings.Contains(text, fmt.Sprintf(`"consoleMode": "%s"`, wantConsoleMode)) {
 		t.Fatalf("host output = %s", data)
 	}
 }
@@ -345,9 +351,7 @@ func TestDefaultFirecrackerPathResolvesHomebrewSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(homebrewBin, "microagent")
-	if err := os.Symlink(executable, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinkOrSkip(t, executable, link)
 	if got := defaultFirecrackerPathFromExecutable(link); got != resolvedFirecracker {
 		t.Fatalf("defaultFirecrackerPathFromExecutable() = %q, want %q", got, resolvedFirecracker)
 	}
@@ -382,9 +386,7 @@ func TestDefaultPackagedKernelPathResolvesHomebrewSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(homebrewBin, "microagent")
-	if err := os.Symlink(executable, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinkOrSkip(t, executable, link)
 	if got := defaultPackagedKernelPathFromExecutable(link, "apple-vf", "arm64"); got != resolvedKernel {
 		t.Fatalf("defaultPackagedKernelPathFromExecutable() = %q, want %q", got, resolvedKernel)
 	}
@@ -394,6 +396,16 @@ func TestFirstOutputLine(t *testing.T) {
 	output := "\nFirecracker v1.15.1\n\n2026-05-02T17:44:08 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0\n"
 	if got := firstOutputLine(output); got != "Firecracker v1.15.1" {
 		t.Fatalf("firstOutputLine() = %q", got)
+	}
+}
+
+func symlinkOrSkip(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Symlink(oldname, newname); err != nil {
+		if runtime.GOOS == "windows" && strings.Contains(err.Error(), "A required privilege is not held by the client") {
+			t.Skipf("symlink privilege unavailable on windows: %v", err)
+		}
+		t.Fatal(err)
 	}
 }
 
@@ -1028,11 +1040,15 @@ func TestRunResultReportsStructuredResult(t *testing.T) {
 }
 
 func TestRunDeleteRemovesSavedWorkspaceState(t *testing.T) {
+	if hostBackend() == vmkit.BackendWindowsHyperV {
+		t.Skip("windows-hyperv delete uses in-process HCS state, not executable supervisor fixtures")
+	}
 	dir := t.TempDir()
 	supervisor := filepath.Join(dir, "supervisor")
+	backend := hostBackend()
 	script := `#!/usr/bin/env bash
 set -euo pipefail
-python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "` + backend + `", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
 `
 	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -1050,6 +1066,7 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 	err = run(t.Context(), []string{
 		"delete",
+		"--backend", backend,
 		"--supervisor", supervisor,
 		"--state-dir", dir,
 		"--yes",
@@ -2012,7 +2029,8 @@ func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", vmkit.BackendAppleVF)
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kernelPath := filepath.Join(dir, "Image")
@@ -2078,7 +2096,8 @@ func TestStartRejectsQuarantinedWorkspace(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", vmkit.BackendAppleVF)
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kernelPath := filepath.Join(dir, "Image")
@@ -2748,7 +2767,8 @@ func TestSuperviseWorkspaceOptionsUseManifestPolicy(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", vmkit.BackendAppleVF)
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kernelPath := filepath.Join(dir, "Image")
@@ -2788,7 +2808,8 @@ func TestSuperviseWorkspaceSkipsNeverPolicy(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", hostBackend())
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kernelPath := filepath.Join(dir, "Image")
@@ -3133,6 +3154,34 @@ func TestRunCPCommand(t *testing.T) {
 
 func fakeDebugFS(t *testing.T, dir string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, "debugfs.cmd")
+		script := `@echo off
+setlocal EnableDelayedExpansion
+set "log=` + filepath.Join(dir, "debugfs.log") + `"
+set "line=%*"
+set "line=!line:"=!"
+set "line=!line: =|!"
+>>"%log%" echo !line!
+:args
+if "%~1"=="" goto done_args
+if "%~1"=="-R" (
+  set "cmd=%~2"
+  set "target="
+  for %%P in (!cmd!) do set "target=%%~P"
+  if "!cmd:~0,5!"=="dump " (
+    >"!target!" <nul set /p "=fake-dump"
+  )
+)
+shift
+goto args
+:done_args
+`
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
 	path := filepath.Join(dir, "debugfs")
 	script := `#!/usr/bin/env bash
 set -euo pipefail
@@ -3176,20 +3225,28 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host supervisor: %v", err)
 	}
-	executable, ok := supervisor.(vmkit.ExecutableSupervisor)
-	if !ok {
-		t.Fatalf("host supervisor = %T, want vmkit.ExecutableSupervisor", supervisor)
-	}
-	if hostBackend() == vmkit.BackendFirecracker && executable.Path != "microagent-firecracker-supervisor" {
-		t.Fatalf("firecracker supervisor path = %q", executable.Path)
-	}
-	if hostBackend() == vmkit.BackendAppleVF && executable.Path != "/tmp/applevf" {
-		t.Fatalf("apple vf supervisor path = %q", executable.Path)
+	if hostBackend() == vmkit.BackendWindowsHyperV {
+		if _, ok := supervisor.(windowshyperv.Supervisor); !ok {
+			t.Fatalf("host supervisor = %T, want windowshyperv.Supervisor", supervisor)
+		}
+	} else {
+		executable, ok := supervisor.(vmkit.ExecutableSupervisor)
+		if !ok {
+			t.Fatalf("host supervisor = %T, want vmkit.ExecutableSupervisor", supervisor)
+		}
+		if hostBackend() == vmkit.BackendFirecracker && executable.Path != "microagent-firecracker-supervisor" {
+			t.Fatalf("firecracker supervisor path = %q", executable.Path)
+		}
+		if hostBackend() == vmkit.BackendAppleVF && executable.Path != "/tmp/applevf" {
+			t.Fatalf("apple vf supervisor path = %q", executable.Path)
+		}
 	}
 
 	otherBackend := vmkit.BackendFirecracker
 	if hostBackend() == vmkit.BackendFirecracker {
 		otherBackend = vmkit.BackendAppleVF
+	} else if hostBackend() == vmkit.BackendWindowsHyperV {
+		otherBackend = vmkit.BackendFirecracker
 	}
 	if _, err := workspaceSupervisor(workspaceOptions{Backend: otherBackend}); err == nil {
 		t.Fatalf("workspaceSupervisor(%q) err = nil, want host-only rejection", otherBackend)
@@ -3242,8 +3299,8 @@ func processStillActive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	if err := syscall.Kill(pid, 0); err != nil {
-		return err != syscall.ESRCH
+	if !platformProcessStillActive(pid) {
+		return false
 	}
 	if data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat")); err == nil {
 		fields := strings.Fields(string(data))
@@ -3657,9 +3714,7 @@ func TestDefaultGuestInitPathResolvesHomebrewSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(homebrewBin, "microagent")
-	if err := os.Symlink(executable, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinkOrSkip(t, executable, link)
 	if got := defaultGuestInitPathFromExecutable(link, "arm64"); got != resolvedGuestInit {
 		t.Fatalf("defaultGuestInitPathFromExecutable() = %q, want %q", got, resolvedGuestInit)
 	}
@@ -3708,6 +3763,37 @@ func TestWaitForConsoleReadyUsesSerialPrompt(t *testing.T) {
 	}
 }
 
+func TestConnectShellTargetUsesWindowsHyperVRuntimeID(t *testing.T) {
+	state := workspaceRuntimeState{
+		Event: workspaceEventFile{
+			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
+			State:    vmkit.StateRunning,
+		},
+		Config:                 vmkit.Config{ShellPort: 25000},
+		ComputeSystemRuntimeID: "11111111-1111-1111-1111-111111111111",
+	}
+	target, err := connectShellTarget("agent-1", state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Network != "hvsock" || target.RuntimeID != "11111111-1111-1111-1111-111111111111" || target.Port != 25000 {
+		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestConnectShellTargetRejectsWindowsHyperVWithoutRuntimeID(t *testing.T) {
+	state := workspaceRuntimeState{
+		Event: workspaceEventFile{
+			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
+			State:    vmkit.StateRunning,
+		},
+		Config: vmkit.Config{ShellPort: 25000},
+	}
+	if _, err := connectShellTarget("agent-1", state); err == nil || !strings.Contains(err.Error(), "compute system runtime ID") {
+		t.Fatalf("connectShellTarget err = %v, want compute system runtime ID", err)
+	}
+}
+
 func TestRunConnectRejectsNegativeReadyTimeoutForInteractive(t *testing.T) {
 	dir := t.TempDir()
 	stdoutPath := filepath.Join(dir, "connect.txt")
@@ -3721,6 +3807,395 @@ func TestRunConnectRejectsNegativeReadyTimeoutForInteractive(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "ready-timeout must not be negative") {
 		t.Fatalf("runConnect err = %v", err)
+	}
+}
+
+func TestWindowsHyperVConnectSmoke(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V connect smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	guestInitPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_GUESTINIT"))
+	if guestInitPath == "" {
+		guestInitPath = filepath.Join("..", "..", ".build", "dev", "microagent-guestinit-amd64")
+	}
+	if _, err := os.Stat(guestInitPath); err != nil {
+		t.Fatalf("guest init %q: %v", guestInitPath, err)
+	}
+	stateDir := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_STATE_DIR"))
+	if stateDir == "" {
+		var err error
+		stateDir, err = os.MkdirTemp("", "microagent-windows-hyperv-connect-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("state dir: %s", stateDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	workspaceOpts := workspace.Options{
+		Name:            "windows-hyperv-connect",
+		Backend:         vmkit.BackendWindowsHyperV,
+		Architecture:    "amd64",
+		StateDir:        stateDir,
+		KernelPath:      kernelPath,
+		GuestInitPath:   guestInitPath,
+		ImageRef:        "docker.io/library/busybox:1.36",
+		ServiceCommand:  "sleep 60",
+		PrepareForStart: true,
+		Timeout:         time.Minute,
+		Keep:            true,
+		MemoryMiB:       512,
+		CPUCount:        2,
+		Network:         vmkit.NetworkConfig{Mode: "user"},
+	}
+	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
+		t.Fatalf("BuildRootfs: %v", err)
+	}
+	if err := workspace.WriteManifest(workspaceOpts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	if _, err := workspace.Start(ctx, workspaceOpts); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = workspace.Control(context.Background(), workspaceOpts, "stop")
+		_, _ = workspace.Control(context.Background(), workspaceOpts, "delete")
+	})
+	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
+	status, err := workspace.Status(workspace.Options{
+		Name:     "windows-hyperv-connect",
+		Backend:  vmkit.BackendWindowsHyperV,
+		StateDir: stateDir,
+	})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.Readiness == nil || !status.Readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v", status.Readiness)
+	}
+
+	stdoutPath := filepath.Join(stateDir, "connect.out")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runConnect(ctx, []string{"windows-hyperv-connect", "--state-dir", stateDir, "--send", "echo CONNECT_SMOKE", "--ready-timeout", "45", "--timeout", "3"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runConnect: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "CONNECT_SMOKE") {
+		t.Fatalf("connect output = %q", data)
+	}
+}
+
+func TestWindowsHyperVMediationSmoke(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_MEDIATION_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_MEDIATION_SMOKE=1 to run the Windows Hyper-V mediation smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	dir := t.TempDir()
+	workspaceName := fmt.Sprintf("whv-med-%d", time.Now().UnixNano()%1000000000)
+	cliPath := filepath.Join(dir, "microagent.exe")
+	guestInitPath := filepath.Join(dir, "microagent-guestinit")
+	probePath := filepath.Join(dir, "mediation-probe")
+	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
+	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
+	buildMediationProbe(t, dir, probePath)
+
+	hostListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hostListener.Close()
+	observed := make(chan string, 1)
+	go func() {
+		conn, err := hostListener.Accept()
+		if err != nil {
+			observed <- "accept: " + err.Error()
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+		line, err := bufio.NewReader(conn).ReadString('\n')
+		if err != nil {
+			observed <- "read: " + err.Error()
+			return
+		}
+		_, _ = conn.Write([]byte(`{"ok":true}` + "\n"))
+		observed <- line
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	workspaceOpts := workspace.Options{
+		Name:            workspaceName,
+		Backend:         vmkit.BackendWindowsHyperV,
+		Architecture:    "amd64",
+		StateDir:        dir,
+		KernelPath:      kernelPath,
+		GuestInitPath:   guestInitPath,
+		ImageRef:        "docker.io/library/busybox:1.36",
+		ServiceCommand:  "/usr/local/bin/mediation-probe",
+		PrepareForStart: true,
+		Env:             map[string]string{"MICROAGENT_RUNTIME_ID": workspaceName, "MEDIATION_PORT": "2048"},
+		MemoryMiB:       512,
+		CPUCount:        2,
+		SizeMiB:         1024,
+		Network:         vmkit.NetworkConfig{Mode: "user"},
+		Mediation: &vmkit.MediationConfig{
+			Enabled:    true,
+			Required:   true,
+			Port:       2048,
+			Target:     hostListener.Addr().String(),
+			FailClosed: true,
+		},
+		Files: []workspace.File{{
+			SourcePath: probePath,
+			Path:       "/usr/local/bin/mediation-probe",
+			Mode:       "0755",
+		}},
+	}
+	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
+		t.Fatalf("BuildRootfs: %v", err)
+	}
+	if err := workspace.WriteManifest(workspaceOpts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", workspaceName, "--state-dir", dir)
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", workspaceName, "--state-dir", dir, "--yes")
+	})
+	runExternal(t, ctx, cliPath, "start", workspaceName, "--state-dir", dir, "--kernel", kernelPath)
+	select {
+	case line := <-observed:
+		if !strings.Contains(line, `"signal":"ready"`) || !strings.Contains(line, `"runtimeID":"`+workspaceName+`"`) {
+			t.Fatalf("observed mediation line = %q", line)
+		}
+	case <-time.After(90 * time.Second):
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatal("timed out waiting for mediated guest message")
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var runtimeState workspace.RuntimeState
+	runtimeData, err := os.ReadFile(filepath.Join(dir, workspaceName, "runtime.json"))
+	if err != nil {
+		t.Fatalf("read runtime.json: %v", err)
+	}
+	if err := json.Unmarshal(runtimeData, &runtimeState); err != nil {
+		t.Fatalf("parse runtime.json: %v\n%s", err, runtimeData)
+	}
+	if runtimeState.VsockListenerPID == 0 {
+		t.Fatalf("runtime.json missing vsock listener pid:\n%s", runtimeData)
+	}
+	if runtimeState.Config.Mediation == nil || !runtimeState.Config.Mediation.Enabled || runtimeState.Config.Mediation.Port != 2048 {
+		t.Fatalf("runtime.json missing mediation config:\n%s", runtimeData)
+	}
+}
+
+func buildCmd(t *testing.T, workdir, output, pkg, goos, goarch string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", output, pkg)
+	cmd.Dir = workdir
+	cmd.Env = os.Environ()
+	if goos != "" {
+		cmd.Env = append(cmd.Env, "GOOS="+goos)
+	}
+	if goarch != "" {
+		cmd.Env = append(cmd.Env, "GOARCH="+goarch)
+	}
+	if goos == "linux" {
+		cmd.Env = append(cmd.Env, "CGO_ENABLED=0")
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build %s: %v\n%s", pkg, err, out)
+	}
+}
+
+func buildMediationProbe(t *testing.T, dir, output string) {
+	t.Helper()
+	source := filepath.Join(dir, "mediation-probe.go")
+	code := `package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/sys/unix"
+)
+
+func main() {
+	port := uint32(2048)
+	if raw := strings.TrimSpace(os.Getenv("MEDIATION_PORT")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "invalid MEDIATION_PORT: %v\n", err)
+			os.Exit(2)
+		}
+		port = uint32(parsed)
+	}
+	fd, err := dialHostVsock(port, 30*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dial mediation vsock: %v\n", err)
+		os.Exit(1)
+	}
+	defer unix.Close(fd)
+	file := os.NewFile(uintptr(fd), "mediation-vsock")
+	if file == nil {
+		fmt.Fprintln(os.Stderr, "wrap mediation fd")
+		os.Exit(1)
+	}
+	defer file.Close()
+	runtimeID := os.Getenv("MICROAGENT_RUNTIME_ID")
+	if runtimeID == "" {
+		runtimeID = "unknown"
+	}
+	if _, err := file.WriteString("{\"signal\":\"ready\",\"runtimeID\":\"" + runtimeID + "\"}\n"); err != nil {
+		fmt.Fprintf(os.Stderr, "write mediation message: %v\n", err)
+		os.Exit(1)
+	}
+	line, err := bufio.NewReader(file).ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read mediation response: %v\n", err)
+		os.Exit(1)
+	}
+	if !strings.Contains(line, "\"ok\":true") {
+		fmt.Fprintf(os.Stderr, "unexpected response: %s\n", line)
+		os.Exit(1)
+	}
+	fmt.Println("MEDIATION_OK")
+}
+
+func dialHostVsock(port uint32, timeout time.Duration) (int, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
+		if err == nil {
+			err = unix.Connect(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_HOST, Port: port})
+			if err == nil {
+				return fd, nil
+			}
+			_ = unix.Close(fd)
+		}
+		lastErr = err
+		if time.Now().After(deadline) {
+			return -1, lastErr
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+`
+	if err := os.WriteFile(source, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buildCmd(t, filepath.Join("..", ".."), output, source, "linux", "amd64")
+}
+
+func runExternal(t *testing.T, ctx context.Context, exe string, args ...string) []byte {
+	t.Helper()
+	out, err := runExternalOutput(ctx, exe, args...)
+	if err != nil {
+		t.Fatalf("%s %s: %v\n%s", exe, strings.Join(args, " "), err, out)
+	}
+	return out
+}
+
+func runExternalOutput(ctx context.Context, exe string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, exe, args...)
+	return cmd.CombinedOutput()
+}
+
+func waitForExternalResult(t *testing.T, ctx context.Context, cliPath, stateDir, name string, timeout time.Duration) []byte {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last []byte
+	for {
+		out, err := runExternalOutput(ctx, cliPath, "result", name, "--state-dir", stateDir)
+		last = out
+		if err == nil {
+			return out
+		}
+		if time.Now().After(deadline) {
+			logWindowsHyperVSmokeState(t, stateDir, name)
+			t.Fatalf("result not ready: %v\n%s", err, last)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func logWindowsHyperVSmokeState(t *testing.T, stateDir, name string) {
+	t.Helper()
+	for _, file := range []string{"serial.log", "hvsock-listener.log", "runtime.json"} {
+		if data, readErr := os.ReadFile(filepath.Join(stateDir, name, file)); readErr == nil {
+			t.Logf("%s:\n%s", file, data)
+		}
+	}
+}
+
+func waitForSerialContains(ctx context.Context, path, needle string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && strings.Contains(string(data), needle) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("serial log did not contain %q before timeout: %w", needle, err)
+			}
+			return fmt.Errorf("serial log did not contain %q before timeout: %s", needle, path)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func waitForWorkspaceState(t *testing.T, stateDir, name string, want vmkit.VMState, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		state, _, err := workspace.LatestStartState(stateDir, name)
+		if err == nil && state == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("workspace %s did not reach %s before timeout; last state=%s err=%v", name, want, state, err)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -3971,8 +4446,8 @@ func TestParseWorkspaceOptionsAcceptsPositionalName(t *testing.T) {
 }
 
 func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4017,8 +4492,8 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 }
 
 func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4063,8 +4538,8 @@ func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
 }
 
 func TestFirecrackerQuarantinePreservesRecordedPID(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4109,8 +4584,8 @@ func TestFirecrackerQuarantinePreservesRecordedPID(t *testing.T) {
 }
 
 func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4152,8 +4627,8 @@ func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
 }
 
 func TestFirecrackerDeleteStopsRunningPIDWithYes(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4194,8 +4669,8 @@ func TestFirecrackerDeleteStopsRunningPIDWithYes(t *testing.T) {
 }
 
 func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	kernel := filepath.Join(dir, "Image")
@@ -4255,8 +4730,8 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 }
 
 func TestFirecrackerStatusReadsPreparedState(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := vmkit.Request{
@@ -4390,6 +4865,19 @@ func TestDefaultKernelManifestHasFirecrackerARM64(t *testing.T) {
 		t.Fatalf("url = %q", kernel.URL)
 	}
 	if kernel.SHA256 != "bd91c4f5c15e497b99ac0c96977a92e68a0c11d3c72267104f5fb968994c4a71" {
+		t.Fatalf("sha256 = %q", kernel.SHA256)
+	}
+}
+
+func TestDefaultKernelManifestHasWindowsHyperVAMD64(t *testing.T) {
+	kernel, ok := defaultKernel(vmkit.BackendWindowsHyperV, "amd64")
+	if !ok {
+		t.Fatal("missing windows-hyperv amd64 kernel")
+	}
+	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-windows-hyperv-amd64" {
+		t.Fatalf("url = %q", kernel.URL)
+	}
+	if kernel.SHA256 != "8623b349a95fa536891e0d292d198396504aad8308c7619083994f7553707a92" {
 		t.Fatalf("sha256 = %q", kernel.SHA256)
 	}
 }

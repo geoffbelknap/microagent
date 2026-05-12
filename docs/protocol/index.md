@@ -8,17 +8,20 @@ out. A request names a lifecycle command such as `prepare`, `start`, or `stop`.
 The response reports whether it worked and, when the command changes VM state,
 includes a lifecycle event.
 
-Firecracker and Apple VF use the same protocol:
+Firecracker, Apple VF, and Windows Hyper-V use the same backend-neutral
+protocol:
 
 - **Firecracker** implements it as `microagent-firecracker-supervisor`.
 - **Apple VF** implements it as the `microagent-applevf-supervisor`
   executable because Virtualization.framework is Swift-only.
+- **Windows Hyper-V** implements it inside the Go supervisor boundary and uses
+  HCS for Linux guests without WSL or QEMU.
 
 The CLI chooses the active host backend and sends the request to that
 supervisor.
 
 Use [`microagent --json contract`](/cli/contract/) for the versioned
-backend-neutral runtime contract that Firecracker and Apple VF share.
+backend-neutral runtime contract.
 
 ## Request
 
@@ -262,5 +265,7 @@ Reading the table:
   executable implementation.
 - [Apple VF supervisor](/protocol/applevf/) documents the macOS executable
   protocol.
+- [Windows Hyper-V supervisor](/protocol/windows-hyperv/) documents the
+  experimental Windows HCS backend.
 - [Runtime contract](/protocol/runtime-contract/) documents the shared
   agent-runtime semantics.

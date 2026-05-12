@@ -18,8 +18,14 @@ The implementation under each mode varies by backend:
 |---|---|
 | Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment` — runs in user space inside the framework, no privileges required. `isolated` and TCP `--publish` work. `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
 | Firecracker | `user` runs Firecracker inside a `pasta` user namespace with a namespace-local TAP. `nat` creates a host-side TAP and installs nftables MASQUERADE rules. `bridged` attaches a transient TAP to an existing host Linux bridge. `isolated` and TCP `--publish` work. |
+| Windows Hyper-V | `user` and `nat` use the managed `microagent-nat` HNS NAT network. `isolated` starts without an external network adapter. TCP `--publish` works through Hyper-V socket bridging. `bridged` attaches to the named HNS network or Hyper-V switch. |
 
 Apple VF NAT is backend-managed by macOS. Microagent attaches `VZNATNetworkDeviceAttachment` and asks the kernel to do DHCP via `ip=dhcp`; it does not create a TAP, configure `pf`, or allocate a subnet of its own. Guest init writes `/etc/resolv.conf` from the kernel's DHCP nameserver data — so NAT works without an image-local DHCP client. Virtualization.framework's NAT API doesn't expose deterministic guest IP, gateway, or DNS, so Apple VF status reports the requested mode and declared publishes but not a runtime lease.
+
+Windows Hyper-V NAT is backend-managed through HNS/HCN. Microagent creates or
+reuses a `microagent-nat` network, attaches an HNS endpoint to the HCS compute
+system, and records runtime network IDs and address details when Windows
+returns them.
 
 ## Declaring the mode
 
@@ -103,6 +109,19 @@ The supervisor creates a transient TAP, attaches it to the bridge via Linux netl
 
 Same `CAP_NET_ADMIN` requirement as `nat` — run as root, or use a launcher that gives the supervisor effective, permitted, and inheritable `CAP_NET_ADMIN` so Firecracker can inherit it.
 
+## Bridged on Windows Hyper-V
+
+Declare an existing HNS network or Hyper-V switch name:
+
+```yaml
+network:
+  mode: bridged
+  interface: External Switch
+```
+
+The Windows backend fails closed if the named network cannot be found or if
+the current user cannot create HNS endpoints for HCS compute systems.
+
 ## Mediation channel
 
 Mediation is a separate guest-to-host vsock contract for the body's calls into the host control plane — distinct from ordinary networking. Declare it with:
@@ -128,4 +147,4 @@ For the architecture and a worked pattern, see [Wire up the mediation channel](/
 
 ## What's visible
 
-The network record appears in JSON output from `create`, `start`, `status`, and `ps`. `microagent --json network <name>` also shows the latest runtime network assignment, including Firecracker NAT IP, subnet, gateway, DNS, and route when present. Apple VF reports the declared mode and any port forwards but can't expose the macOS-managed NAT lease — Virtualization.framework doesn't surface it. Low-level wiring such as TAP names and Firecracker config paths stays behind the supervisor protocol. Malformed port forwards fail closed before any request is sent.
+The network record appears in JSON output from `create`, `start`, `status`, and `ps`. `microagent --json network <name>` also shows the latest runtime network assignment, including Firecracker NAT IP, subnet, gateway, DNS, and route when present. Apple VF reports the declared mode and any port forwards but can't expose the macOS-managed NAT lease — Virtualization.framework doesn't surface it. Windows Hyper-V reports HNS network and endpoint identity plus address details returned by HCN. Low-level wiring such as TAP names, HNS endpoint IDs, and Firecracker config paths stays behind the supervisor protocol. Malformed port forwards fail closed before any request is sent.

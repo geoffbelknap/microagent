@@ -7,9 +7,11 @@ description: Print the backend-neutral agent runtime contract.
 microagent [--json] contract
 ```
 
-`contract` reports the runtime semantics that Firecracker and Apple VF must
-share: lifecycle commands, states, readiness signals, result fields, artifact
-channels, mediation fields, and verification.
+`contract` reports backend-neutral runtime semantics: lifecycle commands,
+states, readiness signals, result fields, artifact channels, mediation fields,
+and verification. Stable backends implement the full surface; experimental
+backends may support a smaller command set while preserving the same response
+shapes for supported commands.
 
 The JSON output is intended for agent-runtime builders and host integrations
 that need a machine-readable contract.

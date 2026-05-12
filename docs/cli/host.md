@@ -16,6 +16,7 @@ vsock support, and console mode. It uses the same probes as
 
 | Flag | Description |
 |---|---|
+| `--backend <name>` | Backend override (`apple-vf`, `firecracker`, or `windows-hyperv`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `host`; print structured JSON output |
@@ -26,6 +27,7 @@ vsock support, and console mode. It uses the same probes as
 |---|---|
 | Apple VF | `interactive` via [`connect`](/cli/connect/) |
 | Firecracker | `interactive` via [`connect`](/cli/connect/); captured output via [`logs`](/cli/logs/) |
+| Windows Hyper-V | `hvsock` via [`connect`](/cli/connect/); captured output via [`logs`](/cli/logs/) |
 
 `consoleAvailable` reports backend capability on this host. A workspace can
 still reject `connect` until it is running and the backend has created the

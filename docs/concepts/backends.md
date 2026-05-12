@@ -4,19 +4,21 @@ description: One backend per host OS. Same lifecycle surface, different mechanic
 ---
 
 microagent installs with one backend for the host OS: Firecracker on Linux,
-Apple VF on macOS. The CLI does not fall back to a cross-host default. If a
-request names a backend that does not match the installed host OS, microagent
-fails before it builds a rootfs or talks to a supervisor.
+Apple VF on macOS, and experimental Windows Hyper-V on Windows. The CLI does
+not fall back to a cross-host default. If a request names a backend that does
+not match the installed host OS, microagent fails before it builds a rootfs or
+talks to a supervisor.
 
 | Backend | Host OS | Supervisor | `connect` | Process model |
 |---|---|---|---|---|
 | `firecracker` | Linux | Go executable supervisor (`microagent-firecracker-supervisor`) | supported | Supervisor records VM PID; `quarantine` preserves it, `stop` sends SIGTERM, `kill` sends SIGKILL |
 | `apple-vf` | macOS | Swift executable supervisor (`microagent-applevf-supervisor`) | supported | One supervisor invocation per request |
+| `windows-hyperv` | Windows | Experimental Go supervisor boundary for Linux guests through HCS / Hyper-V | supported through Hyper-V sockets | HCS compute systems are created through `vmcompute.dll`; lifecycle state records HCS compute IDs |
 
-Both backends expose the same lifecycle surface: `run`, `create`, `start`,
-`status`, `halt`, `quarantine`, `stop`, `kill`, `delete`. Both record state
-files and emit lifecycle events. Firecracker and Apple VF share the same
-executable supervisor-shaped request/response boundary.
+Backends expose the same backend-neutral request and response structures, but
+the host mechanics differ. Firecracker and Apple VF share the same executable
+supervisor-shaped request/response boundary. Windows Hyper-V uses the same
+`vmkit` protocol inside the Go supervisor boundary.
 
 ## Firecracker (Linux)
 
@@ -43,7 +45,24 @@ executable supervisor-shaped request/response boundary.
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
 
+## Windows Hyper-V (experimental)
+
+- Targets Linux microVM-style workspaces on Windows without WSL or QEMU.
+- Uses the backend name `windows-hyperv`.
+- Uses Host Compute Service through `vmcompute.dll`.
+- Consumes VHD root disks at
+  `~/.microagent/workspaces/<name>/rootfs.vhd`.
+- Supports `host`, `check`, `prepare`, `run`, `start`, `inspect`, `connect`,
+  `halt`, `quarantine`, `stop`, `kill`, and `delete` experimentally.
+- Supports HNS NAT networking and published TCP ports through Hyper-V socket
+  bridging.
+- Fails closed for the direct supervisor `console` command; use
+  [`connect`](/cli/connect/).
+- See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
+  details and current limitations.
+
 ## Selecting a host
 
-`microagent doctor` reports the installed host backend, the binary it found,
-KVM/VF availability, and the default kernel status.
+`microagent doctor` reports the active backend, backend-specific host support,
+virtualization availability, guest-init availability, and the default kernel
+status.

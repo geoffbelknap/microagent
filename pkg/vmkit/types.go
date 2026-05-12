@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	BackendAppleVF     = "apple-vf"
-	BackendFirecracker = "firecracker"
+	BackendAppleVF       = "apple-vf"
+	BackendFirecracker   = "firecracker"
+	BackendWindowsHyperV = "windows-hyperv"
 )
 
 type ComponentRole string

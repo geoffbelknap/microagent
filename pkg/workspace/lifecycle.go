@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
@@ -62,15 +61,17 @@ type EventFile struct {
 }
 
 type RuntimeState struct {
-	Event           EventFile              `json:"event"`
-	Config          vmkit.Config           `json:"config"`
-	PID             int                    `json:"pid,omitempty"`
-	SerialLogPath   string                 `json:"serialLogPath"`
-	SerialInputPath string                 `json:"serialInputPath,omitempty"`
-	StartedAt       string                 `json:"startedAt,omitempty"`
-	UpdatedAt       string                 `json:"updatedAt"`
-	Readiness       vmkit.RuntimeReadiness `json:"readiness,omitempty"`
-	Error           string                 `json:"error,omitempty"`
+	Event                  EventFile              `json:"event"`
+	Config                 vmkit.Config           `json:"config"`
+	PID                    int                    `json:"pid,omitempty"`
+	ComputeSystemRuntimeID string                 `json:"computeSystemRuntimeID,omitempty"`
+	VsockListenerPID       int                    `json:"vsockListenerPid,omitempty"`
+	SerialLogPath          string                 `json:"serialLogPath"`
+	SerialInputPath        string                 `json:"serialInputPath,omitempty"`
+	StartedAt              string                 `json:"startedAt,omitempty"`
+	UpdatedAt              string                 `json:"updatedAt"`
+	Readiness              vmkit.RuntimeReadiness `json:"readiness,omitempty"`
+	Error                  string                 `json:"error,omitempty"`
 }
 
 type ListEntry struct {
@@ -325,7 +326,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := ValidateResources(Resources{MemoryMiB: opts.MemoryMiB, CPUCount: opts.CPUCount}, false); err != nil {
 		return Result{}, err
 	}
-	rootfsPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4")
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	if _, err := os.Stat(rootfsPath); err != nil {
 		return Result{}, err
 	}
@@ -447,9 +448,11 @@ func List(stateDir string) ([]ListEntry, error) {
 			entry.Backend = event.Identity.Backend
 			entry.ObservedAt = event.ObservedAt
 		}
-		rootfsPath := filepath.Join(stateDir, "workspaces", name, "rootfs.ext4")
-		if _, err := os.Stat(rootfsPath); err == nil {
-			entry.RootfsPath = rootfsPath
+		for _, rootfsPath := range CandidateWorkspaceRootfsPaths(stateDir, name, entry.Backend) {
+			if _, err := os.Stat(rootfsPath); err == nil {
+				entry.RootfsPath = rootfsPath
+				break
+			}
 		}
 		serialPath := SerialLogPath(stateDir, name)
 		if _, err := os.Stat(serialPath); err == nil {
@@ -490,8 +493,7 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 }
 
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
-	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
-	rootfsPath := filepath.Join(workspaceDir, "rootfs.ext4")
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	req := buildRootfsRequest(opts, rootfsPath)
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := Result{
@@ -524,6 +526,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
 		OutputPath:     rootfsPath,
+		Format:         WorkspaceRootfsFormat(opts.Backend),
 		InitPath:       rootfs.DefaultInitPath,
 		Command:        command,
 		Mode:           mode,
@@ -538,11 +541,53 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		SizeMiB:        opts.SizeMiB,
 		Env:            opts.Env,
 		Files:          RootfsFiles(opts.Files),
-		Mounts:         Mounts(opts.Disks),
+		Mounts:         MountsForBackend(opts.Backend, opts.Disks),
 		HostForwards:   RootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,
 		Progress:       opts.Progress,
 	}
+}
+
+func WorkspaceRootfsFormat(backend string) string {
+	if backend == vmkit.BackendWindowsHyperV {
+		return rootfs.FormatVHD
+	}
+	return rootfs.FormatExt4
+}
+
+func WorkspaceDiskFormat(backend string) string {
+	return WorkspaceRootfsFormat(backend)
+}
+
+func WorkspaceRootfsFilename(backend string) string {
+	if WorkspaceRootfsFormat(backend) == rootfs.FormatVHD {
+		return "rootfs.vhd"
+	}
+	return "rootfs.ext4"
+}
+
+func WorkspaceDiskFilename(backend, name string) string {
+	if WorkspaceDiskFormat(backend) == rootfs.FormatVHD {
+		return name + ".vhd"
+	}
+	return name + ".ext4"
+}
+
+func WorkspaceDiskPath(stateDir, workspaceName, backend, diskName string) string {
+	return filepath.Join(stateDir, "workspaces", workspaceName, "disks", WorkspaceDiskFilename(backend, diskName))
+}
+
+func WorkspaceRootfsPath(stateDir, name, backend string) string {
+	return filepath.Join(stateDir, "workspaces", name, WorkspaceRootfsFilename(backend))
+}
+
+func CandidateWorkspaceRootfsPaths(stateDir, name, backend string) []string {
+	primary := WorkspaceRootfsPath(stateDir, name, backend)
+	secondary := WorkspaceRootfsPath(stateDir, name, "")
+	if primary == secondary {
+		return []string{primary, filepath.Join(stateDir, "workspaces", name, "rootfs.vhd")}
+	}
+	return []string{primary, secondary}
 }
 
 func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
@@ -565,10 +610,11 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 		}
 		seenMountpoints[disk.Mountpoint] = true
 		if disk.Bundle {
-			outputPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "disks", disk.Name+".ext4")
+			outputPath := WorkspaceDiskPath(opts.StateDir, opts.Name, opts.Backend, disk.Name)
 			_, err := rootfs.NewBuilder().BuildBundle(ctx, rootfs.BundleRequest{
 				SourcePath: disk.SourcePath,
 				OutputPath: outputPath,
+				Format:     WorkspaceDiskFormat(opts.Backend),
 				StateDir:   filepath.Join(opts.StateDir, "build"),
 				Mke2fsPath: opts.Mke2fsPath,
 				SizeMiB:    64,
@@ -958,7 +1004,7 @@ func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.
 	resp, err := Dispatch(ctx, opts, req)
 	state := vmkit.StateStopped
 	errorText := ""
-	if opts.Backend == vmkit.BackendFirecracker {
+	if backendOwnsRuntimeState(opts.Backend) {
 		return resp, err
 	}
 	if err != nil || !resp.OK {
@@ -974,10 +1020,20 @@ func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.
 	return resp, err
 }
 
+func backendOwnsRuntimeState(backend string) bool {
+	return backend == vmkit.BackendFirecracker || backend == vmkit.BackendWindowsHyperV
+}
+
 func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
-	if opts.Backend == vmkit.BackendFirecracker {
-		req.Command = "start"
-		return Dispatch(context.Background(), opts, req)
+	if command := detachedSupervisorCommand(opts.Backend); command != "run" {
+		req.Command = command
+		dispatchCtx := context.Background()
+		var cancel context.CancelFunc
+		if opts.Timeout > 0 {
+			dispatchCtx, cancel = context.WithTimeout(dispatchCtx, opts.Timeout)
+			defer cancel()
+		}
+		return Dispatch(dispatchCtx, opts, req)
 	}
 	if opts.Backend != vmkit.BackendAppleVF {
 		return Dispatch(context.Background(), opts, req)
@@ -1003,7 +1059,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Stdout = supervisorLog
 	cmd.Stderr = supervisorLog
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = detachedSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return vmkit.Response{}, err
 	}
@@ -1019,6 +1075,15 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		ObservedAt: time.Now().UTC(),
 	}
 	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
+}
+
+func detachedSupervisorCommand(backend string) string {
+	switch backend {
+	case vmkit.BackendFirecracker, vmkit.BackendWindowsHyperV:
+		return "start"
+	default:
+		return "run"
+	}
 }
 
 func WriteProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {
@@ -1129,7 +1194,7 @@ func VerificationForStatus(opts Options, name string, manifest Manifest, state v
 		rootfsPath = recorded.Rootfs.Path
 	}
 	if rootfsPath == "" {
-		rootfsPath = filepath.Join(opts.StateDir, "workspaces", name, "rootfs.ext4")
+		rootfsPath = WorkspaceRootfsPath(opts.StateDir, name, opts.Backend)
 	}
 	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification, true)
 	verification.Rootfs = currentArtifact("rootfs", rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification, shouldCompareRootfs(state))

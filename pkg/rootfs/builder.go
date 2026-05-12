@@ -46,6 +46,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		ImageRef:   req.ImageRef,
 		Platform:   req.Platform,
 		OutputPath: req.OutputPath,
+		Format:     req.Format,
 		InitPath:   req.InitPath,
 		Builder:    name,
 	}
@@ -154,6 +155,9 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	if err := writeInit(stageDir, req.InitPath, command, req.Mode, req.Env, req.InitBinaryPath, req.ResultPort, req.ShellPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
 		return provenance, err
 	}
+	if err := ensureGuestRuntimeDirs(stageDir); err != nil {
+		return provenance, err
+	}
 	provenance.BuilderPhase = "write-files"
 	progress.emit("write-files", "writing declared files", 0, 0, 0, 0)
 	if err := writeDeclaredFiles(stageDir, req.Files); err != nil {
@@ -168,21 +172,8 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		provenance.StageSnapshot = req.StageSnapshot
 	}
 
-	provenance.BuilderPhase = "build-ext4"
-	progress.emit("build-ext4", "building ext4 image", 0, 0, 0, 0)
-	if err := os.MkdirAll(filepath.Dir(req.OutputPath), 0o755); err != nil {
-		return provenance, fmt.Errorf("create output dir: %w", err)
-	}
-	tmpImage := filepath.Join(tmpDir, "rootfs.ext4")
-	if err := allocateFile(tmpImage, req.SizeMiB*1024*1024); err != nil {
-		return provenance, fmt.Errorf("allocate rootfs image: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, req.Mke2fsPath, "-q", "-t", "ext4", "-d", stageDir, tmpImage)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return provenance, fmt.Errorf("build ext4 rootfs: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	if err := os.Rename(tmpImage, req.OutputPath); err != nil {
-		return provenance, fmt.Errorf("commit rootfs image: %w", err)
+	if err := buildRootfsImage(ctx, req, stageDir, tmpDir, progress, &provenance); err != nil {
+		return provenance, err
 	}
 	info, err := os.Stat(req.OutputPath)
 	if err != nil {
@@ -208,6 +199,7 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	provenance := BundleProvenance{
 		SourcePath:   req.SourcePath,
 		OutputPath:   req.OutputPath,
+		Format:       req.Format,
 		Builder:      b.Name,
 		BuilderPhase: "validate",
 	}
@@ -249,20 +241,8 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	if err := source.Close(); err != nil {
 		return provenance, fmt.Errorf("close bundle: %w", err)
 	}
-	provenance.BuilderPhase = "build-ext4"
-	if err := os.MkdirAll(filepath.Dir(req.OutputPath), 0o755); err != nil {
-		return provenance, fmt.Errorf("create output dir: %w", err)
-	}
-	tmpImage := filepath.Join(tmpDir, "bundle.ext4")
-	if err := allocateFile(tmpImage, req.SizeMiB*1024*1024); err != nil {
-		return provenance, fmt.Errorf("allocate bundle image: %w", err)
-	}
-	cmd := exec.CommandContext(ctx, req.Mke2fsPath, "-q", "-t", "ext4", "-d", stageDir, tmpImage)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return provenance, fmt.Errorf("build ext4 bundle: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	if err := os.Rename(tmpImage, req.OutputPath); err != nil {
-		return provenance, fmt.Errorf("commit bundle image: %w", err)
+	if err := buildBundleImage(ctx, req, stageDir, tmpDir, &provenance); err != nil {
+		return provenance, err
 	}
 	info, err := os.Stat(req.OutputPath)
 	if err != nil {
@@ -271,6 +251,51 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	provenance.SizeBytes = info.Size()
 	provenance.BuilderPhase = "complete"
 	return provenance, nil
+}
+
+func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir string, progress *progressReporter, provenance *Provenance) error {
+	switch req.Format {
+	case FormatExt4:
+		provenance.BuilderPhase = "build-ext4"
+		progress.emit("build-ext4", "building ext4 image", 0, 0, 0, 0)
+		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "rootfs.ext4"), req.OutputPath, req.SizeMiB*1024*1024, "rootfs")
+	case FormatVHD:
+		provenance.BuilderPhase = "build-vhd"
+		progress.emit("build-vhd", "building vhd image", 0, 0, 0, 0)
+		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "rootfs.vhd"), req.OutputPath, req.SizeMiB*1024*1024)
+	default:
+		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
+	}
+}
+
+func buildBundleImage(ctx context.Context, req BundleRequest, stageDir, tmpDir string, provenance *BundleProvenance) error {
+	switch req.Format {
+	case FormatExt4:
+		provenance.BuilderPhase = "build-ext4"
+		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "bundle.ext4"), req.OutputPath, req.SizeMiB*1024*1024, "bundle")
+	case FormatVHD:
+		provenance.BuilderPhase = "build-vhd"
+		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "bundle.vhd"), req.OutputPath, req.SizeMiB*1024*1024)
+	default:
+		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
+	}
+}
+
+func buildExt4Image(ctx context.Context, mke2fsPath, stageDir, tmpImage, outputPath string, sizeBytes int64, label string) error {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
+	}
+	if err := allocateFile(tmpImage, sizeBytes); err != nil {
+		return fmt.Errorf("allocate %s image: %w", label, err)
+	}
+	cmd := exec.CommandContext(ctx, mke2fsPath, "-q", "-t", "ext4", "-d", stageDir, tmpImage)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("build ext4 %s: %w: %s", label, err, strings.TrimSpace(string(out)))
+	}
+	if err := os.Rename(tmpImage, outputPath); err != nil {
+		return fmt.Errorf("commit %s image: %w", label, err)
+	}
+	return nil
 }
 
 func allocateFile(path string, sizeBytes int64) error {
@@ -501,7 +526,19 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 			return err
 		}
 		_ = root.RemoveAll(name)
-		return root.Symlink(linkTarget, name)
+		if err := root.Symlink(linkTarget, name); err != nil {
+			if !canFallbackToSymlinkMarker(err) {
+				return err
+			}
+			if err := writeSymlinkMarker(filepath.Join(root.Name(), filepath.FromSlash(name)), linkTarget); err != nil {
+				return err
+			}
+			return recordStageMode(root, name, 0o777)
+		}
+		if err := recordStageMode(root, name, 0o777); err != nil {
+			return err
+		}
+		return nil
 	case tar.TypeLink:
 		linkTarget, err := safeGuestRel(header.Linkname, false)
 		if err != nil {
@@ -517,7 +554,10 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 	default:
 		return nil
 	}
-	return root.Chmod(name, mode)
+	if err := root.Chmod(name, mode); err != nil {
+		return err
+	}
+	return recordStageMode(root, name, mode)
 }
 
 var errRootPath = errors.New("OCI layer path is root")
@@ -752,7 +792,10 @@ func copyFileToRoot(root *os.Root, src, dst string, mode os.FileMode) error {
 	if err := out.Close(); err != nil {
 		return err
 	}
-	return root.Chmod(dst, mode)
+	if err := root.Chmod(dst, mode); err != nil {
+		return err
+	}
+	return recordStageMode(root, dst, mode)
 }
 
 func writeBytesToRoot(root *os.Root, dst string, data []byte, mode os.FileMode) error {
@@ -767,7 +810,47 @@ func writeBytesToRoot(root *os.Root, dst string, data []byte, mode os.FileMode) 
 	if err := out.Close(); err != nil {
 		return err
 	}
-	return root.Chmod(dst, mode)
+	if err := root.Chmod(dst, mode); err != nil {
+		return err
+	}
+	return recordStageMode(root, dst, mode)
+}
+
+func recordStageMode(root *os.Root, name string, mode os.FileMode) error {
+	name = path.Clean(strings.TrimPrefix(filepath.ToSlash(name), "/"))
+	if name == "." || name == stageMetadataName {
+		return nil
+	}
+	out, err := root.OpenFile(stageMetadataName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("open stage metadata: %w", err)
+	}
+	record := stageModeRecord{Path: name, Mode: int64(mode.Perm())}
+	if err := json.NewEncoder(out).Encode(record); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("write stage metadata: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close stage metadata: %w", err)
+	}
+	return nil
+}
+
+func ensureGuestRuntimeDirs(stageDir string) error {
+	root, err := os.OpenRoot(stageDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	for _, dir := range []string{"proc", "sys", "dev", "dev/pts"} {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create guest runtime dir %s: %w", dir, err)
+		}
+		if err := recordStageMode(root, dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func copyFileOverwrite(src, dst string, mode os.FileMode) error {

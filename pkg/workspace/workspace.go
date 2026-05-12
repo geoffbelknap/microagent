@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"gopkg.in/yaml.v3"
 )
@@ -247,6 +248,8 @@ func HostBackend() string {
 		return vmkit.BackendAppleVF
 	case "linux":
 		return vmkit.BackendFirecracker
+	case "windows":
+		return vmkit.BackendWindowsHyperV
 	default:
 		return ""
 	}
@@ -426,7 +429,7 @@ func GuestInitPathFromExecutable(executable, arch string) string {
 }
 
 func BackendSupportsConsoleInput(backend string) bool {
-	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendFirecracker
+	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendFirecracker || backend == vmkit.BackendWindowsHyperV
 }
 
 func LookupProfile(name string) (Profile, bool) {
@@ -592,18 +595,29 @@ func RuntimeArtifacts(artifacts Artifacts) vmkit.RuntimeArtifacts {
 }
 
 func Mounts(disks []Disk) []rootfs.Mount {
+	return MountsForBackend("", disks)
+}
+
+func MountsForBackend(backend string, disks []Disk) []rootfs.Mount {
 	if len(disks) == 0 {
 		return nil
 	}
 	mounts := make([]rootfs.Mount, 0, len(disks))
 	for idx, disk := range disks {
 		mounts = append(mounts, rootfs.Mount{
-			Device:     VirtioBlockDevice(idx + 1),
+			Device:     BlockDeviceForBackend(backend, idx+1),
 			Mountpoint: disk.Mountpoint,
 			Mode:       disk.Mode,
 		})
 	}
 	return mounts
+}
+
+func BlockDeviceForBackend(backend string, index int) string {
+	if backend == vmkit.BackendWindowsHyperV {
+		return SCSIBlockDevice(index)
+	}
+	return VirtioBlockDevice(index)
 }
 
 func RootfsFiles(files []File) []rootfs.File {
@@ -634,6 +648,21 @@ func VirtioBlockDevice(index int) string {
 		}
 	}
 	return "/dev/vd" + name
+}
+
+func SCSIBlockDevice(index int) string {
+	if index < 0 {
+		index = 0
+	}
+	name := ""
+	for {
+		name = string(rune('a'+(index%26))) + name
+		index = index/26 - 1
+		if index < 0 {
+			break
+		}
+	}
+	return "/dev/sd" + name
 }
 
 func RootfsPortForwards(forwards []vmkit.PortForward) []rootfs.PortForward {
@@ -765,6 +794,8 @@ func Supervisor(opts Options) (vmkit.Supervisor, error) {
 		return vmkit.ExecutableSupervisor{Path: FirecrackerSupervisorPath(opts)}, nil
 	case vmkit.BackendAppleVF:
 		return vmkit.ExecutableSupervisor{Path: opts.SupervisorPath}, nil
+	case vmkit.BackendWindowsHyperV:
+		return windowshyperv.Supervisor{Options: windowshyperv.Options{Name: opts.Name, StateDir: opts.StateDir}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported backend: %s", opts.Backend)
 	}
@@ -818,7 +849,7 @@ func Command(opts Options) string {
 			finalCommand = ShellCommand(opts.ServiceCommand)
 			finalMode = "managed-service"
 		}
-		lines = append(lines, ResetGuestConfigCommand(finalCommand, finalMode, opts.Env, opts.ResultPort, ShellPort(opts), Mounts(opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
+		lines = append(lines, ResetGuestConfigCommand(finalCommand, finalMode, opts.Env, opts.ResultPort, ShellPort(opts), MountsForBackend(opts.Backend, opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
 	}
 	if len(lines) == 0 {
 		return ""

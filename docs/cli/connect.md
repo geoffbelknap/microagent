@@ -16,8 +16,9 @@ the workspace. Typing `exit` closes the current guest shell and returns from
 `connect`; the workspace stays running unless you run a shutdown command such as
 `poweroff`.
 
-`connect` is supported by Apple VF and Firecracker. [`logs`](/cli/logs/)
-remains available for captured serial output.
+`connect` is supported by Apple VF, Firecracker, and experimental
+Windows-HyperV. Windows-HyperV uses Hyper-V sockets rather than WSL or QEMU.
+[`logs`](/cli/logs/) remains available for captured serial output.
 
 The console starts `/bin/sh` by default. Set `--shell <path>` on
 [`create`](/cli/create/) or `shell:` in a workspace spec to use another shell,
@@ -50,9 +51,9 @@ microagent connect research --send "cat /etc/os-release"
 microagent connect research --send "cat /workspace/status; uname -m"
 ```
 
-`connect` waits for the console FIFO and, by default, for a basic shell prompt
-before attaching or writing. If the guest shell is not ready, it exits with an
-error that points to [`logs`](/cli/logs/).
+`connect` waits for the backend console endpoint and, by default, for a basic
+shell prompt before attaching or writing. If the guest shell is not ready, it
+exits with an error that points to [`logs`](/cli/logs/).
 
 The host-level `consoleAvailable` field means the backend supports an
 interactive console on this machine. It is not a guarantee that a specific

@@ -22,14 +22,23 @@ capability report rather than a health check.
   `/dev/net/tun` present, `pasta` available for user-mode networking,
   unprivileged user namespaces enabled, default kernel installed, interactive
   console available.
+- **Windows Hyper-V (experimental):** Windows Host Compute Service available,
+  Hyper-V / Windows Hypervisor Platform support available, HCS access allowed
+  for the current user, HCN/HNS networking available, Hyper-V sockets
+  available, default kernel installed, guest-init available, and HVSock console
+  support available.
 
 On Linux, run `microagent doctor` outside sandboxed agent environments so KVM
 visibility is honest.
+On Windows, run it from the same user account that will start workspaces. HCS
+access usually requires Administrator or membership in the Hyper-V
+Administrators group.
 
 ## Flags
 
 | Flag | Description |
 |---|---|
+| `--backend <name>` | Backend override (`apple-vf`, `firecracker`, or `windows-hyperv`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `doctor`; print structured JSON output |

@@ -63,6 +63,12 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	}
 }
 
+func TestWindowsHyperVSupportsConsoleInput(t *testing.T) {
+	if !BackendSupportsConsoleInput(vmkit.BackendWindowsHyperV) {
+		t.Fatal("windows-hyperv console input support = false")
+	}
+}
+
 func TestShellPortCanBeExplicit(t *testing.T) {
 	opts := Options{Name: "agent-1", ShellPort: 25000}
 	if got := ShellPort(opts); got != 25000 {
@@ -77,16 +83,16 @@ func TestDefaultOptionsUseUserNetworkMode(t *testing.T) {
 	}
 }
 
-func TestDefaultOptionsDoNotSetAppleVFPathForFirecracker(t *testing.T) {
+func TestDefaultOptionsDoNotSetAppleVFPathForNonAppleVF(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("host default backend is apple-vf on darwin")
 	}
 	opts := DefaultOptions()
-	if opts.Backend != vmkit.BackendFirecracker {
-		t.Fatalf("backend = %q, want firecracker", opts.Backend)
+	if opts.Backend == vmkit.BackendAppleVF {
+		t.Fatalf("backend = %q, want non-apple host backend", opts.Backend)
 	}
 	if opts.SupervisorPath != "" {
-		t.Fatalf("SupervisorPath = %q, want empty Firecracker default", opts.SupervisorPath)
+		t.Fatalf("SupervisorPath = %q, want empty non-Apple VF default", opts.SupervisorPath)
 	}
 }
 

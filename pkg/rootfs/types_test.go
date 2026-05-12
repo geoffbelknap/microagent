@@ -79,6 +79,36 @@ func TestNormalizeRequestSetsDefaults(t *testing.T) {
 	if req.SizeMiB != DefaultSizeMiB {
 		t.Fatalf("SizeMiB = %d, want %d", req.SizeMiB, DefaultSizeMiB)
 	}
+	if req.Format != FormatExt4 {
+		t.Fatalf("Format = %q, want %q", req.Format, FormatExt4)
+	}
+}
+
+func TestValidateRequestAcceptsVHDFormat(t *testing.T) {
+	req := BuildRequest{
+		ImageRef:   "ghcr.io/example/agent@sha256:abc123",
+		Platform:   Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath: "/tmp/rootfs.vhd",
+		Format:     FormatVHD,
+	}
+
+	if err := ValidateRequest(req); err != nil {
+		t.Fatalf("ValidateRequest rejected vhd format: %v", err)
+	}
+}
+
+func TestValidateRequestRejectsUnknownFormat(t *testing.T) {
+	req := BuildRequest{
+		ImageRef:   "ghcr.io/example/agent@sha256:abc123",
+		Platform:   Platform{OS: "linux", Architecture: "arm64"},
+		OutputPath: "/tmp/rootfs.raw",
+		Format:     "raw",
+	}
+
+	err := ValidateRequest(req)
+	if err == nil || !strings.Contains(err.Error(), `format must be "ext4" or "vhd"`) {
+		t.Fatalf("ValidateRequest err = %v, want format validation", err)
+	}
 }
 
 func TestValidateFilesRejectsDuplicateDestination(t *testing.T) {

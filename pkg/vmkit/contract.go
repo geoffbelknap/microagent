@@ -41,7 +41,7 @@ type ContractParity struct {
 func NewRuntimeContract() RuntimeContract {
 	return RuntimeContract{
 		Version:  "agent-runtime.v1",
-		Backends: []string{BackendAppleVF, BackendFirecracker},
+		Backends: []string{BackendAppleVF, BackendFirecracker, BackendWindowsHyperV},
 		Commands: []ContractItem{
 			{Name: "prepare", Description: "write backend state/config without booting"},
 			{Name: "start", Description: "start a prepared, halted, stopped, or failed workspace with preserved disk state; quarantined workspaces must be halted, stopped, or killed first"},
@@ -91,7 +91,7 @@ func NewRuntimeContract() RuntimeContract {
 		},
 		Verification: ContractItem{Name: "verification", Description: "image digest, kernel hash, rootfs hash, init hash, and divergence entries"},
 		Parity: ContractParity{
-			Scope: "Firecracker and Apple VF expose the same commands, states, response fields, readiness signals, mediation shape, result channel, and artifact declarations.",
+			Scope: "Firecracker, Apple VF, and Windows Hyper-V expose the same backend-neutral states, response fields, readiness signals, mediation shape, result channel, and artifact declarations.",
 			Rules: []string{
 				"backend-specific mechanics stay behind the supervisor boundary",
 				"public output remains structured and machine-readable",

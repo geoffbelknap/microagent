@@ -38,7 +38,8 @@ microagent start research
 `--memory`, or `--cpus` only when you want a one-start override.
 
 After it's running, open a console with [`connect`](/cli/connect/) on Apple
-VF, or read serial output with [`logs`](/cli/logs/).
+VF, Firecracker, or Windows Hyper-V, or read serial output with
+[`logs`](/cli/logs/).
 
 ## Related
 

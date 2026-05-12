@@ -20,8 +20,10 @@ contains machine-readable mismatch records.
 
 JSON status also includes `readiness`:
 
-- `guestReady` is true after the workspace reaches a started runtime state.
-- `shellReady` is true when a running workspace has console input available.
+- `guestReady` is true when the backend has concrete evidence that the guest
+  reached a started runtime state.
+- `shellReady` is true when console input is available and the configured shell
+  has reached the backend's readiness gate.
 - `resultReady` is true when the guest result file has been delivered.
 
 JSON status includes declared network intent under `network`. When a backend

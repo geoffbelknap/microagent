@@ -14,18 +14,19 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	"gopkg.in/yaml.v3"
@@ -63,6 +64,9 @@ func main() {
 func run(ctx context.Context, args []string, stdout *os.File) error {
 	outputFormat = ""
 	args = parseGlobalFlags(args)
+	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
+		return runWindowsHyperVListener(ctx, args[1:])
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printHelp(stdout)
 		return nil
@@ -173,6 +177,20 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return encodeErr
 	}
 	return err
+}
+
+func runWindowsHyperVListener(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("windows-hyperv-listener", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stateDir := fs.String("state-dir", "", "State directory")
+	name := fs.String("name", "", "Workspace name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *stateDir == "" || *name == "" {
+		return fmt.Errorf("usage: microagent --windows-hyperv-listener --state-dir <dir> --name <name>")
+	}
+	return windowshyperv.RunRuntimeListeners(ctx, windowshyperv.Options{StateDir: *stateDir, Name: *name})
 }
 
 type doctorOptions struct {
@@ -1526,7 +1544,7 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		if *timeoutSeconds < 0 {
 			return fmt.Errorf("connect timeout must not be negative")
 		}
-		conn, err := dialConnectShell(ctx, name, time.Duration(*readyTimeoutSeconds)*time.Second)
+		conn, err := dialConnectShell(ctx, opts.StateDir, name, time.Duration(*readyTimeoutSeconds)*time.Second)
 		if err != nil {
 			return err
 		}
@@ -1546,7 +1564,7 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		return err
 	}
-	conn, err := dialConnectShell(ctx, name, time.Duration(*readyTimeoutSeconds)*time.Second)
+	conn, err := dialConnectShell(ctx, opts.StateDir, name, time.Duration(*readyTimeoutSeconds)*time.Second)
 	if err != nil {
 		return err
 	}
@@ -1578,12 +1596,26 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	return nil
 }
 
-func dialConnectShell(ctx context.Context, name string, timeout time.Duration) (net.Conn, error) {
-	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(workspace.ShellPortForName(name))))
+type shellConnectTarget struct {
+	Network   string
+	Address   string
+	RuntimeID string
+	Port      uint32
+}
+
+func dialConnectShell(ctx context.Context, stateDir, name string, timeout time.Duration) (net.Conn, error) {
+	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: stateDir, Name: name})
+	if err != nil {
+		return nil, err
+	}
+	target, err := connectShellTarget(name, state)
+	if err != nil {
+		return nil, err
+	}
 	if timeout <= 0 {
-		conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", target)
+		conn, err := dialShellTarget(ctx, target)
 		if err != nil {
-			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, target, err)
+			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, targetDescription(target), err)
 		}
 		return conn, nil
 	}
@@ -1591,14 +1623,14 @@ func dialConnectShell(ctx context.Context, name string, timeout time.Duration) (
 	var lastErr error
 	for {
 		dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", target)
+		conn, err := dialShellTarget(dialCtx, target)
 		cancel()
 		if err == nil {
 			return conn, nil
 		}
 		lastErr = err
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, target, lastErr)
+			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, targetDescription(target), lastErr)
 		}
 		select {
 		case <-ctx.Done():
@@ -1606,6 +1638,35 @@ func dialConnectShell(ctx context.Context, name string, timeout time.Duration) (
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func connectShellTarget(name string, state workspaceRuntimeState) (shellConnectTarget, error) {
+	port := uint32(state.Config.ShellPort)
+	if port == 0 {
+		port = uint32(workspace.ShellPortForName(name))
+	}
+	if state.Event.Identity.Backend == vmkit.BackendWindowsHyperV {
+		runtimeID := strings.TrimSpace(state.ComputeSystemRuntimeID)
+		if runtimeID == "" {
+			return shellConnectTarget{}, fmt.Errorf("windows-hyperv connect requires compute system runtime ID in runtime.json")
+		}
+		return shellConnectTarget{Network: "hvsock", RuntimeID: runtimeID, Port: port}, nil
+	}
+	return shellConnectTarget{Network: "tcp", Address: net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), Port: port}, nil
+}
+
+func dialShellTarget(ctx context.Context, target shellConnectTarget) (net.Conn, error) {
+	if target.Network == "hvsock" {
+		return dialWindowsHyperVShell(ctx, target.RuntimeID, target.Port)
+	}
+	return (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
+}
+
+func targetDescription(target shellConnectTarget) string {
+	if target.Network == "hvsock" {
+		return fmt.Sprintf("hvsock:%s:%d", target.RuntimeID, target.Port)
+	}
+	return target.Address
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
@@ -2599,14 +2660,14 @@ func validateWorkspaceFiles(files []workspaceFile, baseDir string) ([]workspaceF
 		if file.Path == "" {
 			return nil, fmt.Errorf("file dst is required for %s", file.SourcePath)
 		}
-		if !filepath.IsAbs(file.Path) {
+		if !path.IsAbs(file.Path) {
 			return nil, fmt.Errorf("file dst must be absolute: %s", file.Path)
 		}
 		if strings.ContainsRune(file.Path, 0) {
 			return nil, fmt.Errorf("file dst contains NUL")
 		}
-		cleanPath := filepath.Clean(file.Path)
-		if cleanPath == string(os.PathSeparator) {
+		cleanPath := path.Clean(file.Path)
+		if cleanPath == "/" {
 			return nil, fmt.Errorf("file dst must name a file: %s", file.Path)
 		}
 		if seen[cleanPath] {
@@ -2667,10 +2728,10 @@ func validateConsoleShell(shellPath string) error {
 	if shellPath == "" {
 		return nil
 	}
-	if !filepath.IsAbs(shellPath) {
+	if !path.IsAbs(shellPath) {
 		return fmt.Errorf("shell must be an absolute guest path")
 	}
-	if filepath.Clean(shellPath) != shellPath {
+	if path.Clean(shellPath) != shellPath {
 		return fmt.Errorf("shell must be a clean absolute guest path")
 	}
 	return nil
@@ -2954,7 +3015,7 @@ func startWorkspaceDetached(opts workspaceOptions, req vmkit.Request) (vmkit.Res
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Stdout = supervisorLog
 	cmd.Stderr = supervisorLog
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = detachedSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return vmkit.Response{}, err
 	}

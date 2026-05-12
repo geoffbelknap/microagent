@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -177,7 +176,7 @@ func supervisedOptions(opts SuperviseOptions) (Options, error) {
 	if err := ValidateRestartPolicy(workspaceOpts.RestartPolicy); err != nil {
 		return Options{}, err
 	}
-	rootfsPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4")
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	if _, err := os.Stat(rootfsPath); err != nil {
 		return Options{}, err
 	}
