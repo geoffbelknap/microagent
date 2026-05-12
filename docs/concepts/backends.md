@@ -16,10 +16,9 @@ talks to a supervisor.
 | `windows-hyperv` | Windows | Experimental Go supervisor boundary for Linux guests through HCS / Hyper-V | supported through Hyper-V sockets | HCS compute systems are created through `vmcompute.dll`; lifecycle state records HCS compute IDs |
 
 Backends expose the same backend-neutral request and response structures, but
-the experimental Windows backend intentionally supports a smaller command
-surface while HCS parity is being built. Firecracker and Apple VF share the
-same executable supervisor-shaped request/response boundary. Windows Hyper-V
-uses the same `vmkit` protocol inside the Go supervisor boundary.
+the host mechanics differ. Firecracker and Apple VF share the same executable
+supervisor-shaped request/response boundary. Windows Hyper-V uses the same
+`vmkit` protocol inside the Go supervisor boundary.
 
 ## Firecracker (Linux)
 
@@ -53,11 +52,12 @@ uses the same `vmkit` protocol inside the Go supervisor boundary.
 - Uses Host Compute Service through `vmcompute.dll`.
 - Consumes VHD root disks at
   `~/.microagent/workspaces/<name>/rootfs.vhd`.
-- Supports `host`, `check`, `run`, `start`, `inspect`, `connect`, `halt`,
-  `quarantine`, `stop`, `kill`, and `delete` experimentally.
+- Supports `host`, `check`, `prepare`, `run`, `start`, `inspect`, `connect`,
+  `halt`, `quarantine`, `stop`, `kill`, and `delete` experimentally.
 - Supports HNS NAT networking and published TCP ports through Hyper-V socket
   bridging.
-- Fails closed for direct supervisor `prepare` and `console`.
+- Fails closed for the direct supervisor `console` command; use
+  [`connect`](/cli/connect/).
 - See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
   details and current limitations.
 

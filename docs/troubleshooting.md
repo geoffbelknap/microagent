@@ -88,8 +88,9 @@ Windows services for Host Network Service and Host Compute Service, then rerun:
 microagent --json doctor --backend windows-hyperv
 ```
 
-For V1, published TCP networking is still unavailable even when HCN/HNS is
-healthy. Mediation and guest-to-host listener targets use Hyper-V sockets.
+Published TCP networking, mediation, and guest-to-host listener targets use
+Hyper-V sockets. If HCN/HNS is unavailable, Windows-HyperV fails closed before
+attaching a network endpoint.
 
 ## Workspace lifecycle
 
