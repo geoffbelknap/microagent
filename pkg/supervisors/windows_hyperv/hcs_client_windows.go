@@ -189,7 +189,7 @@ func (c vmcomputeClient) StartComputeSystem(ctx context.Context, id string) erro
 
 func (c vmcomputeClient) ShutdownComputeSystem(ctx context.Context, id string) error {
 	return c.withComputeSystem(ctx, id, "shutdown", 0, func(handle uintptr) (string, error) {
-		return c.vmcomputeAPI().ShutdownComputeSystem(ctx, handle, "")
+		return c.vmcomputeAPI().ShutdownComputeSystem(ctx, handle, "{}")
 	})
 }
 

@@ -40,12 +40,13 @@ func TestVMComputeClientCreatePassesDocumentAndClosesHandle(t *testing.T) {
 
 func TestVMComputeClientControlCommandsOpenOperateAndClose(t *testing.T) {
 	tests := []struct {
-		name string
-		run  func(context.Context, *vmcomputeClient) error
-		want string
+		name        string
+		run         func(context.Context, *vmcomputeClient) error
+		want        string
+		wantOptions string
 	}{
 		{name: "start", run: func(ctx context.Context, c *vmcomputeClient) error { return c.StartComputeSystem(ctx, "agent-1") }, want: "start"},
-		{name: "shutdown", run: func(ctx context.Context, c *vmcomputeClient) error { return c.ShutdownComputeSystem(ctx, "agent-1") }, want: "shutdown"},
+		{name: "shutdown", run: func(ctx context.Context, c *vmcomputeClient) error { return c.ShutdownComputeSystem(ctx, "agent-1") }, want: "shutdown", wantOptions: "{}"},
 		{name: "kill", run: func(ctx context.Context, c *vmcomputeClient) error { return c.KillComputeSystem(ctx, "agent-1") }, want: "terminate"},
 		{name: "delete", run: func(ctx context.Context, c *vmcomputeClient) error { return c.DeleteComputeSystem(ctx, "agent-1") }, want: "terminate"},
 	}
@@ -63,8 +64,8 @@ func TestVMComputeClientControlCommandsOpenOperateAndClose(t *testing.T) {
 			if len(api.operations) != 1 || api.operations[0] != tt.want {
 				t.Fatalf("operations = %#v, want %q", api.operations, tt.want)
 			}
-			if len(api.operationOptions) != 1 || api.operationOptions[0] != "" {
-				t.Fatalf("operation options = %#v, want empty string", api.operationOptions)
+			if len(api.operationOptions) != 1 || api.operationOptions[0] != tt.wantOptions {
+				t.Fatalf("operation options = %#v, want %q", api.operationOptions, tt.wantOptions)
 			}
 			if len(api.closedHandles) != 1 || api.closedHandles[0] != 77 {
 				t.Fatalf("closed handles = %#v", api.closedHandles)

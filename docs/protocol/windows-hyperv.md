@@ -54,6 +54,7 @@ The current lifecycle surface is:
 |---|---|
 | `host` | supported |
 | `check` | supported |
+| `prepare` | supported experimentally |
 | `run` | supported experimentally |
 | `inspect` | supported |
 | `start` | supported experimentally |
@@ -62,16 +63,17 @@ The current lifecycle surface is:
 | `stop` | supported |
 | `kill` | supported |
 | `delete` | supported |
-| `prepare` | unsupported |
 | `console` | unsupported |
 
 Unsupported commands fail closed with structured `ok: false` responses.
 
-`run` creates an HCS compute system, waits for guest result delivery, records
-backend-neutral runtime state, and returns a stopped event with `result` when
-the guest exits successfully. `start` creates a detached HCS compute system and
-records enough HCS identity in `runtime.json` for later `inspect`, `connect`,
-`halt`, `quarantine`, `stop`, `kill`, and `delete`.
+`prepare` writes the backend-neutral prepared state files for service-style
+`create` flows without creating an HCS compute system. `run` creates an HCS
+compute system, waits for guest result delivery, records backend-neutral
+runtime state, and returns a stopped event with `result` when the guest exits
+successfully. `start` creates a detached HCS compute system and records enough
+HCS identity in `runtime.json` for later `inspect`, `connect`, `halt`,
+`quarantine`, `stop`, `kill`, and `delete`.
 
 ## Networking
 
@@ -129,7 +131,6 @@ exists, `inspect` also returns the backend-neutral `result` object and marks
 - `microagent connect` and `connect --send` use Hyper-V sockets.
 - Mediation and guest-to-host TCP listener targets use Hyper-V socket listener
   helpers.
-- `prepare` is not implemented yet.
 - Direct supervisor `console` is not implemented; use `microagent connect`.
 - Foreground `run` supports the configured result listener by mapping the guest
   AF_VSOCK result port to a Hyper-V socket service and writing the received

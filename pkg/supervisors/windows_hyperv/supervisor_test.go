@@ -172,6 +172,176 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 	}
 }
 
+func TestPrepareCommandWritesPreparedRuntimeStateWithoutCreatingComputeSystem(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv prepare path is windows-only")
+	}
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{}
+	req := vmkit.Request{
+		Command: "prepare",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath:  "C:\\microagent\\Image",
+			RootfsPath:  "C:\\microagent\\rootfs.vhd",
+			StateDir:    stateDir,
+			MemoryMiB:   512,
+			CPUCount:    2,
+			SerialInput: true,
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StatePrepared {
+		t.Fatalf("prepare resp=%#v err=%v", resp, err)
+	}
+	if adapter.creates != 0 || adapter.starts != 0 || adapter.networks != 0 {
+		t.Fatalf("prepare touched HCS adapter: creates=%d starts=%d networks=%d", adapter.creates, adapter.starts, adapter.networks)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Event.State != vmkit.StatePrepared || state.Config.RootfsPath != req.Config.RootfsPath {
+		t.Fatalf("runtime state = %#v", state)
+	}
+	if state.ComputeSystemID != "" || state.ComputeSystemRuntimeID != "" {
+		t.Fatalf("prepared compute IDs = %q %q, want empty", state.ComputeSystemID, state.ComputeSystemRuntimeID)
+	}
+	if state.SerialLogPath != filepath.Join(stateDir, "agent-1", "serial.log") {
+		t.Fatalf("serialLogPath = %q", state.SerialLogPath)
+	}
+	if state.SerialInputPath != filepath.Join(stateDir, "agent-1", "serial.in") {
+		t.Fatalf("serialInputPath = %q", state.SerialInputPath)
+	}
+	if state.Readiness.GuestReady.Ready || state.Readiness.ShellReady.Ready {
+		t.Fatalf("prepared readiness = %#v, want not ready", state.Readiness)
+	}
+}
+
+func TestDeletePreparedWindowsHyperVStateDoesNotDeleteComputeSystem(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	stateDir := t.TempDir()
+	prepareReq := vmkit.Request{
+		Command: "prepare",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransition(prepareReq, vmkit.StatePrepared, "prepared windows-hyperv workspace", ""); err != nil {
+		t.Fatalf("write prepared state: %v", err)
+	}
+	adapter := &fakeAdapter{}
+	deleteReq := prepareReq
+	deleteReq.Command = "delete"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), deleteReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("delete resp=%#v err=%v", resp, err)
+	}
+	if adapter.deletes != 0 || adapter.cleanups != 0 {
+		t.Fatalf("prepared delete touched HCS adapter: deletes=%d cleanups=%d", adapter.deletes, adapter.cleanups)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "agent-1")); !os.IsNotExist(err) {
+		t.Fatalf("runtime dir after prepared delete err=%v, want removed", err)
+	}
+}
+
+func TestDeleteStoppedWindowsHyperVMissingComputeSystemSucceeds(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	stateDir := t.TempDir()
+	startReq := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDs(startReq, vmkit.StateStopped, "windows-hyperv compute system killed", "", "fake", "11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("write stopped state: %v", err)
+	}
+	adapter := &fakeAdapter{deleteErr: fmt.Errorf("windows-hyperv HCS delete open: A virtual machine or container with the specified identifier does not exist.")}
+	deleteReq := startReq
+	deleteReq.Command = "delete"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), deleteReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("delete resp=%#v err=%v", resp, err)
+	}
+	if adapter.deletes != 1 || adapter.deleteID != "fake" {
+		t.Fatalf("deletes=%d deleteID=%q, want one attempted delete", adapter.deletes, adapter.deleteID)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "agent-1")); !os.IsNotExist(err) {
+		t.Fatalf("runtime dir after delete err=%v, want removed", err)
+	}
+}
+
+func TestPreparedWindowsHyperVControlCommandsDoNotTouchComputeSystem(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	tests := []struct {
+		command string
+		state   vmkit.VMState
+	}{
+		{command: "stop", state: vmkit.StateStopped},
+		{command: "halt", state: vmkit.StateHalted},
+		{command: "kill", state: vmkit.StateStopped},
+		{command: "quarantine", state: vmkit.StateQuarantined},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			stateDir := t.TempDir()
+			prepareReq := vmkit.Request{
+				Command: "prepare",
+				Identity: &vmkit.Identity{
+					RequestID: "req-1",
+					RuntimeID: "agent-1",
+					Role:      vmkit.RoleWorkload,
+					Backend:   vmkit.BackendWindowsHyperV,
+				},
+				Config: &vmkit.Config{
+					KernelPath: "C:\\microagent\\Image",
+					RootfsPath: "C:\\microagent\\rootfs.vhd",
+					StateDir:   stateDir,
+				},
+			}
+			if _, err := writeRuntimeTransition(prepareReq, vmkit.StatePrepared, "prepared windows-hyperv workspace", ""); err != nil {
+				t.Fatalf("write prepared state: %v", err)
+			}
+			adapter := &fakeAdapter{}
+			req := prepareReq
+			req.Command = tt.command
+			resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+			if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != tt.state {
+				t.Fatalf("%s resp=%#v err=%v", tt.command, resp, err)
+			}
+			if adapter.shutdowns != 0 || adapter.kills != 0 || adapter.cleanups != 0 {
+				t.Fatalf("%s touched HCS adapter: shutdowns=%d kills=%d cleanups=%d", tt.command, adapter.shutdowns, adapter.kills, adapter.cleanups)
+			}
+		})
+	}
+}
+
 func TestStartCommandRecordsRuntimeNetworkState(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv start path is windows-only")
@@ -860,6 +1030,7 @@ type fakeAdapter struct {
 	waits      int
 	waitID     string
 	startErr   error
+	deleteErr  error
 }
 
 func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
@@ -919,6 +1090,9 @@ func (f *fakeAdapter) Kill(ctx context.Context, id string) error {
 func (f *fakeAdapter) Delete(ctx context.Context, id string) error {
 	f.deletes++
 	f.deleteID = id
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	return nil
 }
 

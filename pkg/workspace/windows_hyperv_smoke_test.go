@@ -168,6 +168,81 @@ func TestWindowsHyperVSmokePublishedPort(t *testing.T) {
 	}
 }
 
+func TestWindowsHyperVSmokeServiceCreateStart(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
+	if imageRef == "" {
+		imageRef = "docker.io/library/busybox:1.36"
+	}
+	guestInitPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_GUESTINIT"))
+	if guestInitPath == "" {
+		guestInitPath = filepath.Join("..", "..", ".build", "dev", "microagent-guestinit-amd64")
+	}
+	if _, err := os.Stat(guestInitPath); err != nil {
+		t.Fatalf("guest init %q: %v", guestInitPath, err)
+	}
+	stateDir, err := os.MkdirTemp("", "microagent-windows-hyperv-service-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("state dir: %s", stateDir)
+	opts := Options{
+		Name:           "windows-hyperv-service",
+		Backend:        vmkit.BackendWindowsHyperV,
+		Architecture:   "amd64",
+		StateDir:       stateDir,
+		KernelPath:     kernelPath,
+		GuestInitPath:  guestInitPath,
+		ImageRef:       imageRef,
+		ServiceCommand: `while true; do sleep 60; done`,
+		Timeout:        2 * time.Minute,
+		Keep:           true,
+		MemoryMiB:      512,
+		CPUCount:       2,
+		Network:        vmkit.NetworkConfig{Mode: "nat"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	t.Cleanup(func() {
+		_, _ = Control(context.Background(), opts, "kill")
+		_, _ = Control(context.Background(), opts, "delete")
+	})
+
+	createResult, err := Create(ctx, opts)
+	if err != nil {
+		t.Fatalf("Create: %v\nresponse=%#v", err, createResult.Response)
+	}
+	if createResult.Response.Event == nil || createResult.Response.Event.State != vmkit.StatePrepared {
+		t.Fatalf("create response = %#v", createResult.Response)
+	}
+	startResult, err := Start(ctx, opts)
+	if err != nil {
+		if data, readErr := os.ReadFile(SerialLogPath(opts.StateDir, opts.Name)); readErr == nil {
+			t.Logf("serial.log:\n%s", string(data))
+		}
+		t.Fatalf("Start: %v\nresponse=%#v", err, startResult.Response)
+	}
+	if startResult.Response.Event == nil || startResult.Response.Event.State != vmkit.StateRunning {
+		t.Fatalf("start response = %#v", startResult.Response)
+	}
+	inspectResp, err := Inspect(ctx, opts)
+	if err != nil || inspectResp.Event == nil || inspectResp.Event.State != vmkit.StateRunning {
+		t.Fatalf("Inspect resp=%#v err=%v", inspectResp, err)
+	}
+	if resp, err := Control(ctx, opts, "stop"); err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("Stop resp=%#v err=%v", resp, err)
+	}
+	if resp, err := Control(ctx, opts, "delete"); err != nil || !resp.OK {
+		t.Fatalf("Delete resp=%#v err=%v", resp, err)
+	}
+}
+
 func freeTCPPort(t *testing.T) uint16 {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

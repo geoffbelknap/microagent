@@ -25,6 +25,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 			return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 		}
 		return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV}, nil
+	case "prepare":
+		return s.prepare(req)
 	case "run":
 		return s.run(ctx, req)
 	case "start":
