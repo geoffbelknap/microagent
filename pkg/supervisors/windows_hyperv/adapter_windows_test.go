@@ -91,6 +91,52 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 	}
 }
 
+func TestBuildComputeSystemDocumentAttachesConfiguredDisks(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Disks: []vmkit.Disk{
+				{Name: "config", Path: "C:\\microagent\\config.vhd", Mountpoint: "/config", Mode: "ro"},
+				{Name: "work", Path: "C:\\microagent\\work.vhd", Mountpoint: "/work", Mode: "rw"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		VirtualMachine struct {
+			Devices struct {
+				Scsi map[string]struct {
+					Attachments map[string]struct {
+						Type     string `json:"Type"`
+						Path     string `json:"Path"`
+						ReadOnly bool   `json:"ReadOnly"`
+					} `json:"Attachments"`
+				} `json:"Scsi"`
+			} `json:"Devices"`
+		} `json:"VirtualMachine"`
+	}
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	attachments := doc.VirtualMachine.Devices.Scsi["0"].Attachments
+	if len(attachments) != 3 {
+		t.Fatalf("attachments = %#v, want rootfs plus two data disks", attachments)
+	}
+	if attachments["0"].Path != "C:\\microagent\\rootfs.vhd" {
+		t.Fatalf("root attachment = %#v", attachments["0"])
+	}
+	if got := attachments["1"]; got.Type != "VirtualDisk" || got.Path != "C:\\microagent\\config.vhd" || !got.ReadOnly {
+		t.Fatalf("config disk attachment = %#v", got)
+	}
+	if got := attachments["2"]; got.Type != "VirtualDisk" || got.Path != "C:\\microagent\\work.vhd" || got.ReadOnly {
+		t.Fatalf("work disk attachment = %#v", got)
+	}
+}
+
 func TestBuildComputeSystemDocumentAddsSerialPipeForResultRuns(t *testing.T) {
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",
@@ -281,7 +327,7 @@ func TestDefaultAdapterCreatePassesDocumentToHCSClient(t *testing.T) {
 	}
 }
 
-func TestDefaultAdapterCreateGrantsVMAccessToRootVHD(t *testing.T) {
+func TestDefaultAdapterCreateGrantsVMAccessToAttachedVHDs(t *testing.T) {
 	client := &fakeHCSClient{
 		handle: computeSystemHandle{
 			ID:        "agent-1",
@@ -293,13 +339,23 @@ func TestDefaultAdapterCreateGrantsVMAccessToRootVHD(t *testing.T) {
 		Config: vmkit.Config{
 			KernelPath: "C:\\microagent\\Image",
 			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Disks: []vmkit.Disk{
+				{Name: "config", Path: "C:\\microagent\\config.vhd", Mountpoint: "/config", Mode: "ro"},
+				{Name: "work", Path: "C:\\microagent\\work.vhd", Mountpoint: "/work", Mode: "rw"},
+			},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.grantVMID != "11111111-1111-1111-1111-111111111111" || client.grantPath != "C:\\microagent\\rootfs.vhd" {
-		t.Fatalf("grant vm access = (%q, %q), want runtime ID and root VHD path", client.grantVMID, client.grantPath)
+	wantPaths := []string{"C:\\microagent\\rootfs.vhd", "C:\\microagent\\config.vhd", "C:\\microagent\\work.vhd"}
+	if len(client.grants) != len(wantPaths) {
+		t.Fatalf("grants = %#v, want paths %#v", client.grants, wantPaths)
+	}
+	for i, want := range wantPaths {
+		if client.grants[i].vmID != "11111111-1111-1111-1111-111111111111" || client.grants[i].path != want {
+			t.Fatalf("grant[%d] = %#v, want runtime ID and path %q", i, client.grants[i], want)
+		}
 	}
 }
 
@@ -307,8 +363,10 @@ type fakeHCSClient struct {
 	createdID string
 	document  []byte
 	handle    computeSystemHandle
-	grantVMID string
-	grantPath string
+	grants    []struct {
+		vmID string
+		path string
+	}
 }
 
 func (f *fakeHCSClient) CreateComputeSystem(ctx context.Context, id string, document []byte) (computeSystemHandle, error) {
@@ -321,8 +379,10 @@ func (f *fakeHCSClient) CreateComputeSystem(ctx context.Context, id string, docu
 }
 
 func (f *fakeHCSClient) GrantVMAccess(ctx context.Context, vmID, path string) error {
-	f.grantVMID = vmID
-	f.grantPath = path
+	f.grants = append(f.grants, struct {
+		vmID string
+		path string
+	}{vmID: vmID, path: path})
 	return nil
 }
 

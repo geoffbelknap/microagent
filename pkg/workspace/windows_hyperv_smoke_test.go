@@ -3,6 +3,7 @@
 package workspace
 
 import (
+	"archive/tar"
 	"context"
 	"io"
 	"net"
@@ -306,6 +307,105 @@ func TestWindowsHyperVSmokeSetupWritesRootfs(t *testing.T) {
 	if result.Response.Result == nil || result.Response.Result.ExitCode != 0 {
 		t.Fatalf("setup result = %#v", result.Response.Result)
 	}
+}
+
+func TestWindowsHyperVSmokeAttachedDiskMounts(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
+	if imageRef == "" {
+		imageRef = "docker.io/library/busybox:1.36"
+	}
+	guestInitPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_GUESTINIT"))
+	if guestInitPath == "" {
+		guestInitPath = filepath.Join("..", "..", ".build", "dev", "microagent-guestinit-amd64")
+	}
+	if _, err := os.Stat(guestInitPath); err != nil {
+		t.Fatalf("guest init %q: %v", guestInitPath, err)
+	}
+	stateDir, err := os.MkdirTemp("", "microagent-windows-hyperv-disk-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundlePath := filepath.Join(stateDir, "bundle.tar")
+	if err := writeTarFile(bundlePath, "input.txt", []byte("WINDOWS_HYPERV_DISK\n")); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("state dir: %s", stateDir)
+	opts := Options{
+		Name:          "windows-hyperv-disk",
+		Backend:       vmkit.BackendWindowsHyperV,
+		Architecture:  "amd64",
+		StateDir:      stateDir,
+		KernelPath:    kernelPath,
+		GuestInitPath: guestInitPath,
+		ImageRef:      imageRef,
+		Disks: []Disk{{
+			Name:       "config",
+			SourcePath: bundlePath,
+			Mountpoint: "/config",
+			Mode:       "ro",
+			Bundle:     true,
+		}},
+		SetupCommands:  []string{`test "$(cat /config/input.txt)" = WINDOWS_HYPERV_DISK`},
+		ServiceCommand: `while true; do sleep 60; done`,
+		Timeout:        2 * time.Minute,
+		Keep:           true,
+		MemoryMiB:      512,
+		CPUCount:       2,
+		Network:        vmkit.NetworkConfig{Mode: "nat"},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	t.Cleanup(func() {
+		_, _ = Control(context.Background(), opts, "kill")
+		_, _ = Control(context.Background(), opts, "delete")
+	})
+
+	result, err := Create(ctx, opts)
+	if err != nil {
+		if data, readErr := os.ReadFile(SerialLogPath(opts.StateDir, opts.Name)); readErr == nil {
+			t.Logf("serial.log:\n%s", string(data))
+		}
+		t.Fatalf("Create: %v\nresponse=%#v", err, result.Response)
+	}
+	if result.Response.Event == nil || result.Response.Event.State != vmkit.StateStopped {
+		t.Fatalf("create disk setup response = %#v", result.Response)
+	}
+	if result.Response.Result == nil || result.Response.Result.ExitCode != 0 {
+		t.Fatalf("disk setup result = %#v", result.Response.Result)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "workspaces", opts.Name, "disks", "config.vhd")); err != nil {
+		t.Fatalf("config.vhd: %v", err)
+	}
+}
+
+func writeTarFile(path, name string, data []byte) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	writer := tar.NewWriter(file)
+	if err := writer.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(data))}); err != nil {
+		_ = writer.Close()
+		_ = file.Close()
+		return err
+	}
+	if _, err := writer.Write(data); err != nil {
+		_ = writer.Close()
+		_ = file.Close()
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func freeTCPPort(t *testing.T) uint16 {

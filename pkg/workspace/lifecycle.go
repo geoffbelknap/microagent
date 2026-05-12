@@ -541,7 +541,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		SizeMiB:        opts.SizeMiB,
 		Env:            opts.Env,
 		Files:          RootfsFiles(opts.Files),
-		Mounts:         Mounts(opts.Disks),
+		Mounts:         MountsForBackend(opts.Backend, opts.Disks),
 		HostForwards:   RootfsPortForwards(opts.Network.PortForwards),
 		AllowMutable:   true,
 		Progress:       opts.Progress,
@@ -555,11 +555,26 @@ func WorkspaceRootfsFormat(backend string) string {
 	return rootfs.FormatExt4
 }
 
+func WorkspaceDiskFormat(backend string) string {
+	return WorkspaceRootfsFormat(backend)
+}
+
 func WorkspaceRootfsFilename(backend string) string {
 	if WorkspaceRootfsFormat(backend) == rootfs.FormatVHD {
 		return "rootfs.vhd"
 	}
 	return "rootfs.ext4"
+}
+
+func WorkspaceDiskFilename(backend, name string) string {
+	if WorkspaceDiskFormat(backend) == rootfs.FormatVHD {
+		return name + ".vhd"
+	}
+	return name + ".ext4"
+}
+
+func WorkspaceDiskPath(stateDir, workspaceName, backend, diskName string) string {
+	return filepath.Join(stateDir, "workspaces", workspaceName, "disks", WorkspaceDiskFilename(backend, diskName))
 }
 
 func WorkspaceRootfsPath(stateDir, name, backend string) string {
@@ -595,10 +610,11 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 		}
 		seenMountpoints[disk.Mountpoint] = true
 		if disk.Bundle {
-			outputPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "disks", disk.Name+".ext4")
+			outputPath := WorkspaceDiskPath(opts.StateDir, opts.Name, opts.Backend, disk.Name)
 			_, err := rootfs.NewBuilder().BuildBundle(ctx, rootfs.BundleRequest{
 				SourcePath: disk.SourcePath,
 				OutputPath: outputPath,
+				Format:     WorkspaceDiskFormat(opts.Backend),
 				StateDir:   filepath.Join(opts.StateDir, "build"),
 				Mke2fsPath: opts.Mke2fsPath,
 				SizeMiB:    64,

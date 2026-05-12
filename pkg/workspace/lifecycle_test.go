@@ -231,6 +231,45 @@ func TestWorkspaceRootfsPathUsesBackendFormat(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDiskPathUsesBackendFormat(t *testing.T) {
+	tests := []struct {
+		name       string
+		backend    string
+		wantSuffix string
+		wantFormat string
+	}{
+		{
+			name:       "firecracker",
+			backend:    vmkit.BackendFirecracker,
+			wantSuffix: filepath.Join("workspaces", "research", "disks", "work.ext4"),
+			wantFormat: rootfs.FormatExt4,
+		},
+		{
+			name:       "apple-vf",
+			backend:    vmkit.BackendAppleVF,
+			wantSuffix: filepath.Join("workspaces", "research", "disks", "work.ext4"),
+			wantFormat: rootfs.FormatExt4,
+		},
+		{
+			name:       "windows-hyperv",
+			backend:    vmkit.BackendWindowsHyperV,
+			wantSuffix: filepath.Join("workspaces", "research", "disks", "work.vhd"),
+			wantFormat: rootfs.FormatVHD,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotPath := WorkspaceDiskPath("/tmp/microagent", "research", tt.backend, "work")
+			if !strings.HasSuffix(gotPath, tt.wantSuffix) {
+				t.Fatalf("WorkspaceDiskPath = %q, want suffix %q", gotPath, tt.wantSuffix)
+			}
+			if got := WorkspaceDiskFormat(tt.backend); got != tt.wantFormat {
+				t.Fatalf("WorkspaceDiskFormat = %q, want %q", got, tt.wantFormat)
+			}
+		})
+	}
+}
+
 func TestBuildRootfsRequestCanUseImageCommandForPreparedWorkspace(t *testing.T) {
 	req := buildRootfsRequest(Options{
 		Name:            "homebridge",
@@ -275,6 +314,30 @@ func TestBuildRootfsRequestCanUseServiceCommandForPreparedWorkspace(t *testing.T
 	}
 	if req.ResultPort != 0 {
 		t.Fatalf("ResultPort = %d, want 0", req.ResultPort)
+	}
+}
+
+func TestBuildRootfsRequestUsesHyperVSCSIDevicesForWindowsDisks(t *testing.T) {
+	req := buildRootfsRequest(Options{
+		Name:            "research",
+		StateDir:        "/tmp/microagent",
+		Backend:         vmkit.BackendWindowsHyperV,
+		ImageRef:        "docker.io/library/ubuntu:24.04",
+		Architecture:    "amd64",
+		SizeMiB:         1024,
+		PrepareForStart: true,
+		ServiceCommand:  "sleep infinity",
+		Disks: []Disk{
+			{Name: "config", Path: "/tmp/config.vhd", Mountpoint: "/config", Mode: "ro"},
+			{Name: "work", Path: "/tmp/work.vhd", Mountpoint: "/work", Mode: "rw"},
+		},
+	}, "/tmp/microagent/workspaces/research/rootfs.vhd")
+
+	if len(req.Mounts) != 2 {
+		t.Fatalf("Mounts = %#v", req.Mounts)
+	}
+	if req.Mounts[0].Device != "/dev/sdb" || req.Mounts[1].Device != "/dev/sdc" {
+		t.Fatalf("mount devices = %#v, want /dev/sdb and /dev/sdc", req.Mounts)
 	}
 }
 

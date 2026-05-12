@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/Microsoft/go-winio"
@@ -55,11 +56,21 @@ func (a defaultAdapter) Create(ctx context.Context, spec computeSystemSpec) (com
 		return computeSystemHandle{}, err
 	}
 	if handle.RuntimeID != "" {
-		if err := client.GrantVMAccess(ctx, handle.RuntimeID, spec.Config.RootfsPath); err != nil {
-			return computeSystemHandle{}, err
+		for _, path := range attachedVHDPaths(spec.Config) {
+			if err := client.GrantVMAccess(ctx, handle.RuntimeID, path); err != nil {
+				return computeSystemHandle{}, err
+			}
 		}
 	}
 	return handle, nil
+}
+
+func attachedVHDPaths(config vmkit.Config) []string {
+	paths := []string{config.RootfsPath}
+	for _, disk := range config.Disks {
+		paths = append(paths, disk.Path)
+	}
+	return paths
 }
 
 func (a defaultAdapter) PrepareNetwork(ctx context.Context, spec computeSystemSpec) (networkAttachment, error) {
@@ -279,6 +290,16 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	if strings.TrimSpace(spec.NetworkEndpointID) != "" {
 		networkAdapters = map[string]networkAdapter{"0": {EndpointID: spec.NetworkEndpointID}}
 	}
+	scsiAttachments := map[string]attachment{
+		"0": {Type: "VirtualDisk", Path: spec.Config.RootfsPath, ReadOnly: false},
+	}
+	for i, disk := range spec.Config.Disks {
+		scsiAttachments[strconv.Itoa(i+1)] = attachment{
+			Type:     "VirtualDisk",
+			Path:     disk.Path,
+			ReadOnly: disk.Mode == "ro",
+		}
+	}
 	doc := computeSystemDocument{
 		Owner:                             "microagent",
 		SchemaVersion:                     versionDocument{Major: 2, Minor: 1},
@@ -295,9 +316,7 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 			},
 			Devices: devices{
 				Scsi: map[string]scsiController{
-					"0": {Attachments: map[string]attachment{
-						"0": {Type: "VirtualDisk", Path: spec.Config.RootfsPath, ReadOnly: false},
-					}},
+					"0": {Attachments: scsiAttachments},
 				},
 				HvSocket: hvSocket{HvSocketConfig: hvSocketConfig{
 					DefaultBindSecurityDescriptor:    "D:P(A;;FA;;;SY)(A;;FA;;;BA)",

@@ -46,6 +46,12 @@ VHD-oriented. Workspace root disks live under:
 The source contents still come from Microagent's OCI/rootfs flow. The Windows
 rootfs builder converts those contents into a fixed VHD with an ext4 payload.
 
+Bundled data disks are also built as fixed VHD ext4 images and attached to the
+same HCS SCSI controller after the root disk. The guest sees the root disk as
+`/dev/sda`, then configured data disks as `/dev/sdb`, `/dev/sdc`, and so on.
+Disk `mode` maps to the HCS attachment's `ReadOnly` flag and the guestinit
+mount mode.
+
 ## Lifecycle
 
 The current lifecycle surface is:
