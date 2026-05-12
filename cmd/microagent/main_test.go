@@ -3178,24 +3178,20 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host supervisor: %v", err)
 	}
-	executable, ok := supervisor.(vmkit.ExecutableSupervisor)
-	if !ok {
-		t.Fatalf("host supervisor = %T, want vmkit.ExecutableSupervisor", supervisor)
-	}
-	if hostBackend() == vmkit.BackendFirecracker && executable.Path != "microagent-firecracker-supervisor" {
-		t.Fatalf("firecracker supervisor path = %q", executable.Path)
-	}
-	if hostBackend() == vmkit.BackendAppleVF && executable.Path != "/tmp/applevf" {
-		t.Fatalf("apple vf supervisor path = %q", executable.Path)
-	}
-
 	if hostBackend() == vmkit.BackendWindowsHyperV {
-		windowsHyperV, err := workspaceSupervisor(workspaceOptions{Backend: vmkit.BackendWindowsHyperV, Name: "research", StateDir: t.TempDir()})
-		if err != nil {
-			t.Fatalf("windows hyper-v supervisor: %v", err)
+		if _, ok := supervisor.(windowshyperv.Supervisor); !ok {
+			t.Fatalf("host supervisor = %T, want windowshyperv.Supervisor", supervisor)
 		}
-		if _, ok := windowsHyperV.(windowshyperv.Supervisor); !ok {
-			t.Fatalf("windows hyper-v supervisor = %T, want windowshyperv.Supervisor", windowsHyperV)
+	} else {
+		executable, ok := supervisor.(vmkit.ExecutableSupervisor)
+		if !ok {
+			t.Fatalf("host supervisor = %T, want vmkit.ExecutableSupervisor", supervisor)
+		}
+		if hostBackend() == vmkit.BackendFirecracker && executable.Path != "microagent-firecracker-supervisor" {
+			t.Fatalf("firecracker supervisor path = %q", executable.Path)
+		}
+		if hostBackend() == vmkit.BackendAppleVF && executable.Path != "/tmp/applevf" {
+			t.Fatalf("apple vf supervisor path = %q", executable.Path)
 		}
 	}
 
