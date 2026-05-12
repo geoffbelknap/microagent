@@ -43,7 +43,7 @@ description: All microagent subcommands at a glance.
 - `--json` — print JSON output; place before the subcommand
 - `--text` — print human-readable output
 - `--output <json|text>` — select output format
-- `--supervisor <path>` — override the active backend supervisor path
+- `--supervisor <path>` — override the installed host backend supervisor path
   (`MICROAGENT_APPLEVF_SUPERVISOR` and
   `MICROAGENT_FIRECRACKER_SUPERVISOR` work too)
 

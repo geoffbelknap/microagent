@@ -26,8 +26,7 @@ recorded runtime PID is preserved in state.
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory |
-| `--backend <name>` | Backend override |
-| `--supervisor <path>` | Override the active backend supervisor path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 
 ## Example
 

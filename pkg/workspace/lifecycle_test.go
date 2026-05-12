@@ -17,7 +17,7 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	opts := Options{
 		Name:           "agency-task",
 		StateDir:       dir,
-		Backend:        vmkit.BackendFirecracker,
+		Backend:        HostBackend(),
 		Profile:        "small",
 		RestartPolicy:  "never",
 		MemoryMiB:      512,
@@ -248,7 +248,7 @@ func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 	opts := Options{
 		Name:          "research",
 		StateDir:      dir,
-		Backend:       vmkit.BackendFirecracker,
+		Backend:       HostBackend(),
 		KernelPath:    kernelPath,
 		GuestInitPath: initPath,
 		Profile:       "small",

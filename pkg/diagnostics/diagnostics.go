@@ -37,6 +37,16 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 	if opts.Arch == "" {
 		opts.Arch = workspace.GuestArch()
 	}
+	if err := workspace.ValidateHostBackend(opts.Backend); err != nil {
+		resp := vmkit.Response{
+			OK:      false,
+			Backend: opts.Backend,
+			Kernel:  kernel.Support(opts.Backend, opts.Arch),
+			Error:   err.Error(),
+		}
+		AugmentHostSupport(&resp, opts)
+		return resp, err
+	}
 	switch opts.Backend {
 	case vmkit.BackendAppleVF:
 		resp, err := vmkit.ExecutableSupervisor{Path: opts.SupervisorPath}.Do(ctx, vmkit.Request{Command: "host"})

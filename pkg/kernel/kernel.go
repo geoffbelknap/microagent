@@ -114,6 +114,9 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if opts.Backend == "" {
 		opts.Backend = workspace.HostBackend()
 	}
+	if err := workspace.ValidateHostBackend(opts.Backend); err != nil {
+		return InstallResult{}, err
+	}
 	if opts.Architecture == "" {
 		opts.Architecture = workspace.GuestArch()
 	}
@@ -141,6 +144,9 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 func Verify(opts VerifyOptions) (VerifyResult, error) {
 	if opts.Backend == "" {
 		opts.Backend = workspace.HostBackend()
+	}
+	if err := workspace.ValidateHostBackend(opts.Backend); err != nil {
+		return VerifyResult{}, err
 	}
 	if opts.Architecture == "" {
 		opts.Architecture = workspace.GuestArch()

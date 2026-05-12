@@ -242,10 +242,29 @@ func DefaultOptions() Options {
 }
 
 func HostBackend() string {
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		return vmkit.BackendAppleVF
+	case "linux":
+		return vmkit.BackendFirecracker
+	default:
+		return ""
 	}
-	return vmkit.BackendFirecracker
+}
+
+func ValidateHostBackend(backend string) error {
+	backend = strings.TrimSpace(backend)
+	hostBackend := HostBackend()
+	if hostBackend == "" {
+		return fmt.Errorf("microagent does not support a backend on %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	if backend == "" {
+		return fmt.Errorf("backend is required; this %s/%s install supports %s", runtime.GOOS, runtime.GOARCH, hostBackend)
+	}
+	if backend != hostBackend {
+		return fmt.Errorf("backend %q is not available in this %s/%s install; supported backend is %q", backend, runtime.GOOS, runtime.GOARCH, hostBackend)
+	}
+	return nil
 }
 
 func GuestArch() string {
@@ -698,6 +717,9 @@ func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, erro
 	if req.Config == nil {
 		return Options{}, fmt.Errorf("config is required")
 	}
+	if err := ValidateHostBackend(req.Identity.Backend); err != nil {
+		return Options{}, err
+	}
 	network := vmkit.NetworkConfig{Mode: DefaultNetworkMode}
 	if req.Config.Network != nil {
 		network = NormalizeNetworkConfig(*req.Config.Network)
@@ -735,6 +757,9 @@ func ConfigDisks(disks []vmkit.Disk) []Disk {
 }
 
 func Supervisor(opts Options) (vmkit.Supervisor, error) {
+	if err := ValidateHostBackend(opts.Backend); err != nil {
+		return nil, err
+	}
 	switch opts.Backend {
 	case vmkit.BackendFirecracker:
 		return vmkit.ExecutableSupervisor{Path: FirecrackerSupervisorPath(opts)}, nil

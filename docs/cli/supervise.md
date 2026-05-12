@@ -28,8 +28,7 @@ The policy comes from `microagent create --restart ...` or `restart:` in
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record |
-| `--supervisor <path>` | Override the active backend supervisor path |
-| `--backend <name>` | Backend override |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--arch <arch>` | Guest architecture |
 | `--kernel <path>` | Kernel path |
 | `--interval <seconds>` | Seconds between state checks |

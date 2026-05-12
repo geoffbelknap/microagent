@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("GO_WANT_FIRECRACKER_SUPERVISOR_HELPER") == "1" {
 		var req vmkit.Request
 		if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
-			_ = json.NewEncoder(os.Stdout).Encode(vmkit.Response{OK: false, Backend: vmkit.BackendFirecracker, Error: err.Error()})
+			_ = json.NewEncoder(os.Stdout).Encode(vmkit.Response{OK: false, Backend: hostBackend(), Error: err.Error()})
 			os.Exit(1)
 		}
 		resp, err := firecrackersupervisor.Supervisor{}.Do(context.Background(), req)
@@ -204,7 +204,7 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 	}
 }
 
-func TestHostCommandReportsFirecrackerDiagnosticsWithoutFailing(t *testing.T) {
+func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 	outputFormat = ""
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
@@ -213,7 +213,7 @@ func TestHostCommandReportsFirecrackerDiagnosticsWithoutFailing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"--json", "host", "--backend", vmkit.BackendFirecracker, "--arch", "amd64"}, stdout)
+	err = run(t.Context(), []string{"--json", "host", "--backend", hostBackend(), "--arch", defaultGuestArch()}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -225,11 +225,29 @@ func TestHostCommandReportsFirecrackerDiagnosticsWithoutFailing(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, `"backend": "firecracker"`) ||
+	if !strings.Contains(text, fmt.Sprintf(`"backend": "%s"`, hostBackend())) ||
 		!strings.Contains(text, `"kernel"`) ||
 		!strings.Contains(text, `"consoleAvailable": true`) ||
 		!strings.Contains(text, `"consoleMode": "interactive"`) {
 		t.Fatalf("host output = %s", data)
+	}
+}
+
+func TestHostCommandRejectsNonHostBackend(t *testing.T) {
+	otherBackend := vmkit.BackendFirecracker
+	if hostBackend() == vmkit.BackendFirecracker {
+		otherBackend = vmkit.BackendAppleVF
+	}
+	stdout, err := os.Create(filepath.Join(t.TempDir(), "stdout.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "host", "--backend", otherBackend}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "is not available in this") {
+		t.Fatalf("run host err = %v, want host-only backend rejection", err)
 	}
 }
 
@@ -530,7 +548,7 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 		"--kernel", "/tmp/kernel",
 		"--rootfs", "/tmp/rootfs.ext4",
 		"--state-dir", "/tmp/state",
-		"--backend", vmkit.BackendFirecracker,
+		"--backend", hostBackend(),
 		"--network", "bridged",
 		"--network-interface", "en0",
 		"--publish", "127.0.0.1:8080:80/tcp",
@@ -825,7 +843,7 @@ func TestStatusReportsVerificationDivergence(t *testing.T) {
 	opts := workspaceOptions{
 		StateDir:      dir,
 		Name:          "research",
-		Backend:       vmkit.BackendFirecracker,
+		Backend:       hostBackend(),
 		KernelPath:    kernelPath,
 		GuestInitPath: initPath,
 		Profile:       "small",
@@ -852,7 +870,7 @@ func TestStatusReportsVerificationDivergence(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: hostBackend()},
 		Config: &vmkit.Config{
 			KernelPath: kernelPath,
 			RootfsPath: rootfsPath,
@@ -872,7 +890,7 @@ func TestStatusReportsVerificationDivergence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -913,7 +931,7 @@ func TestStatusReportsReadinessSignals(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: hostBackend()},
 		Config: &vmkit.Config{
 			KernelPath: filepath.Join(dir, "Image"),
 			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
@@ -930,7 +948,7 @@ func TestStatusReportsReadinessSignals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -961,7 +979,7 @@ func TestRunResultReportsStructuredResult(t *testing.T) {
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: hostBackend()},
 		Config: &vmkit.Config{
 			KernelPath: filepath.Join(dir, "Image"),
 			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
@@ -982,7 +1000,7 @@ func TestRunResultReportsStructuredResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"result", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	err = run(t.Context(), []string{"result", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -1003,7 +1021,7 @@ func TestRunResultReportsStructuredResult(t *testing.T) {
 	if resp.Result.Identity.RuntimeID != "research" || resp.Result.ExitCode != 7 || resp.Result.Stdout != "done\n" || resp.Result.Stderr != "warn\n" {
 		t.Fatalf("result = %#v", resp.Result)
 	}
-	if resp.Result.ResultPath == "" || resp.Result.Backend != vmkit.BackendFirecracker {
+	if resp.Result.ResultPath == "" || resp.Result.Backend != hostBackend() {
 		t.Fatalf("result metadata = %#v", resp.Result)
 	}
 }
@@ -1426,7 +1444,7 @@ files:
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath, "--backend", vmkit.BackendFirecracker})
+	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath, "--backend", hostBackend()})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
@@ -2070,7 +2088,7 @@ func TestStartRejectsQuarantinedWorkspace(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "research",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   hostBackend(),
 		},
 		Config: &vmkit.Config{
 			KernelPath: kernelPath,
@@ -2091,7 +2109,7 @@ func TestStartRejectsQuarantinedWorkspace(t *testing.T) {
 		"start",
 		"research",
 		"--state-dir", dir,
-		"--backend", vmkit.BackendFirecracker,
+		"--backend", hostBackend(),
 		"--kernel", kernelPath,
 	}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
@@ -2212,7 +2230,7 @@ func TestStatusReportsRuntimeNetworkAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: hostBackend()},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
 			RootfsPath: "/tmp/rootfs.ext4",
@@ -2279,7 +2297,7 @@ func TestStatusReportsDeclaredArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: hostBackend()},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
 			RootfsPath: "/tmp/rootfs.ext4",
@@ -2294,7 +2312,7 @@ func TestStatusReportsDeclaredArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -2550,7 +2568,7 @@ func TestStatusReportsMediationReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: hostBackend()},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
 			RootfsPath: "/tmp/rootfs.ext4",
@@ -2566,7 +2584,7 @@ func TestStatusReportsMediationReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -3016,57 +3034,55 @@ func TestCreateDispatchKeepsLowLevelSupervisorCreate(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSupervisorSelectsSymmetricBackends(t *testing.T) {
-	firecracker, err := workspaceSupervisor(workspaceOptions{Backend: vmkit.BackendFirecracker})
+func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
+	supervisor, err := workspaceSupervisor(workspaceOptions{Backend: hostBackend(), SupervisorPath: "/tmp/applevf"})
 	if err != nil {
-		t.Fatalf("firecracker supervisor: %v", err)
+		t.Fatalf("host supervisor: %v", err)
 	}
-	executable, ok := firecracker.(vmkit.ExecutableSupervisor)
+	executable, ok := supervisor.(vmkit.ExecutableSupervisor)
 	if !ok {
-		t.Fatalf("firecracker supervisor = %T, want vmkit.ExecutableSupervisor", firecracker)
+		t.Fatalf("host supervisor = %T, want vmkit.ExecutableSupervisor", supervisor)
 	}
-	if executable.Path != "microagent-firecracker-supervisor" {
+	if hostBackend() == vmkit.BackendFirecracker && executable.Path != "microagent-firecracker-supervisor" {
 		t.Fatalf("firecracker supervisor path = %q", executable.Path)
 	}
-
-	appleVF, err := workspaceSupervisor(workspaceOptions{Backend: vmkit.BackendAppleVF, SupervisorPath: "/tmp/applevf"})
-	if err != nil {
-		t.Fatalf("apple vf supervisor: %v", err)
-	}
-	executable, ok = appleVF.(vmkit.ExecutableSupervisor)
-	if !ok {
-		t.Fatalf("apple vf supervisor = %T, want vmkit.ExecutableSupervisor", appleVF)
-	}
-	if executable.Path != "/tmp/applevf" {
+	if hostBackend() == vmkit.BackendAppleVF && executable.Path != "/tmp/applevf" {
 		t.Fatalf("apple vf supervisor path = %q", executable.Path)
 	}
+
+	otherBackend := vmkit.BackendFirecracker
+	if hostBackend() == vmkit.BackendFirecracker {
+		otherBackend = vmkit.BackendAppleVF
+	}
+	if _, err := workspaceSupervisor(workspaceOptions{Backend: otherBackend}); err == nil {
+		t.Fatalf("workspaceSupervisor(%q) err = nil, want host-only rejection", otherBackend)
+	}
 }
 
-func TestParseWorkspaceOptionsClearsAppleVFDefaultForFirecracker(t *testing.T) {
+func TestParseWorkspaceOptionsUsesHostSupervisorDefault(t *testing.T) {
 	opts, err := parseWorkspaceOptions("run", []string{
-		"--backend", vmkit.BackendFirecracker,
 		"--image", "docker.io/library/busybox:1.36",
 		"--exec", "true",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
-	if opts.SupervisorPath != "" {
-		t.Fatalf("SupervisorPath = %q, want empty Firecracker default", opts.SupervisorPath)
+	want := defaultSupervisorPath(hostBackend())
+	if opts.SupervisorPath != want {
+		t.Fatalf("SupervisorPath = %q, want %q", opts.SupervisorPath, want)
 	}
 }
 
-func TestParseWorkspaceOptionsPreservesExplicitFirecrackerSupervisor(t *testing.T) {
+func TestParseWorkspaceOptionsPreservesExplicitSupervisor(t *testing.T) {
 	opts, err := parseWorkspaceOptions("run", []string{
-		"--backend", vmkit.BackendFirecracker,
-		"--supervisor", "/tmp/microagent-firecracker-supervisor",
+		"--supervisor", "/tmp/microagent-supervisor",
 		"--image", "docker.io/library/busybox:1.36",
 		"--exec", "true",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
-	if opts.SupervisorPath != "/tmp/microagent-firecracker-supervisor" {
+	if opts.SupervisorPath != "/tmp/microagent-supervisor" {
 		t.Fatalf("SupervisorPath = %q", opts.SupervisorPath)
 	}
 }
@@ -4042,7 +4058,7 @@ func TestFirecrackerStatusReadsPreparedState(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "research",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   hostBackend(),
 		},
 		Config: &vmkit.Config{
 			KernelPath: filepath.Join(dir, "Image"),
@@ -4083,7 +4099,7 @@ func testFirecrackerRuntimeState(t *testing.T, dir, name string, state vmkit.VMS
 			RequestID: "req-1",
 			RuntimeID: name,
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   hostBackend(),
 		},
 		Config: &vmkit.Config{
 			KernelPath: filepath.Join(dir, "Image"),

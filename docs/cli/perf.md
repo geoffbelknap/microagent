@@ -34,7 +34,7 @@ host resident set size for the recorded backend process of a running workspace.
 | `--state-dir <dir>` | State directory |
 | `--timeout <seconds>` | Per-iteration timeout |
 | `--mke2fs <path>` | mke2fs binary path |
-| `--supervisor <path>` | Override the active backend supervisor path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 
 ## `footprint` Flags
 

@@ -3,9 +3,10 @@ title: Backends
 description: One backend per host OS. Same lifecycle surface, different mechanics.
 ---
 
-microagent uses one backend per host OS. Most users can let `microagent`
-choose the host backend automatically; `--backend` is mainly for callers that
-need to construct lower-level requests directly.
+microagent installs with one backend for the host OS: Firecracker on Linux,
+Apple VF on macOS. The CLI does not fall back to a cross-host default. If a
+request names a backend that does not match the installed host OS, microagent
+fails before it builds a rootfs or talks to a supervisor.
 
 | Backend | Host OS | Supervisor | `connect` | Process model |
 |---|---|---|---|---|
@@ -44,5 +45,5 @@ executable supervisor-shaped request/response boundary.
 
 ## Selecting a host
 
-`microagent doctor` reports the active backend, the binary it found,
+`microagent doctor` reports the installed host backend, the binary it found,
 KVM/VF availability, and the default kernel status.

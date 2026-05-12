@@ -26,7 +26,7 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
 | `--cpus <n>` | CPU count override for this start |
-| `--supervisor <path>` | Override the active backend supervisor path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 
 ## Example
 

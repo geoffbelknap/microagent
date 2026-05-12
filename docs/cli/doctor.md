@@ -4,10 +4,10 @@ description: Check that the host can run microagent.
 ---
 
 ```text
-microagent doctor [--backend <name>] [--arch <arch>] [--supervisor <path>]
+microagent doctor [--arch <arch>] [--supervisor <path>]
 ```
 
-`doctor` reports host support for the active backend and the default kernel
+`doctor` reports host support for the installed host backend and the default kernel
 status. Run it first when something isn't working.
 
 Use [`host`](/cli/host/) when you want the same information as an inspectable
@@ -30,9 +30,8 @@ visibility is honest.
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend override (`apple-vf` or `firecracker`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
-| `--supervisor <path>` | Override the Apple VF supervisor path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `doctor`; print structured JSON output |
 
 ## Example

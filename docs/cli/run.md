@@ -37,7 +37,7 @@ VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
 | `--timeout <seconds>` | Maximum wall-clock time before kill |
 | `--keep` | Keep state after the command exits |
 | `--mke2fs <path>` | mke2fs binary path |
-| `--supervisor <path>` | Override the active backend supervisor path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 
 ## Image references
 

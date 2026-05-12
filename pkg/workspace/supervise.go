@@ -125,6 +125,9 @@ func supervisedOptions(opts SuperviseOptions) (Options, error) {
 	if opts.Backend == "" {
 		opts.Backend = HostBackend()
 	}
+	if err := ValidateHostBackend(opts.Backend); err != nil {
+		return Options{}, err
+	}
 	if opts.Architecture == "" {
 		opts.Architecture = GuestArch()
 	}

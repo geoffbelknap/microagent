@@ -41,7 +41,7 @@ first.
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
 | `--mke2fs <path>` | mke2fs binary path |
-| `--supervisor <path>` | Override the active backend supervisor path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--dry-run` | Validate config without creating |
 | `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
 

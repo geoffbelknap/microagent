@@ -19,7 +19,6 @@ func TestInstallFromPathAndVerify(t *testing.T) {
 	installed, err := Install(t.Context(), InstallOptions{
 		FromPath:     source,
 		OutputPath:   target,
-		Backend:      vmkit.BackendFirecracker,
 		Architecture: "amd64",
 	})
 	if err != nil {

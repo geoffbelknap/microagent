@@ -14,7 +14,7 @@ escape hatch.
 
 ## `install`
 
-With no options, install the default kernel for the active backend and
+With no options, install the default kernel for the installed host backend and
 architecture.
 
 | Flag | Description |
@@ -23,7 +23,6 @@ architecture.
 | `--from <path>` | Local kernel path |
 | `--sha256 <sum>` | Expected SHA-256 |
 | `--out <path>` | Output path (defaults to the writable kernel path for the host) |
-| `--backend <name>` | Backend override |
 | `--arch <arch>` | Guest architecture |
 
 ## `verify`

@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 ```text
-microagent host [--backend <name>] [--arch <arch>] [--supervisor <path>]
+microagent host [--arch <arch>] [--supervisor <path>]
 ```
 
 `host` reports what `microagent` can see on the current machine: backend,
@@ -16,9 +16,8 @@ vsock support, and console mode. It uses the same probes as
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend override (`apple-vf` or `firecracker`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
-| `--supervisor <path>` | Override the active backend supervisor path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `host`; print structured JSON output |
 
 ## Console modes

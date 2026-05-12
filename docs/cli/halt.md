@@ -20,7 +20,7 @@ preserved disk.
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record |
-| `--supervisor <path>` | Override the active backend supervisor path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 
 ## Example
 

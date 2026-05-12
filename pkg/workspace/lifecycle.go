@@ -868,6 +868,9 @@ func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 	if opts.Backend == "" {
 		opts.Backend = defaults.Backend
 	}
+	if err := ValidateHostBackend(opts.Backend); err != nil {
+		return err
+	}
 	if opts.Architecture == "" {
 		opts.Architecture = defaults.Architecture
 	}

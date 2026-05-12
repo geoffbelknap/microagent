@@ -142,13 +142,18 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "create" && shouldUseHighLevelCreate(args[1:]) {
 		return runHighLevelCreate(ctx, args[1:], stdout)
 	}
-	supervisorPath := defaultAppleVFSupervisorPath()
+	backend := hostBackend()
+	supervisorPath := defaultSupervisorPath(backend)
+	supervisorExplicit := hasFlagValue(args[1:], "supervisor")
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	req, err := requestForCommand(args[0], fs, reorderFlagArgs(args[1:]))
 	if err != nil {
 		return err
+	}
+	if !supervisorExplicit && req.Identity != nil {
+		supervisorPath = defaultSupervisorPath(req.Identity.Backend)
 	}
 	opts, err := workspaceOptionsFromRequest(req, supervisorPath)
 	if err != nil {
@@ -186,20 +191,24 @@ func runContract(args []string, stdout *os.File) error {
 
 func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	opts := doctorOptions{
-		Backend:        hostBackend(),
-		Arch:           defaultGuestArch(),
-		SupervisorPath: defaultAppleVFSupervisorPath(),
+		Backend: hostBackend(),
+		Arch:    defaultGuestArch(),
 	}
+	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	supervisorExplicit := hasFlagValue(args, "supervisor")
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected doctor argument: %s", fs.Arg(0))
+	}
+	if !supervisorExplicit {
+		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
 	resp, err := doctorResponse(ctx, opts)
 	if encodeErr := writeDoctorResponse(stdout, resp); encodeErr != nil {
@@ -210,20 +219,27 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 
 func runHost(ctx context.Context, args []string, stdout *os.File) error {
 	opts := doctorOptions{
-		Backend:        hostBackend(),
-		Arch:           defaultGuestArch(),
-		SupervisorPath: defaultAppleVFSupervisorPath(),
+		Backend: hostBackend(),
+		Arch:    defaultGuestArch(),
 	}
+	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	supervisorExplicit := hasFlagValue(args, "supervisor")
 	fs := flag.NewFlagSet("host", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected host argument: %s", fs.Arg(0))
+	}
+	if !supervisorExplicit {
+		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	}
+	if err := workspace.ValidateHostBackend(opts.Backend); err != nil {
+		return err
 	}
 	resp, _ := doctorResponse(ctx, opts)
 	return writeDoctorResponse(stdout, resp)
@@ -289,7 +305,7 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	fs.StringVar(&opts.FromPath, "from", "", "Local kernel path")
 	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
 	fs.StringVar(&opts.OutputPath, "out", opts.OutputPath, "Output path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
@@ -316,7 +332,7 @@ func runKernelVerify(args []string, stdout *os.File) error {
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.Path, "path", opts.Path, "Kernel path")
 	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
@@ -434,7 +450,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.StringVar(&identity.RuntimeID, "name", "", "Workspace name")
 	fs.StringVar(&identity.RequestID, "request-id", "", "Request ID")
 	fs.StringVar((*string)(&identity.Role), "role", string(vmkit.RoleWorkload), "Role")
-	fs.StringVar(&identity.Backend, "backend", hostBackend(), "Backend override")
+	fs.StringVar(&identity.Backend, "backend", hostBackend(), "Backend identity (internal; must match this install)")
 	fs.StringVar(&config.KernelPath, "kernel", "", "Linux kernel path")
 	fs.StringVar(&config.RootfsPath, "rootfs", "", "Rootfs image path")
 	fs.StringVar(&config.StateDir, "state-dir", "", "State directory")
@@ -1282,8 +1298,9 @@ func runNetwork(args []string, stdout *os.File) error {
 
 func runWorkspaceStateCommand(ctx context.Context, command string, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	supervisorPath := defaultAppleVFSupervisorPath()
 	backend := hostBackend()
+	supervisorPath := defaultSupervisorPath(backend)
+	supervisorExplicit := hasFlagValue(args, "supervisor")
 	name := ""
 	yes := false
 	force := false
@@ -1291,7 +1308,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
-	fs.StringVar(&backend, "backend", backend, "Backend override")
+	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&name, "name", "", "Workspace name")
 	fs.StringVar(&name, "id", "", "Workspace ID")
 	if command == "delete" {
@@ -1302,6 +1319,9 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	}
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
+	}
+	if !supervisorExplicit {
+		supervisorPath = defaultSupervisorPath(backend)
 	}
 	if fs.NArg() > 1 {
 		return fmt.Errorf("usage: microagent %s <name> [--state-dir <dir>]", command)
@@ -1579,6 +1599,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	profileExplicit := hasFlagValue(args, "profile")
 	memoryExplicit := hasFlagValue(args, "memory")
 	cpusExplicit := hasFlagValue(args, "cpus")
+	supervisorExplicit := hasFlagValue(args, "supervisor")
 	backend := hostBackend()
 	opts := workspaceOptions{
 		Backend:        backend,
@@ -1586,7 +1607,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		Profile:        defaultWorkspaceProfile,
 		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
 		StateDir:       defaultStateDir(),
-		SupervisorPath: defaultAppleVFSupervisorPath(),
+		SupervisorPath: defaultSupervisorPath(backend),
 		ResultPort:     workspace.DefaultResultPort,
 		SerialInput:    backendSupportsConsoleInput(backend),
 	}
@@ -1600,7 +1621,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
@@ -1609,6 +1630,9 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
+	}
+	if !supervisorExplicit {
+		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if fs.NArg() != 1 {
@@ -1680,25 +1704,29 @@ type superviseResult = workspace.SuperviseResult
 
 func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	opts := superviseOptions{
-		StateDir:       defaultStateDir(),
-		SupervisorPath: defaultAppleVFSupervisorPath(),
-		Backend:        hostBackend(),
-		Architecture:   defaultGuestArch(),
-		Interval:       time.Second,
+		StateDir:     defaultStateDir(),
+		Backend:      hostBackend(),
+		Architecture: defaultGuestArch(),
+		Interval:     time.Second,
 	}
+	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	opts.KernelExplicit = hasFlagValue(args, "kernel")
+	supervisorExplicit := hasFlagValue(args, "supervisor")
 	fs := flag.NewFlagSet("supervise", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	intervalSeconds := fs.Int("interval", int(opts.Interval.Seconds()), "Seconds between state checks")
 	fs.IntVar(&opts.MaxRestarts, "max-restarts", 0, "Maximum restarts; 0 means unlimited")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
+	}
+	if !supervisorExplicit {
+		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent supervise <name> [--state-dir <dir>]")
@@ -1881,7 +1909,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&bundleFlags, "bundle", "Build and attach bundle name=tar:/mount:ro|rw")
 	var outputFlags multiFlag
 	fs.Var(&outputFlags, "output", "Declare output artifact name=/guest/path")
-	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend override")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")

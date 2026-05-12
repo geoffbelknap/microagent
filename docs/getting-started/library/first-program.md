@@ -68,7 +68,7 @@ The returned `Result.Result.Stdout` contains the guest's stdout;
 
 ## What just happened
 
-1. The library resolved the default backend, architecture, and kernel for
+1. The library resolved the installed host backend, architecture, and kernel for
    this host.
 2. It pulled the OCI image and converted it to an ext4 rootfs.
 3. It booted the VM, ran your command, captured stdout/stderr/exit code into
