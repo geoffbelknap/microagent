@@ -228,10 +228,14 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
+	wantConsoleMode := "interactive"
+	if hostBackend() == vmkit.BackendWindowsHyperV {
+		wantConsoleMode = "hvsock"
+	}
 	if !strings.Contains(text, fmt.Sprintf(`"backend": "%s"`, hostBackend())) ||
 		!strings.Contains(text, `"kernel"`) ||
 		!strings.Contains(text, `"consoleAvailable": true`) ||
-		!strings.Contains(text, `"consoleMode": "interactive"`) {
+		!strings.Contains(text, fmt.Sprintf(`"consoleMode": "%s"`, wantConsoleMode)) {
 		t.Fatalf("host output = %s", data)
 	}
 }
@@ -347,9 +351,7 @@ func TestDefaultFirecrackerPathResolvesHomebrewSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(homebrewBin, "microagent")
-	if err := os.Symlink(executable, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinkOrSkip(t, executable, link)
 	if got := defaultFirecrackerPathFromExecutable(link); got != resolvedFirecracker {
 		t.Fatalf("defaultFirecrackerPathFromExecutable() = %q, want %q", got, resolvedFirecracker)
 	}
@@ -384,9 +386,7 @@ func TestDefaultPackagedKernelPathResolvesHomebrewSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(homebrewBin, "microagent")
-	if err := os.Symlink(executable, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinkOrSkip(t, executable, link)
 	if got := defaultPackagedKernelPathFromExecutable(link, "apple-vf", "arm64"); got != resolvedKernel {
 		t.Fatalf("defaultPackagedKernelPathFromExecutable() = %q, want %q", got, resolvedKernel)
 	}
@@ -396,6 +396,16 @@ func TestFirstOutputLine(t *testing.T) {
 	output := "\nFirecracker v1.15.1\n\n2026-05-02T17:44:08 [anonymous-instance:main] Firecracker exiting successfully. exit_code=0\n"
 	if got := firstOutputLine(output); got != "Firecracker v1.15.1" {
 		t.Fatalf("firstOutputLine() = %q", got)
+	}
+}
+
+func symlinkOrSkip(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Symlink(oldname, newname); err != nil {
+		if runtime.GOOS == "windows" && strings.Contains(err.Error(), "A required privilege is not held by the client") {
+			t.Skipf("symlink privilege unavailable on windows: %v", err)
+		}
+		t.Fatal(err)
 	}
 }
 
@@ -1030,11 +1040,15 @@ func TestRunResultReportsStructuredResult(t *testing.T) {
 }
 
 func TestRunDeleteRemovesSavedWorkspaceState(t *testing.T) {
+	if hostBackend() == vmkit.BackendWindowsHyperV {
+		t.Skip("windows-hyperv delete uses in-process HCS state, not executable supervisor fixtures")
+	}
 	dir := t.TempDir()
 	supervisor := filepath.Join(dir, "supervisor")
+	backend := hostBackend()
 	script := `#!/usr/bin/env bash
 set -euo pipefail
-python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "apple-vf", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
+python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == "delete"; print(json.dumps({"ok": True, "backend": "` + backend + `", "event": {"identity": req["identity"], "state": "stopped", "detail": "deleted", "observedAt": "2026-05-02T00:00:00Z"}}))'
 `
 	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
@@ -1052,6 +1066,7 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); assert req["command"] == 
 	}
 	err = run(t.Context(), []string{
 		"delete",
+		"--backend", backend,
 		"--supervisor", supervisor,
 		"--state-dir", dir,
 		"--yes",
@@ -2014,7 +2029,8 @@ func TestStartUsesPersistedWorkspaceResources(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", vmkit.BackendAppleVF)
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kernelPath := filepath.Join(dir, "Image")
@@ -2080,7 +2096,8 @@ func TestStartRejectsQuarantinedWorkspace(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", vmkit.BackendAppleVF)
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kernelPath := filepath.Join(dir, "Image")
@@ -2750,7 +2767,8 @@ func TestSuperviseWorkspaceOptionsUseManifestPolicy(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", vmkit.BackendAppleVF)
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kernelPath := filepath.Join(dir, "Image")
@@ -2790,7 +2808,8 @@ func TestSuperviseWorkspaceSkipsNeverPolicy(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "workspaces", "research", "rootfs.ext4"), []byte("rootfs"), 0o644); err != nil {
+	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", hostBackend())
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	kernelPath := filepath.Join(dir, "Image")
@@ -3135,6 +3154,34 @@ func TestRunCPCommand(t *testing.T) {
 
 func fakeDebugFS(t *testing.T, dir string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		path := filepath.Join(dir, "debugfs.cmd")
+		script := `@echo off
+setlocal EnableDelayedExpansion
+set "log=` + filepath.Join(dir, "debugfs.log") + `"
+set "line=%*"
+set "line=!line:"=!"
+set "line=!line: =|!"
+>>"%log%" echo !line!
+:args
+if "%~1"=="" goto done_args
+if "%~1"=="-R" (
+  set "cmd=%~2"
+  set "target="
+  for %%P in (!cmd!) do set "target=%%~P"
+  if "!cmd:~0,5!"=="dump " (
+    >"!target!" <nul set /p "=fake-dump"
+  )
+)
+shift
+goto args
+:done_args
+`
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
 	path := filepath.Join(dir, "debugfs")
 	script := `#!/usr/bin/env bash
 set -euo pipefail
@@ -3667,9 +3714,7 @@ func TestDefaultGuestInitPathResolvesHomebrewSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(homebrewBin, "microagent")
-	if err := os.Symlink(executable, link); err != nil {
-		t.Fatal(err)
-	}
+	symlinkOrSkip(t, executable, link)
 	if got := defaultGuestInitPathFromExecutable(link, "arm64"); got != resolvedGuestInit {
 		t.Fatalf("defaultGuestInitPathFromExecutable() = %q, want %q", got, resolvedGuestInit)
 	}
@@ -4401,8 +4446,8 @@ func TestParseWorkspaceOptionsAcceptsPositionalName(t *testing.T) {
 }
 
 func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4447,8 +4492,8 @@ func TestFirecrackerStopTerminatesRecordedPID(t *testing.T) {
 }
 
 func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4493,8 +4538,8 @@ func TestFirecrackerHaltRecordsHaltedState(t *testing.T) {
 }
 
 func TestFirecrackerQuarantinePreservesRecordedPID(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4539,8 +4584,8 @@ func TestFirecrackerQuarantinePreservesRecordedPID(t *testing.T) {
 }
 
 func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4582,8 +4627,8 @@ func TestFirecrackerKillTerminatesRecordedPID(t *testing.T) {
 }
 
 func TestFirecrackerDeleteStopsRunningPIDWithYes(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := testFirecrackerRuntimeState(t, dir, "agent-1", vmkit.StateRunning, 0)
@@ -4624,8 +4669,8 @@ func TestFirecrackerDeleteStopsRunningPIDWithYes(t *testing.T) {
 }
 
 func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	kernel := filepath.Join(dir, "Image")
@@ -4685,8 +4730,8 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 }
 
 func TestFirecrackerStatusReadsPreparedState(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin uses Apple VF")
+	if runtime.GOOS != "linux" {
+		t.Skip("firecracker supervisor lifecycle tests require linux")
 	}
 	dir := t.TempDir()
 	req := vmkit.Request{
