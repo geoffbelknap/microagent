@@ -13,7 +13,7 @@ https://github.com/homebridge/homebridge/wiki/Install-Homebridge-on-Debian-or-Ub
 
 | File | Role |
 |---|---|
-| `microagent.yaml` | Workspace recipe: base image, setup file, service, resources, and port forward. |
+| `microagent.yaml` | Workspace recipe: base image, setup file, service, resources, user-mode networking, and port forward. |
 | `setup.sh` | Guest setup script that installs the Homebridge apt package. |
 | `start.sh` | Foreground service wrapper copied into the guest. |
 
@@ -46,6 +46,9 @@ To inspect the guest:
 - The Debian/Ubuntu package's `/usr/local/bin/hb-service` wrapper expects
   `systemd`. The recipe runs the underlying Homebridge UI service helper in the
   foreground instead, so `microagent-init` can supervise it directly.
+- On Linux Firecracker hosts the recipe uses `network.mode: user`, which keeps
+  the normal Homebrew install path unprivileged while still allowing outbound
+  traffic and the `8581` TCP forward.
 - Homebridge writes logs to `/var/lib/homebridge/homebridge.log`, which is the
   path the Homebridge UI expects for its native log viewer.
 - Bonjour/mDNS discovery is not expected to work through Apple VF NAT.

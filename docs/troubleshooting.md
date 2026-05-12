@@ -159,7 +159,7 @@ Fixes:
 - Create a bridge if you don't have one: `sudo ip link add br0 type bridge && sudo ip link set br0 up`.
 - Run as root, or launch `microagent` from a wrapper that gives the supervisor process `CAP_NET_ADMIN` in its effective, permitted, and inheritable sets. A plain `setcap` on the supervisor binary is not enough on every distro because Firecracker also needs to inherit the capability.
 
-If neither prerequisite is reachable in your environment, use `--network user` (no privileges needed) or `--network nat`.
+If neither prerequisite is reachable in your environment, use `--network user` for unprivileged outbound networking or `--network isolated` when the guest does not need network access.
 
 ### Firecracker `nat` guest can't reach the internet
 

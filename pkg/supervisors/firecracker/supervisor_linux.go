@@ -1379,7 +1379,7 @@ func ensureNetAdminInheritable() error {
 		hasCapability(caps.Inheritable, unix.CAP_NET_ADMIN) {
 		return nil
 	}
-	return fmt.Errorf("firecracker nat and bridged networking require CAP_NET_ADMIN in the supervisor effective, permitted, and inheritable capability sets so Firecracker can inherit it; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, or use --network isolated if outbound network is not needed")
+	return fmt.Errorf("firecracker nat and bridged networking require CAP_NET_ADMIN in the supervisor effective, permitted, and inheritable capability sets so Firecracker can inherit it; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, use --network user for unprivileged outbound networking, or use --network isolated if outbound network is not needed")
 }
 
 func hasCapability(caps uint64, capability int) bool {
@@ -1392,7 +1392,7 @@ func hasCapability(caps uint64, capability int) bool {
 func networkPrivilegeError(action string, err error) error {
 	text := strings.ToLower(err.Error())
 	if errors.Is(err, syscall.EPERM) || strings.Contains(text, "operation not permitted") || strings.Contains(text, "permission denied") {
-		return fmt.Errorf("%s: firecracker nat and bridged networking require CAP_NET_ADMIN to create TAP devices, configure NAT, and let Firecracker attach the TAP; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, or use --network isolated if outbound network is not needed: %w", action, err)
+		return fmt.Errorf("%s: firecracker nat and bridged networking require CAP_NET_ADMIN to create TAP devices, configure NAT, and let Firecracker attach the TAP; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, use --network user for unprivileged outbound networking, or use --network isolated if outbound network is not needed: %w", action, err)
 	}
 	return fmt.Errorf("%s: %w", action, err)
 }

@@ -9,7 +9,7 @@ resources:
   sizeMiB: 4096
 
 network:
-  mode: nat
+  mode: user
   forwards:
     - hostPort: 8581
       guestPort: 8581
