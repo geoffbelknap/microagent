@@ -64,6 +64,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return startProcess(ctx, opts, req, false)
 	case "start":
 		return startProcess(context.Background(), opts, req, true)
+	case "apply":
+		return applyWorkspaceConfig(opts, req)
 	case "inspect":
 		return inspectWorkspace(opts)
 	case "halt":
@@ -91,7 +93,7 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 
 func validateFirecrackerRequest(req vmkit.Request) error {
 	switch req.Command {
-	case "check", "prepare", "start", "run", "console":
+	case "check", "prepare", "start", "run", "console", "apply":
 		return validateFirecrackerConfig(req.Config)
 	default:
 		return nil
@@ -726,6 +728,72 @@ func needsVsock(config *vmkit.Config) bool {
 
 func hasPortForwards(config *vmkit.Config) bool {
 	return config != nil && config.Network != nil && len(config.Network.PortForwards) != 0
+}
+
+func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, error) {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+	}
+	if state.Event.State != vmkit.StateRunning {
+		err := fmt.Errorf("firecracker apply only live-reloads running workspaces")
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+	}
+	if !sameGuestPortForwardShape(networkPortForwards(state.Config.Network), networkPortForwards(req.Config.Network)) {
+		err := fmt.Errorf("firecracker apply can only live-reload host bind changes for existing port forwards; stop and start the workspace for port, guest port, protocol, or network mode changes")
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+	}
+	if state.PortForwardPID != 0 {
+		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
+		state.PortForwardPID = 0
+	}
+	state.Config.Network = req.Config.Network
+	runtimeReq := runtimeStateRequest(req, state)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+	}
+	if hasPortForwards(req.Config) {
+		pid, err := startPortForwarderProcess(opts)
+		if err != nil {
+			_ = writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, err.Error())
+			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		}
+		state.PortForwardPID = pid
+		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, pid, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+			_ = signalProcessGroup(pid, syscall.SIGTERM)
+			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		}
+	}
+	return responseFromRuntimeState(opts, state), nil
+}
+
+func networkPortForwards(network *vmkit.NetworkConfig) []vmkit.PortForward {
+	if network == nil {
+		return nil
+	}
+	return network.PortForwards
+}
+
+func sameGuestPortForwardShape(oldForwards, newForwards []vmkit.PortForward) bool {
+	if len(oldForwards) != len(newForwards) {
+		return false
+	}
+	for i := range oldForwards {
+		oldForward := oldForwards[i]
+		newForward := newForwards[i]
+		oldProtocol := strings.TrimSpace(oldForward.Protocol)
+		if oldProtocol == "" {
+			oldProtocol = "tcp"
+		}
+		newProtocol := strings.TrimSpace(newForward.Protocol)
+		if newProtocol == "" {
+			newProtocol = "tcp"
+		}
+		if oldProtocol != newProtocol || oldForward.HostPort != newForward.HostPort || oldForward.GuestPort != newForward.GuestPort {
+			return false
+		}
+	}
+	return true
 }
 
 func hasVsockListeners(config *vmkit.Config) bool {

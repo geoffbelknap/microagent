@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -103,6 +104,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "create" && wantsHelp(args[1:]) {
 		printCreateHelp(stdout)
 		return nil
+	}
+	if args[0] == "apply" {
+		return runApply(ctx, args[1:], stdout)
 	}
 	if args[0] == "clone" {
 		return runClone(args[1:], stdout)
@@ -511,6 +515,15 @@ type workspaceArtifacts = workspace.Artifacts
 type workspaceManifest = workspace.Manifest
 
 type workspaceResult = workspace.Result
+
+type applyResult struct {
+	Workspace string          `json:"workspace"`
+	State     string          `json:"state,omitempty"`
+	Applied   []string        `json:"applied,omitempty"`
+	Reloaded  bool            `json:"reloaded,omitempty"`
+	Network   networkSpec     `json:"network,omitempty"`
+	Response  *vmkit.Response `json:"response,omitempty"`
+}
 
 type copyResult = workspace.CopyResult
 
@@ -1849,6 +1862,171 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		return encodeErr
 	}
 	return err
+}
+
+func runApply(ctx context.Context, args []string, stdout *os.File) error {
+	opts := workspaceOptions{
+		Backend:      hostBackend(),
+		Architecture: defaultGuestArch(),
+		StateDir:     defaultStateDir(),
+	}
+	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	supervisorExplicit := hasFlagValue(args, "supervisor")
+	specPath := ""
+	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&specPath, "file", "", "Workspace spec file")
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
+	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected apply argument: %s", fs.Arg(0))
+	}
+	if strings.TrimSpace(specPath) == "" {
+		return fmt.Errorf("apply requires --file path")
+	}
+	if !supervisorExplicit {
+		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	}
+	spec, err := readWorkspaceSpec(specPath)
+	if err != nil {
+		return err
+	}
+	name := strings.TrimSpace(spec.Name)
+	if name == "" {
+		return fmt.Errorf("apply spec requires name")
+	}
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	opts.Name = name
+	manifest, err := readWorkspaceManifest(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	next := manifest
+	var applied []string
+	if spec.Restart != "" {
+		restart := normalizeRestartPolicy(spec.Restart)
+		if err := validateRestartPolicy(restart); err != nil {
+			return err
+		}
+		if restart != normalizeRestartPolicy(manifest.Restart) {
+			next.Restart = restart
+			applied = append(applied, "restart")
+		}
+	}
+	if spec.Network.Mode != "" || spec.Network.Interface != "" || len(spec.Network.PortForwards) != 0 || len(spec.Network.DNS) != 0 || len(spec.Network.Routes) != 0 || spec.Network.IP != "" || spec.Network.Subnet != "" || spec.Network.Gateway != "" {
+		network := normalizeNetworkConfig(networkConfigFromSpec(spec.Network))
+		if err := vmkit.ValidateNetworkConfig(network); err != nil {
+			return err
+		}
+		networkSpec := networkSpecFromConfig(network)
+		if !reflect.DeepEqual(networkSpec, manifest.Network) {
+			next.Network = networkSpec
+			applied = append(applied, "network")
+		}
+	}
+	if len(applied) == 0 {
+		state, _, _ := workspace.LatestStartState(opts.StateDir, name)
+		return writeApplyResult(stdout, applyResult{Workspace: name, State: string(state), Network: next.Network})
+	}
+	state, _, err := workspace.LatestStartState(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	if state == vmkit.StateRunning && containsString(applied, "network") {
+		if opts.Backend != vmkit.BackendFirecracker {
+			return fmt.Errorf("live network apply is only supported by the Firecracker backend; stop and start %s to apply this change", name)
+		}
+		oldNetwork := networkConfigFromSpec(manifest.Network)
+		newNetwork := networkConfigFromSpec(next.Network)
+		if !livePortForwardHostOnlyChange(oldNetwork, newNetwork) {
+			return fmt.Errorf("live network apply only supports host bind changes for existing port forwards; stop and start %s to apply this change", name)
+		}
+	}
+	result := applyResult{Workspace: name, State: string(state), Applied: applied, Network: next.Network}
+	if state == vmkit.StateRunning && containsString(applied, "network") {
+		applyOpts := workspaceOptionsFromManifest(opts, next)
+		rootfsPath := filepath.Join(opts.StateDir, "workspaces", name, "rootfs.ext4")
+		resp, err := dispatchWorkspaceRequest(ctx, applyOpts, workspaceRequest(applyOpts, "apply", rootfsPath))
+		result.Reloaded = resp.OK
+		result.Response = &resp
+		if err == nil {
+			err = writeWorkspaceManifestFile(opts.StateDir, name, next)
+		}
+		if encodeErr := writeApplyResult(stdout, result); encodeErr != nil {
+			return encodeErr
+		}
+		return err
+	}
+	if err := writeWorkspaceManifestFile(opts.StateDir, name, next); err != nil {
+		return err
+	}
+	return writeApplyResult(stdout, result)
+}
+
+func workspaceOptionsFromManifest(base workspaceOptions, manifest workspaceManifest) workspaceOptions {
+	opts := base
+	opts.Profile = firstNonEmpty(manifest.Profile, defaultWorkspaceProfile)
+	opts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
+	opts.Network = normalizeNetworkConfig(networkConfigFromSpec(manifest.Network))
+	if manifest.Resources.MemoryMiB != 0 {
+		opts.MemoryMiB = manifest.Resources.MemoryMiB
+	}
+	if manifest.Resources.CPUCount != 0 {
+		opts.CPUCount = manifest.Resources.CPUCount
+	}
+	if manifest.Resources.SizeMiB != 0 {
+		opts.SizeMiB = manifest.Resources.SizeMiB
+	}
+	opts.ServiceCommand = manifest.Service
+	opts.ConsoleShell = manifest.ConsoleShell
+	opts.Hostname = manifest.Hostname
+	opts.Mediation = manifest.Mediation
+	opts.Disks = manifest.Disks
+	opts.Outputs = manifest.Artifacts.Egress
+	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	opts.ResultPort = workspace.DefaultResultPort
+	opts.Timeout = workspace.DefaultTimeout
+	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
+	return opts
+}
+
+func livePortForwardHostOnlyChange(oldNetwork, newNetwork vmkit.NetworkConfig) bool {
+	oldNetwork = normalizeNetworkConfig(oldNetwork)
+	newNetwork = normalizeNetworkConfig(newNetwork)
+	if oldNetwork.Mode != newNetwork.Mode || oldNetwork.Interface != newNetwork.Interface || !reflect.DeepEqual(oldNetwork.DNS, newNetwork.DNS) || !reflect.DeepEqual(oldNetwork.Routes, newNetwork.Routes) || oldNetwork.IP != newNetwork.IP || oldNetwork.Subnet != newNetwork.Subnet || oldNetwork.Gateway != newNetwork.Gateway {
+		return false
+	}
+	if len(oldNetwork.PortForwards) != len(newNetwork.PortForwards) {
+		return false
+	}
+	for i := range oldNetwork.PortForwards {
+		oldForward := oldNetwork.PortForwards[i]
+		newForward := newNetwork.PortForwards[i]
+		if oldForward.Protocol != newForward.Protocol || oldForward.HostPort != newForward.HostPort || oldForward.GuestPort != newForward.GuestPort {
+			return false
+		}
+	}
+	return true
+}
+
+func writeWorkspaceManifestFile(stateDir, name string, manifest workspaceManifest) error {
+	return writeJSONFile(filepath.Join(stateDir, "workspaces", name, "workspace.json"), manifest)
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 type stateCommandOptions struct {
@@ -3620,6 +3798,40 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 		}
 	}
 	if result.Response.Error != "" {
+		fmt.Fprintf(stdout, "Error: %s\n", result.Response.Error)
+	}
+	return nil
+}
+
+func writeApplyResult(stdout *os.File, result applyResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	if result.State != "" {
+		fmt.Fprintf(stdout, "State: %s\n", result.State)
+	}
+	if len(result.Applied) != 0 {
+		fmt.Fprintf(stdout, "Applied: %s\n", strings.Join(result.Applied, ", "))
+	}
+	if result.Network.Mode != "" {
+		fmt.Fprintf(stdout, "Network: %s\n", result.Network.Mode)
+	}
+	for _, forward := range result.Network.PortForwards {
+		host := strings.TrimSpace(forward.Host)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		protocol := strings.TrimSpace(forward.Protocol)
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		fmt.Fprintf(stdout, "Forward: %s:%d -> %d/%s\n", host, forward.HostPort, forward.GuestPort, protocol)
+	}
+	if result.Reloaded {
+		fmt.Fprintln(stdout, "Reloaded: port forwards")
+	}
+	if result.Response != nil && result.Response.Error != "" {
 		fmt.Fprintf(stdout, "Error: %s\n", result.Response.Error)
 	}
 	return nil
@@ -5741,6 +5953,7 @@ func printHelp(stdout *os.File) {
 Commands:
   run                  Run a command
   create               Create a workspace
+  apply                Apply supported workspace spec changes
   clone                Clone a stopped workspace
   cp                   Copy files into or out of a stopped workspace
   artifacts            List or retrieve declared workspace artifacts

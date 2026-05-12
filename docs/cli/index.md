@@ -7,6 +7,7 @@ description: All microagent subcommands at a glance.
 |---|---|
 | [`run`](/cli/run/) | Boot an image and run a command, then tear down |
 | [`create`](/cli/create/) | Create a named, persistent workspace |
+| [`apply`](/cli/apply/) | Apply supported workspace spec changes without rebuilding |
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
 | [`artifacts`](/cli/artifacts/) | List and retrieve declared workspace artifacts |

@@ -238,7 +238,7 @@ func ValidateRequest(req Request) error {
 	switch req.Command {
 	case "host":
 		return nil
-	case "check", "prepare", "start", "run", "console":
+	case "check", "prepare", "start", "run", "console", "apply":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}

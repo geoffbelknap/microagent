@@ -2216,6 +2216,125 @@ func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
 	}
 }
 
+func TestApplyUpdatesStoppedWorkspaceNetwork(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "homebridge",
+		Profile:       "small",
+		RestartPolicy: "always",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Network: vmkit.NetworkConfig{
+			Mode:         "user",
+			PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: 8581, GuestPort: 8581}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(dir, "homebridge.yaml")
+	spec := []byte(`name: homebridge
+network:
+  mode: user
+  forwards:
+    - host: 0.0.0.0
+      hostPort: 8581
+      guestPort: 8581
+      protocol: tcp
+`)
+	if err := os.WriteFile(specPath, spec, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "apply.out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"apply", "--file", specPath, "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	manifest, err := readWorkspaceManifest(dir, "homebridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Network.PortForwards[0].Host; got != "0.0.0.0" {
+		t.Fatalf("forward host = %q, want 0.0.0.0", got)
+	}
+}
+
+func TestApplyRejectsLiveNonHostNetworkChange(t *testing.T) {
+	dir := t.TempDir()
+	originalNetwork := vmkit.NetworkConfig{
+		Mode:         "user",
+		PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: 8581, GuestPort: 8581}},
+	}
+	if err := writeWorkspaceManifest(workspaceOptions{
+		StateDir:      dir,
+		Name:          "homebridge",
+		Profile:       "small",
+		RestartPolicy: "always",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Network:       originalNetwork,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "homebridge",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			Network:    &originalNetwork,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "homebridge"}, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(dir, "homebridge.yaml")
+	spec := []byte(`name: homebridge
+network:
+  mode: user
+  forwards:
+    - host: 0.0.0.0
+      hostPort: 8581
+      guestPort: 8582
+      protocol: tcp
+`)
+	if err := os.WriteFile(specPath, spec, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := os.Create(filepath.Join(dir, "apply.out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"apply", "--file", specPath, "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "host bind changes") {
+		t.Fatalf("err = %v, want host-bind-only rejection", err)
+	}
+	manifest, err := readWorkspaceManifest(dir, "homebridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Network.PortForwards[0].GuestPort; got != 8581 {
+		t.Fatalf("guest port = %d, want unchanged 8581", got)
+	}
+}
+
 func TestStatusReportsRuntimeNetworkAssignment(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
