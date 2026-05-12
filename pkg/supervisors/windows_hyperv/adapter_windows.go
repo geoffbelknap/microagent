@@ -267,7 +267,7 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 			ConnectSecurityDescriptor: "D:P(A;;FA;;;WD)",
 		}
 	}
-	kernelCmdLine := "root=/dev/sda ro rootwait init=/sbin/microagent-init initcall_blacklist=virtio_vsock_init pci=off"
+	kernelCmdLine := "root=/dev/sda rw rootwait init=/sbin/microagent-init initcall_blacklist=virtio_vsock_init pci=off"
 	comPorts := map[string]comPort(nil)
 	if hasResultListener(spec) {
 		kernelCmdLine += " 8250_core.nr_uarts=1 8250_core.skip_txen_test=1 console=ttyS0,115200"
@@ -296,7 +296,7 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 			Devices: devices{
 				Scsi: map[string]scsiController{
 					"0": {Attachments: map[string]attachment{
-						"0": {Type: "VirtualDisk", Path: spec.Config.RootfsPath, ReadOnly: true},
+						"0": {Type: "VirtualDisk", Path: spec.Config.RootfsPath, ReadOnly: false},
 					}},
 				},
 				HvSocket: hvSocket{HvSocketConfig: hvSocketConfig{

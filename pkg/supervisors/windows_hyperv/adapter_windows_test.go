@@ -74,7 +74,7 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 		t.Fatalf("kernel path = %q", doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelFilePath)
 	}
 	cmdline := doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelCmdLine
-	for _, want := range []string{"root=/dev/sda", "init=/sbin/microagent-init", "initcall_blacklist=virtio_vsock_init"} {
+	for _, want := range []string{"root=/dev/sda", "rw", "init=/sbin/microagent-init", "initcall_blacklist=virtio_vsock_init"} {
 		if !strings.Contains(cmdline, want) {
 			t.Fatalf("kernel cmdline %q missing %q", cmdline, want)
 		}
@@ -83,7 +83,7 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 		t.Fatalf("unexpected com ports without result listener: %#v", doc.VirtualMachine.Devices.ComPorts)
 	}
 	attachment := doc.VirtualMachine.Devices.Scsi["0"].Attachments["0"]
-	if attachment.Type != "VirtualDisk" || attachment.Path != "C:\\microagent\\rootfs.vhd" || !attachment.ReadOnly {
+	if attachment.Type != "VirtualDisk" || attachment.Path != "C:\\microagent\\rootfs.vhd" || attachment.ReadOnly {
 		t.Fatalf("root attachment = %#v", attachment)
 	}
 	if doc.VirtualMachine.ComputeTopology.Memory.SizeInMB != 768 || doc.VirtualMachine.ComputeTopology.Processor.Count != 3 {
