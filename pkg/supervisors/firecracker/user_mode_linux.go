@@ -68,8 +68,7 @@ func startUserNetworkProcess(ctx context.Context, opts Options, req vmkit.Reques
 }
 
 func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
-	innerReq := req
-	innerReq.Command = "run"
+	innerReq := detachedUserNetworkRequest(req)
 	cmd, err := newUserNetworkCommand(ctx, opts, innerReq)
 	if err != nil {
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
@@ -199,6 +198,17 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 			return failedResponse(req, ctx.Err().Error()), ctx.Err()
 		}
 	}
+}
+
+func detachedUserNetworkRequest(req vmkit.Request) vmkit.Request {
+	innerReq := req
+	innerReq.Command = "run"
+	if innerReq.Config != nil {
+		config := *innerReq.Config
+		config.TimeoutSeconds = 0
+		innerReq.Config = &config
+	}
+	return innerReq
 }
 
 func newUserNetworkCommand(ctx context.Context, opts Options, req vmkit.Request) (*exec.Cmd, error) {

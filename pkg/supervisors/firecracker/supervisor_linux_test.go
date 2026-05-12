@@ -595,6 +595,29 @@ func TestFirecrackerSysProcAttrAddsAmbientNetAdminOnlyForNetworkedVMs(t *testing
 	}
 }
 
+func TestDetachedUserNetworkRequestClearsRunTimeout(t *testing.T) {
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "research",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{TimeoutSeconds: 300},
+	}
+	inner := detachedUserNetworkRequest(req)
+	if inner.Command != "run" {
+		t.Fatalf("command = %q, want run", inner.Command)
+	}
+	if inner.Config == nil || inner.Config.TimeoutSeconds != 0 {
+		t.Fatalf("timeout = %#v, want cleared", inner.Config)
+	}
+	if req.Config.TimeoutSeconds != 300 {
+		t.Fatalf("original request timeout mutated to %d", req.Config.TimeoutSeconds)
+	}
+}
+
 func containsExpr[T expr.Any](exprs []expr.Any) bool {
 	for _, candidate := range exprs {
 		if _, ok := candidate.(T); ok {
