@@ -264,6 +264,50 @@ expect_failure rootfs-invalid-ref "parse OCI image ref" \
   "$CLI" rootfs build --image "bad ref@sha256:abc" --arch "$ARCH" --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-invalid-ref.ext4" --state-dir "$STATE_DIR/rootfs-invalid-ref" --size-mib 96
 expect_failure rootfs-unsupported-platform "fetch OCI image\\|platform\\|manifest\\|architecture" \
   "$CLI" rootfs build --image "$IMAGE" --arch definitely-unsupported --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-unsupported-platform.ext4" --state-dir "$STATE_DIR/rootfs-unsupported-platform" --size-mib 96
+
+ROOTFS_REFRESH_CACHE="$STATE_DIR/rootfs-refresh-cache"
+env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
+  "$CLI" rootfs build \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --init "$GUEST_INIT" \
+  --out "$STATE_DIR/rootfs-refresh-seed.ext4" \
+  --state-dir "$STATE_DIR/rootfs-refresh-seed" \
+  --size-mib 96 >"$STATE_DIR/rootfs-refresh-seed.json"
+test -e "$STATE_DIR/rootfs-refresh-seed.ext4"
+find "$ROOTFS_REFRESH_CACHE" -name metadata.json -print -quit >"$STATE_DIR/rootfs-refresh-metadata-path.txt"
+ROOTFS_REFRESH_METADATA="$(cat "$STATE_DIR/rootfs-refresh-metadata-path.txt")"
+test -n "$ROOTFS_REFRESH_METADATA"
+printf '{not-json\n' >"$ROOTFS_REFRESH_METADATA"
+expect_failure rootfs-corrupt-base-cache "parse rootfs base cache metadata\\|invalid" \
+  env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
+  "$CLI" rootfs build \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --init "$GUEST_INIT" \
+  --out "$STATE_DIR/rootfs-corrupt-base-cache.ext4" \
+  --state-dir "$STATE_DIR/rootfs-corrupt-base-cache" \
+  --size-mib 96
+env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" MICROAGENT_ROOTFS_BASE_CACHE_REFRESH=1 \
+  "$CLI" rootfs build \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --init "$GUEST_INIT" \
+  --out "$STATE_DIR/rootfs-refresh-recovered.ext4" \
+  --state-dir "$STATE_DIR/rootfs-refresh-recovered" \
+  --size-mib 96 >"$STATE_DIR/rootfs-refresh-recovered.json"
+test -e "$STATE_DIR/rootfs-refresh-recovered.ext4"
+expect_failure rootfs-bad-mke2fs "build ext4 rootfs\\|mke2fs\\|no such file" \
+  env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
+  "$CLI" rootfs build \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --init "$GUEST_INIT" \
+  --out "$STATE_DIR/rootfs-bad-mke2fs.ext4" \
+  --state-dir "$STATE_DIR/rootfs-bad-mke2fs" \
+  --mke2fs "$STATE_DIR/not-mke2fs" \
+  --size-mib 96
+
 expect_failure images-pull-missing-ref "usage: microagent images pull" \
   "$CLI" images pull --state-dir "$STATE_DIR"
 expect_failure images-pull-invalid-ref "parse OCI image ref" \
@@ -274,6 +318,31 @@ expect_failure images-tag-missing-source "source image is required" \
   "$CLI" images tag "" local/microagent:test --state-dir "$STATE_DIR"
 expect_failure images-tag-missing-target "target image is required" \
   "$CLI" images tag "$IMAGE" "" --state-dir "$STATE_DIR"
+mkdir -p "$STATE_DIR/missing-image-cache/images"
+python3 - "$STATE_DIR/missing-image-cache/images/index.json" "$IMAGE" "$ARCH" <<'PY'
+import json
+import sys
+import time
+
+path, image, arch = sys.argv[1:4]
+record = {
+    "image_ref": image,
+    "resolved_ref": image,
+    "digest": image.rsplit("@", 1)[-1] if "@" in image else "",
+    "platform": {"os": "linux", "architecture": arch},
+    "output_path": "/tmp/microagent-missing-rootfs-cache-entry.ext4",
+    "size_bytes": 1,
+    "last_used_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+}
+with open(path, "w", encoding="utf-8") as f:
+    json.dump({"images": [record]}, f, indent=2, sort_keys=True)
+    f.write("\n")
+PY
+"$CLI" images prune --state-dir "$STATE_DIR/missing-image-cache" >"$STATE_DIR/images-prune-missing-rootfs.json"
+assert_json "$STATE_DIR/images-prune-missing-rootfs.json" "len(data.get('removed') or []) == 1 and len(data.get('kept') or []) == 0"
+printf '{not-json\n' >"$STATE_DIR/missing-image-cache/images/index.json"
+expect_failure images-corrupt-index "invalid\\|json" \
+  "$CLI" images list --state-dir "$STATE_DIR/missing-image-cache"
 
 "$CLI" --json create high-dry-run \
   --dry-run \
