@@ -134,6 +134,7 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 				return failedResponse(req, err.Error()), err
 			}
 			if state.Event.State == vmkit.StateRunning {
+				runtimePID := userNetworkRuntimePID(opts, cmd)
 				vsockListenerPID := state.VsockListenerPID
 				if hasVsockListeners(req.Config) && vsockListenerPID == 0 {
 					pid, err := startVsockListenerProcess(opts)
@@ -146,7 +147,7 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 					}
 					vsockListenerPID = pid
 					runtimeReq := runtimeStateRequest(req, state)
-					if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, state.PortForwardPID, vsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+					if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, runtimePID, state.PortForwardPID, vsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
 						_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
 						_ = cmd.Process.Kill()
 						_ = cmd.Process.Release()
@@ -168,11 +169,21 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 						return failedResponse(req, err.Error()), err
 					}
 					runtimeReq := runtimeStateRequest(req, state)
-					if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, portForwardPID, vsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+					if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, runtimePID, portForwardPID, vsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
 						_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 						if vsockListenerPID != 0 {
 							_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
 						}
+						_ = cmd.Process.Kill()
+						_ = cmd.Process.Release()
+						cleanupUserNetworkProcess(opts)
+						return vmkit.Response{}, err
+					}
+					state.PortForwardPID = portForwardPID
+				}
+				if state.PID != runtimePID {
+					runtimeReq := runtimeStateRequest(req, state)
+					if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, runtimePID, state.PortForwardPID, vsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
 						_ = cmd.Process.Kill()
 						_ = cmd.Process.Release()
 						cleanupUserNetworkProcess(opts)
@@ -305,6 +316,16 @@ func userNetworkPastaPID() int {
 		return 0
 	}
 	return pid
+}
+
+func userNetworkRuntimePID(opts Options, cmd *exec.Cmd) int {
+	if pid := readPIDFile(userNetworkPIDPath(opts)); pid > 0 {
+		return pid
+	}
+	if cmd != nil && cmd.Process != nil {
+		return cmd.Process.Pid
+	}
+	return 0
 }
 
 func cleanupUserNetworkProcess(opts Options) {

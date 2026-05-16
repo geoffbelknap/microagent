@@ -795,6 +795,27 @@ func TestUserNetworkDisableRunTimeoutEnvOnlyDisablesRunTimeout(t *testing.T) {
 	}
 }
 
+func TestUserNetworkRuntimePIDPrefersHostPastaPIDFile(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Dir(userNetworkPIDPath(opts)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userNetworkPIDPath(opts), []byte("4242\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if got := userNetworkRuntimePID(opts, cmd); got != 4242 {
+		t.Fatalf("userNetworkRuntimePID = %d, want host pasta pid", got)
+	}
+}
+
 func containsExpr[T expr.Any](exprs []expr.Any) bool {
 	for _, candidate := range exprs {
 		if _, ok := candidate.(T); ok {
