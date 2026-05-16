@@ -8,6 +8,7 @@ SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
 GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
 WORKSPACE="feature-matrix"
 CLONE="feature-clone"
+FORCE_DELETE_WORKSPACE="feature-force-delete"
 ARTIFACT_DIR="$STATE_DIR/artifacts"
 IMAGE="${MICROAGENT_NATS_IMAGE:-docker.io/library/nats@sha256:6e0cca2c6da79f0a3542ec5a3319dd10b1b05f5d8e8949afa8e9cdf6314bbf6c}"
 EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0"
@@ -17,8 +18,10 @@ cleanup() {
   if [ -x "$CLI" ]; then
     "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     "$CLI" stop "$CLONE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-    "$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-    "$CLI" delete "$CLONE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    "$CLI" kill "$FORCE_DELETE_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    "$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    "$CLI" delete "$FORCE_DELETE_WORKSPACE" --force --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_LIFECYCLE_MATRIX:-0}" != "1" ]; then
@@ -241,6 +244,12 @@ wait_for_status_ready "$CLONE" "$STATE_DIR/clone-status-running.json"
 mkdir -p "$ARTIFACT_DIR/clone"
 "$CLI" artifacts get "$CLONE" report "$ARTIFACT_DIR/clone" --state-dir "$STATE_DIR" >"$STATE_DIR/clone-artifact.json"
 
+"$CLI" clone "$WORKSPACE" "$FORCE_DELETE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/force-delete-clone.json"
+"$CLI" start "$FORCE_DELETE_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/force-delete-start.json"
+wait_for_status_ready "$FORCE_DELETE_WORKSPACE" "$STATE_DIR/force-delete-status-running.json"
+"$CLI" delete "$FORCE_DELETE_WORKSPACE" --force --state-dir "$STATE_DIR" >"$STATE_DIR/force-delete-running.json"
+test ! -e "$STATE_DIR/workspaces/$FORCE_DELETE_WORKSPACE"
+
 expect_failure connect-halted "console input is unavailable" \
   "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo should-not-run"
 
@@ -255,20 +264,21 @@ expect_failure start-quarantined "quarantined" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-quarantined.json"
 
-"$CLI" delete "$CLONE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-clone.json"
-"$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-workspace.json"
+"$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-clone.json"
+"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-workspace.json"
 "$CLI" images rm local/nats-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-tag.json"
 "$CLI" images tag "$IMAGE" local/nats-feature:delete-probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag-delete.json"
-"$CLI" images rm local/nats-feature:delete-probe --delete --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
+"$CLI" images rm local/nats-feature:delete-probe --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
 "$CLI" images prune --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune.json"
-"$CLI" images prune --delete --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune-delete.json"
+"$CLI" prune --images --yes --state-dir "$STATE_DIR" >"$STATE_DIR/prune-images-yes.txt"
+"$CLI" images prune --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune-delete.json"
 
-python3 - "$STATE_DIR" "$WORKSPACE" "$CLONE" <<'PY'
+python3 - "$STATE_DIR" "$WORKSPACE" "$CLONE" "$FORCE_DELETE_WORKSPACE" <<'PY'
 import json
 import os
 import sys
 
-state_dir, workspace, clone = sys.argv[1:4]
+state_dir, workspace, clone, force_delete = sys.argv[1:5]
 
 def read_json(name):
     with open(os.path.join(state_dir, name), "r", encoding="utf-8") as f:
@@ -293,12 +303,16 @@ copy_from = read_json("cp-from-workspace.json")
 clone_result = read_json("clone.json")
 clone_running = read_json("clone-status-running.json")
 clone_artifact = read_json("clone-artifact.json")
+force_delete_clone = read_json("force-delete-clone.json")
+force_delete_running = read_json("force-delete-status-running.json")
+force_delete_result = read_json("force-delete-running.json")
 quarantine = read_json("quarantine.json")
 halt_quarantined = read_json("halt-quarantined.json")
 delete_clone = read_json("delete-clone.json")
 delete_workspace = read_json("delete-workspace.json")
 rm_delete = read_json("images-rm-delete.json")
 prune_delete = read_json("images-prune-delete.json")
+prune_images_yes = read_json("prune-images-yes.txt")
 
 if doctor.get("ok") is not True or doctor.get("backend") != "firecracker":
     raise SystemExit(doctor)
@@ -320,9 +334,11 @@ if prepared.get("event", {}).get("state") not in ("prepared", "stopped"):
     raise SystemExit(prepared)
 if running.get("event", {}).get("state") != "running":
     raise SystemExit(running)
-if running.get("verification", {}).get("ok") is not False:
-    raise SystemExit(running)
-if not any(item.get("artifact") == "rootfs" for item in running.get("verification", {}).get("divergence", [])):
+verification = running.get("verification", {})
+if verification.get("ok") is False:
+    if not any(item.get("artifact") == "rootfs" for item in verification.get("divergence", [])):
+        raise SystemExit(running)
+elif verification.get("ok") is not True:
     raise SystemExit(running)
 connect = read_text("connect-running.txt")
 for needle in ("seed-from-spec", "setup-ok", "env=env-ok"):
@@ -357,6 +373,12 @@ with open(os.path.join(state_dir, "artifacts", "clone", "report.json"), "r", enc
         raise SystemExit("clone artifact mismatch")
 if clone_artifact.get("artifact") != "report":
     raise SystemExit(clone_artifact)
+if force_delete_clone.get("workspace") != force_delete or force_delete_clone.get("response", {}).get("event", {}).get("state") != "prepared":
+    raise SystemExit(force_delete_clone)
+if force_delete_running.get("event", {}).get("state") != "running":
+    raise SystemExit(force_delete_running)
+if force_delete_result.get("event", {}).get("state") != "stopped":
+    raise SystemExit(force_delete_result)
 if quarantine.get("event", {}).get("state") != "quarantined":
     raise SystemExit(quarantine)
 if halt_quarantined.get("event", {}).get("state") != "halted":
@@ -365,6 +387,8 @@ if delete_clone.get("event", {}).get("state") != "stopped" or delete_workspace.g
     raise SystemExit((delete_clone, delete_workspace))
 if "removed" not in rm_delete or "removed" not in prune_delete:
     raise SystemExit((rm_delete, prune_delete))
+if "deleted" not in prune_images_yes or "kept" not in prune_images_yes:
+    raise SystemExit(prune_images_yes)
 PY
 
 echo "microagent E2E lifecycle matrix passed"

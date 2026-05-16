@@ -456,6 +456,7 @@ func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
 			StateDir:   opts.StateDir,
 			MemoryMiB:  512,
 			CPUCount:   2,
+			ShellPort:  24279,
 			Network: &vmkit.NetworkConfig{
 				Mode:    "nat",
 				IP:      "10.43.12.2/29",
@@ -482,6 +483,7 @@ func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
 	if !strings.Contains(bootArgs, "microagent_net_if=eth0") ||
 		!strings.Contains(bootArgs, "microagent_net_ip=10.43.12.2/29") ||
 		!strings.Contains(bootArgs, "microagent_net_gw=10.43.12.1") ||
+		!strings.Contains(bootArgs, "microagent_shell_port=24279") ||
 		!strings.Contains(bootArgs, "microagent_net_dns=1.1.1.1,8.8.8.8") {
 		t.Fatalf("boot args = %q", bootArgs)
 	}
@@ -734,6 +736,39 @@ func TestPortForwarderIncludesShellPort(t *testing.T) {
 	}
 	if !needsPortForwarder(&vmkit.Config{ShellPort: 24279}) {
 		t.Fatal("shell port should require port forwarder")
+	}
+}
+
+func TestFirecrackerShellReadinessRequiresGuestHelperLog(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	if err := os.MkdirAll(filepath.Join(dir, "agent-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(serialInputPath(opts), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := runtimeState{
+		Event: eventFile{
+			Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendFirecracker},
+			State:      vmkit.StateRunning,
+			ObservedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		Config:          vmkit.Config{StateDir: dir, ShellPort: 24279, SerialInput: true},
+		SerialInputPath: serialInputPath(opts),
+		SerialLogPath:   serialLogPath(opts),
+		StartedAt:       time.Now().UTC().Format(time.RFC3339),
+	}
+	readiness := readinessFromRuntimeState(state)
+	if readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
+	}
+	if err := os.WriteFile(serialLogPath(opts), []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	readiness = readinessFromRuntimeState(state)
+	if !readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
 	}
 }
 

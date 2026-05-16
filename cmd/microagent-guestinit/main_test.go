@@ -99,6 +99,23 @@ func TestCmdlineRequestsDHCP(t *testing.T) {
 	}
 }
 
+func TestKernelConfigOverrideUpdatesShellPort(t *testing.T) {
+	cfg := config{ShellPort: 22000}
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "console=ttyS0 microagent_shell_port=24279 root=/dev/vda"); err != nil {
+		t.Fatalf("applyKernelConfigOverridesFromCmdline: %v", err)
+	}
+	if cfg.ShellPort != 24279 {
+		t.Fatalf("ShellPort = %d, want 24279", cfg.ShellPort)
+	}
+}
+
+func TestKernelConfigOverrideRejectsBadShellPort(t *testing.T) {
+	cfg := config{ShellPort: 22000}
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "microagent_shell_port=0"); err == nil {
+		t.Fatal("applyKernelConfigOverridesFromCmdline error = nil, want bad shell port error")
+	}
+}
+
 func TestInteractiveShellExitIsNotLaunchFailure(t *testing.T) {
 	err := exec.Command("sh", "-c", "exit 7").Run()
 	if err == nil {
