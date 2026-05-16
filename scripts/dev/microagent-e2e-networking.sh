@@ -19,6 +19,7 @@ WORKSPACE="nats-e2e"
 NAT_WORKSPACE="nat-outbound"
 BRIDGED_WORKSPACE="bridged-ready"
 STATIC_WORKSPACE="static-net"
+APPLY_WORKSPACE="apply-stopped"
 ARTIFACT_DIR="$STATE_DIR/artifacts"
 IMAGE="${MICROAGENT_NATS_IMAGE:-docker.io/library/nats@sha256:6e0cca2c6da79f0a3542ec5a3319dd10b1b05f5d8e8949afa8e9cdf6314bbf6c}"
 IMAGE_CACHE_STATE="${MICROAGENT_E2E_IMAGE_CACHE_DIR:-$ROOT/.cache/microagent-e2e/image-cache/nats-amd64}"
@@ -33,11 +34,13 @@ cleanup() {
     "$CLI" stop "$NAT_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     "$CLI" stop "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     "$CLI" stop "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    "$CLI" stop "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ]; then
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$NAT_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     else
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
@@ -123,6 +126,7 @@ PY
 
 nats_port="$(pick_port)"
 monitor_port="$(pick_port)"
+apply_port="$(pick_port)"
 
 export GOCACHE="$STATE_DIR/gocache"
 export GOMODCACHE="$STATE_DIR/gomodcache"
@@ -600,6 +604,25 @@ PY
 ensure_cached_image
 seed_image_cache_for_state "$STATE_DIR"
 
+prepare_cached_workspace "$APPLY_WORKSPACE" '{"mode":"isolated"}' '{}' "$STATE_DIR/apply-stopped-create.json"
+cat >"$STATE_DIR/apply-stopped.yaml" <<YAML
+name: $APPLY_WORKSPACE
+restart: always
+network:
+  mode: user
+  forwards:
+    - host: 127.0.0.1
+      hostPort: $apply_port
+      guestPort: 4222
+      protocol: tcp
+YAML
+"$CLI" --json apply --file "$STATE_DIR/apply-stopped.yaml" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-stopped.json"
+"$CLI" start "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/apply-stopped-start.json"
+wait_for_status_ready "$APPLY_WORKSPACE" "$STATE_DIR/apply-stopped-status-running.json"
+"$CLI" network "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-stopped-network.json"
+"$CLI" halt "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-stopped-halt.json"
+"$CLI" delete "$APPLY_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/apply-stopped-delete.json"
+
 if "$CLI" create \
   --id publish-collision \
   --backend firecracker \
@@ -790,6 +813,44 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-running.json"
 nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-running.json"
+"$CLI" network "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/network-before-live-apply.json"
+cat >"$STATE_DIR/apply-live.yaml" <<YAML
+name: $WORKSPACE
+network:
+  mode: user
+  forwards:
+    - host: 0.0.0.0
+      hostPort: $nats_port
+      guestPort: 4222
+      protocol: tcp
+    - host: 0.0.0.0
+      hostPort: $monitor_port
+      guestPort: 8222
+      protocol: tcp
+YAML
+"$CLI" --json apply --file "$STATE_DIR/apply-live.yaml" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-live.json"
+"$CLI" network "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/network-after-live-apply.json"
+nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-after-live-apply.json"
+nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-after-live-apply.json"
+cat >"$STATE_DIR/apply-live-invalid.yaml" <<YAML
+name: $WORKSPACE
+network:
+  mode: user
+  forwards:
+    - host: 0.0.0.0
+      hostPort: $nats_port
+      guestPort: 4223
+      protocol: tcp
+    - host: 0.0.0.0
+      hostPort: $monitor_port
+      guestPort: 8222
+      protocol: tcp
+YAML
+if "$CLI" --json apply --file "$STATE_DIR/apply-live-invalid.yaml" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-live-invalid.json" 2>"$STATE_DIR/apply-live-invalid.err"; then
+  echo "live apply guest-port change unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "host bind changes" "$STATE_DIR/apply-live-invalid.err"
 "$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-halted.json"
@@ -819,7 +880,7 @@ mkdir -p "$ARTIFACT_DIR/resumed"
 cp "$STATE_DIR/$WORKSPACE/events.json" "$STATE_DIR/events.json"
 "$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
 
-python3 - "$STATE_DIR" "$nats_port" "$monitor_port" <<'PY'
+python3 - "$STATE_DIR" "$nats_port" "$monitor_port" "$apply_port" <<'PY'
 import json
 import os
 import sys
@@ -827,6 +888,7 @@ import sys
 state_dir = sys.argv[1]
 nats_port = int(sys.argv[2])
 monitor_port = int(sys.argv[3])
+apply_port = int(sys.argv[4])
 
 def read_json(name):
     with open(os.path.join(state_dir, name), "r", encoding="utf-8") as f:
@@ -837,10 +899,17 @@ def read_text(name):
         return f.read()
 
 doctor = read_json("doctor.json")
+apply_stopped = read_json("apply-stopped.json")
+apply_stopped_status = read_json("apply-stopped-status-running.json")
+apply_stopped_network = read_json("apply-stopped-network.json")
+apply_stopped_delete = read_json("apply-stopped-delete.json")
 create = read_json("create.json")
 start = read_json("start.json")
 running = read_json("status-running.json")
 network = read_json("network-running.json")
+network_before_live_apply = read_json("network-before-live-apply.json")
+apply_live = read_json("apply-live.json")
+network_after_live_apply = read_json("network-after-live-apply.json")
 halt = read_json("halt.json")
 halted = read_json("status-halted.json")
 resume = read_json("resume.json")
@@ -852,6 +921,7 @@ delete = read_json("delete.json")
 monitor_running = read_json("monitor-running.json")
 monitor_resumed = read_json("monitor-resumed.json")
 nats_roundtrip_running = read_json("nats-roundtrip-running.json")
+nats_roundtrip_after_live_apply = read_json("nats-roundtrip-after-live-apply.json")
 nats_roundtrip_resumed = read_json("nats-roundtrip-resumed.json")
 artifact_running = read_json("artifact-running.json")
 artifact_resumed = read_json("artifact-resumed.json")
@@ -860,6 +930,19 @@ if doctor["ok"] is not True or doctor["backend"] != "firecracker":
     raise SystemExit(doctor)
 if doctor["host"]["kvmAvailable"] is not True or doctor["host"]["userNetworkingAvailable"] is not True:
     raise SystemExit(doctor)
+if apply_stopped.get("workspace") != "apply-stopped" or set(apply_stopped.get("applied", [])) != {"restart", "network"}:
+    raise SystemExit(apply_stopped)
+if apply_stopped.get("network", {}).get("mode") != "user":
+    raise SystemExit(apply_stopped)
+apply_forwards = apply_stopped.get("network", {}).get("portForwards") or apply_stopped.get("network", {}).get("port_forwards") or []
+if {(f["hostPort"], f["guestPort"]) for f in apply_forwards} != {(apply_port, 4222)}:
+    raise SystemExit(apply_stopped)
+if apply_stopped_status.get("event", {}).get("state") != "running":
+    raise SystemExit(apply_stopped_status)
+if (apply_stopped_network.get("network") or {}).get("mode") != "user":
+    raise SystemExit(apply_stopped_network)
+if apply_stopped_delete.get("event", {}).get("state") != "stopped":
+    raise SystemExit(apply_stopped_delete)
 if create["response"]["event"]["state"] != "prepared":
     raise SystemExit(create)
 if create["network"]["mode"] != "user":
@@ -887,6 +970,21 @@ if monitor_running.get("jetstream", {}).get("config") is None:
     raise SystemExit(monitor_running)
 if not nats_roundtrip_running.get("payload", "").startswith("microagent-nats-roundtrip-"):
     raise SystemExit(nats_roundtrip_running)
+before_forwards = (network_before_live_apply.get("network") or {}).get("portForwards") or (network_before_live_apply.get("network") or {}).get("port_forwards") or []
+if {f.get("host") for f in before_forwards} != {"127.0.0.1"}:
+    raise SystemExit(network_before_live_apply)
+if apply_live.get("workspace") != "nats-e2e" or apply_live.get("applied") != ["network"] or apply_live.get("reloaded") is not True:
+    raise SystemExit(apply_live)
+after_forwards = (network_after_live_apply.get("network") or {}).get("portForwards") or (network_after_live_apply.get("network") or {}).get("port_forwards") or []
+if {f.get("host") for f in after_forwards} != {"0.0.0.0"}:
+    raise SystemExit(network_after_live_apply)
+if not nats_roundtrip_after_live_apply.get("payload", "").startswith("microagent-nats-roundtrip-"):
+    raise SystemExit(nats_roundtrip_after_live_apply)
+with open(os.path.join(state_dir, "workspaces", "nats-e2e", "workspace.json"), "r", encoding="utf-8") as f:
+    live_manifest = json.load(f)
+live_forwards = (live_manifest.get("network") or {}).get("port_forwards") or []
+if {(f.get("host"), f.get("guestPort")) for f in live_forwards} != {("0.0.0.0", 4222), ("0.0.0.0", 8222)}:
+    raise SystemExit(live_manifest)
 if halt["event"]["state"] != "halted" or halted["event"]["state"] != "halted":
     raise SystemExit(halted)
 if artifact_running["artifact"] != "report" or artifact_running["disk"] != "rootfs":
