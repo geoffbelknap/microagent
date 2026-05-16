@@ -31,7 +31,7 @@ cleanup() {
   if [ -x "$CLI" ]; then
     for workspace in supervise-never supervise-on-failure supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail supervise-vsock-helper; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     done
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
@@ -389,7 +389,7 @@ HELPER_SUPERVISE_PID=""
 wait_for_state supervise-vsock-helper stopped "$STATE_DIR/status-vsock-helper-stopped.json"
 wait_for_process_exit "$helper_runtime_pid"
 wait_for_process_exit "$vsock_listener_pid"
-"$CLI" delete supervise-vsock-helper --state-dir "$STATE_DIR" >"$STATE_DIR/delete-vsock-helper.json"
+"$CLI" delete supervise-vsock-helper --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-vsock-helper.json"
 if process_is_active "$vsock_listener_pid"; then
   echo "vsock listener pid $vsock_listener_pid leaked after delete" >&2
   exit 1
@@ -465,7 +465,7 @@ if "supervise-real-failure" not in guest_fail_result.get("result", {}).get("stdo
 PY
 
 for workspace in supervise-never supervise-on-failure supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail; do
-  "$CLI" delete "$workspace" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-${workspace}.json" || true
+  "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-${workspace}.json" || true
 done
 
 echo "microagent E2E supervision passed"
