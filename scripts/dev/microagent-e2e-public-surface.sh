@@ -778,12 +778,32 @@ printf "space-name\n" >"$STATE_DIR/space name.txt"
 expect_failure cp-whitespace-source "whitespace" \
   "$CLI" cp "$STATE_DIR/space name.txt" "$DISK_WORKSPACE:workspace:/space-name.txt" --state-dir "$STATE_DIR"
 printf "host-copy\n" >"$STATE_DIR/host-copy.txt"
+printf "odd-name\n" >"$STATE_DIR/odd-name.txt"
+"$CLI" cp "$STATE_DIR/odd-name.txt" "$DISK_WORKSPACE:workspace:/odd-!@%+=,.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-odd-name-to-disk.json"
+"$CLI" cp "$DISK_WORKSPACE:workspace:/odd-!@%+=,.txt" "$STATE_DIR/odd-name-out.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-odd-name-from-disk.json"
+grep -q "odd-name" "$STATE_DIR/odd-name-out.txt"
+expect_failure cp-missing-parent "parent .*does not exist\\|File not found" \
+  "$CLI" cp "$STATE_DIR/host-copy.txt" "$DISK_WORKSPACE:workspace:/missing-parent/file.txt" --state-dir "$STATE_DIR"
+ln -s host-copy.txt "$STATE_DIR/host-copy-link"
+"$CLI" cp "$STATE_DIR/host-copy-link" "$DISK_WORKSPACE:workspace:/link-source.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-link-source-to-disk.json"
+"$CLI" cp "$DISK_WORKSPACE:workspace:/link-source.txt" "$STATE_DIR/link-source-out.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-link-source-from-disk.json"
+grep -q "host-copy" "$STATE_DIR/link-source-out.txt"
+printf "private-copy\n" >"$STATE_DIR/private-copy.txt"
+chmod 600 "$STATE_DIR/private-copy.txt"
+"$CLI" cp "$STATE_DIR/private-copy.txt" "$DISK_WORKSPACE:workspace:/private-copy.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-private-to-disk.json"
+"$CLI" cp "$DISK_WORKSPACE:workspace:/private-copy.txt" "$STATE_DIR/private-copy-out.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-private-from-disk.json"
+grep -q "private-copy" "$STATE_DIR/private-copy-out.txt"
 expect_failure cp-readonly-disk "read-only" \
   "$CLI" cp "$STATE_DIR/host-copy.txt" "$DISK_WORKSPACE:readonly:/blocked.txt" --state-dir "$STATE_DIR"
 mv "$STATE_DIR/existing-disk.ext4" "$STATE_DIR/existing-disk.ext4.unavailable"
 expect_failure unavailable-disk-artifact "No such\\|not found\\|open" \
   "$CLI" artifacts get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/unavailable-disk-artifacts" --state-dir "$STATE_DIR"
 mv "$STATE_DIR/existing-disk.ext4.unavailable" "$STATE_DIR/existing-disk.ext4"
+cp "$STATE_DIR/workspaces/$DISK_WORKSPACE/workspace.json" "$STATE_DIR/workspace-json.backup"
+printf "{not-json\n" >"$STATE_DIR/workspaces/$DISK_WORKSPACE/workspace.json"
+expect_failure corrupt-workspace-artifact "invalid character\\|workspace.json\\|json" \
+  "$CLI" artifacts get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/corrupt-workspace-artifacts" --state-dir "$STATE_DIR"
+mv "$STATE_DIR/workspace-json.backup" "$STATE_DIR/workspaces/$DISK_WORKSPACE/workspace.json"
 "$CLI" delete "$DISK_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-existing-disk.json"
 
 "$CLI" --json create "$PERF_WORKSPACE" \
