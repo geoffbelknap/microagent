@@ -73,6 +73,10 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
+	if err := ensureGuestDevices(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
 	cfg, err := readConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -402,6 +406,8 @@ var guestFilesystems = []guestFilesystem{
 }
 
 var mountGuestFilesystem = unix.Mount
+var mountDiskFilesystem = unix.Mount
+var mknodGuestDevice = unix.Mknod
 
 func mountGuestFilesystems() error {
 	for _, fs := range guestFilesystems {
@@ -416,6 +422,36 @@ func mountGuestFilesystems() error {
 	return nil
 }
 
+func ensureGuestDevices() error {
+	if err := ensureGuestCharDevice("/dev/null", 1, 3, 0o666); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureGuestCharDevice(path string, major, minor uint32, perm uint32) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+	if err := os.MkdirAll(filepathDir(path), 0o755); err != nil {
+		return fmt.Errorf("create device directory for %s: %w", path, err)
+	}
+	dev := int(unix.Mkdev(major, minor))
+	if err := mknodGuestDevice(path, syscall.S_IFCHR|perm, dev); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("create %s: %w", path, err)
+	}
+	return nil
+}
+
+func filepathDir(path string) string {
+	if idx := strings.LastIndex(path, "/"); idx > 0 {
+		return path[:idx]
+	}
+	return "."
+}
+
 func mountDisks(mounts []mount) error {
 	for _, mount := range mounts {
 		if mount.Device == "" || mount.Mountpoint == "" {
@@ -425,12 +461,14 @@ func mountDisks(mounts []mount) error {
 			return fmt.Errorf("create mountpoint %s: %w", mount.Mountpoint, err)
 		}
 		flags := uintptr(0)
+		data := ""
 		if mount.Mode == "ro" {
 			flags = unix.MS_RDONLY
+			data = "noload"
 		} else if mount.Mode != "rw" {
 			return fmt.Errorf("mount %s mode must be ro or rw", mount.Mountpoint)
 		}
-		if err := unix.Mount(mount.Device, mount.Mountpoint, "ext4", flags, ""); err != nil {
+		if err := mountDiskFilesystem(mount.Device, mount.Mountpoint, "ext4", flags, data); err != nil {
 			return fmt.Errorf("mount %s at %s: %w", mount.Device, mount.Mountpoint, err)
 		}
 	}

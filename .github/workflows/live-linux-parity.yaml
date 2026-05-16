@@ -7,8 +7,8 @@ permissions:
   contents: read
 
 jobs:
-  firecracker-parity:
-    name: Firecracker parity
+  microagent-parity:
+    name: Full microagent E2E on Linux KVM
     runs-on:
       - self-hosted
       - linux
@@ -30,6 +30,9 @@ jobs:
 
       - name: Go tests
         run: scripts/dev/go-test.sh
+
+      - name: Full microagent E2E suite
+        run: scripts/dev/microagent-e2e.sh
 
       - name: Firecracker console parity
         run: scripts/dev/firecracker-console-parity-smoke.sh

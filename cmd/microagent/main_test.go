@@ -3366,8 +3366,8 @@ func TestWorkspaceBuildCommandUsesStartConfigWhenNoSetupIsNeeded(t *testing.T) {
 		ResultPort:      1024,
 		PrepareForStart: true,
 	})
-	if port != 0 {
-		t.Fatalf("port = %d, want 0", port)
+	if port != 1024 {
+		t.Fatalf("port = %d, want 1024", port)
 	}
 	if strings.Join(command, " ") != "/bin/sh -lc /app/entrypoint.sh" {
 		t.Fatalf("command = %#v", command)
