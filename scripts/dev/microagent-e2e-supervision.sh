@@ -10,6 +10,9 @@ IMAGE="${MICROAGENT_NATS_IMAGE:-docker.io/library/nats@sha256:6e0cca2c6da79f0a35
 EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0"
 SUPERVISE_PID=""
 CANCEL_SUPERVISE_PID=""
+SIGNAL_SUPERVISE_PID=""
+HELPER_SUPERVISE_PID=""
+STARTED_SUPERVISE_PID=""
 
 cleanup() {
   status="$?"
@@ -19,8 +22,14 @@ cleanup() {
   if [ -n "$CANCEL_SUPERVISE_PID" ]; then
     kill "$CANCEL_SUPERVISE_PID" >/dev/null 2>&1 || true
   fi
+  if [ -n "$SIGNAL_SUPERVISE_PID" ]; then
+    kill "$SIGNAL_SUPERVISE_PID" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$HELPER_SUPERVISE_PID" ]; then
+    kill "$HELPER_SUPERVISE_PID" >/dev/null 2>&1 || true
+  fi
   if [ -x "$CLI" ]; then
-    for workspace in supervise-never supervise-on-failure supervise-always supervise-cancel; do
+    for workspace in supervise-never supervise-on-failure supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail supervise-vsock-helper; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     done
@@ -121,6 +130,72 @@ wait_for_process_exit() {
   done
 }
 
+start_supervise_background() {
+  workspace="$1"
+  output="$2"
+  shift 2
+  (
+    trap - INT TERM
+    exec "$CLI" supervise "$workspace" "$@"
+  ) >"$output" &
+  STARTED_SUPERVISE_PID="$!"
+}
+
+read_runtime_field() {
+  workspace="$1"
+  field="$2"
+  output="$3"
+  python3 - "$STATE_DIR/$workspace/runtime.json" "$field" "$output" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    runtime = json.load(f)
+value = runtime.get(sys.argv[2]) or 0
+if value <= 0:
+    raise SystemExit(runtime)
+with open(sys.argv[3], "w", encoding="utf-8") as f:
+    f.write(str(value))
+PY
+}
+
+signal_supervise_process() {
+  workspace="$1"
+  signal="$2"
+  prefix="$3"
+  "$CLI" create "$workspace" \
+    --image "$IMAGE" \
+    --arch amd64 \
+    --kernel "$kernel_path" \
+    --guest-init "$GUEST_INIT" \
+    --state-dir "$STATE_DIR" \
+    --size-mib 192 \
+    --network isolated \
+    --restart always \
+    --entrypoint "sleep 300" >"$STATE_DIR/create-$prefix.json"
+  start_supervise_background "$workspace" "$STATE_DIR/supervise-$prefix.json" \
+    --state-dir "$STATE_DIR" \
+    --kernel "$kernel_path" \
+    --interval 1 \
+    --max-restarts 0
+  SIGNAL_SUPERVISE_PID="$STARTED_SUPERVISE_PID"
+  wait_for_state "$workspace" running "$STATE_DIR/status-$prefix-running.json"
+  read_runtime_field "$workspace" pid "$STATE_DIR/$prefix-runtime-pid.txt"
+  runtime_pid="$(cat "$STATE_DIR/$prefix-runtime-pid.txt")"
+  kill -s "$signal" "$SIGNAL_SUPERVISE_PID"
+  wait_for_process_exit "$SIGNAL_SUPERVISE_PID"
+  wait "$SIGNAL_SUPERVISE_PID" || true
+  SIGNAL_SUPERVISE_PID=""
+  "$CLI" status "$workspace" --state-dir "$STATE_DIR" >"$STATE_DIR/status-$prefix-after-signal.json" || true
+  if ! process_is_active "$runtime_pid"; then
+    echo "workspace runtime pid $runtime_pid exited after supervise received $signal" >&2
+    exit 1
+  fi
+  "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >"$STATE_DIR/stop-$prefix.json"
+  wait_for_state "$workspace" stopped "$STATE_DIR/status-$prefix-stopped.json"
+  wait_for_process_exit "$runtime_pid"
+}
+
 (
   cd "$ROOT"
   go build -buildvcs=false -o "$CLI" ./cmd/microagent
@@ -195,12 +270,12 @@ fi
   --network isolated \
   --restart always \
   --entrypoint "sleep 300" >"$STATE_DIR/create-always.json"
-"$CLI" supervise supervise-always \
+start_supervise_background supervise-always "$STATE_DIR/supervise-always.json" \
   --state-dir "$STATE_DIR" \
   --kernel "$kernel_path" \
   --interval 1 \
-  --max-restarts 2 >"$STATE_DIR/supervise-always.json" &
-SUPERVISE_PID="$!"
+  --max-restarts 2
+SUPERVISE_PID="$STARTED_SUPERVISE_PID"
 wait_for_state supervise-always running "$STATE_DIR/status-always-running-1.json"
 "$CLI" stop supervise-always --state-dir "$STATE_DIR" >"$STATE_DIR/stop-always-1.json"
 wait_for_state supervise-always running "$STATE_DIR/status-always-running-2.json"
@@ -220,12 +295,12 @@ SUPERVISE_PID=""
   --network isolated \
   --restart always \
   --entrypoint "sleep 300" >"$STATE_DIR/create-cancel.json"
-"$CLI" supervise supervise-cancel \
+start_supervise_background supervise-cancel "$STATE_DIR/supervise-cancel.json" \
   --state-dir "$STATE_DIR" \
   --kernel "$kernel_path" \
   --interval 1 \
-  --max-restarts 0 >"$STATE_DIR/supervise-cancel.json" &
-CANCEL_SUPERVISE_PID="$!"
+  --max-restarts 0
+CANCEL_SUPERVISE_PID="$STARTED_SUPERVISE_PID"
 wait_for_state supervise-cancel running "$STATE_DIR/status-cancel-running.json"
 if ! process_is_active "$CANCEL_SUPERVISE_PID"; then
   echo "supervise-cancel process exited before cancellation" >&2
@@ -259,6 +334,67 @@ wait_for_process_exit "$cancel_runtime_pid"
 sleep 3
 "$CLI" status supervise-cancel --state-dir "$STATE_DIR" >"$STATE_DIR/status-cancel-no-restart.json" || true
 
+signal_supervise_process supervise-sigint INT sigint
+signal_supervise_process supervise-sigterm TERM sigterm
+
+"$CLI" create supervise-guest-fail \
+  --image "$IMAGE" \
+  --arch amd64 \
+  --kernel "$kernel_path" \
+  --guest-init "$GUEST_INIT" \
+  --state-dir "$STATE_DIR" \
+  --size-mib 192 \
+  --network isolated \
+  --restart on-failure \
+  --entrypoint "printf supervise-real-failure; exit 42" >"$STATE_DIR/create-guest-fail.json"
+"$CLI" supervise supervise-guest-fail \
+  --state-dir "$STATE_DIR" \
+  --kernel "$kernel_path" \
+  --interval 1 \
+  --max-restarts 2 >"$STATE_DIR/supervise-guest-fail.json"
+"$CLI" status supervise-guest-fail --state-dir "$STATE_DIR" >"$STATE_DIR/status-guest-fail-final.json" || true
+"$CLI" result supervise-guest-fail --state-dir "$STATE_DIR" >"$STATE_DIR/result-guest-fail.json" || true
+
+"$CLI" create supervise-vsock-helper \
+  --image "$IMAGE" \
+  --arch amd64 \
+  --kernel "$kernel_path" \
+  --guest-init "$GUEST_INIT" \
+  --state-dir "$STATE_DIR" \
+  --size-mib 192 \
+  --network isolated \
+  --mediation "2050=127.0.0.1:9" \
+  --mediation-optional \
+  --restart always \
+  --entrypoint "sleep 300" >"$STATE_DIR/create-vsock-helper.json"
+start_supervise_background supervise-vsock-helper "$STATE_DIR/supervise-vsock-helper.json" \
+  --state-dir "$STATE_DIR" \
+  --kernel "$kernel_path" \
+  --interval 1 \
+  --max-restarts 0
+HELPER_SUPERVISE_PID="$STARTED_SUPERVISE_PID"
+wait_for_state supervise-vsock-helper running "$STATE_DIR/status-vsock-helper-running.json"
+read_runtime_field supervise-vsock-helper pid "$STATE_DIR/vsock-helper-runtime-pid.txt"
+read_runtime_field supervise-vsock-helper vsockListenerPid "$STATE_DIR/vsock-helper-listener-pid.txt"
+helper_runtime_pid="$(cat "$STATE_DIR/vsock-helper-runtime-pid.txt")"
+vsock_listener_pid="$(cat "$STATE_DIR/vsock-helper-listener-pid.txt")"
+if ! process_is_active "$vsock_listener_pid"; then
+  echo "vsock listener pid $vsock_listener_pid was not active for supervised helper workspace" >&2
+  exit 1
+fi
+kill -TERM "$HELPER_SUPERVISE_PID"
+wait "$HELPER_SUPERVISE_PID" || true
+HELPER_SUPERVISE_PID=""
+"$CLI" stop supervise-vsock-helper --state-dir "$STATE_DIR" >"$STATE_DIR/stop-vsock-helper.json"
+wait_for_state supervise-vsock-helper stopped "$STATE_DIR/status-vsock-helper-stopped.json"
+wait_for_process_exit "$helper_runtime_pid"
+wait_for_process_exit "$vsock_listener_pid"
+"$CLI" delete supervise-vsock-helper --state-dir "$STATE_DIR" >"$STATE_DIR/delete-vsock-helper.json"
+if process_is_active "$vsock_listener_pid"; then
+  echo "vsock listener pid $vsock_listener_pid leaked after delete" >&2
+  exit 1
+fi
+
 python3 - "$STATE_DIR" <<'PY'
 import json
 import os
@@ -279,6 +415,14 @@ always_status = read_json("status-always-final.json")
 cancel_after_kill = read_json("status-cancel-after-supervise-kill.json")
 cancel_stopped = read_json("status-cancel-stopped.json")
 cancel_no_restart = read_json("status-cancel-no-restart.json")
+sigint_after_signal = read_json("status-sigint-after-signal.json")
+sigint_stopped = read_json("status-sigint-stopped.json")
+sigterm_after_signal = read_json("status-sigterm-after-signal.json")
+sigterm_stopped = read_json("status-sigterm-stopped.json")
+guest_fail = read_json("supervise-guest-fail.json")
+guest_fail_status = read_json("status-guest-fail-final.json")
+guest_fail_result = read_json("result-guest-fail.json")
+helper_stopped = read_json("status-vsock-helper-stopped.json")
 
 if doctor.get("ok") is not True:
     raise SystemExit(doctor)
@@ -302,9 +446,25 @@ if cancel_stopped.get("event", {}).get("state") != "stopped":
     raise SystemExit(cancel_stopped)
 if cancel_no_restart.get("event", {}).get("state") != "stopped":
     raise SystemExit(cancel_no_restart)
+for status in (sigint_after_signal, sigterm_after_signal):
+    if status.get("event", {}).get("state") != "running":
+        raise SystemExit(status)
+for status in (sigint_stopped, sigterm_stopped, helper_stopped):
+    if status.get("event", {}).get("state") != "stopped":
+        raise SystemExit(status)
+if guest_fail.get("policy") != "on-failure" or guest_fail.get("restarts") != 2 or guest_fail.get("stopped") is not True:
+    raise SystemExit(guest_fail)
+if guest_fail.get("final_state") != "failed":
+    raise SystemExit(guest_fail)
+if guest_fail_status.get("event", {}).get("state") != "failed":
+    raise SystemExit(guest_fail_status)
+if guest_fail_result.get("result", {}).get("exitCode") != 42:
+    raise SystemExit(guest_fail_result)
+if "supervise-real-failure" not in guest_fail_result.get("result", {}).get("stdout", ""):
+    raise SystemExit(guest_fail_result)
 PY
 
-for workspace in supervise-never supervise-on-failure supervise-always supervise-cancel; do
+for workspace in supervise-never supervise-on-failure supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail; do
   "$CLI" delete "$workspace" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-${workspace}.json" || true
 done
 

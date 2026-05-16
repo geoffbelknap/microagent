@@ -1817,7 +1817,53 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		}
 		return responseFromEvent(event, ""), nil
 	}
+	if state.Event.State == vmkit.StateRunning && GuestHalted(serialLogPath(opts)) {
+		finalState, errorText := guestHaltedState(opts)
+		if state.PID != 0 {
+			_ = signalProcessGroup(state.PID, syscall.SIGTERM)
+			_ = waitForProcessExit(context.Background(), state.PID, 5*time.Second)
+		}
+		if state.PortForwardPID != 0 {
+			_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
+		}
+		if state.VsockListenerPID != 0 {
+			terminateAuxProcess(state.VsockListenerPID)
+		}
+		cleanupTransientFirewallRules(state.FirewallRules)
+		cleanupTransientNetworkDevices(state.NetworkDevices)
+		cleanupUserNetworkProcess(opts)
+		req := runtimeStateRequest(vmkit.Request{}, state)
+		if err := writeProcessStateWithProcessesAndNetwork(opts, req, finalState, 0, 0, 0, nil, nil, errorText); err != nil {
+			return vmkit.Response{}, err
+		}
+		state, err = readRuntimeState(opts)
+		if err != nil {
+			return vmkit.Response{}, err
+		}
+		return responseFromRuntimeState(opts, state), nil
+	}
 	return responseFromRuntimeState(opts, state), nil
+}
+
+func guestHaltedState(opts Options) (vmkit.VMState, string) {
+	data, err := os.ReadFile(filepath.Join(opts.StateDir, opts.Name, "result.json"))
+	if err != nil {
+		return vmkit.StateStopped, ""
+	}
+	var result struct {
+		ExitCode int    `json:"exit_code"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		return vmkit.StateFailed, err.Error()
+	}
+	if result.ExitCode == 0 {
+		return vmkit.StateStopped, ""
+	}
+	if result.Error != "" {
+		return vmkit.StateFailed, result.Error
+	}
+	return vmkit.StateFailed, fmt.Sprintf("guest exited with code %d", result.ExitCode)
 }
 
 func responseFromEvent(file eventFile, errorText string) vmkit.Response {
