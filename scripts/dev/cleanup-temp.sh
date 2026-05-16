@@ -7,6 +7,13 @@ usage: scripts/dev/cleanup-temp.sh [--yes] [--all] [--min-age-hours HOURS] [--ro
 
 Finds temporary microagent development artifacts in temp directories.
 Dry-run is the default; pass --yes to delete matching paths.
+Candidates referenced by live process command lines are skipped.
+
+Policy:
+  - Tests should remove their own temporary state on success.
+  - Tests may preserve temporary state on failure for debugging.
+  - Use this script before fresh live test runs to remove preserved stale state.
+  - This script only scans temp roots and microagent-owned temp name patterns.
 
 Options:
   --yes                 delete candidates instead of printing a dry-run
@@ -137,22 +144,58 @@ find_candidates() {
 }
 
 candidate_file="$(mktemp -t makit-cleanup.XXXXXX)"
-trap 'rm -f "$candidate_file"' EXIT
+filtered_file="$(mktemp -t makit-cleanup-filtered.XXXXXX)"
+live_file="$(mktemp -t makit-cleanup-live.XXXXXX)"
+process_file="$(mktemp -t makit-cleanup-processes.XXXXXX)"
+trap 'rm -f "$candidate_file" "$filtered_file" "$live_file" "$process_file"' EXIT
+
+snapshot_processes() {
+  ps -eo args= >"$process_file" 2>/dev/null && return 0
+  ps -axo command= >"$process_file" 2>/dev/null && return 0
+  : >"$process_file"
+}
+
+is_live_path() {
+  local path="$1"
+  grep -F -- "$path" "$process_file" >/dev/null 2>&1
+}
 
 for root in "${unique_roots[@]}"; do
   find_candidates "$root" >>"$candidate_file"
 done
 
 sort -u -o "$candidate_file" "$candidate_file"
+snapshot_processes
 
-count="$(wc -l <"$candidate_file" | tr -d ' ')"
+while IFS= read -r path; do
+  if is_live_path "$path"; then
+    echo "$path" >>"$live_file"
+  else
+    echo "$path" >>"$filtered_file"
+  fi
+done <"$candidate_file"
+
+count="$(wc -l <"$filtered_file" | tr -d ' ')"
+live_count="$(wc -l <"$live_file" | tr -d ' ')"
 if [ "$count" -eq 0 ]; then
-  echo "No matching temporary microagent artifacts found."
+  if [ "$live_count" -gt 0 ]; then
+    while IFS= read -r path; do
+      echo "skip live $path"
+    done <"$live_file"
+    echo "No deletable temporary microagent artifacts found; skipped $live_count live artifact(s)."
+  else
+    echo "No matching temporary microagent artifacts found."
+  fi
   exit 0
 fi
 
 if [ "$confirm" -eq 1 ]; then
   failures=0
+  if [ "$live_count" -gt 0 ]; then
+    while IFS= read -r path; do
+      echo "skip live $path"
+    done <"$live_file"
+  fi
   while IFS= read -r path; do
     echo "delete $path"
     if [ -d "$path" ] && [ ! -L "$path" ]; then
@@ -162,19 +205,24 @@ if [ "$confirm" -eq 1 ]; then
       echo "failed to delete $path" >&2
       failures=$((failures + 1))
     fi
-  done <"$candidate_file"
+  done <"$filtered_file"
   if [ "$failures" -gt 0 ]; then
     echo "Deleted with $failures failure(s)." >&2
     exit 1
   fi
   echo "Deleted $count temporary microagent artifact(s)."
 else
+  if [ "$live_count" -gt 0 ]; then
+    while IFS= read -r path; do
+      echo "skip live $path"
+    done <"$live_file"
+  fi
   while IFS= read -r path; do
     echo "would delete $path"
-  done <"$candidate_file"
+  done <"$filtered_file"
   if [ "$all" -eq 1 ]; then
-    echo "Dry run: $count candidate(s). Pass --yes to delete them."
+    echo "Dry run: $count deletable candidate(s), $live_count live artifact(s) skipped. Pass --yes to delete them."
   else
-    echo "Dry run: $count candidate(s) older than ${min_age_hours}h. Pass --yes to delete them, or --all to ignore age."
+    echo "Dry run: $count deletable candidate(s) older than ${min_age_hours}h, $live_count live artifact(s) skipped. Pass --yes to delete them, or --all to ignore age."
   fi
 fi
