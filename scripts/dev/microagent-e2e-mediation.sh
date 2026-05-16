@@ -12,6 +12,7 @@ IMAGE="${MICROAGENT_NATS_IMAGE:-docker.io/library/nats@sha256:6e0cca2c6da79f0a35
 EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0"
 SERVER_PID=""
 RAW_SERVER_PID=""
+RAW_LARGE_SERVER_PID=""
 
 cleanup() {
   status="$?"
@@ -20,6 +21,9 @@ cleanup() {
   fi
   if [ -n "$RAW_SERVER_PID" ]; then
     kill "$RAW_SERVER_PID" >/dev/null 2>&1 || true
+  fi
+  if [ -n "$RAW_LARGE_SERVER_PID" ]; then
+    kill "$RAW_LARGE_SERVER_PID" >/dev/null 2>&1 || true
   fi
   if [ -x "$CLI" ]; then
     for workspace in "$WORKSPACE" "$OPTIONAL_WORKSPACE"; do
@@ -199,17 +203,63 @@ srv.close()
 PY
 RAW_SERVER_PID="$!"
 
+python3 - "$STATE_DIR/raw-large-host-port.txt" "$STATE_DIR/raw-large-host-request.txt" <<'PY' &
+import socket
+import sys
+
+port_file, request_file = sys.argv[1:3]
+srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(("127.0.0.1", 0))
+srv.listen(1)
+with open(port_file, "w", encoding="utf-8") as f:
+    f.write(str(srv.getsockname()[1]))
+    f.write("\n")
+conn, addr = srv.accept()
+with conn:
+    conn.settimeout(10)
+    data = bytearray()
+    while b"\r\n\r\n" not in data:
+        chunk = conn.recv(4096)
+        if not chunk:
+            break
+        data.extend(chunk)
+    with open(request_file, "wb") as f:
+        f.write(bytes(data))
+    body = b"RAW_LARGE_BEGIN\n" + (b"A" * 16384) + b"\nRAW_LARGE_END\n"
+    conn.sendall(
+        b"HTTP/1.1 200 OK\r\n"
+        + b"Content-Type: text/plain\r\n"
+        + b"Content-Length: "
+        + str(len(body)).encode()
+        + b"\r\nConnection: close\r\n\r\n"
+        + body
+    )
+srv.close()
+PY
+RAW_LARGE_SERVER_PID="$!"
+
 for _ in $(seq 1 50); do
-  if [ -s "$STATE_DIR/host-port.txt" ] && [ -s "$STATE_DIR/raw-host-port.txt" ]; then
+  if [ -s "$STATE_DIR/host-port.txt" ] && [ -s "$STATE_DIR/raw-host-port.txt" ] && [ -s "$STATE_DIR/raw-large-host-port.txt" ]; then
     break
   fi
   sleep 0.1
 done
 test -s "$STATE_DIR/host-port.txt"
 test -s "$STATE_DIR/raw-host-port.txt"
+test -s "$STATE_DIR/raw-large-host-port.txt"
 host_port="$(cat "$STATE_DIR/host-port.txt")"
 raw_host_port="$(cat "$STATE_DIR/raw-host-port.txt")"
+raw_large_host_port="$(cat "$STATE_DIR/raw-large-host-port.txt")"
 optional_host_port="$(python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+)"
+raw_unavailable_port="$(python3 - <<'PY'
 import socket
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -228,23 +278,27 @@ PY
   --size-mib 192 \
   --result-port 1024 \
   --network isolated \
-  --env MICROAGENT_VSOCK_TCP_LISTENERS=127.0.0.1:18080=2048,127.0.0.1:18081=2050 \
+  --env MICROAGENT_VSOCK_TCP_LISTENERS=127.0.0.1:18080=2048,127.0.0.1:18081=2050,127.0.0.1:18082=2051,127.0.0.1:18083=2052 \
   --mediation "2048=127.0.0.1:${host_port}" >"$STATE_DIR/create.json"
 
 "$CLI" start "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
   --kernel "$kernel_path" \
-  --vsock "2050=127.0.0.1:${raw_host_port}" >"$STATE_DIR/start.json"
+  --vsock "2050=127.0.0.1:${raw_host_port}" \
+  --vsock "2051=127.0.0.1:${raw_large_host_port}" \
+  --vsock "2052=127.0.0.1:${raw_unavailable_port}" >"$STATE_DIR/start.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "wget -qO- -T 10 http://127.0.0.1:18080/mediation-check; wget -qO- -T 10 http://127.0.0.1:18081/raw-vsock-check" \
+  --send "wget -qO- -T 10 http://127.0.0.1:18080/mediation-check; wget -qO- -T 10 http://127.0.0.1:18081/raw-vsock-check; wget -qO- -T 10 http://127.0.0.1:18082/raw-large-check > /tmp/raw-large.out; cat /tmp/raw-large.out; if wget -qO- -T 3 http://127.0.0.1:18083/raw-unavailable; then echo RAW_UNAVAILABLE_UNEXPECTED; else echo RAW_UNAVAILABLE_FAILED; fi" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect.txt"
 wait "$SERVER_PID"
 SERVER_PID=""
 wait "$RAW_SERVER_PID"
 RAW_SERVER_PID=""
+wait "$RAW_LARGE_SERVER_PID"
+RAW_LARGE_SERVER_PID=""
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-after-connect.json"
 cp "$STATE_DIR/$WORKSPACE/runtime.json" "$STATE_DIR/runtime-after-connect.json"
 "$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/quarantine.json"
@@ -327,14 +381,22 @@ if "MEDIATION_OK" not in read_text("connect.txt"):
     raise SystemExit(read_text("connect.txt"))
 if "RAW_VSOCK_OK" not in read_text("connect.txt"):
     raise SystemExit(read_text("connect.txt"))
+if "RAW_LARGE_BEGIN" not in read_text("connect.txt") or "RAW_LARGE_END" not in read_text("connect.txt"):
+    raise SystemExit(read_text("connect.txt"))
+if "RAW_UNAVAILABLE_FAILED" not in read_text("connect.txt") or read_text("connect.txt").count("RAW_UNAVAILABLE_UNEXPECTED") > 1:
+    raise SystemExit(read_text("connect.txt"))
 request = read_text("host-request.txt")
 if "GET /mediation-check" not in request:
     raise SystemExit(request)
 raw_request = read_text("raw-host-request.txt")
 if "GET /raw-vsock-check" not in raw_request:
     raise SystemExit(raw_request)
+raw_large_request = read_text("raw-large-host-request.txt")
+if "GET /raw-large-check" not in raw_large_request:
+    raise SystemExit(raw_large_request)
 listeners = runtime.get("config", {}).get("vsockListeners") or []
-if not any(item.get("port") == 2050 and str(item.get("target", "")).startswith("127.0.0.1:") for item in listeners):
+listener_ports = {item.get("port") for item in listeners if str(item.get("target", "")).startswith("127.0.0.1:")}
+if not {2050, 2051, 2052}.issubset(listener_ports):
     raise SystemExit(runtime)
 if after.get("readiness", {}).get("mediationReady", {}).get("ready") is not True:
     raise SystemExit(after)
