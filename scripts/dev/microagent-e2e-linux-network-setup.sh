@@ -19,9 +19,17 @@ Run this once per checkout, then normal E2E runs can use:
 
 Usage:
   scripts/dev/microagent-e2e-linux-network-setup.sh [--check]
+  scripts/dev/microagent-e2e-linux-network-setup.sh --cleanup
 
 Options:
-  --check   Print current host prerequisite status without changing the host.
+  --check     Print current host prerequisite status without changing the host.
+  --cleanup   Remove the reusable MicroAgent E2E bridge if it exists.
+
+Cleanup policy:
+  This setup helper creates a reusable bridge and intentionally leaves it in
+  place across runs. The E2E networking suite deletes only temporary bridges
+  that it creates for a single run. Use --cleanup to remove the reusable bridge
+  after testing.
 
 Environment:
   MICROAGENT_E2E_NETWORK_INSTALL_DIR  Directory for the capability-enabled supervisor
@@ -30,10 +38,14 @@ EOF
 }
 
 CHECK_ONLY=0
+CLEANUP_ONLY=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check)
       CHECK_ONLY=1
+      ;;
+    --cleanup)
+      CLEANUP_ONLY=1
       ;;
     --help|-h)
       usage
@@ -68,6 +80,21 @@ if ! command -v setcap >/dev/null 2>&1; then
   exit 2
 fi
 
+is_linux_bridge() {
+  [ -d "/sys/class/net/$1/bridge" ]
+}
+
+run_privileged() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    echo "root privileges are required for: $*" >&2
+    exit 2
+  fi
+}
+
 check_status() {
   echo "microagent E2E Linux network setup check"
   echo "supervisor: $SUPERVISOR"
@@ -94,10 +121,10 @@ check_status() {
 
   echo "bridge: $BRIDGE_NAME"
   if ip link show "$BRIDGE_NAME" >/dev/null 2>&1; then
-    bridge_type="$(cat "/sys/class/net/$BRIDGE_NAME/type" 2>/dev/null || true)"
-    if [ "$bridge_type" = "772" ]; then
+    if is_linux_bridge "$BRIDGE_NAME"; then
       echo "bridge_type: ok"
     else
+      bridge_type="$(cat "/sys/class/net/$BRIDGE_NAME/type" 2>/dev/null || true)"
       echo "bridge_type: not a Linux bridge (${bridge_type:-unknown})"
     fi
   else
@@ -105,21 +132,28 @@ check_status() {
   fi
 }
 
+cleanup_bridge() {
+  if ! ip link show "$BRIDGE_NAME" >/dev/null 2>&1; then
+    echo "bridge: $BRIDGE_NAME missing"
+    return 0
+  fi
+  if ! is_linux_bridge "$BRIDGE_NAME"; then
+    echo "$BRIDGE_NAME exists but is not a Linux bridge; refusing to delete it" >&2
+    exit 1
+  fi
+  run_privileged ip link delete "$BRIDGE_NAME" type bridge
+  echo "removed reusable MicroAgent E2E bridge: $BRIDGE_NAME"
+}
+
 if [ "$CHECK_ONLY" = "1" ]; then
   check_status
   exit 0
 fi
 
-run_privileged() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
-  else
-    echo "root privileges are required for: $*" >&2
-    exit 2
-  fi
-}
+if [ "$CLEANUP_ONLY" = "1" ]; then
+  cleanup_bridge
+  exit 0
+fi
 
 mkdir -p "$INSTALL_DIR"
 (
@@ -136,7 +170,7 @@ fi
 run_privileged sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
 if ip link show "$BRIDGE_NAME" >/dev/null 2>&1; then
-  if [ "$(cat "/sys/class/net/$BRIDGE_NAME/type" 2>/dev/null || true)" != "772" ]; then
+  if ! is_linux_bridge "$BRIDGE_NAME"; then
     echo "$BRIDGE_NAME exists but is not a Linux bridge" >&2
     exit 1
   fi
