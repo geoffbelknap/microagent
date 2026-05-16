@@ -99,6 +99,15 @@ func TestDefaultOptionsDoNotSetAppleVFPathForNonAppleVF(t *testing.T) {
 }
 
 func TestDispatchAddsLifecycleFailureContext(t *testing.T) {
+	backend := ""
+	switch runtime.GOOS {
+	case "linux":
+		backend = vmkit.BackendFirecracker
+	case "darwin":
+		backend = vmkit.BackendAppleVF
+	default:
+		t.Skipf("fake executable supervisor dispatch test does not support %s", runtime.GOOS)
+	}
 	dir := t.TempDir()
 	supervisorPath := filepath.Join(dir, "supervisor")
 	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\necho supervisor unavailable >&2\nexit 1\n"), 0o755); err != nil {
@@ -107,7 +116,7 @@ func TestDispatchAddsLifecycleFailureContext(t *testing.T) {
 	stateDir := filepath.Join(dir, "state")
 	opts := Options{
 		Name:           "apply-stopped",
-		Backend:        vmkit.BackendFirecracker,
+		Backend:        backend,
 		StateDir:       stateDir,
 		SupervisorPath: supervisorPath,
 	}
@@ -119,7 +128,7 @@ func TestDispatchAddsLifecycleFailureContext(t *testing.T) {
 	}
 	for _, want := range []string{
 		`halt workspace "apply-stopped" failed`,
-		"backend=firecracker",
+		"backend=" + backend,
 		"state-dir=" + stateDir,
 		"supervisor=" + supervisorPath,
 		"exit status 1",
@@ -132,8 +141,8 @@ func TestDispatchAddsLifecycleFailureContext(t *testing.T) {
 			t.Fatalf("Response error = %q, want substring %q", resp.Error, want)
 		}
 	}
-	if resp.Backend != vmkit.BackendFirecracker {
-		t.Fatalf("Response backend = %q, want %q", resp.Backend, vmkit.BackendFirecracker)
+	if resp.Backend != backend {
+		t.Fatalf("Response backend = %q, want %q", resp.Backend, backend)
 	}
 }
 
