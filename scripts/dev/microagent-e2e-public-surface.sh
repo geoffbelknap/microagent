@@ -136,6 +136,27 @@ expect_failure() {
   fi
 }
 
+expect_tty_cancel() {
+  name="$1"
+  expected="$2"
+  shift 2
+  if command -v script >/dev/null 2>&1 && script --version 2>/dev/null | grep -qi "util-linux"; then
+    printf -v command '%q ' "$@"
+    if printf 'n\n' | script -qfec "$command" /dev/null >"$STATE_DIR/${name}.out" 2>"$STATE_DIR/${name}.err"; then
+      echo "$name unexpectedly succeeded" >&2
+      exit 1
+    fi
+    if ! grep -qia "$expected" "$STATE_DIR/${name}.out" && ! grep -qia "$expected" "$STATE_DIR/${name}.err"; then
+      echo "$name failed without expected message: $expected" >&2
+      cat "$STATE_DIR/${name}.out" >&2
+      cat "$STATE_DIR/${name}.err" >&2
+      exit 1
+    fi
+    return 0
+  fi
+  expect_failure "$name" "pass --yes" "$@"
+}
+
 wait_for_status_ready() {
   workspace="$1"
   output="$2"
@@ -347,6 +368,101 @@ printf '{not-json\n' >"$STATE_DIR/missing-image-cache/images/index.json"
 expect_failure images-corrupt-index "invalid\\|json" \
   "$CLI" images list --state-dir "$STATE_DIR/missing-image-cache"
 
+mkdir -p "$STATE_DIR/workspaces/confirm-delete"
+cat >"$STATE_DIR/workspaces/confirm-delete/workspace.json" <<'JSON'
+{
+  "name": "confirm-delete",
+  "profile": "small",
+  "restart": "never",
+  "resources": {
+    "memory_mib": 512,
+    "cpu_count": 2,
+    "size_mib": 96
+  },
+  "network": {
+    "mode": "isolated"
+  }
+}
+JSON
+expect_tty_cancel delete-confirm-cancel "delete cancelled\\|pass --yes" \
+  "$CLI" delete confirm-delete --state-dir "$STATE_DIR"
+test -e "$STATE_DIR/workspaces/confirm-delete/workspace.json"
+"$CLI" delete confirm-delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-confirm-yes.json"
+assert_json "$STATE_DIR/delete-confirm-yes.json" "data.get('event', {}).get('state') == 'stopped'"
+
+python3 - "$STATE_DIR/confirm-images" <<'PY'
+import json
+import os
+import sys
+import time
+
+state_dir = sys.argv[1]
+rootfs_dir = os.path.join(state_dir, "images", "rootfs")
+os.makedirs(rootfs_dir, exist_ok=True)
+records = []
+for name in ("rm-cancel", "rm-yes", "prune-cancel", "prune-yes"):
+    path = os.path.join(rootfs_dir, f"{name}.ext4")
+    with open(path, "wb") as f:
+        f.write(name.encode("utf-8"))
+    records.append({
+        "image_ref": f"local/{name}:test",
+        "resolved_ref": f"local/{name}:test",
+        "digest": f"sha256:{name}",
+        "platform": {"os": "linux", "architecture": "amd64"},
+        "output_path": path,
+        "size_bytes": os.path.getsize(path),
+        "last_used_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+os.makedirs(os.path.join(state_dir, "images"), exist_ok=True)
+with open(os.path.join(state_dir, "images", "index.json"), "w", encoding="utf-8") as f:
+    json.dump({"images": records}, f, indent=2, sort_keys=True)
+    f.write("\n")
+PY
+expect_tty_cancel images-rm-delete-cancel "prune cancelled\\|pass --yes" \
+  "$CLI" images rm local/rm-cancel:test --delete --state-dir "$STATE_DIR/confirm-images"
+test -e "$STATE_DIR/confirm-images/images/rootfs/rm-cancel.ext4"
+"$CLI" images rm local/rm-yes:test --delete --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-rm-delete-yes.json"
+test ! -e "$STATE_DIR/confirm-images/images/rootfs/rm-yes.ext4"
+expect_tty_cancel images-prune-delete-cancel "prune cancelled\\|pass --yes" \
+  "$CLI" images prune --delete --state-dir "$STATE_DIR/confirm-images"
+test -e "$STATE_DIR/confirm-images/images/rootfs/prune-cancel.ext4"
+"$CLI" images prune --delete --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-prune-delete-yes.json"
+test ! -e "$STATE_DIR/confirm-images/images/rootfs/prune-yes.ext4"
+
+python3 - "$STATE_DIR/confirm-prune-y" <<'PY'
+import json
+import os
+import sys
+import time
+
+state_dir = sys.argv[1]
+rootfs_dir = os.path.join(state_dir, "images", "rootfs")
+os.makedirs(rootfs_dir, exist_ok=True)
+records = []
+for name in ("cancel", "yes"):
+    path = os.path.join(rootfs_dir, f"{name}.ext4")
+    with open(path, "wb") as f:
+        f.write(name.encode("utf-8"))
+    records.append({
+        "image_ref": f"local/top-prune-{name}:test",
+        "resolved_ref": f"local/top-prune-{name}:test",
+        "digest": f"sha256:top-prune-{name}",
+        "platform": {"os": "linux", "architecture": "amd64"},
+        "output_path": path,
+        "size_bytes": os.path.getsize(path),
+        "last_used_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    })
+os.makedirs(os.path.join(state_dir, "images"), exist_ok=True)
+with open(os.path.join(state_dir, "images", "index.json"), "w", encoding="utf-8") as f:
+    json.dump({"images": records}, f, indent=2, sort_keys=True)
+    f.write("\n")
+PY
+expect_tty_cancel prune-images-cancel "prune cancelled\\|pass --yes" \
+  "$CLI" prune --images --state-dir "$STATE_DIR/confirm-prune-y"
+test -e "$STATE_DIR/confirm-prune-y/images/rootfs/cancel.ext4"
+"$CLI" prune --images -y --state-dir "$STATE_DIR/confirm-prune-y" >"$STATE_DIR/prune-images-y.json"
+test ! -e "$STATE_DIR/confirm-prune-y/images/rootfs/yes.ext4"
+
 "$CLI" --json create high-dry-run \
   --dry-run \
   --image "$IMAGE" \
@@ -388,6 +504,60 @@ expect_failure invalid-create-name "invalid workspace name" \
   "$CLI" create "../invalid-name" --dry-run --image "$IMAGE" --state-dir "$STATE_DIR"
 expect_failure invalid-status-name "invalid workspace name" \
   "$CLI" status "../invalid-name" --state-dir "$STATE_DIR"
+
+expect_failure apply-missing-file "apply requires --file" \
+  "$CLI" --json apply --state-dir "$STATE_DIR"
+cat >"$STATE_DIR/apply-invalid-name.yaml" <<'YAML'
+name: ../invalid-apply
+restart: always
+YAML
+expect_failure apply-invalid-name "invalid workspace name" \
+  "$CLI" --json apply --file "$STATE_DIR/apply-invalid-name.yaml" --state-dir "$STATE_DIR"
+cat >"$STATE_DIR/apply-missing-workspace.yaml" <<'YAML'
+name: apply-missing-workspace
+restart: always
+YAML
+expect_failure apply-missing-workspace "workspace.json" \
+  "$CLI" --json apply --file "$STATE_DIR/apply-missing-workspace.yaml" --state-dir "$STATE_DIR"
+
+mkdir -p "$STATE_DIR/workspaces/apply-edge"
+cat >"$STATE_DIR/workspaces/apply-edge/workspace.json" <<'JSON'
+{
+  "name": "apply-edge",
+  "profile": "small",
+  "restart": "never",
+  "resources": {
+    "memory_mib": 512,
+    "cpu_count": 2,
+    "size_mib": 96
+  },
+  "network": {
+    "mode": "isolated"
+  }
+}
+JSON
+cp "$STATE_DIR/workspaces/apply-edge/workspace.json" "$STATE_DIR/apply-edge-before.json"
+cat >"$STATE_DIR/apply-edge-noop.yaml" <<'YAML'
+name: apply-edge
+restart: never
+YAML
+"$CLI" --json apply --file "$STATE_DIR/apply-edge-noop.yaml" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-edge-noop.json"
+assert_json "$STATE_DIR/apply-edge-noop.json" "data.get('workspace') == 'apply-edge' and data.get('applied') is None"
+cat >"$STATE_DIR/apply-edge-unsupported.yaml" <<'YAML'
+name: apply-edge
+resources:
+  memoryMiB: 768
+  cpuCount: 1
+setup:
+  - echo should-not-apply
+service: sleep 300
+files:
+  - src: ./missing.txt
+    dst: /missing.txt
+YAML
+"$CLI" --json apply --file "$STATE_DIR/apply-edge-unsupported.yaml" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-edge-unsupported.json"
+assert_json "$STATE_DIR/apply-edge-unsupported.json" "data.get('workspace') == 'apply-edge' and data.get('applied') is None"
+cmp "$STATE_DIR/apply-edge-before.json" "$STATE_DIR/workspaces/apply-edge/workspace.json"
 
 "$CLI" create \
   --dry-run \
@@ -638,6 +808,8 @@ expect_failure invalid-request-combination "duplicate vsock listener port" \
   --timeout 60 >"$STATE_DIR/run.json"
 assert_json "$STATE_DIR/run.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
 assert_json "$STATE_DIR/run.json" "'RUN_OK' in data.get('result', {}).get('stdout', '')"
+assert_json "$STATE_DIR/run.json" "'RUN_OK' in data.get('serial_log', '')"
+assert_json "$STATE_DIR/run.json" "'reboot: System halted' in data.get('serial_log', '') or 'reboot: Power down' in data.get('serial_log', '')"
 
 "$CLI" --json run \
   --name "$RUN_KEEP_WORKSPACE" \

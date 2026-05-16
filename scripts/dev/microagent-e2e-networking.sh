@@ -667,6 +667,19 @@ if "$CLI" create \
 fi
 grep -qi "publish mapping must be" "$STATE_DIR/publish-ipv6.err"
 
+if "$CLI" create \
+  --id isolated-publish \
+  --backend firecracker \
+  --kernel "$kernel_path" \
+  --rootfs "$(cached_image_rootfs_path)" \
+  --state-dir "$STATE_DIR/isolated-publish" \
+  --network isolated \
+  --publish "127.0.0.1:$monitor_port:8222/tcp" >"$STATE_DIR/isolated-publish.json" 2>"$STATE_DIR/isolated-publish.err"; then
+  echo "isolated network publish unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "network.portForwards require user, nat, or bridged mode" "$STATE_DIR/isolated-publish.err"
+
 prepare_cached_workspace "$NAT_WORKSPACE" '{"mode":"nat"}' '{}' "$STATE_DIR/nat-create.json"
 "$CLI" start "$NAT_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/nat-start.json"
 wait_for_status_ready "$NAT_WORKSPACE" "$STATE_DIR/nat-status-running.json"
@@ -736,6 +749,30 @@ if "BRIDGED_READY" not in console:
 network = create.get("network") or {}
 if network.get("mode") != "bridged" or network.get("interface") != bridge:
     raise SystemExit(network)
+PY
+
+if "$CLI" create \
+  --id bridged-missing-interface \
+  --backend firecracker \
+  --kernel "$kernel_path" \
+  --rootfs "$(cached_image_rootfs_path)" \
+  --state-dir "$STATE_DIR/bridged-missing-interface" \
+  --network bridged >"$STATE_DIR/bridged-missing-interface.json" 2>"$STATE_DIR/bridged-missing-interface.err"; then
+  echo "bridged network without interface unexpectedly succeeded" >&2
+  exit 1
+fi
+python3 - "$STATE_DIR/bridged-missing-interface.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    result = json.load(f)
+err = result.get("error", result.get("response", {}).get("error", ""))
+ok = result.get("ok", result.get("response", {}).get("ok"))
+if ok is not False:
+    raise SystemExit(result)
+if "firecracker network.interface is required for bridged mode" not in err:
+    raise SystemExit(result)
 PY
 
 if "$CLI" create \

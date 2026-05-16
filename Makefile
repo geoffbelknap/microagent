@@ -12,8 +12,8 @@ dev-build:
 	scripts/dev/build-local.sh
 
 smoke: test
-	scripts/dev/runtime-contract-smoke.sh
 ifeq ($(UNAME_S),Darwin)
+	scripts/dev/microagent-e2e.sh contract
 	scripts/dev/applevf-supervisor-build.sh
 	scripts/dev/applevf-supervisor-lifecycle-smoke.sh
 	scripts/dev/cli-lifecycle-smoke.sh
@@ -22,18 +22,14 @@ ifeq ($(UNAME_S),Darwin)
 	scripts/dev/applevf-publish-smoke.sh
 	scripts/dev/applevf-workspace-connect-smoke.sh
 else ifeq ($(UNAME_S),Linux)
-	scripts/dev/firecracker-workspace-smoke.sh
-	scripts/dev/firecracker-console-parity-smoke.sh
-	scripts/dev/firecracker-publish-smoke.sh
-	scripts/dev/firecracker-network-mode-smoke.sh
-	scripts/dev/firecracker-boot-smoke.sh
+	scripts/dev/microagent-e2e.sh
 else
 	@echo "smoke is not supported on $(UNAME_S)" >&2
 	@exit 2
 endif
 
 smoke-contract:
-	scripts/dev/runtime-contract-smoke.sh
+	scripts/dev/microagent-e2e.sh contract
 
 smoke-rootfs:
 	scripts/dev/rootfs-oci-smoke.sh
@@ -57,23 +53,23 @@ smoke-microagent-supervise:
 	scripts/dev/microagent-e2e.sh supervision
 
 smoke-firecracker:
-	scripts/dev/firecracker-boot-smoke.sh
+	scripts/dev/microagent-e2e.sh public-surface lifecycle-matrix networking
 
 smoke-firecracker-console:
-	scripts/dev/firecracker-console-parity-smoke.sh
+	scripts/dev/microagent-e2e.sh lifecycle-matrix
 
 smoke-firecracker-publish:
-	scripts/dev/firecracker-publish-smoke.sh
+	scripts/dev/microagent-e2e.sh networking
 
 smoke-firecracker-network:
-	scripts/dev/firecracker-network-mode-smoke.sh
+	scripts/dev/microagent-e2e.sh networking
 
 smoke-workspace:
 ifeq ($(UNAME_S),Darwin)
 	scripts/dev/applevf-supervisor-build.sh
 	scripts/dev/applevf-workspace-connect-smoke.sh
 else ifeq ($(UNAME_S),Linux)
-	scripts/dev/firecracker-workspace-smoke.sh
+	scripts/dev/microagent-e2e.sh lifecycle-matrix
 else
 	@echo "workspace smoke is not supported on $(UNAME_S)" >&2
 	@exit 2
