@@ -13,6 +13,9 @@ PERF_WORKSPACE="public-perf"
 RUN_KEEP_WORKSPACE="public-run-keep"
 JSON_WORKSPACE="public-json"
 JSON_STDIN_WORKSPACE="public-json-stdin"
+OPTIONS_RUN_WORKSPACE="public-options-run"
+SERVICE_WORKSPACE="public-service-options"
+IMAGE_COMMAND_WORKSPACE="public-image-command"
 ROOTFS="$STATE_DIR/rootfs.ext4"
 ARTIFACT_DIR="$STATE_DIR/artifacts"
 KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE:-0}"
@@ -20,7 +23,7 @@ KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE:-0}"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
+    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" kill "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       if [ "$status" -eq 0 ]; then
@@ -673,8 +676,70 @@ grep -q "RUN_KEEP_OK" "$STATE_DIR/logs-run-keep-text.txt"
 mkdir -p "$STATE_DIR/run-keep-artifacts"
 "$CLI" artifacts get "$RUN_KEEP_WORKSPACE" keep-state "$STATE_DIR/run-keep-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-run-keep.json"
 grep -q "keep-state" "$STATE_DIR/run-keep-artifacts/keep-state.txt"
-"$CLI" delete "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-run-keep.json"
+"$CLI" delete "$RUN_KEEP_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-run-keep.json"
 test ! -e "$STATE_DIR/workspaces/$RUN_KEEP_WORKSPACE"
+
+cat >"$STATE_DIR/options-setup.sh" <<'SH'
+mkdir -p /tmp/microagent-options
+printf setup-file-ok > /tmp/microagent-options/setup.txt
+SH
+"$CLI" --json run \
+  --name "$OPTIONS_RUN_WORKSPACE" \
+  --image "$IMAGE" \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 96 \
+  --setup-file "$STATE_DIR/options-setup.sh" \
+  --shell /bin/sh \
+  --hostname options-host \
+  --env OPTION_ENV=cli-env \
+  --exec "test \"\$(hostname)\" = options-host; test \"\$OPTION_ENV\" = cli-env; grep -q setup-file-ok /tmp/microagent-options/setup.txt; printf OPTIONS_RUN_OK" \
+  --timeout 60 >"$STATE_DIR/options-run.json"
+assert_json "$STATE_DIR/options-run.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
+assert_json "$STATE_DIR/options-run.json" "'OPTIONS_RUN_OK' in data.get('result', {}).get('stdout', '')"
+
+"$CLI" --json create "$SERVICE_WORKSPACE" \
+  --image "$IMAGE" \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 96 \
+  --service-command "printf '{\"ok\":true,\"service\":\"options\",\"env\":\"%s\",\"hostname\":\"%s\"}' \"\$SERVICE_ENV\" \"\$(hostname)\" > /service-options-report.json; sync; sleep 300" \
+  --shell /bin/sh \
+  --hostname service-host \
+  --env SERVICE_ENV=service-env \
+  --output service-report=/service-options-report.json >"$STATE_DIR/create-service-options.json"
+assert_json "$STATE_DIR/create-service-options.json" "data.get('workspace') == '$SERVICE_WORKSPACE'"
+assert_json "$STATE_DIR/create-service-options.json" "data.get('shell') == '/bin/sh' and data.get('hostname') == 'service-host'"
+"$CLI" start "$SERVICE_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start-service-options.json"
+wait_for_status_ready "$SERVICE_WORKSPACE" "$STATE_DIR/status-service-options-running.json"
+sleep 5
+"$CLI" halt "$SERVICE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-service-options.json"
+mkdir -p "$STATE_DIR/service-options-artifacts"
+"$CLI" artifacts get "$SERVICE_WORKSPACE" service-report "$STATE_DIR/service-options-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-service-options.json"
+assert_json "$STATE_DIR/service-options-artifacts/service-options-report.json" "data == {'ok': True, 'service': 'options', 'env': 'service-env', 'hostname': 'service-host'}"
+"$CLI" delete "$SERVICE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-service-options.json"
+
+"$CLI" --json create "$IMAGE_COMMAND_WORKSPACE" \
+  --image "${MICROAGENT_NATS_IMAGE:-docker.io/library/nats:2.10.26-alpine}" \
+  --image-command \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 192 \
+  --shell /bin/sh >"$STATE_DIR/create-image-command.json"
+assert_json "$STATE_DIR/create-image-command.json" "data.get('workspace') == '$IMAGE_COMMAND_WORKSPACE'"
+"$CLI" start "$IMAGE_COMMAND_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start-image-command.json"
+wait_for_status_ready "$IMAGE_COMMAND_WORKSPACE" "$STATE_DIR/status-image-command-running.json"
+sleep 5
+"$CLI" logs "$IMAGE_COMMAND_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-image-command.txt"
+grep -Eiq "nats-server|server is ready" "$STATE_DIR/logs-image-command.txt"
+"$CLI" halt "$IMAGE_COMMAND_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-image-command.json"
+"$CLI" delete "$IMAGE_COMMAND_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-image-command.json"
 
 "$CLI" --json create "$WORKSPACE" \
   --image "$IMAGE" \
@@ -691,7 +756,7 @@ assert_json "$STATE_DIR/result.json" "data.get('result', {}).get('exitCode', dat
 assert_json "$STATE_DIR/result.json" "'RESULT_OK' in data.get('result', {}).get('stdout', '')"
 assert_json "$STATE_DIR/result.json" "'RESULT_ERR' in data.get('result', {}).get('stderr', '')"
 "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/stop-result.json" || true
-"$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-result.json"
+"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-result.json"
 
 "$CLI" --json create missing-result \
   --image "$IMAGE" \
@@ -706,7 +771,7 @@ expect_failure missing-result "result" \
 printf '{not-json\n' >"$STATE_DIR/missing-result/result.json"
 expect_failure malformed-result "invalid\\|character\\|json" \
   "$CLI" --json result missing-result --state-dir "$STATE_DIR"
-"$CLI" delete missing-result --state-dir "$STATE_DIR" >"$STATE_DIR/delete-missing-result.json"
+"$CLI" delete missing-result --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-missing-result.json"
 
 mkdir -p "$STATE_DIR/bundle-src"
 printf "bundle-seed\n" >"$STATE_DIR/bundle-src/seed.txt"
@@ -740,7 +805,7 @@ expect_failure missing-artifact-file "missing.txt\\|not found\\|No such" \
   "$CLI" artifacts get "$BUNDLE_WORKSPACE" missing-report "$ARTIFACT_DIR" --state-dir "$STATE_DIR"
 "$CLI" cp "$BUNDLE_WORKSPACE:data:/report.txt" "$STATE_DIR/copied-report.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-attached-disk.json"
 grep -q "bundle-seed" "$STATE_DIR/copied-report.txt"
-"$CLI" delete "$BUNDLE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-bundle.json"
+"$CLI" delete "$BUNDLE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-bundle.json"
 
 mkdir -p "$STATE_DIR/disk-src/dir"
 printf "existing-disk-seed\n" >"$STATE_DIR/disk-src/seed.txt"
@@ -804,7 +869,7 @@ printf "{not-json\n" >"$STATE_DIR/workspaces/$DISK_WORKSPACE/workspace.json"
 expect_failure corrupt-workspace-artifact "invalid character\\|workspace.json\\|json" \
   "$CLI" artifacts get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/corrupt-workspace-artifacts" --state-dir "$STATE_DIR"
 mv "$STATE_DIR/workspace-json.backup" "$STATE_DIR/workspaces/$DISK_WORKSPACE/workspace.json"
-"$CLI" delete "$DISK_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-existing-disk.json"
+"$CLI" delete "$DISK_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-existing-disk.json"
 
 "$CLI" --json create "$PERF_WORKSPACE" \
   --image "$IMAGE" \
@@ -882,8 +947,8 @@ assert_json "$STATE_DIR/status-perf-killed.json" "data.get('event', {}).get('sta
 assert_json "$STATE_DIR/stop-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
 "$CLI" --json kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/kill-perf-again.json"
 assert_json "$STATE_DIR/kill-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
-"$CLI" delete "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf.json"
-"$CLI" --json delete "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf-again.json"
+"$CLI" delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf.json"
+"$CLI" --json delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf-again.json"
 assert_json "$STATE_DIR/delete-perf-again.json" "data.get('event', {}).get('state') == 'stopped'"
 
 mkdir -p "$STATE_DIR/corrupt-state"
@@ -933,10 +998,10 @@ expect_failure malformed-runtime-start "invalid\\|character\\|json" \
   "$CLI" start malformed-runtime --state-dir "$STATE_DIR" --kernel "$kernel_path"
 "$CLI" --json ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps-partial-state.json"
 assert_json "$STATE_DIR/ps-partial-state.json" "any(item.get('name') == 'partial-state' and item.get('state') == 'unknown' for item in data.get('workspaces', []))"
-"$CLI" --json delete partial-state --state-dir "$STATE_DIR" >"$STATE_DIR/delete-partial-state.json"
+"$CLI" --json delete partial-state --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-partial-state.json"
 assert_json "$STATE_DIR/delete-partial-state.json" "data.get('event', {}).get('state') == 'stopped'"
 test ! -e "$STATE_DIR/workspaces/partial-state"
-"$CLI" --json delete partial-state --state-dir "$STATE_DIR" >"$STATE_DIR/delete-partial-state-again.json"
+"$CLI" --json delete partial-state --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-partial-state-again.json"
 assert_json "$STATE_DIR/delete-partial-state-again.json" "data.get('event', {}).get('state') == 'stopped'"
 
 echo "microagent public surface E2E passed"
