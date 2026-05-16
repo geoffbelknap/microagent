@@ -953,16 +953,7 @@ func runPerf(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
-	opts := perfBootOptions{
-		StateDir:       defaultStateDir(),
-		ImageRef:       defaultWorkspaceImage(defaultGuestArch()),
-		Profile:        defaultWorkspaceProfile,
-		ExecCommand:    "true",
-		Iterations:     1,
-		TimeoutSeconds: 120,
-		Mke2fsPath:     defaultMke2fsPath(),
-		SupervisorPath: defaultAppleVFSupervisorPath(),
-	}
+	opts := defaultPerfBootOptions()
 	fs := flag.NewFlagSet("perf boot", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
@@ -1014,6 +1005,19 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	report.Summary = summarizePerfIterations(report.Iterations)
 	return writePerfReport(stdout, report)
+}
+
+func defaultPerfBootOptions() perfBootOptions {
+	return perfBootOptions{
+		StateDir:       defaultStateDir(),
+		ImageRef:       defaultWorkspaceImage(defaultGuestArch()),
+		Profile:        defaultWorkspaceProfile,
+		ExecCommand:    "true",
+		Iterations:     1,
+		TimeoutSeconds: 120,
+		Mke2fsPath:     defaultMke2fsPath(),
+		SupervisorPath: defaultSupervisorPath(hostBackend()),
+	}
 }
 
 func perfBootWorkspaceArgs(opts perfBootOptions, name string) []string {
@@ -3360,14 +3364,8 @@ func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeRea
 		}
 	}
 	if state.Event.State == vmkit.StateRunning && state.SerialInputPath != "" {
-		if _, err := os.Stat(state.SerialInputPath); err == nil {
-			readiness.ShellReady = vmkit.ReadinessSignal{
-				Ready:      true,
-				ObservedAt: fileModTime(state.SerialInputPath),
-				Detail:     "console input is available",
-			}
-		} else if !os.IsNotExist(err) {
-			readiness.ShellReady = vmkit.ReadinessSignal{Error: err.Error()}
+		if signal, ok := workspaceShellReadinessFromRuntime(state); ok {
+			readiness.ShellReady = signal
 		}
 	}
 	path := resultPath(workspaceOptions{StateDir: state.Config.StateDir, Name: state.Event.Identity.RuntimeID})
@@ -3384,6 +3382,42 @@ func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeRea
 		readiness.MediationReady = mediationReadiness(*state.Config.Mediation, state.Event.State, firstTime(state.StartedAt, state.Event.ObservedAt))
 	}
 	return readiness
+}
+
+func workspaceShellReadinessFromRuntime(state workspaceRuntimeState) (vmkit.ReadinessSignal, bool) {
+	if _, err := os.Stat(state.SerialInputPath); err != nil {
+		if !os.IsNotExist(err) {
+			return vmkit.ReadinessSignal{Error: err.Error()}, true
+		}
+		return vmkit.ReadinessSignal{}, false
+	}
+	if state.Event.Identity.Backend == vmkit.BackendFirecracker && state.Config.ShellPort != 0 {
+		if workspaceShellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
+			return vmkit.ReadinessSignal{
+				Ready:      true,
+				ObservedAt: fileModTime(state.SerialLogPath),
+				Detail:     fmt.Sprintf("guest shell helper listening on vsock port %d", state.Config.ShellPort),
+			}, true
+		}
+		return vmkit.ReadinessSignal{}, false
+	}
+	return vmkit.ReadinessSignal{
+		Ready:      true,
+		ObservedAt: fileModTime(state.SerialInputPath),
+		Detail:     "console input is available",
+	}, true
+}
+
+func workspaceShellHelperListening(serialLogPath string, shellPort uint16) bool {
+	if serialLogPath == "" || shellPort == 0 {
+		return false
+	}
+	data, err := os.ReadFile(serialLogPath)
+	if err != nil {
+		return false
+	}
+	needle := []byte(fmt.Sprintf("microagent-init: shell helper listening on vsock port %d", shellPort))
+	return bytes.Contains(data, needle)
 }
 
 func mediationReadiness(mediation vmkit.MediationConfig, state vmkit.VMState, observedAt *time.Time) vmkit.ReadinessSignal {

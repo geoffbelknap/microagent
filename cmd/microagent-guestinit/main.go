@@ -82,6 +82,10 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
+	if err := applyKernelConfigOverrides(&cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
 	if err := mountDisks(cfg.Mounts); err != nil {
@@ -877,6 +881,37 @@ func parseUint16(raw string) (uint16, error) {
 	return uint16(value), err
 }
 
+func applyKernelConfigOverrides(cfg *config) error {
+	data, err := os.ReadFile("/proc/cmdline")
+	if err != nil {
+		return fmt.Errorf("read kernel command line: %w", err)
+	}
+	return applyKernelConfigOverridesFromCmdline(cfg, string(data))
+}
+
+func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
+	values := microagentCmdlineValues(cmdline)
+	if raw := values["microagent_shell_port"]; strings.TrimSpace(raw) != "" {
+		port, err := parseUint16(raw)
+		if err != nil || port == 0 {
+			return fmt.Errorf("microagent_shell_port must be a positive uint16")
+		}
+		cfg.ShellPort = port
+	}
+	return nil
+}
+
+func microagentCmdlineValues(cmdline string) map[string]string {
+	values := map[string]string{}
+	for _, field := range strings.Fields(cmdline) {
+		key, value, ok := strings.Cut(field, "=")
+		if ok && strings.HasPrefix(key, "microagent_") {
+			values[key] = value
+		}
+	}
+	return values
+}
+
 func nonEmpty(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -915,13 +950,7 @@ func readNetworkBootConfig() (networkBootConfig, error) {
 		return networkBootConfig{}, fmt.Errorf("read kernel command line: %w", err)
 	}
 	log.Printf("microagent-init: cmdline = %q", strings.TrimSpace(string(data)))
-	values := map[string]string{}
-	for _, field := range strings.Fields(string(data)) {
-		key, value, ok := strings.Cut(field, "=")
-		if ok && strings.HasPrefix(key, "microagent_net_") {
-			values[key] = value
-		}
-	}
+	values := microagentCmdlineValues(string(data))
 	cfg := networkBootConfig{
 		Interface: values["microagent_net_if"],
 		IP:        values["microagent_net_ip"],

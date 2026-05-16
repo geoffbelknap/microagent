@@ -1239,14 +1239,8 @@ func readinessFromRuntime(state RuntimeState) vmkit.RuntimeReadiness {
 		}
 	}
 	if state.Event.State == vmkit.StateRunning && state.SerialInputPath != "" {
-		if _, err := os.Stat(state.SerialInputPath); err == nil {
-			readiness.ShellReady = vmkit.ReadinessSignal{
-				Ready:      true,
-				ObservedAt: fileModTime(state.SerialInputPath),
-				Detail:     "console input is available",
-			}
-		} else if !os.IsNotExist(err) {
-			readiness.ShellReady = vmkit.ReadinessSignal{Error: err.Error()}
+		if signal, ok := shellReadinessFromRuntime(state); ok {
+			readiness.ShellReady = signal
 		}
 	}
 	path := ResultPath(state.Config.StateDir, state.Event.Identity.RuntimeID)
@@ -1263,6 +1257,42 @@ func readinessFromRuntime(state RuntimeState) vmkit.RuntimeReadiness {
 		readiness.MediationReady = mediationReadiness(*state.Config.Mediation, state.Event.State, firstTime(state.StartedAt, state.Event.ObservedAt))
 	}
 	return readiness
+}
+
+func shellReadinessFromRuntime(state RuntimeState) (vmkit.ReadinessSignal, bool) {
+	if _, err := os.Stat(state.SerialInputPath); err != nil {
+		if !os.IsNotExist(err) {
+			return vmkit.ReadinessSignal{Error: err.Error()}, true
+		}
+		return vmkit.ReadinessSignal{}, false
+	}
+	if state.Event.Identity.Backend == vmkit.BackendFirecracker && state.Config.ShellPort != 0 {
+		if shellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
+			return vmkit.ReadinessSignal{
+				Ready:      true,
+				ObservedAt: fileModTime(state.SerialLogPath),
+				Detail:     fmt.Sprintf("guest shell helper listening on vsock port %d", state.Config.ShellPort),
+			}, true
+		}
+		return vmkit.ReadinessSignal{}, false
+	}
+	return vmkit.ReadinessSignal{
+		Ready:      true,
+		ObservedAt: fileModTime(state.SerialInputPath),
+		Detail:     "console input is available",
+	}, true
+}
+
+func shellHelperListening(serialLogPath string, shellPort uint16) bool {
+	if serialLogPath == "" || shellPort == 0 {
+		return false
+	}
+	data, err := os.ReadFile(serialLogPath)
+	if err != nil {
+		return false
+	}
+	needle := []byte(fmt.Sprintf("microagent-init: shell helper listening on vsock port %d", shellPort))
+	return bytes.Contains(data, needle)
 }
 
 func mediationReadiness(mediation vmkit.MediationConfig, state vmkit.VMState, observedAt *time.Time) vmkit.ReadinessSignal {

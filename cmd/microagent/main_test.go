@@ -3281,6 +3281,14 @@ func TestParseWorkspaceOptionsPreservesExplicitSupervisor(t *testing.T) {
 	}
 }
 
+func TestDefaultPerfBootOptionsUsesHostSupervisorDefault(t *testing.T) {
+	opts := defaultPerfBootOptions()
+	want := defaultSupervisorPath(hostBackend())
+	if opts.SupervisorPath != want {
+		t.Fatalf("SupervisorPath = %q, want %q", opts.SupervisorPath, want)
+	}
+}
+
 func firecrackerSupervisorHelper(t *testing.T) string {
 	t.Helper()
 	executable, err := os.Executable()

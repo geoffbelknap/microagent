@@ -37,11 +37,11 @@ cleanup() {
     "$CLI" stop "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ]; then
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$NAT_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$NAT_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$BRIDGED_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$STATIC_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$APPLY_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     else
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     fi
@@ -334,8 +334,12 @@ PY
 ensure_cached_image() {
   mkdir -p "$IMAGE_CACHE_STATE"
   if [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" != "1" ] && image_cache_has_ref "$IMAGE_CACHE_STATE"; then
-    echo "using cached networking image rootfs for $IMAGE" >&2
-    return 0
+    rootfs_path="$(cached_image_rootfs_path)"
+    if [ "$rootfs_path" -nt "$GUEST_INIT" ]; then
+      echo "using cached networking image rootfs for $IMAGE" >&2
+      return 0
+    fi
+    echo "refreshing cached networking image rootfs because guest init changed" >&2
   fi
   echo "refreshing cached networking image rootfs for $IMAGE" >&2
   "$CLI" images pull "$IMAGE" \
@@ -672,7 +676,7 @@ wait_for_status_ready "$NAT_WORKSPACE" "$STATE_DIR/nat-status-running.json"
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/nat-connect.txt"
 "$CLI" halt "$NAT_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/nat-halt.json"
-"$CLI" delete "$NAT_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/nat-delete.json"
+"$CLI" delete "$NAT_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/nat-delete.json"
 
 python3 - "$STATE_DIR/nat-create.json" "$STATE_DIR/nat-status-running.json" "$STATE_DIR/nat-connect.txt" <<'PY'
 import json
@@ -710,7 +714,7 @@ wait_for_status_ready "$BRIDGED_WORKSPACE" "$STATE_DIR/bridged-status-running.js
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/bridged-connect.txt"
 "$CLI" halt "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/bridged-halt.json"
-"$CLI" delete "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/bridged-delete.json"
+"$CLI" delete "$BRIDGED_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/bridged-delete.json"
 
 python3 - "$STATE_DIR/bridged-create.json" "$STATE_DIR/bridged-status-running.json" "$STATE_DIR/bridged-connect.txt" "$BRIDGE_NAME" <<'PY'
 import json
@@ -769,7 +773,7 @@ wait_for_status_ready "$STATIC_WORKSPACE" "$STATE_DIR/static-status-running.json
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/static-connect.txt"
 "$CLI" halt "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/static-halt.json"
-"$CLI" delete "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/static-delete.json"
+"$CLI" delete "$STATIC_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/static-delete.json"
 python3 - "$STATE_DIR/static-create.json" "$STATE_DIR/static-network-running.json" "$STATE_DIR/static-status-running.json" "$STATE_DIR/static-connect.txt" <<'PY'
 import json
 import sys
@@ -878,7 +882,8 @@ fi
 mkdir -p "$ARTIFACT_DIR/resumed"
 "$CLI" artifacts get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-resumed.json"
 cp "$STATE_DIR/$WORKSPACE/events.json" "$STATE_DIR/events.json"
-"$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
+cp "$STATE_DIR/workspaces/$WORKSPACE/workspace.json" "$STATE_DIR/workspace-after-live-apply.json"
+"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
 
 python3 - "$STATE_DIR" "$nats_port" "$monitor_port" "$apply_port" <<'PY'
 import json
@@ -980,8 +985,7 @@ if {f.get("host") for f in after_forwards} != {"0.0.0.0"}:
     raise SystemExit(network_after_live_apply)
 if not nats_roundtrip_after_live_apply.get("payload", "").startswith("microagent-nats-roundtrip-"):
     raise SystemExit(nats_roundtrip_after_live_apply)
-with open(os.path.join(state_dir, "workspaces", "nats-e2e", "workspace.json"), "r", encoding="utf-8") as f:
-    live_manifest = json.load(f)
+live_manifest = read_json("workspace-after-live-apply.json")
 live_forwards = (live_manifest.get("network") or {}).get("port_forwards") or []
 if {(f.get("host"), f.get("guestPort")) for f in live_forwards} != {("0.0.0.0", 4222), ("0.0.0.0", 8222)}:
     raise SystemExit(live_manifest)

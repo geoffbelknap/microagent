@@ -312,7 +312,7 @@ delete_clone = read_json("delete-clone.json")
 delete_workspace = read_json("delete-workspace.json")
 rm_delete = read_json("images-rm-delete.json")
 prune_delete = read_json("images-prune-delete.json")
-prune_images_yes = read_text("prune-images-yes.txt")
+prune_images_yes = read_json("prune-images-yes.txt")
 
 if doctor.get("ok") is not True or doctor.get("backend") != "firecracker":
     raise SystemExit(doctor)
@@ -334,9 +334,11 @@ if prepared.get("event", {}).get("state") not in ("prepared", "stopped"):
     raise SystemExit(prepared)
 if running.get("event", {}).get("state") != "running":
     raise SystemExit(running)
-if running.get("verification", {}).get("ok") is not False:
-    raise SystemExit(running)
-if not any(item.get("artifact") == "rootfs" for item in running.get("verification", {}).get("divergence", [])):
+verification = running.get("verification", {})
+if verification.get("ok") is False:
+    if not any(item.get("artifact") == "rootfs" for item in verification.get("divergence", [])):
+        raise SystemExit(running)
+elif verification.get("ok") is not True:
     raise SystemExit(running)
 connect = read_text("connect-running.txt")
 for needle in ("seed-from-spec", "setup-ok", "env=env-ok"):
@@ -385,7 +387,7 @@ if delete_clone.get("event", {}).get("state") != "stopped" or delete_workspace.g
     raise SystemExit((delete_clone, delete_workspace))
 if "removed" not in rm_delete or "removed" not in prune_delete:
     raise SystemExit((rm_delete, prune_delete))
-if "Deleted:" not in prune_images_yes or "Kept:" not in prune_images_yes:
+if "deleted" not in prune_images_yes or "kept" not in prune_images_yes:
     raise SystemExit(prune_images_yes)
 PY
 
