@@ -1915,6 +1915,41 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		return err
 	}
 	opts.Progress = rootfsProgress(stdout, "create")
+	if opts.DryRun {
+		if opts.Name == "" {
+			return fmt.Errorf("create requires a name")
+		}
+		if err := validateWorkspaceName(opts.Name); err != nil {
+			return err
+		}
+		result := workspaceResult{
+			Workspace:  opts.Name,
+			StateDir:   opts.StateDir,
+			Profile:    opts.Profile,
+			Restart:    opts.RestartPolicy,
+			Resources:  workspaceResources(opts),
+			Network:    networkSpecFromConfig(opts.Network),
+			Disks:      opts.Disks,
+			Artifacts:  workspaceArtifactsFromOptions(opts),
+			KernelPath: opts.KernelPath,
+			Response: vmkit.Response{
+				OK:      true,
+				Backend: opts.Backend,
+				Event: &vmkit.Event{
+					Identity: vmkit.Identity{
+						RequestID: newRequestID(),
+						RuntimeID: opts.Name,
+						Role:      vmkit.RoleWorkload,
+						Backend:   opts.Backend,
+					},
+					State:      vmkit.StatePrepared,
+					Detail:     "dry run validated workspace config",
+					ObservedAt: time.Now().UTC(),
+				},
+			},
+		}
+		return writeWorkspaceResult(stdout, result)
+	}
 	result, err := workspace.Create(ctx, opts)
 	if err != nil && result.Workspace == "" {
 		return err
@@ -5212,6 +5247,9 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if wantsHelp(args) {
 		return true
 	}
+	if hasFlagValue(args, "dry-run") && !hasFlagValue(args, "rootfs") && !hasFlagValue(args, "json") && !hasFlagValue(args, "vsock") {
+		return true
+	}
 	if hasLowLevelCreateFlag(args) {
 		return false
 	}
@@ -5825,7 +5863,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
+	case "-json", "-text", "-human", "-keep", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
 		return true
 	default:
 		return false

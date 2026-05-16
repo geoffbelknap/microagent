@@ -862,7 +862,11 @@ func BuildCommandAndPort(opts Options) ([]string, uint32) {
 		return ShellCommand(opts.ServiceCommand), 0
 	}
 	if opts.PrepareForStart && !HasGuestCommand(opts) {
-		return ShellCommand(opts.Entrypoint), 0
+		command := ShellCommand(opts.Entrypoint)
+		if len(command) == 0 {
+			return nil, 0
+		}
+		return command, opts.ResultPort
 	}
 	return ShellCommand(Command(opts)), opts.ResultPort
 }

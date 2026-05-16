@@ -1,6 +1,6 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test dev-build smoke smoke-contract smoke-rootfs smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
+.PHONY: test dev-build smoke smoke-contract smoke-rootfs smoke-microagent-e2e smoke-microagent-public-surface smoke-microagent-lifecycle-matrix smoke-microagent-networking smoke-microagent-mediation smoke-microagent-supervise smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
 
 test:
 	go test ./...
@@ -37,6 +37,24 @@ smoke-contract:
 
 smoke-rootfs:
 	scripts/dev/rootfs-oci-smoke.sh
+
+smoke-microagent-e2e:
+	scripts/dev/microagent-e2e.sh
+
+smoke-microagent-public-surface:
+	scripts/dev/microagent-e2e.sh public-surface
+
+smoke-microagent-lifecycle-matrix:
+	scripts/dev/microagent-e2e.sh lifecycle-matrix
+
+smoke-microagent-networking:
+	scripts/dev/microagent-e2e.sh networking
+
+smoke-microagent-mediation:
+	scripts/dev/microagent-e2e.sh mediation
+
+smoke-microagent-supervise:
+	scripts/dev/microagent-e2e.sh supervision
 
 smoke-firecracker:
 	scripts/dev/firecracker-boot-smoke.sh

@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +28,15 @@ import (
 
 type Builder struct {
 	Name string
+}
+
+type baseStageCacheMetadata struct {
+	ImageRef     string        `json:"image_ref"`
+	ResolvedRef  string        `json:"resolved_ref"`
+	Digest       string        `json:"digest"`
+	Platform     Platform      `json:"platform"`
+	ImageConfig  ocispec.Image `json:"image_config"`
+	LayerDigests []string      `json:"layer_digests"`
 }
 
 func NewBuilder() Builder {
@@ -51,48 +62,12 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		Builder:    name,
 	}
 
-	repoRef, reference, err := splitRegistryReference(req.ImageRef)
-	if err != nil {
-		return provenance, err
-	}
-	repo, err := newRepository(repoRef)
-	if err != nil {
-		return provenance, err
-	}
 	platform := ocispec.Platform{
 		OS:           req.Platform.OS,
 		Architecture: req.Platform.Architecture,
 		Variant:      req.Platform.Variant,
 	}
-	provenance.BuilderPhase = "fetch-manifest"
-	progress.emit("fetch-manifest", "fetching manifest", 0, 0, 0, 0)
-	manifestDesc, manifestBytes, err := oras.FetchBytes(ctx, repo, reference, oras.FetchBytesOptions{
-		FetchOptions: oras.FetchOptions{
-			ResolveOptions: oras.ResolveOptions{TargetPlatform: &platform},
-		},
-	})
-	if err != nil {
-		return provenance, fmt.Errorf("fetch OCI image %s for %s/%s: %w", req.ImageRef, platform.OS, platform.Architecture, err)
-	}
-	provenance.Digest = manifestDesc.Digest.String()
-	provenance.ResolvedRef = repoRef + "@" + manifestDesc.Digest.String()
-
-	var manifest ocispec.Manifest
-	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return provenance, fmt.Errorf("parse OCI image manifest: %w", err)
-	}
-	progress.emit("fetch-config", "fetching image config", 0, 0, 0, 0)
-	configBytes, err := fetchBytes(ctx, repo, manifest.Config)
-	if err != nil {
-		return provenance, fmt.Errorf("fetch OCI image config: %w", err)
-	}
 	var imageConfig ocispec.Image
-	if err := json.Unmarshal(configBytes, &imageConfig); err != nil {
-		return provenance, fmt.Errorf("parse OCI image config: %w", err)
-	}
-	if err := validateImagePlatform(imageConfig, req.Platform); err != nil {
-		return provenance, err
-	}
 
 	tmpBase := req.StateDir
 	if tmpBase == "" {
@@ -120,33 +95,93 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		return provenance, fmt.Errorf("create stage dir: %w", err)
 	}
 
-	provenance.BuilderPhase = "extract-layers"
-	totalLayerBytes := descriptorSize(manifest.Layers...)
-	progress.emit("extract-layers", "extracting layers", 0, int64(len(manifest.Layers)), 0, totalLayerBytes)
-	var fetchedLayerBytes int64
-	for i, layer := range manifest.Layers {
-		rc, err := repo.Fetch(ctx, layer)
+	cacheDir := strings.TrimSpace(os.Getenv("MICROAGENT_ROOTFS_BASE_CACHE_DIR"))
+	cacheRefresh := strings.TrimSpace(os.Getenv("MICROAGENT_ROOTFS_BASE_CACHE_REFRESH")) == "1"
+	if cacheDir != "" && !cacheRefresh {
+		metadata, ok, err := restoreBaseStageCache(cacheDir, req, stageDir)
 		if err != nil {
-			return provenance, fmt.Errorf("fetch OCI layer %s: %w", layer.Digest, err)
+			return provenance, err
 		}
-		var layerBytes int64
-		reader := &progressReadCloser{
-			ReadCloser: rc,
-			OnRead: func(n int64) {
-				layerBytes += n
-				progress.emitThrottled("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes+layerBytes, totalLayerBytes)
+		if ok {
+			provenance.ResolvedRef = metadata.ResolvedRef
+			provenance.Digest = metadata.Digest
+			provenance.LayerDigests = append([]string{}, metadata.LayerDigests...)
+			provenance.BuilderPhase = "restore-base-cache"
+			progress.emit("restore-base-cache", "restoring base rootfs cache", 1, 1, 0, 0)
+			imageConfig = metadata.ImageConfig
+		}
+	}
+	if provenance.BuilderPhase != "restore-base-cache" {
+		repoRef, reference, err := splitRegistryReference(req.ImageRef)
+		if err != nil {
+			return provenance, err
+		}
+		repo, err := newRepository(repoRef)
+		if err != nil {
+			return provenance, err
+		}
+		provenance.BuilderPhase = "fetch-manifest"
+		progress.emit("fetch-manifest", "fetching manifest", 0, 0, 0, 0)
+		manifestDesc, manifestBytes, err := oras.FetchBytes(ctx, repo, reference, oras.FetchBytesOptions{
+			FetchOptions: oras.FetchOptions{
+				ResolveOptions: oras.ResolveOptions{TargetPlatform: &platform},
 			},
+		})
+		if err != nil {
+			return provenance, fmt.Errorf("fetch OCI image %s for %s/%s: %w", req.ImageRef, platform.OS, platform.Architecture, err)
 		}
-		if err := extractLayer(stageDir, layer.MediaType, reader); err != nil {
-			_ = rc.Close()
-			return provenance, fmt.Errorf("extract OCI layer %s: %w", layer.Digest, err)
+		provenance.Digest = manifestDesc.Digest.String()
+		provenance.ResolvedRef = repoRef + "@" + manifestDesc.Digest.String()
+
+		var manifest ocispec.Manifest
+		if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+			return provenance, fmt.Errorf("parse OCI image manifest: %w", err)
 		}
-		if err := rc.Close(); err != nil {
-			return provenance, fmt.Errorf("close OCI layer %s: %w", layer.Digest, err)
+		progress.emit("fetch-config", "fetching image config", 0, 0, 0, 0)
+		configBytes, err := fetchBytes(ctx, repo, manifest.Config)
+		if err != nil {
+			return provenance, fmt.Errorf("fetch OCI image config: %w", err)
 		}
-		provenance.LayerDigests = append(provenance.LayerDigests, layer.Digest.String())
-		fetchedLayerBytes += layerBytes
-		progress.emit("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes, totalLayerBytes)
+		if err := json.Unmarshal(configBytes, &imageConfig); err != nil {
+			return provenance, fmt.Errorf("parse OCI image config: %w", err)
+		}
+		if err := validateImagePlatform(imageConfig, req.Platform); err != nil {
+			return provenance, err
+		}
+
+		provenance.BuilderPhase = "extract-layers"
+		totalLayerBytes := descriptorSize(manifest.Layers...)
+		progress.emit("extract-layers", "extracting layers", 0, int64(len(manifest.Layers)), 0, totalLayerBytes)
+		var fetchedLayerBytes int64
+		for i, layer := range manifest.Layers {
+			rc, err := repo.Fetch(ctx, layer)
+			if err != nil {
+				return provenance, fmt.Errorf("fetch OCI layer %s: %w", layer.Digest, err)
+			}
+			var layerBytes int64
+			reader := &progressReadCloser{
+				ReadCloser: rc,
+				OnRead: func(n int64) {
+					layerBytes += n
+					progress.emitThrottled("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes+layerBytes, totalLayerBytes)
+				},
+			}
+			if err := extractLayer(stageDir, layer.MediaType, reader); err != nil {
+				_ = rc.Close()
+				return provenance, fmt.Errorf("extract OCI layer %s: %w", layer.Digest, err)
+			}
+			if err := rc.Close(); err != nil {
+				return provenance, fmt.Errorf("close OCI layer %s: %w", layer.Digest, err)
+			}
+			provenance.LayerDigests = append(provenance.LayerDigests, layer.Digest.String())
+			fetchedLayerBytes += layerBytes
+			progress.emit("extract-layers", "extracting layers", int64(i+1), int64(len(manifest.Layers)), fetchedLayerBytes, totalLayerBytes)
+		}
+		if cacheDir != "" {
+			if err := saveBaseStageCache(cacheDir, req, provenance, imageConfig, stageDir); err != nil {
+				return provenance, err
+			}
+		}
 	}
 
 	provenance.BuilderPhase = "write-init"
@@ -251,6 +286,112 @@ func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProv
 	provenance.SizeBytes = info.Size()
 	provenance.BuilderPhase = "complete"
 	return provenance, nil
+}
+
+func restoreBaseStageCache(cacheDir string, req BuildRequest, stageDir string) (baseStageCacheMetadata, bool, error) {
+	entryDir := baseStageCacheEntryDir(cacheDir, req.ImageRef, req.Platform)
+	metadataPath := filepath.Join(entryDir, "metadata.json")
+	baseDir := filepath.Join(entryDir, "base")
+	metadataBytes, err := os.ReadFile(metadataPath)
+	if errors.Is(err, os.ErrNotExist) {
+		if metadata, ok := findBaseStageCacheMetadataForImage(cacheDir, req.ImageRef); ok {
+			if err := validateImagePlatform(metadata.ImageConfig, req.Platform); err != nil {
+				return baseStageCacheMetadata{}, false, err
+			}
+		}
+		return baseStageCacheMetadata{}, false, nil
+	}
+	if err != nil {
+		return baseStageCacheMetadata{}, false, fmt.Errorf("read rootfs base cache metadata: %w", err)
+	}
+	var metadata baseStageCacheMetadata
+	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+		return baseStageCacheMetadata{}, false, fmt.Errorf("parse rootfs base cache metadata: %w", err)
+	}
+	if metadata.ImageRef != req.ImageRef || metadata.Platform != req.Platform {
+		return baseStageCacheMetadata{}, false, fmt.Errorf("rootfs base cache metadata does not match request")
+	}
+	if info, err := os.Stat(baseDir); err != nil || !info.IsDir() {
+		if err == nil {
+			err = fmt.Errorf("not a directory")
+		}
+		return baseStageCacheMetadata{}, false, fmt.Errorf("read rootfs base cache stage: %w", err)
+	}
+	if err := copyBaseStageCache(baseDir, stageDir); err != nil {
+		return baseStageCacheMetadata{}, false, fmt.Errorf("restore rootfs base cache: %w", err)
+	}
+	return metadata, true, nil
+}
+
+func findBaseStageCacheMetadataForImage(cacheDir, imageRef string) (baseStageCacheMetadata, bool) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return baseStageCacheMetadata{}, false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		metadataBytes, err := os.ReadFile(filepath.Join(cacheDir, entry.Name(), "metadata.json"))
+		if err != nil {
+			continue
+		}
+		var metadata baseStageCacheMetadata
+		if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+			continue
+		}
+		if metadata.ImageRef == imageRef {
+			return metadata, true
+		}
+	}
+	return baseStageCacheMetadata{}, false
+}
+
+func saveBaseStageCache(cacheDir string, req BuildRequest, provenance Provenance, imageConfig ocispec.Image, stageDir string) error {
+	entryDir := baseStageCacheEntryDir(cacheDir, req.ImageRef, req.Platform)
+	baseDir := filepath.Join(entryDir, "base")
+	if err := os.MkdirAll(entryDir, 0o755); err != nil {
+		return fmt.Errorf("create rootfs base cache: %w", err)
+	}
+	if err := copyBaseStageCache(stageDir, baseDir); err != nil {
+		return fmt.Errorf("save rootfs base cache stage: %w", err)
+	}
+	metadata := baseStageCacheMetadata{
+		ImageRef:     req.ImageRef,
+		ResolvedRef:  provenance.ResolvedRef,
+		Digest:       provenance.Digest,
+		Platform:     req.Platform,
+		ImageConfig:  imageConfig,
+		LayerDigests: append([]string{}, provenance.LayerDigests...),
+	}
+	metadataBytes, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal rootfs base cache metadata: %w", err)
+	}
+	metadataBytes = append(metadataBytes, '\n')
+	if err := os.WriteFile(filepath.Join(entryDir, "metadata.json"), metadataBytes, 0o644); err != nil {
+		return fmt.Errorf("write rootfs base cache metadata: %w", err)
+	}
+	return nil
+}
+
+func baseStageCacheEntryDir(cacheDir, imageRef string, platform Platform) string {
+	sum := sha256.Sum256([]byte(imageRef + "\x00" + platform.OS + "\x00" + platform.Architecture + "\x00" + platform.Variant))
+	return filepath.Join(cacheDir, hex.EncodeToString(sum[:]))
+}
+
+func copyBaseStageCache(src, dst string) error {
+	if err := os.RemoveAll(dst); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	cmd := exec.Command("cp", "-a", src+string(os.PathSeparator)+".", dst)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("cp -a: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir string, progress *progressReporter, provenance *Provenance) error {

@@ -515,6 +515,51 @@ func TestNATForwardChainPrecedesHostFilterChains(t *testing.T) {
 	}
 }
 
+func TestStaticTAPNATAddressPlanPreservesDeclaredNetwork(t *testing.T) {
+	plan, err := staticTAPNATAddressPlan(vmkit.NetworkConfig{
+		Mode:    "nat",
+		IP:      "10.43.210.2/29",
+		Subnet:  "10.43.210.0/29",
+		Gateway: "10.43.210.1",
+		DNS:     []string{"9.9.9.9"},
+	})
+	if err != nil {
+		t.Fatalf("staticTAPNATAddressPlan: %v", err)
+	}
+	if plan.Subnet != "10.43.210.0/29" || plan.GuestCIDR != "10.43.210.2/29" || plan.Gateway != "10.43.210.1" || plan.HostCIDR != "10.43.210.1/29" {
+		t.Fatalf("plan = %#v", plan)
+	}
+	runtimeNetwork := runtimeNetworkConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{
+		Mode:    "nat",
+		IP:      "10.43.210.2/29",
+		Subnet:  "10.43.210.0/29",
+		Gateway: "10.43.210.1",
+		DNS:     []string{"9.9.9.9"},
+		Routes:  []string{"0.0.0.0/0 via 10.43.210.1"},
+	}}, plan.Subnet, plan.GuestCIDR, plan.Gateway)
+	if runtimeNetwork.IP != "10.43.210.2/29" || runtimeNetwork.Subnet != "10.43.210.0/29" || runtimeNetwork.Gateway != "10.43.210.1" {
+		t.Fatalf("runtime network = %#v", runtimeNetwork)
+	}
+	if len(runtimeNetwork.DNS) != 1 || runtimeNetwork.DNS[0] != "9.9.9.9" {
+		t.Fatalf("runtime DNS = %#v", runtimeNetwork.DNS)
+	}
+	if len(runtimeNetwork.Routes) != 1 || runtimeNetwork.Routes[0] != "0.0.0.0/0 via 10.43.210.1" {
+		t.Fatalf("runtime routes = %#v", runtimeNetwork.Routes)
+	}
+}
+
+func TestStaticTAPNATAddressPlanRejectsIncompleteStaticNetwork(t *testing.T) {
+	if _, err := staticTAPNATAddressPlan(vmkit.NetworkConfig{IP: "10.43.210.2/29"}); err == nil || !strings.Contains(err.Error(), "requires network.ip and network.gateway") {
+		t.Fatalf("err = %v, want missing gateway", err)
+	}
+	if _, err := staticTAPNATAddressPlan(vmkit.NetworkConfig{IP: "10.43.210.2", Gateway: "10.43.210.1"}); err == nil || !strings.Contains(err.Error(), "parse firecracker static network.ip") {
+		t.Fatalf("err = %v, want CIDR parse failure", err)
+	}
+	if _, err := staticTAPNATAddressPlan(vmkit.NetworkConfig{IP: "10.43.210.2/29", Subnet: "10.43.211.0/29", Gateway: "10.43.210.1"}); err == nil || !strings.Contains(err.Error(), "must contain network.ip and network.gateway") {
+		t.Fatalf("err = %v, want subnet mismatch", err)
+	}
+}
+
 func TestFirecrackerNetworkSetupDoesNotExecIPOrIPTables(t *testing.T) {
 	data, err := os.ReadFile("supervisor_linux.go")
 	if err != nil {
@@ -540,11 +585,17 @@ func TestFirecrackerNetworkSetupDoesNotExecIPOrIPTables(t *testing.T) {
 func TestEnsureNetAdminInheritableRejectsMissingInheritable(t *testing.T) {
 	oldGetCaps := getProcessCapabilities
 	oldGetEUID := getEffectiveUID
+	oldAddInheritable := addInheritableCapability
 	t.Cleanup(func() {
 		getProcessCapabilities = oldGetCaps
 		getEffectiveUID = oldGetEUID
+		addInheritableCapability = oldAddInheritable
 	})
 	getEffectiveUID = func() int { return 1000 }
+	addInheritableCapability = func(int) error {
+		t.Fatal("addInheritableCapability called without CAP_SETPCAP")
+		return nil
+	}
 	getProcessCapabilities = func() (processCapabilities, error) {
 		mask := uint64(1) << uint(unix.CAP_NET_ADMIN)
 		return processCapabilities{
@@ -561,14 +612,58 @@ func TestEnsureNetAdminInheritableRejectsMissingInheritable(t *testing.T) {
 	}
 }
 
-func TestEnsureNetAdminInheritableAcceptsEIP(t *testing.T) {
+func TestEnsureNetAdminInheritableAddsInheritableWithSetPCAP(t *testing.T) {
 	oldGetCaps := getProcessCapabilities
 	oldGetEUID := getEffectiveUID
+	oldAddInheritable := addInheritableCapability
 	t.Cleanup(func() {
 		getProcessCapabilities = oldGetCaps
 		getEffectiveUID = oldGetEUID
+		addInheritableCapability = oldAddInheritable
 	})
 	getEffectiveUID = func() int { return 1000 }
+	netAdmin := uint64(1) << uint(unix.CAP_NET_ADMIN)
+	setPCAP := uint64(1) << uint(unix.CAP_SETPCAP)
+	added := false
+	getProcessCapabilities = func() (processCapabilities, error) {
+		caps := processCapabilities{
+			Effective: netAdmin | setPCAP,
+			Permitted: netAdmin | setPCAP,
+		}
+		if added {
+			caps.Inheritable = netAdmin
+		}
+		return caps, nil
+	}
+	addInheritableCapability = func(capability int) error {
+		if capability != unix.CAP_NET_ADMIN {
+			t.Fatalf("capability = %d, want CAP_NET_ADMIN", capability)
+		}
+		added = true
+		return nil
+	}
+	if err := ensureNetAdminInheritable(); err != nil {
+		t.Fatalf("ensureNetAdminInheritable: %v", err)
+	}
+	if !added {
+		t.Fatal("addInheritableCapability was not called")
+	}
+}
+
+func TestEnsureNetAdminInheritableAcceptsEIP(t *testing.T) {
+	oldGetCaps := getProcessCapabilities
+	oldGetEUID := getEffectiveUID
+	oldAddInheritable := addInheritableCapability
+	t.Cleanup(func() {
+		getProcessCapabilities = oldGetCaps
+		getEffectiveUID = oldGetEUID
+		addInheritableCapability = oldAddInheritable
+	})
+	getEffectiveUID = func() int { return 1000 }
+	addInheritableCapability = func(int) error {
+		t.Fatal("addInheritableCapability called for complete EIP set")
+		return nil
+	}
 	getProcessCapabilities = func() (processCapabilities, error) {
 		mask := uint64(1) << uint(unix.CAP_NET_ADMIN)
 		return processCapabilities{

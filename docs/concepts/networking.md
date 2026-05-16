@@ -77,7 +77,7 @@ Host requirements:
 
 - Linux kernel with nftables support (any 4.4+ kernel).
 - `net.ipv4.ip_forward=1`. The supervisor doesn't toggle this for you — it's a host-wide policy decision.
-- `CAP_NET_ADMIN` available to the supervisor process and inheritable by Firecracker. Running as root is the predictable path; advanced capability launchers must place the capability in the effective, permitted, and inheritable sets.
+- `CAP_NET_ADMIN` available to the supervisor process and inheritable by Firecracker. Running as root works. For a Docker-like non-root flow, grant the supervisor `cap_net_admin,cap_setpcap+ep`; the supervisor uses `CAP_SETPCAP` to add `CAP_NET_ADMIN` to its inheritable set before it launches Firecracker.
 
 If any of those is missing, `nat` fails closed before the VM boots. Transient TAPs and per-workspace nftables rules are cleaned up on `quarantine`, `stop`, `kill`, and `delete`.
 
@@ -107,7 +107,7 @@ network:
 
 The supervisor creates a transient TAP, attaches it to the bridge via Linux netlink, writes the Firecracker network device config, and tears the TAP down on `quarantine`/`stop`/`kill`/`delete`. Missing privileges, non-bridge interfaces, and TAP setup failures all fail closed.
 
-Same `CAP_NET_ADMIN` requirement as `nat` — run as root, or use a launcher that gives the supervisor effective, permitted, and inheritable `CAP_NET_ADMIN` so Firecracker can inherit it.
+Same `CAP_NET_ADMIN` requirement as `nat` — run as root, or use a supervisor binary with `cap_net_admin,cap_setpcap+ep` so Firecracker can inherit `CAP_NET_ADMIN`.
 
 ## Bridged on Windows Hyper-V
 

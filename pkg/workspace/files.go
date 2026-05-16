@@ -326,6 +326,9 @@ func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCop
 	if strings.ContainsAny(localSource, "\x00\n\r\t ") {
 		return CopyResult{}, fmt.Errorf("local source path must not contain whitespace")
 	}
+	if err := ensureRemoteWritable(stateDir, remote); err != nil {
+		return CopyResult{}, err
+	}
 	imagePath, err := workspaceImagePath(stateDir, remote)
 	if err != nil {
 		return CopyResult{}, err
@@ -374,6 +377,25 @@ func workspaceImagePath(stateDir string, remote remoteCopyEndpoint) (string, err
 		}
 	}
 	return "", fmt.Errorf("workspace %s has no disk %q", remote.Workspace, remote.Disk)
+}
+
+func ensureRemoteWritable(stateDir string, remote remoteCopyEndpoint) error {
+	if remote.Disk == "" || remote.Disk == "rootfs" {
+		return nil
+	}
+	manifest, err := ReadManifest(stateDir, remote.Workspace)
+	if err != nil {
+		return err
+	}
+	for _, disk := range manifest.Disks {
+		if disk.Name == remote.Disk {
+			if disk.Mode == "ro" {
+				return fmt.Errorf("workspace %s disk %q is read-only", remote.Workspace, remote.Disk)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("workspace %s has no disk %q", remote.Workspace, remote.Disk)
 }
 
 func ensureDebugFSParentDir(debugfsPath, imagePath, target string) error {
