@@ -815,9 +815,64 @@ func FirecrackerSupervisorPath(opts Options) string {
 func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
 	supervisor, err := Supervisor(opts)
 	if err != nil {
+		err = contextualDispatchError(opts, req, err.Error())
 		return vmkit.Response{Backend: opts.Backend, Error: err.Error()}, err
 	}
-	return supervisor.Do(ctx, req)
+	resp, err := supervisor.Do(ctx, req)
+	if err == nil {
+		return resp, nil
+	}
+	detail := strings.TrimSpace(resp.Error)
+	if detail == "" {
+		detail = err.Error()
+	}
+	err = contextualDispatchError(opts, req, detail)
+	if resp.Backend == "" {
+		resp.Backend = opts.Backend
+	}
+	resp.Error = err.Error()
+	return resp, err
+}
+
+func contextualDispatchError(opts Options, req vmkit.Request, detail string) error {
+	command := strings.TrimSpace(req.Command)
+	if command == "" {
+		command = "request"
+	}
+	name := strings.TrimSpace(opts.Name)
+	backend := strings.TrimSpace(opts.Backend)
+	stateDir := strings.TrimSpace(opts.StateDir)
+	if req.Identity != nil {
+		if runtimeID := strings.TrimSpace(req.Identity.RuntimeID); runtimeID != "" {
+			name = runtimeID
+		}
+		if identityBackend := strings.TrimSpace(req.Identity.Backend); identityBackend != "" {
+			backend = identityBackend
+		}
+	}
+	if req.Config != nil && stateDir == "" {
+		stateDir = strings.TrimSpace(req.Config.StateDir)
+	}
+	if name == "" {
+		name = "unknown"
+	}
+	if backend == "" {
+		backend = "unknown"
+	}
+	supervisorPath := strings.TrimSpace(opts.SupervisorPath)
+	if opts.Backend == vmkit.BackendFirecracker {
+		supervisorPath = FirecrackerSupervisorPath(opts)
+	}
+	fields := []string{
+		fmt.Sprintf("backend=%s", backend),
+	}
+	if stateDir != "" {
+		fields = append(fields, fmt.Sprintf("state-dir=%s", stateDir))
+	}
+	if supervisorPath != "" {
+		fields = append(fields, fmt.Sprintf("supervisor=%s", supervisorPath))
+	}
+	return fmt.Errorf("%s workspace %q failed (%s): %s", command, name, strings.Join(fields, " "), detail)
 }
 
 func ResultPath(stateDir, name string) string {
