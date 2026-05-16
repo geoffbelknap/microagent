@@ -189,6 +189,30 @@ cat >"$STATE_DIR/images/index.json" <<JSON
       "output_path": "$rootfs_path",
       "size_bytes": 6,
       "last_used_at": "$now"
+    },
+    {
+      "image_ref": "local/remove-alias:test",
+      "resolved_ref": "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f",
+      "digest": "sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f",
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      },
+      "output_path": "$rootfs_path",
+      "size_bytes": 6,
+      "last_used_at": "$now"
+    },
+    {
+      "image_ref": "local/rmi-alias:test",
+      "resolved_ref": "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f",
+      "digest": "sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f",
+      "platform": {
+        "os": "linux",
+        "architecture": "amd64"
+      },
+      "output_path": "$rootfs_path",
+      "size_bytes": 6,
+      "last_used_at": "$now"
     }
   ]
 }
@@ -196,6 +220,7 @@ JSON
 
 assert_stdout_contains contract-text "Contract:" "$CLI" --text contract
 assert_stdout_contains host-text "Backend:" "$CLI" --output text host --backend firecracker --arch amd64
+assert_stdout_contains host-human "Backend:" "$CLI" --human host --backend firecracker --arch amd64
 assert_stdout_contains create-dry-run-text "Workspace: text-dry-run" \
   "$CLI" --output=text create text-dry-run --dry-run --image docker.io/library/busybox:1.36.1 --state-dir "$STATE_DIR" --network isolated
 assert_stdout_contains status-text "Readiness: guest=ready shell=not-ready result=ready mediation=disabled" \
@@ -211,6 +236,10 @@ assert_stdout_contains ps-text "NAME[[:space:]]+STATE[[:space:]]+BACKEND" \
 assert_stdout_contains images-list-text "docker.io/library/busybox" \
   "$CLI" --text images list --state-dir "$STATE_DIR"
 assert_stdout_not_contains images-list-text '"images"'
+assert_stdout_contains images-remove-alias '"removed"' \
+  "$CLI" images remove local/remove-alias:test --state-dir "$STATE_DIR"
+assert_stdout_contains images-rmi-alias '"removed"' \
+  "$CLI" images rmi local/rmi-alias:test --state-dir "$STATE_DIR"
 assert_stdout_contains perf-footprint-text "Benchmark: footprint" \
   "$CLI" --output text perf footprint "$WORKSPACE" --state-dir "$STATE_DIR"
 assert_stdout_contains perf-steady-text "Samples:" \
@@ -218,5 +247,7 @@ assert_stdout_contains perf-steady-text "Samples:" \
 
 MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \
   "$CLI" ps --state-dir "$STATE_DIR/empty"
+assert_stdout_contains output-human "No workspaces." \
+  "$CLI" --output=human ps --state-dir "$STATE_DIR/empty-human"
 
 echo "microagent E2E text output passed"

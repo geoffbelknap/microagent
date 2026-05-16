@@ -102,6 +102,8 @@ expect_failure_contains run-missing-exec "run requires --exec" "$CLI" run --name
 expect_failure_contains cp-usage "usage: microagent cp" "$CLI" cp only-one-arg --state-dir "$STATE_DIR"
 expect_failure_contains artifacts-usage "usage: microagent artifacts get" "$CLI" artifacts get only two --state-dir "$STATE_DIR"
 expect_failure_contains images-rm-usage "usage: microagent images rm" "$CLI" images rm --state-dir "$STATE_DIR"
+expect_failure_contains images-remove-usage "usage: microagent images rm" "$CLI" images remove --state-dir "$STATE_DIR"
+expect_failure_contains images-rmi-usage "usage: microagent images rm" "$CLI" images rmi --state-dir "$STATE_DIR"
 expect_failure_contains rootfs-unknown "unknown rootfs command: nope" "$CLI" rootfs nope
 expect_failure_contains rootfs-missing-out "output_path is required" "$CLI" rootfs build --image docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f --state-dir "$STATE_DIR"
 expect_failure_contains perf-steady-interval "perf steady interval must be less than or equal to duration" "$CLI" perf steady workspace --duration 1 --interval 2 --state-dir "$STATE_DIR"
