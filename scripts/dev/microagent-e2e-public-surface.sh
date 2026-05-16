@@ -806,18 +806,45 @@ PY
 assert_json "$STATE_DIR/perf-footprint.json" "data.get('rss_kib', 0) > 0 and data.get('state') == 'running'"
 "$CLI" --json perf steady "$PERF_WORKSPACE" --state-dir "$STATE_DIR" --duration 1 --interval 1 >"$STATE_DIR/perf-steady.json"
 assert_json "$STATE_DIR/perf-steady.json" "data.get('summary', {}).get('count', 0) >= 1"
+expect_failure perf-boot-zero-iterations "iterations must be positive" \
+  "$CLI" --json perf boot \
+  --image "$IMAGE" \
+  --profile tiny \
+  --state-dir "$STATE_DIR/perf-zero-iterations" \
+  --exec "true" \
+  --iterations 0 \
+  --timeout 90
+expect_failure perf-boot-zero-timeout "timeout must be positive" \
+  "$CLI" --json perf boot \
+  --image "$IMAGE" \
+  --profile tiny \
+  --state-dir "$STATE_DIR/perf-zero-timeout" \
+  --exec "true" \
+  --iterations 1 \
+  --timeout 0
+"$CLI" --json perf boot \
+  --image "$IMAGE" \
+  --profile definitely-not-a-profile \
+  --state-dir "$STATE_DIR/perf-invalid-profile" \
+  --exec "true" \
+  --iterations 1 \
+  --timeout 90 >"$STATE_DIR/perf-invalid-profile.json"
+assert_json "$STATE_DIR/perf-invalid-profile.json" "data.get('summary', {}).get('count') == 1"
+assert_json "$STATE_DIR/perf-invalid-profile.json" "data.get('iterations', [])[0].get('ok') is False"
+assert_json "$STATE_DIR/perf-invalid-profile.json" "'unknown resource profile' in data.get('iterations', [])[0].get('error', '')"
 "$CLI" --json perf boot \
   --image "$IMAGE" \
   --profile tiny \
   --state-dir "$STATE_DIR" \
   --exec "printf PERF_BOOT_OK" \
-  --iterations 1 \
+  --iterations 2 \
   --timeout 90 >"$STATE_DIR/perf-boot.json"
 assert_json "$STATE_DIR/perf-boot.json" "data.get('benchmark') == 'boot'"
-assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('count') == 1"
-assert_json "$STATE_DIR/perf-boot.json" "len(data.get('iterations', [])) == 1"
-assert_json "$STATE_DIR/perf-boot.json" "data.get('iterations', [])[0].get('ok') is True"
-assert_json "$STATE_DIR/perf-boot.json" "data.get('iterations', [])[0].get('duration_ms', 0) > 0"
+assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('count') == 2"
+assert_json "$STATE_DIR/perf-boot.json" "len(data.get('iterations', [])) == 2"
+assert_json "$STATE_DIR/perf-boot.json" "all(item.get('ok') is True for item in data.get('iterations', []))"
+assert_json "$STATE_DIR/perf-boot.json" "all(item.get('duration_ms', 0) > 0 for item in data.get('iterations', []))"
+assert_json "$STATE_DIR/perf-boot.json" "data.get('summary', {}).get('min_ms', 0) > 0 and data.get('summary', {}).get('avg_ms', 0) > 0 and data.get('summary', {}).get('max_ms', 0) >= data.get('summary', {}).get('min_ms', 0)"
 "$CLI" kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/kill-perf.json"
 "$CLI" --json status "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-perf-killed.json"
 assert_json "$STATE_DIR/status-perf-killed.json" "data.get('event', {}).get('state') == 'stopped'"
