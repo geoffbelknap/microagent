@@ -600,6 +600,46 @@ PY
 ensure_cached_image
 seed_image_cache_for_state "$STATE_DIR"
 
+if "$CLI" create \
+  --id publish-collision \
+  --backend firecracker \
+  --kernel "$kernel_path" \
+  --rootfs "$(cached_image_rootfs_path)" \
+  --state-dir "$STATE_DIR/publish-collision" \
+  --network user \
+  --publish "127.0.0.1:$nats_port:4222/tcp" \
+  --publish "127.0.0.1:$nats_port:8222/tcp" >"$STATE_DIR/publish-collision.json" 2>"$STATE_DIR/publish-collision.err"; then
+  echo "duplicate published host port unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "duplicate published host port" "$STATE_DIR/publish-collision.err"
+
+if "$CLI" create \
+  --id publish-udp \
+  --backend firecracker \
+  --kernel "$kernel_path" \
+  --rootfs "$(cached_image_rootfs_path)" \
+  --state-dir "$STATE_DIR/publish-udp" \
+  --network user \
+  --publish "127.0.0.1:$monitor_port:8222/udp" >"$STATE_DIR/publish-udp.json" 2>"$STATE_DIR/publish-udp.err"; then
+  echo "udp published port unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "protocol must be tcp" "$STATE_DIR/publish-udp.err"
+
+if "$CLI" create \
+  --id publish-ipv6 \
+  --backend firecracker \
+  --kernel "$kernel_path" \
+  --rootfs "$(cached_image_rootfs_path)" \
+  --state-dir "$STATE_DIR/publish-ipv6" \
+  --network user \
+  --publish "[::1]:$monitor_port:8222/tcp" >"$STATE_DIR/publish-ipv6.json" 2>"$STATE_DIR/publish-ipv6.err"; then
+  echo "ipv6 published port unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "publish mapping must be" "$STATE_DIR/publish-ipv6.err"
+
 prepare_cached_workspace "$NAT_WORKSPACE" '{"mode":"nat"}' '{}' "$STATE_DIR/nat-create.json"
 "$CLI" start "$NAT_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/nat-start.json"
 wait_for_status_ready "$NAT_WORKSPACE" "$STATE_DIR/nat-status-running.json"
@@ -728,6 +768,8 @@ for item in (declared, runtime, status_runtime):
         raise SystemExit({"network": network, "status": status, "create": create})
     if item.get("subnet") != "10.43.240.0/29" or item.get("dns") != ["1.1.1.1", "8.8.8.8"]:
         raise SystemExit({"network": network, "status": status, "create": create})
+    if item.get("routes") != ["0.0.0.0/0 via 10.43.240.1"]:
+        raise SystemExit({"network": network, "status": status, "create": create})
 if "STATIC_NET_READY" not in console:
     raise SystemExit(console)
 PY
@@ -821,6 +863,9 @@ if doctor["host"]["kvmAvailable"] is not True or doctor["host"]["userNetworkingA
 if create["response"]["event"]["state"] != "prepared":
     raise SystemExit(create)
 if create["network"]["mode"] != "user":
+    raise SystemExit(create["network"])
+declared_forwards = create["network"].get("portForwards") or create["network"].get("port_forwards") or []
+if {(f["hostPort"], f["guestPort"]) for f in declared_forwards} != {(nats_port, 4222), (monitor_port, 8222)}:
     raise SystemExit(create["network"])
 reported_forwards = network["network"].get("portForwards") or network["network"].get("port_forwards") or []
 forwards = {(f["hostPort"], f["guestPort"]) for f in reported_forwards}
