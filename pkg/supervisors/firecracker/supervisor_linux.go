@@ -475,6 +475,23 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 	}
 	if detached {
+		if err := detachedStartExitError(cmd, 500*time.Millisecond); err != nil {
+			if portForwardPID != 0 {
+				_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
+			}
+			if vsockListenerPID != 0 {
+				terminateAuxProcess(vsockListenerPID)
+			}
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
+			_ = serialLog.Close()
+			errorText := fmt.Sprintf("%s; serial log: %s", err.Error(), serialLogPath(opts))
+			_ = writeProcessState(opts, runtimeReq, vmkit.StateFailed, 0, errorText)
+			return failedResponse(req, errorText), fmt.Errorf("%s", errorText)
+		}
 		if serialInput != nil {
 			_ = serialInput.Close()
 		}
@@ -2315,6 +2332,33 @@ func signalProcessGroup(pid int, signal syscall.Signal) error {
 		return err
 	}
 	return syscall.Kill(pid, signal)
+}
+
+func detachedStartExitError(cmd *exec.Cmd, delay time.Duration) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	var status syscall.WaitStatus
+	pid, err := syscall.Wait4(cmd.Process.Pid, &status, syscall.WNOHANG, nil)
+	if err != nil {
+		if err == syscall.ECHILD {
+			return nil
+		}
+		return fmt.Errorf("check detached firecracker process %d: %w", cmd.Process.Pid, err)
+	}
+	if pid == 0 {
+		return nil
+	}
+	if status.Exited() {
+		return fmt.Errorf("firecracker exited during detached startup: exit status %d", status.ExitStatus())
+	}
+	if status.Signaled() {
+		return fmt.Errorf("firecracker exited during detached startup: signal %s", status.Signal())
+	}
+	return fmt.Errorf("firecracker exited during detached startup: wait status %d", status)
 }
 
 func processActive(pid int) (bool, error) {

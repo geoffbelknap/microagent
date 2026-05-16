@@ -1015,6 +1015,31 @@ func TestEnsureCanDeleteRejectsActiveUserNetworkProcess(t *testing.T) {
 	}
 }
 
+func TestDetachedStartExitErrorDetectsImmediateExit(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 7")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	err := detachedStartExitError(cmd, 10*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "exit status 7") {
+		t.Fatalf("detachedStartExitError = %v, want exit status 7", err)
+	}
+}
+
+func TestDetachedStartExitErrorIgnoresRunningProcess(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := detachedStartExitError(cmd, 10*time.Millisecond); err != nil {
+		t.Fatalf("detachedStartExitError = %v, want nil", err)
+	}
+}
+
 func TestWriteConfigOmitsNetworkInterfaceForIsolated(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
 	req := vmkit.Request{
