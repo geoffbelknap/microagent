@@ -263,6 +263,43 @@ func TestStartVsockListenersWritesGuestResult(t *testing.T) {
 	}
 }
 
+func TestGuestHaltedStateWaitsForDelayedFailureResult(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "demo"}
+	if err := os.MkdirAll(filepath.Join(dir, "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		result := `{"started_at":"2026-05-02T00:00:00Z","exited_at":"2026-05-02T00:00:01Z","exit_code":42,"stdout":"failed\n"}`
+		_ = os.WriteFile(filepath.Join(dir, "demo", "result.json"), []byte(result), 0o644)
+	}()
+
+	state, detail := guestHaltedState(opts, time.Second)
+
+	if state != vmkit.StateFailed {
+		t.Fatalf("state = %q, want %q", state, vmkit.StateFailed)
+	}
+	if detail != "guest exited with code 42" {
+		t.Fatalf("detail = %q, want guest exit detail", detail)
+	}
+}
+
+func TestRuntimeHasResultListener(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "demo"}
+	state := runtimeState{
+		Event: eventFile{Identity: vmkit.Identity{RuntimeID: "demo"}},
+		Config: vmkit.Config{
+			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(dir, "demo", "result.json")}},
+		},
+	}
+
+	if !runtimeHasResultListener(opts, state) {
+		t.Fatal("runtimeHasResultListener = false, want true")
+	}
+}
+
 func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}

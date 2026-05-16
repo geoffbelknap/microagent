@@ -1937,7 +1937,11 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		return responseFromEvent(event, ""), nil
 	}
 	if state.Event.State == vmkit.StateRunning && GuestHalted(serialLogPath(opts)) {
-		finalState, errorText := guestHaltedState(opts)
+		resultWait := time.Duration(0)
+		if runtimeHasResultListener(opts, state) {
+			resultWait = 2 * time.Second
+		}
+		finalState, errorText := guestHaltedState(opts, resultWait)
 		if state.PID != 0 {
 			_ = signalProcessGroup(state.PID, syscall.SIGTERM)
 			_ = waitForProcessExit(context.Background(), state.PID, 5*time.Second)
@@ -1964,10 +1968,30 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 	return responseFromRuntimeState(opts, state), nil
 }
 
-func guestHaltedState(opts Options) (vmkit.VMState, string) {
-	data, err := os.ReadFile(filepath.Join(opts.StateDir, opts.Name, "result.json"))
-	if err != nil {
-		return vmkit.StateStopped, ""
+func runtimeHasResultListener(opts Options, state runtimeState) bool {
+	resultPath := resultPathFromState(opts, state)
+	for _, listener := range state.Config.VsockListeners {
+		if listener.Target == resultPath {
+			return true
+		}
+	}
+	return false
+}
+
+func guestHaltedState(opts Options, waitForResult time.Duration) (vmkit.VMState, string) {
+	resultPath := filepath.Join(opts.StateDir, opts.Name, "result.json")
+	deadline := time.Now().Add(waitForResult)
+	var data []byte
+	var err error
+	for {
+		data, err = os.ReadFile(resultPath)
+		if err == nil {
+			break
+		}
+		if waitForResult <= 0 || !os.IsNotExist(err) || time.Now().After(deadline) {
+			return vmkit.StateStopped, ""
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	var result struct {
 		ExitCode int    `json:"exit_code"`
