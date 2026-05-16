@@ -20,7 +20,8 @@ case "$(uname -s)" in
 esac
 
 export GOCACHE="${GOCACHE:-$ROOT/.cache/go-build}"
-mkdir -p "$GOCACHE"
+export GOMODCACHE="${GOMODCACHE:-$ROOT/.cache/gomodcache}"
+mkdir -p "$GOCACHE" "$GOMODCACHE"
 
 cleanup() {
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true

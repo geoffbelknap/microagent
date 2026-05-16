@@ -75,8 +75,8 @@ if [ ! -x "${firecracker:-}" ]; then
   exit 2
 fi
 
-export GOCACHE="$STATE_DIR/gocache"
-export GOMODCACHE="$STATE_DIR/gomodcache"
+export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
+export GOMODCACHE="${GOMODCACHE:-$STATE_DIR/gomodcache}"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 export MICROAGENT_FIRECRACKER="$firecracker"
 export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"

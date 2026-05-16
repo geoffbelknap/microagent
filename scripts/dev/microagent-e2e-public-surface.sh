@@ -85,8 +85,8 @@ if [ "$(uname -s)" = "Linux" ]; then
   export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
 fi
 
-export GOCACHE="$STATE_DIR/gocache"
-export GOMODCACHE="$STATE_DIR/gomodcache"
+export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
+export GOMODCACHE="${GOMODCACHE:-$STATE_DIR/gomodcache}"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 
 json_get() {

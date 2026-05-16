@@ -25,8 +25,8 @@ for required in go grep ps; do
   fi
 done
 
-export GOCACHE="$STATE_DIR/gocache"
-export GOMODCACHE="$STATE_DIR/gomodcache"
+export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
+export GOMODCACHE="${GOMODCACHE:-$STATE_DIR/gomodcache}"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 
 (cd "$ROOT" && go build -buildvcs=false -o "$CLI" ./cmd/microagent)
