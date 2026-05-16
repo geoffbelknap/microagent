@@ -12,8 +12,8 @@ dev-build:
 	scripts/dev/build-local.sh
 
 smoke: test
-	scripts/dev/runtime-contract-smoke.sh
 ifeq ($(UNAME_S),Darwin)
+	scripts/dev/microagent-e2e.sh contract
 	scripts/dev/applevf-supervisor-build.sh
 	scripts/dev/applevf-supervisor-lifecycle-smoke.sh
 	scripts/dev/cli-lifecycle-smoke.sh
@@ -29,7 +29,7 @@ else
 endif
 
 smoke-contract:
-	scripts/dev/runtime-contract-smoke.sh
+	scripts/dev/microagent-e2e.sh contract
 
 smoke-rootfs:
 	scripts/dev/rootfs-oci-smoke.sh
