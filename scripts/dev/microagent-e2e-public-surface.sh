@@ -808,6 +808,8 @@ expect_failure invalid-request-combination "duplicate vsock listener port" \
   --timeout 60 >"$STATE_DIR/run.json"
 assert_json "$STATE_DIR/run.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
 assert_json "$STATE_DIR/run.json" "'RUN_OK' in data.get('result', {}).get('stdout', '')"
+assert_json "$STATE_DIR/run.json" "'RUN_OK' in data.get('serial_log', '')"
+assert_json "$STATE_DIR/run.json" "'reboot: System halted' in data.get('serial_log', '') or 'reboot: Power down' in data.get('serial_log', '')"
 
 "$CLI" --json run \
   --name "$RUN_KEEP_WORKSPACE" \

@@ -33,18 +33,3 @@ jobs:
 
       - name: Full microagent E2E suite
         run: scripts/dev/microagent-e2e.sh
-
-      - name: Firecracker console parity
-        run: scripts/dev/firecracker-console-parity-smoke.sh
-
-      - name: Firecracker publish parity
-        run: scripts/dev/firecracker-publish-smoke.sh
-
-      - name: Firecracker network modes
-        run: scripts/dev/firecracker-network-mode-smoke.sh
-
-      - name: Firecracker workspace lifecycle
-        run: scripts/dev/firecracker-workspace-smoke.sh
-
-      - name: Firecracker boot
-        run: scripts/dev/firecracker-boot-smoke.sh
