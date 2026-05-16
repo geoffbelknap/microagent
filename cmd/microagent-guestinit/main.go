@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ const configPath = "/etc/microagent/run.json"
 const resultConnectTimeout = 15 * time.Second
 const tcpVsockListenersEnv = "MICROAGENT_VSOCK_TCP_LISTENERS"
 const consoleShellExitedMarker = "microagent-init: console shell exited; closing connect session"
+const defaultGuestPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 type config struct {
 	Command      []string      `json:"command"`
@@ -220,9 +222,38 @@ func run() int {
 }
 
 func execServiceCommand(command []string, env []string) error {
+	command, err := resolveServiceCommand(command, env)
+	if err != nil {
+		return err
+	}
 	log.Printf("microagent-init: exec service command %v", command)
-	closeExtraFiles()
+	markExtraFilesCloseOnExec()
 	return syscall.Exec(command[0], command, env)
+}
+
+func resolveServiceCommand(command []string, env []string) ([]string, error) {
+	if len(command) == 0 {
+		return nil, fmt.Errorf("service command is empty")
+	}
+	if strings.Contains(command[0], "/") {
+		return command, nil
+	}
+	searchPath := envValue(env, "PATH")
+	if searchPath == "" {
+		searchPath = defaultGuestPath
+	}
+	for _, dir := range filepath.SplitList(searchPath) {
+		if dir == "" {
+			dir = "."
+		}
+		candidate := filepath.Join(dir, command[0])
+		if err := unix.Access(candidate, unix.X_OK); err == nil {
+			resolved := append([]string{}, command...)
+			resolved[0] = candidate
+			return resolved, nil
+		}
+	}
+	return nil, fmt.Errorf("resolve service command %q in PATH: %w", command[0], exec.ErrNotFound)
 }
 
 func runManagedServiceCommand(command []string, env []string) error {
@@ -1437,7 +1468,7 @@ func attachConsole() error {
 	return fmt.Errorf("open guest console: /dev/hvc0 and /dev/console are unavailable")
 }
 
-func closeExtraFiles() {
+func markExtraFilesCloseOnExec() {
 	entries, err := os.ReadDir("/proc/self/fd")
 	if err != nil {
 		return
@@ -1447,7 +1478,7 @@ func closeExtraFiles() {
 		if err != nil || fd <= 2 {
 			continue
 		}
-		_ = unix.Close(fd)
+		unix.CloseOnExec(fd)
 	}
 }
 

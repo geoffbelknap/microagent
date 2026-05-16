@@ -104,6 +104,36 @@ func TestBuildCommandUsesImageCommandByDefault(t *testing.T) {
 	}
 }
 
+func TestBuildGuestEnvIncludesImageEnvAndRequestOverrides(t *testing.T) {
+	image := ocispec.Image{}
+	image.Config.Env = []string{
+		"PATH=/usr/local/bin:/usr/bin",
+		"IMAGE_ONLY=present",
+		"OVERRIDE=image",
+		"bad-env=ignored",
+	}
+
+	got := buildGuestEnv(map[string]string{
+		"OVERRIDE": "request",
+		"REQUEST":  "present",
+		"bad-env":  "ignored",
+	}, image)
+
+	for key, want := range map[string]string{
+		"PATH":       "/usr/local/bin:/usr/bin",
+		"IMAGE_ONLY": "present",
+		"OVERRIDE":   "request",
+		"REQUEST":    "present",
+	} {
+		if got[key] != want {
+			t.Fatalf("env[%s] = %q, want %q in %#v", key, got[key], want, got)
+		}
+	}
+	if _, ok := got["bad-env"]; ok {
+		t.Fatalf("env included invalid name: %#v", got)
+	}
+}
+
 func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
 	tests := []struct {
 		name          string

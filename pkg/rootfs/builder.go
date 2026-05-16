@@ -187,7 +187,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	provenance.BuilderPhase = "write-init"
 	progress.emit("write-init", "writing guest init", 0, 0, 0, 0)
 	command := buildCommand(req, imageConfig)
-	if err := writeInit(stageDir, req.InitPath, command, req.Mode, req.Env, req.InitBinaryPath, req.ResultPort, req.ShellPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
+	if err := writeInit(stageDir, req.InitPath, command, req.Mode, buildGuestEnv(req.Env, imageConfig), req.InitBinaryPath, req.ResultPort, req.ShellPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
 		return provenance, err
 	}
 	if err := ensureGuestRuntimeDirs(stageDir); err != nil {
@@ -227,6 +227,25 @@ func buildCommand(req BuildRequest, imageConfig ocispec.Image) []string {
 		command = append(command, imageConfig.Config.Cmd...)
 	}
 	return command
+}
+
+func buildGuestEnv(reqEnv map[string]string, imageConfig ocispec.Image) map[string]string {
+	out := map[string]string{}
+	for _, entry := range imageConfig.Config.Env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && validShellEnvName(key) {
+			out[key] = value
+		}
+	}
+	for key, value := range reqEnv {
+		if validShellEnvName(key) {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (b Builder) BuildBundle(ctx context.Context, req BundleRequest) (BundleProvenance, error) {
