@@ -90,8 +90,13 @@ assert_stdout_contains perf-help "Measure workspace performance" "$CLI" perf --h
 assert_stdout_contains kernel-help "Advanced kernel commands" "$CLI" kernel --help
 assert_stdout_contains rootfs-help "Build a rootfs from an OCI image" "$CLI" rootfs --help
 assert_output_contains rootfs-build-help "Usage of rootfs build:" "$CLI" rootfs build --help
+assert_stdout_contains linux-network-setup-help "--check" "$ROOT/scripts/dev/microagent-e2e-linux-network-setup.sh" --help
+if [ "$(uname -s)" = "Linux" ]; then
+  assert_stdout_contains linux-network-setup-check "microagent E2E Linux network setup check" "$ROOT/scripts/dev/microagent-e2e-linux-network-setup.sh" --check
+fi
 
 expect_failure_contains unknown-command "unknown command: definitely-not-a-command" "$CLI" definitely-not-a-command
+expect_failure_contains linux-network-setup-unknown "unknown option: --definitely-not-an-option" "$ROOT/scripts/dev/microagent-e2e-linux-network-setup.sh" --definitely-not-an-option
 expect_failure_contains run-missing-image "run requires --image" "$CLI" run --name missing-image --state-dir "$STATE_DIR"
 expect_failure_contains run-missing-exec "run requires --exec" "$CLI" run --name missing-exec --image example.com/acme/image:latest --state-dir "$STATE_DIR"
 expect_failure_contains cp-usage "usage: microagent cp" "$CLI" cp only-one-arg --state-dir "$STATE_DIR"

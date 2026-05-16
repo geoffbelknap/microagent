@@ -17,16 +17,36 @@ Run this once per checkout, then normal E2E runs can use:
 
   scripts/dev/microagent-e2e.sh networking
 
+Usage:
+  scripts/dev/microagent-e2e-linux-network-setup.sh [--check]
+
+Options:
+  --check   Print current host prerequisite status without changing the host.
+
 Environment:
   MICROAGENT_E2E_NETWORK_INSTALL_DIR  Directory for the capability-enabled supervisor
   MICROAGENT_E2E_BRIDGE               Reusable Linux bridge name (default: microagent0)
 EOF
 }
 
-if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-  usage
-  exit 0
-fi
+CHECK_ONLY=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --check)
+      CHECK_ONLY=1
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
@@ -46,6 +66,48 @@ done
 if ! command -v setcap >/dev/null 2>&1; then
   echo "setcap is required for microagent E2E Linux network setup" >&2
   exit 2
+fi
+
+check_status() {
+  echo "microagent E2E Linux network setup check"
+  echo "supervisor: $SUPERVISOR"
+  if [ -e "$SUPERVISOR" ]; then
+    if caps="$(getcap "$SUPERVISOR" 2>/dev/null)"; then
+      if [[ "$caps" == *cap_net_admin* ]] && [[ "$caps" == *cap_setpcap* ]]; then
+        echo "capabilities: ok ($caps)"
+      else
+        echo "capabilities: missing cap_net_admin or cap_setpcap ($caps)"
+      fi
+    else
+      echo "capabilities: unreadable"
+    fi
+  else
+    echo "capabilities: supervisor not built"
+  fi
+
+  ip_forward="$(sysctl -n net.ipv4.ip_forward 2>/dev/null || true)"
+  if [ "$ip_forward" = "1" ]; then
+    echo "ip_forward: ok"
+  else
+    echo "ip_forward: disabled (${ip_forward:-unknown})"
+  fi
+
+  echo "bridge: $BRIDGE_NAME"
+  if ip link show "$BRIDGE_NAME" >/dev/null 2>&1; then
+    bridge_type="$(cat "/sys/class/net/$BRIDGE_NAME/type" 2>/dev/null || true)"
+    if [ "$bridge_type" = "772" ]; then
+      echo "bridge_type: ok"
+    else
+      echo "bridge_type: not a Linux bridge (${bridge_type:-unknown})"
+    fi
+  else
+    echo "bridge_type: missing"
+  fi
+}
+
+if [ "$CHECK_ONLY" = "1" ]; then
+  check_status
+  exit 0
 fi
 
 run_privileged() {
