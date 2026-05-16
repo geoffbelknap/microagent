@@ -28,7 +28,7 @@ cleanup() {
   if [ -x "$CLI" ]; then
     for workspace in "$WORKSPACE" "$OPTIONAL_WORKSPACE"; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     done
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
@@ -75,8 +75,8 @@ if [ ! -x "${firecracker:-}" ]; then
   exit 2
 fi
 
-export GOCACHE="$STATE_DIR/gocache"
-export GOMODCACHE="$STATE_DIR/gomodcache"
+export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
+export GOMODCACHE="${GOMODCACHE:-$STATE_DIR/gomodcache}"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 export MICROAGENT_FIRECRACKER="$firecracker"
 export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
@@ -308,7 +308,7 @@ if "$CLI" connect "$WORKSPACE" --state-dir "$STATE_DIR" --send "echo no" >"$STAT
 fi
 grep -qi "quarantined" "$STATE_DIR/connect-quarantined.err"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt.json"
-"$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
+"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
 
 "$CLI" create "$OPTIONAL_WORKSPACE" \
   --image "$IMAGE" \
@@ -333,7 +333,7 @@ wait_for_status_ready "$OPTIONAL_WORKSPACE" "$STATE_DIR/status-optional-running.
   --timeout 10 >"$STATE_DIR/connect-optional.txt"
 "$CLI" status "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-optional-after-connect.json"
 "$CLI" halt "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-optional.json"
-"$CLI" delete "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete-optional.json"
+"$CLI" delete "$OPTIONAL_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-optional.json"
 
 python3 - "$STATE_DIR" <<'PY'
 import json
@@ -383,7 +383,8 @@ if "RAW_VSOCK_OK" not in read_text("connect.txt"):
     raise SystemExit(read_text("connect.txt"))
 if "RAW_LARGE_BEGIN" not in read_text("connect.txt") or "RAW_LARGE_END" not in read_text("connect.txt"):
     raise SystemExit(read_text("connect.txt"))
-if "RAW_UNAVAILABLE_FAILED" not in read_text("connect.txt") or read_text("connect.txt").count("RAW_UNAVAILABLE_UNEXPECTED") > 1:
+connect_lines = {line.strip() for line in read_text("connect.txt").splitlines()}
+if "RAW_UNAVAILABLE_FAILED" not in connect_lines or "RAW_UNAVAILABLE_UNEXPECTED" in connect_lines:
     raise SystemExit(read_text("connect.txt"))
 request = read_text("host-request.txt")
 if "GET /mediation-check" not in request:

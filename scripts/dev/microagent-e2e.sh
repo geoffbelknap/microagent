@@ -42,6 +42,7 @@ Environment:
   --keep or MICROAGENT_E2E_KEEP=1 keeps failed and successful scenario state directories.
   MICROAGENT_E2E_IMAGE=<ref> overrides the default BusyBox public-surface image.
   MICROAGENT_NATS_IMAGE=<ref> overrides the default NATS image used by scenarios.
+  MICROAGENT_E2E_CACHE_DIR=<dir> overrides the shared Go build/module cache.
   MICROAGENT_E2E_IMAGE_CACHE_DIR=<dir> overrides the persistent E2E image cache.
   MICROAGENT_ROOTFS_BASE_CACHE_DIR=<dir> overrides the persistent rootfs base cache.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files.
@@ -174,6 +175,11 @@ fi
 
 printf 'microagent E2E suite: %s\n' "${selected[*]}"
 start_suite="$(date +%s)"
+suite_cache_dir="${MICROAGENT_E2E_CACHE_DIR:-$ROOT/.cache/microagent-e2e}"
+export GOCACHE="${GOCACHE:-$suite_cache_dir/go-build}"
+export GOMODCACHE="${GOMODCACHE:-$suite_cache_dir/gomodcache}"
+export GOFLAGS="${GOFLAGS:-} -modcacherw"
+mkdir -p "$GOCACHE" "$GOMODCACHE"
 
 for name in "${selected[@]}"; do
   script="$(scenario_script "$name")"

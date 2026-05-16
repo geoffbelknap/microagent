@@ -1,9 +1,11 @@
 package workspace
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -93,6 +95,54 @@ func TestDefaultOptionsDoNotSetAppleVFPathForNonAppleVF(t *testing.T) {
 	}
 	if opts.SupervisorPath != "" {
 		t.Fatalf("SupervisorPath = %q, want empty non-Apple VF default", opts.SupervisorPath)
+	}
+}
+
+func TestDispatchAddsLifecycleFailureContext(t *testing.T) {
+	backend := ""
+	switch runtime.GOOS {
+	case "linux":
+		backend = vmkit.BackendFirecracker
+	case "darwin":
+		backend = vmkit.BackendAppleVF
+	default:
+		t.Skipf("fake executable supervisor dispatch test does not support %s", runtime.GOOS)
+	}
+	dir := t.TempDir()
+	supervisorPath := filepath.Join(dir, "supervisor")
+	if err := os.WriteFile(supervisorPath, []byte("#!/bin/sh\necho supervisor unavailable >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := filepath.Join(dir, "state")
+	opts := Options{
+		Name:           "apply-stopped",
+		Backend:        backend,
+		StateDir:       stateDir,
+		SupervisorPath: supervisorPath,
+	}
+	req := Request(opts, "halt", "", "req-1")
+
+	resp, err := Dispatch(context.Background(), opts, req)
+	if err == nil {
+		t.Fatal("Dispatch error = nil")
+	}
+	for _, want := range []string{
+		`halt workspace "apply-stopped" failed`,
+		"backend=" + backend,
+		"state-dir=" + stateDir,
+		"supervisor=" + supervisorPath,
+		"exit status 1",
+		"supervisor unavailable",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Dispatch error = %q, want substring %q", err.Error(), want)
+		}
+		if !strings.Contains(resp.Error, want) {
+			t.Fatalf("Response error = %q, want substring %q", resp.Error, want)
+		}
+	}
+	if resp.Backend != backend {
+		t.Fatalf("Response backend = %q, want %q", resp.Backend, backend)
 	}
 }
 

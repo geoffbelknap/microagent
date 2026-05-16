@@ -263,6 +263,43 @@ func TestStartVsockListenersWritesGuestResult(t *testing.T) {
 	}
 }
 
+func TestGuestHaltedStateWaitsForDelayedFailureResult(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "demo"}
+	if err := os.MkdirAll(filepath.Join(dir, "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		result := `{"started_at":"2026-05-02T00:00:00Z","exited_at":"2026-05-02T00:00:01Z","exit_code":42,"stdout":"failed\n"}`
+		_ = os.WriteFile(filepath.Join(dir, "demo", "result.json"), []byte(result), 0o644)
+	}()
+
+	state, detail := guestHaltedState(opts, time.Second)
+
+	if state != vmkit.StateFailed {
+		t.Fatalf("state = %q, want %q", state, vmkit.StateFailed)
+	}
+	if detail != "guest exited with code 42" {
+		t.Fatalf("detail = %q, want guest exit detail", detail)
+	}
+}
+
+func TestRuntimeHasResultListener(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{StateDir: dir, Name: "demo"}
+	state := runtimeState{
+		Event: eventFile{Identity: vmkit.Identity{RuntimeID: "demo"}},
+		Config: vmkit.Config{
+			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(dir, "demo", "result.json")}},
+		},
+	}
+
+	if !runtimeHasResultListener(opts, state) {
+		t.Fatal("runtimeHasResultListener = false, want true")
+	}
+}
+
 func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
@@ -795,6 +832,27 @@ func TestUserNetworkDisableRunTimeoutEnvOnlyDisablesRunTimeout(t *testing.T) {
 	}
 }
 
+func TestUserNetworkRuntimePIDPrefersHostPastaPIDFile(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+	if err := os.MkdirAll(filepath.Dir(userNetworkPIDPath(opts)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userNetworkPIDPath(opts), []byte("4242\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if got := userNetworkRuntimePID(opts, cmd); got != 4242 {
+		t.Fatalf("userNetworkRuntimePID = %d, want host pasta pid", got)
+	}
+}
+
 func containsExpr[T expr.Any](exprs []expr.Any) bool {
 	for _, candidate := range exprs {
 		if _, ok := candidate.(T); ok {
@@ -1012,6 +1070,31 @@ func TestEnsureCanDeleteRejectsActiveUserNetworkProcess(t *testing.T) {
 	}
 	if err := ensureCanDelete(opts); err == nil || !strings.Contains(err.Error(), "user network process is running") {
 		t.Fatalf("ensureCanDelete error = %v, want user network rejection", err)
+	}
+}
+
+func TestDetachedStartExitErrorDetectsImmediateExit(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 7")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	err := detachedStartExitError(cmd, 10*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "exit status 7") {
+		t.Fatalf("detachedStartExitError = %v, want exit status 7", err)
+	}
+}
+
+func TestDetachedStartExitErrorIgnoresRunningProcess(t *testing.T) {
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := detachedStartExitError(cmd, 10*time.Millisecond); err != nil {
+		t.Fatalf("detachedStartExitError = %v, want nil", err)
 	}
 }
 

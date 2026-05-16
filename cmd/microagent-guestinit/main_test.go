@@ -170,6 +170,33 @@ func TestConsoleShellCommandRejectsMissingShell(t *testing.T) {
 	}
 }
 
+func TestResolveServiceCommandUsesGuestPath(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "docker-entrypoint.sh")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveServiceCommand([]string{"docker-entrypoint.sh", "serve"}, []string{"PATH=" + dir})
+	if err != nil {
+		t.Fatalf("resolveServiceCommand: %v", err)
+	}
+	want := []string{bin, "serve"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveServiceCommand = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveServiceCommandRejectsMissingBareCommand(t *testing.T) {
+	_, err := resolveServiceCommand([]string{"definitely-missing-microagent-service"}, []string{"PATH=" + t.TempDir()})
+	if err == nil {
+		t.Fatal("resolveServiceCommand error = nil")
+	}
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("resolveServiceCommand error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestValidateHostname(t *testing.T) {
 	for _, hostname := range []string{"research", "homebridge-1"} {
 		if err := validateHostname(hostname); err != nil {

@@ -475,6 +475,23 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 	}
 	if detached {
+		if err := detachedStartExitError(cmd, 500*time.Millisecond); err != nil {
+			if portForwardPID != 0 {
+				_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
+			}
+			if vsockListenerPID != 0 {
+				terminateAuxProcess(vsockListenerPID)
+			}
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
+			_ = serialLog.Close()
+			errorText := fmt.Sprintf("%s; serial log: %s", err.Error(), serialLogPath(opts))
+			_ = writeProcessState(opts, runtimeReq, vmkit.StateFailed, 0, errorText)
+			return failedResponse(req, errorText), fmt.Errorf("%s", errorText)
+		}
 		if serialInput != nil {
 			_ = serialInput.Close()
 		}
@@ -1920,7 +1937,11 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		return responseFromEvent(event, ""), nil
 	}
 	if state.Event.State == vmkit.StateRunning && GuestHalted(serialLogPath(opts)) {
-		finalState, errorText := guestHaltedState(opts)
+		resultWait := time.Duration(0)
+		if runtimeHasResultListener(opts, state) {
+			resultWait = 2 * time.Second
+		}
+		finalState, errorText := guestHaltedState(opts, resultWait)
 		if state.PID != 0 {
 			_ = signalProcessGroup(state.PID, syscall.SIGTERM)
 			_ = waitForProcessExit(context.Background(), state.PID, 5*time.Second)
@@ -1947,10 +1968,30 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 	return responseFromRuntimeState(opts, state), nil
 }
 
-func guestHaltedState(opts Options) (vmkit.VMState, string) {
-	data, err := os.ReadFile(filepath.Join(opts.StateDir, opts.Name, "result.json"))
-	if err != nil {
-		return vmkit.StateStopped, ""
+func runtimeHasResultListener(opts Options, state runtimeState) bool {
+	resultPath := resultPathFromState(opts, state)
+	for _, listener := range state.Config.VsockListeners {
+		if listener.Target == resultPath {
+			return true
+		}
+	}
+	return false
+}
+
+func guestHaltedState(opts Options, waitForResult time.Duration) (vmkit.VMState, string) {
+	resultPath := filepath.Join(opts.StateDir, opts.Name, "result.json")
+	deadline := time.Now().Add(waitForResult)
+	var data []byte
+	var err error
+	for {
+		data, err = os.ReadFile(resultPath)
+		if err == nil {
+			break
+		}
+		if waitForResult <= 0 || !os.IsNotExist(err) || time.Now().After(deadline) {
+			return vmkit.StateStopped, ""
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	var result struct {
 		ExitCode int    `json:"exit_code"`
@@ -2315,6 +2356,33 @@ func signalProcessGroup(pid int, signal syscall.Signal) error {
 		return err
 	}
 	return syscall.Kill(pid, signal)
+}
+
+func detachedStartExitError(cmd *exec.Cmd, delay time.Duration) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	var status syscall.WaitStatus
+	pid, err := syscall.Wait4(cmd.Process.Pid, &status, syscall.WNOHANG, nil)
+	if err != nil {
+		if err == syscall.ECHILD {
+			return nil
+		}
+		return fmt.Errorf("check detached firecracker process %d: %w", cmd.Process.Pid, err)
+	}
+	if pid == 0 {
+		return nil
+	}
+	if status.Exited() {
+		return fmt.Errorf("firecracker exited during detached startup: exit status %d", status.ExitStatus())
+	}
+	if status.Signaled() {
+		return fmt.Errorf("firecracker exited during detached startup: signal %s", status.Signal())
+	}
+	return fmt.Errorf("firecracker exited during detached startup: wait status %d", status)
 }
 
 func processActive(pid int) (bool, error) {
