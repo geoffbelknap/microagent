@@ -389,6 +389,60 @@ expect_failure invalid-create-name "invalid workspace name" \
 expect_failure invalid-status-name "invalid workspace name" \
   "$CLI" status "../invalid-name" --state-dir "$STATE_DIR"
 
+expect_failure apply-missing-file "apply requires --file" \
+  "$CLI" --json apply --state-dir "$STATE_DIR"
+cat >"$STATE_DIR/apply-invalid-name.yaml" <<'YAML'
+name: ../invalid-apply
+restart: always
+YAML
+expect_failure apply-invalid-name "invalid workspace name" \
+  "$CLI" --json apply --file "$STATE_DIR/apply-invalid-name.yaml" --state-dir "$STATE_DIR"
+cat >"$STATE_DIR/apply-missing-workspace.yaml" <<'YAML'
+name: apply-missing-workspace
+restart: always
+YAML
+expect_failure apply-missing-workspace "workspace.json" \
+  "$CLI" --json apply --file "$STATE_DIR/apply-missing-workspace.yaml" --state-dir "$STATE_DIR"
+
+mkdir -p "$STATE_DIR/workspaces/apply-edge"
+cat >"$STATE_DIR/workspaces/apply-edge/workspace.json" <<'JSON'
+{
+  "name": "apply-edge",
+  "profile": "small",
+  "restart": "never",
+  "resources": {
+    "memory_mib": 512,
+    "cpu_count": 2,
+    "size_mib": 96
+  },
+  "network": {
+    "mode": "isolated"
+  }
+}
+JSON
+cp "$STATE_DIR/workspaces/apply-edge/workspace.json" "$STATE_DIR/apply-edge-before.json"
+cat >"$STATE_DIR/apply-edge-noop.yaml" <<'YAML'
+name: apply-edge
+restart: never
+YAML
+"$CLI" --json apply --file "$STATE_DIR/apply-edge-noop.yaml" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-edge-noop.json"
+assert_json "$STATE_DIR/apply-edge-noop.json" "data.get('workspace') == 'apply-edge' and data.get('applied') is None"
+cat >"$STATE_DIR/apply-edge-unsupported.yaml" <<'YAML'
+name: apply-edge
+resources:
+  memoryMiB: 768
+  cpuCount: 1
+setup:
+  - echo should-not-apply
+service: sleep 300
+files:
+  - src: ./missing.txt
+    dst: /missing.txt
+YAML
+"$CLI" --json apply --file "$STATE_DIR/apply-edge-unsupported.yaml" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-edge-unsupported.json"
+assert_json "$STATE_DIR/apply-edge-unsupported.json" "data.get('workspace') == 'apply-edge' and data.get('applied') is None"
+cmp "$STATE_DIR/apply-edge-before.json" "$STATE_DIR/workspaces/apply-edge/workspace.json"
+
 "$CLI" create \
   --dry-run \
   --id dry-run-check \
