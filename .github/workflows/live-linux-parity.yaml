@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   microagent-parity:
-    name: Microagent parity
+    name: Full microagent E2E on Linux KVM
     runs-on:
       - self-hosted
       - linux
@@ -31,7 +31,7 @@ jobs:
       - name: Go tests
         run: scripts/dev/go-test.sh
 
-      - name: Microagent E2E suite
+      - name: Full microagent E2E suite
         run: scripts/dev/microagent-e2e.sh
 
       - name: Firecracker console parity

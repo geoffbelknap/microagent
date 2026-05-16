@@ -47,9 +47,24 @@ make smoke
 make smoke-rootfs
 ```
 
+The hosted CI workflow runs the portable microagent E2E scenarios:
+
+```bash
+scripts/dev/microagent-e2e.sh help-usage text-output
+```
+
+The full suite is gated by `.github/workflows/live-linux-parity.yaml` on a
+self-hosted Linux runner labeled `linux`, `x64`, and `kvm`:
+
+```bash
+scripts/dev/microagent-e2e.sh
+```
+
 Live Firecracker tests must run outside sandboxed environments on Linux hosts
-with KVM and `/dev/vhost-vsock`. Apple VF tests must run on macOS with the
-supervisor built and signed as described in the docs.
+with KVM, `/dev/vhost-vsock`, Firecracker on `PATH` or `MICROAGENT_FIRECRACKER`,
+and the network prerequisites documented by
+`scripts/dev/microagent-e2e-linux-network-setup.sh`. Apple VF tests must run on
+macOS with the supervisor built and signed as described in the docs.
 
 ## Pull Requests
 
