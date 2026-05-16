@@ -2208,6 +2208,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run")
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return workspaceOptions{}, err
 	}

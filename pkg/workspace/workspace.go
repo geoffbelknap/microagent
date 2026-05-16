@@ -70,6 +70,7 @@ type Options struct {
 	SpecCPU         bool
 	SpecSize        bool
 	Keep            bool
+	DryRun          bool
 	PrepareForStart bool
 	SerialInput     bool
 	Verification    *vmkit.RuntimeVerification

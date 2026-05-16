@@ -893,15 +893,12 @@ func prepareUserNetworkForStart(opts Options, config *vmkit.Config) ([]transient
 }
 
 func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
-	subnetOctet, err := allocateNATSubnetOctet(opts)
+	plan, err := tapNATAddressPlan(opts, config)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	tap := tapName(opts)
-	subnet := fmt.Sprintf("10.43.%d.0/29", subnetOctet)
-	hostIP := fmt.Sprintf("10.43.%d.1", subnetOctet)
-	guestIP := fmt.Sprintf("10.43.%d.2", subnetOctet)
-	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: subnet, Created: true}
+	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: plan.Subnet, Created: true}
 	if err := createTap(tap); err != nil {
 		return nil, nil, nil, networkPrivilegeError("create firecracker nat tap "+tap, err)
 	}
@@ -911,28 +908,97 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 		cleanupTransientNetworkDevices(cleanupDevices)
 		return nil, nil, nil, networkPrivilegeError("inspect firecracker nat tap "+tap, err)
 	}
-	addr, err := netlink.ParseAddr(hostIP + "/29")
+	addr, err := netlink.ParseAddr(plan.HostCIDR)
 	if err != nil {
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, fmt.Errorf("parse firecracker nat tap address %s/29: %w", hostIP, err)
+		return nil, nil, nil, fmt.Errorf("parse firecracker nat tap address %s: %w", plan.HostCIDR, err)
 	}
 	if err := netlink.AddrAdd(link, addr); err != nil && !alreadyExistsError(err) {
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, networkPrivilegeError("assign firecracker nat tap address "+hostIP, err)
+		return nil, nil, nil, networkPrivilegeError("assign firecracker nat tap address "+plan.HostCIDR, err)
 	}
 	if err := netlink.LinkSetUp(link); err != nil {
 		cleanupTransientNetworkDevices(cleanupDevices)
 		return nil, nil, nil, networkPrivilegeError("bring firecracker nat tap up", err)
 	}
-	rules, err := installNATFirewallRules(tap, subnet)
+	rules, err := installNATFirewallRules(tap, plan.Subnet)
 	if err != nil {
 		cleanupTransientFirewallRules(rules)
 		cleanupTransientNetworkDevices(cleanupDevices)
 		return nil, nil, nil, err
 	}
-	network := runtimeNetworkConfig(config, subnet, guestIP+"/29", hostIP)
+	network := runtimeNetworkConfig(config, plan.Subnet, plan.GuestCIDR, plan.Gateway)
 	network.Mode = mode
 	return cleanupDevices, rules, &network, nil
+}
+
+type tapNATAddress struct {
+	Subnet    string
+	GuestCIDR string
+	Gateway   string
+	HostCIDR  string
+}
+
+func tapNATAddressPlan(opts Options, config *vmkit.Config) (tapNATAddress, error) {
+	if config != nil && config.Network != nil && (config.Network.IP != "" || config.Network.Gateway != "" || config.Network.Subnet != "") {
+		return staticTAPNATAddressPlan(*config.Network)
+	}
+	subnetOctet, err := allocateNATSubnetOctet(opts)
+	if err != nil {
+		return tapNATAddress{}, err
+	}
+	subnet := fmt.Sprintf("10.43.%d.0/29", subnetOctet)
+	hostIP := fmt.Sprintf("10.43.%d.1", subnetOctet)
+	guestIP := fmt.Sprintf("10.43.%d.2", subnetOctet)
+	return tapNATAddress{
+		Subnet:    subnet,
+		GuestCIDR: guestIP + "/29",
+		Gateway:   hostIP,
+		HostCIDR:  hostIP + "/29",
+	}, nil
+}
+
+func staticTAPNATAddressPlan(network vmkit.NetworkConfig) (tapNATAddress, error) {
+	if strings.TrimSpace(network.IP) == "" || strings.TrimSpace(network.Gateway) == "" {
+		return tapNATAddress{}, fmt.Errorf("firecracker static nat/user networking requires network.ip and network.gateway")
+	}
+	guestIP, guestNet, err := net.ParseCIDR(strings.TrimSpace(network.IP))
+	if err != nil {
+		return tapNATAddress{}, fmt.Errorf("parse firecracker static network.ip %q: %w", network.IP, err)
+	}
+	if guestIP.To4() == nil {
+		return tapNATAddress{}, fmt.Errorf("firecracker static network.ip %q must be IPv4 CIDR", network.IP)
+	}
+	gateway := net.ParseIP(strings.TrimSpace(network.Gateway)).To4()
+	if gateway == nil {
+		return tapNATAddress{}, fmt.Errorf("firecracker static network.gateway %q must be IPv4", network.Gateway)
+	}
+	subnet := strings.TrimSpace(network.Subnet)
+	if subnet == "" {
+		subnet = guestNet.String()
+	} else {
+		_, declaredSubnet, err := net.ParseCIDR(subnet)
+		if err != nil {
+			return tapNATAddress{}, fmt.Errorf("parse firecracker static network.subnet %q: %w", network.Subnet, err)
+		}
+		if declaredSubnet.IP.To4() == nil {
+			return tapNATAddress{}, fmt.Errorf("firecracker static network.subnet %q must be IPv4 CIDR", network.Subnet)
+		}
+		if !declaredSubnet.Contains(guestIP) || !declaredSubnet.Contains(gateway) {
+			return tapNATAddress{}, fmt.Errorf("firecracker static network.subnet %q must contain network.ip and network.gateway", network.Subnet)
+		}
+	}
+	_, hostNet, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return tapNATAddress{}, fmt.Errorf("parse firecracker static network.subnet %q: %w", subnet, err)
+	}
+	prefix, _ := hostNet.Mask.Size()
+	return tapNATAddress{
+		Subnet:    subnet,
+		GuestCIDR: guestIP.String() + "/" + strconv.Itoa(prefix),
+		Gateway:   gateway.String(),
+		HostCIDR:  gateway.String() + "/" + strconv.Itoa(prefix),
+	}, nil
 }
 
 func runtimeNetworkConfig(config *vmkit.Config, subnet, ip, gateway string) vmkit.NetworkConfig {
@@ -1422,6 +1488,7 @@ type processCapabilities struct {
 }
 
 var getProcessCapabilities = currentProcessCapabilities
+var addInheritableCapability = currentAddInheritableCapability
 var getEffectiveUID = os.Geteuid
 
 func currentProcessCapabilities() (processCapabilities, error) {
@@ -1441,6 +1508,21 @@ func capabilityWords(low, high uint32) uint64 {
 	return uint64(low) | uint64(high)<<32
 }
 
+func currentAddInheritableCapability(capability int) error {
+	if capability < 0 || capability >= 64 {
+		return fmt.Errorf("invalid Linux capability %d", capability)
+	}
+	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
+	data := [2]unix.CapUserData{}
+	if err := unix.Capget(&header, &data[0]); err != nil {
+		return err
+	}
+	index := capability / 32
+	bit := uint32(1) << uint(capability%32)
+	data[index].Inheritable |= bit
+	return unix.Capset(&header, &data[0])
+}
+
 func ensureNetAdminInheritable() error {
 	if getEffectiveUID() == 0 {
 		return nil
@@ -1453,6 +1535,23 @@ func ensureNetAdminInheritable() error {
 		hasCapability(caps.Permitted, unix.CAP_NET_ADMIN) &&
 		hasCapability(caps.Inheritable, unix.CAP_NET_ADMIN) {
 		return nil
+	}
+	if hasCapability(caps.Effective, unix.CAP_NET_ADMIN) &&
+		hasCapability(caps.Permitted, unix.CAP_NET_ADMIN) &&
+		hasCapability(caps.Effective, unix.CAP_SETPCAP) &&
+		hasCapability(caps.Permitted, unix.CAP_SETPCAP) {
+		if err := addInheritableCapability(unix.CAP_NET_ADMIN); err != nil {
+			return fmt.Errorf("add CAP_NET_ADMIN to firecracker supervisor inheritable capability set: %w", err)
+		}
+		caps, err = getProcessCapabilities()
+		if err != nil {
+			return fmt.Errorf("inspect firecracker supervisor capabilities after inheritable update: %w", err)
+		}
+		if hasCapability(caps.Effective, unix.CAP_NET_ADMIN) &&
+			hasCapability(caps.Permitted, unix.CAP_NET_ADMIN) &&
+			hasCapability(caps.Inheritable, unix.CAP_NET_ADMIN) {
+			return nil
+		}
 	}
 	return fmt.Errorf("firecracker nat and bridged networking require CAP_NET_ADMIN in the supervisor effective, permitted, and inheritable capability sets so Firecracker can inherit it; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, use --network user for unprivileged outbound networking, or use --network isolated if outbound network is not needed")
 }
