@@ -202,7 +202,7 @@ assert_stdout_contains status-text "Readiness: guest=ready shell=not-ready resul
   "$CLI" --text status "$WORKSPACE" --state-dir "$STATE_DIR"
 assert_stdout_contains result-text "TEXT_STDOUT_OK" \
   "$CLI" --output text result "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains network-text "Forward: tcp 127.0.0.1:18080 -> :8080" \
+assert_stdout_contains network-text "Forward: tcp 127.0.0.1:18080 -> guest:8080" \
   "$CLI" --text network "$WORKSPACE" --state-dir "$STATE_DIR"
 assert_stdout_contains artifacts-text "Egress: 1" \
   "$CLI" --text artifacts "$WORKSPACE" --state-dir "$STATE_DIR"

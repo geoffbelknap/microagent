@@ -45,6 +45,25 @@ assert_stdout_contains() {
   fi
 }
 
+assert_output_contains() {
+  name="$1"
+  expected="$2"
+  shift 2
+  set +e
+  "$@" >"$STATE_DIR/${name}.out" 2>"$STATE_DIR/${name}.err"
+  status="$?"
+  set -e
+  if ! grep -Eiq -- "$expected" "$STATE_DIR/${name}.out" "$STATE_DIR/${name}.err"; then
+    echo "$name did not print expected output: $expected" >&2
+    echo "exit status: $status" >&2
+    echo "--- stdout ---" >&2
+    cat "$STATE_DIR/${name}.out" >&2
+    echo "--- stderr ---" >&2
+    cat "$STATE_DIR/${name}.err" >&2
+    exit 1
+  fi
+}
+
 expect_failure_contains() {
   name="$1"
   expected="$2"
@@ -70,7 +89,7 @@ assert_stdout_contains run-help "Run a command from an image" "$CLI" run --help
 assert_stdout_contains perf-help "Measure workspace performance" "$CLI" perf --help
 assert_stdout_contains kernel-help "Advanced kernel commands" "$CLI" kernel --help
 assert_stdout_contains rootfs-help "Build a rootfs from an OCI image" "$CLI" rootfs --help
-assert_stdout_contains rootfs-build-help "Build options:" "$CLI" rootfs build --help
+assert_output_contains rootfs-build-help "Usage of rootfs build:" "$CLI" rootfs build --help
 
 expect_failure_contains unknown-command "unknown command: definitely-not-a-command" "$CLI" definitely-not-a-command
 expect_failure_contains run-missing-image "run requires --image" "$CLI" run --name missing-image --state-dir "$STATE_DIR"
