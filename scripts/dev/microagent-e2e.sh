@@ -22,7 +22,7 @@ microagent-e2e.sh
 Runs the full microagent end-to-end suite for the current host backend.
 
 Usage:
-  scripts/dev/microagent-e2e.sh [--keep] [scenario...]
+  scripts/dev/microagent-e2e.sh [--keep] [--image-cache-policy auto|refresh|require] [scenario...]
   scripts/dev/microagent-e2e.sh --list
 
 Scenarios:
@@ -48,7 +48,10 @@ Environment:
   MICROAGENT_E2E_CACHE_DIR=<dir> overrides the shared Go build/module cache.
   MICROAGENT_E2E_IMAGE_CACHE_DIR=<dir> overrides the persistent E2E image cache.
   MICROAGENT_ROOTFS_BASE_CACHE_DIR=<dir> overrides the persistent rootfs base cache.
-  MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files.
+  MICROAGENT_E2E_IMAGE_CACHE_POLICY=auto|refresh|require controls persistent
+    E2E image cache use for scenarios that support it.
+  MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
+    for compatibility with older validation commands.
   MICROAGENT_FIRECRACKER_SUPERVISOR=<path> uses a prepared supervisor binary.
   MICROAGENT_E2E_BRIDGE=<name> uses a prepared Linux bridge for bridged tests.
 
@@ -127,6 +130,18 @@ while [ "$#" -gt 0 ]; do
       keep=1
       shift
       ;;
+    --image-cache-policy)
+      if [ "$#" -lt 2 ]; then
+        echo "--image-cache-policy requires auto, refresh, or require" >&2
+        exit 2
+      fi
+      export MICROAGENT_E2E_IMAGE_CACHE_POLICY="$2"
+      shift 2
+      ;;
+    --image-cache-policy=*)
+      export MICROAGENT_E2E_IMAGE_CACHE_POLICY="${1#*=}"
+      shift
+      ;;
     --)
       shift
       while [ "$#" -gt 0 ]; do
@@ -145,6 +160,17 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+if [ -n "${MICROAGENT_E2E_IMAGE_CACHE_POLICY:-}" ]; then
+  case "$MICROAGENT_E2E_IMAGE_CACHE_POLICY" in
+    auto|refresh|require)
+      ;;
+    *)
+      echo "unknown image cache policy: $MICROAGENT_E2E_IMAGE_CACHE_POLICY" >&2
+      exit 2
+      ;;
+  esac
+fi
 
 if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_HELP_USAGE=1
