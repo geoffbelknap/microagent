@@ -65,10 +65,11 @@ cleanup() {
     "$CLI" kill supervise-cancel --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" kill supervise-sigint --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" kill supervise-sigterm --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    "$CLI" kill supervise-start-fail --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" kill supervise-guest-fail --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" kill supervise-mediation-helper --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_SUPERVISION:-0}" != "1" ]; then
-      for workspace in supervise-never supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail supervise-mediation-helper; do
+      for workspace in supervise-never supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-start-fail supervise-guest-fail supervise-mediation-helper; do
         "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
       done
     fi
@@ -249,6 +250,16 @@ create_workspace supervise-never never "sleep 300" >"$STATE_DIR/create-never.jso
   --max-restarts 1 >"$STATE_DIR/supervise-never.json"
 "$CLI" status supervise-never --state-dir "$STATE_DIR" >"$STATE_DIR/status-never.json"
 
+create_workspace supervise-start-fail on-failure "sleep 300" >"$STATE_DIR/create-start-fail.json"
+"$CLI" supervise supervise-start-fail \
+  --backend apple-vf \
+  --state-dir "$STATE_DIR" \
+  --kernel "$STATE_DIR/missing-kernel" \
+  --supervisor "$SUPERVISOR" \
+  --interval 1 \
+  --max-restarts 2 >"$STATE_DIR/supervise-start-fail.json"
+"$CLI" status supervise-start-fail --state-dir "$STATE_DIR" >"$STATE_DIR/status-start-fail-final.json" || true
+
 create_workspace supervise-always always "sleep 300" >"$STATE_DIR/create-always.json"
 start_supervise_background supervise-always "$STATE_DIR/supervise-always.json" \
   --backend apple-vf \
@@ -355,6 +366,8 @@ def read_json(name):
 doctor = read_json("doctor.json")
 never = read_json("supervise-never.json")
 never_status = read_json("status-never.json")
+start_fail = read_json("supervise-start-fail.json")
+start_fail_status = read_json("status-start-fail-final.json")
 always = read_json("supervise-always.json")
 always_status = read_json("status-always-final.json")
 cancel_after_kill = read_json("status-cancel-after-supervise-kill.json")
@@ -377,6 +390,12 @@ if never.get("policy") != "never" or never.get("restarts") != 0 or never.get("st
     raise SystemExit(never)
 if never_status.get("event", {}).get("state") not in ("prepared", "stopped"):
     raise SystemExit(never_status)
+if start_fail.get("policy") != "on-failure" or start_fail.get("restarts") != 2 or start_fail.get("stopped") is not True:
+    raise SystemExit(start_fail)
+if start_fail.get("final_state") != "failed":
+    raise SystemExit(start_fail)
+if start_fail_status.get("event", {}).get("state") != "failed":
+    raise SystemExit(start_fail_status)
 if always.get("policy") != "always" or always.get("restarts") != 2 or always.get("stopped") is not True:
     raise SystemExit(always)
 if always.get("final_state") != "stopped":
@@ -413,7 +432,7 @@ if helper_delete.get("event", {}).get("state") != "stopped":
     raise SystemExit(helper_delete)
 PY
 
-for workspace in supervise-never supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail supervise-mediation-helper; do
+for workspace in supervise-never supervise-start-fail supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail supervise-mediation-helper; do
   "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-${workspace}.json" || true
 done
 

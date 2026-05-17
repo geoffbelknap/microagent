@@ -43,6 +43,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 		startResult, err := Start(ctx, workspaceOpts)
 		if err != nil {
 			result.FinalState = string(vmkit.StateFailed)
+			writeSuperviseStartFailure(workspaceOpts, err)
 			if !ShouldRestart(policy, vmkit.StateFailed) {
 				result.Stopped = true
 				return result, err
@@ -78,6 +79,12 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 			return result, nil
 		}
 	}
+}
+
+func writeSuperviseStartFailure(opts Options, startErr error) {
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
+	req := Request(opts, "run", rootfsPath, NewRequestID())
+	_ = WriteProcessState(opts, req, vmkit.StateFailed, 0, startErr.Error())
 }
 
 func WaitForSupervised(ctx context.Context, opts Options, interval time.Duration) (vmkit.VMState, error) {

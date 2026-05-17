@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -429,6 +430,39 @@ func TestDetachedSupervisorCommandUsesStartForPersistentBackends(t *testing.T) {
 	}
 	if got := detachedSupervisorCommand(vmkit.BackendAppleVF); got != "run" {
 		t.Fatalf("detachedSupervisorCommand(%q) = %q, want run", vmkit.BackendAppleVF, got)
+	}
+}
+
+func TestAppleVFStartFailsBeforeDetachedRunWhenKernelMissing(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		Name:           "missing-kernel",
+		StateDir:       dir,
+		Backend:        vmkit.BackendAppleVF,
+		Architecture:   "arm64",
+		KernelPath:     filepath.Join(dir, "missing-kernel"),
+		SupervisorPath: filepath.Join(dir, "missing-supervisor"),
+		Profile:        "small",
+		RestartPolicy:  "never",
+		MemoryMiB:      512,
+		CPUCount:       2,
+		SizeMiB:        128,
+		Network:        vmkit.NetworkConfig{Mode: "isolated"},
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	rootfsPath := WorkspaceRootfsPath(dir, opts.Name, opts.Backend)
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatalf("write rootfs: %v", err)
+	}
+
+	_, err := Start(context.Background(), opts)
+	if err == nil || !strings.Contains(err.Error(), "kernel is not readable") {
+		t.Fatalf("Start err = %v, want missing kernel preflight", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, opts.Name, "runtime.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("runtime state exists after preflight failure: %v", statErr)
 	}
 }
 
