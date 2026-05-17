@@ -3,6 +3,9 @@ title: Runtime contract
 description: Backend-neutral agent runtime semantics shared by microagent backends.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 `microagent --json contract` is the JSON source for the shared runtime
 contract. Agent-runtime builders can depend on one set of semantics across
 Firecracker, Apple VF, and experimental Windows Hyper-V support.

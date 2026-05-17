@@ -3,6 +3,9 @@ title: Boundaries
 description: What microagent owns, and what it deliberately leaves to the caller.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 `microagent` runs Linux workspaces inside microVMs. It stops at the VM
 boundary. Other systems own policy, identity, and intent.
 

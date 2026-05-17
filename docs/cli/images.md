@@ -3,6 +3,9 @@ title: microagent images
 description: List or prune local image records.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent images pull <image> [--state-dir <dir>]
 microagent images list [--state-dir <dir>]

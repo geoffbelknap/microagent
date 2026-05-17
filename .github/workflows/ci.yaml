@@ -77,6 +77,9 @@ jobs:
       - name: Check Markdown links
         run: python3 scripts/dev/markdown-link-check.py
 
+      - name: Check docs last-updated stamps
+        run: python3 scripts/dev/docs-last-updated.py --check
+
       - name: Check CLI docs
         run: python3 scripts/dev/cli-docs-check.py
 

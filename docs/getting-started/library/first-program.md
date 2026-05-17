@@ -3,6 +3,9 @@ title: Run microagent from a Go program
 description: Boot a microVM, run a command, and tear it down — in a few lines of Go.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 *If you'd rather drive microagent from the command line, see [run your first microVM](/getting-started/cli/first-microvm/) instead.*
 
 The project is a Go library; the CLI is a thin shell over it. This page

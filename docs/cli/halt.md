@@ -3,6 +3,9 @@ title: microagent halt
 description: Cleanly stop a workspace while preserving disk state.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent halt <name> [--state-dir <dir>]
 ```

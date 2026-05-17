@@ -3,6 +3,9 @@ title: Networking
 description: Declarative workspace network intent.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 Every workspace declares its network intent. Four modes:
 
 | Mode | What it does |

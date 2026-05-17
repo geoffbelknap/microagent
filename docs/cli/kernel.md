@@ -3,6 +3,9 @@ title: microagent kernel
 description: Install or verify a custom kernel.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent kernel install [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]
 microagent kernel verify  --path <path> --sha256 <sum>

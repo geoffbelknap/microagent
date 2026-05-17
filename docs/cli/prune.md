@@ -3,6 +3,9 @@ title: microagent prune
 description: Prune stale local records and optional reusable image baselines.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent prune [--images] [--yes] [--state-dir <dir>]
 ```

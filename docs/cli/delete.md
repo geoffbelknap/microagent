@@ -3,6 +3,9 @@ title: microagent delete
 description: Remove a workspace and its state.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent delete <name> [--yes] [--force] [--state-dir <dir>]
 microagent rm <name> [--yes] [--force] [--state-dir <dir>]

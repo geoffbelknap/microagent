@@ -3,6 +3,9 @@ title: Build a simple agent
 description: Boot a microVM, point it at Claude, watch it write and run files in its own workspace.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 This recipe builds an agent: a Linux microVM running a body that calls Claude with `bash`, `read_file`, and `write_file` tools. Claude can edit code, run commands, and inspect files — all inside the microVM's sandbox at `/workspace`. Halt the workspace, swap in a new prompt, start it back up, and Claude can read whatever it wrote on the previous run.
 
 *New here? Start with [run your first agent](/getting-started/cli/first-agent/) for the quickstart version. This recipe goes deeper on the body, prompt caching, and production-shape gaps.*

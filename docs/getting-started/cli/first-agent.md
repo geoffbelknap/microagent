@@ -3,6 +3,9 @@ title: Run your first agent
 description: Boot a microVM, point it at an LLM, watch it write and run files in its own workspace.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 This walks through running an agent — a body that calls an LLM with `bash`,
 `read_file`, and `write_file` tools — inside a microVM. The example ships in
 three flavors: Anthropic Claude, OpenAI, and Google Gemini. The flow is

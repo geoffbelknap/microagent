@@ -3,6 +3,9 @@ title: State and identity
 description: Where workspace state lives and how identity flows through requests.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 microagent reports VM state changes as JSON events. Every request carries
 an identity block; every response carries an event block describing the
 resulting state.

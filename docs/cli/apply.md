@@ -3,6 +3,9 @@ title: microagent apply
 description: Apply supported workspace spec changes without rebuilding the rootfs.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent apply --file <path> [--state-dir <dir>]
 ```

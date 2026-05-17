@@ -68,6 +68,7 @@ This repository owns the VM pieces:
   part of the docs site. Use Notion or another tracking system for run notes.
 - When command output, flags, runtime semantics, or operator workflows change,
   update README/docs and run `python3 scripts/dev/markdown-link-check.py` and
+  `python3 scripts/dev/docs-last-updated.py --check` and
   `python3 scripts/dev/docs-parity.py`.
 
 ## Project boundary

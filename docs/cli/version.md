@@ -3,6 +3,9 @@ title: microagent version
 description: Print the microagent version.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent version
 microagent --version

@@ -3,6 +3,9 @@ title: microagent create
 description: Create a named, persistent workspace from an OCI image.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent create [--name <name>] --image <ref> [flags]
 microagent create <name> --image <ref> [flags]

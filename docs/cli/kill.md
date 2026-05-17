@@ -3,6 +3,9 @@ title: microagent kill
 description: Force-stop a workspace.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent kill <name> [--state-dir <dir>]
 ```

@@ -3,6 +3,9 @@ title: Run your first microVM
 description: Boot a Linux microVM, run a command, tear it down.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 The fastest way to see microagent work: boot a Linux microVM from an OCI
 image, run one command inside it, and tear it down.
 

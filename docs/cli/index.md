@@ -3,6 +3,9 @@ title: CLI reference
 description: All microagent subcommands at a glance.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 | Command | Purpose |
 |---|---|
 | [`run`](/cli/run/) | Boot an image and run a command, then tear down |

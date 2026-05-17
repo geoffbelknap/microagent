@@ -31,6 +31,7 @@ Run the cheap checks before opening a PR:
 go test ./...
 go vet ./...
 python3 scripts/dev/markdown-link-check.py
+python3 scripts/dev/docs-last-updated.py --check
 python3 scripts/dev/docs-parity.py
 ```
 
