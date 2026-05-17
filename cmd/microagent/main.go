@@ -2074,8 +2074,8 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 		return err
 	}
 	if state == vmkit.StateRunning && containsString(applied, "network") {
-		if opts.Backend != vmkit.BackendFirecracker {
-			return fmt.Errorf("live network apply is only supported by the Firecracker backend; stop and start %s to apply this change", name)
+		if opts.Backend != vmkit.BackendFirecracker && opts.Backend != vmkit.BackendAppleVF {
+			return fmt.Errorf("live network apply is only supported by the Firecracker and Apple VF backends; stop and start %s to apply this change", name)
 		}
 		oldNetwork := networkConfigFromSpec(manifest.Network)
 		newNetwork := networkConfigFromSpec(next.Network)

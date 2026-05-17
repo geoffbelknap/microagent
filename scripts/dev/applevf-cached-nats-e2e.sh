@@ -18,6 +18,7 @@ STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-cached-nats.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
 WORKSPACE="applevf-cached-nats"
+APPLY_WORKSPACE="applevf-apply-stopped"
 ARTIFACT_DIR="$STATE_DIR/artifacts"
 NATS_SIZE_MIB="${MICROAGENT_APPLEVF_NATS_SIZE_MIB:-256}"
 
@@ -386,9 +387,35 @@ export MICROAGENT_APPLEVF_SUPERVISOR="$SUPERVISOR"
 
 nats_port="$(pick_port)"
 monitor_port="$(pick_port)"
+apply_port="$(pick_port)"
 
 "$CLI" doctor --backend apple-vf --arch "$ARCH" --supervisor "$SUPERVISOR" >"$STATE_DIR/doctor.json"
 ensure_cached_image
+
+prepare_cached_workspace "$APPLY_WORKSPACE" "$apply_port" "$monitor_port"
+cat >"$STATE_DIR/apply-stopped.yaml" <<YAML
+name: $APPLY_WORKSPACE
+restart: always
+network:
+  mode: user
+  forwards:
+    - host: 0.0.0.0
+      hostPort: $apply_port
+      guestPort: 4222
+      protocol: tcp
+YAML
+"$CLI" --json apply \
+  --file "$STATE_DIR/apply-stopped.yaml" \
+  --state-dir "$STATE_DIR" \
+  --backend apple-vf \
+  --supervisor "$SUPERVISOR" \
+  --arch "$ARCH" >"$STATE_DIR/apply-stopped.json"
+"$CLI" start "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR" >"$STATE_DIR/apply-stopped-start.json"
+wait_for_status_ready "$APPLY_WORKSPACE" "$STATE_DIR/apply-stopped-status-running.json"
+"$CLI" network "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/apply-stopped-network.json"
+"$CLI" halt "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/apply-stopped-halt.json"
+"$CLI" delete "$APPLY_WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/apply-stopped-delete.json"
+
 prepare_cached_workspace "$WORKSPACE" "$nats_port" "$monitor_port"
 write_guest_run_config "$STATE_DIR/run-nats.json" "$nats_port" "$monitor_port"
 "$CLI" cp "$STATE_DIR/run-nats.json" "$WORKSPACE:/etc/microagent/run.json" \
@@ -405,6 +432,53 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
   --timeout 15 >"$STATE_DIR/connect-running.txt"
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-running.json"
 nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-running.json"
+cat >"$STATE_DIR/apply-live.yaml" <<YAML
+name: $WORKSPACE
+network:
+  mode: user
+  forwards:
+    - host: 0.0.0.0
+      hostPort: $nats_port
+      guestPort: 4222
+      protocol: tcp
+    - host: 0.0.0.0
+      hostPort: $monitor_port
+      guestPort: 8222
+      protocol: tcp
+YAML
+"$CLI" --json apply \
+  --file "$STATE_DIR/apply-live.yaml" \
+  --state-dir "$STATE_DIR" \
+  --backend apple-vf \
+  --supervisor "$SUPERVISOR" \
+  --arch "$ARCH" >"$STATE_DIR/apply-live.json"
+"$CLI" network "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/network-after-live-apply.json"
+nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-after-live-apply.json"
+nats_assert roundtrip "$nats_port" "$STATE_DIR/nats-roundtrip-after-live-apply.json"
+cat >"$STATE_DIR/apply-live-invalid.yaml" <<YAML
+name: $WORKSPACE
+network:
+  mode: user
+  forwards:
+    - host: 0.0.0.0
+      hostPort: $nats_port
+      guestPort: 4223
+      protocol: tcp
+    - host: 0.0.0.0
+      hostPort: $monitor_port
+      guestPort: 8222
+      protocol: tcp
+YAML
+if "$CLI" --json apply \
+  --file "$STATE_DIR/apply-live-invalid.yaml" \
+  --state-dir "$STATE_DIR" \
+  --backend apple-vf \
+  --supervisor "$SUPERVISOR" \
+  --arch "$ARCH" >"$STATE_DIR/apply-live-invalid.json" 2>"$STATE_DIR/apply-live-invalid.err"; then
+  echo "Apple VF live apply guest-port change unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "host bind changes" "$STATE_DIR/apply-live-invalid.err"
 "$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/halt.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-halted.json"
@@ -451,14 +525,15 @@ mkdir -p "$ARTIFACT_DIR/resumed"
   --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-resumed.json"
 "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete.json"
 
-python3 - "$STATE_DIR" "$nats_port" "$monitor_port" <<'PY'
+python3 - "$STATE_DIR" "$nats_port" "$monitor_port" "$apply_port" <<'PY'
 import json
 import os
 import sys
 
-state_dir, nats_port, monitor_port = sys.argv[1:4]
+state_dir, nats_port, monitor_port, apply_port = sys.argv[1:5]
 nats_port = int(nats_port)
 monitor_port = int(monitor_port)
+apply_port = int(apply_port)
 
 def read_json(name):
     with open(os.path.join(state_dir, name), "r", encoding="utf-8") as f:
@@ -469,10 +544,16 @@ def read_text(name):
         return f.read()
 
 doctor = read_json("doctor.json")
+apply_stopped = read_json("apply-stopped.json")
+apply_stopped_status = read_json("apply-stopped-status-running.json")
+apply_stopped_network = read_json("apply-stopped-network.json")
+apply_stopped_delete = read_json("apply-stopped-delete.json")
 create = read_json("create-cached.json")
 start = read_json("start.json")
 running = read_json("status-running.json")
 network = read_json("network-running.json")
+apply_live = read_json("apply-live.json")
+network_after_live_apply = read_json("network-after-live-apply.json")
 halt = read_json("halt.json")
 halted = read_json("status-halted.json")
 resume = read_json("resume.json")
@@ -481,13 +562,28 @@ quarantine = read_json("quarantine.json")
 halt_quarantined = read_json("halt-quarantined.json")
 delete = read_json("delete.json")
 roundtrip_running = read_json("nats-roundtrip-running.json")
+roundtrip_after_live_apply = read_json("nats-roundtrip-after-live-apply.json")
 roundtrip_resumed = read_json("nats-roundtrip-resumed.json")
+monitor_after_live_apply = read_json("monitor-after-live-apply.json")
 monitor_resumed = read_json("monitor-resumed.json")
 artifact_running = read_json("artifact-running.json")
 artifact_resumed = read_json("artifact-resumed.json")
 
 if doctor.get("ok") is not True or doctor.get("backend") != "apple-vf":
     raise SystemExit(doctor)
+if apply_stopped.get("workspace") != "applevf-apply-stopped" or set(apply_stopped.get("applied", [])) != {"restart", "network"}:
+    raise SystemExit(apply_stopped)
+if apply_stopped.get("network", {}).get("mode") != "user":
+    raise SystemExit(apply_stopped)
+apply_forwards = apply_stopped.get("network", {}).get("portForwards") or apply_stopped.get("network", {}).get("port_forwards") or []
+if {(item.get("host"), item.get("hostPort"), item.get("guestPort")) for item in apply_forwards} != {("0.0.0.0", apply_port, 4222)}:
+    raise SystemExit(apply_stopped)
+if apply_stopped_status.get("event", {}).get("state") != "running":
+    raise SystemExit(apply_stopped_status)
+if (apply_stopped_network.get("network") or {}).get("mode") != "user":
+    raise SystemExit(apply_stopped_network)
+if apply_stopped_delete.get("event", {}).get("state") != "stopped":
+    raise SystemExit(apply_stopped_delete)
 if create.get("response", {}).get("event", {}).get("state") != "prepared":
     raise SystemExit(create)
 if start.get("response", {}).get("event", {}).get("state") != "running":
@@ -508,6 +604,15 @@ if "APPLEVF_NATS_OUTBOUND_RESUMED" not in read_text("connect-resumed.txt"):
     raise SystemExit(read_text("connect-resumed.txt"))
 if not roundtrip_running.get("payload", "").startswith("microagent-applevf-nats-roundtrip-"):
     raise SystemExit(roundtrip_running)
+if apply_live.get("workspace") != "applevf-cached-nats" or apply_live.get("applied") != ["network"] or apply_live.get("reloaded") is not True:
+    raise SystemExit(apply_live)
+after_forwards = (network_after_live_apply.get("network") or {}).get("portForwards") or (network_after_live_apply.get("network") or {}).get("port_forwards") or []
+if {(item.get("host"), item.get("hostPort"), item.get("guestPort")) for item in after_forwards} != {("0.0.0.0", nats_port, 4222), ("0.0.0.0", monitor_port, 8222)}:
+    raise SystemExit(network_after_live_apply)
+if not roundtrip_after_live_apply.get("payload", "").startswith("microagent-applevf-nats-roundtrip-"):
+    raise SystemExit(roundtrip_after_live_apply)
+if monitor_after_live_apply.get("jetstream", {}).get("config") is None:
+    raise SystemExit(monitor_after_live_apply)
 if not roundtrip_resumed.get("payload", "").startswith("microagent-applevf-nats-roundtrip-"):
     raise SystemExit(roundtrip_resumed)
 if monitor_resumed.get("jetstream", {}).get("config") is None:
