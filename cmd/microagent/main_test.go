@@ -111,6 +111,13 @@ func TestGlobalJSONOutputSwitch(t *testing.T) {
 	}
 }
 
+func TestExecAliasReturnsMicroAgentEquivalent(t *testing.T) {
+	err := run(t.Context(), []string{"exec", "research", "echo hello"}, os.Stdout)
+	if err == nil || !strings.Contains(err.Error(), "use microagent connect <name> --send <command>") {
+		t.Fatalf("err = %v, want connect --send guidance", err)
+	}
+}
+
 func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 	resp, err := firecrackerDoctorResponse(
 		vmkit.BackendFirecracker,
@@ -984,6 +991,42 @@ func TestStatusReportsReadinessSignals(t *testing.T) {
 	}
 	if resp.Result == nil || resp.Result.ExitCode != 0 || resp.Result.CompletedAt != "2026-05-02T00:00:01Z" {
 		t.Fatalf("result = %#v, want structured result", resp.Result)
+	}
+}
+
+func TestInspectAliasDefaultsToJSONStatus(t *testing.T) {
+	dir := t.TempDir()
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: hostBackend()},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "inspect.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"inspect", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run inspect: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"runtimeID": "research"`) || !strings.Contains(string(data), `"state": "stopped"`) {
+		t.Fatalf("inspect output = %s", data)
 	}
 }
 

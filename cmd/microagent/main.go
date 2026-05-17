@@ -133,10 +133,22 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "result" {
 		return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 	}
+	if args[0] == "inspect" {
+		if outputFormat == "" {
+			outputFormat = "json"
+		}
+		return runWorkspaceStateCommand(ctx, "status", args[1:], stdout)
+	}
 	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
 		if hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 		}
+	}
+	if args[0] == "rm" {
+		return runWorkspaceStateCommand(ctx, "delete", args[1:], stdout)
+	}
+	if args[0] == "exec" {
+		return fmt.Errorf("microagent exec is not supported; use microagent connect <name> --send <command> for console commands, or microagent cp and artifacts for file exchange")
 	}
 	if args[0] == "connect" {
 		return runConnect(ctx, args[1:], stdout)
@@ -6307,7 +6319,9 @@ Commands:
   start                Start a workspace
   supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
+  exec                 Not supported; use connect --send
   ps                   List workspaces
+  inspect              Alias for status with JSON output
   status               Show workspace state
   result               Show structured workspace result
   logs                 Show workspace logs
@@ -6320,6 +6334,7 @@ Commands:
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace
+  rm                   Alias for delete
   contract             Show backend-neutral runtime contract
   host                 Report host capabilities
   doctor               Check the host

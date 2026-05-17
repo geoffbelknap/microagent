@@ -6,11 +6,15 @@ description: Show the current state of a workspace.
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
 microagent [--json] status --name <name> [--state-dir <dir>]
+microagent inspect <name> [--state-dir <dir>]
 ```
 
 `status` reads the state file for one workspace and prints the latest event:
 identity, state (`prepared`, `running`, `halted`, `quarantined`, `stopped`, `failed`), and
 backend.
+
+`inspect` is a Docker-compatible alias for `status` that defaults to structured
+JSON output.
 
 With the global `--json` flag, named workspaces also include a `verification` block. It reports
 the recorded OCI image reference/digest and current SHA-256 values for the

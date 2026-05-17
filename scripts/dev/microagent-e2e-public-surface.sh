@@ -858,6 +858,8 @@ assert_json "$STATE_DIR/status-run-keep.json" "data.get('readiness', {}).get('re
 grep -q "Workspace: $RUN_KEEP_WORKSPACE" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "State: stopped" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "Readiness:" "$STATE_DIR/status-run-keep-text.txt"
+"$CLI" inspect "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/inspect-run-keep.json"
+assert_json "$STATE_DIR/inspect-run-keep.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$RUN_KEEP_WORKSPACE' and data.get('event', {}).get('state') == 'stopped'"
 "$CLI" --json result "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result-run-keep.json"
 assert_json "$STATE_DIR/result-run-keep.json" "'RUN_KEEP_OK' in data.get('result', {}).get('stdout', '')"
 "$CLI" --output text result "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result-run-keep-text.txt"
@@ -1000,7 +1002,7 @@ expect_failure missing-artifact-file "missing.txt\\|not found\\|No such" \
   "$CLI" artifacts get "$BUNDLE_WORKSPACE" missing-report "$ARTIFACT_DIR" --state-dir "$STATE_DIR"
 "$CLI" cp "$BUNDLE_WORKSPACE:data:/report.txt" "$STATE_DIR/copied-report.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-attached-disk.json"
 grep -q "bundle-seed" "$STATE_DIR/copied-report.txt"
-"$CLI" delete "$BUNDLE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-bundle.json"
+"$CLI" rm "$BUNDLE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-bundle.json"
 
 mkdir -p "$STATE_DIR/disk-src/dir"
 printf "existing-disk-seed\n" >"$STATE_DIR/disk-src/seed.txt"
