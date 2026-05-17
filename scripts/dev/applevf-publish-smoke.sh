@@ -196,6 +196,58 @@ if "HTTP_READY" not in http_body:
     raise SystemExit(http_body)
 PY
 
+"$CLI" --json status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status.json"
+"$CLI" --json network "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/network.json"
+python3 - "$host_port" "$STATE_DIR/status.json" "$STATE_DIR/network.json" <<'PY'
+import json
+import sys
+
+host_port = int(sys.argv[1])
+with open(sys.argv[2], "r", encoding="utf-8") as f:
+    status = json.load(f)
+with open(sys.argv[3], "r", encoding="utf-8") as f:
+    network = json.load(f)
+
+for label, body in (("status", status), ("network", network)):
+    cfg = body.get("network") or {}
+    if cfg.get("mode") != "user":
+        raise SystemExit(f"{label} mode: {cfg}")
+    forwards = cfg.get("portForwards") or cfg.get("port_forwards") or []
+    if not forwards:
+        raise SystemExit(f"{label} missing port forwards: {cfg}")
+    forward = forwards[0]
+    if forward.get("hostPort") != host_port or forward.get("guestPort") != 8080:
+        raise SystemExit(f"{label} forward mismatch: {forward}")
+    runtime = cfg.get("runtime")
+    if runtime is not None:
+        runtime_forwards = runtime.get("portForwards") or []
+        if not runtime_forwards or runtime_forwards[0].get("hostPort") != host_port:
+            raise SystemExit(f"{label} runtime forward mismatch: {runtime}")
+PY
+
+"$CLI" quarantine "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/quarantine.json"
+python3 - "$host_port" <<'PY'
+import socket
+import sys
+import time
+
+port = int(sys.argv[1])
+deadline = time.time() + 5
+last_error = ""
+while time.time() < deadline:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            time.sleep(0.2)
+            continue
+    except OSError as err:
+        last_error = str(err)
+        break
+else:
+    raise SystemExit("published TCP listener stayed open after quarantine")
+if not last_error:
+    raise SystemExit("published TCP listener check did not observe closure")
+PY
+
 "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/stop.json"
 "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete.json"
 

@@ -149,6 +149,25 @@ if not resp.get("ok"):
     raise SystemExit(resp)
 PY
 
+if "$CLI" run \
+  --backend apple-vf \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --exec "true" \
+  --name isolated-publish-smoke \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR/isolated-publish" \
+  --size-mib "${MICROAGENT_APPLEVF_NETWORK_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --network isolated \
+  --publish "127.0.0.1:8080:80/tcp" >"$STATE_DIR/isolated-publish.json" 2>"$STATE_DIR/isolated-publish.err"; then
+  echo "Apple VF isolated publish was accepted unexpectedly" >&2
+  exit 1
+fi
+grep -q "network.portForwards require user, nat, or bridged mode" "$STATE_DIR/isolated-publish.err"
+
 BRIDGE_ERROR="$(run_check bridged-missing-interface bridged || true)"
 BRIDGE_STATUS="$(python3 - "$BRIDGE_ERROR" <<'PY'
 import json
