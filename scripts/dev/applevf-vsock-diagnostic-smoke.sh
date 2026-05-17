@@ -13,6 +13,8 @@ STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-mediation.XXXXXX")"
 HOST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-mediation-host.XXXXXX")"
 WORKSPACE="mediation-smoke"
 FAIL_WORKSPACE="mediation-fail-smoke"
+RAW_WORKSPACE="mediation-raw-smoke"
+OPTIONAL_WORKSPACE="mediation-optional-smoke"
 CLI="$STATE_DIR/microagent"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
 PROBE="$HOST_DIR/mediation-probe"
@@ -25,6 +27,8 @@ FAIL_RESPONSE="$STATE_DIR/fail-response.json"
 HOST_PORT=""
 FAIL_HOST_PORT=""
 SERVER_PID=""
+RAW_SERVER_PID=""
+RAW_LARGE_SERVER_PID=""
 
 cleanup() {
   status="$?"
@@ -33,18 +37,32 @@ cleanup() {
     kill "$SERVER_PID" >/dev/null 2>&1
     wait "$SERVER_PID" >/dev/null 2>&1
   fi
+  if [ -n "$RAW_SERVER_PID" ]; then
+    kill "$RAW_SERVER_PID" >/dev/null 2>&1
+    wait "$RAW_SERVER_PID" >/dev/null 2>&1
+  fi
+  if [ -n "$RAW_LARGE_SERVER_PID" ]; then
+    kill "$RAW_LARGE_SERVER_PID" >/dev/null 2>&1
+    wait "$RAW_LARGE_SERVER_PID" >/dev/null 2>&1
+  fi
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_APPLEVF_MEDIATION_SMOKE:-0}" != "1" ]; then
     if [ -x "$CLI" ]; then
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
       "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
       "$CLI" stop "$FAIL_WORKSPACE" --state-dir "$STATE_DIR/fail" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
       "$CLI" delete "$FAIL_WORKSPACE" --yes --state-dir "$STATE_DIR/fail" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" stop "$RAW_WORKSPACE" --state-dir "$STATE_DIR/raw" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" delete "$RAW_WORKSPACE" --yes --state-dir "$STATE_DIR/raw" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" stop "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR/optional" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" delete "$OPTIONAL_WORKSPACE" --yes --state-dir "$STATE_DIR/optional" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     fi
     rm -rf "$STATE_DIR" "$HOST_DIR"
   else
     if [ -x "$CLI" ]; then
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
       "$CLI" stop "$FAIL_WORKSPACE" --state-dir "$STATE_DIR/fail" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" stop "$RAW_WORKSPACE" --state-dir "$STATE_DIR/raw" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" stop "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR/optional" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     fi
     echo "kept Apple VF mediation smoke state at $STATE_DIR" >&2
     echo "kept Apple VF mediation smoke host dir at $HOST_DIR" >&2
@@ -74,6 +92,47 @@ else
   echo "mke2fs not found; install e2fsprogs" >&2
   exit 2
 fi
+
+pick_port() {
+  python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+}
+
+wait_for_status_ready() {
+  workspace="$1"
+  state_dir="$2"
+  output="$3"
+  deadline=$((SECONDS + ${MICROAGENT_APPLEVF_MEDIATION_TIMEOUT_SECONDS:-60}))
+  while true; do
+    "$CLI" status "$workspace" --state-dir "$state_dir" >"$output"
+    if python3 - "$output" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    status = json.load(f)
+event = status.get("event") or {}
+readiness = status.get("readiness") or {}
+if event.get("state") == "running" and readiness.get("guestReady", {}).get("ready") and readiness.get("shellReady", {}).get("ready"):
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
+      return 0
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo "workspace $workspace did not become ready" >&2
+      cat "$output" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}
 
 cat >"$HOST_DIR/mediation-probe.go" <<'GO'
 package main
@@ -156,21 +215,12 @@ GO
   GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -o "$PROBE" "$HOST_DIR/mediation-probe.go"
 )
 
-HOST_PORT="$(python3 - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.bind(("127.0.0.1", 0))
-    print(s.getsockname()[1])
-PY
-)"
-
-FAIL_HOST_PORT="$(python3 - <<'PY'
-import socket
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.bind(("127.0.0.1", 0))
-    print(s.getsockname()[1])
-PY
-)"
+HOST_PORT="$(pick_port)"
+FAIL_HOST_PORT="$(pick_port)"
+RAW_HOST_PORT="$(pick_port)"
+RAW_LARGE_HOST_PORT="$(pick_port)"
+RAW_UNAVAILABLE_PORT="$(pick_port)"
+OPTIONAL_HOST_PORT="$(pick_port)"
 
 cat >"$SPEC" <<YAML
 name: $WORKSPACE
@@ -357,6 +407,219 @@ readiness = result.get("response", {}).get("readiness", {})
 mediation = readiness.get("mediationReady", {})
 if mediation and result.get("response", {}).get("event", {}).get("state") == "running" and mediation.get("ready") is not True:
     raise SystemExit(readiness)
+PY
+
+python3 - "$RAW_HOST_PORT" "$HOST_DIR/raw-host-request.txt" <<'PY' &
+import socket
+import sys
+
+port = int(sys.argv[1])
+request_file = sys.argv[2]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", port))
+    srv.listen(1)
+    conn, addr = srv.accept()
+    with conn:
+        conn.settimeout(10)
+        data = bytearray()
+        while b"\r\n\r\n" not in data:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data.extend(chunk)
+        with open(request_file, "wb") as f:
+            f.write(bytes(data))
+        body = b"RAW_VSOCK_OK\n"
+        conn.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            + b"Content-Type: text/plain\r\n"
+            + b"Content-Length: "
+            + str(len(body)).encode()
+            + b"\r\nConnection: close\r\n\r\n"
+            + body
+        )
+PY
+RAW_SERVER_PID="$!"
+
+python3 - "$RAW_LARGE_HOST_PORT" "$HOST_DIR/raw-large-host-request.txt" <<'PY' &
+import socket
+import sys
+
+port = int(sys.argv[1])
+request_file = sys.argv[2]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", port))
+    srv.listen(1)
+    conn, addr = srv.accept()
+    with conn:
+        conn.settimeout(10)
+        data = bytearray()
+        while b"\r\n\r\n" not in data:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data.extend(chunk)
+        with open(request_file, "wb") as f:
+            f.write(bytes(data))
+        body = b"RAW_LARGE_BEGIN\n" + (b"A" * 16384) + b"\nRAW_LARGE_END\n"
+        conn.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            + b"Content-Type: text/plain\r\n"
+            + b"Content-Length: "
+            + str(len(body)).encode()
+            + b"\r\nConnection: close\r\n\r\n"
+            + body
+        )
+PY
+RAW_LARGE_SERVER_PID="$!"
+
+"$CLI" create "$RAW_WORKSPACE" \
+  --backend apple-vf \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR/raw" \
+  --size-mib "${MICROAGENT_APPLEVF_MEDIATION_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --memory "${MICROAGENT_APPLEVF_MEDIATION_MEMORY_MIB:-512}" \
+  --cpus "${MICROAGENT_APPLEVF_MEDIATION_CPUS:-2}" \
+  --network isolated \
+  --env MICROAGENT_VSOCK_TCP_LISTENERS=127.0.0.1:18081=2050,127.0.0.1:18082=2051,127.0.0.1:18083=2052 \
+  --service-command "sleep 300" >"$STATE_DIR/raw-create.json"
+
+"$CLI" start "$RAW_WORKSPACE" \
+  --state-dir "$STATE_DIR/raw" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" \
+  --vsock "2050=127.0.0.1:${RAW_HOST_PORT}" \
+  --vsock "2051=127.0.0.1:${RAW_LARGE_HOST_PORT}" \
+  --vsock "2052=127.0.0.1:${RAW_UNAVAILABLE_PORT}" >"$STATE_DIR/raw-start.json"
+wait_for_status_ready "$RAW_WORKSPACE" "$STATE_DIR/raw" "$STATE_DIR/raw-status-running.json"
+"$CLI" connect "$RAW_WORKSPACE" \
+  --state-dir "$STATE_DIR/raw" \
+  --send "wget -qO- -T 10 http://127.0.0.1:18081/raw-vsock-check; wget -qO- -T 10 http://127.0.0.1:18082/raw-large-check > /tmp/raw-large.out; cat /tmp/raw-large.out" \
+  --ready-timeout 30 \
+  --timeout 15 >"$STATE_DIR/raw-connect.txt"
+"$CLI" connect "$RAW_WORKSPACE" \
+  --state-dir "$STATE_DIR/raw" \
+  --send "if wget -qO- -T 3 http://127.0.0.1:18083/raw-unavailable; then echo RAW_UNAVAILABLE_UNEXPECTED; else echo RAW_UNAVAILABLE_FAILED; fi" \
+  --ready-timeout 30 \
+  --timeout 10 >"$STATE_DIR/raw-connect-unavailable.txt"
+wait "$RAW_SERVER_PID"
+RAW_SERVER_PID=""
+wait "$RAW_LARGE_SERVER_PID"
+RAW_LARGE_SERVER_PID=""
+"$CLI" status "$RAW_WORKSPACE" --state-dir "$STATE_DIR/raw" >"$STATE_DIR/raw-status-after-connect.json"
+cp "$STATE_DIR/raw/$RAW_WORKSPACE/runtime.json" "$STATE_DIR/raw-runtime-after-connect.json"
+"$CLI" halt "$RAW_WORKSPACE" --state-dir "$STATE_DIR/raw" --supervisor "$SUPERVISOR" >"$STATE_DIR/raw-halt.json"
+"$CLI" delete "$RAW_WORKSPACE" --yes --state-dir "$STATE_DIR/raw" --supervisor "$SUPERVISOR" >"$STATE_DIR/raw-delete.json"
+
+"$CLI" create "$OPTIONAL_WORKSPACE" \
+  --backend apple-vf \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR/optional" \
+  --size-mib "${MICROAGENT_APPLEVF_MEDIATION_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --memory "${MICROAGENT_APPLEVF_MEDIATION_MEMORY_MIB:-512}" \
+  --cpus "${MICROAGENT_APPLEVF_MEDIATION_CPUS:-2}" \
+  --network isolated \
+  --mediation "2049=127.0.0.1:${OPTIONAL_HOST_PORT}" \
+  --mediation-optional \
+  --service-command "sleep 300" >"$STATE_DIR/optional-create.json"
+"$CLI" start "$OPTIONAL_WORKSPACE" \
+  --state-dir "$STATE_DIR/optional" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/optional-start.json"
+wait_for_status_ready "$OPTIONAL_WORKSPACE" "$STATE_DIR/optional" "$STATE_DIR/optional-status-running.json"
+"$CLI" connect "$OPTIONAL_WORKSPACE" \
+  --state-dir "$STATE_DIR/optional" \
+  --send "echo OPTIONAL_MEDIATION_RUNNING" \
+  --ready-timeout 30 \
+  --timeout 10 >"$STATE_DIR/optional-connect.txt"
+"$CLI" status "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR/optional" >"$STATE_DIR/optional-status-after-connect.json"
+"$CLI" halt "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR/optional" --supervisor "$SUPERVISOR" >"$STATE_DIR/optional-halt.json"
+"$CLI" delete "$OPTIONAL_WORKSPACE" --yes --state-dir "$STATE_DIR/optional" --supervisor "$SUPERVISOR" >"$STATE_DIR/optional-delete.json"
+
+python3 - "$STATE_DIR" "$HOST_DIR" <<'PY'
+import json
+import os
+import sys
+
+state_dir, host_dir = sys.argv[1:3]
+
+def read_json(name):
+    with open(os.path.join(state_dir, name), "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def read_text(path):
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+raw_create = read_json("raw-create.json")
+raw_running = read_json("raw-status-running.json")
+raw_after = read_json("raw-status-after-connect.json")
+raw_runtime = read_json("raw-runtime-after-connect.json")
+raw_halt = read_json("raw-halt.json")
+raw_delete = read_json("raw-delete.json")
+optional_create = read_json("optional-create.json")
+optional_running = read_json("optional-status-running.json")
+optional_after = read_json("optional-status-after-connect.json")
+optional_halt = read_json("optional-halt.json")
+optional_delete = read_json("optional-delete.json")
+raw_connect = read_text(os.path.join(state_dir, "raw-connect.txt"))
+raw_unavailable = read_text(os.path.join(state_dir, "raw-connect-unavailable.txt"))
+raw_request = read_text(os.path.join(host_dir, "raw-host-request.txt"))
+raw_large_request = read_text(os.path.join(host_dir, "raw-large-host-request.txt"))
+optional_connect = read_text(os.path.join(state_dir, "optional-connect.txt"))
+
+if raw_create.get("response", {}).get("event", {}).get("state") != "prepared":
+    raise SystemExit(raw_create)
+if raw_running.get("event", {}).get("state") != "running":
+    raise SystemExit(raw_running)
+if "RAW_VSOCK_OK" not in raw_connect:
+    raise SystemExit(raw_connect)
+if "RAW_LARGE_BEGIN" not in raw_connect or "RAW_LARGE_END" not in raw_connect:
+    raise SystemExit(raw_connect)
+if "RAW_UNAVAILABLE_FAILED" not in raw_unavailable or "RAW_UNAVAILABLE_UNEXPECTED" in raw_unavailable:
+    raise SystemExit(raw_unavailable)
+if "GET /raw-vsock-check" not in raw_request:
+    raise SystemExit(raw_request)
+if "GET /raw-large-check" not in raw_large_request:
+    raise SystemExit(raw_large_request)
+listeners = raw_runtime.get("config", {}).get("vsockListeners") or []
+ports = {item.get("port") for item in listeners}
+if not {2050, 2051, 2052}.issubset(ports):
+    raise SystemExit(raw_runtime)
+if raw_halt.get("event", {}).get("state") != "halted":
+    raise SystemExit(raw_halt)
+if raw_delete.get("event", {}).get("state") != "stopped":
+    raise SystemExit(raw_delete)
+if optional_create.get("response", {}).get("event", {}).get("state") != "prepared":
+    raise SystemExit(optional_create)
+if optional_running.get("event", {}).get("state") != "running":
+    raise SystemExit(optional_running)
+mediation = optional_running.get("mediation") or {}
+if mediation.get("required") is not False or mediation.get("failClosed") is not False:
+    raise SystemExit(optional_running)
+ready = optional_running.get("readiness", {}).get("mediationReady", {})
+if ready.get("ready") is not True or ready.get("error"):
+    raise SystemExit(optional_running)
+if "OPTIONAL_MEDIATION_RUNNING" not in optional_connect:
+    raise SystemExit(optional_connect)
+if optional_after.get("event", {}).get("state") != "running":
+    raise SystemExit(optional_after)
+if optional_halt.get("event", {}).get("state") != "halted":
+    raise SystemExit(optional_halt)
+if optional_delete.get("event", {}).get("state") != "stopped":
+    raise SystemExit(optional_delete)
 PY
 
 echo "Apple VF mediation smoke passed"
