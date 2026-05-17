@@ -1030,7 +1030,7 @@ mke2fs -q -F -t ext4 -d "$STATE_DIR/disk-src" "$STATE_DIR/existing-disk.ext4"
   --state-dir "$STATE_DIR" \
   --network isolated \
   --size-mib 96 \
-  --disk "workspace=$STATE_DIR/existing-disk.ext4:/workspace:rw" \
+  -v "$STATE_DIR/existing-disk.ext4:/workspace:rw" \
   --disk "readonly=$STATE_DIR/existing-disk.ext4:/readonly:ro" \
   --output existing-disk-report=/workspace/report.txt >"$STATE_DIR/create-existing-disk.json"
 assert_json "$STATE_DIR/create-existing-disk.json" "any(disk.get('name') == 'workspace' and not disk.get('bundle') for disk in data.get('disks', []))"

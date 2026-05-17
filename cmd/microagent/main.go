@@ -6475,6 +6475,7 @@ Options:
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
   -setup-file <path>    Shell script file to run before --exec
+  -image-command        Run the image Entrypoint/Cmd
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
@@ -6488,8 +6489,11 @@ Options:
   -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -name <name>          Workspace name; generated when omitted
+  -backend <name>       Backend identity override
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
+  -guest-init <path>    Guest init path
+  -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
   -network <mode>       Network mode: user, nat, isolated, or bridged
@@ -6501,6 +6505,7 @@ Options:
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
+  -result-port <port>   Vsock result port
   -timeout <seconds>    Timeout
   -keep                 Keep state
   -rm                   Explicitly remove state after run
@@ -6529,6 +6534,7 @@ Options:
   -setup <command>      Shell command to run before first start
   -setup-file <path>    Shell script file to run before first start
   -service-command <cmd> Long-running command to run as the VM service
+  -image-command        Run the image Entrypoint/Cmd when creating a prepared workspace
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
@@ -6541,8 +6547,11 @@ Options:
                          Attach a safe tar/ext4 volume
   -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
+  -backend <name>       Backend identity override
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
+  -guest-init <path>    Guest init path
+  -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
   -network <mode>       Network mode: user, nat, isolated, or bridged
@@ -6556,6 +6565,7 @@ Options:
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
+  -result-port <port>   Vsock result port
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
   -dry-run              Validate without writing state

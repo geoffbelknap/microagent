@@ -23,6 +23,7 @@ first.
 | `--setup <command>` | Shell command to run before first start. Repeatable |
 | `--setup-file <path>` | Shell script file to run before first start. Repeatable |
 | `--service-command <cmd>` | Long-running shell command to run as the VM service |
+| `--image-command` | Run the image Entrypoint/Cmd when creating a prepared workspace |
 | `--entrypoint <command>` | Command to run on start |
 | `--shell <path>` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
 | `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
@@ -32,8 +33,11 @@ first.
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
 | `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
 | `--output n=/guest/path` | Declare an output artifact path |
+| `--backend <name>` | Backend identity override |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory |
+| `--guest-init <path>` | Guest init path |
+| `--arch <arch>` | Guest architecture |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
 | `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `bridged` |
@@ -45,6 +49,7 @@ first.
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
+| `--result-port <port>` | Vsock result port |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--dry-run` | Validate config without creating |

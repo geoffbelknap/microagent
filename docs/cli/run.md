@@ -25,6 +25,7 @@ command.
 | `--exec <command>` | Shell command to run |
 | `--setup <command>` | Shell command to run before `--exec`. Repeatable |
 | `--setup-file <path>` | Shell script file to run before `--exec`. Repeatable |
+| `--image-command` | Run the image Entrypoint/Cmd |
 | `--entrypoint <command>` | Command to run on start |
 | `--shell <path>` | Interactive console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
@@ -41,14 +42,18 @@ command.
 | `--publish <mapping>` | Forward `[host:]hostPort:guestPort[/tcp]` |
 | `-p <mapping>` | Alias for `--publish` |
 | `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
+| `--backend <name>` | Backend identity override |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+| `--guest-init <path>` | Guest init path |
+| `--arch <arch>` | Guest architecture |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
+| `--result-port <port>` | Vsock result port |
 | `--timeout <seconds>` | Maximum wall-clock time before kill |
 | `--keep` | Keep state after the command exits |
 | `--rm` | Explicit disposable-run behavior. This is the default unless `--keep` is set |
