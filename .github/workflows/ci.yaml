@@ -5,6 +5,7 @@ on:
     branches:
       - main
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
@@ -67,11 +68,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: go.mod
+
       - name: Check Markdown links
         run: python3 scripts/dev/markdown-link-check.py
 
       - name: Check CLI docs
         run: python3 scripts/dev/cli-docs-check.py
+
+      - name: Check docs parity
+        run: python3 scripts/dev/docs-parity.py
 
       - name: Check shell syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
