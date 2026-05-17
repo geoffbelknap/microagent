@@ -4,7 +4,7 @@ description: Move the body from one-request-per-restart to a stream of requests 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-11_
 
 The [simple-agent recipe](/recipes/simple-agent/) ships work into the body via `microagent cp` and retrieves it via `microagent --json result`. That works for a demo; it doesn't scale to "agent processing a stream of requests". For that, the body needs to talk to the host directly while it's running.
 

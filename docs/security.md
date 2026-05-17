@@ -4,7 +4,7 @@ description: Trust boundary and reporting issues.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-11_
 
 ## Trust boundary
 

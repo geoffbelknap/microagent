@@ -4,7 +4,7 @@ description: One backend per host OS. Same lifecycle surface, different mechanic
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-12_
 
 microagent installs with one backend for the host OS: Firecracker on Linux,
 Apple VF on macOS, and experimental Windows Hyper-V on Windows. The CLI does

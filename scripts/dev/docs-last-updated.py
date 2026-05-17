@@ -37,10 +37,47 @@ def docs_pages() -> list[Path]:
 
 def git_date(path: Path) -> str:
     rel = str(path.relative_to(ROOT))
+    for commit in git_history(rel):
+        if commit_is_substantive(commit, rel):
+            return run(["git", "show", "-s", "--format=%cs", commit])
     date = run(["git", "log", "-1", "--format=%cs", "--", rel])
     if date:
         return date
     return today()
+
+
+def git_history(rel: str) -> list[str]:
+    output = run(["git", "log", "--format=%H", "--", rel])
+    return [line for line in output.splitlines() if line]
+
+
+def git_file(commitish: str, rel: str) -> str | None:
+    result = subprocess.run(
+        ["git", "show", f"{commitish}:{rel}"],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def normalize_for_substantive_compare(text: str | None) -> str | None:
+    if text is None:
+        return None
+    frontmatter, body = split_frontmatter(text)
+    body = STAMP_RE.sub("", body.lstrip("\n"), count=1)
+    if frontmatter:
+        return f"{frontmatter}\n{body}"
+    return body
+
+
+def commit_is_substantive(commit: str, rel: str) -> bool:
+    current = normalize_for_substantive_compare(git_file(commit, rel))
+    previous = normalize_for_substantive_compare(git_file(f"{commit}^", rel))
+    return current != previous
 
 
 def today() -> str:
@@ -52,6 +89,15 @@ def git_dirty(path: Path) -> bool:
     unstaged = subprocess.run(["git", "diff", "--quiet", "--", rel], cwd=ROOT)
     staged = subprocess.run(["git", "diff", "--cached", "--quiet", "--", rel], cwd=ROOT)
     return unstaged.returncode != 0 or staged.returncode != 0
+
+
+def working_tree_substantive_dirty(path: Path) -> bool:
+    if not git_dirty(path):
+        return False
+    rel = str(path.relative_to(ROOT))
+    current = normalize_for_substantive_compare(path.read_text(encoding="utf-8"))
+    head = normalize_for_substantive_compare(git_file("HEAD", rel))
+    return current != head
 
 
 def split_frontmatter(text: str) -> tuple[str, str]:
@@ -70,7 +116,7 @@ def stamped_text(path: Path) -> str:
     body = body.lstrip("\n")
     has_stamp = STAMP_RE.search(body) is not None
     body = STAMP_RE.sub("", body, count=1)
-    stamp_date = today() if git_dirty(path) or not has_stamp else git_date(path)
+    stamp_date = today() if working_tree_substantive_dirty(path) or not has_stamp else git_date(path)
     stamp = f"<!-- docs-last-updated -->\n_Last updated: {stamp_date}_\n\n"
     if frontmatter:
         return f"{frontmatter}\n{stamp}{body}"

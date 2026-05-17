@@ -4,7 +4,7 @@ description: Print the backend-neutral agent runtime contract.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-12_
 
 ```text
 microagent [--json] contract

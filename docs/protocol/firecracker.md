@@ -4,7 +4,7 @@ description: Linux backend lifecycle through the executable Go supervisor.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-08_
 
 The Firecracker backend uses the same executable supervisor protocol as Apple
 VF. The supervisor is packaged as `microagent-firecracker-supervisor`.

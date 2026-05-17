@@ -4,7 +4,7 @@ description: End-to-end walkthroughs that combine microagent primitives into som
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-11_
 
 Recipes are tutorials. They take you from "I have microagent installed" to "I have a working thing", showing the moving parts as you assemble them.
 

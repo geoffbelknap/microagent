@@ -4,7 +4,7 @@ description: Show boot/serial output for a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-08_
 
 ```text
 microagent logs <name> [--state-dir <dir>]

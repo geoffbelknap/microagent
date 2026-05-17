@@ -4,7 +4,7 @@ description: Boot a microVM, run a command, and tear it down — in a few lines 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-11_
 
 *If you'd rather drive microagent from the command line, see [run your first microVM](/getting-started/cli/first-microvm/) instead.*
 

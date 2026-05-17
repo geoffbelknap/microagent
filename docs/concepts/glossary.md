@@ -4,7 +4,7 @@ description: Terms used throughout the microagent docs and what they actually me
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-11_
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse — and the distinctions matter for what you can do next.
 
