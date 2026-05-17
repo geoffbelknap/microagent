@@ -4,7 +4,7 @@ description: How the Go library, CLI, and backend supervisors fit together.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-11_
+_Last updated: 2026-05-17_
 
 `microagent` is a Go library with a CLI adapter. The library packages own
 workspace lifecycle, rootfs builds, kernel management, image cache management,
@@ -64,6 +64,8 @@ OCI image ──► pkg/rootfs ──► ext4 disk ──► VM
    local state.
 
 Go callers can use the same package flow directly without invoking the CLI.
+See the [library overview](/library/) for the recommended entry points and
+the [Go library reference](/library/go/) for the exported package surface.
 
 ## Why supervisors are separate executables
 
