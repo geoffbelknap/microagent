@@ -21,6 +21,8 @@ first.
 | `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
 | `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
+| `--setup-file <path>` | Shell script file to run before first start. Repeatable |
+| `--service-command <cmd>` | Long-running shell command to run as the VM service |
 | `--entrypoint <command>` | Command to run on start |
 | `--shell <path>` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
 | `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |

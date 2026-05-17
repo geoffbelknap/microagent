@@ -26,6 +26,10 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
 | `--cpus <n>` | CPU count override for this start |
+| `--kernel <path>` | Linux kernel path override |
+| `--arch <arch>` | Guest architecture |
+| `--backend <name>` | Backend identity override |
+| `--vsock p=host:port` | Add a vsock mapping for this start. Repeatable |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
 ## Example

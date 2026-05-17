@@ -24,6 +24,7 @@ command.
 | `--image <ref>` | OCI image reference |
 | `--exec <command>` | Shell command to run |
 | `--setup <command>` | Shell command to run before `--exec`. Repeatable |
+| `--setup-file <path>` | Shell script file to run before `--exec`. Repeatable |
 | `--entrypoint <command>` | Command to run on start |
 | `--shell <path>` | Interactive console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
@@ -33,6 +34,10 @@ command.
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
 | `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
 | `--output n=/guest/path` | Declare an output artifact path |
+| `--file <path>` | Workspace spec file; flags override matching spec fields |
+| `--restart <policy>` | Restart policy for kept/named runs: `never`, `on-failure`, or `always` |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `bridged` |
+| `--network-interface <if>` | Host interface identifier or display name for bridged mode |
 | `--publish <mapping>` | Forward `[host:]hostPort:guestPort[/tcp]` |
 | `-p <mapping>` | Alias for `--publish` |
 | `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |

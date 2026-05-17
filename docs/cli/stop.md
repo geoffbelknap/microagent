@@ -14,7 +14,10 @@ recorded VM process; on Apple VF it asks the supervisor to stop the VM.
 
 | Flag | Description |
 |---|---|
+| `--name <name>` | Workspace name; positional name is also accepted |
+| `--id <id>` | Workspace ID alias for `--name` |
 | `--state-dir <dir>` | State directory holding the workspace record |
+| `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
 ## Example

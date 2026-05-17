@@ -91,11 +91,54 @@ func TestCreateHelpUsesWorkspaceHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "microagent create") || !strings.Contains(text, "-entrypoint <command>") {
+	if !strings.Contains(text, "microagent create") ||
+		!strings.Contains(text, "-entrypoint <command>") ||
+		!strings.Contains(text, "-v SRC:DST[:ro|rw]") ||
+		!strings.Contains(text, "-p host:guest[/tcp]") ||
+		!strings.Contains(text, "-dry-run") {
 		t.Fatalf("create help = %s", text)
 	}
 	if strings.Contains(text, "Rootfs image path") {
 		t.Fatalf("create help exposed low-level supervisor flags: %s", text)
+	}
+}
+
+func TestHighLevelCommandHelpDoesNotFallThroughToSupervisorFlags(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: "start", want: "Usage of start:"},
+		{command: "delete", want: "Confirm workspace deletion without prompting"},
+		{command: "status", want: "Workspace name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			dir := t.TempDir()
+			stdoutPath := filepath.Join(dir, "stdout.txt")
+			stdout, err := os.Create(stdoutPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = run(t.Context(), []string{tt.command, "--help"}, stdout)
+			if closeErr := stdout.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			if err != nil {
+				t.Fatalf("run %s --help: %v", tt.command, err)
+			}
+			data, err := os.ReadFile(stdoutPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(data)
+			if !strings.Contains(text, tt.want) {
+				t.Fatalf("%s help = %s, want %q", tt.command, text, tt.want)
+			}
+			if strings.Contains(text, "Rootfs image path") || strings.Contains(text, "Read request JSON") {
+				t.Fatalf("%s help exposed low-level supervisor flags: %s", tt.command, text)
+			}
+		})
 	}
 }
 

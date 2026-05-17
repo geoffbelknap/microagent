@@ -56,6 +56,9 @@ const (
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -143,7 +146,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return runWorkspaceStateCommand(ctx, "status", args[1:], stdout)
 	}
 	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
-		if hasWorkspaceStateTarget(args[1:]) {
+		if wantsHelp(args[1:]) || hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 		}
 	}
@@ -156,7 +159,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "connect" {
 		return runConnect(ctx, args[1:], stdout)
 	}
-	if args[0] == "start" && hasPositionalWorkspaceName(args[1:]) {
+	if args[0] == "start" && (wantsHelp(args[1:]) || hasPositionalWorkspaceName(args[1:])) {
 		return runStartWorkspace(ctx, args[1:], stdout)
 	}
 	if args[0] == "supervise" {
@@ -169,7 +172,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	supervisorPath := defaultSupervisorPath(backend)
 	supervisorExplicit := hasFlagValue(args[1:], "supervisor")
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stdout)
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	req, err := requestForCommand(args[0], fs, reorderFlagArgs(args[1:]))
 	if err != nil {
@@ -218,6 +221,9 @@ func runContract(args []string, stdout *os.File) error {
 	fs := flag.NewFlagSet("contract", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -234,11 +240,14 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stdout)
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -1355,7 +1364,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	yes := false
 	force := false
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stdout)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
@@ -1368,6 +1377,9 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		fs.BoolVar(&force, "f", false, "Kill a running workspace before deleting")
 	}
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if !supervisorExplicit {
@@ -1710,7 +1722,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	kernelExplicit := hasFlagValue(args, "kernel")
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stdout)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
@@ -1722,6 +1734,9 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if !supervisorExplicit {
@@ -6518,8 +6533,12 @@ Options:
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
+  -e KEY=VALUE          Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
+  -volume SRC:DST[:ro|rw]
+                         Attach a safe tar/ext4 volume
   -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -kernel <path>        Custom kernel path
@@ -6529,6 +6548,9 @@ Options:
   -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
+  -p host:guest[/tcp]   Publish a TCP port
+  -publish host:guest[/tcp]
+                         Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
   -memory <MiB>         Memory in MiB; defaults to 512
@@ -6536,13 +6558,15 @@ Options:
   -size-mib <MiB>       Disk size
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
+  -dry-run              Validate without writing state
+  -json <path|->        Read request JSON from a file or stdin
 `)
 }
 
 func printKernelHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent kernel
 
-Advanced kernel commands. Most users can start with microagent run --image ...
+Advanced kernel commands. Most users can start with microagent run IMAGE ...
 and skip this.
 
 Commands:
