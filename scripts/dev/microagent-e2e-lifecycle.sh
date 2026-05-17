@@ -161,6 +161,17 @@ expect_failure invalid-publish "publish" \
   "$CLI" create invalid-publish --image "$IMAGE" --publish bad-mapping --state-dir "$STATE_DIR" --backend apple-vf --supervisor "$SUPERVISOR"
 expect_failure reserved-disk "rootfs is reserved" \
   "$CLI" create invalid-disk --image "$IMAGE" --disk rootfs=/tmp/nope:/data:rw --state-dir "$STATE_DIR" --backend apple-vf --supervisor "$SUPERVISOR"
+expect_failure mutable-rootfs "mutable" \
+  "$CLI" rootfs build --image docker.io/library/busybox:1.36 --out "$STATE_DIR/mutable.ext4" --state-dir "$STATE_DIR/mutable-rootfs" --arch "$ARCH" --init "$GUEST_INIT" --mke2fs "$MKE2FS"
+
+"$CLI" images pull "$IMAGE" \
+  --state-dir "$STATE_DIR" \
+  --arch "$ARCH" \
+  --guest-init "$GUEST_INIT" \
+  --mke2fs "$MKE2FS" \
+  --size-mib "${MICROAGENT_APPLEVF_BOOT_SIZE_MIB:-128}" >"$STATE_DIR/images-pull.json"
+"$CLI" images tag "$IMAGE" local/busybox-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag.json"
+"$CLI" images list --state-dir "$STATE_DIR" >"$STATE_DIR/images-list.json"
 
 mkdir -p "$STATE_DIR/spec"
 printf "seed-from-spec\n" >"$STATE_DIR/spec/seed.txt"
@@ -205,6 +216,13 @@ YAML
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$KERNEL" --supervisor "$SUPERVISOR" >"$STATE_DIR/start.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 "$CLI" ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps-running.json"
+(
+  printf 'echo INTERACTIVE_OK\n'
+  sleep 1
+  printf '\035'
+) | "$CLI" connect "$WORKSPACE" \
+  --state-dir "$STATE_DIR" \
+  --ready-timeout 30 >"$STATE_DIR/connect-interactive.txt"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
   --send "cat /seed.txt; cat /matrix/setup.txt; printf env=%s \"\$MATRIX_ENV\"; printf persisted > /matrix/persist.txt; printf '{\"ok\":true,\"phase\":\"running\"}' > /matrix/report.json; sync" \
@@ -267,6 +285,12 @@ cp "$STATE_DIR/$WORKSPACE/events.json" "$STATE_DIR/events.json"
 
 "$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-clone.json"
 "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-workspace.json"
+"$CLI" images rm local/busybox-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-tag.json"
+"$CLI" images tag "$IMAGE" local/busybox-feature:delete-probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag-delete.json"
+"$CLI" images rm local/busybox-feature:delete-probe --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
+"$CLI" images prune --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune.json"
+"$CLI" prune --images --yes --state-dir "$STATE_DIR" >"$STATE_DIR/prune-images-yes.txt"
+"$CLI" images prune --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune-delete.json"
 
 python3 - "$STATE_DIR" "$WORKSPACE" "$CLONE" "$FORCE_DELETE_WORKSPACE" <<'PY'
 import json
@@ -285,6 +309,9 @@ def read_text(name):
 
 doctor = read_json("doctor.json")
 profiles = read_json("profiles.json")
+pull = read_json("images-pull.json")
+tag = read_json("images-tag.json")
+images = read_json("images-list.json")
 create = read_json("create-spec.json")
 prepared = read_json("status-prepared.json")
 running = read_json("status-running.json")
@@ -303,11 +330,20 @@ quarantine = read_json("quarantine.json")
 halt_quarantined = read_json("halt-quarantined.json")
 delete_clone = read_json("delete-clone.json")
 delete_workspace = read_json("delete-workspace.json")
+rm_delete = read_json("images-rm-delete.json")
+prune_delete = read_json("images-prune-delete.json")
+prune_images_yes = read_json("prune-images-yes.txt")
 
 if doctor.get("ok") is not True or doctor.get("backend") != "apple-vf":
     raise SystemExit(doctor)
 if not any(profile.get("name") == "tiny" for profile in profiles.get("profiles", [])):
     raise SystemExit(profiles)
+if (pull.get("imageRef") or pull.get("image_ref", "")) == "" or (pull.get("outputPath") or pull.get("output_path", "")) == "":
+    raise SystemExit(pull)
+if (tag.get("imageRef") or tag.get("image_ref")) != "local/busybox-feature:probe":
+    raise SystemExit(tag)
+if not any((image.get("imageRef") or image.get("image_ref")) == "local/busybox-feature:probe" for image in images.get("images", [])):
+    raise SystemExit(images)
 if create.get("workspace") != workspace or create.get("response", {}).get("event", {}).get("state") not in ("prepared", "stopped"):
     raise SystemExit(create)
 if create.get("profile") != "tiny" or create.get("restart") != "never":
@@ -332,6 +368,8 @@ connect = read_text("connect-running.txt")
 for needle in ("seed-from-spec", "setup-ok", "env=env-ok"):
     if needle not in connect:
         raise SystemExit(connect)
+if "INTERACTIVE_OK" not in read_text("connect-interactive.txt"):
+    raise SystemExit(read_text("connect-interactive.txt"))
 if "microagent-init: starting" not in read_text("logs-running.txt"):
     raise SystemExit("logs missing guest init output")
 if halted.get("event", {}).get("state") != "halted":
@@ -373,6 +411,10 @@ if halt_quarantined.get("event", {}).get("state") != "halted":
     raise SystemExit(halt_quarantined)
 if delete_clone.get("event", {}).get("state") != "stopped" or delete_workspace.get("event", {}).get("state") != "stopped":
     raise SystemExit((delete_clone, delete_workspace))
+if "removed" not in rm_delete or "removed" not in prune_delete:
+    raise SystemExit((rm_delete, prune_delete))
+if "deleted" not in prune_images_yes or "kept" not in prune_images_yes:
+    raise SystemExit(prune_images_yes)
 with open(os.path.join(state_dir, "events.json"), "r", encoding="utf-8") as handle:
     states = [event["state"] for event in json.load(handle)]
 for expected in ("running", "halted", "quarantined"):
