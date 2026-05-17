@@ -77,27 +77,31 @@ Use the unified E2E runner for repeatable macOS validation:
 scripts/dev/microagent-e2e.sh --list
 scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output
 scripts/dev/microagent-e2e.sh \
-  applevf-boot \
-  applevf-substrate \
-  applevf-workspace-connect \
-  applevf-network-mode \
-  applevf-publish \
-  applevf-vsock-diagnostic
+  public-surface \
+  lifecycle \
+  networking \
+  transport \
+  supervision
 ```
 
-Add `applevf-direct-console` when validating the direct supervisor console
-path. Use `--keep` or `MICROAGENT_E2E_KEEP=1` only when you need to preserve
-state directories for debugging; otherwise successful scenarios clean up their
-own temporary state. If the local Docker config names a missing credential
-helper, set `DOCKER_CONFIG` to an empty temporary directory for public-image
-validation rather than editing host login state.
+Those feature scenarios are backend-agnostic: the scenario names describe the
+shared CLI/runtime contract, while the host or
+`MICROAGENT_E2E_BACKEND=applevf` selects the Apple VF execution lane. Add the
+targeted `applevf-*` scenarios when you need narrower diagnostics for boot,
+direct console, substrate, workspace connect, network mode, TCP publish, or
+vsock forwarding. Use `--keep` or `MICROAGENT_E2E_KEEP=1` only when you need to
+preserve state directories for debugging; otherwise successful scenarios clean
+up their own temporary state. If the local Docker config names a missing
+credential helper, set `DOCKER_CONFIG` to an empty temporary directory for
+public-image validation rather than editing host login state.
 
 The Apple VF lane should cover portable CLI behavior, lifecycle/substrate,
 connect/logs/ps, NAT/user/isolated/publish networking, mediation and generic
-virtio-vsock behavior, quarantine cleanup, results, and artifacts. Bridged mode
-is entitlement-gated: open-source ad-hoc builds should fail closed with the
-`com.apple.vm.networking` restriction named unless the supervisor is signed
-with Apple's restricted entitlement.
+virtio-vsock behavior, supervision, quarantine cleanup, results, artifacts,
+attached disks, and text/JSON output. Bridged mode is entitlement-gated:
+open-source ad-hoc builds should fail closed with the
+`com.apple.vm.networking` restriction named unless the supervisor is signed with
+Apple's restricted entitlement.
 
 Keep one-off run logs and investigation notes out of `docs/`; update the
 Notion task or another tracker with run evidence instead.

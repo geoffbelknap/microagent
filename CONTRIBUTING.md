@@ -73,6 +73,19 @@ Run the live Linux lane on the self-hosted KVM runner:
 scripts/dev/microagent-e2e.sh
 ```
 
+Feature E2E scenarios are backend-agnostic. They describe the shared
+microagent contract first and select a backend lane from the host, or from
+`MICROAGENT_E2E_BACKEND=firecracker|applevf` when you need to force one:
+
+```bash
+scripts/dev/microagent-e2e.sh \
+  public-surface \
+  lifecycle \
+  networking \
+  transport \
+  supervision
+```
+
 List scenarios with `scripts/dev/microagent-e2e.sh --list`. Before fresh live
 runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to check for preserved
 temporary state from failed tests; pass `--yes` only when the candidates are
@@ -90,21 +103,22 @@ same runner:
 ```bash
 scripts/dev/applevf-supervisor-build.sh
 scripts/dev/microagent-e2e.sh \
-  applevf-boot \
-  applevf-substrate \
-  applevf-workspace-connect \
-  applevf-network-mode \
-  applevf-publish \
-  applevf-vsock-diagnostic
+  public-surface \
+  lifecycle \
+  networking \
+  transport \
+  supervision
 ```
 
-Before release, the Apple VF lane must pass boot, substrate/lifecycle,
-connect/logs/ps, NAT/user/isolated networking, TCP publish, mediation/vsock,
-quarantine cleanup, results, and artifact retrieval on an Apple silicon host.
-`applevf-direct-console` is a smoke-only direct-supervisor check. Bridged mode
-is release-relevant only on hosts with Apple's restricted
-`com.apple.vm.networking` entitlement; public ad-hoc builds should instead
-prove the fail-closed entitlement error.
+Before release, the Apple VF lane must pass portable public CLI behavior,
+lifecycle/substrate, connect/logs/ps, NAT/user/isolated networking, TCP publish,
+mediation/vsock transport, supervision/restart behavior, quarantine cleanup,
+results, artifacts, attached disks, and text/JSON output on an Apple silicon
+host. The `applevf-*` scenarios are targeted backend diagnostics for narrower
+failures; `applevf-direct-console` is a direct-supervisor smoke check. Bridged
+mode is release-relevant only on hosts with Apple's restricted
+`com.apple.vm.networking` entitlement; public ad-hoc builds should instead prove
+the fail-closed entitlement error.
 
 ## Pull Requests
 
