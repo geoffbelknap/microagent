@@ -57,10 +57,12 @@ This repository owns the VM pieces:
 - Run live Firecracker, network, and E2E tests outside sandboxed environments.
   KVM, `/dev/vhost-vsock`, `/dev/net/tun`, networking tools, and cleanup checks
   must reflect the real host.
-- Use `scripts/dev/microagent-e2e.sh --list` to see E2E scenarios. The portable
-  set is `contract help-usage registry-auth text-output`; the full Linux live
-  suite also includes `public-surface lifecycle-matrix networking mediation
-  supervision`.
+- Use `scripts/dev/microagent-e2e.sh --list` to see E2E scenarios. Feature
+  suites should be backend-neutral by default: `public-surface`,
+  `lifecycle-deep`, `networking-deep`, `transport-deep`, and
+  `supervision-deep` must run the current host backend selected by
+  `MICROAGENT_E2E_BACKEND`. Firecracker-only or Apple-VF-only scenarios are
+  host implementation probes and must be named as such.
 - Before fresh live runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to
   identify preserved stale state. Delete only after confirming the candidates
   are test-owned and safe.

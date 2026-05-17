@@ -9,15 +9,14 @@ SCENARIOS=(
   "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all"
   "text-output:scripts/dev/microagent-e2e-text-output.sh:all"
   "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all"
-  "lifecycle:scripts/dev/microagent-e2e-lifecycle.sh:all"
-  "lifecycle-matrix:scripts/dev/microagent-e2e-lifecycle-matrix.sh:manual-linux"
-  "networking:scripts/dev/microagent-e2e-networking-contract.sh:all"
-  "networking-linux:scripts/dev/microagent-e2e-networking.sh:manual-linux"
-  "transport:scripts/dev/microagent-e2e-transport.sh:all"
-  "mediation:scripts/dev/microagent-e2e-transport.sh:manual-all"
-  "mediation-linux:scripts/dev/microagent-e2e-mediation.sh:manual-linux"
-  "supervision:scripts/dev/microagent-e2e-supervision-contract.sh:all"
-  "supervision-linux:scripts/dev/microagent-e2e-supervision.sh:manual-linux"
+  "lifecycle-deep:scripts/dev/microagent-e2e-lifecycle.sh:all"
+  "networking-deep:scripts/dev/microagent-e2e-networking-contract.sh:all"
+  "transport-deep:scripts/dev/microagent-e2e-transport.sh:all"
+  "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all"
+  "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:manual-linux"
+  "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:manual-linux"
+  "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:manual-linux"
+  "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:manual-linux"
   "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin"
   "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin"
   "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin"
@@ -46,20 +45,26 @@ Scenarios:
   text-output       Human/text output mode for stable public CLI surfaces
   public-surface     CLI contract, host/doctor, kernel/rootfs, run/result,
                      request JSON, bundles, attached-disk artifacts, kill, perf
-  lifecycle          Backend-agnostic lifecycle contract scenario. Defaults to
-                     Firecracker on Linux and Apple VF on macOS; override with
-                     MICROAGENT_E2E_BACKEND=firecracker|applevf
-  lifecycle-matrix   create/start/status/ps/connect/logs/halt/resume/cp/clone,
-                     validation failures, images, artifacts, quarantine/delete
-  networking         Backend-agnostic networking contract scenario. Defaults to
-                     Firecracker on Linux and Apple VF on macOS; override with
-                     MICROAGENT_E2E_BACKEND=firecracker|applevf
-  networking-linux   Legacy direct Linux Firecracker networking scenario
-  transport          Backend-agnostic mediation/vsock transport scenario
-  mediation          Alias for transport
-  mediation-linux    Legacy direct Linux Firecracker mediation scenario
-  supervision        Backend-agnostic restart supervision scenario
-  supervision-linux  Legacy direct Linux Firecracker supervision scenario
+  lifecycle-deep     Backend-neutral lifecycle feature contract:
+                     create/start/status/ps/connect/logs/halt/resume/cp/clone,
+                     validation failures, images, artifacts, quarantine/delete.
+                     Defaults to Firecracker on Linux and Apple VF on macOS;
+                     override with MICROAGENT_E2E_BACKEND=firecracker|applevf.
+  networking-deep    Backend-neutral networking feature contract. Covers modes,
+                     publish, cached NATS/rootfs, apply, artifacts,
+                     halt/resume, quarantine, and invalid config paths where
+                     each backend has matching semantics.
+  transport-deep     Backend-neutral mediation/vsock transport feature contract.
+  supervision-deep   Backend-neutral restart supervision, signal, failure, and
+                     cleanup feature contract.
+  firecracker-lifecycle-host
+                    Firecracker/Linux host mechanics probe behind lifecycle.
+  firecracker-networking-host
+                    Firecracker/Linux TAP, bridge, NAT, and helper mechanics.
+  firecracker-transport-host
+                    Firecracker/Linux /dev/vhost-vsock and helper mechanics.
+  firecracker-supervision-host
+                    Firecracker/Linux helper PID cleanup mechanics.
   applevf-boot       Apple VF run boot smoke for a BusyBox workload
   applevf-direct-console
                     Apple VF direct supervisor console input smoke
@@ -99,7 +104,7 @@ EOF
 }
 
 scenario_script() {
-  wanted="$1"
+  wanted="$(canonical_scenario "$1")"
   for entry in "${SCENARIOS[@]}"; do
     name="${entry%%:*}"
     rest="${entry#*:}"
@@ -113,7 +118,7 @@ scenario_script() {
 }
 
 scenario_platform() {
-  wanted="$1"
+  wanted="$(canonical_scenario "$1")"
   for entry in "${SCENARIOS[@]}"; do
     name="${entry%%:*}"
     rest="${entry#*:}"
@@ -124,6 +129,26 @@ scenario_platform() {
     fi
   done
   return 1
+}
+
+canonical_scenario() {
+  case "$1" in
+    lifecycle|lifecycle-matrix)
+      printf '%s\n' lifecycle-deep
+      ;;
+    networking|networking-linux)
+      printf '%s\n' networking-deep
+      ;;
+    transport|mediation|mediation-linux)
+      printf '%s\n' transport-deep
+      ;;
+    supervision|supervision-linux)
+      printf '%s\n' supervision-deep
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
 }
 
 scenario_supported() {
@@ -239,13 +264,14 @@ if [ "${#args[@]}" -eq 0 ]; then
   done
 else
   for name in "${args[@]}"; do
-    if ! scenario_script "$name" >/dev/null; then
+    resolved="$(canonical_scenario "$name")"
+    if ! scenario_script "$resolved" >/dev/null; then
       echo "unknown microagent E2E scenario: $name" >&2
       echo "available scenarios:" >&2
       list_scenarios >&2
       exit 2
     fi
-    selected+=("$name")
+    selected+=("$resolved")
   done
 fi
 
