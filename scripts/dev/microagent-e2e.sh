@@ -9,7 +9,8 @@ SCENARIOS=(
   "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all"
   "text-output:scripts/dev/microagent-e2e-text-output.sh:all"
   "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all"
-  "lifecycle-matrix:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux"
+  "lifecycle:scripts/dev/microagent-e2e-lifecycle.sh:all"
+  "lifecycle-matrix:scripts/dev/microagent-e2e-lifecycle-matrix.sh:manual-linux"
   "networking:scripts/dev/microagent-e2e-networking.sh:linux"
   "mediation:scripts/dev/microagent-e2e-mediation.sh:linux"
   "supervision:scripts/dev/microagent-e2e-supervision.sh:linux"
@@ -41,6 +42,9 @@ Scenarios:
   text-output       Human/text output mode for stable public CLI surfaces
   public-surface     CLI contract, host/doctor, kernel/rootfs, run/result,
                      request JSON, bundles, attached-disk artifacts, kill, perf
+  lifecycle          Backend-agnostic lifecycle contract scenario. Defaults to
+                     Firecracker on Linux and Apple VF on macOS; override with
+                     MICROAGENT_E2E_BACKEND=firecracker|applevf
   lifecycle-matrix   create/start/status/ps/connect/logs/halt/resume/cp/clone,
                      validation failures, images, artifacts, quarantine/delete
   networking         user/nat/bridged networking, published ports, outbound
@@ -70,6 +74,8 @@ Environment:
     E2E image cache use for scenarios that support it.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
     for compatibility with older validation commands.
+  MICROAGENT_E2E_BACKEND=firecracker|applevf selects the backend lane for
+    backend-agnostic feature scenarios.
   MICROAGENT_FIRECRACKER_SUPERVISOR=<path> uses a prepared supervisor binary.
   MICROAGENT_E2E_BRIDGE=<name> uses a prepared Linux bridge for bridged tests.
   MICROAGENT_APPLEVF_SUPERVISOR=<path> uses a prepared Apple VF supervisor binary.
@@ -200,6 +206,7 @@ if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_REGISTRY_AUTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_TEXT_OUTPUT=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_LIFECYCLE=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_LIFECYCLE_MATRIX=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_NETWORKING=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_MEDIATION=1
