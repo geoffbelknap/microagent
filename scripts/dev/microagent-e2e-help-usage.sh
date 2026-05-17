@@ -93,6 +93,8 @@ assert_stdout_contains run-help-env-alias "-e KEY=VALUE" "$CLI" run --help
 assert_stdout_contains run-help-publish-alias "-p host:guest" "$CLI" run --help
 assert_stdout_contains run-help-rm-alias "-rm" "$CLI" run --help
 assert_stdout_contains run-help-volume-alias "-v SRC:DST" "$CLI" run --help
+assert_stdout_contains run-help-docker-examples "Docker-shaped examples" "$CLI" run --help
+assert_stdout_contains run-help-noncompat "Docker API, Compose, pods, privileged mode" "$CLI" run --help
 assert_stdout_contains perf-help "Measure workspace performance" "$CLI" perf --help
 assert_stdout_contains kernel-help "Advanced kernel commands" "$CLI" kernel --help
 assert_stdout_contains rootfs-help "Build a rootfs from an OCI image" "$CLI" rootfs --help
@@ -111,6 +113,11 @@ mkdir -p "$STATE_DIR/host-bind"
 expect_failure_contains run-volume-bind-reject "does not expose host bind mounts" "$CLI" run -v "$STATE_DIR/host-bind:/workspace:rw" example.com/acme/image:latest true --state-dir "$STATE_DIR"
 expect_failure_contains exec-unsupported "use microagent connect <name> --send <command>" "$CLI" exec example.com/acme/image:latest true
 expect_failure_contains inspect-usage "usage: microagent status" "$CLI" inspect --state-dir "$STATE_DIR"
+expect_failure_contains compose-unsupported "Docker Compose compatibility is not supported" "$CLI" compose up
+expect_failure_contains run-privileged-unsupported "microVM boundary" "$CLI" run --privileged example.com/acme/image:latest true
+expect_failure_contains run-pod-unsupported "does not implement Docker/Podman pods" "$CLI" run --pod new:demo example.com/acme/image:latest true
+expect_failure_contains run-mount-bind-unsupported "does not expose host bind mounts" "$CLI" run --mount type=bind,source="$STATE_DIR/host-bind",target=/workspace example.com/acme/image:latest true
+expect_failure_contains run-cap-unsupported "namespace, capability, device, or security-opt controls" "$CLI" run --cap-add NET_ADMIN example.com/acme/image:latest true
 expect_failure_contains cp-usage "usage: microagent cp" "$CLI" cp only-one-arg --state-dir "$STATE_DIR"
 expect_failure_contains artifacts-usage "usage: microagent artifacts get" "$CLI" artifacts get only two --state-dir "$STATE_DIR"
 expect_failure_contains images-rm-usage "usage: microagent images rm" "$CLI" images rm --state-dir "$STATE_DIR"

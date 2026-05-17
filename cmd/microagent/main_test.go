@@ -1444,6 +1444,43 @@ func TestParseWorkspaceOptionsRejectsUnsupportedDockerStyleVolume(t *testing.T) 
 	}
 }
 
+func TestParseWorkspaceOptionsRejectsUnsupportedDockerCompatibilityFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "privileged",
+			args: []string{"--privileged", "docker.io/library/busybox:1.36", "true"},
+			want: "--privileged is not supported",
+		},
+		{
+			name: "pod",
+			args: []string{"--pod", "new:demo", "docker.io/library/busybox:1.36", "true"},
+			want: "does not implement Docker/Podman pods",
+		},
+		{
+			name: "bind mount",
+			args: []string{"--mount", "type=bind,source=/tmp,target=/workspace", "docker.io/library/busybox:1.36", "true"},
+			want: "does not expose host bind mounts",
+		},
+		{
+			name: "capability",
+			args: []string{"--cap-add", "NET_ADMIN", "docker.io/library/busybox:1.36", "true"},
+			want: "microVM boundary",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseWorkspaceOptions("run", tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseWorkspaceOptionsAcceptsMediation(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
