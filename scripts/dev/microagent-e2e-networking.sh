@@ -24,6 +24,10 @@ PUBLISH_ALIAS_WORKSPACE="publish-alias"
 ARTIFACT_DIR="$STATE_DIR/artifacts"
 IMAGE="${MICROAGENT_NATS_IMAGE:-docker.io/library/nats@sha256:6e0cca2c6da79f0a3542ec5a3319dd10b1b05f5d8e8949afa8e9cdf6314bbf6c}"
 IMAGE_CACHE_STATE="${MICROAGENT_E2E_IMAGE_CACHE_DIR:-$ROOT/.cache/microagent-e2e/image-cache/nats-amd64}"
+IMAGE_CACHE_POLICY="${MICROAGENT_E2E_IMAGE_CACHE_POLICY:-auto}"
+if [ -z "${MICROAGENT_E2E_IMAGE_CACHE_POLICY+x}" ] && [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" = "1" ]; then
+  IMAGE_CACHE_POLICY="refresh"
+fi
 EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0"
 BRIDGE_NAME="${MICROAGENT_E2E_BRIDGE:-}"
 DELETE_BRIDGE=0
@@ -81,6 +85,15 @@ for required in pasta getcap ip debugfs; do
     exit 2
   fi
 done
+
+case "$IMAGE_CACHE_POLICY" in
+  auto|refresh|require)
+    ;;
+  *)
+    echo "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY" >&2
+    exit 2
+    ;;
+esac
 
 if [ ! -e /dev/kvm ]; then
   echo "/dev/kvm is not visible; run this smoke outside sandboxed environments" >&2
@@ -336,14 +349,83 @@ raise SystemExit(1)
 PY
 }
 
+image_cache_status() {
+  if ! image_cache_has_ref "$IMAGE_CACHE_STATE"; then
+    printf 'missing\n'
+    return 0
+  fi
+  rootfs_path="$(cached_image_rootfs_path)"
+  if [ "$rootfs_path" -nt "$GUEST_INIT" ]; then
+    printf 'usable\n'
+  else
+    printf 'stale-guest-init\n'
+  fi
+}
+
+print_image_cache_plan() {
+  cache_status="$(image_cache_status)"
+  case "$IMAGE_CACHE_POLICY:$cache_status" in
+    auto:usable)
+      cache_action="reuse cached rootfs"
+      cache_reason="cache rootfs is newer than guest init"
+      ;;
+    auto:stale-guest-init)
+      cache_action="refresh cached rootfs"
+      cache_reason="guest init changed after the cached rootfs was built"
+      ;;
+    auto:missing)
+      cache_action="populate cache"
+      cache_reason="no cached rootfs exists for the networking image"
+      ;;
+    refresh:*)
+      cache_action="refresh cached rootfs"
+      cache_reason="image cache policy is refresh"
+      ;;
+    require:usable)
+      cache_action="reuse cached rootfs"
+      cache_reason="image cache policy is require and the cache is usable"
+      ;;
+    require:*)
+      cache_action="fail before VM work"
+      cache_reason="image cache policy is require and the cache is $cache_status"
+      ;;
+  esac
+  cat >&2 <<EOF
+networking E2E image cache plan:
+  image: $IMAGE
+  cache: $IMAGE_CACHE_STATE
+  policy: $IMAGE_CACHE_POLICY
+  state: $cache_status
+  action: $cache_action
+  reason: $cache_reason
+EOF
+}
+
 ensure_cached_image() {
   mkdir -p "$IMAGE_CACHE_STATE"
-  if [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" != "1" ] && image_cache_has_ref "$IMAGE_CACHE_STATE"; then
-    rootfs_path="$(cached_image_rootfs_path)"
-    if [ "$rootfs_path" -nt "$GUEST_INIT" ]; then
+  cache_status="$(image_cache_status)"
+  case "$IMAGE_CACHE_POLICY:$cache_status" in
+    require:missing|require:stale-guest-init)
+      cat >&2 <<EOF
+networking E2E image cache policy is require, but the cache is $cache_status.
+
+Use --image-cache-policy refresh once to rebuild it, or leave the policy at
+auto for normal validation runs.
+EOF
+      exit 2
+      ;;
+    auto:usable|require:usable)
       echo "using cached networking image rootfs for $IMAGE" >&2
       return 0
-    fi
+      ;;
+    refresh:*|auto:missing|auto:stale-guest-init)
+      ;;
+    *)
+      echo "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY" >&2
+      exit 2
+      ;;
+  esac
+  if [ "$cache_status" = "stale-guest-init" ]; then
     echo "refreshing cached networking image rootfs because guest init changed" >&2
   fi
   echo "refreshing cached networking image rootfs for $IMAGE" >&2
@@ -610,6 +692,7 @@ PY
 
 "$CLI" doctor >"$STATE_DIR/doctor.json"
 
+print_image_cache_plan
 ensure_cached_image
 seed_image_cache_for_state "$STATE_DIR"
 
