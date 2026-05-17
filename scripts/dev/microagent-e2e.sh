@@ -13,6 +13,13 @@ SCENARIOS=(
   "networking:scripts/dev/microagent-e2e-networking.sh:linux"
   "mediation:scripts/dev/microagent-e2e-mediation.sh:linux"
   "supervision:scripts/dev/microagent-e2e-supervision.sh:linux"
+  "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin"
+  "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin"
+  "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin"
+  "applevf-workspace-connect:scripts/dev/applevf-workspace-connect-smoke.sh:darwin"
+  "applevf-network-mode:scripts/dev/applevf-network-mode-smoke.sh:darwin"
+  "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin"
+  "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin"
 )
 
 usage() {
@@ -40,6 +47,17 @@ Scenarios:
                      connectivity, event history, resume behavior
   mediation          required mediation channel and quarantine fail-closed behavior
   supervision        restart policy behavior for never/always
+  applevf-boot       Apple VF run boot smoke for a BusyBox workload
+  applevf-direct-console
+                    Apple VF direct supervisor console input smoke
+  applevf-substrate  Apple VF create/start/halt/resume/quarantine/artifact smoke
+  applevf-workspace-connect
+                    Apple VF workspace connect/logs/ps smoke
+  applevf-network-mode
+                    Apple VF user/nat/isolated/bridged check and outbound smoke
+  applevf-publish    Apple VF TCP publish forwarding smoke
+  applevf-vsock-diagnostic
+                    Apple VF mediation and virtio-vsock diagnostic smoke
 
 Environment:
   --keep or MICROAGENT_E2E_KEEP=1 keeps failed and successful scenario state directories.
@@ -54,9 +72,14 @@ Environment:
     for compatibility with older validation commands.
   MICROAGENT_FIRECRACKER_SUPERVISOR=<path> uses a prepared supervisor binary.
   MICROAGENT_E2E_BRIDGE=<name> uses a prepared Linux bridge for bridged tests.
+  MICROAGENT_APPLEVF_SUPERVISOR=<path> uses a prepared Apple VF supervisor binary.
+  MICROAGENT_APPLEVF_KERNEL=<path> uses a prepared Apple VF Linux ARM64 kernel.
 
 Linux nat/bridged setup:
   scripts/dev/microagent-e2e-linux-network-setup.sh
+
+Apple VF setup:
+  scripts/dev/applevf-supervisor-build.sh
 EOF
 }
 
@@ -181,6 +204,13 @@ if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_NETWORKING=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_MEDIATION=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_SUPERVISION=1
+  export MICROAGENT_KEEP_BOOT_SMOKE=1
+  export MICROAGENT_KEEP_DIRECT_CONSOLE_SMOKE=1
+  export MICROAGENT_KEEP_APPLEVF_SUBSTRATE_SMOKE=1
+  export MICROAGENT_KEEP_CONNECT_SMOKE=1
+  export MICROAGENT_KEEP_NETWORK_SMOKE=1
+  export MICROAGENT_KEEP_APPLEVF_PUBLISH_SMOKE=1
+  export MICROAGENT_KEEP_APPLEVF_MEDIATION_SMOKE=1
 fi
 
 selected=()
