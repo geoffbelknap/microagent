@@ -31,6 +31,10 @@ you want to prepare a rootfs ahead of time or hand it to a workspace via
 By default, `rootfs build` only accepts images pinned by digest. Pass
 `--allow-mutable` to accept tag references.
 
+For private registries, MicroAgent reads Docker-compatible credential
+configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
+including configured credential helpers. It does not store registry credentials.
+
 ## Example
 
 ```bash

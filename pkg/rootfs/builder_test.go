@@ -3,12 +3,15 @@ package rootfs
 import (
 	"archive/tar"
 	"bytes"
+	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
@@ -201,6 +204,51 @@ func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
 				t.Fatalf("splitRegistryReference(%q) = %q, %q; want %q, %q", tc.raw, gotRepoRef, gotReference, tc.wantRepoRef, tc.wantReference)
 			}
 		})
+	}
+}
+
+func TestNewRepositoryUsesDockerCredentialConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOCKER_CONFIG", dir)
+	encoded := base64.StdEncoding.EncodeToString([]byte("microagent-user:microagent-pass"))
+	configJSON := `{"auths":{"example.com":{"auth":"` + encoded + `"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := newRepository("example.com/acme/image")
+	if err != nil {
+		t.Fatalf("newRepository: %v", err)
+	}
+	client, ok := repo.Client.(*auth.Client)
+	if !ok {
+		t.Fatalf("repo.Client = %T, want *auth.Client", repo.Client)
+	}
+	cred, err := client.Credential(context.Background(), "example.com")
+	if err != nil {
+		t.Fatalf("Credential: %v", err)
+	}
+	if cred.Username != "microagent-user" || cred.Password != "microagent-pass" {
+		t.Fatalf("credential = %#v", cred)
+	}
+}
+
+func TestNewRepositoryAllowsAnonymousPullWithoutDockerConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOCKER_CONFIG", dir)
+	repo, err := newRepository("example.com/acme/image")
+	if err != nil {
+		t.Fatalf("newRepository: %v", err)
+	}
+	client, ok := repo.Client.(*auth.Client)
+	if !ok {
+		t.Fatalf("repo.Client = %T, want *auth.Client", repo.Client)
+	}
+	cred, err := client.Credential(context.Background(), "example.com")
+	if err != nil {
+		t.Fatalf("Credential: %v", err)
+	}
+	if cred != (auth.Credential{}) {
+		t.Fatalf("credential = %#v, want empty", cred)
 	}
 }
 
