@@ -290,9 +290,14 @@ PY
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "wget -qO- -T 10 http://127.0.0.1:18080/mediation-check; wget -qO- -T 10 http://127.0.0.1:18081/raw-vsock-check; wget -qO- -T 10 http://127.0.0.1:18082/raw-large-check > /tmp/raw-large.out; cat /tmp/raw-large.out; if wget -qO- -T 3 http://127.0.0.1:18083/raw-unavailable; then echo RAW_UNAVAILABLE_UNEXPECTED; else echo RAW_UNAVAILABLE_FAILED; fi" \
+  --send "wget -qO- -T 10 http://127.0.0.1:18080/mediation-check; wget -qO- -T 10 http://127.0.0.1:18081/raw-vsock-check; wget -qO- -T 10 http://127.0.0.1:18082/raw-large-check > /tmp/raw-large.out; cat /tmp/raw-large.out" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect.txt"
+"$CLI" connect "$WORKSPACE" \
+  --state-dir "$STATE_DIR" \
+  --send "if wget -qO- -T 3 http://127.0.0.1:18083/raw-unavailable; then echo RAW_UNAVAILABLE_UNEXPECTED; else echo RAW_UNAVAILABLE_FAILED; fi" \
+  --ready-timeout 30 \
+  --timeout 10 >"$STATE_DIR/connect-unavailable.txt"
 wait "$SERVER_PID"
 SERVER_PID=""
 wait "$RAW_SERVER_PID"
@@ -384,8 +389,9 @@ if "RAW_VSOCK_OK" not in read_text("connect.txt"):
 if "RAW_LARGE_BEGIN" not in read_text("connect.txt") or "RAW_LARGE_END" not in read_text("connect.txt"):
     raise SystemExit(read_text("connect.txt"))
 connect_lines = {line.strip() for line in read_text("connect.txt").splitlines()}
-if "RAW_UNAVAILABLE_FAILED" not in connect_lines or "RAW_UNAVAILABLE_UNEXPECTED" in connect_lines:
-    raise SystemExit(read_text("connect.txt"))
+unavailable_lines = {line.strip() for line in read_text("connect-unavailable.txt").splitlines()}
+if "RAW_UNAVAILABLE_FAILED" not in unavailable_lines or "RAW_UNAVAILABLE_UNEXPECTED" in unavailable_lines:
+    raise SystemExit(read_text("connect-unavailable.txt"))
 request = read_text("host-request.txt")
 if "GET /mediation-check" not in request:
     raise SystemExit(request)
