@@ -67,7 +67,8 @@ This repository owns the VM pieces:
 - Do not put transient test-run notes in `docs/`; anything in `docs/` becomes
   part of the docs site. Use Notion or another tracking system for run notes.
 - When command output, flags, runtime semantics, or operator workflows change,
-  update README/docs and run `python3 scripts/dev/markdown-link-check.py`.
+  update README/docs and run `python3 scripts/dev/markdown-link-check.py` and
+  `python3 scripts/dev/docs-parity.py`.
 
 ## Project boundary
 
