@@ -3,6 +3,9 @@ title: microagent run
 description: Boot a VM from an OCI image, run a command, and tear down.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
 microagent run [flags] <image> [command arg...]

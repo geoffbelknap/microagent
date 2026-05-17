@@ -3,6 +3,9 @@ title: Security
 description: Trust boundary and reporting issues.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ## Trust boundary
 
 `microagent` treats the kernel, rootfs, and request files as **executable

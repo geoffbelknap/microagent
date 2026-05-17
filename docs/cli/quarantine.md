@@ -3,6 +3,9 @@ title: microagent quarantine
 description: Sever host-side workspace effects while preserving forensic state.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent quarantine <name> [--state-dir <dir>]
 ```

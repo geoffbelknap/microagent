@@ -3,6 +3,9 @@ title: microagent network
 description: Inspect workspace network intent and runtime network state.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent network <name> [--state-dir <dir>]
 ```

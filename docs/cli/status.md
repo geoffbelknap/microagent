@@ -3,6 +3,9 @@ title: microagent status
 description: Show the current state of a workspace.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
 microagent [--json] status --name <name> [--state-dir <dir>]

@@ -3,6 +3,9 @@ title: microagent perf
 description: Measure workspace performance.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent perf boot [flags]
 microagent perf footprint <name> [flags]

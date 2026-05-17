@@ -3,6 +3,9 @@ title: Recipes
 description: End-to-end walkthroughs that combine microagent primitives into something useful.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 Recipes are tutorials. They take you from "I have microagent installed" to "I have a working thing", showing the moving parts as you assemble them.
 
 If you're after the reference docs — what every flag does, what every command returns — see the [CLI reference](/cli/) or the [Go library](/library/go/) instead.

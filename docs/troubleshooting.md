@@ -3,6 +3,9 @@ title: Troubleshooting
 description: Common failure modes, what they mean, and how to fix them.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
 This page is indexed by symptom — search for whatever you're seeing.

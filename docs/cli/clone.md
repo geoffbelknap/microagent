@@ -3,6 +3,9 @@ title: microagent clone
 description: Copy a stopped workspace into a new workspace.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent clone <source> <target> [--state-dir <dir>]
 ```

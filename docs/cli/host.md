@@ -3,6 +3,9 @@ title: microagent host
 description: Report host backend capabilities.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]
 ```

@@ -46,6 +46,9 @@ make smoke-contract
 if [ -x scripts/dev/markdown-link-check.py ]; then
   python3 scripts/dev/markdown-link-check.py
 fi
+if [ -x scripts/dev/docs-last-updated.py ]; then
+  python3 scripts/dev/docs-last-updated.py --check
+fi
 if [ -x scripts/dev/cli-docs-check.py ]; then
   python3 scripts/dev/cli-docs-check.py
 fi

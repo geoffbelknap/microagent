@@ -3,6 +3,9 @@ title: Windows Hyper-V supervisor
 description: Experimental Windows host backend for Linux guests through HCS.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 The `windows-hyperv` backend is the experimental Windows host backend for
 running Linux guests without WSL and without QEMU. It talks to Windows Host
 Compute Service (HCS) through `vmcompute.dll` and prepares Hyper-V utility

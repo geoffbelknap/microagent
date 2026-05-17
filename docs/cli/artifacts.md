@@ -3,6 +3,9 @@ title: microagent artifacts
 description: List and retrieve declared workspace artifacts.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent artifacts <name> [--state-dir <dir>]
 microagent artifacts get <name> <artifact> <target> [--state-dir <dir>] [--debugfs <path>]

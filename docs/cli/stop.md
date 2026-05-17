@@ -3,6 +3,9 @@ title: microagent stop
 description: Shut a workspace down gracefully.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent stop <name> [--state-dir <dir>]
 ```

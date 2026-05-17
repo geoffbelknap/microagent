@@ -3,6 +3,9 @@ title: microagent supervise
 description: Start and restart a workspace according to its restart policy.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
 ```

@@ -3,6 +3,9 @@ title: Wire up the mediation channel
 description: Move the body from one-request-per-restart to a stream of requests over a guest-to-host vsock contract.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 The [simple-agent recipe](/recipes/simple-agent/) ships work into the body via `microagent cp` and retrieves it via `microagent --json result`. That works for a demo; it doesn't scale to "agent processing a stream of requests". For that, the body needs to talk to the host directly while it's running.
 
 microagent has a primitive for exactly this: the **mediation channel**. It's a guest-to-host vsock contract — the body initiates connections to a vsock port; the host listens at a host TCP target; microagent's supervisor proxies bytes between them. Required and fail-closed by default.

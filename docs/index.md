@@ -3,6 +3,9 @@ title: microagent
 description: Run AI agent workspaces in microVMs.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 `microagent` provides Go packages and the `microagent` CLI for running
 Linux workspaces inside microVMs. Each host OS uses one backend: Firecracker on
 Linux, Apple Virtualization.framework on macOS, and experimental Windows

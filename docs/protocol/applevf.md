@@ -3,6 +3,9 @@ title: Apple VF supervisor protocol
 description: One JSON request in, one JSON response out.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 microagent uses the supervisor concept for backend lifecycle work. The
 Apple VF supervisor is packaged as a standalone executable,
 `microagent-applevf-supervisor`, so non-Swift callers can cross the

@@ -3,6 +3,9 @@ title: microagent result
 description: Show the structured result for a workspace.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent result <name> [--state-dir <dir>]
 ```

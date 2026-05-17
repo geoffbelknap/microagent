@@ -3,6 +3,9 @@ title: microagent start
 description: Boot a previously created workspace.
 ---
 
+<!-- docs-last-updated -->
+_Last updated: 2026-05-17_
+
 ```text
 microagent start <name> [--state-dir <dir>]
 ```
