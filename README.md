@@ -2,7 +2,7 @@
 
 Run AI agent workspaces in microVMs.
 
-Each agent gets its own Linux microVM — kernel, rootfs, state, lifecycle. Boot from an OCI image and tear down, or keep the workspace around and halt/resume it later. Linux uses Firecracker; macOS uses Apple Virtualization.framework. Identity, policy, credentials, and control-plane decisions live in your code, not in this one.
+Each agent gets its own Linux microVM — kernel, rootfs, state, lifecycle. Boot from an OCI image and tear down, or keep the workspace around and halt/resume it later. Linux uses Firecracker; macOS uses Apple Virtualization.framework; Windows Hyper-V support is experimental. Identity, policy, credentials, and control-plane decisions live in your code, not in this one.
 
 The project is a Go library; the `microagent` CLI is a thin shell over it. Anything the CLI can do, your program can do directly.
 
@@ -55,9 +55,17 @@ microagent delete research
 
 The same workspace can be expressed declaratively — see [`microagent.yaml`](docs/cli/spec.md) for the spec format.
 
+Other useful surfaces:
+
+- `microagent inspect <name>` — structured alias for `status`
+- `microagent rm <name>` — alias for `delete`
+- `microagent images pull/list/tag/rm/prune` — manage reusable local rootfs baselines
+- `microagent cp` and `microagent artifacts get` — move files without entering a running VM
+- `microagent perf` — measure boot and runtime footprint
+
 ## What it owns
 
-The VM boundary. Kernel management, OCI-to-rootfs builds, VM lifecycle (`run`, `create`, `start`, `halt`, `quarantine`, `stop`, `kill`, `delete`), networking and vsock wiring, structured results, declared artifacts, runtime verification, and lifecycle events.
+The VM boundary. Kernel management, OCI-to-rootfs builds, local image records, VM lifecycle (`run`, `create`, `start`, `halt`, `quarantine`, `stop`, `kill`, `delete`), networking and vsock wiring, serial console, file transfer for stopped disks, structured results, declared artifacts, runtime verification, lifecycle events, and backend supervisors.
 
 ## What it doesn't own
 

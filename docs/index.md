@@ -5,9 +5,18 @@ description: Run AI agent workspaces in microVMs.
 
 `microagent` provides Go packages and the `microagent` CLI for running
 Linux workspaces inside microVMs. Each host OS uses one backend: Firecracker on
-Linux, Apple Virtualization.framework on macOS. microagent owns the kernel,
-the OCI-to-disk conversion, and the VM lifecycle. Identity, policy, credentials,
-and control-plane decisions stay outside this project.
+Linux, Apple Virtualization.framework on macOS, and experimental Windows
+Hyper-V on Windows. microagent owns the kernel, OCI-to-disk conversion, local
+image records, VM lifecycle, networking/vsock wiring, console access, file
+transfer for stopped disks, structured results, artifacts, and runtime
+verification. Identity, policy, credentials, and control-plane decisions stay
+outside this project.
+
+For one-shot use, `microagent run IMAGE [COMMAND ARG...]` boots a VM, runs the
+command, and removes scratch state. For persistent workspaces, use `create`,
+`start`, `connect`, `halt`, `stop`, and `delete`. Container-style aliases such
+as `-e`, `-p`, `-v`, `--name`, and `--rm` are available only where they map
+cleanly to microVM behavior.
 
 ## Where to start
 
