@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path"
@@ -569,12 +570,26 @@ func newRepository(repoRef string) (*remote.Repository, error) {
 		return nil, err
 	}
 	host := strings.SplitN(repoRef, "/", 2)[0]
+	repo.PlainHTTP = isLoopbackRegistry(host)
 	repo.Client = &auth.Client{
 		Client:     retry.DefaultClient,
 		Cache:      auth.DefaultCache,
 		Credential: registryCredential(host),
 	}
 	return repo, nil
+}
+
+func isLoopbackRegistry(host string) bool {
+	host = strings.TrimSpace(host)
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func registryCredential(host string) auth.CredentialFunc {

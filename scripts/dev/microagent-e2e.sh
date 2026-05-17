@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCENARIOS=(
   "contract:scripts/dev/runtime-contract-smoke.sh:all"
   "help-usage:scripts/dev/microagent-e2e-help-usage.sh:all"
+  "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all"
   "text-output:scripts/dev/microagent-e2e-text-output.sh:all"
   "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all"
   "lifecycle-matrix:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux"
@@ -28,6 +29,8 @@ Scenarios:
   contract          Runtime contract JSON and synthetic state/result/artifact
                     compatibility checks
   help-usage        CLI help output and invalid invocation usage errors
+  registry-auth     Docker-compatible registry credential discovery against a
+                    local private OCI registry
   text-output       Human/text output mode for stable public CLI surfaces
   public-surface     CLI contract, host/doctor, kernel/rootfs, run/result,
                      request JSON, bundles, attached-disk artifacts, kill, perf
@@ -145,6 +148,7 @@ done
 
 if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_HELP_USAGE=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_REGISTRY_AUTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_TEXT_OUTPUT=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_LIFECYCLE_MATRIX=1
