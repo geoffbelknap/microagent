@@ -3316,6 +3316,48 @@ func TestParseWorkspaceOptionsRunPositionalCommandConflictsWithExec(t *testing.T
 	}
 }
 
+func TestParseWorkspaceOptionsAcceptsDockerStyleRunAliases(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"-e", "GREETING=hello",
+		"-p", "127.0.0.1:18080:8080/tcp",
+		"--rm",
+		"docker.io/library/busybox:1.36",
+		"printenv",
+		"GREETING",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Env["GREETING"] != "hello" {
+		t.Fatalf("Env = %#v", opts.Env)
+	}
+	if opts.Keep {
+		t.Fatal("Keep = true")
+	}
+	if len(opts.Network.PortForwards) != 1 {
+		t.Fatalf("PortForwards = %#v", opts.Network.PortForwards)
+	}
+	forward := opts.Network.PortForwards[0]
+	if forward.Host != "127.0.0.1" || forward.HostPort != 18080 || forward.GuestPort != 8080 || forward.Protocol != "tcp" {
+		t.Fatalf("PortForward = %#v", forward)
+	}
+	if opts.ExecCommand != "exec 'printenv' 'GREETING'" {
+		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsRunRmKeepConflict(t *testing.T) {
+	_, err := parseWorkspaceOptions("run", []string{
+		"--rm",
+		"--keep",
+		"docker.io/library/busybox:1.36",
+		"true",
+	})
+	if err == nil || !strings.Contains(err.Error(), "both --rm and --keep") {
+		t.Fatalf("err = %v, want --rm --keep conflict", err)
+	}
+}
+
 func TestParseWorkspaceOptionsPreservesExplicitSupervisor(t *testing.T) {
 	opts, err := parseWorkspaceOptions("run", []string{
 		"--supervisor", "/tmp/microagent-supervisor",

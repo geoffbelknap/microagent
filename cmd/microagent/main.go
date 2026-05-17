@@ -2181,6 +2181,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&setupFiles, "setup-file", "Shell script file to run before --exec")
 	var envVars multiFlag
 	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
+	fs.Var(&envVars, "e", "Guest environment variable KEY=VALUE")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2204,6 +2205,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.BoolVar(&mediationOptional, "mediation-optional", false, "Allow workspace to run if mediation is unavailable")
 	var publishFlags multiFlag
 	fs.Var(&publishFlags, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
+	fs.Var(&publishFlags, "p", "Forward host[:hostPort]:guestPort[/tcp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
@@ -2212,6 +2214,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run")
+	rm := false
+	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return workspaceOptions{}, err
@@ -2307,6 +2311,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
 		return workspaceOptions{}, fmt.Errorf("%s cannot use both --image-command and --service-command", command)
+	}
+	if command == "run" && rm && opts.Keep {
+		return workspaceOptions{}, fmt.Errorf("run cannot use both --rm and --keep")
+	}
+	if command != "run" && rm {
+		return workspaceOptions{}, fmt.Errorf("%s does not support --rm", command)
 	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if specExplicit && specPath == "" {
@@ -5884,6 +5894,7 @@ func reorderFlagArgs(args []string) []string {
 		"-network-interface": true,
 		"-mediation":         true,
 		"-publish":           true,
+		"-p":                 true,
 		"-state-dir":         true,
 		"-url":               true,
 		"-from":              true,
@@ -5904,6 +5915,7 @@ func reorderFlagArgs(args []string) []string {
 		"-max-restarts":      true,
 		"-result-port":       true,
 		"-send":              true,
+		"-e":                 true,
 	}
 	var flags []string
 	var positional []string
@@ -5939,7 +5951,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
 		return true
 	default:
 		return false
@@ -6309,6 +6321,7 @@ Options:
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
+  -e KEY=VALUE          Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
   -output n=/guest/path Declare an output artifact
@@ -6321,6 +6334,7 @@ Options:
   -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
+  -p host:guest[/tcp]   Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
   -memory <MiB>         Memory in MiB; defaults to 512
@@ -6328,6 +6342,7 @@ Options:
   -size-mib <MiB>       Disk size
   -timeout <seconds>    Timeout
   -keep                 Keep state
+  -rm                   Explicitly remove state after run
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
 `)
