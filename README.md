@@ -4,7 +4,9 @@ Run AI agent workspaces in microVMs.
 
 Each agent gets its own Linux microVM — kernel, rootfs, state, lifecycle. Boot from an OCI image and tear down, or keep the workspace around and halt/resume it later. Linux uses Firecracker; macOS uses Apple Virtualization.framework; Windows Hyper-V support is experimental. Identity, policy, credentials, and control-plane decisions live in your code, not in this one.
 
-The project is a Go library; the `microagent` CLI is a thin shell over it. Anything the CLI can do, your program can do directly.
+The project is a Go library first. The `microagent` CLI is a thin shell over
+the exported packages, so anything the CLI can do, your Go program can do
+directly with typed options and typed results.
 
 ## Install
 
@@ -88,8 +90,9 @@ Pick the path that matches what you're doing:
 | [Named workspaces](docs/getting-started/cli/named-workspaces.md) | Create, start, stop, resume |
 | [CLI reference](docs/cli/index.md) | Every subcommand |
 
-| Building with the library (Go) | |
+| Embedding microagent from Go | |
 |---|---|
+| [Library overview](docs/library/index.md) | When to use the library, main packages, and integration path |
 | [First program](docs/getting-started/library/first-program.md) | A handful of lines that boots a VM, runs a command, tears down |
 | [Go library](docs/library/go.md) | Exported package surface and CLI ↔ library mapping |
 | [Supervisor protocol](docs/protocol/index.md) | JSON protocol if you're going below the library |

@@ -47,4 +47,4 @@ Entrypoint/Cmd.
 
 - **Keep a workspace around between runs** — see [named workspaces](/getting-started/cli/named-workspaces/) for `create`, `start`, `halt`, `connect`, `delete`.
 - **Run an actual agent inside the microVM** — see [run your first agent](/getting-started/cli/first-agent/).
-- **Drive microagent from Go instead of the CLI** — see the [library quickstart](/getting-started/library/first-program/).
+- **Drive microagent from Go instead of the CLI** — start with the [library overview](/library/) or go straight to the [library quickstart](/getting-started/library/first-program/).

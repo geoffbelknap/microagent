@@ -6,7 +6,9 @@ description: Use microagent packages directly from Go.
 <!-- docs-last-updated -->
 _Last updated: 2026-05-17_
 
-*Want the smallest useful program first? See the [library quickstart](/getting-started/library/first-program/). This page is the package reference.*
+*New to the library? Start with the [library overview](/library/) or the
+[smallest useful Go program](/getting-started/library/first-program/). This
+page is the package reference.*
 
 ## Use it as a generic microVM toolkit
 
