@@ -49,10 +49,12 @@ CLI="$STATE_DIR/microagent"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
 SUPERVISE_PID=""
 CANCEL_SUPERVISE_PID=""
+SIGNAL_SUPERVISE_PID=""
+HELPER_SUPERVISE_PID=""
 
 cleanup() {
   status="$?"
-  for pid in "$SUPERVISE_PID" "$CANCEL_SUPERVISE_PID"; do
+  for pid in "$SUPERVISE_PID" "$CANCEL_SUPERVISE_PID" "$SIGNAL_SUPERVISE_PID" "$HELPER_SUPERVISE_PID"; do
     if [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1; then
       kill "$pid" >/dev/null 2>&1 || true
       wait "$pid" 2>/dev/null || true
@@ -61,9 +63,12 @@ cleanup() {
   if [ -x "$CLI" ]; then
     "$CLI" kill supervise-always --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" kill supervise-cancel --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    "$CLI" kill supervise-sigint --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    "$CLI" kill supervise-sigterm --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" kill supervise-guest-fail --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    "$CLI" kill supervise-mediation-helper --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_SUPERVISION:-0}" != "1" ]; then
-      for workspace in supervise-never supervise-always supervise-cancel supervise-guest-fail; do
+      for workspace in supervise-never supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail supervise-mediation-helper; do
         "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
       done
     fi
@@ -153,7 +158,7 @@ start_supervise_background() {
   (
     trap - INT TERM
     exec "$CLI" supervise "$workspace" "$@"
-  ) >"$output" &
+  ) >"$output" 2>"$output.err" &
   STARTED_SUPERVISE_PID="$!"
 }
 
@@ -175,10 +180,41 @@ with open(sys.argv[3], "w", encoding="utf-8") as handle:
 PY
 }
 
+signal_supervise_process() {
+  workspace="$1"
+  signal="$2"
+  prefix="$3"
+  create_workspace "$workspace" always "sleep 300" >"$STATE_DIR/create-$prefix.json"
+  start_supervise_background "$workspace" "$STATE_DIR/supervise-$prefix.json" \
+    --backend apple-vf \
+    --state-dir "$STATE_DIR" \
+    --kernel "$KERNEL" \
+    --supervisor "$SUPERVISOR" \
+    --interval 1 \
+    --max-restarts 0
+  SIGNAL_SUPERVISE_PID="$STARTED_SUPERVISE_PID"
+  wait_for_state "$workspace" running "$STATE_DIR/status-$prefix-running.json"
+  read_runtime_field "$workspace" pid "$STATE_DIR/$prefix-runtime-pid.txt"
+  runtime_pid="$(cat "$STATE_DIR/$prefix-runtime-pid.txt")"
+  kill -s "$signal" "$SIGNAL_SUPERVISE_PID"
+  wait_for_process_exit "$SIGNAL_SUPERVISE_PID"
+  wait "$SIGNAL_SUPERVISE_PID" || true
+  SIGNAL_SUPERVISE_PID=""
+  "$CLI" status "$workspace" --state-dir "$STATE_DIR" >"$STATE_DIR/status-$prefix-after-signal.json" || true
+  if ! process_is_active "$runtime_pid"; then
+    echo "workspace runtime pid $runtime_pid exited after supervise received $signal" >&2
+    exit 1
+  fi
+  "$CLI" stop "$workspace" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/stop-$prefix.json"
+  wait_for_state "$workspace" stopped "$STATE_DIR/status-$prefix-stopped.json"
+  wait_for_process_exit "$runtime_pid"
+}
+
 create_workspace() {
   workspace="$1"
   restart="$2"
   entrypoint="$3"
+  shift 3
   "$CLI" create "$workspace" \
     --backend apple-vf \
     --image "$IMAGE" \
@@ -191,7 +227,8 @@ create_workspace() {
     --mke2fs "$MKE2FS" \
     --network isolated \
     --restart "$restart" \
-    --entrypoint "$entrypoint"
+    --entrypoint "$entrypoint" \
+    "$@"
 }
 
 (
@@ -264,6 +301,9 @@ wait_for_process_exit "$cancel_runtime_pid"
 sleep 3
 "$CLI" status supervise-cancel --state-dir "$STATE_DIR" >"$STATE_DIR/status-cancel-no-restart.json" || true
 
+signal_supervise_process supervise-sigint INT sigint
+signal_supervise_process supervise-sigterm TERM sigterm
+
 create_workspace supervise-guest-fail on-failure "printf supervise-real-failure; exit 42" >"$STATE_DIR/create-guest-fail.json"
 "$CLI" supervise supervise-guest-fail \
   --backend apple-vf \
@@ -274,6 +314,32 @@ create_workspace supervise-guest-fail on-failure "printf supervise-real-failure;
   --max-restarts 2 >"$STATE_DIR/supervise-guest-fail.json"
 "$CLI" status supervise-guest-fail --state-dir "$STATE_DIR" >"$STATE_DIR/status-guest-fail-final.json" || true
 "$CLI" result supervise-guest-fail --state-dir "$STATE_DIR" >"$STATE_DIR/result-guest-fail.json" || true
+
+create_workspace supervise-mediation-helper always "sleep 300" \
+  --mediation "2050=127.0.0.1:9" \
+  --mediation-optional >"$STATE_DIR/create-mediation-helper.json"
+start_supervise_background supervise-mediation-helper "$STATE_DIR/supervise-mediation-helper.json" \
+  --backend apple-vf \
+  --state-dir "$STATE_DIR" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" \
+  --interval 1 \
+  --max-restarts 0
+HELPER_SUPERVISE_PID="$STARTED_SUPERVISE_PID"
+wait_for_state supervise-mediation-helper running "$STATE_DIR/status-mediation-helper-running.json"
+read_runtime_field supervise-mediation-helper pid "$STATE_DIR/mediation-helper-runtime-pid.txt"
+helper_runtime_pid="$(cat "$STATE_DIR/mediation-helper-runtime-pid.txt")"
+kill -TERM "$HELPER_SUPERVISE_PID"
+wait "$HELPER_SUPERVISE_PID" || true
+HELPER_SUPERVISE_PID=""
+"$CLI" stop supervise-mediation-helper --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/stop-mediation-helper.json"
+wait_for_state supervise-mediation-helper stopped "$STATE_DIR/status-mediation-helper-stopped.json"
+wait_for_process_exit "$helper_runtime_pid"
+"$CLI" delete supervise-mediation-helper --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-mediation-helper.json"
+if [ -e "$STATE_DIR/supervise-mediation-helper/runtime.json" ]; then
+  echo "Apple VF mediation helper runtime state leaked after delete" >&2
+  exit 1
+fi
 
 python3 - "$STATE_DIR" <<'PY'
 import json
@@ -294,9 +360,16 @@ always_status = read_json("status-always-final.json")
 cancel_after_kill = read_json("status-cancel-after-supervise-kill.json")
 cancel_stopped = read_json("status-cancel-stopped.json")
 cancel_no_restart = read_json("status-cancel-no-restart.json")
+sigint_after_signal = read_json("status-sigint-after-signal.json")
+sigint_stopped = read_json("status-sigint-stopped.json")
+sigterm_after_signal = read_json("status-sigterm-after-signal.json")
+sigterm_stopped = read_json("status-sigterm-stopped.json")
 guest_fail = read_json("supervise-guest-fail.json")
 guest_fail_status = read_json("status-guest-fail-final.json")
 guest_fail_result = read_json("result-guest-fail.json")
+helper_running = read_json("status-mediation-helper-running.json")
+helper_stopped = read_json("status-mediation-helper-stopped.json")
+helper_delete = read_json("delete-mediation-helper.json")
 
 if doctor.get("ok") is not True or doctor.get("backend") != "apple-vf":
     raise SystemExit(doctor)
@@ -316,6 +389,12 @@ if cancel_stopped.get("event", {}).get("state") != "stopped":
     raise SystemExit(cancel_stopped)
 if cancel_no_restart.get("event", {}).get("state") != "stopped":
     raise SystemExit(cancel_no_restart)
+for status in (sigint_after_signal, sigterm_after_signal):
+    if status.get("event", {}).get("state") != "running":
+        raise SystemExit(status)
+for status in (sigint_stopped, sigterm_stopped):
+    if status.get("event", {}).get("state") != "stopped":
+        raise SystemExit(status)
 if guest_fail.get("policy") != "on-failure" or guest_fail.get("restarts") != 2 or guest_fail.get("stopped") is not True:
     raise SystemExit(guest_fail)
 if guest_fail.get("final_state") != "failed":
@@ -326,9 +405,15 @@ if guest_fail_result.get("result", {}).get("exitCode") != 42:
     raise SystemExit(guest_fail_result)
 if "supervise-real-failure" not in guest_fail_result.get("result", {}).get("stdout", ""):
     raise SystemExit(guest_fail_result)
+if helper_running.get("event", {}).get("state") != "running":
+    raise SystemExit(helper_running)
+if helper_stopped.get("event", {}).get("state") != "stopped":
+    raise SystemExit(helper_stopped)
+if helper_delete.get("event", {}).get("state") != "stopped":
+    raise SystemExit(helper_delete)
 PY
 
-for workspace in supervise-never supervise-always supervise-cancel supervise-guest-fail; do
+for workspace in supervise-never supervise-always supervise-cancel supervise-sigint supervise-sigterm supervise-guest-fail supervise-mediation-helper; do
   "$CLI" delete "$workspace" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete-${workspace}.json" || true
 done
 

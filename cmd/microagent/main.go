@@ -14,12 +14,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
@@ -1854,6 +1856,8 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	result, err := workspace.Supervise(ctx, opts)
 	if result.Workspace != "" {
 		if encodeErr := writeSuperviseResult(stdout, result); encodeErr != nil {
