@@ -6,7 +6,16 @@ on:
       - published
 
 jobs:
+  prerelease:
+    if: ${{ github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip Homebrew tap update for prerelease
+        run: |
+          echo "Skipping Homebrew tap update for prerelease ${GITHUB_REF_NAME}"
+
   dispatch:
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     steps:
       - name: Notify homebrew tap
