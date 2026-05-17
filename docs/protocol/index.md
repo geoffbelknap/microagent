@@ -4,7 +4,7 @@ description: The JSON request and response format used by backend supervisors.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-12_
 
 Backend supervisors speak a small JSON protocol: one request in, one response
 out. A request names a lifecycle command such as `prepare`, `start`, or `stop`.

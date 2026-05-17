@@ -4,7 +4,7 @@ description: List exact resource profiles.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-08_
 
 ```text
 microagent profiles

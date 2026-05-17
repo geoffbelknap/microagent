@@ -4,7 +4,7 @@ description: Backend-neutral agent runtime semantics shared by microagent backen
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-12_
 
 `microagent --json contract` is the JSON source for the shared runtime
 contract. Agent-runtime builders can depend on one set of semantics across

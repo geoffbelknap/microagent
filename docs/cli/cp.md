@@ -4,7 +4,7 @@ description: Copy regular files into or out of stopped workspace disks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-08_
 
 ```text
 microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]

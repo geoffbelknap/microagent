@@ -4,7 +4,7 @@ description: Open the workspace console.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-12_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--ready-timeout <seconds>]

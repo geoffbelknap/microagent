@@ -4,7 +4,7 @@ description: Print the microagent version.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-05_
 
 ```text
 microagent version

@@ -4,7 +4,7 @@ description: Install microagent via Homebrew or build from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-11_
 
 ## Homebrew
 

@@ -4,7 +4,7 @@ description: Check that the host can run microagent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-12_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]

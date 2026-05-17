@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-10_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is consumed by [`microagent create`](/cli/create/).

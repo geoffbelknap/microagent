@@ -4,7 +4,7 @@ description: Create, start, connect to, and delete persistent workspaces.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-08_
 
 A workspace is a named, persistent VM record. Unlike `microagent run`, the
 disk and state stick around between starts, so you can stop and resume an

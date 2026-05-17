@@ -4,7 +4,7 @@ description: Experimental Windows host backend for Linux guests through HCS.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-12_
 
 The `windows-hyperv` backend is the experimental Windows host backend for
 running Linux guests without WSL and without QEMU. It talks to Windows Host
