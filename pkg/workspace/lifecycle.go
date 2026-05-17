@@ -230,7 +230,7 @@ func startIndeterminateProgress(progress rootfs.ProgressFunc, phase, message str
 }
 
 func Run(ctx context.Context, opts Options) (Result, error) {
-	if strings.TrimSpace(opts.ExecCommand) == "" {
+	if strings.TrimSpace(opts.ExecCommand) == "" && !opts.UseImageCommand {
 		return Result{}, fmt.Errorf("run requires ExecCommand")
 	}
 	if opts.Name == "" {
@@ -941,7 +941,7 @@ func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 	if opts.Mke2fsPath == "" {
 		opts.Mke2fsPath = Mke2fsPath()
 	}
-	if opts.ResultPort == 0 && (opts.ExecCommand != "" || len(opts.SetupCommands) != 0) {
+	if opts.ResultPort == 0 && (opts.ExecCommand != "" || len(opts.SetupCommands) != 0 || opts.UseImageCommand) {
 		opts.ResultPort = DefaultResultPort
 	}
 	if opts.Timeout == 0 {

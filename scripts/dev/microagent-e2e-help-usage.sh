@@ -98,7 +98,7 @@ fi
 expect_failure_contains unknown-command "unknown command: definitely-not-a-command" "$CLI" definitely-not-a-command
 expect_failure_contains linux-network-setup-unknown "unknown option: --definitely-not-an-option" "$ROOT/scripts/dev/microagent-e2e-linux-network-setup.sh" --definitely-not-an-option
 expect_failure_contains run-missing-image "run requires --image" "$CLI" run --name missing-image --state-dir "$STATE_DIR"
-expect_failure_contains run-missing-exec "run requires --exec" "$CLI" run --name missing-exec --image example.com/acme/image:latest --state-dir "$STATE_DIR"
+expect_failure_contains run-exec-positional-conflict "both --exec and positional command" "$CLI" run --image example.com/acme/image:latest --exec true echo --state-dir "$STATE_DIR"
 expect_failure_contains cp-usage "usage: microagent cp" "$CLI" cp only-one-arg --state-dir "$STATE_DIR"
 expect_failure_contains artifacts-usage "usage: microagent artifacts get" "$CLI" artifacts get only two --state-dir "$STATE_DIR"
 expect_failure_contains images-rm-usage "usage: microagent images rm" "$CLI" images rm --state-dir "$STATE_DIR"

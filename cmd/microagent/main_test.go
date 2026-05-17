@@ -3267,6 +3267,55 @@ func TestParseWorkspaceOptionsUsesHostSupervisorDefault(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsAcceptsDockerStyleRunCommand(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"docker.io/library/busybox:1.36",
+		"echo",
+		"hello world",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.ImageRef != "docker.io/library/busybox:1.36" {
+		t.Fatalf("ImageRef = %q", opts.ImageRef)
+	}
+	if opts.ExecCommand != "exec 'echo' 'hello world'" {
+		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
+	}
+	if opts.UseImageCommand {
+		t.Fatal("UseImageCommand = true")
+	}
+}
+
+func TestParseWorkspaceOptionsRunImageDefaultsToImageCommand(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"docker.io/library/busybox:1.36",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.ImageRef != "docker.io/library/busybox:1.36" {
+		t.Fatalf("ImageRef = %q", opts.ImageRef)
+	}
+	if opts.ExecCommand != "" {
+		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
+	}
+	if !opts.UseImageCommand {
+		t.Fatal("UseImageCommand = false")
+	}
+}
+
+func TestParseWorkspaceOptionsRunPositionalCommandConflictsWithExec(t *testing.T) {
+	_, err := parseWorkspaceOptions("run", []string{
+		"--image", "docker.io/library/busybox:1.36",
+		"--exec", "true",
+		"echo",
+	})
+	if err == nil || !strings.Contains(err.Error(), "both --exec and positional command") {
+		t.Fatalf("err = %v, want positional command conflict", err)
+	}
+}
+
 func TestParseWorkspaceOptionsPreservesExplicitSupervisor(t *testing.T) {
 	opts, err := parseWorkspaceOptions("run", []string{
 		"--supervisor", "/tmp/microagent-supervisor",
@@ -4406,22 +4455,6 @@ func TestRunLogsPrintsSerialLog(t *testing.T) {
 	}
 	if string(got) != "hello\n" {
 		t.Fatalf("logs = %q", got)
-	}
-}
-
-func TestRunWorkspaceRequiresExec(t *testing.T) {
-	dir := t.TempDir()
-	stdoutPath := filepath.Join(dir, "stdout.json")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = runWorkspace(t.Context(), []string{"--image", "docker.io/library/ubuntu:24.04"}, stdout)
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if err == nil || !strings.Contains(err.Error(), "run requires --exec") {
-		t.Fatalf("err = %v, want --exec validation", err)
 	}
 }
 

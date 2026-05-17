@@ -652,8 +652,8 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(opts.ExecCommand) == "" {
-		return fmt.Errorf("run requires --exec")
+	if strings.TrimSpace(opts.ExecCommand) == "" && !opts.UseImageCommand {
+		return fmt.Errorf("run requires IMAGE [COMMAND...] or --exec")
 	}
 	if opts.Name == "" {
 		opts.Name = fmt.Sprintf("run-%d", time.Now().UnixNano())
@@ -2219,6 +2219,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if fs.NArg() != 0 {
 		if command == "create" && fs.NArg() == 1 && opts.Name == "" {
 			opts.Name = fs.Arg(0)
+		} else if command == "run" {
+			if err := applyDockerRunArgs(&opts, fs.Args()); err != nil {
+				return workspaceOptions{}, err
+			}
 		} else {
 			return workspaceOptions{}, fmt.Errorf("unexpected %s argument: %s", command, fs.Arg(0))
 		}
@@ -2271,6 +2275,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 			return workspaceOptions{}, fmt.Errorf("%s requires --image", command)
 		}
 	}
+	if command == "run" && strings.TrimSpace(opts.ExecCommand) == "" {
+		opts.UseImageCommand = true
+	}
 	if err := validateConsoleShell(opts.ConsoleShell); err != nil {
 		return workspaceOptions{}, err
 	}
@@ -2320,6 +2327,40 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.ResultPort = uint32(resultPort)
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
 	return opts, nil
+}
+
+func applyDockerRunArgs(opts *workspaceOptions, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(opts.ExecCommand) != "" {
+		return fmt.Errorf("run cannot use both --exec and positional command arguments")
+	}
+	if opts.UseImageCommand {
+		return fmt.Errorf("run cannot use both --image-command and positional command arguments")
+	}
+	commandArgs := args
+	if strings.TrimSpace(opts.ImageRef) == "" {
+		opts.ImageRef = strings.TrimSpace(args[0])
+		commandArgs = args[1:]
+	}
+	if strings.TrimSpace(opts.ImageRef) == "" {
+		return fmt.Errorf("run requires IMAGE [COMMAND...] or --image")
+	}
+	if len(commandArgs) == 0 {
+		opts.UseImageCommand = true
+		return nil
+	}
+	opts.ExecCommand = shellCommandFromArgs(commandArgs)
+	return nil
+}
+
+func shellCommandFromArgs(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, shellSingleQuote(arg))
+	}
+	return "exec " + strings.Join(quoted, " ")
 }
 
 func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
@@ -6254,6 +6295,10 @@ func printRunHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent run
 
 Run a command from an image.
+
+Usage:
+  microagent run IMAGE [COMMAND ARG...]
+  microagent run --image IMAGE --exec <command>
 
 Options:
   -image <ref>          OCI image

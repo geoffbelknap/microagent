@@ -23,7 +23,7 @@ KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE:-0}"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
+    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" public-docker-run public-docker-image-command implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" kill "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       if [ "$status" -eq 0 ]; then
@@ -810,6 +810,29 @@ assert_json "$STATE_DIR/run.json" "data.get('result', {}).get('exitCode', data.g
 assert_json "$STATE_DIR/run.json" "'RUN_OK' in data.get('result', {}).get('stdout', '')"
 assert_json "$STATE_DIR/run.json" "'RUN_OK' in data.get('serial_log', '')"
 assert_json "$STATE_DIR/run.json" "'reboot: System halted' in data.get('serial_log', '') or 'reboot: Power down' in data.get('serial_log', '')"
+
+"$CLI" --json run \
+  --name public-docker-run \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 96 \
+  --timeout 60 \
+  "$IMAGE" printf DOCKER_RUN_OK >"$STATE_DIR/run-docker-style.json"
+assert_json "$STATE_DIR/run-docker-style.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
+assert_json "$STATE_DIR/run-docker-style.json" "'DOCKER_RUN_OK' in data.get('result', {}).get('stdout', '')"
+
+"$CLI" --json run \
+  --name public-docker-image-command \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 96 \
+  --timeout 60 \
+  "$IMAGE" >"$STATE_DIR/run-docker-image-command.json"
+assert_json "$STATE_DIR/run-docker-image-command.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
 
 "$CLI" --json run \
   --name "$RUN_KEEP_WORKSPACE" \
