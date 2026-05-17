@@ -23,7 +23,7 @@ KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE:-0}"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" public-docker-run public-docker-image-command implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
+    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" public-docker-run public-docker-text public-docker-image-command implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" kill "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       if [ "$status" -eq 0 ]; then
@@ -813,15 +813,30 @@ assert_json "$STATE_DIR/run.json" "'reboot: System halted' in data.get('serial_l
 
 "$CLI" --json run \
   --name public-docker-run \
+  -e DOCKER_RUN_ENV=env-ok \
+  --rm \
   --guest-init "$GUEST_INIT" \
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
   --size-mib 96 \
   --timeout 60 \
-  "$IMAGE" printf DOCKER_RUN_OK >"$STATE_DIR/run-docker-style.json"
+  "$IMAGE" printenv DOCKER_RUN_ENV >"$STATE_DIR/run-docker-style.json"
 assert_json "$STATE_DIR/run-docker-style.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
-assert_json "$STATE_DIR/run-docker-style.json" "'DOCKER_RUN_OK' in data.get('result', {}).get('stdout', '')"
+assert_json "$STATE_DIR/run-docker-style.json" "'env-ok' in data.get('result', {}).get('stdout', '')"
+test ! -e "$STATE_DIR/workspaces/public-docker-run"
+
+"$CLI" --text run \
+  --name public-docker-text \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 96 \
+  --timeout 60 \
+  "$IMAGE" printf DOCKER_TEXT_OK >"$STATE_DIR/run-docker-style-text.txt"
+grep -q "DOCKER_TEXT_OK" "$STATE_DIR/run-docker-style-text.txt"
+test ! -e "$STATE_DIR/workspaces/public-docker-text"
 
 "$CLI" --json run \
   --name public-docker-image-command \

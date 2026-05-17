@@ -118,6 +118,7 @@ expect_failure_contains run-privileged-unsupported "microVM boundary" "$CLI" run
 expect_failure_contains run-pod-unsupported "does not implement Docker/Podman pods" "$CLI" run --pod new:demo example.com/acme/image:latest true
 expect_failure_contains run-mount-bind-unsupported "does not expose host bind mounts" "$CLI" run --mount type=bind,source="$STATE_DIR/host-bind",target=/workspace example.com/acme/image:latest true
 expect_failure_contains run-cap-unsupported "namespace, capability, device, or security-opt controls" "$CLI" run --cap-add NET_ADMIN example.com/acme/image:latest true
+expect_failure_contains run-publish-alias-isolated "network.portForwards require user, nat, or bridged mode" "$CLI" run -p 127.0.0.1:18080:8080/tcp --network isolated example.com/acme/image:latest true --state-dir "$STATE_DIR"
 expect_failure_contains cp-usage "usage: microagent cp" "$CLI" cp only-one-arg --state-dir "$STATE_DIR"
 expect_failure_contains artifacts-usage "usage: microagent artifacts get" "$CLI" artifacts get only two --state-dir "$STATE_DIR"
 expect_failure_contains images-rm-usage "usage: microagent images rm" "$CLI" images rm --state-dir "$STATE_DIR"
