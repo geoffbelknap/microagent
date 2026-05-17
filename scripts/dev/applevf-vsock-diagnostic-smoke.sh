@@ -12,14 +12,18 @@ ARCH="${MICROAGENT_APPLEVF_MEDIATION_ARCH:-arm64}"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-mediation.XXXXXX")"
 HOST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-mediation-host.XXXXXX")"
 WORKSPACE="mediation-smoke"
+FAIL_WORKSPACE="mediation-fail-smoke"
 CLI="$STATE_DIR/microagent"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
 PROBE="$HOST_DIR/mediation-probe"
 SPEC="$HOST_DIR/microagent.yaml"
+FAIL_SPEC="$HOST_DIR/microagent-fail.yaml"
 SERVER_LOG="$HOST_DIR/server.log"
 OBSERVED="$HOST_DIR/observed.jsonl"
 RESPONSE="$STATE_DIR/response.json"
+FAIL_RESPONSE="$STATE_DIR/fail-response.json"
 HOST_PORT=""
+FAIL_HOST_PORT=""
 SERVER_PID=""
 
 cleanup() {
@@ -31,13 +35,16 @@ cleanup() {
   fi
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_APPLEVF_MEDIATION_SMOKE:-0}" != "1" ]; then
     if [ -x "$CLI" ]; then
-      "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" stop "$FAIL_WORKSPACE" --state-dir "$STATE_DIR/fail" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" delete "$FAIL_WORKSPACE" --yes --state-dir "$STATE_DIR/fail" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     fi
     rm -rf "$STATE_DIR" "$HOST_DIR"
   else
     if [ -x "$CLI" ]; then
-      "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      "$CLI" stop "$FAIL_WORKSPACE" --state-dir "$STATE_DIR/fail" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     fi
     echo "kept Apple VF mediation smoke state at $STATE_DIR" >&2
     echo "kept Apple VF mediation smoke host dir at $HOST_DIR" >&2
@@ -157,6 +164,14 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 PY
 )"
 
+FAIL_HOST_PORT="$(python3 - <<'PY'
+import socket
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind(("127.0.0.1", 0))
+    print(s.getsockname()[1])
+PY
+)"
+
 cat >"$SPEC" <<YAML
 name: $WORKSPACE
 image: $IMAGE
@@ -176,6 +191,83 @@ files:
     dst: /usr/local/bin/mediation-probe
     mode: "0755"
 YAML
+
+cat >"$FAIL_SPEC" <<YAML
+name: $FAIL_WORKSPACE
+image: $IMAGE
+entrypoint: /usr/local/bin/mediation-probe
+env:
+  MEDIATION_PORT: "2048"
+mediation:
+  enabled: true
+  required: true
+  port: 2048
+  target: 127.0.0.1:$FAIL_HOST_PORT
+  failClosed: true
+files:
+  - src: $PROBE
+    dst: /usr/local/bin/mediation-probe
+    mode: "0755"
+YAML
+
+"$CLI" create \
+  --backend apple-vf \
+  --file "$FAIL_SPEC" \
+  --arch "$ARCH" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR/fail" \
+  --size-mib "${MICROAGENT_APPLEVF_MEDIATION_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --memory "${MICROAGENT_APPLEVF_MEDIATION_MEMORY_MIB:-512}" \
+  --cpus "${MICROAGENT_APPLEVF_MEDIATION_CPUS:-2}" >"$STATE_DIR/fail-create.json"
+
+"$CLI" start "$FAIL_WORKSPACE" \
+  --state-dir "$STATE_DIR/fail" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/fail-start.json"
+
+wait_for_result() {
+  output="$1"
+  state_dir="$2"
+  workspace="$3"
+  deadline=$((SECONDS + ${MICROAGENT_APPLEVF_MEDIATION_TIMEOUT_SECONDS:-60}))
+  while true; do
+    if "$CLI" result "$workspace" --state-dir "$state_dir" >"$output" 2>"$output.err"; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      cat "$output.err" >&2 || true
+      echo "mediation workspace $workspace did not produce a result before timeout" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+wait_for_result "$FAIL_RESPONSE" "$STATE_DIR/fail" "$FAIL_WORKSPACE"
+
+python3 - "$FAIL_RESPONSE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    result = json.load(f)
+guest = result.get("result") or {}
+exit_code = guest.get("exit_code", guest.get("exitCode"))
+if exit_code == 0:
+    raise SystemExit(result)
+stderr = guest.get("stderr", "")
+serial = result.get("serial_log", "")
+if "dial mediation vsock port 2048" not in stderr and "dial mediation vsock port 2048" not in serial:
+    raise SystemExit(result)
+response = result.get("response") or {}
+readiness = response.get("readiness") or {}
+mediation = readiness.get("mediationReady") or {}
+if mediation.get("ready") is True:
+    raise SystemExit(readiness)
+PY
 
 "$CLI" create \
   --backend apple-vf \
@@ -235,27 +327,11 @@ if ! grep -q "listening on" "$SERVER_LOG" 2>/dev/null; then
   exit 1
 fi
 
-wait_for_result() {
-  output="$1"
-  deadline=$((SECONDS + ${MICROAGENT_APPLEVF_MEDIATION_TIMEOUT_SECONDS:-60}))
-  while true; do
-    if "$CLI" result "$WORKSPACE" --state-dir "$STATE_DIR" >"$output" 2>"$STATE_DIR/result.err"; then
-      break
-    fi
-    if [ "$SECONDS" -ge "$deadline" ]; then
-      cat "$STATE_DIR/result.err" >&2 || true
-      echo "mediation workspace did not produce a result before timeout" >&2
-      exit 1
-    fi
-    sleep 1
-  done
-}
-
 "$CLI" start "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
   --kernel "$KERNEL" \
   --supervisor "$SUPERVISOR" >"$STATE_DIR/start.json"
-wait_for_result "$RESPONSE"
+wait_for_result "$RESPONSE" "$STATE_DIR" "$WORKSPACE"
 
 python3 - "$RESPONSE" "$OBSERVED" <<'PY'
 import json
