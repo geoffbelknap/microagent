@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path"
@@ -23,6 +24,7 @@ import (
 	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/credentials"
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
@@ -568,12 +570,34 @@ func newRepository(repoRef string) (*remote.Repository, error) {
 		return nil, err
 	}
 	host := strings.SplitN(repoRef, "/", 2)[0]
+	repo.PlainHTTP = isLoopbackRegistry(host)
 	repo.Client = &auth.Client{
 		Client:     retry.DefaultClient,
 		Cache:      auth.DefaultCache,
-		Credential: auth.StaticCredential(host, auth.Credential{}),
+		Credential: registryCredential(host),
 	}
 	return repo, nil
+}
+
+func isLoopbackRegistry(host string) bool {
+	host = strings.TrimSpace(host)
+	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
+		host = parsedHost
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func registryCredential(host string) auth.CredentialFunc {
+	store, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+	if err == nil {
+		return credentials.Credential(store)
+	}
+	return auth.StaticCredential(host, auth.Credential{})
 }
 
 func fetchBytes(ctx context.Context, repo *remote.Repository, desc ocispec.Descriptor) ([]byte, error) {

@@ -184,13 +184,24 @@ func run() int {
 			fmt.Fprintln(os.Stderr, err)
 		}
 	} else if len(cfg.Command) > 0 {
-		log.Printf("microagent-init: handing off to %v", cfg.Command)
-		cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
-		cmd.Env = guestEnv(cfg.Env)
+		env := guestEnv(cfg.Env)
+		command, err := resolveGuestCommand(cfg.Command, env)
+		if err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = sendResult(cfg.Port, res)
+			return code
+		}
+		log.Printf("microagent-init: handing off to %v", command)
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Env = env
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
 		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
-		err := cmd.Run()
+		err = cmd.Run()
 		res.Stdout = stdout.String()
 		res.Stderr = stderr.String()
 		if err != nil {
@@ -222,7 +233,7 @@ func run() int {
 }
 
 func execServiceCommand(command []string, env []string) error {
-	command, err := resolveServiceCommand(command, env)
+	command, err := resolveGuestCommand(command, env)
 	if err != nil {
 		return err
 	}
@@ -231,9 +242,9 @@ func execServiceCommand(command []string, env []string) error {
 	return syscall.Exec(command[0], command, env)
 }
 
-func resolveServiceCommand(command []string, env []string) ([]string, error) {
+func resolveGuestCommand(command []string, env []string) ([]string, error) {
 	if len(command) == 0 {
-		return nil, fmt.Errorf("service command is empty")
+		return nil, fmt.Errorf("guest command is empty")
 	}
 	if strings.Contains(command[0], "/") {
 		return command, nil
@@ -253,7 +264,7 @@ func resolveServiceCommand(command []string, env []string) ([]string, error) {
 			return resolved, nil
 		}
 	}
-	return nil, fmt.Errorf("resolve service command %q in PATH: %w", command[0], exec.ErrNotFound)
+	return nil, fmt.Errorf("resolve guest command %q in PATH: %w", command[0], exec.ErrNotFound)
 }
 
 func runManagedServiceCommand(command []string, env []string) error {

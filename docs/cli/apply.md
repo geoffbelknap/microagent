@@ -42,3 +42,13 @@ microagent apply --file ./homebridge.yaml
 
 If the workspace is running and only the Firecracker host bind changed,
 `apply` restarts the host-side port-forwarder and leaves the VM running.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--file <path>` | Workspace spec file |
+| `--state-dir <dir>` | State directory holding the workspace record |
+| `--backend <name>` | Backend identity override |
+| `--arch <arch>` | Guest architecture |
+| `--supervisor <path>` | Override the installed host backend supervisor path |

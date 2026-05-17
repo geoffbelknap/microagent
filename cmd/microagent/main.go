@@ -56,6 +56,9 @@ const (
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -105,6 +108,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
+	if args[0] == "compose" {
+		return fmt.Errorf("compose-style multi-workspace projects are not supported; run one MicroAgent workspace at a time and keep orchestration outside microagent")
+	}
 	if args[0] == "create" && wantsHelp(args[1:]) {
 		printCreateHelp(stdout)
 		return nil
@@ -133,15 +139,27 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "result" {
 		return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 	}
+	if args[0] == "inspect" {
+		if outputFormat == "" {
+			outputFormat = "json"
+		}
+		return runWorkspaceStateCommand(ctx, "status", args[1:], stdout)
+	}
 	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
-		if hasWorkspaceStateTarget(args[1:]) {
+		if wantsHelp(args[1:]) || hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 		}
+	}
+	if args[0] == "rm" {
+		return runWorkspaceStateCommand(ctx, "delete", args[1:], stdout)
+	}
+	if args[0] == "exec" {
+		return fmt.Errorf("microagent exec is not supported; use microagent connect <name> --send <command> for console commands, or microagent cp and artifacts for file exchange")
 	}
 	if args[0] == "connect" {
 		return runConnect(ctx, args[1:], stdout)
 	}
-	if args[0] == "start" && hasPositionalWorkspaceName(args[1:]) {
+	if args[0] == "start" && (wantsHelp(args[1:]) || hasPositionalWorkspaceName(args[1:])) {
 		return runStartWorkspace(ctx, args[1:], stdout)
 	}
 	if args[0] == "supervise" {
@@ -154,7 +172,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	supervisorPath := defaultSupervisorPath(backend)
 	supervisorExplicit := hasFlagValue(args[1:], "supervisor")
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stdout)
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	req, err := requestForCommand(args[0], fs, reorderFlagArgs(args[1:]))
 	if err != nil {
@@ -203,6 +221,9 @@ func runContract(args []string, stdout *os.File) error {
 	fs := flag.NewFlagSet("contract", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -219,11 +240,14 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	supervisorExplicit := hasFlagValue(args, "supervisor")
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stdout)
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Arch, "arch", opts.Arch, "Guest architecture")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -652,8 +676,8 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(opts.ExecCommand) == "" {
-		return fmt.Errorf("run requires --exec")
+	if strings.TrimSpace(opts.ExecCommand) == "" && !opts.UseImageCommand {
+		return fmt.Errorf("run requires IMAGE [COMMAND...] or --exec")
 	}
 	if opts.Name == "" {
 		opts.Name = fmt.Sprintf("run-%d", time.Now().UnixNano())
@@ -1340,7 +1364,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	yes := false
 	force := false
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stdout)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
 	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
@@ -1353,6 +1377,9 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		fs.BoolVar(&force, "f", false, "Kill a running workspace before deleting")
 	}
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if !supervisorExplicit {
@@ -1695,7 +1722,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	kernelExplicit := hasFlagValue(args, "kernel")
 	fs := flag.NewFlagSet("start", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	fs.SetOutput(stdout)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
@@ -1707,6 +1734,9 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if !supervisorExplicit {
@@ -2181,10 +2211,14 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&setupFiles, "setup-file", "Shell script file to run before --exec")
 	var envVars multiFlag
 	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
+	fs.Var(&envVars, "e", "Guest environment variable KEY=VALUE")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
 	fs.Var(&bundleFlags, "bundle", "Build and attach bundle name=tar:/mount:ro|rw")
+	var volumeFlags multiFlag
+	fs.Var(&volumeFlags, "volume", "Attach a safe container-style volume SRC:DST[:ro|rw]")
+	fs.Var(&volumeFlags, "v", "Attach a safe container-style volume SRC:DST[:ro|rw]")
 	var outputFlags multiFlag
 	fs.Var(&outputFlags, "output", "Declare output artifact name=/guest/path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
@@ -2204,6 +2238,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.BoolVar(&mediationOptional, "mediation-optional", false, "Allow workspace to run if mediation is unavailable")
 	var publishFlags multiFlag
 	fs.Var(&publishFlags, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
+	fs.Var(&publishFlags, "p", "Forward host[:hostPort]:guestPort[/tcp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
@@ -2212,13 +2247,22 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run")
+	rm := false
+	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
+	if err := rejectUnsupportedContainerCompatibilityFlags(args); err != nil {
+		return workspaceOptions{}, err
+	}
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return workspaceOptions{}, err
 	}
 	if fs.NArg() != 0 {
 		if command == "create" && fs.NArg() == 1 && opts.Name == "" {
 			opts.Name = fs.Arg(0)
+		} else if command == "run" {
+			if err := applyContainerRunArgs(&opts, fs.Args()); err != nil {
+				return workspaceOptions{}, err
+			}
 		} else {
 			return workspaceOptions{}, fmt.Errorf("unexpected %s argument: %s", command, fs.Arg(0))
 		}
@@ -2234,6 +2278,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.Env = mergeEnv(opts.Env, env)
+	volumes, err := parseWorkspaceVolumes(volumeFlags)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
 	disks, err := parseWorkspaceDisks(diskFlags, false)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -2242,6 +2290,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err != nil {
 		return workspaceOptions{}, err
 	}
+	opts.Disks = append(opts.Disks, volumes...)
 	opts.Disks = append(opts.Disks, disks...)
 	opts.Disks = append(opts.Disks, bundles...)
 	outputs, err := parseWorkspaceOutputs(outputFlags)
@@ -2270,6 +2319,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		} else {
 			return workspaceOptions{}, fmt.Errorf("%s requires --image", command)
 		}
+	}
+	if command == "run" && strings.TrimSpace(opts.ExecCommand) == "" {
+		opts.UseImageCommand = true
 	}
 	if err := validateConsoleShell(opts.ConsoleShell); err != nil {
 		return workspaceOptions{}, err
@@ -2301,6 +2353,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
 		return workspaceOptions{}, fmt.Errorf("%s cannot use both --image-command and --service-command", command)
 	}
+	if command == "run" && rm && opts.Keep {
+		return workspaceOptions{}, fmt.Errorf("run cannot use both --rm and --keep")
+	}
+	if command != "run" && rm {
+		return workspaceOptions{}, fmt.Errorf("%s does not support --rm", command)
+	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if specExplicit && specPath == "" {
 		return workspaceOptions{}, fmt.Errorf("%s requires --file path", command)
@@ -2320,6 +2378,40 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	opts.ResultPort = uint32(resultPort)
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
 	return opts, nil
+}
+
+func applyContainerRunArgs(opts *workspaceOptions, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(opts.ExecCommand) != "" {
+		return fmt.Errorf("run cannot use both --exec and positional command arguments")
+	}
+	if opts.UseImageCommand {
+		return fmt.Errorf("run cannot use both --image-command and positional command arguments")
+	}
+	commandArgs := args
+	if strings.TrimSpace(opts.ImageRef) == "" {
+		opts.ImageRef = strings.TrimSpace(args[0])
+		commandArgs = args[1:]
+	}
+	if strings.TrimSpace(opts.ImageRef) == "" {
+		return fmt.Errorf("run requires IMAGE [COMMAND...] or --image")
+	}
+	if len(commandArgs) == 0 {
+		opts.UseImageCommand = true
+		return nil
+	}
+	opts.ExecCommand = shellCommandFromArgs(commandArgs)
+	return nil
+}
+
+func shellCommandFromArgs(args []string) string {
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, shellSingleQuote(arg))
+	}
+	return "exec " + strings.Join(quoted, " ")
 }
 
 func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
@@ -5291,7 +5383,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
 		return true
 	}
-	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "setup-file") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
+	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "setup-file") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "e") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "volume") || hasFlagValue(args, "v") || hasFlagValue(args, "output")
 }
 
 func hasLowLevelCreateFlag(args []string) bool {
@@ -5835,6 +5927,8 @@ func reorderFlagArgs(args []string) []string {
 		"-rootfs":            true,
 		"-disk":              true,
 		"-bundle":            true,
+		"-volume":            true,
+		"-v":                 true,
 		"-output":            true,
 		"-debugfs":           true,
 		"-profile":           true,
@@ -5843,6 +5937,7 @@ func reorderFlagArgs(args []string) []string {
 		"-network-interface": true,
 		"-mediation":         true,
 		"-publish":           true,
+		"-p":                 true,
 		"-state-dir":         true,
 		"-url":               true,
 		"-from":              true,
@@ -5863,6 +5958,7 @@ func reorderFlagArgs(args []string) []string {
 		"-max-restarts":      true,
 		"-result-port":       true,
 		"-send":              true,
+		"-e":                 true,
 	}
 	var flags []string
 	var positional []string
@@ -5898,7 +5994,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
 		return true
 	default:
 		return false
@@ -6101,6 +6197,118 @@ func parseWorkspaceDisk(raw string, bundle bool) (workspaceDisk, error) {
 	}, nil
 }
 
+func parseWorkspaceVolumes(values []string) ([]workspaceDisk, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	disks := make([]workspaceDisk, 0, len(values))
+	for _, raw := range values {
+		disk, err := parseWorkspaceVolume(raw)
+		if err != nil {
+			return nil, err
+		}
+		disks = append(disks, disk)
+	}
+	return disks, nil
+}
+
+func parseWorkspaceVolume(raw string) (workspaceDisk, error) {
+	parts := strings.Split(raw, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return workspaceDisk{}, fmt.Errorf("volume must be SRC:DST[:ro|rw]")
+	}
+	sourcePath := strings.TrimSpace(parts[0])
+	mountpoint := strings.TrimSpace(parts[1])
+	mode := "rw"
+	if len(parts) == 3 {
+		mode = strings.TrimSpace(parts[2])
+	}
+	if sourcePath == "" {
+		return workspaceDisk{}, fmt.Errorf("volume source path is required")
+	}
+	if mountpoint == "" || !strings.HasPrefix(mountpoint, "/") {
+		return workspaceDisk{}, fmt.Errorf("volume destination must be an absolute guest path")
+	}
+	if mode != "ro" && mode != "rw" {
+		return workspaceDisk{}, fmt.Errorf("volume mode must be ro or rw")
+	}
+	if info, err := os.Stat(sourcePath); err == nil && info.IsDir() {
+		return workspaceDisk{}, fmt.Errorf("MicroAgent does not expose host bind mounts yet; use --bundle with a tar archive, --disk with an ext4 image, or copy files with microagent cp")
+	}
+	name, err := volumeDiskName(mountpoint)
+	if err != nil {
+		return workspaceDisk{}, err
+	}
+	lower := strings.ToLower(sourcePath)
+	switch {
+	case strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz"):
+		return workspaceDisk{
+			Name:       name,
+			SourcePath: sourcePath,
+			Path:       sourcePath,
+			Mountpoint: mountpoint,
+			Mode:       mode,
+			Bundle:     true,
+		}, nil
+	case strings.HasSuffix(lower, ".ext4") || strings.HasSuffix(lower, ".img"):
+		return workspaceDisk{
+			Name:       name,
+			SourcePath: sourcePath,
+			Path:       sourcePath,
+			Mountpoint: mountpoint,
+			Mode:       mode,
+			Bundle:     false,
+		}, nil
+	default:
+		return workspaceDisk{}, fmt.Errorf("unsupported volume source %q; MicroAgent accepts tar archives as bundles or ext4 disk images, not named volumes or host bind mounts", sourcePath)
+	}
+}
+
+func volumeDiskName(mountpoint string) (string, error) {
+	name := path.Base(path.Clean(mountpoint))
+	if name == "." || name == "/" {
+		return "", fmt.Errorf("volume destination must include a mount directory name")
+	}
+	if name == "rootfs" {
+		return "", fmt.Errorf("disk name rootfs is reserved")
+	}
+	if err := validateSafeBasename("volume-derived disk name", name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func rejectUnsupportedContainerCompatibilityFlags(args []string) error {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		name, value, hasValue := splitFlagArg(arg)
+		switch name {
+		case "--privileged", "-privileged":
+			return fmt.Errorf("--privileged is not supported; MicroAgent runs workloads inside a microVM boundary and does not expose privileged host/container mode")
+		case "--pod", "-pod", "--pod-id-file", "-pod-id-file":
+			return fmt.Errorf("%s is not supported; MicroAgent does not implement pods, so run one workspace per microVM and keep orchestration outside microagent", name)
+		case "--mount", "-mount":
+			if !hasValue && i+1 < len(args) {
+				value = args[i+1]
+			}
+			if strings.Contains(value, "type=bind") || strings.Contains(value, "bind") {
+				return fmt.Errorf("--mount type=bind is not supported; MicroAgent does not expose host bind mounts, so use -v with a tar archive or ext4 image, --bundle, --disk, microagent cp, or declared --output paths")
+			}
+			return fmt.Errorf("--mount is not supported; use -v SRC:DST[:ro|rw] with a tar archive or ext4 image, --bundle, or --disk")
+		case "--cap-add", "-cap-add", "--cap-drop", "-cap-drop", "--security-opt", "-security-opt", "--device", "-device", "--pid", "-pid", "--ipc", "-ipc", "--userns", "-userns":
+			return fmt.Errorf("%s is not supported; MicroAgent exposes a microVM boundary rather than namespace, capability, device, or security-opt controls", name)
+		}
+	}
+	return nil
+}
+
+func splitFlagArg(arg string) (name, value string, hasValue bool) {
+	if before, after, ok := strings.Cut(arg, "="); ok {
+		return before, after, true
+	}
+	return arg, "", false
+}
+
 func newRequestID() string {
 	return fmt.Sprintf("req-%d", time.Now().UnixNano())
 }
@@ -6163,7 +6371,9 @@ Commands:
   start                Start a workspace
   supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
+  exec                 Not supported; use connect --send
   ps                   List workspaces
+  inspect              Alias for status with JSON output
   status               Show workspace state
   result               Show structured workspace result
   logs                 Show workspace logs
@@ -6176,6 +6386,7 @@ Commands:
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace
+  rm                   Alias for delete
   contract             Show backend-neutral runtime contract
   host                 Report host capabilities
   doctor               Check the host
@@ -6255,36 +6466,60 @@ func printRunHelp(stdout *os.File) {
 
 Run a command from an image.
 
+Usage:
+  microagent run IMAGE [COMMAND ARG...]
+  microagent run --image IMAGE --exec <command>
+
 Options:
   -image <ref>          OCI image
   -exec <command>       Shell command to run
   -setup <command>      Shell command to run before --exec
   -setup-file <path>    Shell script file to run before --exec
+  -image-command        Run the image Entrypoint/Cmd
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
+  -e KEY=VALUE          Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
+  -volume SRC:DST[:ro|rw]
+                         Attach a safe tar/ext4 volume
   -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -name <name>          Workspace name; generated when omitted
+  -backend <name>       Backend identity override
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
+  -guest-init <path>    Guest init path
+  -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
   -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
+  -p host:guest[/tcp]   Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
+  -result-port <port>   Vsock result port
   -timeout <seconds>    Timeout
   -keep                 Keep state
+  -rm                   Explicitly remove state after run
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
+
+Container-style examples:
+  microagent run alpine echo hello
+  microagent run -e FOO=bar -p 8080:80 alpine
+  microagent run -v /tmp/config.tar:/config:ro alpine ls /config
+
+Not implemented:
+  container-engine APIs, compose projects, pods, privileged mode, namespace flags, devices, and
+  host directory bind mounts are not exposed.
 `)
 }
 
@@ -6299,35 +6534,49 @@ Options:
   -setup <command>      Shell command to run before first start
   -setup-file <path>    Shell script file to run before first start
   -service-command <cmd> Long-running command to run as the VM service
+  -image-command        Run the image Entrypoint/Cmd when creating a prepared workspace
   -entrypoint <command> Command to run on start
   -shell <path>         Interactive console shell path
   -hostname <name>      Guest hostname
   -env KEY=VALUE        Guest environment variable
+  -e KEY=VALUE          Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
+  -volume SRC:DST[:ro|rw]
+                         Attach a safe tar/ext4 volume
   -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
+  -backend <name>       Backend identity override
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory
+  -guest-init <path>    Guest init path
+  -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
   -network <mode>       Network mode: user, nat, isolated, or bridged
   -network-interface <if>
                          Host interface for bridged network mode
+  -p host:guest[/tcp]   Publish a TCP port
+  -publish host:guest[/tcp]
+                         Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
+  -result-port <port>   Vsock result port
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
+  -dry-run              Validate without writing state
+  -json <path|->        Read request JSON from a file or stdin
 `)
 }
 
 func printKernelHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent kernel
 
-Advanced kernel commands. Most users can start with microagent run --image ...
+Advanced kernel commands. Most users can start with microagent run IMAGE ...
 and skip this.
 
 Commands:

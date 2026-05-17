@@ -23,7 +23,7 @@ KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE:-0}"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
+    for workspace in "$WORKSPACE" "$BUNDLE_WORKSPACE" "$DISK_WORKSPACE" "$PERF_WORKSPACE" "$RUN_KEEP_WORKSPACE" "$JSON_WORKSPACE" "$JSON_STDIN_WORKSPACE" "$OPTIONS_RUN_WORKSPACE" "$SERVICE_WORKSPACE" "$IMAGE_COMMAND_WORKSPACE" public-docker-run public-docker-text public-docker-image-command implicit-spec high-dry-run missing-result missing-artifact corrupt-state invalid-name; do
       "$CLI" stop "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" kill "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       if [ "$status" -eq 0 ]; then
@@ -812,6 +812,44 @@ assert_json "$STATE_DIR/run.json" "'RUN_OK' in data.get('serial_log', '')"
 assert_json "$STATE_DIR/run.json" "'reboot: System halted' in data.get('serial_log', '') or 'reboot: Power down' in data.get('serial_log', '')"
 
 "$CLI" --json run \
+  --name public-docker-run \
+  -e DOCKER_RUN_ENV=env-ok \
+  --rm \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 96 \
+  --timeout 60 \
+  "$IMAGE" printenv DOCKER_RUN_ENV >"$STATE_DIR/run-docker-style.json"
+assert_json "$STATE_DIR/run-docker-style.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
+assert_json "$STATE_DIR/run-docker-style.json" "'env-ok' in data.get('result', {}).get('stdout', '')"
+test ! -e "$STATE_DIR/workspaces/public-docker-run"
+
+"$CLI" --text run \
+  --name public-docker-text \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 96 \
+  --timeout 60 \
+  "$IMAGE" printf DOCKER_TEXT_OK >"$STATE_DIR/run-docker-style-text.txt"
+grep -q "DOCKER_TEXT_OK" "$STATE_DIR/run-docker-style-text.txt"
+test ! -e "$STATE_DIR/workspaces/public-docker-text"
+
+"$CLI" --json run \
+  --name public-docker-image-command \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network isolated \
+  --size-mib 96 \
+  --timeout 60 \
+  "$IMAGE" >"$STATE_DIR/run-docker-image-command.json"
+assert_json "$STATE_DIR/run-docker-image-command.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
+
+"$CLI" --json run \
   --name "$RUN_KEEP_WORKSPACE" \
   --image "$IMAGE" \
   --guest-init "$GUEST_INIT" \
@@ -835,6 +873,8 @@ assert_json "$STATE_DIR/status-run-keep.json" "data.get('readiness', {}).get('re
 grep -q "Workspace: $RUN_KEEP_WORKSPACE" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "State: stopped" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "Readiness:" "$STATE_DIR/status-run-keep-text.txt"
+"$CLI" inspect "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/inspect-run-keep.json"
+assert_json "$STATE_DIR/inspect-run-keep.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$RUN_KEEP_WORKSPACE' and data.get('event', {}).get('state') == 'stopped'"
 "$CLI" --json result "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result-run-keep.json"
 assert_json "$STATE_DIR/result-run-keep.json" "'RUN_KEEP_OK' in data.get('result', {}).get('stdout', '')"
 "$CLI" --output text result "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result-run-keep-text.txt"
@@ -955,7 +995,7 @@ tar -C "$STATE_DIR/bundle-src" -cf "$STATE_DIR/bundle.tar" .
   --state-dir "$STATE_DIR" \
   --network isolated \
   --size-mib 96 \
-  --bundle "data=$STATE_DIR/bundle.tar:/data:rw" \
+  -v "$STATE_DIR/bundle.tar:/data:rw" \
   --output disk-report=/data/report.txt \
   --output missing-report=/data/missing.txt >"$STATE_DIR/create-bundle.json"
 assert_json "$STATE_DIR/create-bundle.json" "any(disk.get('name') == 'data' and disk.get('bundle') for disk in data.get('disks', []))"
@@ -977,7 +1017,7 @@ expect_failure missing-artifact-file "missing.txt\\|not found\\|No such" \
   "$CLI" artifacts get "$BUNDLE_WORKSPACE" missing-report "$ARTIFACT_DIR" --state-dir "$STATE_DIR"
 "$CLI" cp "$BUNDLE_WORKSPACE:data:/report.txt" "$STATE_DIR/copied-report.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-attached-disk.json"
 grep -q "bundle-seed" "$STATE_DIR/copied-report.txt"
-"$CLI" delete "$BUNDLE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-bundle.json"
+"$CLI" rm "$BUNDLE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-bundle.json"
 
 mkdir -p "$STATE_DIR/disk-src/dir"
 printf "existing-disk-seed\n" >"$STATE_DIR/disk-src/seed.txt"
@@ -990,7 +1030,7 @@ mke2fs -q -F -t ext4 -d "$STATE_DIR/disk-src" "$STATE_DIR/existing-disk.ext4"
   --state-dir "$STATE_DIR" \
   --network isolated \
   --size-mib 96 \
-  --disk "workspace=$STATE_DIR/existing-disk.ext4:/workspace:rw" \
+  -v "$STATE_DIR/existing-disk.ext4:/workspace:rw" \
   --disk "readonly=$STATE_DIR/existing-disk.ext4:/readonly:ro" \
   --output existing-disk-report=/workspace/report.txt >"$STATE_DIR/create-existing-disk.json"
 assert_json "$STATE_DIR/create-existing-disk.json" "any(disk.get('name') == 'workspace' and not disk.get('bundle') for disk in data.get('disks', []))"

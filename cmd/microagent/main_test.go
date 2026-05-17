@@ -91,11 +91,54 @@ func TestCreateHelpUsesWorkspaceHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !strings.Contains(text, "microagent create") || !strings.Contains(text, "-entrypoint <command>") {
+	if !strings.Contains(text, "microagent create") ||
+		!strings.Contains(text, "-entrypoint <command>") ||
+		!strings.Contains(text, "-v SRC:DST[:ro|rw]") ||
+		!strings.Contains(text, "-p host:guest[/tcp]") ||
+		!strings.Contains(text, "-dry-run") {
 		t.Fatalf("create help = %s", text)
 	}
 	if strings.Contains(text, "Rootfs image path") {
 		t.Fatalf("create help exposed low-level supervisor flags: %s", text)
+	}
+}
+
+func TestHighLevelCommandHelpDoesNotFallThroughToSupervisorFlags(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{command: "start", want: "Usage of start:"},
+		{command: "delete", want: "Confirm workspace deletion without prompting"},
+		{command: "status", want: "Workspace name"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			dir := t.TempDir()
+			stdoutPath := filepath.Join(dir, "stdout.txt")
+			stdout, err := os.Create(stdoutPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = run(t.Context(), []string{tt.command, "--help"}, stdout)
+			if closeErr := stdout.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			if err != nil {
+				t.Fatalf("run %s --help: %v", tt.command, err)
+			}
+			data, err := os.ReadFile(stdoutPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := string(data)
+			if !strings.Contains(text, tt.want) {
+				t.Fatalf("%s help = %s, want %q", tt.command, text, tt.want)
+			}
+			if strings.Contains(text, "Rootfs image path") || strings.Contains(text, "Read request JSON") {
+				t.Fatalf("%s help exposed low-level supervisor flags: %s", tt.command, text)
+			}
+		})
 	}
 }
 
@@ -108,6 +151,13 @@ func TestGlobalJSONOutputSwitch(t *testing.T) {
 	}
 	if len(args) != 1 || args[0] != "doctor" {
 		t.Fatalf("args = %#v", args)
+	}
+}
+
+func TestExecAliasReturnsMicroAgentEquivalent(t *testing.T) {
+	err := run(t.Context(), []string{"exec", "research", "echo hello"}, os.Stdout)
+	if err == nil || !strings.Contains(err.Error(), "use microagent connect <name> --send <command>") {
+		t.Fatalf("err = %v, want connect --send guidance", err)
 	}
 }
 
@@ -987,6 +1037,42 @@ func TestStatusReportsReadinessSignals(t *testing.T) {
 	}
 }
 
+func TestInspectAliasDefaultsToJSONStatus(t *testing.T) {
+	dir := t.TempDir()
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: hostBackend()},
+		Config: &vmkit.Config{
+			KernelPath: filepath.Join(dir, "Image"),
+			RootfsPath: filepath.Join(dir, "rootfs.ext4"),
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "inspect.json")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"inspect", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run inspect: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"runtimeID": "research"`) || !strings.Contains(string(data), `"state": "stopped"`) {
+		t.Fatalf("inspect output = %s", data)
+	}
+}
+
 func TestRunResultReportsStructuredResult(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
@@ -1357,6 +1443,84 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	}
 	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "report" || opts.Outputs[0].Path != "/workspace/report.json" {
 		t.Fatalf("outputs = %#v", opts.Outputs)
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsSafeContainerStyleVolumes(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"-v", "/tmp/config.tar:/config:ro",
+		"--volume", "/tmp/workspace.ext4:/workspace",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if len(opts.Disks) != 2 {
+		t.Fatalf("Disks len = %d, want 2", len(opts.Disks))
+	}
+	if opts.Disks[0].Name != "config" || opts.Disks[0].Path != "/tmp/config.tar" || opts.Disks[0].Mountpoint != "/config" || opts.Disks[0].Mode != "ro" || !opts.Disks[0].Bundle {
+		t.Fatalf("bundle volume = %#v", opts.Disks[0])
+	}
+	if opts.Disks[1].Name != "workspace" || opts.Disks[1].Path != "/tmp/workspace.ext4" || opts.Disks[1].Mountpoint != "/workspace" || opts.Disks[1].Mode != "rw" || opts.Disks[1].Bundle {
+		t.Fatalf("disk volume = %#v", opts.Disks[1])
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsHostBindMountVolume(t *testing.T) {
+	dir := t.TempDir()
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"-v", dir + ":/workspace:rw",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not expose host bind mounts") {
+		t.Fatalf("err = %v, want host bind mount rejection", err)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsUnsupportedContainerStyleVolume(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--volume", "cache:/cache:rw",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not named volumes or host bind mounts") {
+		t.Fatalf("err = %v, want unsupported volume rejection", err)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsUnsupportedContainerCompatibilityFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "privileged",
+			args: []string{"--privileged", "docker.io/library/busybox:1.36", "true"},
+			want: "--privileged is not supported",
+		},
+		{
+			name: "pod",
+			args: []string{"--pod", "new:demo", "docker.io/library/busybox:1.36", "true"},
+			want: "does not implement pods",
+		},
+		{
+			name: "bind mount",
+			args: []string{"--mount", "type=bind,source=/tmp,target=/workspace", "docker.io/library/busybox:1.36", "true"},
+			want: "does not expose host bind mounts",
+		},
+		{
+			name: "capability",
+			args: []string{"--cap-add", "NET_ADMIN", "docker.io/library/busybox:1.36", "true"},
+			want: "microVM boundary",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseWorkspaceOptions("run", tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -3267,6 +3431,97 @@ func TestParseWorkspaceOptionsUsesHostSupervisorDefault(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsAcceptsContainerStyleRunCommand(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"docker.io/library/busybox:1.36",
+		"echo",
+		"hello world",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.ImageRef != "docker.io/library/busybox:1.36" {
+		t.Fatalf("ImageRef = %q", opts.ImageRef)
+	}
+	if opts.ExecCommand != "exec 'echo' 'hello world'" {
+		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
+	}
+	if opts.UseImageCommand {
+		t.Fatal("UseImageCommand = true")
+	}
+}
+
+func TestParseWorkspaceOptionsRunImageDefaultsToImageCommand(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"docker.io/library/busybox:1.36",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.ImageRef != "docker.io/library/busybox:1.36" {
+		t.Fatalf("ImageRef = %q", opts.ImageRef)
+	}
+	if opts.ExecCommand != "" {
+		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
+	}
+	if !opts.UseImageCommand {
+		t.Fatal("UseImageCommand = false")
+	}
+}
+
+func TestParseWorkspaceOptionsRunPositionalCommandConflictsWithExec(t *testing.T) {
+	_, err := parseWorkspaceOptions("run", []string{
+		"--image", "docker.io/library/busybox:1.36",
+		"--exec", "true",
+		"echo",
+	})
+	if err == nil || !strings.Contains(err.Error(), "both --exec and positional command") {
+		t.Fatalf("err = %v, want positional command conflict", err)
+	}
+}
+
+func TestParseWorkspaceOptionsAcceptsContainerStyleRunAliases(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"-e", "GREETING=hello",
+		"-p", "127.0.0.1:18080:8080/tcp",
+		"--rm",
+		"docker.io/library/busybox:1.36",
+		"printenv",
+		"GREETING",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Env["GREETING"] != "hello" {
+		t.Fatalf("Env = %#v", opts.Env)
+	}
+	if opts.Keep {
+		t.Fatal("Keep = true")
+	}
+	if len(opts.Network.PortForwards) != 1 {
+		t.Fatalf("PortForwards = %#v", opts.Network.PortForwards)
+	}
+	forward := opts.Network.PortForwards[0]
+	if forward.Host != "127.0.0.1" || forward.HostPort != 18080 || forward.GuestPort != 8080 || forward.Protocol != "tcp" {
+		t.Fatalf("PortForward = %#v", forward)
+	}
+	if opts.ExecCommand != "exec 'printenv' 'GREETING'" {
+		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsRunRmKeepConflict(t *testing.T) {
+	_, err := parseWorkspaceOptions("run", []string{
+		"--rm",
+		"--keep",
+		"docker.io/library/busybox:1.36",
+		"true",
+	})
+	if err == nil || !strings.Contains(err.Error(), "both --rm and --keep") {
+		t.Fatalf("err = %v, want --rm --keep conflict", err)
+	}
+}
+
 func TestParseWorkspaceOptionsPreservesExplicitSupervisor(t *testing.T) {
 	opts, err := parseWorkspaceOptions("run", []string{
 		"--supervisor", "/tmp/microagent-supervisor",
@@ -4406,22 +4661,6 @@ func TestRunLogsPrintsSerialLog(t *testing.T) {
 	}
 	if string(got) != "hello\n" {
 		t.Fatalf("logs = %q", got)
-	}
-}
-
-func TestRunWorkspaceRequiresExec(t *testing.T) {
-	dir := t.TempDir()
-	stdoutPath := filepath.Join(dir, "stdout.json")
-	stdout, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = runWorkspace(t.Context(), []string{"--image", "docker.io/library/ubuntu:24.04"}, stdout)
-	if closeErr := stdout.Close(); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	if err == nil || !strings.Contains(err.Error(), "run requires --exec") {
-		t.Fatalf("err = %v, want --exec validation", err)
 	}
 }
 

@@ -19,7 +19,10 @@ error when the guest reported one.
 | Flag | Description |
 |---|---|
 | `--name <name>` | Workspace name (also accepted as positional) |
+| `--id <id>` | Workspace ID alias for `--name` |
 | `--state-dir <dir>` | State directory holding the workspace record |
+| `--backend <name>` | Backend identity override |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `result`; print structured JSON output |
 
 ## Example

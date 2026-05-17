@@ -21,25 +21,35 @@ first.
 | `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
 | `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
+| `--setup-file <path>` | Shell script file to run before first start. Repeatable |
+| `--service-command <cmd>` | Long-running shell command to run as the VM service |
+| `--image-command` | Run the image Entrypoint/Cmd when creating a prepared workspace |
 | `--entrypoint <command>` | Command to run on start |
 | `--shell <path>` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
 | `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |
+| `-e KEY=VALUE` | Alias for `--env` |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
+| `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
 | `--output n=/guest/path` | Declare an output artifact path |
+| `--backend <name>` | Backend identity override |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory |
+| `--guest-init <path>` | Guest init path |
+| `--arch <arch>` | Guest architecture |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
 | `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `bridged` |
 | `--network-interface <if>` | Host interface identifier or display name for bridged mode |
 | `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
+| `-p <mapping>` | Alias for `--publish` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
+| `--result-port <port>` | Vsock result port |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--dry-run` | Validate config without creating |
@@ -154,6 +164,21 @@ microagent create \
   --image docker.io/library/ubuntu:24.04 \
   --bundle config=/tmp/config.tar:/config:ro
 ```
+
+Container-style `-v` is supported for the same safe storage forms:
+
+```bash
+microagent create \
+  --name research \
+  --image docker.io/library/ubuntu:24.04 \
+  -v /tmp/config.tar:/config:ro \
+  -v /tmp/workspace.ext4:/workspace:rw
+```
+
+This does not expose host directory bind mounts or named volumes. Use a
+tar archive for one-time ingress, an ext4 image for an attached disk,
+`microagent cp` for stopped-workspace file transfer, and declared `--output`
+paths for egress.
 
 Lower-level form using an existing rootfs:
 

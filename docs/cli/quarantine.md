@@ -25,7 +25,10 @@ recorded runtime PID is preserved in state.
 
 | Flag | Description |
 |---|---|
+| `--name <name>` | Workspace name; positional name is also accepted |
+| `--id <id>` | Workspace ID alias for `--name` |
 | `--state-dir <dir>` | State directory |
+| `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
 ## Example

@@ -26,10 +26,18 @@ you want to prepare a rootfs ahead of time or hand it to a workspace via
 | `--size-mib <MiB>` | Disk size |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--exec <command>` | Shell command to run as guest init |
+| `--init <path>` | Guest init path to inject |
+| `--state-dir <dir>` | Builder state directory |
+| `--keep-stage` | Keep the temporary unpacked stage directory |
+| `--stage-snapshot <path>` | Copy the unpacked stage directory to this path before ext4 creation |
 | `--allow-mutable` | Allow tag references (image without a digest) |
 
 By default, `rootfs build` only accepts images pinned by digest. Pass
 `--allow-mutable` to accept tag references.
+
+For private registries, MicroAgent reads standard registry credential
+configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
+including configured credential helpers. It does not store registry credentials.
 
 ## Example
 

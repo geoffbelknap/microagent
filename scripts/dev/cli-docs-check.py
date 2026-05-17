@@ -14,8 +14,10 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCS_CLI = ROOT / "docs" / "cli"
 
 DOCUMENTED_SPECIAL_PAGES = {"index", "spec"}
-UNDOCUMENTED_HELP_COMMANDS = {"help"}
+UNDOCUMENTED_HELP_COMMANDS = {"help", "exec"}
 COMMAND_DOC_ALIASES = {
+    "inspect": "status",
+    "rm": "delete",
     "rootfs build": "rootfs",
     "kernel install": "kernel",
     "kernel verify": "kernel",

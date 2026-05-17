@@ -19,7 +19,9 @@ description: All microagent subcommands at a glance.
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |
+| `rm` | Alias for `delete` |
 | [`status`](/cli/status/) | Show workspace state |
+| `inspect` | Alias for `status` with JSON output |
 | [`result`](/cli/result/) | Show structured workspace result |
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
@@ -34,6 +36,20 @@ description: All microagent subcommands at a glance.
 | [`rootfs`](/cli/rootfs/) | Build a rootfs from an OCI image |
 | [`kernel`](/cli/kernel/) | Install or verify a custom kernel |
 | [`version`](/cli/version/) | Print the version |
+
+## Container-style convenience
+
+`microagent run` accepts both the explicit `--image IMAGE --exec "cmd"` form and
+the shorter `microagent run IMAGE [COMMAND ARG...]` form. For flags that map
+cleanly onto a microVM, common aliases are available: `-e` for `--env`, `-p` for
+`--publish`, `-v`/`--volume` for tar bundles and ext4 disk images, `--name`, and
+`--rm`.
+
+Features that do not map cleanly to a microVM boundary are not implemented:
+container-engine APIs, compose projects, pods, privileged mode, namespace flags,
+devices, host directory bind mounts, and named volumes. When those inputs are
+recognized, microagent returns targeted guidance rather than silently changing
+their meaning.
 
 ## Workspace spec
 

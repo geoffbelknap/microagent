@@ -2,7 +2,7 @@
 
 A small agent body that runs inside a microVM, calls Claude with `bash`, `read_file`, and `write_file` tools, and lets Claude actually do work in its `/workspace`. Prompt caching is on by default — the system prompt is paid for once and read from cache afterward.
 
-The whole workspace is described in [`microagent.yaml`](microagent.yaml). One spec, one `microagent create`, no Docker.
+The whole workspace is described in [`microagent.yaml`](microagent.yaml). One spec, one `microagent create`.
 
 For the walkthrough — create, deliver a request, run, halt-and-resume, retrieve files Claude wrote — see [`docs/recipes/simple-agent.md`](../../docs/recipes/simple-agent.md).
 

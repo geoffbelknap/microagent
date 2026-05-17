@@ -2,7 +2,7 @@
 
 This example builds Homebridge in a microVM-native way: start from Ubuntu, run a
 setup script, and let `microagent-init` supervise the service command. It does
-not use the Homebridge Docker image as a container runtime contract.
+not use the Homebridge container image as a container runtime contract.
 
 The setup script follows the upstream Debian/Ubuntu package install flow from
 the Homebridge wiki:

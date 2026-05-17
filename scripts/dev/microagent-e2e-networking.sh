@@ -20,6 +20,7 @@ NAT_WORKSPACE="nat-outbound"
 BRIDGED_WORKSPACE="bridged-ready"
 STATIC_WORKSPACE="static-net"
 APPLY_WORKSPACE="apply-stopped"
+PUBLISH_ALIAS_WORKSPACE="publish-alias"
 ARTIFACT_DIR="$STATE_DIR/artifacts"
 IMAGE="${MICROAGENT_NATS_IMAGE:-docker.io/library/nats@sha256:6e0cca2c6da79f0a3542ec5a3319dd10b1b05f5d8e8949afa8e9cdf6314bbf6c}"
 IMAGE_CACHE_STATE="${MICROAGENT_E2E_IMAGE_CACHE_DIR:-$ROOT/.cache/microagent-e2e/image-cache/nats-amd64}"
@@ -35,12 +36,14 @@ cleanup() {
     "$CLI" stop "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     "$CLI" stop "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     "$CLI" stop "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    "$CLI" stop "$PUBLISH_ALIAS_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ]; then
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$NAT_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$BRIDGED_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$STATIC_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$APPLY_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$PUBLISH_ALIAS_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     else
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
@@ -127,6 +130,8 @@ PY
 nats_port="$(pick_port)"
 monitor_port="$(pick_port)"
 apply_port="$(pick_port)"
+publish_alias_nats_port="$(pick_port)"
+publish_alias_monitor_port="$(pick_port)"
 
 export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
 export GOMODCACHE="${GOMODCACHE:-$STATE_DIR/gomodcache}"
@@ -607,6 +612,27 @@ PY
 
 ensure_cached_image
 seed_image_cache_for_state "$STATE_DIR"
+
+"$CLI" --json create "$PUBLISH_ALIAS_WORKSPACE" \
+  --image "$IMAGE" \
+  --guest-init "$GUEST_INIT" \
+  --kernel "$kernel_path" \
+  --state-dir "$STATE_DIR" \
+  --network user \
+  -p "127.0.0.1:$publish_alias_nats_port:4222/tcp" \
+  -p "127.0.0.1:$publish_alias_monitor_port:8222/tcp" \
+  --size-mib 192 >"$STATE_DIR/create-publish-alias.json"
+"$CLI" start "$PUBLISH_ALIAS_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start-publish-alias.json"
+wait_for_status_ready "$PUBLISH_ALIAS_WORKSPACE" "$STATE_DIR/status-publish-alias-running.json"
+"$CLI" connect "$PUBLISH_ALIAS_WORKSPACE" \
+  --state-dir "$STATE_DIR" \
+  --send "mkdir -p /data/jetstream; /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 >/tmp/nats-p-alias.log 2>&1 & echo PUBLISH_ALIAS_READY; sync" \
+  --ready-timeout 30 \
+  --timeout 15 >"$STATE_DIR/connect-publish-alias.txt"
+nats_assert monitor "$publish_alias_monitor_port" "$STATE_DIR/monitor-publish-alias.json"
+nats_assert roundtrip "$publish_alias_nats_port" "$STATE_DIR/nats-roundtrip-publish-alias.json"
+"$CLI" halt "$PUBLISH_ALIAS_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-publish-alias.json"
+"$CLI" delete "$PUBLISH_ALIAS_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-publish-alias.json"
 
 prepare_cached_workspace "$APPLY_WORKSPACE" '{"mode":"isolated"}' '{}' "$STATE_DIR/apply-stopped-create.json"
 cat >"$STATE_DIR/apply-stopped.yaml" <<YAML

@@ -34,6 +34,23 @@ The CLI is an adapter over these packages. Go callers should use the library
 directly for workspace lifecycle operations instead of shelling out to
 `microagent`.
 
+## Public surface guard
+
+The docs parity check treats these symbols as the public Go surface that should
+stay visible in docs. Helper functions and backend plumbing can remain exported
+for package boundaries without being promoted here, but new caller-facing
+symbols should be added to this page when they are introduced.
+
+| Package | Documented symbols |
+|---|---|
+| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract` |
+| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `Network`, `List`, `Control`, `Supervise`, `ReadManifest`, `WriteManifest`, `LookupProfile` |
+| `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
+| `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
+| `pkg/diagnostics` | `Options`, `Check` |
+| `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
+| `pkg/supervisors/firecracker` | `Supervisor` |
+
 ## Supervisor types
 
 Use `pkg/vmkit` when you need the shared request/response schema or want to

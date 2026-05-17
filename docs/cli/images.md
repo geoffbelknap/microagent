@@ -43,6 +43,11 @@ when the workspace has no setup commands, entrypoint, env overrides, or
 attached disks. Workspaces that need guest config are rebuilt from the source
 OCI image so their init config is baked into the rootfs.
 
+For private registries, image pulls read standard registry credential
+configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
+including configured credential helpers. MicroAgent uses those credentials for
+pulls and does not write registry login state.
+
 ## Pull flags
 
 | Flag | Description |

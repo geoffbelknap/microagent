@@ -3,12 +3,24 @@ package rootfs
 import (
 	"archive/tar"
 	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	digest "github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
 func TestWriteInitInjectsCommandAndValidEnv(t *testing.T) {
@@ -134,7 +146,7 @@ func TestBuildGuestEnvIncludesImageEnvAndRequestOverrides(t *testing.T) {
 	}
 }
 
-func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
+func TestSplitRegistryReferenceNormalizesDefaultRegistryRefs(t *testing.T) {
 	tests := []struct {
 		name          string
 		raw           string
@@ -154,25 +166,25 @@ func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
 			wantReference: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 		{
-			name:          "docker hub namespace with tag",
+			name:          "default registry namespace with tag",
 			raw:           "homebridge/homebridge:latest",
 			wantRepoRef:   "docker.io/homebridge/homebridge",
 			wantReference: "latest",
 		},
 		{
-			name:          "docker hub namespace without tag",
+			name:          "default registry namespace without tag",
 			raw:           "homebridge/homebridge",
 			wantRepoRef:   "docker.io/homebridge/homebridge",
 			wantReference: "latest",
 		},
 		{
-			name:          "docker io official shorthand",
+			name:          "explicit default registry official shorthand",
 			raw:           "docker.io/ubuntu:24.04",
 			wantRepoRef:   "docker.io/library/ubuntu",
 			wantReference: "24.04",
 		},
 		{
-			name:          "explicit docker io namespace",
+			name:          "explicit default registry namespace",
 			raw:           "docker.io/homebridge/homebridge:latest",
 			wantRepoRef:   "docker.io/homebridge/homebridge",
 			wantReference: "latest",
@@ -202,6 +214,308 @@ func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewRepositoryUsesRegistryCredentialConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOCKER_CONFIG", dir)
+	encoded := base64.StdEncoding.EncodeToString([]byte("microagent-user:microagent-pass"))
+	configJSON := `{"auths":{"example.com":{"auth":"` + encoded + `"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := newRepository("example.com/acme/image")
+	if err != nil {
+		t.Fatalf("newRepository: %v", err)
+	}
+	client, ok := repo.Client.(*auth.Client)
+	if !ok {
+		t.Fatalf("repo.Client = %T, want *auth.Client", repo.Client)
+	}
+	cred, err := client.Credential(context.Background(), "example.com")
+	if err != nil {
+		t.Fatalf("Credential: %v", err)
+	}
+	if cred.Username != "microagent-user" || cred.Password != "microagent-pass" {
+		t.Fatalf("credential = %#v", cred)
+	}
+}
+
+func TestNewRepositoryAllowsAnonymousPullWithoutCredentialConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOCKER_CONFIG", dir)
+	repo, err := newRepository("example.com/acme/image")
+	if err != nil {
+		t.Fatalf("newRepository: %v", err)
+	}
+	client, ok := repo.Client.(*auth.Client)
+	if !ok {
+		t.Fatalf("repo.Client = %T, want *auth.Client", repo.Client)
+	}
+	cred, err := client.Credential(context.Background(), "example.com")
+	if err != nil {
+		t.Fatalf("Credential: %v", err)
+	}
+	if cred != (auth.Credential{}) {
+		t.Fatalf("credential = %#v, want empty", cred)
+	}
+}
+
+func TestNewRepositoryUsesPlainHTTPOnlyForLoopbackRegistries(t *testing.T) {
+	tests := []struct {
+		repoRef string
+		want    bool
+	}{
+		{repoRef: "localhost:5000/acme/image", want: true},
+		{repoRef: "127.0.0.1:5000/acme/image", want: true},
+		{repoRef: "[::1]:5000/acme/image", want: true},
+		{repoRef: "registry.example.com/acme/image", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.repoRef, func(t *testing.T) {
+			repo, err := newRepository(tc.repoRef)
+			if err != nil {
+				t.Fatalf("newRepository: %v", err)
+			}
+			if repo.PlainHTTP != tc.want {
+				t.Fatalf("PlainHTTP = %v, want %v", repo.PlainHTTP, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuilderPullsFromPrivateRegistryUsingCredentialConfig(t *testing.T) {
+	if os.Getenv("MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E") != "1" {
+		t.Skip("set MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E=1 to run private registry rootfs E2E")
+	}
+	mke2fsPath, err := exec.LookPath("mke2fs")
+	if err != nil {
+		t.Fatalf("mke2fs is required for private registry rootfs E2E: %v", err)
+	}
+
+	registry := newPrivateRegistryFixture(t)
+	defer registry.close()
+	writeRegistryCredentialConfig(t, registry.host, "microagent-user", "microagent-pass")
+
+	dir := t.TempDir()
+	provenance, err := NewBuilder().Build(context.Background(), BuildRequest{
+		ImageRef:     registry.ref,
+		Platform:     Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath:   filepath.Join(dir, "rootfs.ext4"),
+		StateDir:     filepath.Join(dir, "state"),
+		Mke2fsPath:   mke2fsPath,
+		SizeMiB:      64,
+		AllowMutable: true,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rootfs.ext4")); err != nil {
+		t.Fatalf("rootfs output: %v", err)
+	}
+	wantResolved := registry.host + "/microagent/private@" + registry.manifestDigest.String()
+	if provenance.ResolvedRef != wantResolved {
+		t.Fatalf("ResolvedRef = %q, want %q", provenance.ResolvedRef, wantResolved)
+	}
+	if !registry.sawAuthorizedPath("/v2/microagent/private/manifests/latest") ||
+		!registry.sawAuthorizedPath("/v2/microagent/private/blobs/"+registry.configDigest.String()) ||
+		!registry.sawAuthorizedPath("/v2/microagent/private/blobs/"+registry.layerDigest.String()) {
+		t.Fatalf("registry did not see authorized manifest/config/layer fetches: %#v", registry.authorizedPaths())
+	}
+}
+
+func TestBuilderRejectsPrivateRegistryWithoutCredentials(t *testing.T) {
+	if os.Getenv("MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E") != "1" {
+		t.Skip("set MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E=1 to run private registry rootfs E2E")
+	}
+	registry := newPrivateRegistryFixture(t)
+	defer registry.close()
+	t.Setenv("DOCKER_CONFIG", t.TempDir())
+
+	dir := t.TempDir()
+	_, err := NewBuilder().Build(context.Background(), BuildRequest{
+		ImageRef:     registry.ref,
+		Platform:     Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath:   filepath.Join(dir, "rootfs.ext4"),
+		StateDir:     filepath.Join(dir, "state"),
+		SizeMiB:      64,
+		AllowMutable: true,
+	})
+	if err == nil {
+		t.Fatal("Build succeeded without registry credentials")
+	}
+	if !strings.Contains(err.Error(), "fetch OCI image") {
+		t.Fatalf("Build error = %v, want OCI fetch failure", err)
+	}
+	if registry.sawAuthorizedPath("/v2/microagent/private/manifests/latest") {
+		t.Fatalf("registry saw authorized manifest fetch without credentials")
+	}
+}
+
+type privateRegistryFixture struct {
+	server         *httptest.Server
+	host           string
+	ref            string
+	manifestDigest digest.Digest
+	configDigest   digest.Digest
+	layerDigest    digest.Digest
+
+	mu         sync.Mutex
+	authorized map[string]int
+}
+
+func newPrivateRegistryFixture(t *testing.T) *privateRegistryFixture {
+	t.Helper()
+	layerBytes := testTarLayer(t, "etc/microagent-auth-e2e.txt", "registry-auth-ok\n")
+	layerDigest := digest.FromBytes(layerBytes)
+	configBytes := mustJSON(t, map[string]any{
+		"architecture": "amd64",
+		"os":           "linux",
+		"rootfs": map[string]any{
+			"type":     "layers",
+			"diff_ids": []string{layerDigest.String()},
+		},
+		"config": map[string]any{
+			"Env":        []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},
+			"Entrypoint": []string{"/bin/sh"},
+			"Cmd":        []string{"-c", "cat /etc/microagent-auth-e2e.txt"},
+		},
+	})
+	configDigest := digest.FromBytes(configBytes)
+	manifestBytes := mustJSON(t, ocispec.Manifest{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: ocispec.MediaTypeImageManifest,
+		Config: ocispec.Descriptor{
+			MediaType: ocispec.MediaTypeImageConfig,
+			Digest:    configDigest,
+			Size:      int64(len(configBytes)),
+		},
+		Layers: []ocispec.Descriptor{{
+			MediaType: ocispec.MediaTypeImageLayer,
+			Digest:    layerDigest,
+			Size:      int64(len(layerBytes)),
+		}},
+	})
+	manifestDigest := digest.FromBytes(manifestBytes)
+
+	fixture := &privateRegistryFixture{
+		manifestDigest: manifestDigest,
+		configDigest:   configDigest,
+		layerDigest:    layerDigest,
+		authorized:     map[string]int{},
+	}
+	blobs := map[string][]byte{
+		configDigest.String(): configBytes,
+		layerDigest.String():  layerBytes,
+	}
+	fixture.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !fixture.authorize(w, r) {
+			return
+		}
+		switch {
+		case r.URL.Path == "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/v2/microagent/private/manifests/latest":
+			w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+			w.Header().Set("Docker-Content-Digest", manifestDigest.String())
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(manifestBytes)))
+			if r.Method != http.MethodHead {
+				_, _ = w.Write(manifestBytes)
+			}
+		case strings.HasPrefix(r.URL.Path, "/v2/microagent/private/blobs/"):
+			dgst := strings.TrimPrefix(r.URL.Path, "/v2/microagent/private/blobs/")
+			data, ok := blobs[dgst]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Docker-Content-Digest", dgst)
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+			if r.Method != http.MethodHead {
+				_, _ = w.Write(data)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	fixture.host = strings.TrimPrefix(fixture.server.URL, "http://")
+	fixture.ref = fixture.host + "/microagent/private:latest"
+	return fixture
+}
+
+func (f *privateRegistryFixture) authorize(w http.ResponseWriter, r *http.Request) bool {
+	user, pass, ok := r.BasicAuth()
+	if ok && user == "microagent-user" && pass == "microagent-pass" {
+		f.mu.Lock()
+		f.authorized[r.URL.Path]++
+		f.mu.Unlock()
+		return true
+	}
+	w.Header().Set("WWW-Authenticate", `Basic realm="microagent private registry"`)
+	http.Error(w, "authentication required", http.StatusUnauthorized)
+	return false
+}
+
+func (f *privateRegistryFixture) sawAuthorizedPath(path string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.authorized[path] > 0
+}
+
+func (f *privateRegistryFixture) authorizedPaths() map[string]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	paths := map[string]int{}
+	for path, count := range f.authorized {
+		paths[path] = count
+	}
+	return paths
+}
+
+func (f *privateRegistryFixture) close() {
+	f.server.Close()
+}
+
+func writeRegistryCredentialConfig(t *testing.T, host, username, password string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("DOCKER_CONFIG", dir)
+	encoded := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	configJSON := `{"auths":{"` + host + `":{"auth":"` + encoded + `"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testTarLayer(t *testing.T, name, content string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	header := &tar.Header{
+		Name: name,
+		Mode: 0o644,
+		Size: int64(len(content)),
+	}
+	if err := tw.WriteHeader(header); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(tw, content); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func mustJSON(t *testing.T, value any) []byte {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestWriteDeclaredFilesCopiesSourceIntoStage(t *testing.T) {

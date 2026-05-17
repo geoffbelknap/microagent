@@ -31,6 +31,7 @@ Run the cheap checks before opening a PR:
 go test ./...
 go vet ./...
 python3 scripts/dev/markdown-link-check.py
+python3 scripts/dev/docs-parity.py
 ```
 
 For code that changes shared runtime behavior, also run:
@@ -50,7 +51,7 @@ make smoke-rootfs
 The hosted CI workflow runs the portable microagent E2E scenarios:
 
 ```bash
-scripts/dev/microagent-e2e.sh help-usage text-output
+scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output
 ```
 
 The full suite is gated by `.github/workflows/live-linux-parity.yaml` on a
@@ -59,6 +60,12 @@ self-hosted Linux runner labeled `linux`, `x64`, and `kvm`:
 ```bash
 scripts/dev/microagent-e2e.sh
 ```
+
+List scenarios with `scripts/dev/microagent-e2e.sh --list`. Before fresh live
+runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to check for preserved
+temporary state from failed tests; pass `--yes` only when the candidates are
+safe to delete. Successful E2E scenarios are expected to remove their own
+temporary state.
 
 Live Firecracker tests must run outside sandboxed environments on Linux hosts
 with KVM, `/dev/vhost-vsock`, Firecracker on `PATH` or `MICROAGENT_FIRECRACKER`,

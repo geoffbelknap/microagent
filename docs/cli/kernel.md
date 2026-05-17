@@ -8,9 +8,9 @@ microagent kernel install [--url <url>] [--from <path>] [--sha256 <sum>] [--out 
 microagent kernel verify  --path <path> --sha256 <sum>
 ```
 
-Most users can stick with `microagent run --image ...` and let `microagent`
-download the default kernel automatically. `microagent kernel` is the manual
-escape hatch.
+Most users can stick with `microagent run IMAGE [COMMAND ARG...]` and let
+`microagent` download the default kernel automatically. `microagent kernel` is
+the manual escape hatch.
 
 ## `install`
 
@@ -24,6 +24,7 @@ architecture.
 | `--sha256 <sum>` | Expected SHA-256 |
 | `--out <path>` | Output path (defaults to the writable kernel path for the host) |
 | `--arch <arch>` | Guest architecture |
+| `--backend <name>` | Backend identity override |
 
 ## `verify`
 
@@ -33,6 +34,8 @@ Verify a kernel file matches an expected SHA-256.
 |---|---|
 | `--path <path>` | Kernel path |
 | `--sha256 <sum>` | Expected SHA-256 |
+| `--arch <arch>` | Guest architecture |
+| `--backend <name>` | Backend identity override |
 
 ## Examples
 
