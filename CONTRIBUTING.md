@@ -55,8 +55,19 @@ The hosted CI workflow runs the portable microagent E2E scenarios:
 scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output
 ```
 
-The full suite is gated by `.github/workflows/live-linux-parity.yaml` on a
-self-hosted Linux runner labeled `linux`, `x64`, and `kvm`:
+Live backend validation is split by host capability:
+
+- Hosted CI is the portable gate. It should not assume KVM, Hyper-V, or Apple
+  Virtualization.framework access.
+- Linux release parity is gated by `.github/workflows/live-linux-parity.yaml`
+  on a self-hosted runner labeled `linux`, `x64`, and `kvm`.
+- macOS Apple VF parity is a local/mac-agent lane unless a self-hosted Apple
+  silicon runner is explicitly available. Hosted macOS runners are not treated
+  as the release source of truth for Virtualization.framework behavior.
+- Windows Hyper-V remains experimental and gated by its own self-hosted
+  Windows runner when available.
+
+Run the live Linux lane on the self-hosted KVM runner:
 
 ```bash
 scripts/dev/microagent-e2e.sh
@@ -86,6 +97,14 @@ scripts/dev/microagent-e2e.sh \
   applevf-publish \
   applevf-vsock-diagnostic
 ```
+
+Before release, the Apple VF lane must pass boot, substrate/lifecycle,
+connect/logs/ps, NAT/user/isolated networking, TCP publish, mediation/vsock,
+quarantine cleanup, results, and artifact retrieval on an Apple silicon host.
+`applevf-direct-console` is a smoke-only direct-supervisor check. Bridged mode
+is release-relevant only on hosts with Apple's restricted
+`com.apple.vm.networking` entitlement; public ad-hoc builds should instead
+prove the fail-closed entitlement error.
 
 ## Pull Requests
 
