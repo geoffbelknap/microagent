@@ -16,7 +16,8 @@ SCENARIOS=(
   "transport:scripts/dev/microagent-e2e-transport.sh:all"
   "mediation:scripts/dev/microagent-e2e-transport.sh:manual-all"
   "mediation-linux:scripts/dev/microagent-e2e-mediation.sh:manual-linux"
-  "supervision:scripts/dev/microagent-e2e-supervision.sh:linux"
+  "supervision:scripts/dev/microagent-e2e-supervision-contract.sh:all"
+  "supervision-linux:scripts/dev/microagent-e2e-supervision.sh:manual-linux"
   "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin"
   "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin"
   "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin"
@@ -57,7 +58,8 @@ Scenarios:
   transport          Backend-agnostic mediation/vsock transport scenario
   mediation          Alias for transport
   mediation-linux    Legacy direct Linux Firecracker mediation scenario
-  supervision        restart policy behavior for never/always
+  supervision        Backend-agnostic restart supervision scenario
+  supervision-linux  Legacy direct Linux Firecracker supervision scenario
   applevf-boot       Apple VF run boot smoke for a BusyBox workload
   applevf-direct-console
                     Apple VF direct supervisor console input smoke

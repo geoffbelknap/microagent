@@ -828,7 +828,12 @@ final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
     }
 
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
-        updateRuntime(identity: identity, config: config, state: .stopped, error: nil)
+        let result = try? readRuntimeResult(identity: identity, stateDir: config.stateDir)
+        if let result, result.exitCode != 0 {
+            updateRuntime(identity: identity, config: config, state: .failed, error: result.error ?? "guest exited with status \(result.exitCode)")
+        } else {
+            updateRuntime(identity: identity, config: config, state: .stopped, error: nil)
+        }
         CFRunLoopStop(CFRunLoopGetMain())
     }
 

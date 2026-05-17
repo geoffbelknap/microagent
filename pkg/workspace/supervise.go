@@ -85,13 +85,15 @@ func WaitForSupervised(ctx context.Context, opts Options, interval time.Duration
 		resp, err := Inspect(ctx, opts)
 		if err != nil {
 			if resp.Event != nil {
+				if isSupervisedTerminalState(resp.Event.State) {
+					return resp.Event.State, nil
+				}
 				return resp.Event.State, err
 			}
 			return vmkit.StateUnknown, err
 		}
 		if resp.Event != nil {
-			switch resp.Event.State {
-			case vmkit.StateHalted, vmkit.StateQuarantined, vmkit.StateStopped, vmkit.StateFailed:
+			if isSupervisedTerminalState(resp.Event.State) {
 				return resp.Event.State, nil
 			}
 		}
@@ -100,6 +102,15 @@ func WaitForSupervised(ctx context.Context, opts Options, interval time.Duration
 			return vmkit.StateUnknown, ctx.Err()
 		case <-time.After(interval):
 		}
+	}
+}
+
+func isSupervisedTerminalState(state vmkit.VMState) bool {
+	switch state {
+	case vmkit.StateHalted, vmkit.StateQuarantined, vmkit.StateStopped, vmkit.StateFailed:
+		return true
+	default:
+		return false
 	}
 }
 
