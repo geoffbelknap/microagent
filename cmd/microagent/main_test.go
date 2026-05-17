@@ -1360,6 +1360,47 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsAcceptsSafeDockerStyleVolumes(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"-v", "/tmp/config.tar:/config:ro",
+		"--volume", "/tmp/workspace.ext4:/workspace",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if len(opts.Disks) != 2 {
+		t.Fatalf("Disks len = %d, want 2", len(opts.Disks))
+	}
+	if opts.Disks[0].Name != "config" || opts.Disks[0].Path != "/tmp/config.tar" || opts.Disks[0].Mountpoint != "/config" || opts.Disks[0].Mode != "ro" || !opts.Disks[0].Bundle {
+		t.Fatalf("bundle volume = %#v", opts.Disks[0])
+	}
+	if opts.Disks[1].Name != "workspace" || opts.Disks[1].Path != "/tmp/workspace.ext4" || opts.Disks[1].Mountpoint != "/workspace" || opts.Disks[1].Mode != "rw" || opts.Disks[1].Bundle {
+		t.Fatalf("disk volume = %#v", opts.Disks[1])
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsHostBindMountVolume(t *testing.T) {
+	dir := t.TempDir()
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"-v", dir + ":/workspace:rw",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not expose host bind mounts") {
+		t.Fatalf("err = %v, want host bind mount rejection", err)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsUnsupportedDockerStyleVolume(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--volume", "cache:/cache:rw",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not Docker named volumes or host bind mounts") {
+		t.Fatalf("err = %v, want unsupported volume rejection", err)
+	}
+}
+
 func TestParseWorkspaceOptionsAcceptsMediation(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",

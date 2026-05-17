@@ -978,7 +978,7 @@ tar -C "$STATE_DIR/bundle-src" -cf "$STATE_DIR/bundle.tar" .
   --state-dir "$STATE_DIR" \
   --network isolated \
   --size-mib 96 \
-  --bundle "data=$STATE_DIR/bundle.tar:/data:rw" \
+  -v "$STATE_DIR/bundle.tar:/data:rw" \
   --output disk-report=/data/report.txt \
   --output missing-report=/data/missing.txt >"$STATE_DIR/create-bundle.json"
 assert_json "$STATE_DIR/create-bundle.json" "any(disk.get('name') == 'data' and disk.get('bundle') for disk in data.get('disks', []))"

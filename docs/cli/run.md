@@ -22,8 +22,10 @@ VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
 | `--shell <path>` | Interactive console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |
+| `-e KEY=VALUE` | Alias for `--env` |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
+| `-v, --volume SRC:DST[:ro\|rw]` | Docker-style safe volume alias for tar bundles and ext4 disk images |
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
 | `--kernel <path>` | Custom kernel path |
@@ -36,6 +38,7 @@ VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
 | `--size-mib <MiB>` | Rootfs disk size |
 | `--timeout <seconds>` | Maximum wall-clock time before kill |
 | `--keep` | Keep state after the command exits |
+| `--rm` | Explicit disposable-run behavior. This is the default unless `--keep` is set |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
@@ -48,10 +51,24 @@ VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
 Run a single command:
 
 ```bash
-microagent run \
-  --image docker.io/library/ubuntu:24.04 \
-  --exec "uname -a"
+microagent run docker.io/library/ubuntu:24.04 uname -a
 ```
+
+Docker-style `-v` is intentionally narrower than Docker or Podman bind mounts.
+MicroAgent accepts tar archives as bundles and ext4 disk images as attached
+disks:
+
+```bash
+microagent run \
+  -v /tmp/config.tar:/config:ro \
+  -v /tmp/workspace.ext4:/workspace:rw \
+  docker.io/library/ubuntu:24.04 \
+  ls /config /workspace
+```
+
+Host directory bind mounts and Docker named volumes are not exposed. Package a
+directory as a tar archive for ingress, attach an ext4 disk, use `microagent cp`
+with a stopped workspace, and declare `--output` paths for egress.
 
 Run with a named resource profile:
 

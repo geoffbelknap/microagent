@@ -25,8 +25,10 @@ first.
 | `--shell <path>` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
 | `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
 | `--env KEY=VALUE` | Guest environment variable. Repeatable |
+| `-e KEY=VALUE` | Alias for `--env` |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
+| `-v, --volume SRC:DST[:ro\|rw]` | Docker-style safe volume alias for tar bundles and ext4 disk images |
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory |
@@ -154,6 +156,21 @@ microagent create \
   --image docker.io/library/ubuntu:24.04 \
   --bundle config=/tmp/config.tar:/config:ro
 ```
+
+Docker-style `-v` is supported for the same safe storage forms:
+
+```bash
+microagent create \
+  --name research \
+  --image docker.io/library/ubuntu:24.04 \
+  -v /tmp/config.tar:/config:ro \
+  -v /tmp/workspace.ext4:/workspace:rw
+```
+
+This does not expose host directory bind mounts or Docker named volumes. Use a
+tar archive for one-time ingress, an ext4 image for an attached disk,
+`microagent cp` for stopped-workspace file transfer, and declared `--output`
+paths for egress.
 
 Lower-level form using an existing rootfs:
 

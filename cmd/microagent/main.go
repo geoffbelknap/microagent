@@ -2186,6 +2186,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
 	fs.Var(&bundleFlags, "bundle", "Build and attach bundle name=tar:/mount:ro|rw")
+	var volumeFlags multiFlag
+	fs.Var(&volumeFlags, "volume", "Attach a safe Docker-style volume SRC:DST[:ro|rw]")
+	fs.Var(&volumeFlags, "v", "Attach a safe Docker-style volume SRC:DST[:ro|rw]")
 	var outputFlags multiFlag
 	fs.Var(&outputFlags, "output", "Declare output artifact name=/guest/path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
@@ -2242,6 +2245,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.Env = mergeEnv(opts.Env, env)
+	volumes, err := parseWorkspaceVolumes(volumeFlags)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
 	disks, err := parseWorkspaceDisks(diskFlags, false)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -2250,6 +2257,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err != nil {
 		return workspaceOptions{}, err
 	}
+	opts.Disks = append(opts.Disks, volumes...)
 	opts.Disks = append(opts.Disks, disks...)
 	opts.Disks = append(opts.Disks, bundles...)
 	outputs, err := parseWorkspaceOutputs(outputFlags)
@@ -5342,7 +5350,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if hasFlagValue(args, "image") || hasPositionalWorkspaceName(args) {
 		return true
 	}
-	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "setup-file") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "output")
+	return hasFlagValue(args, "file") || hasFlagValue(args, "name") || hasFlagValue(args, "id") || hasFlagValue(args, "setup") || hasFlagValue(args, "setup-file") || hasFlagValue(args, "entrypoint") || hasFlagValue(args, "shell") || hasFlagValue(args, "hostname") || hasFlagValue(args, "env") || hasFlagValue(args, "e") || hasFlagValue(args, "disk") || hasFlagValue(args, "bundle") || hasFlagValue(args, "volume") || hasFlagValue(args, "v") || hasFlagValue(args, "output")
 }
 
 func hasLowLevelCreateFlag(args []string) bool {
@@ -5886,6 +5894,8 @@ func reorderFlagArgs(args []string) []string {
 		"-rootfs":            true,
 		"-disk":              true,
 		"-bundle":            true,
+		"-volume":            true,
+		"-v":                 true,
 		"-output":            true,
 		"-debugfs":           true,
 		"-profile":           true,
@@ -6154,6 +6164,87 @@ func parseWorkspaceDisk(raw string, bundle bool) (workspaceDisk, error) {
 	}, nil
 }
 
+func parseWorkspaceVolumes(values []string) ([]workspaceDisk, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	disks := make([]workspaceDisk, 0, len(values))
+	for _, raw := range values {
+		disk, err := parseWorkspaceVolume(raw)
+		if err != nil {
+			return nil, err
+		}
+		disks = append(disks, disk)
+	}
+	return disks, nil
+}
+
+func parseWorkspaceVolume(raw string) (workspaceDisk, error) {
+	parts := strings.Split(raw, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return workspaceDisk{}, fmt.Errorf("volume must be SRC:DST[:ro|rw]")
+	}
+	sourcePath := strings.TrimSpace(parts[0])
+	mountpoint := strings.TrimSpace(parts[1])
+	mode := "rw"
+	if len(parts) == 3 {
+		mode = strings.TrimSpace(parts[2])
+	}
+	if sourcePath == "" {
+		return workspaceDisk{}, fmt.Errorf("volume source path is required")
+	}
+	if mountpoint == "" || !strings.HasPrefix(mountpoint, "/") {
+		return workspaceDisk{}, fmt.Errorf("volume destination must be an absolute guest path")
+	}
+	if mode != "ro" && mode != "rw" {
+		return workspaceDisk{}, fmt.Errorf("volume mode must be ro or rw")
+	}
+	if info, err := os.Stat(sourcePath); err == nil && info.IsDir() {
+		return workspaceDisk{}, fmt.Errorf("MicroAgent does not expose host bind mounts yet; use --bundle with a tar archive, --disk with an ext4 image, or copy files with microagent cp")
+	}
+	name, err := volumeDiskName(mountpoint)
+	if err != nil {
+		return workspaceDisk{}, err
+	}
+	lower := strings.ToLower(sourcePath)
+	switch {
+	case strings.HasSuffix(lower, ".tar") || strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz"):
+		return workspaceDisk{
+			Name:       name,
+			SourcePath: sourcePath,
+			Path:       sourcePath,
+			Mountpoint: mountpoint,
+			Mode:       mode,
+			Bundle:     true,
+		}, nil
+	case strings.HasSuffix(lower, ".ext4") || strings.HasSuffix(lower, ".img"):
+		return workspaceDisk{
+			Name:       name,
+			SourcePath: sourcePath,
+			Path:       sourcePath,
+			Mountpoint: mountpoint,
+			Mode:       mode,
+			Bundle:     false,
+		}, nil
+	default:
+		return workspaceDisk{}, fmt.Errorf("unsupported volume source %q; MicroAgent accepts tar archives as bundles or ext4 disk images, not Docker named volumes or host bind mounts", sourcePath)
+	}
+}
+
+func volumeDiskName(mountpoint string) (string, error) {
+	name := path.Base(path.Clean(mountpoint))
+	if name == "." || name == "/" {
+		return "", fmt.Errorf("volume destination must include a mount directory name")
+	}
+	if name == "rootfs" {
+		return "", fmt.Errorf("disk name rootfs is reserved")
+	}
+	if err := validateSafeBasename("volume-derived disk name", name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
 func newRequestID() string {
 	return fmt.Sprintf("req-%d", time.Now().UnixNano())
 }
@@ -6324,6 +6415,9 @@ Options:
   -e KEY=VALUE          Guest environment variable
   -disk n=p:/m:ro|rw    Attach an ext4 disk
   -bundle n=p:/m:ro|rw  Build a disk from a tar bundle
+  -v SRC:DST[:ro|rw]    Attach a safe tar/ext4 volume
+  -volume SRC:DST[:ro|rw]
+                         Attach a safe tar/ext4 volume
   -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
   -name <name>          Workspace name; generated when omitted

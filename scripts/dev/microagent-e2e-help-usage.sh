@@ -89,6 +89,7 @@ assert_stdout_contains run-help "Run a command from an image" "$CLI" run --help
 assert_stdout_contains run-help-env-alias "-e KEY=VALUE" "$CLI" run --help
 assert_stdout_contains run-help-publish-alias "-p host:guest" "$CLI" run --help
 assert_stdout_contains run-help-rm-alias "-rm" "$CLI" run --help
+assert_stdout_contains run-help-volume-alias "-v SRC:DST" "$CLI" run --help
 assert_stdout_contains perf-help "Measure workspace performance" "$CLI" perf --help
 assert_stdout_contains kernel-help "Advanced kernel commands" "$CLI" kernel --help
 assert_stdout_contains rootfs-help "Build a rootfs from an OCI image" "$CLI" rootfs --help
@@ -103,6 +104,8 @@ expect_failure_contains linux-network-setup-unknown "unknown option: --definitel
 expect_failure_contains run-missing-image "run requires --image" "$CLI" run --name missing-image --state-dir "$STATE_DIR"
 expect_failure_contains run-exec-positional-conflict "both --exec and positional command" "$CLI" run --image example.com/acme/image:latest --exec true echo --state-dir "$STATE_DIR"
 expect_failure_contains run-rm-keep-conflict "both --rm and --keep" "$CLI" run --rm --keep example.com/acme/image:latest true --state-dir "$STATE_DIR"
+mkdir -p "$STATE_DIR/host-bind"
+expect_failure_contains run-volume-bind-reject "does not expose host bind mounts" "$CLI" run -v "$STATE_DIR/host-bind:/workspace:rw" example.com/acme/image:latest true --state-dir "$STATE_DIR"
 expect_failure_contains cp-usage "usage: microagent cp" "$CLI" cp only-one-arg --state-dir "$STATE_DIR"
 expect_failure_contains artifacts-usage "usage: microagent artifacts get" "$CLI" artifacts get only two --state-dir "$STATE_DIR"
 expect_failure_contains images-rm-usage "usage: microagent images rm" "$CLI" images rm --state-dir "$STATE_DIR"
