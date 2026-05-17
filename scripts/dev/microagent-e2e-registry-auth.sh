@@ -32,7 +32,7 @@ export MICROAGENT_ROOTFS_BASE_CACHE_DIR=
 (
   cd "$ROOT"
   go test ./pkg/rootfs \
-    -run 'TestBuilder(PullsFromPrivateRegistryUsingDockerConfig|RejectsPrivateRegistryWithoutDockerCredentials)$' \
+    -run 'TestBuilder(PullsFromPrivateRegistryUsingCredentialConfig|RejectsPrivateRegistryWithoutCredentials)$' \
     -count=1
 )
 

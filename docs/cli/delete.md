@@ -15,8 +15,8 @@ By default, `delete` asks for confirmation. If the workspace is running, it
 asks whether to stop and delete it. Use `--yes` for non-interactive cleanup.
 Use `--force` to kill a running workspace before deleting it.
 
-`rm` is a Docker-compatible alias for `delete`; `-f`/`--force` and
-`-y`/`--yes` have the same behavior.
+`rm` is a familiar alias for `delete`; `-f`/`--force` and `-y`/`--yes` have
+the same behavior.
 
 ## Flags
 

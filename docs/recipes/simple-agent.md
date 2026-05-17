@@ -7,7 +7,7 @@ This recipe builds an agent: a Linux microVM running a body that calls Claude wi
 
 *New here? Start with [run your first agent](/getting-started/cli/first-agent/) for the quickstart version. This recipe goes deeper on the body, prompt caching, and production-shape gaps.*
 
-The workspace is fully described by [`examples/minimal-body/microagent.yaml`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/microagent.yaml). One spec file, one `microagent create` call — no Docker, no separate build step.
+The workspace is fully described by [`examples/minimal-body/microagent.yaml`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/microagent.yaml). One spec file, one `microagent create` call, no separate build step.
 
 ## What you'll need
 

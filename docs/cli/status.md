@@ -13,8 +13,8 @@ microagent inspect <name> [--state-dir <dir>]
 identity, state (`prepared`, `running`, `halted`, `quarantined`, `stopped`, `failed`), and
 backend.
 
-`inspect` is a Docker-compatible alias for `status` that defaults to structured
-JSON output.
+`inspect` is a familiar alias for `status` that defaults to structured JSON
+output.
 
 With the global `--json` flag, named workspaces also include a `verification` block. It reports
 the recorded OCI image reference/digest and current SHA-256 values for the

@@ -1403,7 +1403,7 @@ func TestParseWorkspaceOptionsAcceptsDiskAndBundle(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceOptionsAcceptsSafeDockerStyleVolumes(t *testing.T) {
+func TestParseWorkspaceOptionsAcceptsSafeContainerStyleVolumes(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
 		"-v", "/tmp/config.tar:/config:ro",
@@ -1434,17 +1434,17 @@ func TestParseWorkspaceOptionsRejectsHostBindMountVolume(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceOptionsRejectsUnsupportedDockerStyleVolume(t *testing.T) {
+func TestParseWorkspaceOptionsRejectsUnsupportedContainerStyleVolume(t *testing.T) {
 	_, err := parseWorkspaceOptions("create", []string{
 		"research",
 		"--volume", "cache:/cache:rw",
 	})
-	if err == nil || !strings.Contains(err.Error(), "not Docker named volumes or host bind mounts") {
+	if err == nil || !strings.Contains(err.Error(), "not named volumes or host bind mounts") {
 		t.Fatalf("err = %v, want unsupported volume rejection", err)
 	}
 }
 
-func TestParseWorkspaceOptionsRejectsUnsupportedDockerCompatibilityFlags(t *testing.T) {
+func TestParseWorkspaceOptionsRejectsUnsupportedContainerCompatibilityFlags(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
@@ -1458,7 +1458,7 @@ func TestParseWorkspaceOptionsRejectsUnsupportedDockerCompatibilityFlags(t *test
 		{
 			name: "pod",
 			args: []string{"--pod", "new:demo", "docker.io/library/busybox:1.36", "true"},
-			want: "does not implement Docker/Podman pods",
+			want: "does not implement pods",
 		},
 		{
 			name: "bind mount",
@@ -3388,7 +3388,7 @@ func TestParseWorkspaceOptionsUsesHostSupervisorDefault(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceOptionsAcceptsDockerStyleRunCommand(t *testing.T) {
+func TestParseWorkspaceOptionsAcceptsContainerStyleRunCommand(t *testing.T) {
 	opts, err := parseWorkspaceOptions("run", []string{
 		"docker.io/library/busybox:1.36",
 		"echo",
@@ -3437,7 +3437,7 @@ func TestParseWorkspaceOptionsRunPositionalCommandConflictsWithExec(t *testing.T
 	}
 }
 
-func TestParseWorkspaceOptionsAcceptsDockerStyleRunAliases(t *testing.T) {
+func TestParseWorkspaceOptionsAcceptsContainerStyleRunAliases(t *testing.T) {
 	opts, err := parseWorkspaceOptions("run", []string{
 		"-e", "GREETING=hello",
 		"-p", "127.0.0.1:18080:8080/tcp",

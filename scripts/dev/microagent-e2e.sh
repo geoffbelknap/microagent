@@ -29,7 +29,7 @@ Scenarios:
   contract          Runtime contract JSON and synthetic state/result/artifact
                     compatibility checks
   help-usage        CLI help output and invalid invocation usage errors
-  registry-auth     Docker-compatible registry credential discovery against a
+  registry-auth     Standard registry credential discovery against a
                     local private OCI registry
   text-output       Human/text output mode for stable public CLI surfaces
   public-surface     CLI contract, host/doctor, kernel/rootfs, run/result,

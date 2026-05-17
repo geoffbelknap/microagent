@@ -28,7 +28,7 @@ first.
 | `-e KEY=VALUE` | Alias for `--env` |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
-| `-v, --volume SRC:DST[:ro\|rw]` | Docker-style safe volume alias for tar bundles and ext4 disk images |
+| `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory |
@@ -157,7 +157,7 @@ microagent create \
   --bundle config=/tmp/config.tar:/config:ro
 ```
 
-Docker-style `-v` is supported for the same safe storage forms:
+Container-style `-v` is supported for the same safe storage forms:
 
 ```bash
 microagent create \
@@ -167,7 +167,7 @@ microagent create \
   -v /tmp/workspace.ext4:/workspace:rw
 ```
 
-This does not expose host directory bind mounts or Docker named volumes. Use a
+This does not expose host directory bind mounts or named volumes. Use a
 tar archive for one-time ingress, an ext4 image for an attached disk,
 `microagent cp` for stopped-workspace file transfer, and declared `--output`
 paths for egress.

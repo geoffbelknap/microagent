@@ -106,7 +106,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
 	if args[0] == "compose" {
-		return fmt.Errorf("Docker Compose compatibility is not supported; run one MicroAgent workspace at a time and keep orchestration outside microagent")
+		return fmt.Errorf("compose-style multi-workspace projects are not supported; run one MicroAgent workspace at a time and keep orchestration outside microagent")
 	}
 	if args[0] == "create" && wantsHelp(args[1:]) {
 		printCreateHelp(stdout)
@@ -2202,8 +2202,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var bundleFlags multiFlag
 	fs.Var(&bundleFlags, "bundle", "Build and attach bundle name=tar:/mount:ro|rw")
 	var volumeFlags multiFlag
-	fs.Var(&volumeFlags, "volume", "Attach a safe Docker-style volume SRC:DST[:ro|rw]")
-	fs.Var(&volumeFlags, "v", "Attach a safe Docker-style volume SRC:DST[:ro|rw]")
+	fs.Var(&volumeFlags, "volume", "Attach a safe container-style volume SRC:DST[:ro|rw]")
+	fs.Var(&volumeFlags, "v", "Attach a safe container-style volume SRC:DST[:ro|rw]")
 	var outputFlags multiFlag
 	fs.Var(&outputFlags, "output", "Declare output artifact name=/guest/path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
@@ -2235,7 +2235,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	rm := false
 	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
-	if err := rejectUnsupportedDockerCompatibilityFlags(args); err != nil {
+	if err := rejectUnsupportedContainerCompatibilityFlags(args); err != nil {
 		return workspaceOptions{}, err
 	}
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
@@ -2245,7 +2245,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		if command == "create" && fs.NArg() == 1 && opts.Name == "" {
 			opts.Name = fs.Arg(0)
 		} else if command == "run" {
-			if err := applyDockerRunArgs(&opts, fs.Args()); err != nil {
+			if err := applyContainerRunArgs(&opts, fs.Args()); err != nil {
 				return workspaceOptions{}, err
 			}
 		} else {
@@ -2365,7 +2365,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	return opts, nil
 }
 
-func applyDockerRunArgs(opts *workspaceOptions, args []string) error {
+func applyContainerRunArgs(opts *workspaceOptions, args []string) error {
 	if len(args) == 0 {
 		return nil
 	}
@@ -6245,7 +6245,7 @@ func parseWorkspaceVolume(raw string) (workspaceDisk, error) {
 			Bundle:     false,
 		}, nil
 	default:
-		return workspaceDisk{}, fmt.Errorf("unsupported volume source %q; MicroAgent accepts tar archives as bundles or ext4 disk images, not Docker named volumes or host bind mounts", sourcePath)
+		return workspaceDisk{}, fmt.Errorf("unsupported volume source %q; MicroAgent accepts tar archives as bundles or ext4 disk images, not named volumes or host bind mounts", sourcePath)
 	}
 }
 
@@ -6263,7 +6263,7 @@ func volumeDiskName(mountpoint string) (string, error) {
 	return name, nil
 }
 
-func rejectUnsupportedDockerCompatibilityFlags(args []string) error {
+func rejectUnsupportedContainerCompatibilityFlags(args []string) error {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		name, value, hasValue := splitFlagArg(arg)
@@ -6271,7 +6271,7 @@ func rejectUnsupportedDockerCompatibilityFlags(args []string) error {
 		case "--privileged", "-privileged":
 			return fmt.Errorf("--privileged is not supported; MicroAgent runs workloads inside a microVM boundary and does not expose privileged host/container mode")
 		case "--pod", "-pod", "--pod-id-file", "-pod-id-file":
-			return fmt.Errorf("%s is not supported; MicroAgent does not implement Docker/Podman pods, so run one workspace per microVM and keep orchestration outside microagent", name)
+			return fmt.Errorf("%s is not supported; MicroAgent does not implement pods, so run one workspace per microVM and keep orchestration outside microagent", name)
 		case "--mount", "-mount":
 			if !hasValue && i+1 < len(args) {
 				value = args[i+1]
@@ -6281,7 +6281,7 @@ func rejectUnsupportedDockerCompatibilityFlags(args []string) error {
 			}
 			return fmt.Errorf("--mount is not supported; use -v SRC:DST[:ro|rw] with a tar archive or ext4 image, --bundle, or --disk")
 		case "--cap-add", "-cap-add", "--cap-drop", "-cap-drop", "--security-opt", "-security-opt", "--device", "-device", "--pid", "-pid", "--ipc", "-ipc", "--userns", "-userns":
-			return fmt.Errorf("%s is not supported; MicroAgent exposes a microVM boundary rather than Docker namespace, capability, device, or security-opt controls", name)
+			return fmt.Errorf("%s is not supported; MicroAgent exposes a microVM boundary rather than namespace, capability, device, or security-opt controls", name)
 		}
 	}
 	return nil
@@ -6492,13 +6492,13 @@ Options:
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
 
-Docker-shaped examples:
+Container-style examples:
   microagent run alpine echo hello
   microagent run -e FOO=bar -p 8080:80 alpine
   microagent run -v /tmp/config.tar:/config:ro alpine ls /config
 
-Not Docker-compatible:
-  Docker API, Compose, pods, privileged mode, namespace flags, devices, and
+Not implemented:
+  container-engine APIs, compose projects, pods, privileged mode, namespace flags, devices, and
   host directory bind mounts are not exposed.
 `)
 }

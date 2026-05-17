@@ -25,7 +25,7 @@ VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
 | `-e KEY=VALUE` | Alias for `--env` |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
-| `-v, --volume SRC:DST[:ro\|rw]` | Docker-style safe volume alias for tar bundles and ext4 disk images |
+| `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
 | `--kernel <path>` | Custom kernel path |
@@ -54,9 +54,8 @@ Run a single command:
 microagent run docker.io/library/ubuntu:24.04 uname -a
 ```
 
-Docker-style `-v` is intentionally narrower than Docker or Podman bind mounts.
-MicroAgent accepts tar archives as bundles and ext4 disk images as attached
-disks:
+Container-style `-v` is intentionally narrow. MicroAgent accepts tar archives
+as bundles and ext4 disk images as attached disks:
 
 ```bash
 microagent run \
@@ -66,9 +65,9 @@ microagent run \
   ls /config /workspace
 ```
 
-Host directory bind mounts and Docker named volumes are not exposed. Package a
-directory as a tar archive for ingress, attach an ext4 disk, use `microagent cp`
-with a stopped workspace, and declare `--output` paths for egress.
+Host directory bind mounts and named volumes are not exposed. Package a directory
+as a tar archive for ingress, attach an ext4 disk, use `microagent cp` with a
+stopped workspace, and declare `--output` paths for egress.
 
 Run with a named resource profile:
 

@@ -146,7 +146,7 @@ func TestBuildGuestEnvIncludesImageEnvAndRequestOverrides(t *testing.T) {
 	}
 }
 
-func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
+func TestSplitRegistryReferenceNormalizesDefaultRegistryRefs(t *testing.T) {
 	tests := []struct {
 		name          string
 		raw           string
@@ -166,25 +166,25 @@ func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
 			wantReference: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 		{
-			name:          "docker hub namespace with tag",
+			name:          "default registry namespace with tag",
 			raw:           "homebridge/homebridge:latest",
 			wantRepoRef:   "docker.io/homebridge/homebridge",
 			wantReference: "latest",
 		},
 		{
-			name:          "docker hub namespace without tag",
+			name:          "default registry namespace without tag",
 			raw:           "homebridge/homebridge",
 			wantRepoRef:   "docker.io/homebridge/homebridge",
 			wantReference: "latest",
 		},
 		{
-			name:          "docker io official shorthand",
+			name:          "explicit default registry official shorthand",
 			raw:           "docker.io/ubuntu:24.04",
 			wantRepoRef:   "docker.io/library/ubuntu",
 			wantReference: "24.04",
 		},
 		{
-			name:          "explicit docker io namespace",
+			name:          "explicit default registry namespace",
 			raw:           "docker.io/homebridge/homebridge:latest",
 			wantRepoRef:   "docker.io/homebridge/homebridge",
 			wantReference: "latest",
@@ -216,7 +216,7 @@ func TestSplitRegistryReferenceNormalizesDockerHubRefs(t *testing.T) {
 	}
 }
 
-func TestNewRepositoryUsesDockerCredentialConfig(t *testing.T) {
+func TestNewRepositoryUsesRegistryCredentialConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DOCKER_CONFIG", dir)
 	encoded := base64.StdEncoding.EncodeToString([]byte("microagent-user:microagent-pass"))
@@ -241,7 +241,7 @@ func TestNewRepositoryUsesDockerCredentialConfig(t *testing.T) {
 	}
 }
 
-func TestNewRepositoryAllowsAnonymousPullWithoutDockerConfig(t *testing.T) {
+func TestNewRepositoryAllowsAnonymousPullWithoutCredentialConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DOCKER_CONFIG", dir)
 	repo, err := newRepository("example.com/acme/image")
@@ -284,7 +284,7 @@ func TestNewRepositoryUsesPlainHTTPOnlyForLoopbackRegistries(t *testing.T) {
 	}
 }
 
-func TestBuilderPullsFromPrivateRegistryUsingDockerConfig(t *testing.T) {
+func TestBuilderPullsFromPrivateRegistryUsingCredentialConfig(t *testing.T) {
 	if os.Getenv("MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E") != "1" {
 		t.Skip("set MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E=1 to run private registry rootfs E2E")
 	}
@@ -295,7 +295,7 @@ func TestBuilderPullsFromPrivateRegistryUsingDockerConfig(t *testing.T) {
 
 	registry := newPrivateRegistryFixture(t)
 	defer registry.close()
-	writeDockerConfig(t, registry.host, "microagent-user", "microagent-pass")
+	writeRegistryCredentialConfig(t, registry.host, "microagent-user", "microagent-pass")
 
 	dir := t.TempDir()
 	provenance, err := NewBuilder().Build(context.Background(), BuildRequest{
@@ -324,7 +324,7 @@ func TestBuilderPullsFromPrivateRegistryUsingDockerConfig(t *testing.T) {
 	}
 }
 
-func TestBuilderRejectsPrivateRegistryWithoutDockerCredentials(t *testing.T) {
+func TestBuilderRejectsPrivateRegistryWithoutCredentials(t *testing.T) {
 	if os.Getenv("MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E") != "1" {
 		t.Skip("set MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E=1 to run private registry rootfs E2E")
 	}
@@ -342,7 +342,7 @@ func TestBuilderRejectsPrivateRegistryWithoutDockerCredentials(t *testing.T) {
 		AllowMutable: true,
 	})
 	if err == nil {
-		t.Fatal("Build succeeded without Docker credentials")
+		t.Fatal("Build succeeded without registry credentials")
 	}
 	if !strings.Contains(err.Error(), "fetch OCI image") {
 		t.Fatalf("Build error = %v, want OCI fetch failure", err)
@@ -477,7 +477,7 @@ func (f *privateRegistryFixture) close() {
 	f.server.Close()
 }
 
-func writeDockerConfig(t *testing.T, host, username, password string) {
+func writeRegistryCredentialConfig(t *testing.T, host, username, password string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("DOCKER_CONFIG", dir)
