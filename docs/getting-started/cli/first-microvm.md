@@ -17,12 +17,12 @@ image, run one command inside it, and tear it down.
 
 ```bash
 microagent run \
-  --image docker.io/library/ubuntu:24.04 \
-  --exec "uname -a"
+  docker.io/library/ubuntu:24.04 uname -a
 ```
 
-`--image` is the OCI image microagent converts into the rootfs. `--exec` is
-the command to run inside the booted VM. The output looks something like:
+The first argument is the OCI image microagent converts into the rootfs. The
+remaining arguments are the command to run inside the booted VM. The output
+looks something like:
 
 ```text
 Linux microagent 6.1.0 #1 SMP ... x86_64 GNU/Linux
@@ -30,6 +30,15 @@ Linux microagent 6.1.0 #1 SMP ... x86_64 GNU/Linux
 
 The first run also downloads the default kernel for the host backend; later
 runs reuse it.
+
+The explicit shell-command form is still available:
+
+```bash
+microagent run --image docker.io/library/ubuntu:24.04 --exec "uname -a"
+```
+
+If you run an image without a command, microagent uses the image's
+Entrypoint/Cmd.
 
 ## What's next
 

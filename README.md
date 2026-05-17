@@ -19,10 +19,25 @@ This installs `microagent` and `microagent-supervisor`, a symlink to the correct
 ```bash
 microagent doctor                                # check the host
 
-microagent run \                                 # one-shot: boot, run, tear down
-  --image docker.io/library/ubuntu:24.04 \
-  --exec "uname -a"
+# one-shot: boot, run, tear down
+microagent run docker.io/library/ubuntu:24.04 uname -a
 ```
+
+`microagent run` also accepts the explicit form when you want shell command
+parsing:
+
+```bash
+microagent run --image docker.io/library/ubuntu:24.04 --exec "uname -a"
+```
+
+If you omit a command, microagent uses the image's Entrypoint/Cmd. Common
+container-style aliases are supported where they map cleanly to microVMs:
+`-e/--env`, `-p/--publish`, `-v/--volume` for tar/ext4 inputs, `--name`, and
+`--rm`.
+
+Private registry pulls use standard registry credential configuration from
+`$DOCKER_CONFIG/config.json` or `~/.docker/config.json`, including configured
+credential helpers.
 
 For workspaces that stick around — halt, resume, copy files in, attach a console:
 
@@ -47,6 +62,11 @@ The VM boundary. Kernel management, OCI-to-rootfs builds, VM lifecycle (`run`, `
 ## What it doesn't own
 
 Planning loops, LLM calls, tool mediation, policy decisions, credential brokering, audit interpretation. Other projects own those — `microagent` is the substrate they sit on.
+
+It also does not expose container-engine APIs, compose projects, pods,
+privileged mode, namespace/device controls, host directory bind mounts, or named
+volumes. MicroAgent accepts only the subset that maps cleanly to a microVM
+boundary.
 
 ## Docs
 

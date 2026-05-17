@@ -37,6 +37,7 @@ Non-interactive cleanup:
 
 ```bash
 microagent delete research --yes
+microagent rm research -y
 ```
 
 Force-delete a running workspace:

@@ -37,6 +37,20 @@ description: All microagent subcommands at a glance.
 | [`kernel`](/cli/kernel/) | Install or verify a custom kernel |
 | [`version`](/cli/version/) | Print the version |
 
+## Container-style convenience
+
+`microagent run` accepts both the explicit `--image IMAGE --exec "cmd"` form and
+the shorter `microagent run IMAGE [COMMAND ARG...]` form. For flags that map
+cleanly onto a microVM, common aliases are available: `-e` for `--env`, `-p` for
+`--publish`, `-v`/`--volume` for tar bundles and ext4 disk images, `--name`, and
+`--rm`.
+
+Features that do not map cleanly to a microVM boundary are not implemented:
+container-engine APIs, compose projects, pods, privileged mode, namespace flags,
+devices, host directory bind mounts, and named volumes. When those inputs are
+recognized, microagent returns targeted guidance rather than silently changing
+their meaning.
+
 ## Workspace spec
 
 [`microagent.yaml`](/cli/spec/) is the declarative form of `microagent create` — image, profile, restart policy, networking, mounts, mediation, and outputs in a single file you can keep in source control.
