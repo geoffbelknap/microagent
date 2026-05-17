@@ -4,7 +4,7 @@ description: One backend per host OS. Same lifecycle surface, different mechanic
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-12_
+_Last updated: 2026-05-17_
 
 microagent installs with one backend for the host OS: Firecracker on Linux,
 Apple VF on macOS, and experimental Windows Hyper-V on Windows. The CLI does
@@ -47,6 +47,60 @@ supervisor-shaped request/response boundary. Windows Hyper-V uses the same
   `--supervisor` or `MICROAGENT_APPLEVF_SUPERVISOR`.
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
+
+### Apple VF validation runbook
+
+Run Apple VF validation on Apple silicon macOS, not inside a Linux or KVM
+environment. The host needs Go, the Xcode command line tools with Swift,
+Virtualization.framework support, network access for OCI image pulls, and
+`e2fsprogs` tools (`mke2fs` and `debugfs`). Homebrew installs those tools under
+`/opt/homebrew/opt/e2fsprogs/sbin`, which the smoke scripts check
+automatically.
+
+Build and ad-hoc sign the supervisor before live runs:
+
+```bash
+scripts/dev/applevf-supervisor-build.sh
+```
+
+Install or verify the default Apple VF kernel if the host does not already have
+one at `~/.microagent/kernels/apple-vf/arm64/Image`:
+
+```bash
+go run ./cmd/microagent --json kernel install --backend apple-vf
+go run ./cmd/microagent --json doctor --backend apple-vf
+```
+
+Use the unified E2E runner for repeatable macOS validation:
+
+```bash
+scripts/dev/microagent-e2e.sh --list
+scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output
+scripts/dev/microagent-e2e.sh \
+  applevf-boot \
+  applevf-substrate \
+  applevf-workspace-connect \
+  applevf-network-mode \
+  applevf-publish \
+  applevf-vsock-diagnostic
+```
+
+Add `applevf-direct-console` when validating the direct supervisor console
+path. Use `--keep` or `MICROAGENT_E2E_KEEP=1` only when you need to preserve
+state directories for debugging; otherwise successful scenarios clean up their
+own temporary state. If the local Docker config names a missing credential
+helper, set `DOCKER_CONFIG` to an empty temporary directory for public-image
+validation rather than editing host login state.
+
+The Apple VF lane should cover portable CLI behavior, lifecycle/substrate,
+connect/logs/ps, NAT/user/isolated/publish networking, mediation and generic
+virtio-vsock behavior, quarantine cleanup, results, and artifacts. Bridged mode
+is entitlement-gated: open-source ad-hoc builds should fail closed with the
+`com.apple.vm.networking` restriction named unless the supervisor is signed
+with Apple's restricted entitlement.
+
+Keep one-off run logs and investigation notes out of `docs/`; update the
+Notion task or another tracker with run evidence instead.
 
 ## Windows Hyper-V (experimental)
 

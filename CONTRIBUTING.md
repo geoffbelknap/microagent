@@ -72,7 +72,20 @@ Live Firecracker tests must run outside sandboxed environments on Linux hosts
 with KVM, `/dev/vhost-vsock`, Firecracker on `PATH` or `MICROAGENT_FIRECRACKER`,
 and the network prerequisites documented by
 `scripts/dev/microagent-e2e-linux-network-setup.sh`. Apple VF tests must run on
-macOS with the supervisor built and signed as described in the docs.
+Apple silicon macOS with the supervisor built and signed as described in
+[Backends](docs/concepts/backends.md). The macOS lane is exposed through the
+same runner:
+
+```bash
+scripts/dev/applevf-supervisor-build.sh
+scripts/dev/microagent-e2e.sh \
+  applevf-boot \
+  applevf-substrate \
+  applevf-workspace-connect \
+  applevf-network-mode \
+  applevf-publish \
+  applevf-vsock-diagnostic
+```
 
 ## Pull Requests
 
