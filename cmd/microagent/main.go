@@ -1653,13 +1653,17 @@ func dialConnectShell(ctx context.Context, stateDir, name string, timeout time.D
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {
-		dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		conn, err := dialShellTarget(dialCtx, target)
-		cancel()
-		if err == nil {
-			return conn, nil
+		if target.Network == "tcp" && state.Config.ShellPort != 0 && !workspaceShellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
+			lastErr = fmt.Errorf("guest shell helper is not listening on port %d", state.Config.ShellPort)
+		} else {
+			dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			conn, err := dialShellTarget(dialCtx, target)
+			cancel()
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
 		}
-		lastErr = err
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, targetDescription(target), lastErr)
 		}
@@ -3483,7 +3487,7 @@ func workspaceShellReadinessFromRuntime(state workspaceRuntimeState) (vmkit.Read
 		}
 		return vmkit.ReadinessSignal{}, false
 	}
-	if state.Event.Identity.Backend == vmkit.BackendFirecracker && state.Config.ShellPort != 0 {
+	if state.Event.Identity.Backend != vmkit.BackendWindowsHyperV && state.Config.ShellPort != 0 {
 		if workspaceShellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
 			return vmkit.ReadinessSignal{
 				Ready:      true,

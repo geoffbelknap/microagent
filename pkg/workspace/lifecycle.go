@@ -1266,7 +1266,7 @@ func shellReadinessFromRuntime(state RuntimeState) (vmkit.ReadinessSignal, bool)
 		}
 		return vmkit.ReadinessSignal{}, false
 	}
-	if state.Event.Identity.Backend == vmkit.BackendFirecracker && state.Config.ShellPort != 0 {
+	if state.Event.Identity.Backend != vmkit.BackendWindowsHyperV && state.Config.ShellPort != 0 {
 		if shellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
 			return vmkit.ReadinessSignal{
 				Ready:      true,

@@ -170,41 +170,45 @@ func TestReadinessFromRuntimeReportsWindowsHyperVShell(t *testing.T) {
 	}
 }
 
-func TestReadinessFromRuntimeRequiresFirecrackerShellHelperLog(t *testing.T) {
-	dir := t.TempDir()
-	runtimeDir := filepath.Join(dir, "agent")
-	inputPath := filepath.Join(runtimeDir, "serial.in")
-	serialPath := filepath.Join(runtimeDir, "serial.log")
-	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(inputPath, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	state := RuntimeState{
-		Event: EventFile{
-			Identity:   vmkit.Identity{RuntimeID: "agent", Backend: vmkit.BackendFirecracker},
-			State:      vmkit.StateRunning,
-			ObservedAt: time.Now().UTC().Format(time.RFC3339),
-		},
-		Config:          vmkit.Config{StateDir: dir, SerialInput: true, ShellPort: 24279},
-		SerialInputPath: inputPath,
-		SerialLogPath:   serialPath,
-		StartedAt:       time.Now().UTC().Format(time.RFC3339),
-	}
-	readiness := readinessFromRuntime(state)
-	if readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
-	}
-	if err := os.WriteFile(serialPath, []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	readiness = readinessFromRuntime(state)
-	if !readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
-	}
-	if readiness.ShellReady.Detail != "guest shell helper listening on vsock port 24279" {
-		t.Fatalf("shell readiness detail = %q", readiness.ShellReady.Detail)
+func TestReadinessFromRuntimeRequiresGuestShellHelperLog(t *testing.T) {
+	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendAppleVF} {
+		t.Run(backend, func(t *testing.T) {
+			dir := t.TempDir()
+			runtimeDir := filepath.Join(dir, "agent")
+			inputPath := filepath.Join(runtimeDir, "serial.in")
+			serialPath := filepath.Join(runtimeDir, "serial.log")
+			if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(inputPath, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			state := RuntimeState{
+				Event: EventFile{
+					Identity:   vmkit.Identity{RuntimeID: "agent", Backend: backend},
+					State:      vmkit.StateRunning,
+					ObservedAt: time.Now().UTC().Format(time.RFC3339),
+				},
+				Config:          vmkit.Config{StateDir: dir, SerialInput: true, ShellPort: 24279},
+				SerialInputPath: inputPath,
+				SerialLogPath:   serialPath,
+				StartedAt:       time.Now().UTC().Format(time.RFC3339),
+			}
+			readiness := readinessFromRuntime(state)
+			if readiness.ShellReady.Ready {
+				t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
+			}
+			if err := os.WriteFile(serialPath, []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			readiness = readinessFromRuntime(state)
+			if !readiness.ShellReady.Ready {
+				t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
+			}
+			if readiness.ShellReady.Detail != "guest shell helper listening on vsock port 24279" {
+				t.Fatalf("shell readiness detail = %q", readiness.ShellReady.Detail)
+			}
+		})
 	}
 }
 

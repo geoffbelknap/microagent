@@ -16,9 +16,11 @@ GUEST_INIT="$STATE_DIR/microagent-guestinit"
 
 cleanup() {
   status="$?"
-  if [ "$status" -eq 0 ] && [ -x "$CLI" ]; then
-    "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-    "$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+  if [ -x "$CLI" ]; then
+    "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    if [ "$status" -eq 0 ]; then
+      "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    fi
   fi
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_APPLEVF_PUBLISH_SMOKE:-0}" != "1" ]; then
     rm -rf "$STATE_DIR"
@@ -194,7 +196,7 @@ if "HTTP_READY" not in http_body:
     raise SystemExit(http_body)
 PY
 
-"$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/stop.json"
-"$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
+"$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/stop.json"
+"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete.json"
 
 echo "Apple VF publish smoke passed"

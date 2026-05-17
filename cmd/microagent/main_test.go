@@ -4073,6 +4073,41 @@ func TestRunConnectRejectsNegativeReadyTimeoutForInteractive(t *testing.T) {
 	}
 }
 
+func TestWorkspaceShellReadinessRequiresAppleVFHelperLog(t *testing.T) {
+	dir := t.TempDir()
+	runtimeDir := filepath.Join(dir, "agent")
+	inputPath := filepath.Join(runtimeDir, "serial.in")
+	serialPath := filepath.Join(runtimeDir, "serial.log")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inputPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := workspaceRuntimeState{
+		Event: workspaceEventFile{
+			Identity:   vmkit.Identity{RuntimeID: "agent", Backend: vmkit.BackendAppleVF},
+			State:      vmkit.StateRunning,
+			ObservedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		Config:          vmkit.Config{StateDir: dir, SerialInput: true, ShellPort: 24279},
+		SerialInputPath: inputPath,
+		SerialLogPath:   serialPath,
+		StartedAt:       time.Now().UTC().Format(time.RFC3339),
+	}
+	readiness := workspaceReadinessFromRuntime(state)
+	if readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
+	}
+	if err := os.WriteFile(serialPath, []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	readiness = workspaceReadinessFromRuntime(state)
+	if !readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
+	}
+}
+
 func TestWindowsHyperVConnectSmoke(t *testing.T) {
 	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
 		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V connect smoke test")
