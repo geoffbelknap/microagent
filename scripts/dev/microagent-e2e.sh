@@ -11,7 +11,8 @@ SCENARIOS=(
   "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all"
   "lifecycle:scripts/dev/microagent-e2e-lifecycle.sh:all"
   "lifecycle-matrix:scripts/dev/microagent-e2e-lifecycle-matrix.sh:manual-linux"
-  "networking:scripts/dev/microagent-e2e-networking.sh:linux"
+  "networking:scripts/dev/microagent-e2e-networking-contract.sh:all"
+  "networking-linux:scripts/dev/microagent-e2e-networking.sh:manual-linux"
   "mediation:scripts/dev/microagent-e2e-mediation.sh:linux"
   "supervision:scripts/dev/microagent-e2e-supervision.sh:linux"
   "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin"
@@ -47,8 +48,10 @@ Scenarios:
                      MICROAGENT_E2E_BACKEND=firecracker|applevf
   lifecycle-matrix   create/start/status/ps/connect/logs/halt/resume/cp/clone,
                      validation failures, images, artifacts, quarantine/delete
-  networking         user/nat/bridged networking, published ports, outbound
-                     connectivity, event history, resume behavior
+  networking         Backend-agnostic networking contract scenario. Defaults to
+                     Firecracker on Linux and Apple VF on macOS; override with
+                     MICROAGENT_E2E_BACKEND=firecracker|applevf
+  networking-linux   Legacy direct Linux Firecracker networking scenario
   mediation          required mediation channel and quarantine fail-closed behavior
   supervision        restart policy behavior for never/always
   applevf-boot       Apple VF run boot smoke for a BusyBox workload
