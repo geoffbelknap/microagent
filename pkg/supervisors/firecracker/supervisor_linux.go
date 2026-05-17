@@ -1985,28 +1985,28 @@ func guestHaltedState(opts Options, waitForResult time.Duration) (vmkit.VMState,
 	var err error
 	for {
 		data, err = os.ReadFile(resultPath)
-		if err == nil {
-			break
-		}
-		if waitForResult <= 0 || !os.IsNotExist(err) || time.Now().After(deadline) {
+		if err != nil && (waitForResult <= 0 || !os.IsNotExist(err) || time.Now().After(deadline)) {
 			return vmkit.StateStopped, ""
+		}
+		if err == nil {
+			var result struct {
+				ExitCode int    `json:"exit_code"`
+				Error    string `json:"error"`
+			}
+			if err := json.Unmarshal(data, &result); err == nil {
+				if result.ExitCode == 0 {
+					return vmkit.StateStopped, ""
+				}
+				if result.Error != "" {
+					return vmkit.StateFailed, result.Error
+				}
+				return vmkit.StateFailed, fmt.Sprintf("guest exited with code %d", result.ExitCode)
+			} else if waitForResult <= 0 || time.Now().After(deadline) {
+				return vmkit.StateFailed, err.Error()
+			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	var result struct {
-		ExitCode int    `json:"exit_code"`
-		Error    string `json:"error"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return vmkit.StateFailed, err.Error()
-	}
-	if result.ExitCode == 0 {
-		return vmkit.StateStopped, ""
-	}
-	if result.Error != "" {
-		return vmkit.StateFailed, result.Error
-	}
-	return vmkit.StateFailed, fmt.Sprintf("guest exited with code %d", result.ExitCode)
 }
 
 func responseFromEvent(file eventFile, errorText string) vmkit.Response {
