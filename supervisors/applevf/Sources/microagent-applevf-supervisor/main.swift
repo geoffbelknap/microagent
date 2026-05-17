@@ -62,6 +62,8 @@ struct NetworkConfig: Codable {
     var dns: [String]?
     var routes: [String]?
     var ip: String?
+    var subnet: String?
+    var gateway: String?
 }
 
 struct PortForward: Codable {
@@ -521,6 +523,14 @@ func validateNetworkConfig(_ network: NetworkConfig?) throws {
         break
     default:
         throw ProtocolError.invalid("network.mode must be user, nat, isolated, or bridged")
+    }
+    let ip = network.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let gateway = network.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let subnet = network.subnet?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !ip.isEmpty || !gateway.isEmpty || !subnet.isEmpty {
+        if ip.isEmpty || gateway.isEmpty {
+            throw ProtocolError.invalid("Apple VF static networking requires network.ip and network.gateway")
+        }
     }
     #if canImport(Virtualization)
     if mode == "bridged" {
@@ -1692,9 +1702,21 @@ func linuxKernelCommandLine(for config: Config) -> String {
     }
     switch normalizedNetworkMode(config.network) {
     case "user", "nat", "bridged":
-        args.append("ip=dhcp")
-        args.append("microagent_dns=192.168.64.1")
-        args.append("microagent_dns_fallback_gateway=1")
+        let ip = config.network?.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let gateway = config.network?.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !ip.isEmpty && !gateway.isEmpty {
+            args.append("microagent_net_if=eth0")
+            args.append("microagent_net_ip=\(ip)")
+            args.append("microagent_net_gw=\(gateway)")
+            let dns = config.network?.dns?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
+            if !dns.isEmpty {
+                args.append("microagent_net_dns=\(dns.joined(separator: ","))")
+            }
+        } else {
+            args.append("ip=dhcp")
+            args.append("microagent_dns=192.168.64.1")
+            args.append("microagent_dns_fallback_gateway=1")
+        }
     default:
         break
     }

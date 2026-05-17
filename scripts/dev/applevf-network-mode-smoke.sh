@@ -92,6 +92,16 @@ run_check() {
   request "$runtime" "$mode" "$iface" | "$SUPERVISOR"
 }
 
+pick_port() {
+  python3 - <<'PY'
+import socket
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+}
+
 wait_for_status_ready() {
   local workspace="$1"
   local state_dir="$2"
@@ -179,6 +189,75 @@ PY
 run_outbound_smoke user
 run_outbound_smoke nat
 
+STATIC_WORKSPACE="static-nat-smoke"
+STATIC_STATE="$STATE_DIR/static-nat"
+cat >"$STATE_DIR/static-nat.yaml" <<YAML
+name: $STATIC_WORKSPACE
+image: $IMAGE
+profile: small
+restart: never
+resources:
+  memoryMiB: ${MICROAGENT_APPLEVF_NETWORK_MEMORY_MIB:-512}
+  cpuCount: ${MICROAGENT_APPLEVF_NETWORK_CPUS:-2}
+  sizeMiB: ${MICROAGENT_APPLEVF_NETWORK_SIZE_MIB:-128}
+network:
+  mode: nat
+  ip: 192.168.64.2/24
+  subnet: 192.168.64.0/24
+  gateway: 192.168.64.1
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
+  routes:
+    - 0.0.0.0/0 via 192.168.64.1
+service: sleep 300
+YAML
+"$CLI" create \
+  --file "$STATE_DIR/static-nat.yaml" \
+  --backend apple-vf \
+  --arch "$ARCH" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATIC_STATE" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/static-nat-create.json"
+"$CLI" start "$STATIC_WORKSPACE" \
+  --state-dir "$STATIC_STATE" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/static-nat-start.json"
+wait_for_status_ready "$STATIC_WORKSPACE" "$STATIC_STATE" "$STATE_DIR/static-nat-status.json"
+"$CLI" network "$STATIC_WORKSPACE" --state-dir "$STATIC_STATE" >"$STATE_DIR/static-nat-network.json"
+"$CLI" connect "$STATIC_WORKSPACE" \
+  --state-dir "$STATIC_STATE" \
+  --send "grep -q '192.168.64.2' /proc/net/fib_trie; grep -q 'nameserver 1.1.1.1' /etc/resolv.conf; wget -qO- -T 10 http://example.com >/tmp/applevf-static-nat.out && echo APPLEVF_STATIC_NAT_OK; sync" \
+  --ready-timeout 30 \
+  --timeout "${MICROAGENT_APPLEVF_NETWORK_TIMEOUT_SECONDS:-45}" >"$STATE_DIR/static-nat-connect.txt"
+"$CLI" halt "$STATIC_WORKSPACE" --state-dir "$STATIC_STATE" --supervisor "$SUPERVISOR" >"$STATE_DIR/static-nat-halt.json"
+"$CLI" delete "$STATIC_WORKSPACE" --yes --state-dir "$STATIC_STATE" --supervisor "$SUPERVISOR" >"$STATE_DIR/static-nat-delete.json"
+
+python3 - "$STATE_DIR/static-nat-create.json" "$STATE_DIR/static-nat-network.json" "$STATE_DIR/static-nat-connect.txt" <<'PY'
+import json
+import sys
+
+create_path, network_path, connect_path = sys.argv[1:4]
+with open(create_path, "r", encoding="utf-8") as f:
+    create = json.load(f)
+with open(network_path, "r", encoding="utf-8") as f:
+    network = json.load(f)
+with open(connect_path, "r", encoding="utf-8", errors="replace") as f:
+    connect = f.read()
+for body in (create, network):
+    cfg = body.get("network") or {}
+    if cfg.get("mode") != "nat" or cfg.get("ip") != "192.168.64.2/24" or cfg.get("gateway") != "192.168.64.1":
+        raise SystemExit(body)
+    if cfg.get("subnet") != "192.168.64.0/24" or cfg.get("dns") != ["1.1.1.1", "8.8.8.8"]:
+        raise SystemExit(body)
+    if cfg.get("routes") != ["0.0.0.0/0 via 192.168.64.1"]:
+        raise SystemExit(body)
+if "APPLEVF_STATIC_NAT_OK" not in connect:
+    raise SystemExit(connect)
+PY
+
 ISOLATED_RESPONSE="$(run_check isolated-check isolated)"
 python3 - "$ISOLATED_RESPONSE" <<'PY'
 import json
@@ -206,6 +285,59 @@ if "$CLI" run \
   exit 1
 fi
 grep -q "network.portForwards require user, nat, or bridged mode" "$STATE_DIR/isolated-publish.err"
+
+duplicate_port="$(pick_port)"
+if "$CLI" create publish-collision \
+  --backend apple-vf \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR/publish-collision" \
+  --size-mib "${MICROAGENT_APPLEVF_NETWORK_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --network user \
+  --publish "127.0.0.1:$duplicate_port:4222/tcp" \
+  --publish "127.0.0.1:$duplicate_port:8222/tcp" >"$STATE_DIR/publish-collision.json" 2>"$STATE_DIR/publish-collision.err"; then
+  echo "duplicate published host port unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "duplicate published host port" "$STATE_DIR/publish-collision.err"
+
+if "$CLI" create publish-udp \
+  --backend apple-vf \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR/publish-udp" \
+  --size-mib "${MICROAGENT_APPLEVF_NETWORK_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --network user \
+  --publish "127.0.0.1:$(pick_port):8222/udp" >"$STATE_DIR/publish-udp.json" 2>"$STATE_DIR/publish-udp.err"; then
+  echo "udp published port unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "protocol must be tcp" "$STATE_DIR/publish-udp.err"
+
+if "$CLI" create publish-ipv6 \
+  --backend apple-vf \
+  --image "$IMAGE" \
+  --arch "$ARCH" \
+  --kernel "$KERNEL" \
+  --state-dir "$STATE_DIR/publish-ipv6" \
+  --size-mib "${MICROAGENT_APPLEVF_NETWORK_SIZE_MIB:-128}" \
+  --mke2fs "$MKE2FS" \
+  --guest-init "$GUEST_INIT" \
+  --supervisor "$SUPERVISOR" \
+  --network user \
+  --publish "[::1]:$(pick_port):8222/tcp" >"$STATE_DIR/publish-ipv6.json" 2>"$STATE_DIR/publish-ipv6.err"; then
+  echo "ipv6 published port unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -qi "publish mapping must be" "$STATE_DIR/publish-ipv6.err"
 
 BRIDGE_ERROR="$(run_check bridged-missing-interface bridged || true)"
 BRIDGE_STATUS="$(python3 - "$BRIDGE_ERROR" <<'PY'
