@@ -54,6 +54,7 @@ case "$(uname -m)" in
     IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox:1.36.1}"
     ;;
 esac
+PUBLIC_SURFACE_SIZE_MIB="${MICROAGENT_PUBLIC_SURFACE_SIZE_MIB:-512}"
 export MICROAGENT_ROOTFS_BASE_CACHE_DIR="${MICROAGENT_ROOTFS_BASE_CACHE_DIR:-$ROOT/.cache/microagent-e2e/rootfs-base-cache/busybox-$ARCH}"
 if [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" = "1" ]; then
   export MICROAGENT_ROOTFS_BASE_CACHE_REFRESH=1
@@ -83,6 +84,13 @@ if [ "$(uname -s)" = "Linux" ]; then
   fi
   export MICROAGENT_FIRECRACKER="$firecracker"
   export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
+elif [ "$(uname -s)" = "Darwin" ]; then
+  SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
+  if [ ! -x "$SUPERVISOR" ]; then
+    echo "microagent public surface E2E requires the Apple VF supervisor; run scripts/dev/applevf-supervisor-build.sh or set MICROAGENT_APPLEVF_SUPERVISOR" >&2
+    exit 2
+  fi
+  export MICROAGENT_APPLEVF_SUPERVISOR="$SUPERVISOR"
 fi
 
 export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
@@ -125,11 +133,12 @@ expect_failure() {
   name="$1"
   expected="$2"
   shift 2
+  expected_regex="${expected//\\|/|}"
   if "$@" >"$STATE_DIR/${name}.out" 2>"$STATE_DIR/${name}.err"; then
     echo "$name unexpectedly succeeded" >&2
     exit 1
   fi
-  if ! grep -qi "$expected" "$STATE_DIR/${name}.err"; then
+  if ! grep -Eqi "$expected_regex" "$STATE_DIR/${name}.err"; then
     echo "$name failed without expected message: $expected" >&2
     cat "$STATE_DIR/${name}.err" >&2
     exit 1
@@ -140,13 +149,14 @@ expect_tty_cancel() {
   name="$1"
   expected="$2"
   shift 2
+  expected_regex="${expected//\\|/|}"
   if command -v script >/dev/null 2>&1 && script --version 2>/dev/null | grep -qi "util-linux"; then
     printf -v command '%q ' "$@"
     if printf 'n\n' | script -qfec "$command" /dev/null >"$STATE_DIR/${name}.out" 2>"$STATE_DIR/${name}.err"; then
       echo "$name unexpectedly succeeded" >&2
       exit 1
     fi
-    if ! grep -qia "$expected" "$STATE_DIR/${name}.out" && ! grep -qia "$expected" "$STATE_DIR/${name}.err"; then
+    if ! grep -Eqia "$expected_regex" "$STATE_DIR/${name}.out" && ! grep -Eqia "$expected_regex" "$STATE_DIR/${name}.err"; then
       echo "$name failed without expected message: $expected" >&2
       cat "$STATE_DIR/${name}.out" >&2
       cat "$STATE_DIR/${name}.err" >&2
@@ -154,7 +164,7 @@ expect_tty_cancel() {
     fi
     return 0
   fi
-  expect_failure "$name" "pass --yes" "$@"
+  expect_failure "$name" "$expected" "$@"
 }
 
 wait_for_status_ready() {
@@ -254,7 +264,7 @@ assert_json "$STATE_DIR/kernel-verify-from.json" "data.get('ok') is True"
   --init "$GUEST_INIT" \
   --out "$ROOTFS" \
   --state-dir "$STATE_DIR/rootfs-build" \
-  --size-mib 96 >"$STATE_DIR/rootfs-build.json"
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" >"$STATE_DIR/rootfs-build.json"
 assert_json "$STATE_DIR/rootfs-build.json" "data.get('outputPath') or data.get('output_path')"
 "$CLI" rootfs build \
   --image docker.io/library/busybox:1.36.1 \
@@ -265,7 +275,7 @@ assert_json "$STATE_DIR/rootfs-build.json" "data.get('outputPath') or data.get('
   --init "$GUEST_INIT" \
   --out "$STATE_DIR/rootfs-advanced.ext4" \
   --state-dir "$STATE_DIR/rootfs-advanced-build" \
-  --size-mib 96 >"$STATE_DIR/rootfs-advanced-build.json"
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" >"$STATE_DIR/rootfs-advanced-build.json"
 assert_json "$STATE_DIR/rootfs-advanced-build.json" "data.get('image_ref') == 'docker.io/library/busybox:1.36.1'"
 assert_json "$STATE_DIR/rootfs-advanced-build.json" "data.get('resolved_ref', '').startswith('docker.io/library/busybox@sha256:')"
 assert_json "$STATE_DIR/rootfs-advanced-build.json" "data.get('stage_dir', '') != ''"
@@ -283,11 +293,11 @@ expect_failure rootfs-missing-output "output_path is required" \
 expect_failure rootfs-negative-size "size_mib must not be negative" \
   "$CLI" rootfs build --image "$IMAGE" --arch "$ARCH" --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-negative-size.ext4" --state-dir "$STATE_DIR/rootfs-negative-size" --size-mib -1
 expect_failure rootfs-mutable-ref "immutable" \
-  "$CLI" rootfs build --image docker.io/library/busybox:latest --arch "$ARCH" --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-mutable.ext4" --state-dir "$STATE_DIR/rootfs-mutable" --size-mib 96
+  "$CLI" rootfs build --image docker.io/library/busybox:latest --arch "$ARCH" --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-mutable.ext4" --state-dir "$STATE_DIR/rootfs-mutable" --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 expect_failure rootfs-invalid-ref "parse OCI image ref" \
-  "$CLI" rootfs build --image "bad ref@sha256:abc" --arch "$ARCH" --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-invalid-ref.ext4" --state-dir "$STATE_DIR/rootfs-invalid-ref" --size-mib 96
+  "$CLI" rootfs build --image "bad ref@sha256:abc" --arch "$ARCH" --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-invalid-ref.ext4" --state-dir "$STATE_DIR/rootfs-invalid-ref" --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 expect_failure rootfs-unsupported-platform "fetch OCI image\\|platform\\|manifest\\|architecture" \
-  "$CLI" rootfs build --image "$IMAGE" --arch definitely-unsupported --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-unsupported-platform.ext4" --state-dir "$STATE_DIR/rootfs-unsupported-platform" --size-mib 96
+  "$CLI" rootfs build --image "$IMAGE" --arch definitely-unsupported --init "$GUEST_INIT" --out "$STATE_DIR/rootfs-unsupported-platform.ext4" --state-dir "$STATE_DIR/rootfs-unsupported-platform" --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 
 ROOTFS_REFRESH_CACHE="$STATE_DIR/rootfs-refresh-cache"
 env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
@@ -297,7 +307,7 @@ env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
   --init "$GUEST_INIT" \
   --out "$STATE_DIR/rootfs-refresh-seed.ext4" \
   --state-dir "$STATE_DIR/rootfs-refresh-seed" \
-  --size-mib 96 >"$STATE_DIR/rootfs-refresh-seed.json"
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" >"$STATE_DIR/rootfs-refresh-seed.json"
 test -e "$STATE_DIR/rootfs-refresh-seed.ext4"
 find "$ROOTFS_REFRESH_CACHE" -name metadata.json -print -quit >"$STATE_DIR/rootfs-refresh-metadata-path.txt"
 ROOTFS_REFRESH_METADATA="$(cat "$STATE_DIR/rootfs-refresh-metadata-path.txt")"
@@ -311,7 +321,7 @@ expect_failure rootfs-corrupt-base-cache "parse rootfs base cache metadata\\|inv
   --init "$GUEST_INIT" \
   --out "$STATE_DIR/rootfs-corrupt-base-cache.ext4" \
   --state-dir "$STATE_DIR/rootfs-corrupt-base-cache" \
-  --size-mib 96
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" MICROAGENT_ROOTFS_BASE_CACHE_REFRESH=1 \
   "$CLI" rootfs build \
   --image "$IMAGE" \
@@ -319,7 +329,7 @@ env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" MICROAGENT_ROOTFS_B
   --init "$GUEST_INIT" \
   --out "$STATE_DIR/rootfs-refresh-recovered.ext4" \
   --state-dir "$STATE_DIR/rootfs-refresh-recovered" \
-  --size-mib 96 >"$STATE_DIR/rootfs-refresh-recovered.json"
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" >"$STATE_DIR/rootfs-refresh-recovered.json"
 test -e "$STATE_DIR/rootfs-refresh-recovered.ext4"
 expect_failure rootfs-bad-mke2fs "build ext4 rootfs\\|mke2fs\\|no such file" \
   env MICROAGENT_ROOTFS_BASE_CACHE_DIR="$ROOTFS_REFRESH_CACHE" \
@@ -330,12 +340,12 @@ expect_failure rootfs-bad-mke2fs "build ext4 rootfs\\|mke2fs\\|no such file" \
   --out "$STATE_DIR/rootfs-bad-mke2fs.ext4" \
   --state-dir "$STATE_DIR/rootfs-bad-mke2fs" \
   --mke2fs "$STATE_DIR/not-mke2fs" \
-  --size-mib 96
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 
 expect_failure images-pull-missing-ref "usage: microagent images pull" \
   "$CLI" images pull --state-dir "$STATE_DIR"
 expect_failure images-pull-invalid-ref "parse OCI image ref" \
-  "$CLI" images pull "bad ref@sha256:abc" --state-dir "$STATE_DIR" --arch "$ARCH" --guest-init "$GUEST_INIT" --size-mib 96
+  "$CLI" images pull "bad ref@sha256:abc" --state-dir "$STATE_DIR" --arch "$ARCH" --guest-init "$GUEST_INIT" --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 expect_failure images-rm-missing-ref "image reference is required" \
   "$CLI" images rm "" --state-dir "$STATE_DIR"
 expect_failure images-tag-missing-source "source image is required" \
@@ -470,7 +480,7 @@ test ! -e "$STATE_DIR/confirm-prune-y/images/rootfs/yes.ext4"
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 >"$STATE_DIR/create-high-dry-run.json"
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" >"$STATE_DIR/create-high-dry-run.json"
 assert_json "$STATE_DIR/create-high-dry-run.json" "data.get('workspace') == 'high-dry-run'"
 assert_json "$STATE_DIR/create-high-dry-run.json" "data.get('response', {}).get('ok') is True"
 assert_json "$STATE_DIR/create-high-dry-run.json" "data.get('response', {}).get('event', {}).get('state') == 'prepared'"
@@ -485,7 +495,7 @@ restart: never
 resources:
   memoryMiB: 512
   cpuCount: 2
-  sizeMiB: 96
+  sizeMiB: $PUBLIC_SURFACE_SIZE_MIB
 network:
   mode: isolated
 YAML
@@ -803,7 +813,7 @@ expect_failure invalid-request-combination "duplicate vsock listener port" \
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --exec "printf RUN_OK" \
   --timeout 60 >"$STATE_DIR/run.json"
 assert_json "$STATE_DIR/run.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
@@ -819,7 +829,7 @@ assert_json "$STATE_DIR/run.json" "'reboot: System halted' in data.get('serial_l
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --timeout 60 \
   "$IMAGE" printenv DOCKER_RUN_ENV >"$STATE_DIR/run-docker-style.json"
 assert_json "$STATE_DIR/run-docker-style.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
@@ -832,7 +842,7 @@ test ! -e "$STATE_DIR/workspaces/public-docker-run"
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --timeout 60 \
   "$IMAGE" printf DOCKER_TEXT_OK >"$STATE_DIR/run-docker-style-text.txt"
 grep -q "DOCKER_TEXT_OK" "$STATE_DIR/run-docker-style-text.txt"
@@ -844,7 +854,7 @@ test ! -e "$STATE_DIR/workspaces/public-docker-text"
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --timeout 60 \
   "$IMAGE" >"$STATE_DIR/run-docker-image-command.json"
 assert_json "$STATE_DIR/run-docker-image-command.json" "data.get('result', {}).get('exitCode', data.get('result', {}).get('exit_code')) == 0"
@@ -856,7 +866,7 @@ assert_json "$STATE_DIR/run-docker-image-command.json" "data.get('result', {}).g
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --exec "printf RUN_KEEP_OK; printf keep-state > /tmp/keep-state.txt" \
   --output keep-state=/tmp/keep-state.txt \
   --keep \
@@ -902,7 +912,7 @@ SH
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --setup-file "$STATE_DIR/options-setup.sh" \
   --shell /bin/sh \
   --hostname options-host \
@@ -918,7 +928,7 @@ assert_json "$STATE_DIR/options-run.json" "'OPTIONS_RUN_OK' in data.get('result'
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --service-command "printf '{\"ok\":true,\"service\":\"options\",\"env\":\"%s\",\"hostname\":\"%s\"}' \"\$SERVICE_ENV\" \"\$(hostname)\" > /service-options-report.json; sync; sleep 300" \
   --shell /bin/sh \
   --hostname service-host \
@@ -942,7 +952,7 @@ assert_json "$STATE_DIR/service-options-artifacts/service-options-report.json" "
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 192 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --shell /bin/sh >"$STATE_DIR/create-image-command.json"
 assert_json "$STATE_DIR/create-image-command.json" "data.get('workspace') == '$IMAGE_COMMAND_WORKSPACE'"
 "$CLI" start "$IMAGE_COMMAND_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start-image-command.json"
@@ -959,7 +969,7 @@ grep -Eiq "nats-server|server is ready" "$STATE_DIR/logs-image-command.txt"
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --entrypoint "printf RESULT_OK; printf RESULT_ERR >&2" \
   --output report=/tmp/report.txt >"$STATE_DIR/create-result.json"
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start-result.json"
@@ -976,7 +986,7 @@ assert_json "$STATE_DIR/result.json" "'RESULT_ERR' in data.get('result', {}).get
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --entrypoint "sleep 300" >"$STATE_DIR/create-missing-result.json"
 expect_failure missing-result "result" \
   "$CLI" --json result missing-result --state-dir "$STATE_DIR"
@@ -994,7 +1004,7 @@ tar -C "$STATE_DIR/bundle-src" -cf "$STATE_DIR/bundle.tar" .
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   -v "$STATE_DIR/bundle.tar:/data:rw" \
   --output disk-report=/data/report.txt \
   --output missing-report=/data/missing.txt >"$STATE_DIR/create-bundle.json"
@@ -1023,15 +1033,16 @@ mkdir -p "$STATE_DIR/disk-src/dir"
 printf "existing-disk-seed\n" >"$STATE_DIR/disk-src/seed.txt"
 truncate -s 64M "$STATE_DIR/existing-disk.ext4"
 mke2fs -q -F -t ext4 -d "$STATE_DIR/disk-src" "$STATE_DIR/existing-disk.ext4"
+cp "$STATE_DIR/existing-disk.ext4" "$STATE_DIR/existing-readonly.ext4"
 "$CLI" --json create "$DISK_WORKSPACE" \
   --image "$IMAGE" \
   --guest-init "$GUEST_INIT" \
   --kernel "$kernel_path" \
   --state-dir "$STATE_DIR" \
   --network isolated \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   -v "$STATE_DIR/existing-disk.ext4:/workspace:rw" \
-  --disk "readonly=$STATE_DIR/existing-disk.ext4:/readonly:ro" \
+  --disk "readonly=$STATE_DIR/existing-readonly.ext4:/readonly:ro" \
   --output existing-disk-report=/workspace/report.txt >"$STATE_DIR/create-existing-disk.json"
 assert_json "$STATE_DIR/create-existing-disk.json" "any(disk.get('name') == 'workspace' and not disk.get('bundle') for disk in data.get('disks', []))"
 "$CLI" start "$DISK_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start-existing-disk.json"
@@ -1091,7 +1102,7 @@ mv "$STATE_DIR/workspace-json.backup" "$STATE_DIR/workspaces/$DISK_WORKSPACE/wor
   --network isolated \
   --memory 768 \
   --cpus 1 \
-  --size-mib 96 \
+  --size-mib "$PUBLIC_SURFACE_SIZE_MIB" \
   --entrypoint "sleep 300" >"$STATE_DIR/create-perf.json"
 assert_json "$STATE_DIR/create-perf.json" "data.get('resources', {}).get('memory_mib', data.get('resources', {}).get('memoryMiB')) == 768"
 assert_json "$STATE_DIR/create-perf.json" "data.get('resources', {}).get('cpu_count', data.get('resources', {}).get('cpuCount')) == 1"
