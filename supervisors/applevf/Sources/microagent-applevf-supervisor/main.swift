@@ -1504,6 +1504,8 @@ func linuxKernelCommandLine(for config: Config) -> String {
     switch normalizedNetworkMode(config.network) {
     case "user", "nat", "bridged":
         args.append("ip=dhcp")
+        args.append("microagent_dns=192.168.64.1")
+        args.append("microagent_dns_fallback_gateway=1")
     default:
         break
     }

@@ -26,6 +26,7 @@ case "$BACKEND" in
   applevf)
     "$ROOT/scripts/dev/applevf-network-mode-smoke.sh"
     "$ROOT/scripts/dev/applevf-publish-smoke.sh"
+    "$ROOT/scripts/dev/applevf-cached-nats-e2e.sh"
     ;;
   *)
     echo "microagent networking E2E does not support backend lane: $BACKEND" >&2

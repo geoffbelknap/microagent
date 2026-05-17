@@ -99,6 +99,23 @@ func TestCmdlineRequestsDHCP(t *testing.T) {
 	}
 }
 
+func TestCmdlineAllowsGatewayDNSFallback(t *testing.T) {
+	if !cmdlineAllowsGatewayDNSFallback("console=hvc0 microagent_dns_fallback_gateway=1 ip=dhcp") {
+		t.Fatal("cmdlineAllowsGatewayDNSFallback = false, want true")
+	}
+	if cmdlineAllowsGatewayDNSFallback("console=hvc0 ip=dhcp") {
+		t.Fatal("cmdlineAllowsGatewayDNSFallback without flag = true, want false")
+	}
+}
+
+func TestCmdlineDNSNameservers(t *testing.T) {
+	got := cmdlineDNSNameservers("console=hvc0 microagent_dns=192.168.64.1,not-ip,8.8.8.8,192.168.64.1")
+	want := []string{"192.168.64.1", "8.8.8.8"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cmdlineDNSNameservers = %#v, want %#v", got, want)
+	}
+}
+
 func TestKernelConfigOverrideUpdatesShellPort(t *testing.T) {
 	cfg := config{ShellPort: 22000}
 	if err := applyKernelConfigOverridesFromCmdline(&cfg, "console=ttyS0 microagent_shell_port=24279 root=/dev/vda"); err != nil {
@@ -222,5 +239,19 @@ nameserver 192.168.64.1
 	want := []string{"192.168.64.1", "8.8.8.8"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("nameservers = %#v, want %#v", got, want)
+	}
+}
+
+func TestDefaultGatewayNameserver(t *testing.T) {
+	route := filepath.Join(t.TempDir(), "route")
+	data := `Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT
+eth0 00000000 0140A8C0 0003 0 0 0 00000000 0 0 0
+`
+	if err := os.WriteFile(route, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := defaultGatewayNameserver(route)
+	if !ok || got != "192.168.64.1" {
+		t.Fatalf("defaultGatewayNameserver = %q, %v; want 192.168.64.1, true", got, ok)
 	}
 }
