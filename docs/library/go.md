@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-18_
+_Last updated: 2026-05-17_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -244,9 +244,10 @@ if err != nil {
 _ = resp
 ```
 
-The CLI contains presentation, flag parsing, and terminal-oriented behavior.
-microVM orchestration and management capabilities are exposed through the Go
-packages.
+The CLI contains presentation, flag parsing, build metadata output, and raw
+terminal handling. microVM orchestration and management capabilities are exposed
+through the Go packages, and the mapping below is checked by
+`scripts/dev/docs-parity.py`.
 
 ## CLI ↔ library mapping
 
@@ -279,4 +280,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent version` | CLI-only build metadata output |
 | `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |
 
-The library calls take options structs and return typed responses. The CLI is a thin shell over them — anything the CLI does, your program can do too without shelling out.
+The library calls take options structs and return typed responses. For reusable
+runtime behavior, prefer the package API. The remaining CLI-only surfaces are
+presentation concerns such as `help`, `version`, and raw terminal mode around an
+already-open console connection.
