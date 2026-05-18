@@ -294,6 +294,89 @@ func TestReadSpecReportsUnknownField(t *testing.T) {
 	}
 }
 
+func TestApplyUpdatesStoppedWorkspaceNetwork(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		StateDir:      dir,
+		Name:          "homebridge",
+		Profile:       "small",
+		RestartPolicy: "always",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Network: vmkit.NetworkConfig{
+			Mode:         "user",
+			PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: 8581, GuestPort: 8581}},
+		},
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Apply(t.Context(), Options{StateDir: dir, Backend: vmkit.BackendFirecracker}, Spec{
+		Name: "homebridge",
+		Network: NetworkSpec{
+			Mode:         "user",
+			PortForwards: []vmkit.PortForward{{Protocol: "tcp", Host: "0.0.0.0", HostPort: 8581, GuestPort: 8581}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.Workspace != "homebridge" || len(result.Applied) != 1 || result.Applied[0] != "network" {
+		t.Fatalf("result = %#v", result)
+	}
+	manifest, err := ReadManifest(dir, "homebridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Network.PortForwards[0].Host; got != "0.0.0.0" {
+		t.Fatalf("forward host = %q, want 0.0.0.0", got)
+	}
+}
+
+func TestApplyRejectsLiveNonHostNetworkChange(t *testing.T) {
+	dir := t.TempDir()
+	originalNetwork := vmkit.NetworkConfig{
+		Mode:         "user",
+		PortForwards: []vmkit.PortForward{{Protocol: "tcp", HostPort: 8581, GuestPort: 8581}},
+	}
+	opts := Options{
+		StateDir:      dir,
+		Name:          "homebridge",
+		Profile:       "small",
+		RestartPolicy: "always",
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       1024,
+		Network:       originalNetwork,
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatal(err)
+	}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req.Config.Network = &originalNetwork
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Apply(t.Context(), Options{StateDir: dir, Backend: vmkit.BackendFirecracker}, Spec{
+		Name: "homebridge",
+		Network: NetworkSpec{
+			Mode:         "user",
+			PortForwards: []vmkit.PortForward{{Protocol: "tcp", Host: "0.0.0.0", HostPort: 8581, GuestPort: 8582}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "host bind changes") {
+		t.Fatalf("err = %v, want host-bind-only rejection", err)
+	}
+	manifest, err := ReadManifest(dir, "homebridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest.Network.PortForwards[0].GuestPort; got != uint16(8581) {
+		t.Fatalf("guest port changed to %d", got)
+	}
+}
+
 func TestWorkspaceRootfsPathUsesBackendFormat(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -17,7 +17,6 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -559,14 +558,7 @@ type workspaceManifest = workspace.Manifest
 
 type workspaceResult = workspace.Result
 
-type applyResult struct {
-	Workspace string          `json:"workspace"`
-	State     string          `json:"state,omitempty"`
-	Applied   []string        `json:"applied,omitempty"`
-	Reloaded  bool            `json:"reloaded,omitempty"`
-	Network   networkSpec     `json:"network,omitempty"`
-	Response  *vmkit.Response `json:"response,omitempty"`
-}
+type applyResult = workspace.ApplyResult
 
 type copyResult = workspace.CopyResult
 
@@ -2033,137 +2025,11 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	name := strings.TrimSpace(spec.Name)
-	if name == "" {
-		return fmt.Errorf("apply spec requires name")
+	result, err := workspace.Apply(ctx, opts, spec)
+	if encodeErr := writeApplyResult(stdout, result); encodeErr != nil {
+		return encodeErr
 	}
-	if err := validateWorkspaceName(name); err != nil {
-		return err
-	}
-	opts.Name = name
-	manifest, err := readWorkspaceManifest(opts.StateDir, name)
-	if err != nil {
-		return err
-	}
-	next := manifest
-	var applied []string
-	if spec.Restart != "" {
-		restart := normalizeRestartPolicy(spec.Restart)
-		if err := validateRestartPolicy(restart); err != nil {
-			return err
-		}
-		if restart != normalizeRestartPolicy(manifest.Restart) {
-			next.Restart = restart
-			applied = append(applied, "restart")
-		}
-	}
-	if spec.Network.Mode != "" || spec.Network.Interface != "" || len(spec.Network.PortForwards) != 0 || len(spec.Network.DNS) != 0 || len(spec.Network.Routes) != 0 || spec.Network.IP != "" || spec.Network.Subnet != "" || spec.Network.Gateway != "" {
-		network := normalizeNetworkConfig(networkConfigFromSpec(spec.Network))
-		if err := vmkit.ValidateNetworkConfig(network); err != nil {
-			return err
-		}
-		networkSpec := networkSpecFromConfig(network)
-		if !reflect.DeepEqual(networkSpec, manifest.Network) {
-			next.Network = networkSpec
-			applied = append(applied, "network")
-		}
-	}
-	if len(applied) == 0 {
-		state, _, _ := workspace.LatestStartState(opts.StateDir, name)
-		return writeApplyResult(stdout, applyResult{Workspace: name, State: string(state), Network: next.Network})
-	}
-	state, _, err := workspace.LatestStartState(opts.StateDir, name)
-	if err != nil {
-		return err
-	}
-	if state == vmkit.StateRunning && containsString(applied, "network") {
-		if opts.Backend != vmkit.BackendFirecracker && opts.Backend != vmkit.BackendAppleVF {
-			return fmt.Errorf("live network apply is only supported by the Firecracker and Apple VF backends; stop and start %s to apply this change", name)
-		}
-		oldNetwork := networkConfigFromSpec(manifest.Network)
-		newNetwork := networkConfigFromSpec(next.Network)
-		if !livePortForwardHostOnlyChange(oldNetwork, newNetwork) {
-			return fmt.Errorf("live network apply only supports host bind changes for existing port forwards; stop and start %s to apply this change", name)
-		}
-	}
-	result := applyResult{Workspace: name, State: string(state), Applied: applied, Network: next.Network}
-	if state == vmkit.StateRunning && containsString(applied, "network") {
-		applyOpts := workspaceOptionsFromManifest(opts, next)
-		rootfsPath := filepath.Join(opts.StateDir, "workspaces", name, "rootfs.ext4")
-		resp, err := dispatchWorkspaceRequest(ctx, applyOpts, workspaceRequest(applyOpts, "apply", rootfsPath))
-		result.Reloaded = resp.OK
-		result.Response = &resp
-		if err == nil {
-			err = writeWorkspaceManifestFile(opts.StateDir, name, next)
-		}
-		if encodeErr := writeApplyResult(stdout, result); encodeErr != nil {
-			return encodeErr
-		}
-		return err
-	}
-	if err := writeWorkspaceManifestFile(opts.StateDir, name, next); err != nil {
-		return err
-	}
-	return writeApplyResult(stdout, result)
-}
-
-func workspaceOptionsFromManifest(base workspaceOptions, manifest workspaceManifest) workspaceOptions {
-	opts := base
-	opts.Profile = firstNonEmpty(manifest.Profile, defaultWorkspaceProfile)
-	opts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
-	opts.Network = normalizeNetworkConfig(networkConfigFromSpec(manifest.Network))
-	if manifest.Resources.MemoryMiB != 0 {
-		opts.MemoryMiB = manifest.Resources.MemoryMiB
-	}
-	if manifest.Resources.CPUCount != 0 {
-		opts.CPUCount = manifest.Resources.CPUCount
-	}
-	if manifest.Resources.SizeMiB != 0 {
-		opts.SizeMiB = manifest.Resources.SizeMiB
-	}
-	opts.ServiceCommand = manifest.Service
-	opts.ConsoleShell = manifest.ConsoleShell
-	opts.Hostname = manifest.Hostname
-	opts.Mediation = manifest.Mediation
-	opts.Disks = manifest.Disks
-	opts.Outputs = manifest.Artifacts.Egress
-	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
-	opts.ResultPort = workspace.DefaultResultPort
-	opts.Timeout = workspace.DefaultTimeout
-	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
-	return opts
-}
-
-func livePortForwardHostOnlyChange(oldNetwork, newNetwork vmkit.NetworkConfig) bool {
-	oldNetwork = normalizeNetworkConfig(oldNetwork)
-	newNetwork = normalizeNetworkConfig(newNetwork)
-	if oldNetwork.Mode != newNetwork.Mode || oldNetwork.Interface != newNetwork.Interface || !reflect.DeepEqual(oldNetwork.DNS, newNetwork.DNS) || !reflect.DeepEqual(oldNetwork.Routes, newNetwork.Routes) || oldNetwork.IP != newNetwork.IP || oldNetwork.Subnet != newNetwork.Subnet || oldNetwork.Gateway != newNetwork.Gateway {
-		return false
-	}
-	if len(oldNetwork.PortForwards) != len(newNetwork.PortForwards) {
-		return false
-	}
-	for i := range oldNetwork.PortForwards {
-		oldForward := oldNetwork.PortForwards[i]
-		newForward := newNetwork.PortForwards[i]
-		if oldForward.Protocol != newForward.Protocol || oldForward.HostPort != newForward.HostPort || oldForward.GuestPort != newForward.GuestPort {
-			return false
-		}
-	}
-	return true
-}
-
-func writeWorkspaceManifestFile(stateDir, name string, manifest workspaceManifest) error {
-	return writeJSONFile(filepath.Join(stateDir, "workspaces", name, "workspace.json"), manifest)
-}
-
-func containsString(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
+	return err
 }
 
 type stateCommandOptions struct {
