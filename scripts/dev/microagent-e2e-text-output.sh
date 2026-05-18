@@ -7,6 +7,30 @@ CLI="$STATE_DIR/microagent"
 WORKSPACE="text-output"
 KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_TEXT_OUTPUT:-0}"
 
+case "$(uname -s)" in
+  Darwin)
+    HOST_BACKEND="apple-vf"
+    ;;
+  Linux)
+    HOST_BACKEND="firecracker"
+    ;;
+  *)
+    echo "unsupported host OS for microagent text output E2E: $(uname -s)" >&2
+    exit 2
+    ;;
+esac
+case "$(uname -m)" in
+  arm64|aarch64)
+    GUEST_ARCH="arm64"
+    ;;
+  x86_64|amd64)
+    GUEST_ARCH="amd64"
+    ;;
+  *)
+    GUEST_ARCH="$(uname -m)"
+    ;;
+esac
+
 cleanup() {
   status="$?"
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
@@ -111,7 +135,7 @@ cat >"$STATE_DIR/$WORKSPACE/event.json" <<JSON
     "requestID": "text-output-request",
     "runtimeID": "$WORKSPACE",
     "role": "workload",
-    "backend": "firecracker"
+    "backend": "$HOST_BACKEND"
   },
   "state": "running",
   "detail": "seeded text output state",
@@ -126,7 +150,7 @@ cat >"$STATE_DIR/$WORKSPACE/runtime.json" <<JSON
       "requestID": "text-output-request",
       "runtimeID": "$WORKSPACE",
       "role": "workload",
-      "backend": "firecracker"
+      "backend": "$HOST_BACKEND"
     },
     "state": "running",
     "detail": "seeded text output state",
@@ -184,7 +208,7 @@ cat >"$STATE_DIR/images/index.json" <<JSON
       "digest": "sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f",
       "platform": {
         "os": "linux",
-        "architecture": "amd64"
+        "architecture": "$GUEST_ARCH"
       },
       "output_path": "$rootfs_path",
       "size_bytes": 6,
@@ -196,7 +220,7 @@ cat >"$STATE_DIR/images/index.json" <<JSON
       "digest": "sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f",
       "platform": {
         "os": "linux",
-        "architecture": "amd64"
+        "architecture": "$GUEST_ARCH"
       },
       "output_path": "$rootfs_path",
       "size_bytes": 6,
@@ -208,7 +232,7 @@ cat >"$STATE_DIR/images/index.json" <<JSON
       "digest": "sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f",
       "platform": {
         "os": "linux",
-        "architecture": "amd64"
+        "architecture": "$GUEST_ARCH"
       },
       "output_path": "$rootfs_path",
       "size_bytes": 6,
@@ -219,8 +243,8 @@ cat >"$STATE_DIR/images/index.json" <<JSON
 JSON
 
 assert_stdout_contains contract-text "Contract:" "$CLI" --text contract
-assert_stdout_contains host-text "Backend:" "$CLI" --output text host --backend firecracker --arch amd64
-assert_stdout_contains host-human "Backend:" "$CLI" --human host --backend firecracker --arch amd64
+assert_stdout_contains host-text "Backend:" "$CLI" --output text host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
+assert_stdout_contains host-human "Backend:" "$CLI" --human host --backend "$HOST_BACKEND" --arch "$GUEST_ARCH"
 assert_stdout_contains create-dry-run-text "Workspace: text-dry-run" \
   "$CLI" --output=text create text-dry-run --dry-run --image docker.io/library/busybox:1.36.1 --state-dir "$STATE_DIR" --network isolated
 assert_stdout_contains status-text "Readiness: guest=ready shell=not-ready result=ready mediation=disabled" \
