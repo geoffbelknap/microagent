@@ -55,11 +55,35 @@ The hosted CI workflow runs the portable microagent E2E scenarios:
 scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output
 ```
 
-The full suite is gated by `.github/workflows/live-linux-parity.yaml` on a
-self-hosted Linux runner labeled `linux`, `x64`, and `kvm`:
+Live backend validation is split by host capability:
+
+- Hosted CI is the portable gate. It should not assume KVM, Hyper-V, or Apple
+  Virtualization.framework access.
+- Linux release parity is gated by `.github/workflows/live-linux-parity.yaml`
+  on a self-hosted runner labeled `linux`, `x64`, and `kvm`.
+- macOS Apple VF parity is a local/mac-agent lane unless a self-hosted Apple
+  silicon runner is explicitly available. Hosted macOS runners are not treated
+  as the release source of truth for Virtualization.framework behavior.
+- Windows Hyper-V remains experimental and gated by its own self-hosted
+  Windows runner when available.
+
+Run the live Linux lane on the self-hosted KVM runner:
 
 ```bash
 scripts/dev/microagent-e2e.sh
+```
+
+Feature E2E scenarios are backend-agnostic. They describe the shared
+microagent contract first and select a backend lane from the host, or from
+`MICROAGENT_E2E_BACKEND=firecracker|applevf` when you need to force one:
+
+```bash
+scripts/dev/microagent-e2e.sh \
+  public-surface \
+  lifecycle \
+  networking \
+  transport \
+  supervision
 ```
 
 List scenarios with `scripts/dev/microagent-e2e.sh --list`. Before fresh live
@@ -72,7 +96,29 @@ Live Firecracker tests must run outside sandboxed environments on Linux hosts
 with KVM, `/dev/vhost-vsock`, Firecracker on `PATH` or `MICROAGENT_FIRECRACKER`,
 and the network prerequisites documented by
 `scripts/dev/microagent-e2e-linux-network-setup.sh`. Apple VF tests must run on
-macOS with the supervisor built and signed as described in the docs.
+Apple silicon macOS with the supervisor built and signed as described in
+[Backends](docs/concepts/backends.md). The macOS lane is exposed through the
+same runner:
+
+```bash
+scripts/dev/applevf-supervisor-build.sh
+scripts/dev/microagent-e2e.sh \
+  public-surface \
+  lifecycle \
+  networking \
+  transport \
+  supervision
+```
+
+Before release, the Apple VF lane must pass portable public CLI behavior,
+lifecycle/substrate, connect/logs/ps, NAT/user/isolated networking, TCP publish,
+mediation/vsock transport, supervision/restart behavior, quarantine cleanup,
+results, artifacts, attached disks, and text/JSON output on an Apple silicon
+host. The `applevf-*` scenarios are targeted backend diagnostics for narrower
+failures; `applevf-direct-console` is a direct-supervisor smoke check. Bridged
+mode is release-relevant only on hosts with Apple's restricted
+`com.apple.vm.networking` entitlement; public ad-hoc builds should instead prove
+the fail-closed entitlement error.
 
 ## Pull Requests
 

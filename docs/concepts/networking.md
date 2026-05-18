@@ -19,16 +19,37 @@ The implementation under each mode varies by backend:
 
 | Backend | What works today |
 |---|---|
-| Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment` — runs in user space inside the framework, no privileges required. `isolated` and TCP `--publish` work. `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
+| Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment` — runs in user space inside the framework, no privileges required. `isolated`, static NAT config, and TCP `--publish` work. `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
 | Firecracker | `user` runs Firecracker inside a `pasta` user namespace with a namespace-local TAP. `nat` creates a host-side TAP and installs nftables MASQUERADE rules. `bridged` attaches a transient TAP to an existing host Linux bridge. `isolated` and TCP `--publish` work. |
 | Windows Hyper-V | `user` and `nat` use the managed `microagent-nat` HNS NAT network. `isolated` starts without an external network adapter. TCP `--publish` works through Hyper-V socket bridging. `bridged` attaches to the named HNS network or Hyper-V switch. |
 
-Apple VF NAT is backend-managed by macOS. Microagent attaches `VZNATNetworkDeviceAttachment` and asks the kernel to do DHCP via `ip=dhcp`; it does not create a TAP, configure `pf`, or allocate a subnet of its own. Guest init writes `/etc/resolv.conf` from the kernel's DHCP nameserver data — so NAT works without an image-local DHCP client. Virtualization.framework's NAT API doesn't expose deterministic guest IP, gateway, or DNS, so Apple VF status reports the requested mode and declared publishes but not a runtime lease.
+Apple VF NAT is backend-managed by macOS. Microagent attaches `VZNATNetworkDeviceAttachment`; it does not create a TAP, configure `pf`, or allocate a subnet of its own. By default it asks the kernel to do DHCP via `ip=dhcp`, and guest init writes `/etc/resolv.conf` from the kernel's DHCP nameserver data, so NAT works without an image-local DHCP client. When a spec declares `network.ip`, `network.gateway`, and optional `network.dns`, Apple VF passes those values to guest init for static IPv4 setup. Use the macOS NAT subnet, normally `192.168.64.0/24` with gateway `192.168.64.1`; Virtualization.framework still owns the attachment and does not expose an independently allocated runtime lease.
 
 Windows Hyper-V NAT is backend-managed through HNS/HCN. Microagent creates or
 reuses a `microagent-nat` network, attaches an HNS endpoint to the HCS compute
 system, and records runtime network IDs and address details when Windows
 returns them.
+
+## Backend parity
+
+The portable contract is the network intent: outbound access in `user` and
+`nat`, no guest network in `isolated`, declared TCP inbound through
+`--publish`, and static guest IP/DNS config where the backend can safely apply
+it.
+
+The backend mechanics are intentionally different:
+
+| Capability | Firecracker on Linux | Apple VF on macOS |
+|---|---|---|
+| `user` | `pasta` user-mode networking in an unprivileged namespace. | Native `VZNATNetworkDeviceAttachment`; no sudo, TAP, `pf`, or bridge setup. |
+| `nat` | Microagent creates a TAP, assigns a `10.43.x.0/29` subnet, and installs nftables NAT rules. | macOS owns the native NAT attachment. Microagent can configure a static guest address inside Apple's NAT subnet, normally `192.168.64.0/24`. |
+| Runtime lease reporting | Reports assigned runtime IP, subnet, gateway, DNS, and routes because microagent owns the allocation. | Reports declared static config and published ports. DHCP lease details stay macOS-managed because Virtualization.framework does not expose them. |
+| Bridged | Works with an existing Linux bridge and host network privileges. | Implemented in the supervisor, but normal open-source builds are blocked by Apple's restricted `com.apple.vm.networking` entitlement. |
+
+For most workloads, use `user` unless you need static guest config or Linux TAP
+NAT throughput. On macOS, `user` and `nat` both use Apple's native NAT
+attachment; `nat` is the mode to choose when you want to declare a stable
+guest IP/gateway/DNS inside that native NAT network.
 
 ## Declaring the mode
 
@@ -60,6 +81,25 @@ Under the hood, the guest init listens on a vsock port matching the host port; t
 
 Isolated workspaces reject port forwards before the request leaves the CLI: there's no guest network for them to reach.
 
+## Inbound networking
+
+Use `--publish` for host-to-guest TCP services:
+
+```bash
+microagent create web --network user --publish 127.0.0.1:8080:80/tcp
+```
+
+That is the backend-neutral inbound contract. The host listens on the declared
+address and port, the supervisor bridges the connection over the backend's
+transport, and guest init forwards it to the requested guest TCP port. It works
+the same way for HTTP services, SSH-like services, and local test servers.
+
+Do not depend on direct host routing to the guest IP unless you are deliberately
+using a backend-specific bridged setup. Firecracker `nat` and Apple VF `nat`
+are NAT modes; a stable guest IP is useful for deterministic guest-side config,
+tests, and software that binds to a non-loopback address, but it is not the
+portable way to expose a service to the host. Published ports are.
+
 ## User mode on Firecracker
 
 `user` is the default Linux mode. The workspace runs inside an unprivileged user namespace, with `pasta` bridging that namespace's network out to the host using ordinary user-space socket calls. No host `setcap`, no `ip_forward=1`, no bridge configuration — `pasta` does the equivalent of NAT entirely in user space.
@@ -85,6 +125,28 @@ Host requirements:
 If any of those is missing, `nat` fails closed before the VM boots. Transient TAPs and per-workspace nftables rules are cleaned up on `quarantine`, `stop`, `kill`, and `delete`.
 
 Pick `nat` over `user` when you need the throughput — the user-mode stack costs ~10–30% on bandwidth, irrelevant for LLM API calls but noticeable for high-volume traffic.
+
+## Static NAT on Apple VF
+
+Apple VF can apply static guest IPv4 inside the native macOS NAT subnet:
+
+```yaml
+network:
+  mode: nat
+  ip: 192.168.64.2/24
+  subnet: 192.168.64.0/24
+  gateway: 192.168.64.1
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
+  routes:
+    - 0.0.0.0/0 via 192.168.64.1
+```
+
+This is not a TAP-style backend allocation. Microagent passes the declared
+address, gateway, and DNS values to guest init; macOS still provides the NAT
+attachment. Use static NAT when a test or workload needs a stable guest address
+inside the Apple VF NAT network.
 
 ## Bridged on Apple VF
 
@@ -150,4 +212,4 @@ For the architecture and a worked pattern, see [Wire up the mediation channel](/
 
 ## What's visible
 
-The network record appears in JSON output from `create`, `start`, `status`, and `ps`. `microagent --json network <name>` also shows the latest runtime network assignment, including Firecracker NAT IP, subnet, gateway, DNS, and route when present. Apple VF reports the declared mode and any port forwards but can't expose the macOS-managed NAT lease — Virtualization.framework doesn't surface it. Windows Hyper-V reports HNS network and endpoint identity plus address details returned by HCN. Low-level wiring such as TAP names, HNS endpoint IDs, and Firecracker config paths stays behind the supervisor protocol. Malformed port forwards fail closed before any request is sent.
+The network record appears in JSON output from `create`, `start`, `status`, and `ps`. `microagent --json network <name>` also shows the latest runtime network assignment, including Firecracker NAT IP, subnet, gateway, DNS, and route when present. Apple VF reports the declared mode, static network fields, and any port forwards, but DHCP NAT details remain macOS-managed because Virtualization.framework doesn't surface the lease. Windows Hyper-V reports HNS network and endpoint identity plus address details returned by HCN. Low-level wiring such as TAP names, HNS endpoint IDs, and Firecracker config paths stays behind the supervisor protocol. Malformed port forwards fail closed before any request is sent.

@@ -529,14 +529,27 @@ func configureKernelDHCPDNS() error {
 	if err != nil || !cmdlineRequestsDHCP(string(cmdline)) {
 		return nil
 	}
-	pnp, err := os.ReadFile("/proc/net/pnp")
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
+	allowGatewayFallback := cmdlineAllowsGatewayDNSFallback(string(cmdline))
+	nameservers := cmdlineDNSNameservers(string(cmdline))
+	deadline := time.Now().Add(10 * time.Second)
+	for len(nameservers) == 0 {
+		pnp, err := os.ReadFile("/proc/net/pnp")
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read kernel DHCP nameservers: %w", err)
 		}
-		return fmt.Errorf("read kernel DHCP nameservers: %w", err)
+		if err == nil {
+			nameservers = parseKernelPNPNameservers(string(pnp))
+		}
+		if len(nameservers) == 0 && allowGatewayFallback {
+			if nameserver, ok := defaultGatewayNameserver("/proc/net/route"); ok {
+				nameservers = append(nameservers, nameserver)
+			}
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
-	nameservers := parseKernelPNPNameservers(string(pnp))
 	if len(nameservers) == 0 {
 		return nil
 	}
@@ -578,6 +591,30 @@ func cmdlineRequestsDHCP(cmdline string) bool {
 	return false
 }
 
+func cmdlineAllowsGatewayDNSFallback(cmdline string) bool {
+	values := microagentCmdlineValues(cmdline)
+	return values["microagent_dns_fallback_gateway"] == "1"
+}
+
+func cmdlineDNSNameservers(cmdline string) []string {
+	values := microagentCmdlineValues(cmdline)
+	raw := strings.TrimSpace(values["microagent_dns"])
+	if raw == "" {
+		return nil
+	}
+	var nameservers []string
+	seen := map[string]bool{}
+	for _, item := range strings.Split(raw, ",") {
+		ip := strings.TrimSpace(item)
+		if net.ParseIP(ip) == nil || seen[ip] {
+			continue
+		}
+		seen[ip] = true
+		nameservers = append(nameservers, ip)
+	}
+	return nameservers
+}
+
 func parseKernelPNPNameservers(raw string) []string {
 	var nameservers []string
 	seen := map[string]bool{}
@@ -598,6 +635,40 @@ func parseKernelPNPNameservers(raw string) []string {
 		nameservers = append(nameservers, ip)
 	}
 	return nameservers
+}
+
+func defaultGatewayNameserver(routePath string) (string, bool) {
+	data, err := os.ReadFile(routePath)
+	if err != nil {
+		return "", false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] == "Iface" || fields[1] != "00000000" {
+			continue
+		}
+		ip := littleEndianHexIPv4(fields[2])
+		if ip == "" || ip == "0.0.0.0" {
+			continue
+		}
+		return ip, true
+	}
+	return "", false
+}
+
+func littleEndianHexIPv4(raw string) string {
+	if len(raw) != 8 {
+		return ""
+	}
+	bytes := make([]byte, 4)
+	for i := 0; i < 4; i++ {
+		value, err := strconv.ParseUint(raw[i*2:i*2+2], 16, 8)
+		if err != nil {
+			return ""
+		}
+		bytes[3-i] = byte(value)
+	}
+	return net.IPv4(bytes[0], bytes[1], bytes[2], bytes[3]).String()
 }
 
 func guestEnv(extra []string) []string {

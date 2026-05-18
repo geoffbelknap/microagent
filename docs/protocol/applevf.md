@@ -4,7 +4,7 @@ description: One JSON request in, one JSON response out.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-11_
+_Last updated: 2026-05-17_
 
 microagent uses the supervisor concept for backend lifecycle work. The
 Apple VF supervisor is packaged as a standalone executable,
@@ -98,7 +98,7 @@ devices:
 |---|---|
 | `nat` | Adds a `VZNATNetworkDeviceAttachment` and requests guest DHCP with `ip=dhcp` |
 | `isolated` | Adds no network device |
-| `bridged` | Adds a `VZBridgedNetworkDeviceAttachment` and requests guest DHCP with `ip=dhcp` |
+| `bridged` | Adds a `VZBridgedNetworkDeviceAttachment`; uses DHCP unless static IP and gateway are declared |
 
 `nat` is the default. It uses Virtualization.framework's native NAT service,
 not a TAP device, host bridge, or host firewall rule set managed by
@@ -110,14 +110,15 @@ on image-local DHCP clients such as `dhclient` or `udhcpc`. Guest init writes
 `/etc/resolv.conf` from the kernel DHCP nameserver data so slim images can
 resolve DNS without extra packages.
 
-Apple does not expose a stable guest IP, gateway, or DNS assignment through the
-Virtualization.framework NAT API. Status and network responses therefore report
-the requested mode and declared TCP publishes, but Apple VF NAT runtime details
-do not include deterministic `ip`, `gateway`, or `dns` values. Treat the NAT
-assignment as backend-managed. If a guest cannot resolve DNS or reach outbound
-TCP targets, check that the host is online, that the guest kernel supports
-`ip=dhcp`, and that host firewall or endpoint-security software is not blocking
-the supervisor process.
+When the request declares `network.ip` and `network.gateway`, Apple VF passes
+those values, plus optional `network.dns`, to guest init for static IPv4 setup.
+Use the native macOS NAT subnet, normally `192.168.64.0/24` with gateway
+`192.168.64.1`. Apple still owns the NAT attachment, so DHCP-assigned leases
+remain backend-managed and are not reported as deterministic runtime details.
+If a guest cannot resolve DNS or reach outbound TCP targets, check that the host
+is online, that the guest kernel supports `ip=dhcp` for dynamic NAT, and that
+host firewall or endpoint-security software is not blocking the supervisor
+process.
 
 `bridged` requires `config.network.interface`, matched against the Apple VF
 bridged interface identifier or localized display name. It also requires the

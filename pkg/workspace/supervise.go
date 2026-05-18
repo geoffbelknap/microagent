@@ -43,6 +43,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 		startResult, err := Start(ctx, workspaceOpts)
 		if err != nil {
 			result.FinalState = string(vmkit.StateFailed)
+			writeSuperviseStartFailure(workspaceOpts, err)
 			if !ShouldRestart(policy, vmkit.StateFailed) {
 				result.Stopped = true
 				return result, err
@@ -80,18 +81,26 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 	}
 }
 
+func writeSuperviseStartFailure(opts Options, startErr error) {
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
+	req := Request(opts, "run", rootfsPath, NewRequestID())
+	_ = WriteProcessState(opts, req, vmkit.StateFailed, 0, startErr.Error())
+}
+
 func WaitForSupervised(ctx context.Context, opts Options, interval time.Duration) (vmkit.VMState, error) {
 	for {
 		resp, err := Inspect(ctx, opts)
 		if err != nil {
 			if resp.Event != nil {
+				if isSupervisedTerminalState(resp.Event.State) {
+					return resp.Event.State, nil
+				}
 				return resp.Event.State, err
 			}
 			return vmkit.StateUnknown, err
 		}
 		if resp.Event != nil {
-			switch resp.Event.State {
-			case vmkit.StateHalted, vmkit.StateQuarantined, vmkit.StateStopped, vmkit.StateFailed:
+			if isSupervisedTerminalState(resp.Event.State) {
 				return resp.Event.State, nil
 			}
 		}
@@ -100,6 +109,15 @@ func WaitForSupervised(ctx context.Context, opts Options, interval time.Duration
 			return vmkit.StateUnknown, ctx.Err()
 		case <-time.After(interval):
 		}
+	}
+}
+
+func isSupervisedTerminalState(state vmkit.VMState) bool {
+	switch state {
+	case vmkit.StateHalted, vmkit.StateQuarantined, vmkit.StateStopped, vmkit.StateFailed:
+		return true
+	default:
+		return false
 	}
 }
 

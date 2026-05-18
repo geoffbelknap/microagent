@@ -14,12 +14,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
@@ -1653,13 +1655,17 @@ func dialConnectShell(ctx context.Context, stateDir, name string, timeout time.D
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {
-		dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-		conn, err := dialShellTarget(dialCtx, target)
-		cancel()
-		if err == nil {
-			return conn, nil
+		if target.Network == "tcp" && state.Config.ShellPort != 0 && !workspaceShellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
+			lastErr = fmt.Errorf("guest shell helper is not listening on port %d", state.Config.ShellPort)
+		} else {
+			dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			conn, err := dialShellTarget(dialCtx, target)
+			cancel()
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
 		}
-		lastErr = err
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, targetDescription(target), lastErr)
 		}
@@ -1850,6 +1856,8 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	result, err := workspace.Supervise(ctx, opts)
 	if result.Workspace != "" {
 		if encodeErr := writeSuperviseResult(stdout, result); encodeErr != nil {
@@ -2070,8 +2078,8 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 		return err
 	}
 	if state == vmkit.StateRunning && containsString(applied, "network") {
-		if opts.Backend != vmkit.BackendFirecracker {
-			return fmt.Errorf("live network apply is only supported by the Firecracker backend; stop and start %s to apply this change", name)
+		if opts.Backend != vmkit.BackendFirecracker && opts.Backend != vmkit.BackendAppleVF {
+			return fmt.Errorf("live network apply is only supported by the Firecracker and Apple VF backends; stop and start %s to apply this change", name)
 		}
 		oldNetwork := networkConfigFromSpec(manifest.Network)
 		newNetwork := networkConfigFromSpec(next.Network)
@@ -3483,7 +3491,7 @@ func workspaceShellReadinessFromRuntime(state workspaceRuntimeState) (vmkit.Read
 		}
 		return vmkit.ReadinessSignal{}, false
 	}
-	if state.Event.Identity.Backend == vmkit.BackendFirecracker && state.Config.ShellPort != 0 {
+	if state.Event.Identity.Backend != vmkit.BackendWindowsHyperV && state.Config.ShellPort != 0 {
 		if workspaceShellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
 			return vmkit.ReadinessSignal{
 				Ready:      true,

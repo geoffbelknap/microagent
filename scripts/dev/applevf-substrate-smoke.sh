@@ -224,7 +224,7 @@ with open(os.path.join(state_dir, "start-quarantined.err"), "r", encoding="utf-8
         raise SystemExit("start from quarantined state did not report quarantine")
 PY
 
-"$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
+"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
 python3 - "$STATE_DIR/delete.json" <<'PY'
 import json
 import sys

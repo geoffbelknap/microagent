@@ -9,10 +9,21 @@ SCENARIOS=(
   "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all"
   "text-output:scripts/dev/microagent-e2e-text-output.sh:all"
   "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all"
-  "lifecycle-matrix:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux"
-  "networking:scripts/dev/microagent-e2e-networking.sh:linux"
-  "mediation:scripts/dev/microagent-e2e-mediation.sh:linux"
-  "supervision:scripts/dev/microagent-e2e-supervision.sh:linux"
+  "lifecycle-deep:scripts/dev/microagent-e2e-lifecycle.sh:all"
+  "networking-deep:scripts/dev/microagent-e2e-networking-contract.sh:all"
+  "transport-deep:scripts/dev/microagent-e2e-transport.sh:all"
+  "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all"
+  "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:manual-linux"
+  "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:manual-linux"
+  "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:manual-linux"
+  "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:manual-linux"
+  "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin"
+  "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin"
+  "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin"
+  "applevf-workspace-connect:scripts/dev/applevf-workspace-connect-smoke.sh:darwin"
+  "applevf-network-mode:scripts/dev/applevf-network-mode-smoke.sh:darwin"
+  "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin"
+  "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin"
 )
 
 usage() {
@@ -34,12 +45,37 @@ Scenarios:
   text-output       Human/text output mode for stable public CLI surfaces
   public-surface     CLI contract, host/doctor, kernel/rootfs, run/result,
                      request JSON, bundles, attached-disk artifacts, kill, perf
-  lifecycle-matrix   create/start/status/ps/connect/logs/halt/resume/cp/clone,
-                     validation failures, images, artifacts, quarantine/delete
-  networking         user/nat/bridged networking, published ports, outbound
-                     connectivity, event history, resume behavior
-  mediation          required mediation channel and quarantine fail-closed behavior
-  supervision        restart policy behavior for never/always
+  lifecycle-deep     Backend-neutral lifecycle feature contract:
+                     create/start/status/ps/connect/logs/halt/resume/cp/clone,
+                     validation failures, images, artifacts, quarantine/delete.
+                     Defaults to Firecracker on Linux and Apple VF on macOS;
+                     override with MICROAGENT_E2E_BACKEND=firecracker|applevf.
+  networking-deep    Backend-neutral networking feature contract. Covers modes,
+                     publish, cached NATS/rootfs, apply, artifacts,
+                     halt/resume, quarantine, and invalid config paths where
+                     each backend has matching semantics.
+  transport-deep     Backend-neutral mediation/vsock transport feature contract.
+  supervision-deep   Backend-neutral restart supervision, signal, failure, and
+                     cleanup feature contract.
+  firecracker-lifecycle-host
+                    Firecracker/Linux host mechanics probe behind lifecycle.
+  firecracker-networking-host
+                    Firecracker/Linux TAP, bridge, NAT, and helper mechanics.
+  firecracker-transport-host
+                    Firecracker/Linux /dev/vhost-vsock and helper mechanics.
+  firecracker-supervision-host
+                    Firecracker/Linux helper PID cleanup mechanics.
+  applevf-boot       Apple VF run boot smoke for a BusyBox workload
+  applevf-direct-console
+                    Apple VF direct supervisor console input smoke
+  applevf-substrate  Apple VF create/start/halt/resume/quarantine/artifact smoke
+  applevf-workspace-connect
+                    Apple VF workspace connect/logs/ps smoke
+  applevf-network-mode
+                    Apple VF user/nat/isolated/bridged check and outbound smoke
+  applevf-publish    Apple VF TCP publish forwarding smoke
+  applevf-vsock-diagnostic
+                    Apple VF mediation and virtio-vsock diagnostic smoke
 
 Environment:
   --keep or MICROAGENT_E2E_KEEP=1 keeps failed and successful scenario state directories.
@@ -52,16 +88,23 @@ Environment:
     E2E image cache use for scenarios that support it.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
     for compatibility with older validation commands.
+  MICROAGENT_E2E_BACKEND=firecracker|applevf selects the backend lane for
+    backend-agnostic feature scenarios.
   MICROAGENT_FIRECRACKER_SUPERVISOR=<path> uses a prepared supervisor binary.
   MICROAGENT_E2E_BRIDGE=<name> uses a prepared Linux bridge for bridged tests.
+  MICROAGENT_APPLEVF_SUPERVISOR=<path> uses a prepared Apple VF supervisor binary.
+  MICROAGENT_APPLEVF_KERNEL=<path> uses a prepared Apple VF Linux ARM64 kernel.
 
 Linux nat/bridged setup:
   scripts/dev/microagent-e2e-linux-network-setup.sh
+
+Apple VF setup:
+  scripts/dev/applevf-supervisor-build.sh
 EOF
 }
 
 scenario_script() {
-  wanted="$1"
+  wanted="$(canonical_scenario "$1")"
   for entry in "${SCENARIOS[@]}"; do
     name="${entry%%:*}"
     rest="${entry#*:}"
@@ -75,7 +118,7 @@ scenario_script() {
 }
 
 scenario_platform() {
-  wanted="$1"
+  wanted="$(canonical_scenario "$1")"
   for entry in "${SCENARIOS[@]}"; do
     name="${entry%%:*}"
     rest="${entry#*:}"
@@ -86,6 +129,26 @@ scenario_platform() {
     fi
   done
   return 1
+}
+
+canonical_scenario() {
+  case "$1" in
+    lifecycle|lifecycle-matrix)
+      printf '%s\n' lifecycle-deep
+      ;;
+    networking|networking-linux)
+      printf '%s\n' networking-deep
+      ;;
+    transport|mediation|mediation-linux)
+      printf '%s\n' transport-deep
+      ;;
+    supervision|supervision-linux)
+      printf '%s\n' supervision-deep
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
 }
 
 scenario_supported() {
@@ -177,10 +240,18 @@ if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_REGISTRY_AUTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_TEXT_OUTPUT=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_LIFECYCLE=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_LIFECYCLE_MATRIX=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_NETWORKING=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_MEDIATION=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_SUPERVISION=1
+  export MICROAGENT_KEEP_BOOT_SMOKE=1
+  export MICROAGENT_KEEP_DIRECT_CONSOLE_SMOKE=1
+  export MICROAGENT_KEEP_APPLEVF_SUBSTRATE_SMOKE=1
+  export MICROAGENT_KEEP_CONNECT_SMOKE=1
+  export MICROAGENT_KEEP_NETWORK_SMOKE=1
+  export MICROAGENT_KEEP_APPLEVF_PUBLISH_SMOKE=1
+  export MICROAGENT_KEEP_APPLEVF_MEDIATION_SMOKE=1
 fi
 
 selected=()
@@ -193,13 +264,14 @@ if [ "${#args[@]}" -eq 0 ]; then
   done
 else
   for name in "${args[@]}"; do
-    if ! scenario_script "$name" >/dev/null; then
+    resolved="$(canonical_scenario "$name")"
+    if ! scenario_script "$resolved" >/dev/null; then
       echo "unknown microagent E2E scenario: $name" >&2
       echo "available scenarios:" >&2
       list_scenarios >&2
       exit 2
     fi
-    selected+=("$name")
+    selected+=("$resolved")
   done
 fi
 

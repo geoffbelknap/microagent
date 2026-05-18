@@ -170,41 +170,45 @@ func TestReadinessFromRuntimeReportsWindowsHyperVShell(t *testing.T) {
 	}
 }
 
-func TestReadinessFromRuntimeRequiresFirecrackerShellHelperLog(t *testing.T) {
-	dir := t.TempDir()
-	runtimeDir := filepath.Join(dir, "agent")
-	inputPath := filepath.Join(runtimeDir, "serial.in")
-	serialPath := filepath.Join(runtimeDir, "serial.log")
-	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(inputPath, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	state := RuntimeState{
-		Event: EventFile{
-			Identity:   vmkit.Identity{RuntimeID: "agent", Backend: vmkit.BackendFirecracker},
-			State:      vmkit.StateRunning,
-			ObservedAt: time.Now().UTC().Format(time.RFC3339),
-		},
-		Config:          vmkit.Config{StateDir: dir, SerialInput: true, ShellPort: 24279},
-		SerialInputPath: inputPath,
-		SerialLogPath:   serialPath,
-		StartedAt:       time.Now().UTC().Format(time.RFC3339),
-	}
-	readiness := readinessFromRuntime(state)
-	if readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
-	}
-	if err := os.WriteFile(serialPath, []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	readiness = readinessFromRuntime(state)
-	if !readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
-	}
-	if readiness.ShellReady.Detail != "guest shell helper listening on vsock port 24279" {
-		t.Fatalf("shell readiness detail = %q", readiness.ShellReady.Detail)
+func TestReadinessFromRuntimeRequiresGuestShellHelperLog(t *testing.T) {
+	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendAppleVF} {
+		t.Run(backend, func(t *testing.T) {
+			dir := t.TempDir()
+			runtimeDir := filepath.Join(dir, "agent")
+			inputPath := filepath.Join(runtimeDir, "serial.in")
+			serialPath := filepath.Join(runtimeDir, "serial.log")
+			if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(inputPath, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			state := RuntimeState{
+				Event: EventFile{
+					Identity:   vmkit.Identity{RuntimeID: "agent", Backend: backend},
+					State:      vmkit.StateRunning,
+					ObservedAt: time.Now().UTC().Format(time.RFC3339),
+				},
+				Config:          vmkit.Config{StateDir: dir, SerialInput: true, ShellPort: 24279},
+				SerialInputPath: inputPath,
+				SerialLogPath:   serialPath,
+				StartedAt:       time.Now().UTC().Format(time.RFC3339),
+			}
+			readiness := readinessFromRuntime(state)
+			if readiness.ShellReady.Ready {
+				t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
+			}
+			if err := os.WriteFile(serialPath, []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			readiness = readinessFromRuntime(state)
+			if !readiness.ShellReady.Ready {
+				t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
+			}
+			if readiness.ShellReady.Detail != "guest shell helper listening on vsock port 24279" {
+				t.Fatalf("shell readiness detail = %q", readiness.ShellReady.Detail)
+			}
+		})
 	}
 }
 
@@ -425,6 +429,40 @@ func TestDetachedSupervisorCommandUsesStartForPersistentBackends(t *testing.T) {
 	}
 	if got := detachedSupervisorCommand(vmkit.BackendAppleVF); got != "run" {
 		t.Fatalf("detachedSupervisorCommand(%q) = %q, want run", vmkit.BackendAppleVF, got)
+	}
+}
+
+func TestAppleVFStartFailsBeforeDetachedRunWhenKernelMissing(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		Name:           "missing-kernel",
+		StateDir:       dir,
+		Backend:        vmkit.BackendAppleVF,
+		Architecture:   "arm64",
+		KernelPath:     filepath.Join(dir, "missing-kernel"),
+		SupervisorPath: filepath.Join(dir, "missing-supervisor"),
+		Profile:        "small",
+		RestartPolicy:  "never",
+		MemoryMiB:      512,
+		CPUCount:       2,
+		SizeMiB:        128,
+		Network:        vmkit.NetworkConfig{Mode: "isolated"},
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	rootfsPath := WorkspaceRootfsPath(dir, opts.Name, opts.Backend)
+	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
+		t.Fatalf("write rootfs: %v", err)
+	}
+
+	req := Request(opts, "run", rootfsPath, "req-missing-kernel")
+	_, err := startDetached(opts, req)
+	if err == nil || !strings.Contains(err.Error(), "kernel is not readable") {
+		t.Fatalf("Start err = %v, want missing kernel preflight", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, opts.Name, "runtime.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("runtime state exists after preflight failure: %v", statErr)
 	}
 }
 

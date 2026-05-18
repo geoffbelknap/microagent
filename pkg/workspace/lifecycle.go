@@ -1038,6 +1038,9 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	if opts.Backend != vmkit.BackendAppleVF {
 		return Dispatch(context.Background(), opts, req)
 	}
+	if err := requireReadableFile(opts.KernelPath, "kernel"); err != nil {
+		return vmkit.Response{}, err
+	}
 	path := opts.SupervisorPath
 	if path == "" {
 		path = "microagent-applevf-supervisor"
@@ -1075,6 +1078,21 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		ObservedAt: time.Now().UTC(),
 	}
 	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
+}
+
+func requireReadableFile(path, name string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s is not readable at %s: %w", name, path, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s is not readable at %s: path is a directory", name, path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("%s is not readable at %s: %w", name, path, err)
+	}
+	return file.Close()
 }
 
 func detachedSupervisorCommand(backend string) string {
@@ -1266,7 +1284,7 @@ func shellReadinessFromRuntime(state RuntimeState) (vmkit.ReadinessSignal, bool)
 		}
 		return vmkit.ReadinessSignal{}, false
 	}
-	if state.Event.Identity.Backend == vmkit.BackendFirecracker && state.Config.ShellPort != 0 {
+	if state.Event.Identity.Backend != vmkit.BackendWindowsHyperV && state.Config.ShellPort != 0 {
 		if shellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
 			return vmkit.ReadinessSignal{
 				Ready:      true,

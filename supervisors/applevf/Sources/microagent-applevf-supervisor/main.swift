@@ -62,6 +62,8 @@ struct NetworkConfig: Codable {
     var dns: [String]?
     var routes: [String]?
     var ip: String?
+    var subnet: String?
+    var gateway: String?
 }
 
 struct PortForward: Codable {
@@ -179,7 +181,10 @@ let serialLogFileName = "serial.log"
 let serialInputFileName = "serial.in"
 let supervisorLogFileName = "supervisor.log"
 let quarantineAckFileName = "quarantine.ack.json"
+let applyRequestFileName = "apply.request.json"
+let applyAckFileName = "apply.ack.json"
 let quarantineControlSignal = SIGUSR1
+let applyControlSignal = SIGUSR2
 let maxSocketConnections = 128
 let maxResultSocketBytes = 16 * 1024 * 1024
 let decoder = JSONDecoder()
@@ -197,6 +202,12 @@ struct RuntimeState: Codable {
     var startedAt: Date?
     var updatedAt: Date
     var readiness: RuntimeReadiness?
+    var error: String?
+}
+
+struct ApplyAck: Codable {
+    var runtimeID: String
+    var observedAt: String
     var error: String?
 }
 
@@ -293,6 +304,8 @@ func handle(_ request: Request) throws -> Response {
         return try stateOnly(request, state: .halted, detail: nil)
     case "quarantine":
         return try quarantine(request)
+    case "apply":
+        return try applyLive(request)
     case "kill":
         return try stateOnly(request, state: .stopped, detail: "forced")
     case "delete":
@@ -307,6 +320,32 @@ func handle(_ request: Request) throws -> Response {
     default:
         throw ProtocolError.invalid("unknown command: \(request.command)")
     }
+}
+
+func applyLive(_ request: Request) throws -> Response {
+    let identity = try validatedIdentity(request.identity)
+    let config = try validatedConfig(request.config)
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), processAlive(runtime.pid), let pid = runtime.pid else {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
+    }
+    guard livePortForwardHostOnlyChange(oldConfig: runtime.config, newConfig: config) else {
+        throw ProtocolError.invalid("live network apply only supports host bind changes for existing port forwards; stop and start \(identity.runtimeID) to apply this change")
+    }
+    let requestPath = applyRequestPath(identity: identity, stateDir: runtime.config.stateDir)
+    let ackPath = applyAckPath(identity: identity, stateDir: runtime.config.stateDir)
+    try? FileManager.default.removeItem(at: ackPath)
+    try encoder.encode(config).write(to: requestPath, options: .atomic)
+    if kill(pid, applyControlSignal) != 0 && errno != ESRCH {
+        throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
+    }
+    let ack = try waitForApplyAck(path: ackPath, timeout: 2.0)
+    if let error = ack.error, !error.isEmpty {
+        throw ProtocolError.invalid(error)
+    }
+    let event = Event(identity: identity, state: .running, detail: "network applied", observedAt: Date())
+    try writeState(event: event, config: config)
+    try writeRuntimeState(event: event, config: config, pid: pid, error: nil)
+    return response(event: event, config: config, error: nil)
 }
 
 func quarantine(_ request: Request) throws -> Response {
@@ -328,6 +367,17 @@ func quarantine(_ request: Request) throws -> Response {
     try writeState(event: event, config: config)
     try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
     return response(event: event, config: config, error: nil)
+}
+
+func waitForApplyAck(path: URL, timeout: TimeInterval) throws -> ApplyAck {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if FileManager.default.fileExists(atPath: path.path) {
+            return try decoder.decode(ApplyAck.self, from: Data(contentsOf: path))
+        }
+        usleep(20_000)
+    }
+    throw ProtocolError.invalid("apple-vf apply control did not acknowledge before timeout")
 }
 
 func waitForQuarantineAck(path: URL, timeout: TimeInterval) throws {
@@ -474,6 +524,14 @@ func validateNetworkConfig(_ network: NetworkConfig?) throws {
     default:
         throw ProtocolError.invalid("network.mode must be user, nat, isolated, or bridged")
     }
+    let ip = network.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let gateway = network.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let subnet = network.subnet?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !ip.isEmpty || !gateway.isEmpty || !subnet.isEmpty {
+        if ip.isEmpty || gateway.isEmpty {
+            throw ProtocolError.invalid("Apple VF static networking requires network.ip and network.gateway")
+        }
+    }
     #if canImport(Virtualization)
     if mode == "bridged" {
         if #available(macOS 13.0, *) {
@@ -598,6 +656,14 @@ func supervisorLogPath(identity: Identity, stateDir: String) -> URL {
 
 func quarantineAckPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(quarantineAckFileName)
+}
+
+func applyRequestPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(applyRequestFileName)
+}
+
+func applyAckPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(applyAckFileName)
 }
 
 func resultPath(identity: Identity, stateDir: String) -> URL {
@@ -828,7 +894,12 @@ final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
     }
 
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
-        updateRuntime(identity: identity, config: config, state: .stopped, error: nil)
+        let result = try? readRuntimeResult(identity: identity, stateDir: config.stateDir)
+        if let result, result.exitCode != 0 {
+            updateRuntime(identity: identity, config: config, state: .failed, error: result.error ?? "guest exited with status \(result.exitCode)")
+        } else {
+            updateRuntime(identity: identity, config: config, state: .stopped, error: nil)
+        }
         CFRunLoopStop(CFRunLoopGetMain())
     }
 
@@ -860,11 +931,68 @@ protocol QuarantineClosable {
 final class TCPPublishForwarder: @unchecked Sendable {
     private let socketDevice: VZVirtioSocketDevice
     private var listenerFDs: [Int32]
+    private var currentForwards: [PortForward]
     private let lock = NSLock()
     private var connections: [VZVirtioSocketConnection] = []
 
     init(socketDevice: VZVirtioSocketDevice, forwards: [PortForward]) throws {
         self.socketDevice = socketDevice
+        self.listenerFDs = []
+        self.currentForwards = []
+        try install(forwards: forwards)
+    }
+
+    deinit {
+        quarantineClose()
+    }
+
+    func quarantineClose() {
+        lock.lock()
+        let fds = listenerFDs
+        listenerFDs = []
+        currentForwards = []
+        let retainedConnections = connections
+        connections = []
+        lock.unlock()
+        for fd in fds {
+            shutdown(fd, SHUT_RDWR)
+            close(fd)
+        }
+        for connection in retainedConnections {
+            connection.close()
+        }
+    }
+
+    func reload(forwards: [PortForward]) throws {
+        let previous = closeCurrent()
+        do {
+            try install(forwards: forwards)
+        } catch {
+            try? install(forwards: previous)
+            throw error
+        }
+    }
+
+    private func closeCurrent() -> [PortForward] {
+        lock.lock()
+        let previousForwards = currentForwards
+        let fds = listenerFDs
+        listenerFDs = []
+        currentForwards = []
+        let retainedConnections = connections
+        connections = []
+        lock.unlock()
+        for fd in fds {
+            shutdown(fd, SHUT_RDWR)
+            close(fd)
+        }
+        for connection in retainedConnections {
+            connection.close()
+        }
+        return previousForwards
+    }
+
+    private func install(forwards: [PortForward]) throws {
         var opened: [Int32] = []
         do {
             for forward in forwards {
@@ -876,32 +1004,15 @@ final class TCPPublishForwarder: @unchecked Sendable {
             }
             throw error
         }
-        self.listenerFDs = opened
+        lock.lock()
+        listenerFDs = opened
+        currentForwards = forwards
+        lock.unlock()
         for (idx, forward) in forwards.enumerated() {
             let fd = opened[idx]
             Thread.detachNewThread {
                 self.acceptLoop(listenerFD: fd, guestVsockPort: UInt32(forward.hostPort))
             }
-        }
-    }
-
-    deinit {
-        quarantineClose()
-    }
-
-    func quarantineClose() {
-        lock.lock()
-        let fds = listenerFDs
-        listenerFDs = []
-        let retainedConnections = connections
-        connections = []
-        lock.unlock()
-        for fd in fds {
-            shutdown(fd, SHUT_RDWR)
-            close(fd)
-        }
-        for connection in retainedConnections {
-            connection.close()
         }
     }
 
@@ -1183,6 +1294,60 @@ final class QuarantineController {
         }
     }
 }
+
+@available(macOS 13.0, *)
+final class ApplyController {
+    private let identity: Identity
+    private let config: Config
+    private let publishForwarder: TCPPublishForwarder?
+    private var source: DispatchSourceSignal?
+
+    init(identity: Identity, config: Config, publishForwarder: TCPPublishForwarder?) {
+        self.identity = identity
+        self.config = config
+        self.publishForwarder = publishForwarder
+    }
+
+    func start() {
+        signal(applyControlSignal, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: applyControlSignal, queue: .main)
+        source.setEventHandler { [weak self] in
+            self?.apply()
+        }
+        source.resume()
+        self.source = source
+    }
+
+    private func apply() {
+        let requestPath = applyRequestPath(identity: identity, stateDir: config.stateDir)
+        let ackPath = applyAckPath(identity: identity, stateDir: config.stateDir)
+        var errorMessage: String?
+        do {
+            let nextConfig = try decoder.decode(Config.self, from: Data(contentsOf: requestPath))
+            guard livePortForwardHostOnlyChange(oldConfig: config, newConfig: nextConfig) else {
+                throw ProtocolError.invalid("live network apply only supports host bind changes for existing port forwards")
+            }
+            let forwards = tcpPublishForwards(config: nextConfig)
+            if forwards.isEmpty {
+                publishForwarder?.quarantineClose()
+            } else if let publishForwarder {
+                try publishForwarder.reload(forwards: forwards)
+            } else {
+                throw ProtocolError.invalid("Apple VF publish forwarder is not available")
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
+        writeApplyAck(path: ackPath, error: errorMessage)
+    }
+
+    private func writeApplyAck(path: URL, error: String?) {
+        let ack = ApplyAck(runtimeID: identity.runtimeID, observedAt: ISO8601DateFormatter().string(from: Date()), error: error)
+        if let data = try? encoder.encode(ack) {
+            try? data.write(to: path, options: .atomic)
+        }
+    }
+}
 #endif
 
 func updateRuntime(identity: Identity, config: Config, state: VMState, error: String?) {
@@ -1213,7 +1378,9 @@ func runVM(_ request: Request) throws {
         let socketListeners = try installSocketListeners(vm: vm, identity: identity, config: config)
         let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
         let quarantineController = QuarantineController(identity: identity, config: config, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
+        let applyController = ApplyController(identity: identity, config: config, publishForwarder: publishForwarder)
         quarantineController.start()
+        applyController.start()
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
@@ -1232,7 +1399,7 @@ func runVM(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController)) {
+        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController, applyController)) {
             CFRunLoopRun()
         }
     } else {
@@ -1260,7 +1427,9 @@ func runConsole(_ request: Request) throws {
         let socketListeners = try installSocketListeners(vm: vm, identity: identity, config: config)
         let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
         let quarantineController = QuarantineController(identity: identity, config: config, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
+        let applyController = ApplyController(identity: identity, config: config, publishForwarder: publishForwarder)
         quarantineController.start()
+        applyController.start()
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
@@ -1279,7 +1448,7 @@ func runConsole(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController)) {
+        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController, applyController)) {
             CFRunLoopRun()
         }
     } else {
@@ -1327,10 +1496,7 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
 
 @available(macOS 13.0, *)
 func installTCPPublishForwarder(vm: VZVirtualMachine, config: Config) throws -> TCPPublishForwarder? {
-    var forwards = config.network?.portForwards ?? []
-    if let shellPort = config.shellPort, shellPort > 0 {
-        forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: shellPort, guestPort: shellPort))
-    }
+    let forwards = tcpPublishForwards(config: config)
     if forwards.isEmpty {
         return nil
     }
@@ -1338,6 +1504,44 @@ func installTCPPublishForwarder(vm: VZVirtualMachine, config: Config) throws -> 
         throw ProtocolError.invalid("Apple VF publish requires a virtio socket device")
     }
     return try TCPPublishForwarder(socketDevice: socket, forwards: forwards)
+}
+
+func tcpPublishForwards(config: Config) -> [PortForward] {
+    var forwards = config.network?.portForwards ?? []
+    if let shellPort = config.shellPort, shellPort > 0 {
+        forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: shellPort, guestPort: shellPort))
+    }
+    return forwards
+}
+
+func livePortForwardHostOnlyChange(oldConfig: Config, newConfig: Config) -> Bool {
+    if oldConfig.shellPort != newConfig.shellPort {
+        return false
+    }
+    let oldNetwork = oldConfig.network
+    let newNetwork = newConfig.network
+    if oldNetwork?.mode != newNetwork?.mode ||
+        oldNetwork?.interface != newNetwork?.interface ||
+        (oldNetwork?.dns ?? []) != (newNetwork?.dns ?? []) ||
+        (oldNetwork?.routes ?? []) != (newNetwork?.routes ?? []) ||
+        oldNetwork?.ip != newNetwork?.ip {
+        return false
+    }
+    let oldForwards = oldNetwork?.portForwards ?? []
+    let newForwards = newNetwork?.portForwards ?? []
+    if oldForwards.count != newForwards.count {
+        return false
+    }
+    for idx in oldForwards.indices {
+        let oldForward = oldForwards[idx]
+        let newForward = newForwards[idx]
+        if oldForward.protocolName != newForward.protocolName ||
+            oldForward.hostPort != newForward.hostPort ||
+            oldForward.guestPort != newForward.guestPort {
+            return false
+        }
+    }
+    return true
 }
 
 func listenTCP(_ forward: PortForward) throws -> Int32 {
@@ -1493,9 +1697,26 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
 
 func linuxKernelCommandLine(for config: Config) -> String {
     var args = ["console=hvc0", "root=/dev/vda", "rw", "init=/sbin/microagent-init"]
+    if let shellPort = config.shellPort, shellPort > 0 {
+        args.append("microagent_shell_port=\(shellPort)")
+    }
     switch normalizedNetworkMode(config.network) {
     case "user", "nat", "bridged":
-        args.append("ip=dhcp")
+        let ip = config.network?.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let gateway = config.network?.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !ip.isEmpty && !gateway.isEmpty {
+            args.append("microagent_net_if=eth0")
+            args.append("microagent_net_ip=\(ip)")
+            args.append("microagent_net_gw=\(gateway)")
+            let dns = config.network?.dns?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
+            if !dns.isEmpty {
+                args.append("microagent_net_dns=\(dns.joined(separator: ","))")
+            }
+        } else {
+            args.append("ip=dhcp")
+            args.append("microagent_dns=192.168.64.1")
+            args.append("microagent_dns_fallback_gateway=1")
+        }
     default:
         break
     }
