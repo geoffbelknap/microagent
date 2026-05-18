@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -457,7 +456,8 @@ func TestAppleVFStartFailsBeforeDetachedRunWhenKernelMissing(t *testing.T) {
 		t.Fatalf("write rootfs: %v", err)
 	}
 
-	_, err := Start(context.Background(), opts)
+	req := Request(opts, "run", rootfsPath, "req-missing-kernel")
+	_, err := startDetached(opts, req)
 	if err == nil || !strings.Contains(err.Error(), "kernel is not readable") {
 		t.Fatalf("Start err = %v, want missing kernel preflight", err)
 	}

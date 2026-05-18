@@ -35,8 +35,7 @@ func TestWriteSuperviseStartFailureRecordsFailedState(t *testing.T) {
 	opts := Options{
 		Name:          "start-fail",
 		StateDir:      dir,
-		Backend:       vmkit.BackendAppleVF,
-		Architecture:  "arm64",
+		Backend:       HostBackend(),
 		Profile:       "small",
 		MemoryMiB:     512,
 		CPUCount:      2,

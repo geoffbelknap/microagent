@@ -4,7 +4,7 @@ description: Declarative workspace network intent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-18_
+_Last updated: 2026-05-17_
 
 Every workspace declares its network intent. Four modes:
 
