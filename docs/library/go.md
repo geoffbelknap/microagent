@@ -257,24 +257,26 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent run` | [`workspace.Run`](#workspace-api) |
 | `microagent create` | `workspace.Create` |
 | `microagent start` | `workspace.Start` |
-| `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
+| `microagent status` / `microagent inspect` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
 | `microagent result` | `workspace.ResultStatus` |
 | `microagent ps` | `workspace.List` |
-| `microagent halt` / `quarantine` / `stop` / `kill` / `delete` | `workspace.Control` (one function, action picked via options) |
+| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` / `microagent rm` | `workspace.Control` (one function, action picked via options) |
 | `microagent apply` | `workspace.Apply` |
 | `microagent supervise` | `workspace.Supervise` |
 | `microagent connect` | `workspace.DialConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
 | `microagent logs` | `workspace.ReadLogs` |
 | `microagent cp` | `workspace.Copy` |
 | `microagent clone` | `workspace.Clone` |
-| `microagent artifacts` / `artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
+| `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
-| `microagent doctor` / `host` | [`diagnostics.Check`](#diagnostics-api) |
+| `microagent doctor` / `microagent host` | [`diagnostics.Check`](#diagnostics-api) |
 | `microagent contract` | `vmkit.Contract` |
-| `microagent kernel install` / `verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
+| `microagent kernel install` / `microagent kernel verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
 | `microagent rootfs build` | `rootfs.Builder.Build` |
-| `microagent images pull` / `list` / `tag` / `rm` / `prune` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
-| `microagent perf boot` / `footprint` / `steady` | `perf.Boot` / `Footprint` / `Steady` |
+| `microagent images` / `microagent prune` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
+| `microagent perf` / `microagent perf boot` / `microagent perf footprint` / `microagent perf steady` | `perf.Boot` / `Footprint` / `Steady` |
+| `microagent profiles` | `workspace.Profiles` / `workspace.ProfileNames` |
+| `microagent version` | CLI-only build metadata output |
 | `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |
 
 The library calls take options structs and return typed responses. The CLI is a thin shell over them — anything the CLI does, your program can do too without shelling out.

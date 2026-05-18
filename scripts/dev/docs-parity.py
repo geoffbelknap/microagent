@@ -381,6 +381,20 @@ def check_go() -> list[str]:
                     f"{GO_DOC.relative_to(ROOT)}: missing exported {name}.{symbol}; "
                     f"document it or add it to DEFAULT_GO_SYMBOL_ALLOWLIST"
                 )
+    errors.extend(check_cli_library_mapping(doc))
+    return errors
+
+
+def check_cli_library_mapping(doc: str) -> list[str]:
+    errors: list[str] = []
+    help_commands = parse_help_commands(microagent_help("help"))
+    for command in sorted(help_commands):
+        if command in UNDOCUMENTED_HELP_COMMANDS:
+            continue
+        if f"`microagent {command}`" not in doc:
+            errors.append(
+                f"{GO_DOC.relative_to(ROOT)}: CLI command {command!r} is missing from the CLI ↔ library mapping table"
+            )
     return errors
 
 
