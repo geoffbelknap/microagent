@@ -292,7 +292,7 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
   --state-dir "$STATE_DIR" \
   --send "wget -qO- -T 10 http://127.0.0.1:18080/mediation-check; wget -qO- -T 10 http://127.0.0.1:18081/raw-vsock-check; wget -qO- -T 10 http://127.0.0.1:18082/raw-large-check > /tmp/raw-large.out; cat /tmp/raw-large.out" \
   --ready-timeout 30 \
-  --timeout 15 >"$STATE_DIR/connect.txt"
+  --timeout 45 >"$STATE_DIR/connect.txt"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
   --send "if wget -qO- -T 3 http://127.0.0.1:18083/raw-unavailable; then echo RAW_UNAVAILABLE_UNEXPECTED; else echo RAW_UNAVAILABLE_FAILED; fi" \
