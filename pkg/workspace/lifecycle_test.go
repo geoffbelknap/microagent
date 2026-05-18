@@ -377,6 +377,37 @@ func TestApplyRejectsLiveNonHostNetworkChange(t *testing.T) {
 	}
 }
 
+func TestConsoleTargetUsesWindowsHyperVRuntimeID(t *testing.T) {
+	state := RuntimeState{
+		Event: EventFile{
+			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
+			State:    vmkit.StateRunning,
+		},
+		Config:                 vmkit.Config{ShellPort: 25000},
+		ComputeSystemRuntimeID: "11111111-1111-1111-1111-111111111111",
+	}
+	target, err := ConsoleTarget("agent-1", state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Network != "hvsock" || target.RuntimeID != "11111111-1111-1111-1111-111111111111" || target.Port != 25000 {
+		t.Fatalf("target = %#v", target)
+	}
+}
+
+func TestConsoleTargetRejectsWindowsHyperVWithoutRuntimeID(t *testing.T) {
+	state := RuntimeState{
+		Event: EventFile{
+			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
+			State:    vmkit.StateRunning,
+		},
+		Config: vmkit.Config{ShellPort: 25000},
+	}
+	if _, err := ConsoleTarget("agent-1", state); err == nil || !strings.Contains(err.Error(), "compute system runtime ID") {
+		t.Fatalf("ConsoleTarget err = %v, want compute system runtime ID", err)
+	}
+}
+
 func TestWorkspaceRootfsPathUsesBackendFormat(t *testing.T) {
 	tests := []struct {
 		name       string

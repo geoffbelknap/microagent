@@ -1554,41 +1554,16 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if *readyTimeoutSeconds < 0 {
 		return fmt.Errorf("connect ready-timeout must not be negative")
 	}
-	state, _, err := workspace.LatestStartState(opts.StateDir, name)
-	if err != nil {
-		return err
-	}
-	if state == vmkit.StateQuarantined {
-		return fmt.Errorf("workspace %s is quarantined; console input is disabled", name)
-	}
-	if state != vmkit.StateRunning {
-		return fmt.Errorf("workspace %s is not running; console input is unavailable in state %s", name, state)
+	consoleOpts := workspace.ConsoleOptions{
+		StateDir:     opts.StateDir,
+		Name:         name,
+		ReadyTimeout: time.Duration(*readyTimeoutSeconds) * time.Second,
+		SendTimeout:  time.Duration(*timeoutSeconds) * time.Second,
 	}
 	if strings.TrimSpace(*send) != "" {
-		if *timeoutSeconds < 0 {
-			return fmt.Errorf("connect timeout must not be negative")
-		}
-		conn, err := dialConnectShell(ctx, opts.StateDir, name, time.Duration(*readyTimeoutSeconds)*time.Second)
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
-		text := strings.ReplaceAll(*send, "\n", "\r")
-		if !strings.HasSuffix(text, "\r") {
-			text += "\r"
-		}
-		text += "exit\r"
-		if _, err := io.WriteString(conn, text); err != nil {
-			return err
-		}
-		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(*timeoutSeconds) * time.Second))
-		_, err = io.Copy(stdout, conn)
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return nil
-		}
-		return err
+		return workspace.SendConsoleCommand(ctx, consoleOpts, *send, stdout)
 	}
-	conn, err := dialConnectShell(ctx, opts.StateDir, name, time.Duration(*readyTimeoutSeconds)*time.Second)
+	conn, err := workspace.DialConsole(ctx, consoleOpts)
 	if err != nil {
 		return err
 	}
@@ -1618,83 +1593,6 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		return result.err
 	}
 	return nil
-}
-
-type shellConnectTarget struct {
-	Network   string
-	Address   string
-	RuntimeID string
-	Port      uint32
-}
-
-func dialConnectShell(ctx context.Context, stateDir, name string, timeout time.Duration) (net.Conn, error) {
-	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: stateDir, Name: name})
-	if err != nil {
-		return nil, err
-	}
-	target, err := connectShellTarget(name, state)
-	if err != nil {
-		return nil, err
-	}
-	if timeout <= 0 {
-		conn, err := dialShellTarget(ctx, target)
-		if err != nil {
-			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, targetDescription(target), err)
-		}
-		return conn, nil
-	}
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for {
-		if target.Network == "tcp" && state.Config.ShellPort != 0 && !workspaceShellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
-			lastErr = fmt.Errorf("guest shell helper is not listening on port %d", state.Config.ShellPort)
-		} else {
-			dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-			conn, err := dialShellTarget(dialCtx, target)
-			cancel()
-			if err == nil {
-				return conn, nil
-			}
-			lastErr = err
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, targetDescription(target), lastErr)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
-
-func connectShellTarget(name string, state workspaceRuntimeState) (shellConnectTarget, error) {
-	port := uint32(state.Config.ShellPort)
-	if port == 0 {
-		port = uint32(workspace.ShellPortForName(name))
-	}
-	if state.Event.Identity.Backend == vmkit.BackendWindowsHyperV {
-		runtimeID := strings.TrimSpace(state.ComputeSystemRuntimeID)
-		if runtimeID == "" {
-			return shellConnectTarget{}, fmt.Errorf("windows-hyperv connect requires compute system runtime ID in runtime.json")
-		}
-		return shellConnectTarget{Network: "hvsock", RuntimeID: runtimeID, Port: port}, nil
-	}
-	return shellConnectTarget{Network: "tcp", Address: net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), Port: port}, nil
-}
-
-func dialShellTarget(ctx context.Context, target shellConnectTarget) (net.Conn, error) {
-	if target.Network == "hvsock" {
-		return dialWindowsHyperVShell(ctx, target.RuntimeID, target.Port)
-	}
-	return (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
-}
-
-func targetDescription(target shellConnectTarget) string {
-	if target.Network == "hvsock" {
-		return fmt.Sprintf("hvsock:%s:%d", target.RuntimeID, target.Port)
-	}
-	return target.Address
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {

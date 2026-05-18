@@ -4027,15 +4027,15 @@ func TestWaitForConsoleReadyUsesSerialPrompt(t *testing.T) {
 }
 
 func TestConnectShellTargetUsesWindowsHyperVRuntimeID(t *testing.T) {
-	state := workspaceRuntimeState{
-		Event: workspaceEventFile{
+	state := workspace.RuntimeState{
+		Event: workspace.EventFile{
 			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
 			State:    vmkit.StateRunning,
 		},
 		Config:                 vmkit.Config{ShellPort: 25000},
 		ComputeSystemRuntimeID: "11111111-1111-1111-1111-111111111111",
 	}
-	target, err := connectShellTarget("agent-1", state)
+	target, err := workspace.ConsoleTarget("agent-1", state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4045,15 +4045,15 @@ func TestConnectShellTargetUsesWindowsHyperVRuntimeID(t *testing.T) {
 }
 
 func TestConnectShellTargetRejectsWindowsHyperVWithoutRuntimeID(t *testing.T) {
-	state := workspaceRuntimeState{
-		Event: workspaceEventFile{
+	state := workspace.RuntimeState{
+		Event: workspace.EventFile{
 			Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
 			State:    vmkit.StateRunning,
 		},
 		Config: vmkit.Config{ShellPort: 25000},
 	}
-	if _, err := connectShellTarget("agent-1", state); err == nil || !strings.Contains(err.Error(), "compute system runtime ID") {
-		t.Fatalf("connectShellTarget err = %v, want compute system runtime ID", err)
+	if _, err := workspace.ConsoleTarget("agent-1", state); err == nil || !strings.Contains(err.Error(), "compute system runtime ID") {
+		t.Fatalf("ConsoleTarget err = %v, want compute system runtime ID", err)
 	}
 }
 
