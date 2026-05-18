@@ -31,7 +31,6 @@ import (
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
-	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -2463,242 +2462,31 @@ func workspaceSpecPath(command string, args []string) string {
 }
 
 func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit, cpusExplicit, sizeExplicit bool) error {
-	spec, err := readWorkspaceSpec(path)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(spec.Name) != "" {
-		opts.Name = strings.TrimSpace(spec.Name)
-	}
-	if strings.TrimSpace(spec.ImageRef) != "" {
-		opts.ImageRef = strings.TrimSpace(spec.ImageRef)
-	}
-	if strings.TrimSpace(spec.Profile) != "" {
-		opts.Profile = strings.TrimSpace(spec.Profile)
-		if err := applyResourceProfile(opts, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
-			return err
-		}
-	}
-	if strings.TrimSpace(spec.Restart) != "" {
-		opts.RestartPolicy = normalizeRestartPolicy(spec.Restart)
-	}
-	if spec.Resources.MemoryMiB != 0 && !memoryExplicit {
-		opts.MemoryMiB = spec.Resources.MemoryMiB
-		opts.SpecMemory = true
-	}
-	if spec.Resources.CPUCount != 0 && !cpusExplicit {
-		opts.CPUCount = spec.Resources.CPUCount
-		opts.SpecCPU = true
-	}
-	if spec.Resources.SizeMiB != 0 && !sizeExplicit {
-		opts.SizeMiB = spec.Resources.SizeMiB
-		opts.SpecSize = true
-	}
-	if spec.Network.Mode != "" || spec.Network.Interface != "" || len(spec.Network.PortForwards) != 0 || len(spec.Network.DNS) != 0 || len(spec.Network.Routes) != 0 || spec.Network.IP != "" || spec.Network.Subnet != "" || spec.Network.Gateway != "" {
-		opts.Network = vmkit.NetworkConfig{
-			Mode:         spec.Network.Mode,
-			Interface:    spec.Network.Interface,
-			PortForwards: append([]vmkit.PortForward{}, spec.Network.PortForwards...),
-			DNS:          append([]string{}, spec.Network.DNS...),
-			Routes:       append([]string{}, spec.Network.Routes...),
-			IP:           spec.Network.IP,
-			Subnet:       spec.Network.Subnet,
-			Gateway:      spec.Network.Gateway,
-		}
-	}
-	if spec.Mediation.Enabled || spec.Mediation.Required || spec.Mediation.Port != 0 || strings.TrimSpace(spec.Mediation.Target) != "" || spec.Mediation.FailClosed {
-		mediation := normalizeMediationConfig(spec.Mediation)
-		if err := vmkit.ValidateMediationConfig(mediation); err != nil {
-			return err
-		}
-		opts.Mediation = &mediation
-	}
-	if strings.TrimSpace(spec.Entrypoint) != "" {
-		opts.Entrypoint = spec.Entrypoint
-	}
-	if strings.TrimSpace(spec.Service) != "" {
-		opts.ServiceCommand = strings.TrimSpace(spec.Service)
-	}
-	if strings.TrimSpace(spec.Shell) != "" {
-		opts.ConsoleShell = strings.TrimSpace(spec.Shell)
-	}
-	if strings.TrimSpace(spec.Hostname) != "" {
-		opts.Hostname = strings.TrimSpace(spec.Hostname)
-	}
-	if len(spec.Setup) != 0 || len(spec.SetupFiles) != 0 {
-		setupCommands, err := setupCommandsFromSpec(spec.Setup, spec.SetupFiles, filepath.Dir(path))
-		if err != nil {
-			return err
-		}
-		opts.SetupCommands = setupCommands
-	}
-	opts.Env = mergeEnv(opts.Env, spec.Env)
-	files, err := validateWorkspaceFiles(spec.Files, filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	opts.Files = append(opts.Files, files...)
-	disks, err := workspaceSpecDisks(spec)
-	if err != nil {
-		return err
-	}
-	opts.Disks = append(opts.Disks, disks...)
-	outputs, err := validateWorkspaceOutputs(spec.Outputs)
-	if err != nil {
-		return err
-	}
-	opts.Outputs = append(opts.Outputs, outputs...)
-	return nil
+	return workspace.ApplySpecFile(opts, path, workspace.SpecApplyOptions{
+		MemoryExplicit: memoryExplicit,
+		CPUExplicit:    cpusExplicit,
+		SizeExplicit:   sizeExplicit,
+	})
 }
 
 func readWorkspaceSpec(path string) (workspaceSpec, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return workspaceSpec{}, err
-	}
-	var spec workspaceSpec
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&spec); err != nil {
-		return workspaceSpec{}, workspaceSpecDecodeError(path, err)
-	}
-	return spec, nil
-}
-
-func workspaceSpecDecodeError(path string, err error) error {
-	var typeErr *yaml.TypeError
-	if !errors.As(err, &typeErr) {
-		return fmt.Errorf("invalid workspace spec %s: %w", path, err)
-	}
-	messages := make([]string, 0, len(typeErr.Errors))
-	for _, msg := range typeErr.Errors {
-		messages = append(messages, humanWorkspaceSpecFieldError(msg))
-	}
-	return fmt.Errorf("invalid workspace spec %s: %s", path, strings.Join(messages, "; "))
-}
-
-func humanWorkspaceSpecFieldError(msg string) string {
-	line := ""
-	rest := msg
-	if strings.HasPrefix(rest, "line ") {
-		if index := strings.Index(rest, ": "); index >= 0 {
-			line = rest[:index]
-			rest = rest[index+2:]
-		}
-	}
-	const prefix = "field "
-	const separator = " not found in type "
-	if strings.HasPrefix(rest, prefix) && strings.Contains(rest, separator) {
-		parts := strings.SplitN(strings.TrimPrefix(rest, prefix), separator, 2)
-		field := parts[0]
-		typeName := parts[1]
-		var text string
-		switch typeName {
-		case "workspace.Spec":
-			text = fmt.Sprintf("unknown top-level field %q", field)
-		case "workspace.Resources":
-			if field == "network" {
-				text = `unknown field "network" under resources; move network to the top level, aligned with resources`
-			} else {
-				text = fmt.Sprintf("unknown field %q under resources", field)
-			}
-		default:
-			text = fmt.Sprintf("unknown field %q under %s", field, strings.TrimPrefix(typeName, "workspace."))
-		}
-		if line != "" {
-			return line + ": " + text
-		}
-		return text
-	}
-	return msg
+	return workspace.ReadSpec(path)
 }
 
 func setupCommandsFromSpec(steps workspace.SetupSteps, setupFiles []string, baseDir string) ([]string, error) {
-	commands := make([]string, 0, len(steps)+len(setupFiles))
-	for _, step := range steps {
-		run := strings.TrimSpace(step.Run)
-		file := strings.TrimSpace(step.File)
-		if run != "" && file != "" {
-			return nil, fmt.Errorf("setup entry cannot use both run and file")
-		}
-		if run != "" {
-			commands = append(commands, run)
-			continue
-		}
-		if file != "" {
-			command, err := setupCommandFromFile(file, baseDir)
-			if err != nil {
-				return nil, err
-			}
-			commands = append(commands, command)
-		}
-	}
-	fileCommands, err := setupCommandsFromFiles(setupFiles, baseDir)
-	if err != nil {
-		return nil, err
-	}
-	commands = append(commands, fileCommands...)
-	return commands, nil
+	return workspace.SetupCommandsFromSpec(steps, setupFiles, baseDir)
 }
 
 func setupCommandsFromFiles(files []string, baseDir string) ([]string, error) {
-	commands := make([]string, 0, len(files))
-	for _, file := range files {
-		command, err := setupCommandFromFile(file, baseDir)
-		if err != nil {
-			return nil, err
-		}
-		commands = append(commands, command)
-	}
-	return commands, nil
+	return workspace.SetupCommandsFromFiles(files, baseDir)
 }
 
 func setupCommandFromFile(path, baseDir string) (string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "", fmt.Errorf("setup file path is required")
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(baseDir, path)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", fmt.Errorf("setup file %q: %w", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("setup file must be a regular file: %s", path)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read setup file %q: %w", path, err)
-	}
-	command := strings.TrimSpace(string(data))
-	if command == "" {
-		return "", fmt.Errorf("setup file is empty: %s", path)
-	}
-	return command, nil
+	return workspace.SetupCommandFromFile(path, baseDir)
 }
 
 func workspaceSpecDisks(spec workspaceSpec) ([]workspaceDisk, error) {
-	disks := make([]workspaceDisk, 0, len(spec.Disks)+len(spec.Bundles))
-	for _, disk := range spec.Disks {
-		disk.Bundle = false
-		if err := validateWorkspaceDisk(disk); err != nil {
-			return nil, err
-		}
-		disks = append(disks, disk)
-	}
-	for _, disk := range spec.Bundles {
-		disk.Bundle = true
-		if disk.SourcePath == "" {
-			disk.SourcePath = disk.Path
-		}
-		if err := validateWorkspaceDisk(disk); err != nil {
-			return nil, err
-		}
-		disks = append(disks, disk)
-	}
-	return disks, nil
+	return workspace.SpecDisks(spec)
 }
 
 func validateWorkspaceDisk(disk workspaceDisk) error {
@@ -2747,21 +2535,7 @@ func parseWorkspaceOutputs(values []string) ([]workspaceOutput, error) {
 }
 
 func validateWorkspaceOutputs(outputs []workspaceOutput) ([]workspaceOutput, error) {
-	seen := map[string]bool{}
-	validated := make([]workspaceOutput, 0, len(outputs))
-	for _, output := range outputs {
-		output.Name = strings.TrimSpace(output.Name)
-		output.Path = strings.TrimSpace(output.Path)
-		if err := validateWorkspaceOutput(output); err != nil {
-			return nil, err
-		}
-		if seen[output.Name] {
-			return nil, fmt.Errorf("duplicate output artifact %q", output.Name)
-		}
-		seen[output.Name] = true
-		validated = append(validated, output)
-	}
-	return validated, nil
+	return workspace.ValidateOutputs(outputs)
 }
 
 func validateWorkspaceOutput(output workspaceOutput) error {
@@ -2778,65 +2552,11 @@ func validateWorkspaceOutput(output workspaceOutput) error {
 }
 
 func validateWorkspaceFiles(files []workspaceFile, baseDir string) ([]workspaceFile, error) {
-	seen := map[string]bool{}
-	validated := make([]workspaceFile, 0, len(files))
-	for _, file := range files {
-		file.SourcePath = strings.TrimSpace(file.SourcePath)
-		file.Path = strings.TrimSpace(file.Path)
-		file.Mode = strings.TrimSpace(file.Mode)
-		if file.SourcePath == "" {
-			return nil, fmt.Errorf("file src is required")
-		}
-		if !filepath.IsAbs(file.SourcePath) {
-			file.SourcePath = filepath.Join(baseDir, file.SourcePath)
-		}
-		info, err := os.Stat(file.SourcePath)
-		if err != nil {
-			return nil, fmt.Errorf("file src %q: %w", file.SourcePath, err)
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("file src must be a regular file: %s", file.SourcePath)
-		}
-		if file.Path == "" {
-			return nil, fmt.Errorf("file dst is required for %s", file.SourcePath)
-		}
-		if !path.IsAbs(file.Path) {
-			return nil, fmt.Errorf("file dst must be absolute: %s", file.Path)
-		}
-		if strings.ContainsRune(file.Path, 0) {
-			return nil, fmt.Errorf("file dst contains NUL")
-		}
-		cleanPath := path.Clean(file.Path)
-		if cleanPath == "/" {
-			return nil, fmt.Errorf("file dst must name a file: %s", file.Path)
-		}
-		if seen[cleanPath] {
-			return nil, fmt.Errorf("duplicate file dst %q", cleanPath)
-		}
-		seen[cleanPath] = true
-		file.Path = cleanPath
-		if file.Mode != "" {
-			if _, err := strconv.ParseUint(file.Mode, 8, 32); err != nil {
-				return nil, fmt.Errorf("file %s mode: %w", file.Path, err)
-			}
-		}
-		validated = append(validated, file)
-	}
-	return validated, nil
+	return workspace.ValidateFiles(files, baseDir)
 }
 
 func mergeEnv(base, overrides map[string]string) map[string]string {
-	if len(base) == 0 && len(overrides) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(base)+len(overrides))
-	for key, value := range base {
-		out[key] = value
-	}
-	for key, value := range overrides {
-		out[key] = value
-	}
-	return out
+	return workspace.MergeEnv(base, overrides)
 }
 
 func applyResourceProfile(opts *workspaceOptions, memoryExplicit, cpusExplicit, sizeExplicit bool) error {

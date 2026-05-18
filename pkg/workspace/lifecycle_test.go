@@ -226,6 +226,74 @@ func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 	}
 }
 
+func TestApplySpecFilePopulatesWorkspaceOptions(t *testing.T) {
+	dir := t.TempDir()
+	setupPath := filepath.Join(dir, "setup.sh")
+	if err := os.WriteFile(setupPath, []byte("apt-get update\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(dir, "config.txt")
+	if err := os.WriteFile(filePath, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	specPath := filepath.Join(dir, "microagent.yaml")
+	if err := os.WriteFile(specPath, []byte(`
+name: demo
+image: docker.io/library/ubuntu:24.04
+profile: medium
+restart: on-failure
+setupFiles:
+  - setup.sh
+env:
+  FOO: bar
+resources:
+  memoryMiB: 1024
+network:
+  mode: user
+files:
+  - src: config.txt
+    dst: /etc/demo/config.txt
+outputs:
+  - name: result
+    path: /workspace/result.json
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := DefaultOptions()
+	if err := ApplySpecFile(&opts, specPath, SpecApplyOptions{}); err != nil {
+		t.Fatalf("ApplySpecFile: %v", err)
+	}
+	if opts.Name != "demo" || opts.ImageRef != "docker.io/library/ubuntu:24.04" {
+		t.Fatalf("spec identity not applied: %+v", opts)
+	}
+	if opts.Profile != "medium" || opts.MemoryMiB != 1024 || opts.RestartPolicy != "on-failure" {
+		t.Fatalf("spec resources not applied: %+v", opts)
+	}
+	if len(opts.SetupCommands) != 1 || opts.SetupCommands[0] != "apt-get update" {
+		t.Fatalf("setup commands = %#v", opts.SetupCommands)
+	}
+	if opts.Env["FOO"] != "bar" {
+		t.Fatalf("env = %#v", opts.Env)
+	}
+	if len(opts.Files) != 1 || opts.Files[0].SourcePath != filePath || opts.Files[0].Path != "/etc/demo/config.txt" {
+		t.Fatalf("files = %#v", opts.Files)
+	}
+	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "result" {
+		t.Fatalf("outputs = %#v", opts.Outputs)
+	}
+}
+
+func TestReadSpecReportsUnknownField(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "microagent.yaml")
+	if err := os.WriteFile(specPath, []byte("resources:\n  network: user\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ReadSpec(specPath)
+	if err == nil || !strings.Contains(err.Error(), `unknown field "network" under resources`) {
+		t.Fatalf("ReadSpec error = %v", err)
+	}
+}
+
 func TestWorkspaceRootfsPathUsesBackendFormat(t *testing.T) {
 	tests := []struct {
 		name       string
