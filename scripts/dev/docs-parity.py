@@ -39,9 +39,10 @@ NESTED_HELP_COMMANDS = {
 }
 PUBLIC_GO_PACKAGES = {
     "github.com/geoffbelknap/microagent/pkg/diagnostics",
-    "github.com/geoffbelknap/microagent/pkg/imagecache",
-    "github.com/geoffbelknap/microagent/pkg/kernel",
-    "github.com/geoffbelknap/microagent/pkg/rootfs",
+	"github.com/geoffbelknap/microagent/pkg/imagecache",
+	"github.com/geoffbelknap/microagent/pkg/kernel",
+	"github.com/geoffbelknap/microagent/pkg/perf",
+	"github.com/geoffbelknap/microagent/pkg/rootfs",
     "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker",
     "github.com/geoffbelknap/microagent/pkg/vmkit",
     "github.com/geoffbelknap/microagent/pkg/workspace",

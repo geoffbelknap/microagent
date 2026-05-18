@@ -1,0 +1,305 @@
+package perf
+
+import (
+	"context"
+	"fmt"
+	"os/exec"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
+)
+
+type BootOptions struct {
+	StateDir       string
+	ImageRef       string
+	Profile        string
+	ExecCommand    string
+	Backend        string
+	Architecture   string
+	Mke2fsPath     string
+	SupervisorPath string
+	Iterations     int
+	Timeout        time.Duration
+	Host           *vmkit.HostSupport
+}
+
+type BootReport struct {
+	Benchmark  string             `json:"benchmark"`
+	Backend    string             `json:"backend"`
+	Arch       string             `json:"arch"`
+	ImageRef   string             `json:"image_ref"`
+	Profile    string             `json:"profile"`
+	Iterations []Iteration        `json:"iterations"`
+	Summary    Summary            `json:"summary"`
+	Host       *vmkit.HostSupport `json:"host,omitempty"`
+}
+
+type Iteration struct {
+	Name       string `json:"name"`
+	OK         bool   `json:"ok"`
+	DurationMs int64  `json:"duration_ms"`
+	Error      string `json:"error,omitempty"`
+}
+
+type Summary struct {
+	Count int   `json:"count"`
+	MinMs int64 `json:"min_ms"`
+	AvgMs int64 `json:"avg_ms"`
+	MaxMs int64 `json:"max_ms"`
+}
+
+type FootprintReport struct {
+	Benchmark string `json:"benchmark"`
+	Workspace string `json:"workspace"`
+	Backend   string `json:"backend"`
+	PID       int    `json:"pid"`
+	RSSKiB    int64  `json:"rss_kib"`
+	State     string `json:"state"`
+}
+
+type SteadyReport struct {
+	Benchmark       string      `json:"benchmark"`
+	Workspace       string      `json:"workspace"`
+	Backend         string      `json:"backend"`
+	PID             int         `json:"pid"`
+	State           string      `json:"state"`
+	DurationSeconds int         `json:"duration_seconds"`
+	IntervalSeconds int         `json:"interval_seconds"`
+	Samples         []RSSSample `json:"samples"`
+	Summary         RSSSummary  `json:"summary"`
+}
+
+type RSSSample struct {
+	At     string `json:"at"`
+	RSSKiB int64  `json:"rss_kib"`
+}
+
+type RSSSummary struct {
+	Count  int   `json:"count"`
+	MinKiB int64 `json:"min_kib"`
+	AvgKiB int64 `json:"avg_kib"`
+	MaxKiB int64 `json:"max_kib"`
+}
+
+func Boot(ctx context.Context, opts BootOptions) (BootReport, error) {
+	if opts.Iterations <= 0 {
+		return BootReport{}, fmt.Errorf("perf boot iterations must be positive")
+	}
+	if opts.Timeout <= 0 {
+		return BootReport{}, fmt.Errorf("perf boot timeout must be positive")
+	}
+	if strings.TrimSpace(opts.ImageRef) == "" {
+		return BootReport{}, fmt.Errorf("perf boot requires --image")
+	}
+	if strings.TrimSpace(opts.ExecCommand) == "" {
+		return BootReport{}, fmt.Errorf("perf boot requires --exec")
+	}
+	report := BootReport{
+		Benchmark: "boot",
+		Backend:   opts.Backend,
+		Arch:      opts.Architecture,
+		ImageRef:  strings.TrimSpace(opts.ImageRef),
+		Profile:   strings.TrimSpace(opts.Profile),
+		Host:      opts.Host,
+	}
+	for i := 0; i < opts.Iterations; i++ {
+		name := fmt.Sprintf("perf-boot-%d-%d", time.Now().UnixNano(), i+1)
+		start := time.Now()
+		err := runBootWorkspace(ctx, opts, name)
+		workspace.Cleanup(opts.StateDir, name)
+		duration := time.Since(start)
+		result := Iteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds()}
+		if err != nil {
+			result.Error = err.Error()
+		}
+		report.Iterations = append(report.Iterations, result)
+	}
+	report.Summary = SummarizeIterations(report.Iterations)
+	return report, nil
+}
+
+func Footprint(stateDir, name string) (FootprintReport, error) {
+	if err := workspace.ValidateName(name); err != nil {
+		return FootprintReport{}, err
+	}
+	state, err := workspace.ReadRuntimeState(workspace.Options{StateDir: stateDir, Name: name})
+	if err != nil {
+		return FootprintReport{}, err
+	}
+	if state.PID <= 0 {
+		return FootprintReport{}, fmt.Errorf("workspace %s does not have a running process pid", name)
+	}
+	rssKiB, err := ProcessRSSKiB(state.PID)
+	if err != nil {
+		return FootprintReport{}, err
+	}
+	return FootprintReport{
+		Benchmark: "footprint",
+		Workspace: name,
+		Backend:   state.Event.Identity.Backend,
+		PID:       state.PID,
+		RSSKiB:    rssKiB,
+		State:     string(state.Event.State),
+	}, nil
+}
+
+func Steady(ctx context.Context, stateDir, name string, duration, interval time.Duration) (SteadyReport, error) {
+	if duration <= 0 {
+		return SteadyReport{}, fmt.Errorf("perf steady duration must be positive")
+	}
+	if interval <= 0 {
+		return SteadyReport{}, fmt.Errorf("perf steady interval must be positive")
+	}
+	if interval > duration {
+		return SteadyReport{}, fmt.Errorf("perf steady interval must be less than or equal to duration")
+	}
+	if err := workspace.ValidateName(name); err != nil {
+		return SteadyReport{}, err
+	}
+	state, err := workspace.ReadRuntimeState(workspace.Options{StateDir: stateDir, Name: name})
+	if err != nil {
+		return SteadyReport{}, err
+	}
+	if state.PID <= 0 {
+		return SteadyReport{}, fmt.Errorf("workspace %s does not have a running process pid", name)
+	}
+	samples, err := SampleProcessRSS(ctx, state.PID, duration, interval)
+	if err != nil {
+		return SteadyReport{}, err
+	}
+	return SteadyReport{
+		Benchmark:       "steady",
+		Workspace:       name,
+		Backend:         state.Event.Identity.Backend,
+		PID:             state.PID,
+		State:           string(state.Event.State),
+		DurationSeconds: int(duration.Seconds()),
+		IntervalSeconds: int(interval.Seconds()),
+		Samples:         samples,
+		Summary:         SummarizeRSSSamples(samples),
+	}, nil
+}
+
+func ProcessRSSKiB(pid int) (int64, error) {
+	if pid <= 0 {
+		return 0, fmt.Errorf("pid must be positive")
+	}
+	output, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return 0, fmt.Errorf("inspect pid %d rss: %w", pid, err)
+	}
+	return ParseRSSKiB(output)
+}
+
+func ParseRSSKiB(output []byte) (int64, error) {
+	text := strings.TrimSpace(string(output))
+	if text == "" {
+		return 0, fmt.Errorf("process rss is unavailable")
+	}
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return 0, fmt.Errorf("process rss is unavailable")
+	}
+	rssKiB, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil || rssKiB < 0 {
+		return 0, fmt.Errorf("process rss is invalid: %q", fields[0])
+	}
+	return rssKiB, nil
+}
+
+func SampleProcessRSS(ctx context.Context, pid int, duration, interval time.Duration) ([]RSSSample, error) {
+	if duration <= 0 {
+		return nil, fmt.Errorf("duration must be positive")
+	}
+	if interval <= 0 {
+		return nil, fmt.Errorf("interval must be positive")
+	}
+	deadline := time.Now().Add(duration)
+	samples := []RSSSample{}
+	for {
+		rssKiB, err := ProcessRSSKiB(pid)
+		if err != nil {
+			return nil, err
+		}
+		samples = append(samples, RSSSample{At: time.Now().UTC().Format(time.RFC3339Nano), RSSKiB: rssKiB})
+		if !time.Now().Before(deadline) {
+			return samples, nil
+		}
+		sleep := interval
+		if remaining := time.Until(deadline); remaining < sleep {
+			sleep = remaining
+		}
+		timer := time.NewTimer(sleep)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func SummarizeIterations(iterations []Iteration) Summary {
+	summary := Summary{Count: len(iterations)}
+	if len(iterations) == 0 {
+		return summary
+	}
+	var total int64
+	for i, iteration := range iterations {
+		if i == 0 || iteration.DurationMs < summary.MinMs {
+			summary.MinMs = iteration.DurationMs
+		}
+		if iteration.DurationMs > summary.MaxMs {
+			summary.MaxMs = iteration.DurationMs
+		}
+		total += iteration.DurationMs
+	}
+	summary.AvgMs = total / int64(len(iterations))
+	return summary
+}
+
+func SummarizeRSSSamples(samples []RSSSample) RSSSummary {
+	summary := RSSSummary{Count: len(samples)}
+	if len(samples) == 0 {
+		return summary
+	}
+	var total int64
+	for i, sample := range samples {
+		if i == 0 || sample.RSSKiB < summary.MinKiB {
+			summary.MinKiB = sample.RSSKiB
+		}
+		if sample.RSSKiB > summary.MaxKiB {
+			summary.MaxKiB = sample.RSSKiB
+		}
+		total += sample.RSSKiB
+	}
+	summary.AvgKiB = total / int64(len(samples))
+	return summary
+}
+
+func runBootWorkspace(ctx context.Context, opts BootOptions, name string) error {
+	workspaceOpts := workspace.DefaultOptions()
+	workspaceOpts.Name = name
+	workspaceOpts.StateDir = opts.StateDir
+	workspaceOpts.ImageRef = strings.TrimSpace(opts.ImageRef)
+	workspaceOpts.ExecCommand = opts.ExecCommand
+	workspaceOpts.Profile = strings.TrimSpace(opts.Profile)
+	workspaceOpts.Timeout = opts.Timeout
+	if strings.TrimSpace(opts.Backend) != "" {
+		workspaceOpts.Backend = opts.Backend
+	}
+	if strings.TrimSpace(opts.Architecture) != "" {
+		workspaceOpts.Architecture = opts.Architecture
+	}
+	if strings.TrimSpace(opts.Mke2fsPath) != "" {
+		workspaceOpts.Mke2fsPath = opts.Mke2fsPath
+	}
+	if strings.TrimSpace(opts.SupervisorPath) != "" {
+		workspaceOpts.SupervisorPath = opts.SupervisorPath
+	}
+	_, err := workspace.Run(ctx, workspaceOpts)
+	return err
+}

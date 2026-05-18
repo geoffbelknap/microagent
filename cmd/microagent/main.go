@@ -26,6 +26,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
+	"github.com/geoffbelknap/microagent/pkg/perf"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -589,74 +590,14 @@ type imagePullOptions struct {
 	GuestInitPath string
 }
 
-type perfBootOptions struct {
-	StateDir       string
-	ImageRef       string
-	Profile        string
-	ExecCommand    string
-	Iterations     int
-	TimeoutSeconds int
-	Mke2fsPath     string
-	SupervisorPath string
-}
-
-type perfReport struct {
-	Benchmark  string             `json:"benchmark"`
-	Backend    string             `json:"backend"`
-	Arch       string             `json:"arch"`
-	ImageRef   string             `json:"image_ref"`
-	Profile    string             `json:"profile"`
-	Iterations []perfIteration    `json:"iterations"`
-	Summary    perfSummary        `json:"summary"`
-	Host       *vmkit.HostSupport `json:"host,omitempty"`
-}
-
-type perfIteration struct {
-	Name       string `json:"name"`
-	OK         bool   `json:"ok"`
-	DurationMs int64  `json:"duration_ms"`
-	Error      string `json:"error,omitempty"`
-}
-
-type perfSummary struct {
-	Count int   `json:"count"`
-	MinMs int64 `json:"min_ms"`
-	AvgMs int64 `json:"avg_ms"`
-	MaxMs int64 `json:"max_ms"`
-}
-
-type perfFootprintReport struct {
-	Benchmark string `json:"benchmark"`
-	Workspace string `json:"workspace"`
-	Backend   string `json:"backend"`
-	PID       int    `json:"pid"`
-	RSSKiB    int64  `json:"rss_kib"`
-	State     string `json:"state"`
-}
-
-type perfSteadyReport struct {
-	Benchmark       string          `json:"benchmark"`
-	Workspace       string          `json:"workspace"`
-	Backend         string          `json:"backend"`
-	PID             int             `json:"pid"`
-	State           string          `json:"state"`
-	DurationSeconds int             `json:"duration_seconds"`
-	IntervalSeconds int             `json:"interval_seconds"`
-	Samples         []perfRSSSample `json:"samples"`
-	Summary         perfRSSSummary  `json:"summary"`
-}
-
-type perfRSSSample struct {
-	At     string `json:"at"`
-	RSSKiB int64  `json:"rss_kib"`
-}
-
-type perfRSSSummary struct {
-	Count  int   `json:"count"`
-	MinKiB int64 `json:"min_kib"`
-	AvgKiB int64 `json:"avg_kib"`
-	MaxKiB int64 `json:"max_kib"`
-}
+type perfBootOptions = perf.BootOptions
+type perfReport = perf.BootReport
+type perfIteration = perf.Iteration
+type perfSummary = perf.Summary
+type perfFootprintReport = perf.FootprintReport
+type perfSteadyReport = perf.SteadyReport
+type perfRSSSample = perf.RSSSample
+type perfRSSSummary = perf.RSSSummary
 
 var resourceProfiles = workspace.Profiles
 
@@ -978,7 +919,8 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.ExecCommand, "exec", opts.ExecCommand, "Guest command used to mark boot completion")
 	fs.IntVar(&opts.Iterations, "iterations", opts.Iterations, "Number of boot measurements")
-	fs.IntVar(&opts.TimeoutSeconds, "timeout", opts.TimeoutSeconds, "Per-iteration timeout in seconds")
+	timeoutSeconds := int(opts.Timeout.Seconds())
+	fs.IntVar(&timeoutSeconds, "timeout", timeoutSeconds, "Per-iteration timeout in seconds")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
@@ -987,40 +929,16 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected perf boot argument: %s", fs.Arg(0))
 	}
-	if opts.Iterations <= 0 {
-		return fmt.Errorf("perf boot iterations must be positive")
-	}
-	if opts.TimeoutSeconds <= 0 {
+	if timeoutSeconds <= 0 {
 		return fmt.Errorf("perf boot timeout must be positive")
 	}
-	if strings.TrimSpace(opts.ImageRef) == "" {
-		return fmt.Errorf("perf boot requires --image")
-	}
-	if strings.TrimSpace(opts.ExecCommand) == "" {
-		return fmt.Errorf("perf boot requires --exec")
-	}
+	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
 	hostResp, _ := doctorResponse(ctx, doctorOptions{Backend: hostBackend(), Arch: defaultGuestArch(), SupervisorPath: opts.SupervisorPath})
-	report := perfReport{
-		Benchmark: "boot",
-		Backend:   hostBackend(),
-		Arch:      defaultGuestArch(),
-		ImageRef:  strings.TrimSpace(opts.ImageRef),
-		Profile:   strings.TrimSpace(opts.Profile),
-		Host:      hostResp.Host,
+	opts.Host = hostResp.Host
+	report, err := perf.Boot(ctx, opts)
+	if err != nil {
+		return err
 	}
-	for i := 0; i < opts.Iterations; i++ {
-		name := fmt.Sprintf("perf-boot-%d-%d", time.Now().UnixNano(), i+1)
-		start := time.Now()
-		err := runWorkspaceToDiscardedOutput(ctx, perfBootWorkspaceArgs(opts, name))
-		cleanupWorkspaceState(workspaceOptions{StateDir: opts.StateDir, Name: name})
-		duration := time.Since(start)
-		result := perfIteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds()}
-		if err != nil {
-			result.Error = err.Error()
-		}
-		report.Iterations = append(report.Iterations, result)
-	}
-	report.Summary = summarizePerfIterations(report.Iterations)
 	return writePerfReport(stdout, report)
 }
 
@@ -1031,56 +949,16 @@ func defaultPerfBootOptions() perfBootOptions {
 		Profile:        defaultWorkspaceProfile,
 		ExecCommand:    "true",
 		Iterations:     1,
-		TimeoutSeconds: 120,
+		Timeout:        120 * time.Second,
 		Mke2fsPath:     defaultMke2fsPath(),
 		SupervisorPath: defaultSupervisorPath(hostBackend()),
+		Backend:        hostBackend(),
+		Architecture:   defaultGuestArch(),
 	}
-}
-
-func perfBootWorkspaceArgs(opts perfBootOptions, name string) []string {
-	args := []string{
-		"--name", name,
-		"--image", strings.TrimSpace(opts.ImageRef),
-		"--exec", opts.ExecCommand,
-		"--state-dir", opts.StateDir,
-		"--profile", strings.TrimSpace(opts.Profile),
-		"--timeout", strconv.Itoa(opts.TimeoutSeconds),
-		"--mke2fs", opts.Mke2fsPath,
-	}
-	if strings.TrimSpace(opts.SupervisorPath) != "" {
-		args = append(args, "--supervisor", opts.SupervisorPath)
-	}
-	return args
-}
-
-func runWorkspaceToDiscardedOutput(ctx context.Context, args []string) error {
-	file, err := os.CreateTemp("", "microagent-perf-*.json")
-	if err != nil {
-		return err
-	}
-	path := file.Name()
-	defer os.Remove(path)
-	defer file.Close()
-	return runWorkspace(ctx, args, file)
 }
 
 func summarizePerfIterations(iterations []perfIteration) perfSummary {
-	summary := perfSummary{Count: len(iterations)}
-	if len(iterations) == 0 {
-		return summary
-	}
-	var total int64
-	for i, iteration := range iterations {
-		if i == 0 || iteration.DurationMs < summary.MinMs {
-			summary.MinMs = iteration.DurationMs
-		}
-		if iteration.DurationMs > summary.MaxMs {
-			summary.MaxMs = iteration.DurationMs
-		}
-		total += iteration.DurationMs
-	}
-	summary.AvgMs = total / int64(len(iterations))
-	return summary
+	return perf.SummarizeIterations(iterations)
 }
 
 func writePerfReport(stdout *os.File, report perfReport) error {
@@ -1123,53 +1001,19 @@ func runPerfFootprint(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name})
+	report, err := perf.Footprint(opts.StateDir, name)
 	if err != nil {
 		return err
-	}
-	if state.PID <= 0 {
-		return fmt.Errorf("workspace %s does not have a running process pid", name)
-	}
-	rssKiB, err := processRSSKiB(state.PID)
-	if err != nil {
-		return err
-	}
-	report := perfFootprintReport{
-		Benchmark: "footprint",
-		Workspace: name,
-		Backend:   state.Event.Identity.Backend,
-		PID:       state.PID,
-		RSSKiB:    rssKiB,
-		State:     string(state.Event.State),
 	}
 	return writePerfFootprintReport(stdout, report)
 }
 
 func processRSSKiB(pid int) (int64, error) {
-	if pid <= 0 {
-		return 0, fmt.Errorf("pid must be positive")
-	}
-	output, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return 0, fmt.Errorf("inspect pid %d rss: %w", pid, err)
-	}
-	return parseRSSKiB(output)
+	return perf.ProcessRSSKiB(pid)
 }
 
 func parseRSSKiB(output []byte) (int64, error) {
-	text := strings.TrimSpace(string(output))
-	if text == "" {
-		return 0, fmt.Errorf("process rss is unavailable")
-	}
-	fields := strings.Fields(text)
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("process rss is unavailable")
-	}
-	rssKiB, err := strconv.ParseInt(fields[0], 10, 64)
-	if err != nil || rssKiB < 0 {
-		return 0, fmt.Errorf("process rss is invalid: %q", fields[0])
-	}
-	return rssKiB, nil
+	return perf.ParseRSSKiB(output)
 }
 
 func writePerfFootprintReport(stdout *os.File, report perfFootprintReport) error {
@@ -1200,93 +1044,23 @@ func runPerfSteady(ctx context.Context, args []string, stdout *os.File) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent perf steady <name> [--state-dir <dir>]")
 	}
-	if durationSeconds <= 0 {
-		return fmt.Errorf("perf steady duration must be positive")
-	}
-	if intervalSeconds <= 0 {
-		return fmt.Errorf("perf steady interval must be positive")
-	}
-	if intervalSeconds > durationSeconds {
-		return fmt.Errorf("perf steady interval must be less than or equal to duration")
-	}
 	name := fs.Arg(0)
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name})
+	report, err := perf.Steady(ctx, opts.StateDir, name, time.Duration(durationSeconds)*time.Second, time.Duration(intervalSeconds)*time.Second)
 	if err != nil {
 		return err
-	}
-	if state.PID <= 0 {
-		return fmt.Errorf("workspace %s does not have a running process pid", name)
-	}
-	samples, err := sampleProcessRSS(ctx, state.PID, time.Duration(durationSeconds)*time.Second, time.Duration(intervalSeconds)*time.Second)
-	if err != nil {
-		return err
-	}
-	report := perfSteadyReport{
-		Benchmark:       "steady",
-		Workspace:       name,
-		Backend:         state.Event.Identity.Backend,
-		PID:             state.PID,
-		State:           string(state.Event.State),
-		DurationSeconds: durationSeconds,
-		IntervalSeconds: intervalSeconds,
-		Samples:         samples,
-		Summary:         summarizeRSSSamples(samples),
 	}
 	return writePerfSteadyReport(stdout, report)
 }
 
 func sampleProcessRSS(ctx context.Context, pid int, duration, interval time.Duration) ([]perfRSSSample, error) {
-	if duration <= 0 {
-		return nil, fmt.Errorf("duration must be positive")
-	}
-	if interval <= 0 {
-		return nil, fmt.Errorf("interval must be positive")
-	}
-	deadline := time.Now().Add(duration)
-	samples := []perfRSSSample{}
-	for {
-		rssKiB, err := processRSSKiB(pid)
-		if err != nil {
-			return nil, err
-		}
-		samples = append(samples, perfRSSSample{At: time.Now().UTC().Format(time.RFC3339Nano), RSSKiB: rssKiB})
-		if !time.Now().Before(deadline) {
-			return samples, nil
-		}
-		sleep := interval
-		if remaining := time.Until(deadline); remaining < sleep {
-			sleep = remaining
-		}
-		timer := time.NewTimer(sleep)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
-	}
+	return perf.SampleProcessRSS(ctx, pid, duration, interval)
 }
 
 func summarizeRSSSamples(samples []perfRSSSample) perfRSSSummary {
-	summary := perfRSSSummary{Count: len(samples)}
-	if len(samples) == 0 {
-		return summary
-	}
-	var total int64
-	for i, sample := range samples {
-		if i == 0 || sample.RSSKiB < summary.MinKiB {
-			summary.MinKiB = sample.RSSKiB
-		}
-		if sample.RSSKiB > summary.MaxKiB {
-			summary.MaxKiB = sample.RSSKiB
-		}
-		total += sample.RSSKiB
-	}
-	summary.AvgKiB = total / int64(len(samples))
-	return summary
+	return perf.SummarizeRSSSamples(samples)
 }
 
 func writePerfSteadyReport(stdout *os.File, report perfSteadyReport) error {
