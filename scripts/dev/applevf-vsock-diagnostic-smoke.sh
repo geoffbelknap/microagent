@@ -541,7 +541,7 @@ cp "$STATE_DIR/raw/$RAW_WORKSPACE/runtime.json" "$STATE_DIR/raw-runtime-after-co
 wait_for_status_ready "$OPTIONAL_WORKSPACE" "$STATE_DIR/optional" "$STATE_DIR/optional-status-running.json"
 "$CLI" connect "$OPTIONAL_WORKSPACE" \
   --state-dir "$STATE_DIR/optional" \
-  --send "echo OPTIONAL_MEDIATION_RUNNING" \
+  --send "printf 'OPTIONAL_MEDIATION_RUNNING\n'; sleep 1" \
   --ready-timeout 30 \
   --timeout 10 >"$STATE_DIR/optional-connect.txt"
 "$CLI" status "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR/optional" >"$STATE_DIR/optional-status-after-connect.json"
