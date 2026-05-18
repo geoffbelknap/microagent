@@ -4,7 +4,7 @@ description: Declarative workspace network intent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-18_
 
 Every workspace declares its network intent. Four modes:
 
@@ -29,6 +29,27 @@ Windows Hyper-V NAT is backend-managed through HNS/HCN. Microagent creates or
 reuses a `microagent-nat` network, attaches an HNS endpoint to the HCS compute
 system, and records runtime network IDs and address details when Windows
 returns them.
+
+## Backend parity
+
+The portable contract is the network intent: outbound access in `user` and
+`nat`, no guest network in `isolated`, declared TCP inbound through
+`--publish`, and static guest IP/DNS config where the backend can safely apply
+it.
+
+The backend mechanics are intentionally different:
+
+| Capability | Firecracker on Linux | Apple VF on macOS |
+|---|---|---|
+| `user` | `pasta` user-mode networking in an unprivileged namespace. | Native `VZNATNetworkDeviceAttachment`; no sudo, TAP, `pf`, or bridge setup. |
+| `nat` | Microagent creates a TAP, assigns a `10.43.x.0/29` subnet, and installs nftables NAT rules. | macOS owns the native NAT attachment. Microagent can configure a static guest address inside Apple's NAT subnet, normally `192.168.64.0/24`. |
+| Runtime lease reporting | Reports assigned runtime IP, subnet, gateway, DNS, and routes because microagent owns the allocation. | Reports declared static config and published ports. DHCP lease details stay macOS-managed because Virtualization.framework does not expose them. |
+| Bridged | Works with an existing Linux bridge and host network privileges. | Implemented in the supervisor, but normal open-source builds are blocked by Apple's restricted `com.apple.vm.networking` entitlement. |
+
+For most workloads, use `user` unless you need static guest config or Linux TAP
+NAT throughput. On macOS, `user` and `nat` both use Apple's native NAT
+attachment; `nat` is the mode to choose when you want to declare a stable
+guest IP/gateway/DNS inside that native NAT network.
 
 ## Declaring the mode
 
@@ -59,6 +80,25 @@ microagent create research --publish 127.0.0.1:8080:80/tcp
 Under the hood, the guest init listens on a vsock port matching the host port; the backend supervisor runs the host-side TCP listener and bridges connections to that vsock port. You don't have to configure either side — declaring the forward wires it up.
 
 Isolated workspaces reject port forwards before the request leaves the CLI: there's no guest network for them to reach.
+
+## Inbound networking
+
+Use `--publish` for host-to-guest TCP services:
+
+```bash
+microagent create web --network user --publish 127.0.0.1:8080:80/tcp
+```
+
+That is the backend-neutral inbound contract. The host listens on the declared
+address and port, the supervisor bridges the connection over the backend's
+transport, and guest init forwards it to the requested guest TCP port. It works
+the same way for HTTP services, SSH-like services, and local test servers.
+
+Do not depend on direct host routing to the guest IP unless you are deliberately
+using a backend-specific bridged setup. Firecracker `nat` and Apple VF `nat`
+are NAT modes; a stable guest IP is useful for deterministic guest-side config,
+tests, and software that binds to a non-loopback address, but it is not the
+portable way to expose a service to the host. Published ports are.
 
 ## User mode on Firecracker
 
