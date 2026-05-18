@@ -17,7 +17,6 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,11 +26,11 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
+	"github.com/geoffbelknap/microagent/pkg/perf"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
-	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -560,14 +559,7 @@ type workspaceManifest = workspace.Manifest
 
 type workspaceResult = workspace.Result
 
-type applyResult struct {
-	Workspace string          `json:"workspace"`
-	State     string          `json:"state,omitempty"`
-	Applied   []string        `json:"applied,omitempty"`
-	Reloaded  bool            `json:"reloaded,omitempty"`
-	Network   networkSpec     `json:"network,omitempty"`
-	Response  *vmkit.Response `json:"response,omitempty"`
-}
+type applyResult = workspace.ApplyResult
 
 type copyResult = workspace.CopyResult
 
@@ -598,74 +590,14 @@ type imagePullOptions struct {
 	GuestInitPath string
 }
 
-type perfBootOptions struct {
-	StateDir       string
-	ImageRef       string
-	Profile        string
-	ExecCommand    string
-	Iterations     int
-	TimeoutSeconds int
-	Mke2fsPath     string
-	SupervisorPath string
-}
-
-type perfReport struct {
-	Benchmark  string             `json:"benchmark"`
-	Backend    string             `json:"backend"`
-	Arch       string             `json:"arch"`
-	ImageRef   string             `json:"image_ref"`
-	Profile    string             `json:"profile"`
-	Iterations []perfIteration    `json:"iterations"`
-	Summary    perfSummary        `json:"summary"`
-	Host       *vmkit.HostSupport `json:"host,omitempty"`
-}
-
-type perfIteration struct {
-	Name       string `json:"name"`
-	OK         bool   `json:"ok"`
-	DurationMs int64  `json:"duration_ms"`
-	Error      string `json:"error,omitempty"`
-}
-
-type perfSummary struct {
-	Count int   `json:"count"`
-	MinMs int64 `json:"min_ms"`
-	AvgMs int64 `json:"avg_ms"`
-	MaxMs int64 `json:"max_ms"`
-}
-
-type perfFootprintReport struct {
-	Benchmark string `json:"benchmark"`
-	Workspace string `json:"workspace"`
-	Backend   string `json:"backend"`
-	PID       int    `json:"pid"`
-	RSSKiB    int64  `json:"rss_kib"`
-	State     string `json:"state"`
-}
-
-type perfSteadyReport struct {
-	Benchmark       string          `json:"benchmark"`
-	Workspace       string          `json:"workspace"`
-	Backend         string          `json:"backend"`
-	PID             int             `json:"pid"`
-	State           string          `json:"state"`
-	DurationSeconds int             `json:"duration_seconds"`
-	IntervalSeconds int             `json:"interval_seconds"`
-	Samples         []perfRSSSample `json:"samples"`
-	Summary         perfRSSSummary  `json:"summary"`
-}
-
-type perfRSSSample struct {
-	At     string `json:"at"`
-	RSSKiB int64  `json:"rss_kib"`
-}
-
-type perfRSSSummary struct {
-	Count  int   `json:"count"`
-	MinKiB int64 `json:"min_kib"`
-	AvgKiB int64 `json:"avg_kib"`
-	MaxKiB int64 `json:"max_kib"`
-}
+type perfBootOptions = perf.BootOptions
+type perfReport = perf.BootReport
+type perfIteration = perf.Iteration
+type perfSummary = perf.Summary
+type perfFootprintReport = perf.FootprintReport
+type perfSteadyReport = perf.SteadyReport
+type perfRSSSample = perf.RSSSample
+type perfRSSSummary = perf.RSSSummary
 
 var resourceProfiles = workspace.Profiles
 
@@ -987,7 +919,8 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.ExecCommand, "exec", opts.ExecCommand, "Guest command used to mark boot completion")
 	fs.IntVar(&opts.Iterations, "iterations", opts.Iterations, "Number of boot measurements")
-	fs.IntVar(&opts.TimeoutSeconds, "timeout", opts.TimeoutSeconds, "Per-iteration timeout in seconds")
+	timeoutSeconds := int(opts.Timeout.Seconds())
+	fs.IntVar(&timeoutSeconds, "timeout", timeoutSeconds, "Per-iteration timeout in seconds")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
@@ -996,40 +929,16 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected perf boot argument: %s", fs.Arg(0))
 	}
-	if opts.Iterations <= 0 {
-		return fmt.Errorf("perf boot iterations must be positive")
-	}
-	if opts.TimeoutSeconds <= 0 {
+	if timeoutSeconds <= 0 {
 		return fmt.Errorf("perf boot timeout must be positive")
 	}
-	if strings.TrimSpace(opts.ImageRef) == "" {
-		return fmt.Errorf("perf boot requires --image")
-	}
-	if strings.TrimSpace(opts.ExecCommand) == "" {
-		return fmt.Errorf("perf boot requires --exec")
-	}
+	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
 	hostResp, _ := doctorResponse(ctx, doctorOptions{Backend: hostBackend(), Arch: defaultGuestArch(), SupervisorPath: opts.SupervisorPath})
-	report := perfReport{
-		Benchmark: "boot",
-		Backend:   hostBackend(),
-		Arch:      defaultGuestArch(),
-		ImageRef:  strings.TrimSpace(opts.ImageRef),
-		Profile:   strings.TrimSpace(opts.Profile),
-		Host:      hostResp.Host,
+	opts.Host = hostResp.Host
+	report, err := perf.Boot(ctx, opts)
+	if err != nil {
+		return err
 	}
-	for i := 0; i < opts.Iterations; i++ {
-		name := fmt.Sprintf("perf-boot-%d-%d", time.Now().UnixNano(), i+1)
-		start := time.Now()
-		err := runWorkspaceToDiscardedOutput(ctx, perfBootWorkspaceArgs(opts, name))
-		cleanupWorkspaceState(workspaceOptions{StateDir: opts.StateDir, Name: name})
-		duration := time.Since(start)
-		result := perfIteration{Name: name, OK: err == nil, DurationMs: duration.Milliseconds()}
-		if err != nil {
-			result.Error = err.Error()
-		}
-		report.Iterations = append(report.Iterations, result)
-	}
-	report.Summary = summarizePerfIterations(report.Iterations)
 	return writePerfReport(stdout, report)
 }
 
@@ -1040,56 +949,16 @@ func defaultPerfBootOptions() perfBootOptions {
 		Profile:        defaultWorkspaceProfile,
 		ExecCommand:    "true",
 		Iterations:     1,
-		TimeoutSeconds: 120,
+		Timeout:        120 * time.Second,
 		Mke2fsPath:     defaultMke2fsPath(),
 		SupervisorPath: defaultSupervisorPath(hostBackend()),
+		Backend:        hostBackend(),
+		Architecture:   defaultGuestArch(),
 	}
-}
-
-func perfBootWorkspaceArgs(opts perfBootOptions, name string) []string {
-	args := []string{
-		"--name", name,
-		"--image", strings.TrimSpace(opts.ImageRef),
-		"--exec", opts.ExecCommand,
-		"--state-dir", opts.StateDir,
-		"--profile", strings.TrimSpace(opts.Profile),
-		"--timeout", strconv.Itoa(opts.TimeoutSeconds),
-		"--mke2fs", opts.Mke2fsPath,
-	}
-	if strings.TrimSpace(opts.SupervisorPath) != "" {
-		args = append(args, "--supervisor", opts.SupervisorPath)
-	}
-	return args
-}
-
-func runWorkspaceToDiscardedOutput(ctx context.Context, args []string) error {
-	file, err := os.CreateTemp("", "microagent-perf-*.json")
-	if err != nil {
-		return err
-	}
-	path := file.Name()
-	defer os.Remove(path)
-	defer file.Close()
-	return runWorkspace(ctx, args, file)
 }
 
 func summarizePerfIterations(iterations []perfIteration) perfSummary {
-	summary := perfSummary{Count: len(iterations)}
-	if len(iterations) == 0 {
-		return summary
-	}
-	var total int64
-	for i, iteration := range iterations {
-		if i == 0 || iteration.DurationMs < summary.MinMs {
-			summary.MinMs = iteration.DurationMs
-		}
-		if iteration.DurationMs > summary.MaxMs {
-			summary.MaxMs = iteration.DurationMs
-		}
-		total += iteration.DurationMs
-	}
-	summary.AvgMs = total / int64(len(iterations))
-	return summary
+	return perf.SummarizeIterations(iterations)
 }
 
 func writePerfReport(stdout *os.File, report perfReport) error {
@@ -1132,53 +1001,19 @@ func runPerfFootprint(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name})
+	report, err := perf.Footprint(opts.StateDir, name)
 	if err != nil {
 		return err
-	}
-	if state.PID <= 0 {
-		return fmt.Errorf("workspace %s does not have a running process pid", name)
-	}
-	rssKiB, err := processRSSKiB(state.PID)
-	if err != nil {
-		return err
-	}
-	report := perfFootprintReport{
-		Benchmark: "footprint",
-		Workspace: name,
-		Backend:   state.Event.Identity.Backend,
-		PID:       state.PID,
-		RSSKiB:    rssKiB,
-		State:     string(state.Event.State),
 	}
 	return writePerfFootprintReport(stdout, report)
 }
 
 func processRSSKiB(pid int) (int64, error) {
-	if pid <= 0 {
-		return 0, fmt.Errorf("pid must be positive")
-	}
-	output, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return 0, fmt.Errorf("inspect pid %d rss: %w", pid, err)
-	}
-	return parseRSSKiB(output)
+	return perf.ProcessRSSKiB(pid)
 }
 
 func parseRSSKiB(output []byte) (int64, error) {
-	text := strings.TrimSpace(string(output))
-	if text == "" {
-		return 0, fmt.Errorf("process rss is unavailable")
-	}
-	fields := strings.Fields(text)
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("process rss is unavailable")
-	}
-	rssKiB, err := strconv.ParseInt(fields[0], 10, 64)
-	if err != nil || rssKiB < 0 {
-		return 0, fmt.Errorf("process rss is invalid: %q", fields[0])
-	}
-	return rssKiB, nil
+	return perf.ParseRSSKiB(output)
 }
 
 func writePerfFootprintReport(stdout *os.File, report perfFootprintReport) error {
@@ -1209,93 +1044,23 @@ func runPerfSteady(ctx context.Context, args []string, stdout *os.File) error {
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent perf steady <name> [--state-dir <dir>]")
 	}
-	if durationSeconds <= 0 {
-		return fmt.Errorf("perf steady duration must be positive")
-	}
-	if intervalSeconds <= 0 {
-		return fmt.Errorf("perf steady interval must be positive")
-	}
-	if intervalSeconds > durationSeconds {
-		return fmt.Errorf("perf steady interval must be less than or equal to duration")
-	}
 	name := fs.Arg(0)
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: opts.StateDir, Name: name})
+	report, err := perf.Steady(ctx, opts.StateDir, name, time.Duration(durationSeconds)*time.Second, time.Duration(intervalSeconds)*time.Second)
 	if err != nil {
 		return err
-	}
-	if state.PID <= 0 {
-		return fmt.Errorf("workspace %s does not have a running process pid", name)
-	}
-	samples, err := sampleProcessRSS(ctx, state.PID, time.Duration(durationSeconds)*time.Second, time.Duration(intervalSeconds)*time.Second)
-	if err != nil {
-		return err
-	}
-	report := perfSteadyReport{
-		Benchmark:       "steady",
-		Workspace:       name,
-		Backend:         state.Event.Identity.Backend,
-		PID:             state.PID,
-		State:           string(state.Event.State),
-		DurationSeconds: durationSeconds,
-		IntervalSeconds: intervalSeconds,
-		Samples:         samples,
-		Summary:         summarizeRSSSamples(samples),
 	}
 	return writePerfSteadyReport(stdout, report)
 }
 
 func sampleProcessRSS(ctx context.Context, pid int, duration, interval time.Duration) ([]perfRSSSample, error) {
-	if duration <= 0 {
-		return nil, fmt.Errorf("duration must be positive")
-	}
-	if interval <= 0 {
-		return nil, fmt.Errorf("interval must be positive")
-	}
-	deadline := time.Now().Add(duration)
-	samples := []perfRSSSample{}
-	for {
-		rssKiB, err := processRSSKiB(pid)
-		if err != nil {
-			return nil, err
-		}
-		samples = append(samples, perfRSSSample{At: time.Now().UTC().Format(time.RFC3339Nano), RSSKiB: rssKiB})
-		if !time.Now().Before(deadline) {
-			return samples, nil
-		}
-		sleep := interval
-		if remaining := time.Until(deadline); remaining < sleep {
-			sleep = remaining
-		}
-		timer := time.NewTimer(sleep)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil, ctx.Err()
-		case <-timer.C:
-		}
-	}
+	return perf.SampleProcessRSS(ctx, pid, duration, interval)
 }
 
 func summarizeRSSSamples(samples []perfRSSSample) perfRSSSummary {
-	summary := perfRSSSummary{Count: len(samples)}
-	if len(samples) == 0 {
-		return summary
-	}
-	var total int64
-	for i, sample := range samples {
-		if i == 0 || sample.RSSKiB < summary.MinKiB {
-			summary.MinKiB = sample.RSSKiB
-		}
-		if sample.RSSKiB > summary.MaxKiB {
-			summary.MaxKiB = sample.RSSKiB
-		}
-		total += sample.RSSKiB
-	}
-	summary.AvgKiB = total / int64(len(samples))
-	return summary
+	return perf.SummarizeRSSSamples(samples)
 }
 
 func writePerfSteadyReport(stdout *os.File, report perfSteadyReport) error {
@@ -1563,41 +1328,16 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if *readyTimeoutSeconds < 0 {
 		return fmt.Errorf("connect ready-timeout must not be negative")
 	}
-	state, _, err := workspace.LatestStartState(opts.StateDir, name)
-	if err != nil {
-		return err
-	}
-	if state == vmkit.StateQuarantined {
-		return fmt.Errorf("workspace %s is quarantined; console input is disabled", name)
-	}
-	if state != vmkit.StateRunning {
-		return fmt.Errorf("workspace %s is not running; console input is unavailable in state %s", name, state)
+	consoleOpts := workspace.ConsoleOptions{
+		StateDir:     opts.StateDir,
+		Name:         name,
+		ReadyTimeout: time.Duration(*readyTimeoutSeconds) * time.Second,
+		SendTimeout:  time.Duration(*timeoutSeconds) * time.Second,
 	}
 	if strings.TrimSpace(*send) != "" {
-		if *timeoutSeconds < 0 {
-			return fmt.Errorf("connect timeout must not be negative")
-		}
-		conn, err := dialConnectShell(ctx, opts.StateDir, name, time.Duration(*readyTimeoutSeconds)*time.Second)
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
-		text := strings.ReplaceAll(*send, "\n", "\r")
-		if !strings.HasSuffix(text, "\r") {
-			text += "\r"
-		}
-		text += "exit\r"
-		if _, err := io.WriteString(conn, text); err != nil {
-			return err
-		}
-		_ = conn.SetReadDeadline(time.Now().Add(time.Duration(*timeoutSeconds) * time.Second))
-		_, err = io.Copy(stdout, conn)
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return nil
-		}
-		return err
+		return workspace.SendConsoleCommand(ctx, consoleOpts, *send, stdout)
 	}
-	conn, err := dialConnectShell(ctx, opts.StateDir, name, time.Duration(*readyTimeoutSeconds)*time.Second)
+	conn, err := workspace.DialConsole(ctx, consoleOpts)
 	if err != nil {
 		return err
 	}
@@ -1627,83 +1367,6 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		return result.err
 	}
 	return nil
-}
-
-type shellConnectTarget struct {
-	Network   string
-	Address   string
-	RuntimeID string
-	Port      uint32
-}
-
-func dialConnectShell(ctx context.Context, stateDir, name string, timeout time.Duration) (net.Conn, error) {
-	state, err := readWorkspaceRuntimeState(workspaceOptions{StateDir: stateDir, Name: name})
-	if err != nil {
-		return nil, err
-	}
-	target, err := connectShellTarget(name, state)
-	if err != nil {
-		return nil, err
-	}
-	if timeout <= 0 {
-		conn, err := dialShellTarget(ctx, target)
-		if err != nil {
-			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, targetDescription(target), err)
-		}
-		return conn, nil
-	}
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for {
-		if target.Network == "tcp" && state.Config.ShellPort != 0 && !workspaceShellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
-			lastErr = fmt.Errorf("guest shell helper is not listening on port %d", state.Config.ShellPort)
-		} else {
-			dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-			conn, err := dialShellTarget(dialCtx, target)
-			cancel()
-			if err == nil {
-				return conn, nil
-			}
-			lastErr = err
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", name, targetDescription(target), lastErr)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
-
-func connectShellTarget(name string, state workspaceRuntimeState) (shellConnectTarget, error) {
-	port := uint32(state.Config.ShellPort)
-	if port == 0 {
-		port = uint32(workspace.ShellPortForName(name))
-	}
-	if state.Event.Identity.Backend == vmkit.BackendWindowsHyperV {
-		runtimeID := strings.TrimSpace(state.ComputeSystemRuntimeID)
-		if runtimeID == "" {
-			return shellConnectTarget{}, fmt.Errorf("windows-hyperv connect requires compute system runtime ID in runtime.json")
-		}
-		return shellConnectTarget{Network: "hvsock", RuntimeID: runtimeID, Port: port}, nil
-	}
-	return shellConnectTarget{Network: "tcp", Address: net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))), Port: port}, nil
-}
-
-func dialShellTarget(ctx context.Context, target shellConnectTarget) (net.Conn, error) {
-	if target.Network == "hvsock" {
-		return dialWindowsHyperVShell(ctx, target.RuntimeID, target.Port)
-	}
-	return (&net.Dialer{}).DialContext(ctx, "tcp", target.Address)
-}
-
-func targetDescription(target shellConnectTarget) string {
-	if target.Network == "hvsock" {
-		return fmt.Sprintf("hvsock:%s:%d", target.RuntimeID, target.Port)
-	}
-	return target.Address
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
@@ -2034,137 +1697,11 @@ func runApply(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	name := strings.TrimSpace(spec.Name)
-	if name == "" {
-		return fmt.Errorf("apply spec requires name")
+	result, err := workspace.Apply(ctx, opts, spec)
+	if encodeErr := writeApplyResult(stdout, result); encodeErr != nil {
+		return encodeErr
 	}
-	if err := validateWorkspaceName(name); err != nil {
-		return err
-	}
-	opts.Name = name
-	manifest, err := readWorkspaceManifest(opts.StateDir, name)
-	if err != nil {
-		return err
-	}
-	next := manifest
-	var applied []string
-	if spec.Restart != "" {
-		restart := normalizeRestartPolicy(spec.Restart)
-		if err := validateRestartPolicy(restart); err != nil {
-			return err
-		}
-		if restart != normalizeRestartPolicy(manifest.Restart) {
-			next.Restart = restart
-			applied = append(applied, "restart")
-		}
-	}
-	if spec.Network.Mode != "" || spec.Network.Interface != "" || len(spec.Network.PortForwards) != 0 || len(spec.Network.DNS) != 0 || len(spec.Network.Routes) != 0 || spec.Network.IP != "" || spec.Network.Subnet != "" || spec.Network.Gateway != "" {
-		network := normalizeNetworkConfig(networkConfigFromSpec(spec.Network))
-		if err := vmkit.ValidateNetworkConfig(network); err != nil {
-			return err
-		}
-		networkSpec := networkSpecFromConfig(network)
-		if !reflect.DeepEqual(networkSpec, manifest.Network) {
-			next.Network = networkSpec
-			applied = append(applied, "network")
-		}
-	}
-	if len(applied) == 0 {
-		state, _, _ := workspace.LatestStartState(opts.StateDir, name)
-		return writeApplyResult(stdout, applyResult{Workspace: name, State: string(state), Network: next.Network})
-	}
-	state, _, err := workspace.LatestStartState(opts.StateDir, name)
-	if err != nil {
-		return err
-	}
-	if state == vmkit.StateRunning && containsString(applied, "network") {
-		if opts.Backend != vmkit.BackendFirecracker && opts.Backend != vmkit.BackendAppleVF {
-			return fmt.Errorf("live network apply is only supported by the Firecracker and Apple VF backends; stop and start %s to apply this change", name)
-		}
-		oldNetwork := networkConfigFromSpec(manifest.Network)
-		newNetwork := networkConfigFromSpec(next.Network)
-		if !livePortForwardHostOnlyChange(oldNetwork, newNetwork) {
-			return fmt.Errorf("live network apply only supports host bind changes for existing port forwards; stop and start %s to apply this change", name)
-		}
-	}
-	result := applyResult{Workspace: name, State: string(state), Applied: applied, Network: next.Network}
-	if state == vmkit.StateRunning && containsString(applied, "network") {
-		applyOpts := workspaceOptionsFromManifest(opts, next)
-		rootfsPath := filepath.Join(opts.StateDir, "workspaces", name, "rootfs.ext4")
-		resp, err := dispatchWorkspaceRequest(ctx, applyOpts, workspaceRequest(applyOpts, "apply", rootfsPath))
-		result.Reloaded = resp.OK
-		result.Response = &resp
-		if err == nil {
-			err = writeWorkspaceManifestFile(opts.StateDir, name, next)
-		}
-		if encodeErr := writeApplyResult(stdout, result); encodeErr != nil {
-			return encodeErr
-		}
-		return err
-	}
-	if err := writeWorkspaceManifestFile(opts.StateDir, name, next); err != nil {
-		return err
-	}
-	return writeApplyResult(stdout, result)
-}
-
-func workspaceOptionsFromManifest(base workspaceOptions, manifest workspaceManifest) workspaceOptions {
-	opts := base
-	opts.Profile = firstNonEmpty(manifest.Profile, defaultWorkspaceProfile)
-	opts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
-	opts.Network = normalizeNetworkConfig(networkConfigFromSpec(manifest.Network))
-	if manifest.Resources.MemoryMiB != 0 {
-		opts.MemoryMiB = manifest.Resources.MemoryMiB
-	}
-	if manifest.Resources.CPUCount != 0 {
-		opts.CPUCount = manifest.Resources.CPUCount
-	}
-	if manifest.Resources.SizeMiB != 0 {
-		opts.SizeMiB = manifest.Resources.SizeMiB
-	}
-	opts.ServiceCommand = manifest.Service
-	opts.ConsoleShell = manifest.ConsoleShell
-	opts.Hostname = manifest.Hostname
-	opts.Mediation = manifest.Mediation
-	opts.Disks = manifest.Disks
-	opts.Outputs = manifest.Artifacts.Egress
-	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
-	opts.ResultPort = workspace.DefaultResultPort
-	opts.Timeout = workspace.DefaultTimeout
-	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
-	return opts
-}
-
-func livePortForwardHostOnlyChange(oldNetwork, newNetwork vmkit.NetworkConfig) bool {
-	oldNetwork = normalizeNetworkConfig(oldNetwork)
-	newNetwork = normalizeNetworkConfig(newNetwork)
-	if oldNetwork.Mode != newNetwork.Mode || oldNetwork.Interface != newNetwork.Interface || !reflect.DeepEqual(oldNetwork.DNS, newNetwork.DNS) || !reflect.DeepEqual(oldNetwork.Routes, newNetwork.Routes) || oldNetwork.IP != newNetwork.IP || oldNetwork.Subnet != newNetwork.Subnet || oldNetwork.Gateway != newNetwork.Gateway {
-		return false
-	}
-	if len(oldNetwork.PortForwards) != len(newNetwork.PortForwards) {
-		return false
-	}
-	for i := range oldNetwork.PortForwards {
-		oldForward := oldNetwork.PortForwards[i]
-		newForward := newNetwork.PortForwards[i]
-		if oldForward.Protocol != newForward.Protocol || oldForward.HostPort != newForward.HostPort || oldForward.GuestPort != newForward.GuestPort {
-			return false
-		}
-	}
-	return true
-}
-
-func writeWorkspaceManifestFile(stateDir, name string, manifest workspaceManifest) error {
-	return writeJSONFile(filepath.Join(stateDir, "workspaces", name, "workspace.json"), manifest)
-}
-
-func containsString(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
+	return err
 }
 
 type stateCommandOptions struct {
@@ -2463,242 +2000,31 @@ func workspaceSpecPath(command string, args []string) string {
 }
 
 func applyWorkspaceSpecFile(opts *workspaceOptions, path string, memoryExplicit, cpusExplicit, sizeExplicit bool) error {
-	spec, err := readWorkspaceSpec(path)
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(spec.Name) != "" {
-		opts.Name = strings.TrimSpace(spec.Name)
-	}
-	if strings.TrimSpace(spec.ImageRef) != "" {
-		opts.ImageRef = strings.TrimSpace(spec.ImageRef)
-	}
-	if strings.TrimSpace(spec.Profile) != "" {
-		opts.Profile = strings.TrimSpace(spec.Profile)
-		if err := applyResourceProfile(opts, memoryExplicit, cpusExplicit, sizeExplicit); err != nil {
-			return err
-		}
-	}
-	if strings.TrimSpace(spec.Restart) != "" {
-		opts.RestartPolicy = normalizeRestartPolicy(spec.Restart)
-	}
-	if spec.Resources.MemoryMiB != 0 && !memoryExplicit {
-		opts.MemoryMiB = spec.Resources.MemoryMiB
-		opts.SpecMemory = true
-	}
-	if spec.Resources.CPUCount != 0 && !cpusExplicit {
-		opts.CPUCount = spec.Resources.CPUCount
-		opts.SpecCPU = true
-	}
-	if spec.Resources.SizeMiB != 0 && !sizeExplicit {
-		opts.SizeMiB = spec.Resources.SizeMiB
-		opts.SpecSize = true
-	}
-	if spec.Network.Mode != "" || spec.Network.Interface != "" || len(spec.Network.PortForwards) != 0 || len(spec.Network.DNS) != 0 || len(spec.Network.Routes) != 0 || spec.Network.IP != "" || spec.Network.Subnet != "" || spec.Network.Gateway != "" {
-		opts.Network = vmkit.NetworkConfig{
-			Mode:         spec.Network.Mode,
-			Interface:    spec.Network.Interface,
-			PortForwards: append([]vmkit.PortForward{}, spec.Network.PortForwards...),
-			DNS:          append([]string{}, spec.Network.DNS...),
-			Routes:       append([]string{}, spec.Network.Routes...),
-			IP:           spec.Network.IP,
-			Subnet:       spec.Network.Subnet,
-			Gateway:      spec.Network.Gateway,
-		}
-	}
-	if spec.Mediation.Enabled || spec.Mediation.Required || spec.Mediation.Port != 0 || strings.TrimSpace(spec.Mediation.Target) != "" || spec.Mediation.FailClosed {
-		mediation := normalizeMediationConfig(spec.Mediation)
-		if err := vmkit.ValidateMediationConfig(mediation); err != nil {
-			return err
-		}
-		opts.Mediation = &mediation
-	}
-	if strings.TrimSpace(spec.Entrypoint) != "" {
-		opts.Entrypoint = spec.Entrypoint
-	}
-	if strings.TrimSpace(spec.Service) != "" {
-		opts.ServiceCommand = strings.TrimSpace(spec.Service)
-	}
-	if strings.TrimSpace(spec.Shell) != "" {
-		opts.ConsoleShell = strings.TrimSpace(spec.Shell)
-	}
-	if strings.TrimSpace(spec.Hostname) != "" {
-		opts.Hostname = strings.TrimSpace(spec.Hostname)
-	}
-	if len(spec.Setup) != 0 || len(spec.SetupFiles) != 0 {
-		setupCommands, err := setupCommandsFromSpec(spec.Setup, spec.SetupFiles, filepath.Dir(path))
-		if err != nil {
-			return err
-		}
-		opts.SetupCommands = setupCommands
-	}
-	opts.Env = mergeEnv(opts.Env, spec.Env)
-	files, err := validateWorkspaceFiles(spec.Files, filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	opts.Files = append(opts.Files, files...)
-	disks, err := workspaceSpecDisks(spec)
-	if err != nil {
-		return err
-	}
-	opts.Disks = append(opts.Disks, disks...)
-	outputs, err := validateWorkspaceOutputs(spec.Outputs)
-	if err != nil {
-		return err
-	}
-	opts.Outputs = append(opts.Outputs, outputs...)
-	return nil
+	return workspace.ApplySpecFile(opts, path, workspace.SpecApplyOptions{
+		MemoryExplicit: memoryExplicit,
+		CPUExplicit:    cpusExplicit,
+		SizeExplicit:   sizeExplicit,
+	})
 }
 
 func readWorkspaceSpec(path string) (workspaceSpec, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return workspaceSpec{}, err
-	}
-	var spec workspaceSpec
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&spec); err != nil {
-		return workspaceSpec{}, workspaceSpecDecodeError(path, err)
-	}
-	return spec, nil
-}
-
-func workspaceSpecDecodeError(path string, err error) error {
-	var typeErr *yaml.TypeError
-	if !errors.As(err, &typeErr) {
-		return fmt.Errorf("invalid workspace spec %s: %w", path, err)
-	}
-	messages := make([]string, 0, len(typeErr.Errors))
-	for _, msg := range typeErr.Errors {
-		messages = append(messages, humanWorkspaceSpecFieldError(msg))
-	}
-	return fmt.Errorf("invalid workspace spec %s: %s", path, strings.Join(messages, "; "))
-}
-
-func humanWorkspaceSpecFieldError(msg string) string {
-	line := ""
-	rest := msg
-	if strings.HasPrefix(rest, "line ") {
-		if index := strings.Index(rest, ": "); index >= 0 {
-			line = rest[:index]
-			rest = rest[index+2:]
-		}
-	}
-	const prefix = "field "
-	const separator = " not found in type "
-	if strings.HasPrefix(rest, prefix) && strings.Contains(rest, separator) {
-		parts := strings.SplitN(strings.TrimPrefix(rest, prefix), separator, 2)
-		field := parts[0]
-		typeName := parts[1]
-		var text string
-		switch typeName {
-		case "workspace.Spec":
-			text = fmt.Sprintf("unknown top-level field %q", field)
-		case "workspace.Resources":
-			if field == "network" {
-				text = `unknown field "network" under resources; move network to the top level, aligned with resources`
-			} else {
-				text = fmt.Sprintf("unknown field %q under resources", field)
-			}
-		default:
-			text = fmt.Sprintf("unknown field %q under %s", field, strings.TrimPrefix(typeName, "workspace."))
-		}
-		if line != "" {
-			return line + ": " + text
-		}
-		return text
-	}
-	return msg
+	return workspace.ReadSpec(path)
 }
 
 func setupCommandsFromSpec(steps workspace.SetupSteps, setupFiles []string, baseDir string) ([]string, error) {
-	commands := make([]string, 0, len(steps)+len(setupFiles))
-	for _, step := range steps {
-		run := strings.TrimSpace(step.Run)
-		file := strings.TrimSpace(step.File)
-		if run != "" && file != "" {
-			return nil, fmt.Errorf("setup entry cannot use both run and file")
-		}
-		if run != "" {
-			commands = append(commands, run)
-			continue
-		}
-		if file != "" {
-			command, err := setupCommandFromFile(file, baseDir)
-			if err != nil {
-				return nil, err
-			}
-			commands = append(commands, command)
-		}
-	}
-	fileCommands, err := setupCommandsFromFiles(setupFiles, baseDir)
-	if err != nil {
-		return nil, err
-	}
-	commands = append(commands, fileCommands...)
-	return commands, nil
+	return workspace.SetupCommandsFromSpec(steps, setupFiles, baseDir)
 }
 
 func setupCommandsFromFiles(files []string, baseDir string) ([]string, error) {
-	commands := make([]string, 0, len(files))
-	for _, file := range files {
-		command, err := setupCommandFromFile(file, baseDir)
-		if err != nil {
-			return nil, err
-		}
-		commands = append(commands, command)
-	}
-	return commands, nil
+	return workspace.SetupCommandsFromFiles(files, baseDir)
 }
 
 func setupCommandFromFile(path, baseDir string) (string, error) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "", fmt.Errorf("setup file path is required")
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(baseDir, path)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return "", fmt.Errorf("setup file %q: %w", path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("setup file must be a regular file: %s", path)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read setup file %q: %w", path, err)
-	}
-	command := strings.TrimSpace(string(data))
-	if command == "" {
-		return "", fmt.Errorf("setup file is empty: %s", path)
-	}
-	return command, nil
+	return workspace.SetupCommandFromFile(path, baseDir)
 }
 
 func workspaceSpecDisks(spec workspaceSpec) ([]workspaceDisk, error) {
-	disks := make([]workspaceDisk, 0, len(spec.Disks)+len(spec.Bundles))
-	for _, disk := range spec.Disks {
-		disk.Bundle = false
-		if err := validateWorkspaceDisk(disk); err != nil {
-			return nil, err
-		}
-		disks = append(disks, disk)
-	}
-	for _, disk := range spec.Bundles {
-		disk.Bundle = true
-		if disk.SourcePath == "" {
-			disk.SourcePath = disk.Path
-		}
-		if err := validateWorkspaceDisk(disk); err != nil {
-			return nil, err
-		}
-		disks = append(disks, disk)
-	}
-	return disks, nil
+	return workspace.SpecDisks(spec)
 }
 
 func validateWorkspaceDisk(disk workspaceDisk) error {
@@ -2747,21 +2073,7 @@ func parseWorkspaceOutputs(values []string) ([]workspaceOutput, error) {
 }
 
 func validateWorkspaceOutputs(outputs []workspaceOutput) ([]workspaceOutput, error) {
-	seen := map[string]bool{}
-	validated := make([]workspaceOutput, 0, len(outputs))
-	for _, output := range outputs {
-		output.Name = strings.TrimSpace(output.Name)
-		output.Path = strings.TrimSpace(output.Path)
-		if err := validateWorkspaceOutput(output); err != nil {
-			return nil, err
-		}
-		if seen[output.Name] {
-			return nil, fmt.Errorf("duplicate output artifact %q", output.Name)
-		}
-		seen[output.Name] = true
-		validated = append(validated, output)
-	}
-	return validated, nil
+	return workspace.ValidateOutputs(outputs)
 }
 
 func validateWorkspaceOutput(output workspaceOutput) error {
@@ -2778,65 +2090,11 @@ func validateWorkspaceOutput(output workspaceOutput) error {
 }
 
 func validateWorkspaceFiles(files []workspaceFile, baseDir string) ([]workspaceFile, error) {
-	seen := map[string]bool{}
-	validated := make([]workspaceFile, 0, len(files))
-	for _, file := range files {
-		file.SourcePath = strings.TrimSpace(file.SourcePath)
-		file.Path = strings.TrimSpace(file.Path)
-		file.Mode = strings.TrimSpace(file.Mode)
-		if file.SourcePath == "" {
-			return nil, fmt.Errorf("file src is required")
-		}
-		if !filepath.IsAbs(file.SourcePath) {
-			file.SourcePath = filepath.Join(baseDir, file.SourcePath)
-		}
-		info, err := os.Stat(file.SourcePath)
-		if err != nil {
-			return nil, fmt.Errorf("file src %q: %w", file.SourcePath, err)
-		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("file src must be a regular file: %s", file.SourcePath)
-		}
-		if file.Path == "" {
-			return nil, fmt.Errorf("file dst is required for %s", file.SourcePath)
-		}
-		if !path.IsAbs(file.Path) {
-			return nil, fmt.Errorf("file dst must be absolute: %s", file.Path)
-		}
-		if strings.ContainsRune(file.Path, 0) {
-			return nil, fmt.Errorf("file dst contains NUL")
-		}
-		cleanPath := path.Clean(file.Path)
-		if cleanPath == "/" {
-			return nil, fmt.Errorf("file dst must name a file: %s", file.Path)
-		}
-		if seen[cleanPath] {
-			return nil, fmt.Errorf("duplicate file dst %q", cleanPath)
-		}
-		seen[cleanPath] = true
-		file.Path = cleanPath
-		if file.Mode != "" {
-			if _, err := strconv.ParseUint(file.Mode, 8, 32); err != nil {
-				return nil, fmt.Errorf("file %s mode: %w", file.Path, err)
-			}
-		}
-		validated = append(validated, file)
-	}
-	return validated, nil
+	return workspace.ValidateFiles(files, baseDir)
 }
 
 func mergeEnv(base, overrides map[string]string) map[string]string {
-	if len(base) == 0 && len(overrides) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(base)+len(overrides))
-	for key, value := range base {
-		out[key] = value
-	}
-	for key, value := range overrides {
-		out[key] = value
-	}
-	return out
+	return workspace.MergeEnv(base, overrides)
 }
 
 func applyResourceProfile(opts *workspaceOptions, memoryExplicit, cpusExplicit, sizeExplicit bool) error {

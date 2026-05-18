@@ -32,6 +32,7 @@ supervisor request.
 | `pkg/kernel` | kernel default manifest, install, verify, and support checks |
 | `pkg/imagecache` | reusable rootfs image cache indexing, pull, tag, remove, and prune |
 | `pkg/diagnostics` | backend host diagnostics and support summaries |
+| `pkg/perf` | boot, footprint, and steady-state performance measurements |
 | `pkg/rootfs` | OCI image and tar bundle conversion into ext4 disks |
 | `pkg/supervisors/firecracker` | Linux Firecracker supervisor implementation |
 
@@ -49,10 +50,11 @@ symbols should be added to this page when they are introduced.
 | Package | Documented symbols |
 |---|---|
 | `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract` |
-| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `Network`, `List`, `Control`, `Supervise`, `ReadManifest`, `WriteManifest`, `LookupProfile` |
+| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `Network`, `List`, `Control`, `Apply`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `LookupProfile` |
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check` |
+| `pkg/perf` | `BootOptions`, `BootReport`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `Boot`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeRSSSamples` |
 | `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
 
@@ -242,9 +244,10 @@ if err != nil {
 _ = resp
 ```
 
-The CLI contains presentation, flag parsing, and terminal-oriented behavior.
-microVM orchestration and management capabilities are exposed through the Go
-packages.
+The CLI contains presentation, flag parsing, build metadata output, and raw
+terminal handling. microVM orchestration and management capabilities are exposed
+through the Go packages, and the mapping below is checked by
+`scripts/dev/docs-parity.py`.
 
 ## CLI ↔ library mapping
 
@@ -255,22 +258,29 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent run` | [`workspace.Run`](#workspace-api) |
 | `microagent create` | `workspace.Create` |
 | `microagent start` | `workspace.Start` |
-| `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
+| `microagent status` / `microagent inspect` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
 | `microagent result` | `workspace.ResultStatus` |
 | `microagent ps` | `workspace.List` |
-| `microagent halt` / `quarantine` / `stop` / `kill` / `delete` | `workspace.Control` (one function, action picked via options) |
+| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` / `microagent rm` | `workspace.Control` (one function, action picked via options) |
+| `microagent apply` | `workspace.Apply` |
 | `microagent supervise` | `workspace.Supervise` |
-| `microagent connect` | No direct library equivalent — interactive console is CLI-only. Use `workspace.ReadLogs` for captured serial output. |
+| `microagent connect` | `workspace.DialConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
 | `microagent logs` | `workspace.ReadLogs` |
 | `microagent cp` | `workspace.Copy` |
 | `microagent clone` | `workspace.Clone` |
-| `microagent artifacts` / `artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
+| `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
-| `microagent doctor` / `host` | [`diagnostics.Check`](#diagnostics-api) |
+| `microagent doctor` / `microagent host` | [`diagnostics.Check`](#diagnostics-api) |
 | `microagent contract` | `vmkit.Contract` |
-| `microagent kernel install` / `verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
+| `microagent kernel install` / `microagent kernel verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
 | `microagent rootfs build` | `rootfs.Builder.Build` |
-| `microagent images pull` / `list` / `tag` / `rm` / `prune` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
-| `microagent.yaml` (spec parsing) | `workspace.ReadManifest` / `WriteManifest` |
+| `microagent images` / `microagent prune` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
+| `microagent perf` / `microagent perf boot` / `microagent perf footprint` / `microagent perf steady` | `perf.Boot` / `Footprint` / `Steady` |
+| `microagent profiles` | `workspace.Profiles` / `workspace.ProfileNames` |
+| `microagent version` | CLI-only build metadata output |
+| `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |
 
-The library calls take options structs and return typed responses. The CLI is a thin shell over them — anything the CLI does, your program can do too without shelling out.
+The library calls take options structs and return typed responses. For reusable
+runtime behavior, prefer the package API. The remaining CLI-only surfaces are
+presentation concerns such as `help`, `version`, and raw terminal mode around an
+already-open console connection.

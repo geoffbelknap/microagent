@@ -39,9 +39,10 @@ NESTED_HELP_COMMANDS = {
 }
 PUBLIC_GO_PACKAGES = {
     "github.com/geoffbelknap/microagent/pkg/diagnostics",
-    "github.com/geoffbelknap/microagent/pkg/imagecache",
-    "github.com/geoffbelknap/microagent/pkg/kernel",
-    "github.com/geoffbelknap/microagent/pkg/rootfs",
+	"github.com/geoffbelknap/microagent/pkg/imagecache",
+	"github.com/geoffbelknap/microagent/pkg/kernel",
+	"github.com/geoffbelknap/microagent/pkg/perf",
+	"github.com/geoffbelknap/microagent/pkg/rootfs",
     "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker",
     "github.com/geoffbelknap/microagent/pkg/vmkit",
     "github.com/geoffbelknap/microagent/pkg/workspace",
@@ -138,6 +139,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "DefaultWorkspaceImageArm64",
         "Disk",
         "Dispatch",
+        "DialShellTarget",
         "EnsureCanCreate",
         "EnsureCanStart",
         "EnsureCloneable",
@@ -191,18 +193,29 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "SerialLogPath",
         "SetupStep",
         "SetupSteps",
+        "MergeEnv",
+        "LivePortForwardHostOnlyChange",
+        "NormalizeMediationConfig",
+        "OptionsFromManifest",
+        "SetupCommandFromFile",
+        "SetupCommandsFromFiles",
+        "SetupCommandsFromSpec",
         "ShellCommand",
         "ShellPort",
         "ShellPortForName",
         "ShellSingleQuote",
+        "ShellTargetDescription",
         "ShouldRestart",
+        "SpecDisks",
         "StateDir",
         "Supervisor",
         "ValidateDisk",
+        "ValidateFiles",
         "ValidateHostBackend",
         "ValidateHostname",
         "ValidateName",
         "ValidateOutput",
+        "ValidateOutputs",
         "ValidateResources",
         "ValidateRestartPolicy",
         "VerificationForStatus",
@@ -368,6 +381,20 @@ def check_go() -> list[str]:
                     f"{GO_DOC.relative_to(ROOT)}: missing exported {name}.{symbol}; "
                     f"document it or add it to DEFAULT_GO_SYMBOL_ALLOWLIST"
                 )
+    errors.extend(check_cli_library_mapping(doc))
+    return errors
+
+
+def check_cli_library_mapping(doc: str) -> list[str]:
+    errors: list[str] = []
+    help_commands = parse_help_commands(microagent_help("help"))
+    for command in sorted(help_commands):
+        if command in UNDOCUMENTED_HELP_COMMANDS:
+            continue
+        if f"`microagent {command}`" not in doc:
+            errors.append(
+                f"{GO_DOC.relative_to(ROOT)}: CLI command {command!r} is missing from the CLI ↔ library mapping table"
+            )
     return errors
 
 
