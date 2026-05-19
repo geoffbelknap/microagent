@@ -189,6 +189,10 @@ For non-defaults — backend override, custom kernel, sized memory/CPUs, network
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
 | `workspace.ReadManifest` / `workspace.WriteManifest` | Manage workspace manifests directly |
 
+Console helpers return `workspace.WorkspaceNotFoundError` when the requested
+workspace has no runtime or event state. Use `errors.Is` to classify missing
+workspaces separately from stopped, halted, or quarantined workspaces.
+
 ## Kernel API
 
 Use `pkg/kernel` when your program wants microagent to manage backend kernel
