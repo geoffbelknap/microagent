@@ -115,6 +115,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "perf" {
 		return runPerf(ctx, args[1:], stdout)
 	}
+	if args[0] == "serve" {
+		return runServe(ctx, args[1:], stdout)
+	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
@@ -5670,6 +5673,7 @@ Commands:
   images               List or prune local image records
   prune                Prune stale local records and optional image cache files
   perf                 Measure workspace performance
+  serve mcp            Serve the MCP stdio endpoint
   halt                 Halt a workspace and preserve disk state
   quarantine           Sever host-side network and mediation
   stop                 Stop a workspace
