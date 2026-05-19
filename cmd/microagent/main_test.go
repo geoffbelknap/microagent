@@ -181,6 +181,33 @@ func TestExecAliasReturnsMicroAgentEquivalent(t *testing.T) {
 	}
 }
 
+func TestStructuredErrorMapping(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		kind structuredErrorKind
+	}{
+		{name: "unsupported", err: fmt.Errorf("microagent exec is not supported"), kind: errorKindUnsupported},
+		{name: "not found", err: os.ErrNotExist, kind: errorKindNotFound},
+		{name: "conflict", err: fmt.Errorf("workspace demo is already running"), kind: errorKindConflict},
+		{name: "transient", err: fmt.Errorf("connect timeout"), kind: errorKindTransient},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mapStructuredError(tt.err, "req-test")
+			if got.Kind != tt.kind {
+				t.Fatalf("Kind = %q, want %q", got.Kind, tt.kind)
+			}
+			if got.CorrelationID != "req-test" {
+				t.Fatalf("CorrelationID = %q, want req-test", got.CorrelationID)
+			}
+			if strings.TrimSpace(got.Remediation) == "" {
+				t.Fatalf("Remediation is empty")
+			}
+		})
+	}
+}
+
 func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 	resp, err := firecrackerDoctorResponse(
 		vmkit.BackendFirecracker,
