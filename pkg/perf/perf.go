@@ -287,6 +287,11 @@ func runBootWorkspace(ctx context.Context, opts BootOptions, name string) error 
 	workspaceOpts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	workspaceOpts.ExecCommand = opts.ExecCommand
 	workspaceOpts.Profile = strings.TrimSpace(opts.Profile)
+	if workspaceOpts.Profile != "" {
+		if _, ok := workspace.LookupProfile(workspaceOpts.Profile); !ok {
+			return fmt.Errorf("unknown resource profile %q; choose one of: %s", workspaceOpts.Profile, strings.Join(workspace.ProfileNames(), ", "))
+		}
+	}
 	workspaceOpts.Timeout = opts.Timeout
 	if strings.TrimSpace(opts.Backend) != "" {
 		workspaceOpts.Backend = opts.Backend
