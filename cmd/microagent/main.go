@@ -36,6 +36,7 @@ import (
 var (
 	version          = "dev"
 	outputFormat     string
+	globalOutputMode outputMode
 	stdinIsTerminal  = defaultStdinIsTerminal
 	readConfirmation = defaultReadConfirmation
 )
@@ -67,7 +68,9 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout *os.File) error {
 	outputFormat = ""
+	globalOutputMode = ""
 	args = parseGlobalFlags(args)
+	ctx = contextWithOutputMode(ctx, currentOutputMode())
 	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
 		return runWindowsHyperVListener(ctx, args[1:])
 	}
@@ -2901,6 +2904,9 @@ func writeJSON(stdout *os.File, value any) error {
 }
 
 func outputJSON(stdout *os.File) bool {
+	if currentOutputMode() == outputModeAX {
+		return true
+	}
 	switch outputFormat {
 	case "json":
 		return true
@@ -3067,6 +3073,13 @@ func parseGlobalFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--mode":
+			if i+1 < len(args) {
+				globalOutputMode = normalizeOutputMode(args[i+1])
+				i++
+			} else {
+				out = append(out, args[i])
+			}
 		case "--json":
 			outputFormat = "json"
 		case "--text", "--human":
@@ -3079,6 +3092,10 @@ func parseGlobalFlags(args []string) []string {
 				out = append(out, args[i])
 			}
 		default:
+			if strings.HasPrefix(args[i], "--mode=") {
+				globalOutputMode = normalizeOutputMode(strings.TrimPrefix(args[i], "--mode="))
+				continue
+			}
 			if strings.HasPrefix(args[i], "--output=") {
 				outputFormat = normalizeOutputFormat(strings.TrimPrefix(args[i], "--output="))
 				continue
@@ -5665,6 +5682,7 @@ Advanced:
   kernel verify        Verify a custom kernel
 
 Options:
+  --mode <ux|ax>        Select human UX or agent AX output mode
   --json                Print JSON output
   --text                Print human-readable output
   --output <json|text>  Select output format

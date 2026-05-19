@@ -144,12 +144,32 @@ func TestHighLevelCommandHelpDoesNotFallThroughToSupervisorFlags(t *testing.T) {
 
 func TestGlobalJSONOutputSwitch(t *testing.T) {
 	outputFormat = ""
-	t.Cleanup(func() { outputFormat = "" })
+	globalOutputMode = ""
+	t.Cleanup(func() {
+		outputFormat = ""
+		globalOutputMode = ""
+	})
 	args := parseGlobalFlags([]string{"--json", "doctor"})
 	if outputFormat != "json" {
 		t.Fatalf("outputFormat = %q, want json", outputFormat)
 	}
 	if len(args) != 1 || args[0] != "doctor" {
+		t.Fatalf("args = %#v", args)
+	}
+}
+
+func TestGlobalOutputModeSwitch(t *testing.T) {
+	outputFormat = ""
+	globalOutputMode = ""
+	t.Cleanup(func() {
+		outputFormat = ""
+		globalOutputMode = ""
+	})
+	args := parseGlobalFlags([]string{"--mode=ax", "profiles"})
+	if globalOutputMode != outputModeAX {
+		t.Fatalf("globalOutputMode = %q, want ax", globalOutputMode)
+	}
+	if len(args) != 1 || args[0] != "profiles" {
 		t.Fatalf("args = %#v", args)
 	}
 }
