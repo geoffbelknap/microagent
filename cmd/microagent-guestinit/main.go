@@ -843,21 +843,30 @@ func runShellSession(fd int, shellPath string) {
 		return
 	}
 	_ = slave.Close()
-	done := make(chan struct{}, 2)
+	inputDone := make(chan struct{}, 1)
+	outputDone := make(chan struct{}, 1)
 	go func() {
 		_, _ = io.Copy(master, file)
 		_ = master.Close()
-		done <- struct{}{}
+		inputDone <- struct{}{}
 	}()
 	go func() {
 		_, _ = io.Copy(file, master)
 		closeWriteFile(file)
-		done <- struct{}{}
+		outputDone <- struct{}{}
 	}()
 	err = cmd.Wait()
+	select {
+	case <-outputDone:
+	case <-time.After(2 * time.Second):
+		_ = master.Close()
+	}
 	_ = master.Close()
 	_ = file.Close()
-	<-done
+	select {
+	case <-inputDone:
+	default:
+	}
 	if err != nil {
 		log.Printf("microagent-init: connect shell exited: %v", err)
 		return

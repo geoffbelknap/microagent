@@ -281,8 +281,7 @@ func SummarizeRSSSamples(samples []RSSSample) RSSSummary {
 }
 
 func runBootWorkspace(ctx context.Context, opts BootOptions, name string) error {
-	workspaceOpts := workspace.DefaultOptions()
-	workspaceOpts.Name = name
+	workspaceOpts := workspace.Options{Name: name}
 	workspaceOpts.StateDir = opts.StateDir
 	workspaceOpts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	workspaceOpts.ExecCommand = opts.ExecCommand
