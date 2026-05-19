@@ -144,7 +144,11 @@ func TestHighLevelCommandHelpDoesNotFallThroughToSupervisorFlags(t *testing.T) {
 
 func TestGlobalJSONOutputSwitch(t *testing.T) {
 	outputFormat = ""
-	t.Cleanup(func() { outputFormat = "" })
+	globalOutputMode = ""
+	t.Cleanup(func() {
+		outputFormat = ""
+		globalOutputMode = ""
+	})
 	args := parseGlobalFlags([]string{"--json", "doctor"})
 	if outputFormat != "json" {
 		t.Fatalf("outputFormat = %q, want json", outputFormat)
@@ -154,10 +158,139 @@ func TestGlobalJSONOutputSwitch(t *testing.T) {
 	}
 }
 
+func TestGlobalOutputModeSwitch(t *testing.T) {
+	outputFormat = ""
+	globalOutputMode = ""
+	t.Cleanup(func() {
+		outputFormat = ""
+		globalOutputMode = ""
+	})
+	args := parseGlobalFlags([]string{"--mode=ax", "profiles"})
+	if globalOutputMode != outputModeAX {
+		t.Fatalf("globalOutputMode = %q, want ax", globalOutputMode)
+	}
+	if len(args) != 1 || args[0] != "profiles" {
+		t.Fatalf("args = %#v", args)
+	}
+}
+
+func TestAXModeVersionOutput(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--mode=ax", "version"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run version: %v", err)
+	}
+	var got map[string]string
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode version output %q: %v", data, err)
+	}
+	if got["name"] != "microagent" || got["version"] == "" {
+		t.Fatalf("version output = %#v", got)
+	}
+}
+
+func TestAXModeFromEnvironment(t *testing.T) {
+	t.Setenv("MICROAGENT_MODE", "ax")
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"profiles"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run profiles: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) || !strings.Contains(string(data), "profiles") {
+		t.Fatalf("profiles output = %q, want JSON", data)
+	}
+}
+
+func TestAXModeLogsOutput(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	name := "log-test"
+	if err := os.MkdirAll(filepath.Dir(workspace.SerialLogPath(stateDir, name)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workspace.SerialLogPath(stateDir, name), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--mode=ax", "logs", name, "--state-dir", stateDir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run logs: %v", err)
+	}
+	var got map[string]string
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode logs output %q: %v", data, err)
+	}
+	if got["workspace"] != name || got["logs"] != "hello\n" {
+		t.Fatalf("logs output = %#v", got)
+	}
+}
+
 func TestExecAliasReturnsMicroAgentEquivalent(t *testing.T) {
 	err := run(t.Context(), []string{"exec", "research", "echo hello"}, os.Stdout)
 	if err == nil || !strings.Contains(err.Error(), "use microagent connect <name> --send <command>") {
 		t.Fatalf("err = %v, want connect --send guidance", err)
+	}
+}
+
+func TestStructuredErrorMapping(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		kind structuredErrorKind
+	}{
+		{name: "unsupported", err: fmt.Errorf("microagent exec is not supported"), kind: errorKindUnsupported},
+		{name: "not found", err: os.ErrNotExist, kind: errorKindNotFound},
+		{name: "conflict", err: fmt.Errorf("workspace demo is already running"), kind: errorKindConflict},
+		{name: "transient", err: fmt.Errorf("connect timeout"), kind: errorKindTransient},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mapStructuredError(tt.err, "req-test")
+			if got.Kind != tt.kind {
+				t.Fatalf("Kind = %q, want %q", got.Kind, tt.kind)
+			}
+			if got.CorrelationID != "req-test" {
+				t.Fatalf("CorrelationID = %q, want req-test", got.CorrelationID)
+			}
+			if strings.TrimSpace(got.Remediation) == "" {
+				t.Fatalf("Remediation is empty")
+			}
+		})
 	}
 }
 

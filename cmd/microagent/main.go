@@ -36,6 +36,7 @@ import (
 var (
 	version          = "dev"
 	outputFormat     string
+	globalOutputMode outputMode
 	stdinIsTerminal  = defaultStdinIsTerminal
 	readConfirmation = defaultReadConfirmation
 )
@@ -60,6 +61,12 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
+		if currentOutputMode() == outputModeAX {
+			if writeErr := writeAXError(os.Stderr, err); writeErr != nil {
+				fmt.Fprintln(os.Stderr, writeErr)
+			}
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -67,7 +74,9 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout *os.File) error {
 	outputFormat = ""
+	globalOutputMode = ""
 	args = parseGlobalFlags(args)
+	ctx = contextWithOutputMode(ctx, currentOutputMode())
 	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
 		return runWindowsHyperVListener(ctx, args[1:])
 	}
@@ -76,8 +85,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return nil
 	}
 	if args[0] == "version" || args[0] == "--version" || args[0] == "-v" {
-		fmt.Fprintf(stdout, "microagent %s\n", version)
-		return nil
+		return writeVersion(stdout)
 	}
 	if args[0] == "rootfs" {
 		return runRootFS(ctx, args[1:], stdout)
@@ -105,6 +113,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "perf" {
 		return runPerf(ctx, args[1:], stdout)
+	}
+	if args[0] == "serve" {
+		return runServe(ctx, args[1:], stdout)
 	}
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
@@ -1096,6 +1107,12 @@ func runLogs(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	if outputStructured() {
+		return writeJSON(stdout, map[string]any{
+			"workspace": name,
+			"logs":      string(data),
+		})
+	}
 	_, err = stdout.Write(data)
 	return err
 }
@@ -1335,7 +1352,20 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		SendTimeout:  time.Duration(*timeoutSeconds) * time.Second,
 	}
 	if strings.TrimSpace(*send) != "" {
+		if outputStructured() {
+			var buf bytes.Buffer
+			if err := workspace.SendConsoleCommand(ctx, consoleOpts, *send, &buf); err != nil {
+				return err
+			}
+			return writeJSON(stdout, map[string]any{
+				"workspace": name,
+				"output":    buf.String(),
+			})
+		}
 		return workspace.SendConsoleCommand(ctx, consoleOpts, *send, stdout)
+	}
+	if outputStructured() {
+		return fmt.Errorf("microagent connect interactive sessions are not supported in AX mode; use connect --send for structured output")
 	}
 	conn, err := workspace.DialConsole(ctx, consoleOpts)
 	if err != nil {
@@ -2900,7 +2930,25 @@ func writeJSON(stdout *os.File, value any) error {
 	return enc.Encode(value)
 }
 
+func writeVersion(stdout *os.File) error {
+	if outputStructured() {
+		return writeJSON(stdout, map[string]any{
+			"name":    "microagent",
+			"version": version,
+		})
+	}
+	fmt.Fprintf(stdout, "microagent %s\n", version)
+	return nil
+}
+
+func outputStructured() bool {
+	return currentOutputMode() == outputModeAX || outputFormat == "json"
+}
+
 func outputJSON(stdout *os.File) bool {
+	if currentOutputMode() == outputModeAX {
+		return true
+	}
 	switch outputFormat {
 	case "json":
 		return true
@@ -3067,6 +3115,13 @@ func parseGlobalFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--mode":
+			if i+1 < len(args) {
+				globalOutputMode = normalizeOutputMode(args[i+1])
+				i++
+			} else {
+				out = append(out, args[i])
+			}
 		case "--json":
 			outputFormat = "json"
 		case "--text", "--human":
@@ -3079,6 +3134,10 @@ func parseGlobalFlags(args []string) []string {
 				out = append(out, args[i])
 			}
 		default:
+			if strings.HasPrefix(args[i], "--mode=") {
+				globalOutputMode = normalizeOutputMode(strings.TrimPrefix(args[i], "--mode="))
+				continue
+			}
 			if strings.HasPrefix(args[i], "--output=") {
 				outputFormat = normalizeOutputFormat(strings.TrimPrefix(args[i], "--output="))
 				continue
@@ -5647,6 +5706,7 @@ Commands:
   images               List or prune local image records
   prune                Prune stale local records and optional image cache files
   perf                 Measure workspace performance
+  serve mcp            Serve the MCP stdio endpoint
   halt                 Halt a workspace and preserve disk state
   quarantine           Sever host-side network and mediation
   stop                 Stop a workspace
@@ -5665,6 +5725,7 @@ Advanced:
   kernel verify        Verify a custom kernel
 
 Options:
+  --mode <ux|ax>        Select human UX or agent AX output mode
   --json                Print JSON output
   --text                Print human-readable output
   --output <json|text>  Select output format
