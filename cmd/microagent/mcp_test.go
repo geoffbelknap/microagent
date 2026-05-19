@@ -60,6 +60,20 @@ func TestMCPWorkspaceEstimateCost(t *testing.T) {
 	}
 }
 
+func TestMCPDeletePreview(t *testing.T) {
+	result, err := runMCPTool(context.Background(), "workspace.delete", map[string]any{"name": "demo", "preview": true})
+	if err != nil {
+		t.Fatalf("runMCPTool preview: %v", err)
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"preview":true`) || !strings.Contains(string(data), "remove workspace disk and state") {
+		t.Fatalf("preview = %s", data)
+	}
+}
+
 func TestMCPDescribeTool(t *testing.T) {
 	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
 		"jsonrpc": "2.0",

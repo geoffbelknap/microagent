@@ -183,7 +183,7 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.exec", "Send a console command to a running workspace.", []string{"name", "command"}, map[string]any{"name": map[string]any{"type": "string"}, "command": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}}),
+		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("workspace.list", "List workspaces.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.inspect", "Inspect workspace state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.estimate_cost", "Estimate workspace resource consumption before creating or starting it.", nil, map[string]any{"profile": map[string]any{"type": "string"}, "memory_mib": map[string]any{"type": "integer"}, "cpus": map[string]any{"type": "integer"}, "size_mib": map[string]any{"type": "integer"}, "price_per_hour": map[string]any{"type": "number"}}),
@@ -378,6 +378,9 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 			return result, nil
 		}
 	}
+	if preview := previewDestructiveMCPTool(name, args); preview != nil {
+		return preview, nil
+	}
 	cliArgs, err := mcpCLIArgs(name, args)
 	if err != nil {
 		return nil, err
@@ -396,6 +399,32 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		envelope["idempotency_replay"] = false
 	}
 	return envelope, cliErr
+}
+
+func previewDestructiveMCPTool(name string, args map[string]any) map[string]any {
+	if !boolArg(args, "preview") {
+		return nil
+	}
+	switch name {
+	case "workspace.delete":
+		force := boolArg(args, "force")
+		action := "delete"
+		if force {
+			action = "force-delete"
+		}
+		return map[string]any{
+			"result": map[string]any{
+				"preview":   true,
+				"tool":      name,
+				"workspace": stringArg(args, "name"),
+				"actions":   []string{action, "remove workspace disk and state"},
+			},
+			"timing_ms":         int64(0),
+			"principal_context": principalContextArg(args),
+		}
+	default:
+		return nil
+	}
 }
 
 func mcpIdempotencyCacheKey(name string, args map[string]any) string {
