@@ -85,8 +85,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return nil
 	}
 	if args[0] == "version" || args[0] == "--version" || args[0] == "-v" {
-		fmt.Fprintf(stdout, "microagent %s\n", version)
-		return nil
+		return writeVersion(stdout)
 	}
 	if args[0] == "rootfs" {
 		return runRootFS(ctx, args[1:], stdout)
@@ -1108,6 +1107,12 @@ func runLogs(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	if outputStructured() {
+		return writeJSON(stdout, map[string]any{
+			"workspace": name,
+			"logs":      string(data),
+		})
+	}
 	_, err = stdout.Write(data)
 	return err
 }
@@ -1347,7 +1352,20 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		SendTimeout:  time.Duration(*timeoutSeconds) * time.Second,
 	}
 	if strings.TrimSpace(*send) != "" {
+		if outputStructured() {
+			var buf bytes.Buffer
+			if err := workspace.SendConsoleCommand(ctx, consoleOpts, *send, &buf); err != nil {
+				return err
+			}
+			return writeJSON(stdout, map[string]any{
+				"workspace": name,
+				"output":    buf.String(),
+			})
+		}
 		return workspace.SendConsoleCommand(ctx, consoleOpts, *send, stdout)
+	}
+	if outputStructured() {
+		return fmt.Errorf("microagent connect interactive sessions are not supported in AX mode; use connect --send for structured output")
 	}
 	conn, err := workspace.DialConsole(ctx, consoleOpts)
 	if err != nil {
@@ -2910,6 +2928,21 @@ func writeJSON(stdout *os.File, value any) error {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(value)
+}
+
+func writeVersion(stdout *os.File) error {
+	if outputStructured() {
+		return writeJSON(stdout, map[string]any{
+			"name":    "microagent",
+			"version": version,
+		})
+	}
+	fmt.Fprintf(stdout, "microagent %s\n", version)
+	return nil
+}
+
+func outputStructured() bool {
+	return currentOutputMode() == outputModeAX || outputFormat == "json"
 }
 
 func outputJSON(stdout *os.File) bool {

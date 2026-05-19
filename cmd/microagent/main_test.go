@@ -174,6 +174,92 @@ func TestGlobalOutputModeSwitch(t *testing.T) {
 	}
 }
 
+func TestAXModeVersionOutput(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--mode=ax", "version"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run version: %v", err)
+	}
+	var got map[string]string
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode version output %q: %v", data, err)
+	}
+	if got["name"] != "microagent" || got["version"] == "" {
+		t.Fatalf("version output = %#v", got)
+	}
+}
+
+func TestAXModeFromEnvironment(t *testing.T) {
+	t.Setenv("MICROAGENT_MODE", "ax")
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"profiles"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run profiles: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(data) || !strings.Contains(string(data), "profiles") {
+		t.Fatalf("profiles output = %q, want JSON", data)
+	}
+}
+
+func TestAXModeLogsOutput(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	name := "log-test"
+	if err := os.MkdirAll(filepath.Dir(workspace.SerialLogPath(stateDir, name)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workspace.SerialLogPath(stateDir, name), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--mode=ax", "logs", name, "--state-dir", stateDir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run logs: %v", err)
+	}
+	var got map[string]string
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode logs output %q: %v", data, err)
+	}
+	if got["workspace"] != name || got["logs"] != "hello\n" {
+		t.Fatalf("logs output = %#v", got)
+	}
+}
+
 func TestExecAliasReturnsMicroAgentEquivalent(t *testing.T) {
 	err := run(t.Context(), []string{"exec", "research", "echo hello"}, os.Stdout)
 	if err == nil || !strings.Contains(err.Error(), "use microagent connect <name> --send <command>") {
