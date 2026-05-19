@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 type structuredErrorKind string
@@ -55,6 +57,9 @@ func mapStructuredError(err error, correlationID string) structuredError {
 	}
 	text := strings.ToLower(err.Error())
 	switch {
+	case errors.Is(err, workspace.WorkspaceNotFoundError{}):
+		mapped.Kind = errorKindNotFound
+		mapped.Remediation = "Run workspace.list to inspect available workspaces, or workspace.create to create the requested workspace."
 	case strings.Contains(text, "not found"), strings.Contains(text, "no such file"), errors.Is(err, os.ErrNotExist):
 		mapped.Kind = errorKindNotFound
 		mapped.Remediation = "Check the workspace name, file path, image reference, or state directory and retry."

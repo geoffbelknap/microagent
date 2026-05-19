@@ -269,12 +269,14 @@ func TestExecAliasReturnsMicroAgentEquivalent(t *testing.T) {
 
 func TestStructuredErrorMapping(t *testing.T) {
 	tests := []struct {
-		name string
-		err  error
-		kind structuredErrorKind
+		name                string
+		err                 error
+		kind                structuredErrorKind
+		remediationContains string
 	}{
 		{name: "unsupported", err: fmt.Errorf("microagent exec is not supported"), kind: errorKindUnsupported},
 		{name: "not found", err: os.ErrNotExist, kind: errorKindNotFound},
+		{name: "workspace not found", err: workspace.WorkspaceNotFoundError{Name: "missing"}, kind: errorKindNotFound, remediationContains: "workspace.create"},
 		{name: "conflict", err: fmt.Errorf("workspace demo is already running"), kind: errorKindConflict},
 		{name: "transient", err: fmt.Errorf("connect timeout"), kind: errorKindTransient},
 	}
@@ -289,6 +291,9 @@ func TestStructuredErrorMapping(t *testing.T) {
 			}
 			if strings.TrimSpace(got.Remediation) == "" {
 				t.Fatalf("Remediation is empty")
+			}
+			if tt.remediationContains != "" && !strings.Contains(got.Remediation, tt.remediationContains) {
+				t.Fatalf("Remediation = %q, want to contain %q", got.Remediation, tt.remediationContains)
 			}
 		})
 	}

@@ -39,6 +39,9 @@ func DialConsole(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
 	if state == vmkit.StateQuarantined {
 		return nil, fmt.Errorf("workspace %s is quarantined; console input is disabled", opts.Name)
 	}
+	if state == "" {
+		return nil, WorkspaceNotFoundError{Name: opts.Name}
+	}
 	if state != vmkit.StateRunning {
 		return nil, fmt.Errorf("workspace %s is not running; console input is unavailable in state %s", opts.Name, state)
 	}
