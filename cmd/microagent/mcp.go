@@ -198,6 +198,7 @@ func mcpTool(name, description string, required []string, properties map[string]
 	if mcpMutationTool(name) {
 		properties["idempotency_key"] = map[string]any{"type": "string"}
 	}
+	properties["principal"] = principalContextSchema()
 	return map[string]any{
 		"name":        name,
 		"description": description,
@@ -343,8 +344,9 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 	}
 	result, cliErr := runCLIForMCP(ctx, cliArgs)
 	envelope := map[string]any{
-		"result":    result,
-		"timing_ms": time.Since(start).Milliseconds(),
+		"result":            result,
+		"timing_ms":         time.Since(start).Milliseconds(),
+		"principal_context": principalContextArg(args),
 	}
 	if cliErr != nil {
 		envelope["error"] = mapStructuredError(cliErr, newRequestID())
@@ -379,6 +381,36 @@ func cloneMCPMap(value map[string]any) map[string]any {
 		out[key] = item
 	}
 	return out
+}
+
+func principalContextArg(args map[string]any) map[string]any {
+	if args == nil {
+		return map[string]any{}
+	}
+	raw, ok := args["principal"].(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	for _, key := range []string{"workload_identity", "delegated_authority", "purpose", "correlation_id"} {
+		if value, ok := raw[key].(string); ok && strings.TrimSpace(value) != "" {
+			out[key] = strings.TrimSpace(value)
+		}
+	}
+	return out
+}
+
+func principalContextSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"workload_identity":   map[string]any{"type": "string"},
+			"delegated_authority": map[string]any{"type": "string"},
+			"purpose":             map[string]any{"type": "string"},
+			"correlation_id":      map[string]any{"type": "string"},
+		},
+		"additionalProperties": false,
+	}
 }
 
 func mcpCLIArgs(name string, args map[string]any) ([]string, error) {

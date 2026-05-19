@@ -83,6 +83,22 @@ func TestMCPIdempotencyCache(t *testing.T) {
 	}
 }
 
+func TestMCPPrincipalContext(t *testing.T) {
+	got := principalContextArg(map[string]any{"principal": map[string]any{
+		"workload_identity":   "agent-1",
+		"delegated_authority": "user",
+		"purpose":             "test",
+		"correlation_id":      "corr-1",
+		"ignored":             "value",
+	}})
+	if got["workload_identity"] != "agent-1" || got["correlation_id"] != "corr-1" {
+		t.Fatalf("principal = %#v", got)
+	}
+	if _, ok := got["ignored"]; ok {
+		t.Fatalf("principal retained unexpected field: %#v", got)
+	}
+}
+
 func TestMCPPingTool(t *testing.T) {
 	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
 		"jsonrpc": "2.0",
