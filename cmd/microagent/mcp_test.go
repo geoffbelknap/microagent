@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -66,6 +67,19 @@ func TestMCPDescribeTool(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "schema_version") || !strings.Contains(string(data), "workspace.create") {
 		t.Fatalf("describe response = %s", data)
+	}
+}
+
+func TestMCPIdempotencyCache(t *testing.T) {
+	t.Cleanup(func() { mcpIdempotencyCache = sync.Map{} })
+	key := "workspace.create:test-key"
+	mcpIdempotencyCache.Store(key, map[string]any{"result": map[string]any{"workspace": "cached"}})
+	result, err := runMCPTool(context.Background(), "workspace.create", map[string]any{"name": "demo", "idempotency_key": "test-key"})
+	if err != nil {
+		t.Fatalf("runMCPTool: %v", err)
+	}
+	if result["idempotency_replay"] != true {
+		t.Fatalf("idempotency_replay = %#v", result["idempotency_replay"])
 	}
 }
 

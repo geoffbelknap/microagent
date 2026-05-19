@@ -11,8 +11,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+var mcpIdempotencyCache sync.Map
 
 func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
@@ -192,6 +195,9 @@ func mcpTool(name, description string, required []string, properties map[string]
 	if properties == nil {
 		properties = map[string]any{}
 	}
+	if mcpMutationTool(name) {
+		properties["idempotency_key"] = map[string]any{"type": "string"}
+	}
 	return map[string]any{
 		"name":        name,
 		"description": description,
@@ -323,6 +329,14 @@ func mcpToolCostClass(name string) string {
 
 func runMCPTool(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
 	start := time.Now()
+	cacheKey := mcpIdempotencyCacheKey(name, args)
+	if cacheKey != "" {
+		if cached, ok := mcpIdempotencyCache.Load(cacheKey); ok {
+			result := cloneMCPMap(cached.(map[string]any))
+			result["idempotency_replay"] = true
+			return result, nil
+		}
+	}
 	cliArgs, err := mcpCLIArgs(name, args)
 	if err != nil {
 		return nil, err
@@ -335,7 +349,36 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 	if cliErr != nil {
 		envelope["error"] = mapStructuredError(cliErr, newRequestID())
 	}
+	if cacheKey != "" && cliErr == nil {
+		mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
+		envelope["idempotency_replay"] = false
+	}
 	return envelope, cliErr
+}
+
+func mcpIdempotencyCacheKey(name string, args map[string]any) string {
+	key := stringArg(args, "idempotency_key")
+	if key == "" || !mcpMutationTool(name) {
+		return ""
+	}
+	return name + ":" + key
+}
+
+func mcpMutationTool(name string) bool {
+	switch name {
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "images.pull", "cp", "artifacts.get":
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneMCPMap(value map[string]any) map[string]any {
+	out := make(map[string]any, len(value))
+	for key, item := range value {
+		out[key] = item
+	}
+	return out
 }
 
 func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
