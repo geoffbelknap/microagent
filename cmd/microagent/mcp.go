@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/rootfs"
 )
 
 var mcpIdempotencyCache sync.Map
@@ -184,6 +186,7 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}}),
 		mcpTool("workspace.list", "List workspaces.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.inspect", "Inspect workspace state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.estimate_cost", "Estimate workspace resource consumption before creating or starting it.", nil, map[string]any{"profile": map[string]any{"type": "string"}, "memory_mib": map[string]any{"type": "integer"}, "cpus": map[string]any{"type": "integer"}, "size_mib": map[string]any{"type": "integer"}, "price_per_hour": map[string]any{"type": "number"}}),
 		mcpTool("images.pull", "Pull a reusable image rootfs.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}}),
 		mcpTool("images.list", "List reusable local image records.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("cp", "Copy files into or out of a stopped workspace.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -224,6 +227,9 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 	if params.Name != "microagent.ping" {
 		if params.Name == "microagent.describe" {
 			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(microagentCapabilityManifest())}
+		}
+		if params.Name == "workspace.estimate_cost" {
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(estimateWorkspaceCost(params.Arguments))}
 		}
 		result, err := runMCPTool(ctx, params.Name, params.Arguments)
 		if err != nil {
@@ -297,7 +303,7 @@ func mcpToolIdempotency(name string) string {
 	switch name {
 	case "workspace.create", "workspace.start", "workspace.halt", "workspace.delete", "images.pull":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
-	case "workspace.list", "workspace.inspect", "images.list", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.estimate_cost", "images.list", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -326,6 +332,40 @@ func mcpToolCostClass(name string) string {
 	default:
 		return "metadata"
 	}
+}
+
+func estimateWorkspaceCost(args map[string]any) map[string]any {
+	resources := resourceConfig{MemoryMiB: defaultWorkspaceMemoryMiB, CPUCount: defaultWorkspaceCPUCount, SizeMiB: rootfs.DefaultSizeMiB}
+	profileName := stringArg(args, "profile")
+	if profileName == "" {
+		profileName = defaultWorkspaceProfile
+	}
+	if profile, ok := lookupResourceProfile(profileName); ok {
+		resources = profile.Resources
+	}
+	if memory := intArg(args, "memory_mib"); memory > 0 {
+		resources.MemoryMiB = memory
+	}
+	if cpus := intArg(args, "cpus"); cpus > 0 {
+		resources.CPUCount = cpus
+	}
+	if size := int64Arg(args, "size_mib"); size > 0 {
+		resources.SizeMiB = size
+	}
+	pricePerHour := floatArg(args, "price_per_hour")
+	estimate := map[string]any{
+		"profile":             profileName,
+		"memory_mib":          resources.MemoryMiB,
+		"cpus":                resources.CPUCount,
+		"disk_mib":            resources.SizeMiB,
+		"estimated_boot_ms":   0,
+		"price_per_hour":      pricePerHour,
+		"estimated_cost_hour": float64(0),
+	}
+	if pricePerHour > 0 {
+		estimate["estimated_cost_hour"] = pricePerHour
+	}
+	return map[string]any{"result": estimate, "timing_ms": int64(0), "principal_context": principalContextArg(args)}
 }
 
 func runMCPTool(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
@@ -536,6 +576,38 @@ func boolArg(args map[string]any, name string) bool {
 	}
 	value, ok := args[name].(bool)
 	return ok && value
+}
+
+func intArg(args map[string]any, name string) int {
+	if args == nil {
+		return 0
+	}
+	switch value := args[name].(type) {
+	case int:
+		return value
+	case float64:
+		return int(value)
+	default:
+		return 0
+	}
+}
+
+func int64Arg(args map[string]any, name string) int64 {
+	return int64(intArg(args, name))
+}
+
+func floatArg(args map[string]any, name string) float64 {
+	if args == nil {
+		return 0
+	}
+	switch value := args[name].(type) {
+	case float64:
+		return value
+	case int:
+		return float64(value)
+	default:
+		return 0
+	}
 }
 
 func appendOptionalFlag(args []string, name, value string) []string {

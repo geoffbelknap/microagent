@@ -42,10 +42,21 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		}
 		names[tool["name"].(string)] = true
 	}
-	for _, name := range []string{"microagent.ping", "microagent.describe", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "images.pull", "images.list", "cp", "artifacts.get"} {
+	for _, name := range []string{"microagent.ping", "microagent.describe", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.estimate_cost", "images.pull", "images.list", "cp", "artifacts.get"} {
 		if !names[name] {
 			t.Fatalf("tools missing %s: %#v", name, names)
 		}
+	}
+}
+
+func TestMCPWorkspaceEstimateCost(t *testing.T) {
+	result := estimateWorkspaceCost(map[string]any{"profile": "tiny", "price_per_hour": 0.25})
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "estimated_cost_hour") || !strings.Contains(string(data), "memory_mib") {
+		t.Fatalf("estimate = %s", data)
 	}
 }
 
