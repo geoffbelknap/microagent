@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-19_
 
 | Command | Purpose |
 |---|---|
@@ -33,6 +33,7 @@ _Last updated: 2026-05-17_
 | [`images`](/cli/images/) | List or prune local image records |
 | [`prune`](/cli/prune/) | Prune stale records and optional reusable image baselines |
 | [`perf`](/cli/perf/) | Measure workspace boot performance |
+| [`serve`](/cli/serve/) | Serve machine-readable agent endpoints |
 | [`contract`](/cli/contract/) | Print the backend-neutral runtime contract |
 | [`host`](/cli/host/) | Report host backend capabilities |
 | [`doctor`](/cli/doctor/) | Check the host for backend support |

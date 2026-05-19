@@ -33,6 +33,10 @@ func runServe(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer) error {
+	if len(args) > 0 && wantsHelp(args) {
+		printServeMCPHelp(stdout)
+		return nil
+	}
 	if len(args) != 0 {
 		return fmt.Errorf("usage: microagent serve mcp")
 	}
@@ -706,5 +710,12 @@ func printServeHelp(stdout *os.File) {
 
 Commands:
   mcp                 Serve the microagent MCP stdio endpoint
+`)
+}
+
+func printServeMCPHelp(stdout io.Writer) {
+	fmt.Fprint(stdout, `microagent serve mcp
+
+Serve the microagent MCP stdio endpoint.
 `)
 }
