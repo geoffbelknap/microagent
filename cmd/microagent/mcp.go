@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func runServe(ctx context.Context, args []string, stdout *os.File) error {
@@ -48,7 +50,7 @@ func serveMCP(ctx context.Context, stdin io.Reader, stdout io.Writer) error {
 			}
 			return err
 		}
-		resp, ok := handleMCPMessage(msg)
+		resp, ok := handleMCPMessage(ctx, msg)
 		if !ok {
 			continue
 		}
@@ -125,7 +127,7 @@ type mcpError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-func handleMCPMessage(msg json.RawMessage) (mcpResponse, bool) {
+func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bool) {
 	var req mcpRequest
 	if err := json.Unmarshal(msg, &req); err != nil {
 		return mcpResponse{
@@ -140,9 +142,9 @@ func handleMCPMessage(msg json.RawMessage) (mcpResponse, bool) {
 	case "initialize":
 		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpInitializeResult()}, true
 	case "tools/list":
-		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": []any{mcpPingTool()}}}, true
+		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": mcpTools()}}, true
 	case "tools/call":
-		return handleMCPToolCall(req), true
+		return handleMCPToolCall(ctx, req), true
 	default:
 		return mcpResponse{
 			JSONRPC: "2.0",
@@ -165,21 +167,46 @@ func mcpInitializeResult() map[string]any {
 	}
 }
 
-func mcpPingTool() map[string]any {
+func mcpTools() []map[string]any {
+	return []map[string]any{
+		mcpTool("microagent.ping", "Test tool for validating the microagent MCP transport.", nil, nil),
+		mcpTool("workspace.create", "Create or dry-run a workspace.", []string{"name"}, map[string]any{
+			"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "exec": map[string]any{"type": "string"},
+			"state_dir": map[string]any{"type": "string"}, "profile": map[string]any{"type": "string"}, "dry_run": map[string]any{"type": "boolean"},
+		}),
+		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.exec", "Send a console command to a running workspace.", []string{"name", "command"}, map[string]any{"name": map[string]any{"type": "string"}, "command": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}}),
+		mcpTool("workspace.list", "List workspaces.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.inspect", "Inspect workspace state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("images.pull", "Pull a reusable image rootfs.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}}),
+		mcpTool("images.list", "List reusable local image records.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("cp", "Copy files into or out of a stopped workspace.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("artifacts.get", "Copy a declared workspace artifact out to the host.", []string{"name", "artifact", "target"}, map[string]any{"name": map[string]any{"type": "string"}, "artifact": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+	}
+}
+
+func mcpTool(name, description string, required []string, properties map[string]any) map[string]any {
+	if properties == nil {
+		properties = map[string]any{}
+	}
 	return map[string]any{
-		"name":        "microagent.ping",
-		"description": "Test tool for validating the microagent MCP transport.",
+		"name":        name,
+		"description": description,
 		"inputSchema": map[string]any{
 			"type":                 "object",
-			"properties":           map[string]any{},
-			"additionalProperties": false,
+			"properties":           properties,
+			"required":             required,
+			"additionalProperties": true,
 		},
 	}
 }
 
-func handleMCPToolCall(req mcpRequest) mcpResponse {
+func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 	var params struct {
-		Name string `json:"name"`
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
 	}
 	if len(req.Params) != 0 {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -187,7 +214,11 @@ func handleMCPToolCall(req mcpRequest) mcpResponse {
 		}
 	}
 	if params.Name != "microagent.ping" {
-		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "unknown tool", Data: mapStructuredError(fmt.Errorf("unsupported MCP tool %s", params.Name), newRequestID())}}
+		result, err := runMCPTool(ctx, params.Name, params.Arguments)
+		if err != nil {
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "tool failed", Data: mapStructuredError(err, newRequestID())}}
+		}
+		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(result)}
 	}
 	return mcpResponse{
 		JSONRPC: "2.0",
@@ -198,6 +229,164 @@ func handleMCPToolCall(req mcpRequest) mcpResponse {
 			},
 		},
 	}
+}
+
+func runMCPTool(ctx context.Context, name string, args map[string]any) (map[string]any, error) {
+	start := time.Now()
+	cliArgs, err := mcpCLIArgs(name, args)
+	if err != nil {
+		return nil, err
+	}
+	result, cliErr := runCLIForMCP(ctx, cliArgs)
+	envelope := map[string]any{
+		"result":    result,
+		"timing_ms": time.Since(start).Milliseconds(),
+	}
+	if cliErr != nil {
+		envelope["error"] = mapStructuredError(cliErr, newRequestID())
+	}
+	return envelope, cliErr
+}
+
+func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
+	stateDir := stringArg(args, "state_dir")
+	switch name {
+	case "workspace.create":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "create", stringArg(args, "name")}
+		cli = appendOptionalFlag(cli, "-image", stringArg(args, "image"))
+		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
+		cli = appendOptionalFlag(cli, "-profile", stringArg(args, "profile"))
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		if boolArg(args, "dry_run") {
+			cli = append(cli, "-dry-run")
+		}
+		return cli, nil
+	case "workspace.start":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag([]string{"--mode=ax", "start", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "workspace.exec":
+		if err := requireToolArgs(args, name, "name", "command"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "connect", stringArg(args, "name"), "-send", stringArg(args, "command")}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
+	case "workspace.halt":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag([]string{"--mode=ax", "halt", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "workspace.delete":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "delete", stringArg(args, "name"), "-yes"}
+		if boolArg(args, "force") {
+			cli = append(cli, "-force")
+		}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
+	case "workspace.list":
+		return appendOptionalFlag([]string{"--mode=ax", "ps"}, "-state-dir", stateDir), nil
+	case "workspace.inspect":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag([]string{"--mode=ax", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "images.pull":
+		if err := requireToolArgs(args, name, "image"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "images", "pull", stringArg(args, "image")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
+		return cli, nil
+	case "images.list":
+		return appendOptionalFlag([]string{"--mode=ax", "images", "list"}, "-state-dir", stateDir), nil
+	case "cp":
+		if err := requireToolArgs(args, name, "source", "target"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "cp", stringArg(args, "source"), stringArg(args, "target")}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
+	case "artifacts.get":
+		if err := requireToolArgs(args, name, "name", "artifact", "target"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "artifacts", "get", stringArg(args, "name"), stringArg(args, "artifact"), stringArg(args, "target")}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
+	default:
+		return nil, fmt.Errorf("unsupported MCP tool %s", name)
+	}
+}
+
+func runCLIForMCP(ctx context.Context, args []string) (any, error) {
+	dir, err := os.MkdirTemp("", "microagent-mcp-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "stdout.json")
+	stdout, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	err = run(ctx, args, stdout)
+	closeErr := stdout.Close()
+	if err == nil {
+		err = closeErr
+	}
+	data, readErr := os.ReadFile(path)
+	if readErr != nil && err == nil {
+		err = readErr
+	}
+	var parsed any
+	if len(bytes.TrimSpace(data)) != 0 && json.Unmarshal(data, &parsed) == nil {
+		return parsed, err
+	}
+	return map[string]any{"output": string(data)}, err
+}
+
+func mcpToolResult(value any) map[string]any {
+	data, _ := json.Marshal(value)
+	return map[string]any{"content": []any{map[string]any{"type": "text", "text": string(data)}}}
+}
+
+func stringArg(args map[string]any, name string) string {
+	if args == nil {
+		return ""
+	}
+	if value, ok := args[name].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func boolArg(args map[string]any, name string) bool {
+	if args == nil {
+		return false
+	}
+	value, ok := args[name].(bool)
+	return ok && value
+}
+
+func appendOptionalFlag(args []string, name, value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return args
+	}
+	return append(args, name, value)
+}
+
+func requireToolArgs(args map[string]any, tool string, names ...string) error {
+	for _, name := range names {
+		if stringArg(args, name) == "" {
+			return fmt.Errorf("%s requires %s", tool, name)
+		}
+	}
+	return nil
 }
 
 func encodeMCPTestMessage(value any) []byte {
