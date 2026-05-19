@@ -60,7 +60,8 @@ Live backend validation is split by host capability:
 - Hosted CI is the portable gate. It should not assume KVM, Hyper-V, or Apple
   Virtualization.framework access.
 - Linux release parity is gated by `.github/workflows/live-linux-parity.yaml`
-  on a self-hosted runner labeled `linux`, `x64`, and `kvm`.
+  on trusted `main` pushes or manual dispatch on a self-hosted runner labeled
+  `linux`, `x64`, and `kvm`.
 - macOS Apple VF parity is a local/mac-agent lane unless a self-hosted Apple
   silicon runner is explicitly available. Hosted macOS runners are not treated
   as the release source of truth for Virtualization.framework behavior.
@@ -93,7 +94,8 @@ safe to delete. Successful E2E scenarios are expected to remove their own
 temporary state.
 
 Live Firecracker tests must run outside sandboxed environments on Linux hosts
-with KVM, `/dev/vhost-vsock`, Firecracker on `PATH` or `MICROAGENT_FIRECRACKER`,
+with KVM, `/dev/kvm`, `/dev/vhost-vsock`, `/dev/net/tun`, Firecracker on
+`PATH` or `MICROAGENT_FIRECRACKER`, permission to create TAP/bridge/NAT state,
 and the network prerequisites documented by
 `scripts/dev/microagent-e2e-linux-network-setup.sh`. Apple VF tests must run on
 Apple silicon macOS with the supervisor built and signed as described in

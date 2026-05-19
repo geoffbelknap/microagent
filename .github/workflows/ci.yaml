@@ -111,7 +111,7 @@ jobs:
           cache-dependency-path: go.mod
 
       - name: Run portable E2E scenarios
-        run: scripts/dev/microagent-e2e.sh help-usage text-output
+        run: scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output
 
   govulncheck:
     name: Go vulnerability check
