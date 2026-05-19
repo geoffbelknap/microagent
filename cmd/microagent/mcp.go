@@ -185,7 +185,7 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("workspace.list", "List workspaces.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.inspect", "Inspect workspace state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.inspect", "Inspect workspace state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}}),
 		mcpTool("workspace.estimate_cost", "Estimate workspace resource consumption before creating or starting it.", nil, map[string]any{"profile": map[string]any{"type": "string"}, "memory_mib": map[string]any{"type": "integer"}, "cpus": map[string]any{"type": "integer"}, "size_mib": map[string]any{"type": "integer"}, "price_per_hour": map[string]any{"type": "number"}}),
 		mcpTool("images.pull", "Pull a reusable image rootfs.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}}),
 		mcpTool("images.list", "List reusable local image records.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
@@ -386,6 +386,9 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		return nil, err
 	}
 	result, cliErr := runCLIForMCP(ctx, cliArgs)
+	if cliErr == nil && name == "workspace.inspect" && strings.EqualFold(stringArg(args, "format"), "summary") {
+		result = summarizeWorkspaceInspect(result)
+	}
 	envelope := map[string]any{
 		"result":            result,
 		"timing_ms":         time.Since(start).Milliseconds(),
@@ -425,6 +428,42 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 	default:
 		return nil
 	}
+}
+
+func summarizeWorkspaceInspect(result any) any {
+	resp, ok := result.(map[string]any)
+	if !ok {
+		return result
+	}
+	summary := map[string]any{
+		"format":    "summary",
+		"ok":        resp["ok"],
+		"backend":   resp["backend"],
+		"error":     resp["error"],
+		"error_cnt": 0,
+	}
+	if text, ok := resp["error"].(string); ok && strings.TrimSpace(text) != "" {
+		summary["error_cnt"] = 1
+	}
+	if event, ok := resp["event"].(map[string]any); ok {
+		summary["state"] = event["state"]
+		if identity, ok := event["identity"].(map[string]any); ok {
+			summary["workspace"] = identity["runtimeID"]
+		}
+	}
+	var next []string
+	switch fmt.Sprint(summary["state"]) {
+	case "running", "starting":
+		next = []string{"workspace.exec", "workspace.halt", "workspace.delete"}
+	case "prepared", "halted", "stopped":
+		next = []string{"workspace.start", "workspace.delete"}
+	case "failed", "quarantined":
+		next = []string{"workspace.inspect", "workspace.delete"}
+	default:
+		next = []string{"workspace.inspect"}
+	}
+	summary["next_decision_points"] = next
+	return summary
 }
 
 func mcpIdempotencyCacheKey(name string, args map[string]any) string {

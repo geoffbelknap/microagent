@@ -74,6 +74,27 @@ func TestMCPDeletePreview(t *testing.T) {
 	}
 }
 
+func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
+	summary, ok := summarizeWorkspaceInspect(map[string]any{
+		"ok":      true,
+		"backend": "firecracker",
+		"event": map[string]any{
+			"state":    "running",
+			"identity": map[string]any{"runtimeID": "demo"},
+		},
+	}).(map[string]any)
+	if !ok {
+		t.Fatalf("summary type = %T", summary)
+	}
+	if summary["format"] != "summary" || summary["workspace"] != "demo" || summary["state"] != "running" {
+		t.Fatalf("summary = %#v", summary)
+	}
+	points, ok := summary["next_decision_points"].([]string)
+	if !ok || len(points) == 0 {
+		t.Fatalf("next_decision_points = %#v", summary["next_decision_points"])
+	}
+}
+
 func TestMCPDescribeTool(t *testing.T) {
 	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
 		"jsonrpc": "2.0",
