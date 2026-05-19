@@ -4,7 +4,7 @@ description: One backend per host OS. Same lifecycle surface, different mechanic
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-19_
 
 microagent installs with one backend for the host OS: Firecracker on Linux,
 Apple VF on macOS, and experimental Windows Hyper-V on Windows. The CLI does
@@ -83,6 +83,12 @@ scripts/dev/microagent-e2e.sh \
   transport \
   supervision
 ```
+
+On Linux, the same runner is the live full-suite parity gate in
+`.github/workflows/live-linux-parity.yaml`. That workflow runs on trusted
+`main` pushes or manual dispatch on a self-hosted runner labeled `linux`,
+`x64`, and `kvm`, with KVM, `/dev/vhost-vsock`, `/dev/net/tun`, Firecracker,
+and the network setup from `scripts/dev/microagent-e2e-linux-network-setup.sh`.
 
 Those feature scenarios are backend-agnostic: the scenario names describe the
 shared CLI/runtime contract, while the host or

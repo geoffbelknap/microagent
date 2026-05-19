@@ -1,0 +1,61 @@
+name: Live Linux parity
+
+on:
+  workflow_dispatch:
+    inputs:
+      image-cache-policy:
+        description: Persistent E2E image cache policy
+        required: false
+        type: choice
+        options:
+          - auto
+          - refresh
+          - require
+        default: auto
+      image:
+        description: OCI image override for public-surface scenarios
+        required: false
+        default: ""
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-linux-parity-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-kvm-full-suite:
+    name: Linux KVM full microagent E2E
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - kvm
+    timeout-minutes: 180
+    env:
+      MICROAGENT_E2E_IMAGE_CACHE_POLICY: ${{ inputs.image-cache-policy || 'auto' }}
+      MICROAGENT_E2E_IMAGE: ${{ inputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.3"
+          cache-dependency-path: go.mod
+
+      - name: Inspect preserved test state
+        run: scripts/dev/cleanup-temp.sh --dry-run
+
+      - name: Host doctor
+        run: go run ./cmd/microagent --json doctor
+
+      - name: Run full Linux E2E suite
+        run: scripts/dev/microagent-e2e.sh
