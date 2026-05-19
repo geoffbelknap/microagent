@@ -170,6 +170,7 @@ func mcpInitializeResult() map[string]any {
 func mcpTools() []map[string]any {
 	return []map[string]any{
 		mcpTool("microagent.ping", "Test tool for validating the microagent MCP transport.", nil, nil),
+		mcpTool("microagent.describe", "Return the machine-readable microagent MCP capability manifest.", nil, nil),
 		mcpTool("workspace.create", "Create or dry-run a workspace.", []string{"name"}, map[string]any{
 			"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "exec": map[string]any{"type": "string"},
 			"state_dir": map[string]any{"type": "string"}, "profile": map[string]any{"type": "string"}, "dry_run": map[string]any{"type": "boolean"},
@@ -214,6 +215,9 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 		}
 	}
 	if params.Name != "microagent.ping" {
+		if params.Name == "microagent.describe" {
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(microagentCapabilityManifest())}
+		}
 		result, err := runMCPTool(ctx, params.Name, params.Arguments)
 		if err != nil {
 			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "tool failed", Data: mapStructuredError(err, newRequestID())}}
@@ -228,6 +232,92 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 				map[string]any{"type": "text", "text": "pong"},
 			},
 		},
+	}
+}
+
+func microagentCapabilityManifest() map[string]any {
+	operations := make([]map[string]any, 0, len(mcpTools()))
+	for _, tool := range mcpTools() {
+		name, _ := tool["name"].(string)
+		if name == "microagent.ping" {
+			continue
+		}
+		operations = append(operations, map[string]any{
+			"name":               name,
+			"description":        tool["description"],
+			"input_schema":       tool["inputSchema"],
+			"output_schema":      mcpToolOutputSchema(),
+			"side_effects":       mcpToolSideEffects(name),
+			"idempotency":        mcpToolIdempotency(name),
+			"principal_scope":    mcpToolPrincipalScope(name),
+			"cost_class":         mcpToolCostClass(name),
+			"structured_errors":  []string{string(errorKindTransient), string(errorKindPermanent), string(errorKindConflict), string(errorKindNotFound), string(errorKindResourceExhausted), string(errorKindUnsupported), string(errorKindPolicyDenied)},
+			"correlation_id_key": "error.correlation_id",
+		})
+	}
+	return map[string]any{
+		"schema_version": "2026-05-19",
+		"service":        "microagent",
+		"version":        version,
+		"transport":      "mcp_stdio",
+		"output_mode":    string(outputModeAX),
+		"operations":     operations,
+	}
+}
+
+func mcpToolOutputSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"result":            map[string]any{"type": "object"},
+			"error":             map[string]any{"type": "object"},
+			"timing_ms":         map[string]any{"type": "integer"},
+			"principal_context": map[string]any{"type": "object"},
+		},
+	}
+}
+
+func mcpToolSideEffects(name string) []string {
+	switch name {
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "images.pull", "cp", "artifacts.get":
+		return []string{"host_state", "workspace_state"}
+	default:
+		return nil
+	}
+}
+
+func mcpToolIdempotency(name string) string {
+	switch name {
+	case "workspace.create", "workspace.start", "workspace.halt", "workspace.delete", "images.pull":
+		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
+	case "workspace.list", "workspace.inspect", "images.list", "microagent.describe":
+		return "read_only"
+	default:
+		return "not_idempotent"
+	}
+}
+
+func mcpToolPrincipalScope(name string) []string {
+	switch name {
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete":
+		return []string{"workspace.lifecycle"}
+	case "images.pull", "images.list":
+		return []string{"images.read", "images.write"}
+	case "cp", "artifacts.get":
+		return []string{"workspace.files"}
+	default:
+		return []string{"microagent.read"}
+	}
+}
+
+func mcpToolCostClass(name string) string {
+	switch name {
+	case "workspace.create", "workspace.start", "workspace.exec", "images.pull":
+		return "host_compute_and_storage"
+	case "cp", "artifacts.get":
+		return "host_io"
+	default:
+		return "metadata"
 	}
 }
 

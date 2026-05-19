@@ -41,10 +41,31 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		}
 		names[tool["name"].(string)] = true
 	}
-	for _, name := range []string{"microagent.ping", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "images.pull", "images.list", "cp", "artifacts.get"} {
+	for _, name := range []string{"microagent.ping", "microagent.describe", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "images.pull", "images.list", "cp", "artifacts.get"} {
 		if !names[name] {
 			t.Fatalf("tools missing %s: %#v", name, names)
 		}
+	}
+}
+
+func TestMCPDescribeTool(t *testing.T) {
+	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "call-1",
+		"method":  "tools/call",
+		"params":  map[string]any{"name": "microagent.describe"},
+	}))
+	var output bytes.Buffer
+	if err := serveMCP(context.Background(), input, &output); err != nil {
+		t.Fatalf("serveMCP: %v", err)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	data, err := json.Marshal(responses[0]["result"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "schema_version") || !strings.Contains(string(data), "workspace.create") {
+		t.Fatalf("describe response = %s", data)
 	}
 }
 
