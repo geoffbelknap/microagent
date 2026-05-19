@@ -17,6 +17,29 @@ func TestBootRejectsInvalidIterations(t *testing.T) {
 	}
 }
 
+func TestBootReportsUnknownProfileAsIterationFailure(t *testing.T) {
+	report, err := Boot(context.Background(), BootOptions{
+		StateDir:    t.TempDir(),
+		ImageRef:    "docker.io/library/busybox:1.36",
+		Profile:     "definitely-not-a-profile",
+		ExecCommand: "true",
+		Iterations:  1,
+		Timeout:     1,
+	})
+	if err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+	if report.Summary.Count != 1 {
+		t.Fatalf("summary count = %d, want 1", report.Summary.Count)
+	}
+	if len(report.Iterations) != 1 || report.Iterations[0].OK {
+		t.Fatalf("iterations = %#v, want one failed iteration", report.Iterations)
+	}
+	if !strings.Contains(report.Iterations[0].Error, "unknown resource profile") {
+		t.Fatalf("iteration error = %q, want unknown profile", report.Iterations[0].Error)
+	}
+}
+
 func TestSummarizeIterations(t *testing.T) {
 	summary := SummarizeIterations([]Iteration{
 		{Name: "one", OK: true, DurationMs: 30},
