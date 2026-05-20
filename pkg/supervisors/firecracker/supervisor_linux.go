@@ -2151,32 +2151,30 @@ func shellReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, 
 		return vmkit.ReadinessSignal{}, false
 	}
 	if state.Config.ShellPort != 0 {
-		if shellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
+		target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(state.Config.ShellPort)))
+		observedAt := time.Now().UTC()
+		start := time.Now()
+		conn, err := net.DialTimeout("tcp", target, 150*time.Millisecond)
+		elapsed := time.Since(start)
+		if err != nil {
 			return vmkit.ReadinessSignal{
-				Ready:      true,
-				ObservedAt: fileModTime(state.SerialLogPath),
-				Detail:     fmt.Sprintf("guest shell helper listening on vsock port %d", state.Config.ShellPort),
+				Ready:      false,
+				ObservedAt: &observedAt,
+				Detail:     fmt.Sprintf("shell target unreachable at %s after %s: %v", target, elapsed.Round(time.Millisecond), err),
 			}, true
 		}
-		return vmkit.ReadinessSignal{}, false
+		_ = conn.Close()
+		return vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("shell target reachable at %s in %s", target, elapsed.Round(time.Millisecond)),
+		}, true
 	}
 	return vmkit.ReadinessSignal{
 		Ready:      true,
 		ObservedAt: fileModTime(state.SerialInputPath),
 		Detail:     "console input is available",
 	}, true
-}
-
-func shellHelperListening(serialLogPath string, shellPort uint16) bool {
-	if serialLogPath == "" || shellPort == 0 {
-		return false
-	}
-	data, err := os.ReadFile(serialLogPath)
-	if err != nil {
-		return false
-	}
-	needle := []byte(fmt.Sprintf("microagent-init: shell helper listening on vsock port %d", shellPort))
-	return bytes.Contains(data, needle)
 }
 
 func mediationReadiness(mediation vmkit.MediationConfig, state vmkit.VMState, observedAt *time.Time) vmkit.ReadinessSignal {

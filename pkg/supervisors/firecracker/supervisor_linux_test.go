@@ -776,7 +776,7 @@ func TestPortForwarderIncludesShellPort(t *testing.T) {
 	}
 }
 
-func TestFirecrackerShellReadinessRequiresGuestHelperLog(t *testing.T) {
+func TestFirecrackerShellReadinessRequiresLiveShellTarget(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
 	if err := os.MkdirAll(filepath.Join(dir, "agent-1"), 0o755); err != nil {
@@ -798,14 +798,32 @@ func TestFirecrackerShellReadinessRequiresGuestHelperLog(t *testing.T) {
 	}
 	readiness := readinessFromRuntimeState(state)
 	if readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
+		t.Fatalf("shell readiness = %#v, want not ready before shell target is reachable", readiness.ShellReady)
 	}
 	if err := os.WriteFile(serialLogPath(opts), []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	readiness = readinessFromRuntimeState(state)
+	if readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v, want not ready when only the guest helper log exists", readiness.ShellReady)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Config.ShellPort = uint16(port)
+	readiness = readinessFromRuntimeState(state)
 	if !readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
+		t.Fatalf("shell readiness = %#v, want ready when shell target is reachable", readiness.ShellReady)
 	}
 }
 

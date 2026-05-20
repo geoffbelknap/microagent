@@ -4,7 +4,7 @@ description: Open the workspace console.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-12_
+_Last updated: 2026-05-20_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--ready-timeout <seconds>]
@@ -55,13 +55,15 @@ microagent connect research --send "cat /workspace/status; uname -m"
 ```
 
 `connect` waits for the backend console endpoint and, by default, for a basic
-shell prompt before attaching or writing. If the guest shell is not ready, it
-exits with an error that points to [`logs`](/cli/logs/).
+shell prompt before attaching or writing. With `--send`, a timeout means the
+command did not report completion before the deadline; the command exits with an
+error and includes any partial output that was captured. If the guest shell is
+not ready, it exits with an error that points to [`logs`](/cli/logs/).
 
 The host-level `consoleAvailable` field means the backend supports an
 interactive console on this machine. It is not a guarantee that a specific
-workspace is ready for input; the workspace must be running and past the shell
-readiness gate.
+workspace is ready for input; the workspace must be running and `shellReady`
+must report that the shell target is reachable.
 
 ## Related
 

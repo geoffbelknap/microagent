@@ -1330,7 +1330,7 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	send := fs.String("send", "", "Write text to the console and exit")
-	timeoutSeconds := fs.Int("timeout", 2, "Seconds to wait for output after --send")
+	timeoutSeconds := fs.Int("timeout", 5, "Seconds to wait for output after --send")
 	readyTimeoutSeconds := fs.Int("ready-timeout", 10, "Seconds to wait for a shell prompt before --send; 0 disables")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
@@ -2773,39 +2773,7 @@ func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeRea
 }
 
 func workspaceShellReadinessFromRuntime(state workspaceRuntimeState) (vmkit.ReadinessSignal, bool) {
-	if _, err := os.Stat(state.SerialInputPath); err != nil {
-		if !os.IsNotExist(err) {
-			return vmkit.ReadinessSignal{Error: err.Error()}, true
-		}
-		return vmkit.ReadinessSignal{}, false
-	}
-	if state.Event.Identity.Backend != vmkit.BackendWindowsHyperV && state.Config.ShellPort != 0 {
-		if workspaceShellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
-			return vmkit.ReadinessSignal{
-				Ready:      true,
-				ObservedAt: fileModTime(state.SerialLogPath),
-				Detail:     fmt.Sprintf("guest shell helper listening on vsock port %d", state.Config.ShellPort),
-			}, true
-		}
-		return vmkit.ReadinessSignal{}, false
-	}
-	return vmkit.ReadinessSignal{
-		Ready:      true,
-		ObservedAt: fileModTime(state.SerialInputPath),
-		Detail:     "console input is available",
-	}, true
-}
-
-func workspaceShellHelperListening(serialLogPath string, shellPort uint16) bool {
-	if serialLogPath == "" || shellPort == 0 {
-		return false
-	}
-	data, err := os.ReadFile(serialLogPath)
-	if err != nil {
-		return false
-	}
-	needle := []byte(fmt.Sprintf("microagent-init: shell helper listening on vsock port %d", shellPort))
-	return bytes.Contains(data, needle)
+	return workspace.ShellReadinessSignal(context.Background(), state, 150*time.Millisecond)
 }
 
 func mediationReadiness(mediation vmkit.MediationConfig, state vmkit.VMState, observedAt *time.Time) vmkit.ReadinessSignal {

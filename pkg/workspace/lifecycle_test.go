@@ -170,7 +170,7 @@ func TestReadinessFromRuntimeReportsWindowsHyperVShell(t *testing.T) {
 	}
 }
 
-func TestReadinessFromRuntimeRequiresGuestShellHelperLog(t *testing.T) {
+func TestReadinessFromRuntimeRequiresLiveShellTarget(t *testing.T) {
 	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendAppleVF} {
 		t.Run(backend, func(t *testing.T) {
 			dir := t.TempDir()
@@ -196,16 +196,37 @@ func TestReadinessFromRuntimeRequiresGuestShellHelperLog(t *testing.T) {
 			}
 			readiness := readinessFromRuntime(state)
 			if readiness.ShellReady.Ready {
-				t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
+				t.Fatalf("shell readiness = %#v, want not ready before shell target is reachable", readiness.ShellReady)
+			}
+			if !strings.Contains(readiness.ShellReady.Detail, "unreachable") {
+				t.Fatalf("shell readiness detail = %q, want unreachable probe detail", readiness.ShellReady.Detail)
 			}
 			if err := os.WriteFile(serialPath, []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			readiness = readinessFromRuntime(state)
-			if !readiness.ShellReady.Ready {
-				t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
+			if readiness.ShellReady.Ready {
+				t.Fatalf("shell readiness = %#v, want not ready when only the guest helper log exists", readiness.ShellReady)
 			}
-			if readiness.ShellReady.Detail != "guest shell helper listening on vsock port 24279" {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			_, portText, err := net.SplitHostPort(listener.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			port, err := strconv.Atoi(portText)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state.Config.ShellPort = uint16(port)
+			readiness = readinessFromRuntime(state)
+			if !readiness.ShellReady.Ready {
+				t.Fatalf("shell readiness = %#v, want ready when shell target is reachable", readiness.ShellReady)
+			}
+			if !strings.Contains(readiness.ShellReady.Detail, "reachable at") {
 				t.Fatalf("shell readiness detail = %q", readiness.ShellReady.Detail)
 			}
 		})

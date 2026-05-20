@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,19 @@ type ConsoleOptions struct {
 	ReadyTimeout time.Duration
 	SendTimeout  time.Duration
 	DialTarget   func(context.Context, ShellTarget) (net.Conn, error)
+}
+
+type ConsoleReadTimeoutError struct {
+	Workspace     string
+	Timeout       time.Duration
+	PartialOutput string
+}
+
+func (err ConsoleReadTimeoutError) Error() string {
+	if err.PartialOutput != "" {
+		return fmt.Sprintf("console command for workspace %s timed out after %s before completion; partial output: %q", err.Workspace, err.Timeout, err.PartialOutput)
+	}
+	return fmt.Sprintf("console command for workspace %s timed out after %s before completion", err.Workspace, err.Timeout)
 }
 
 func DialConsole(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
@@ -57,21 +71,79 @@ func SendConsoleCommand(ctx context.Context, opts ConsoleOptions, command string
 		return err
 	}
 	defer conn.Close()
-	text := strings.ReplaceAll(command, "\n", "\r")
-	if !strings.HasSuffix(text, "\r") {
-		text += "\r"
+	token := strconv.FormatInt(time.Now().UnixNano(), 10)
+	doneMarker := "__MICROAGENT_DONE_" + token + "__"
+	statusVar := "__ma_status"
+	tokenVar := "__ma_token"
+	text := strings.TrimRight(strings.ReplaceAll(command, "\n", "; "), " \t\r;")
+	if text != "" {
+		text += "; "
 	}
+	text = "stty -echo\r" + text
+	text += statusVar + "=$?; "
+	text += tokenVar + "=" + token + "; "
+	text += "printf '\\r\\n__MICROAGENT_DONE_%s__%s\\r\\n' \"$" + tokenVar + "\" \"$" + statusVar + "\"; "
 	text += "exit\r"
 	if _, err := io.WriteString(conn, text); err != nil {
 		return err
 	}
-	_ = conn.SetReadDeadline(time.Now().Add(opts.SendTimeout))
-	_, err = io.Copy(output, conn)
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return nil
+	var captured bytes.Buffer
+	writer := output
+	if writer == nil {
+		writer = io.Discard
 	}
-	return err
+	_ = conn.SetReadDeadline(time.Now().Add(opts.SendTimeout))
+	buf := make([]byte, 4096)
+	for {
+		n, err := conn.Read(buf)
+		if n > 0 {
+			captured.Write(buf[:n])
+			if bytes.Contains(captured.Bytes(), []byte(doneMarker)) {
+				_, writeErr := io.WriteString(writer, cleanConsoleSendOutput(captured.String(), token))
+				return writeErr
+			}
+		}
+		if err != nil {
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				partial := cleanConsoleSendOutput(captured.String(), token)
+				_, _ = io.WriteString(writer, partial)
+				return ConsoleReadTimeoutError{
+					Workspace:     opts.Name,
+					Timeout:       opts.SendTimeout,
+					PartialOutput: partial,
+				}
+			}
+			if errors.Is(err, io.EOF) {
+				_, writeErr := io.WriteString(writer, cleanConsoleSendOutput(captured.String(), token))
+				return writeErr
+			}
+			return err
+		}
+	}
+}
+
+func cleanConsoleSendOutput(text, token string) string {
+	doneMarker := "__MICROAGENT_DONE_" + token + "__"
+	if idx := strings.Index(text, doneMarker); idx >= 0 {
+		text = text[:idx]
+	}
+	lines := strings.SplitAfter(text, "\n")
+	cleaned := lines[:0]
+	for _, line := range lines {
+		switch {
+		case strings.Contains(line, "__ma_status"):
+			continue
+		case strings.Contains(line, "__ma_token"):
+			continue
+		case strings.Contains(line, "__MICROAGENT_DONE_%s__%s"):
+			continue
+		case strings.Contains(line, "stty -echo"):
+			continue
+		}
+		cleaned = append(cleaned, line)
+	}
+	return strings.Join(cleaned, "")
 }
 
 func ConsoleTarget(name string, state RuntimeState) (ShellTarget, error) {
@@ -101,6 +173,25 @@ func ShellTargetDescription(target ShellTarget) string {
 		return fmt.Sprintf("hvsock:%s:%d", target.RuntimeID, target.Port)
 	}
 	return target.Address
+}
+
+func ProbeShellTarget(ctx context.Context, target ShellTarget, timeout time.Duration, dialTarget func(context.Context, ShellTarget) (net.Conn, error)) (time.Duration, error) {
+	if timeout <= 0 {
+		timeout = 150 * time.Millisecond
+	}
+	if dialTarget == nil {
+		dialTarget = DialShellTarget
+	}
+	start := time.Now()
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	conn, err := dialTarget(dialCtx, target)
+	elapsed := time.Since(start)
+	if err != nil {
+		return elapsed, err
+	}
+	_ = conn.Close()
+	return elapsed, nil
 }
 
 func dialConsoleShell(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
