@@ -1278,6 +1278,10 @@ func readinessFromRuntime(state RuntimeState) vmkit.RuntimeReadiness {
 }
 
 func shellReadinessFromRuntime(state RuntimeState) (vmkit.ReadinessSignal, bool) {
+	return ShellReadinessSignal(context.Background(), state, 150*time.Millisecond)
+}
+
+func ShellReadinessSignal(ctx context.Context, state RuntimeState, probeTimeout time.Duration) (vmkit.ReadinessSignal, bool) {
 	if _, err := os.Stat(state.SerialInputPath); err != nil {
 		if !os.IsNotExist(err) {
 			return vmkit.ReadinessSignal{Error: err.Error()}, true
@@ -1285,14 +1289,24 @@ func shellReadinessFromRuntime(state RuntimeState) (vmkit.ReadinessSignal, bool)
 		return vmkit.ReadinessSignal{}, false
 	}
 	if state.Event.Identity.Backend != vmkit.BackendWindowsHyperV && state.Config.ShellPort != 0 {
-		if shellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
+		target, err := ConsoleTarget(state.Event.Identity.RuntimeID, state)
+		if err != nil {
+			return vmkit.ReadinessSignal{Ready: false, Error: err.Error()}, true
+		}
+		observedAt := time.Now().UTC()
+		elapsed, err := ProbeShellTarget(ctx, target, probeTimeout, nil)
+		if err != nil {
 			return vmkit.ReadinessSignal{
-				Ready:      true,
-				ObservedAt: fileModTime(state.SerialLogPath),
-				Detail:     fmt.Sprintf("guest shell helper listening on vsock port %d", state.Config.ShellPort),
+				Ready:      false,
+				ObservedAt: &observedAt,
+				Detail:     fmt.Sprintf("shell target unreachable at %s after %s: %v", ShellTargetDescription(target), elapsed.Round(time.Millisecond), err),
 			}, true
 		}
-		return vmkit.ReadinessSignal{}, false
+		return vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("shell target reachable at %s in %s", ShellTargetDescription(target), elapsed.Round(time.Millisecond)),
+		}, true
 	}
 	return vmkit.ReadinessSignal{
 		Ready:      true,

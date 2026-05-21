@@ -28,6 +28,7 @@ type structuredError struct {
 	Message       string              `json:"message"`
 	Remediation   string              `json:"remediation,omitempty"`
 	RetryAfterMS  int64               `json:"retry_after_ms,omitempty"`
+	PartialOutput string              `json:"partial_output,omitempty"`
 	CorrelationID string              `json:"correlation_id"`
 }
 
@@ -53,6 +54,14 @@ func mapStructuredError(err error, correlationID string) structuredError {
 	}
 	if errors.Is(err, flag.ErrHelp) {
 		mapped.Remediation = "Re-run the command without --help, or choose one of the documented command forms."
+		return mapped
+	}
+	var consoleTimeout workspace.ConsoleReadTimeoutError
+	if errors.As(err, &consoleTimeout) {
+		mapped.Kind = errorKindTransient
+		mapped.RetryAfterMS = 1000
+		mapped.PartialOutput = consoleTimeout.PartialOutput
+		mapped.Remediation = "Retry after the guest shell has produced a complete response, or increase the connect timeout."
 		return mapped
 	}
 	text := strings.ToLower(err.Error())

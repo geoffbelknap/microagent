@@ -279,6 +279,7 @@ func TestStructuredErrorMapping(t *testing.T) {
 		{name: "workspace not found", err: workspace.WorkspaceNotFoundError{Name: "missing"}, kind: errorKindNotFound, remediationContains: "workspace.create"},
 		{name: "conflict", err: fmt.Errorf("workspace demo is already running"), kind: errorKindConflict},
 		{name: "transient", err: fmt.Errorf("connect timeout"), kind: errorKindTransient},
+		{name: "console read timeout", err: workspace.ConsoleReadTimeoutError{Workspace: "research", Timeout: time.Second, PartialOutput: "partial\n"}, kind: errorKindTransient},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -294,6 +295,9 @@ func TestStructuredErrorMapping(t *testing.T) {
 			}
 			if tt.remediationContains != "" && !strings.Contains(got.Remediation, tt.remediationContains) {
 				t.Fatalf("Remediation = %q, want to contain %q", got.Remediation, tt.remediationContains)
+			}
+			if timeoutErr, ok := tt.err.(workspace.ConsoleReadTimeoutError); ok && got.PartialOutput != timeoutErr.PartialOutput {
+				t.Fatalf("PartialOutput = %q, want %q", got.PartialOutput, timeoutErr.PartialOutput)
 			}
 		})
 	}
@@ -4211,7 +4215,7 @@ func TestRunConnectRejectsNegativeReadyTimeoutForInteractive(t *testing.T) {
 	}
 }
 
-func TestWorkspaceShellReadinessRequiresAppleVFHelperLog(t *testing.T) {
+func TestWorkspaceShellReadinessRequiresReachableShellTarget(t *testing.T) {
 	dir := t.TempDir()
 	runtimeDir := filepath.Join(dir, "agent")
 	inputPath := filepath.Join(runtimeDir, "serial.in")
@@ -4235,14 +4239,32 @@ func TestWorkspaceShellReadinessRequiresAppleVFHelperLog(t *testing.T) {
 	}
 	readiness := workspaceReadinessFromRuntime(state)
 	if readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want not ready before guest helper log", readiness.ShellReady)
+		t.Fatalf("shell readiness = %#v, want not ready before shell target is reachable", readiness.ShellReady)
 	}
 	if err := os.WriteFile(serialPath, []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	readiness = workspaceReadinessFromRuntime(state)
+	if readiness.ShellReady.Ready {
+		t.Fatalf("shell readiness = %#v, want not ready when only the guest helper log exists", readiness.ShellReady)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Config.ShellPort = uint16(port)
+	readiness = workspaceReadinessFromRuntime(state)
 	if !readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v, want ready after guest helper log", readiness.ShellReady)
+		t.Fatalf("shell readiness = %#v, want ready when shell target is reachable", readiness.ShellReady)
 	}
 }
 
