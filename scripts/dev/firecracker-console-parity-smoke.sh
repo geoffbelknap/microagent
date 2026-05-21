@@ -139,15 +139,15 @@ if create["response"]["backend"] != "firecracker":
     raise SystemExit(create)
 if start["response"]["event"]["state"] != "running":
     raise SystemExit(start)
-if "CONNECT_READY" not in send + logs:
+if "CONNECT_READY" not in send:
     raise SystemExit("connect output did not reach the guest shell")
 if status["event"]["state"] != "running":
     raise SystemExit("Ctrl-] detach stopped the workspace")
-if "CONNECT_READY" not in logs:
+if "microagent-init: starting" not in logs:
     raise SystemExit("serial output was not available through logs")
 PY
 
 "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/stop.json"
-"$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
+"$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"
 
 echo "firecracker console parity smoke passed"
