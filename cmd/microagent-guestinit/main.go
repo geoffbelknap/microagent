@@ -38,6 +38,7 @@ type config struct {
 	Mounts       []mount       `json:"mounts,omitempty"`
 	HostForwards []hostForward `json:"hostForwards,omitempty"`
 	ShellPort    uint16        `json:"shellPort,omitempty"`
+	ExecPort     uint16        `json:"execPort,omitempty"`
 	ConsoleShell string        `json:"consoleShell,omitempty"`
 	Hostname     string        `json:"hostname,omitempty"`
 }
@@ -63,6 +64,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "shell-helper" {
 		os.Exit(runShellHelper(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "exec-service" {
+		os.Exit(runExecService(os.Args[2:]))
 	}
 	code := run()
 	poweroff()
@@ -152,6 +156,9 @@ func run() int {
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		_ = sendResult(cfg.Port, res)
 		return code
+	}
+	if err := startStructuredExecService(cfg.ExecPort, guestEnv(cfg.Env)); err != nil {
+		log.Printf("microagent-init: structured exec service failed to start on vsock port %d: %v", cfg.ExecPort, err)
 	}
 	if cfg.Mode == "service" && len(cfg.Command) > 0 {
 		if err := attachConsole(); err != nil {
@@ -1019,6 +1026,13 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 			return fmt.Errorf("microagent_shell_port must be a positive uint16")
 		}
 		cfg.ShellPort = port
+	}
+	if raw := values["microagent_exec_port"]; strings.TrimSpace(raw) != "" {
+		port, err := parseUint16(raw)
+		if err != nil || port == 0 {
+			return fmt.Errorf("microagent_exec_port must be a positive uint16")
+		}
+		cfg.ExecPort = port
 	}
 	return nil
 }
