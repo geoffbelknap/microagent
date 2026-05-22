@@ -4,15 +4,15 @@ description: Open the workspace console.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-20_
+_Last updated: 2026-05-22_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--ready-timeout <seconds>]
 ```
 
 `connect` opens an interactive serial console for a workspace. With `--send`
-it writes one line to the console and prints any new output, which is useful
-in scripts.
+it writes one line to the console and prints any new output. For typed
+stdout/stderr/exit-code results, use [`exec`](/cli/exec/).
 
 In interactive mode, press `Ctrl-]` to detach from the console without stopping
 the workspace. Typing `exit` closes the current guest shell and returns from
@@ -67,4 +67,4 @@ must report that the shell target is reachable.
 
 ## Related
 
-- [`logs`](/cli/logs/), [`status`](/cli/status/)
+- [`exec`](/cli/exec/), [`logs`](/cli/logs/), [`status`](/cli/status/)

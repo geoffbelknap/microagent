@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -38,10 +39,14 @@ type errorEnvelope struct {
 }
 
 func writeAXError(stderr *os.File, err error) error {
+	return writeAXErrorTo(stderr, err)
+}
+
+func writeAXErrorTo(w io.Writer, err error) error {
 	if err == nil {
 		return nil
 	}
-	enc := json.NewEncoder(stderr)
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(errorEnvelope{OK: false, Error: mapStructuredError(err, newRequestID())})
 }
@@ -80,7 +85,7 @@ func mapStructuredError(err error, correlationID string) structuredError {
 	case strings.Contains(text, "not found"), strings.Contains(text, "no such file"), errors.Is(err, os.ErrNotExist):
 		mapped.Kind = errorKindNotFound
 		mapped.Remediation = "Check the workspace name, file path, image reference, or state directory and retry."
-	case strings.Contains(text, "already "), strings.Contains(text, "cannot start from state"), strings.Contains(text, "specified twice"), strings.Contains(text, "cancelled"):
+	case strings.Contains(text, "already "), strings.Contains(text, "cannot start from state"), strings.Contains(text, "not running"), strings.Contains(text, "specified twice"), strings.Contains(text, "cancelled"):
 		mapped.Kind = errorKindConflict
 		mapped.Remediation = "Inspect current state, resolve the conflicting operation, and retry."
 	case strings.Contains(text, "not supported"), strings.Contains(text, "unsupported"), strings.Contains(text, "not available"):
@@ -89,7 +94,7 @@ func mapStructuredError(err error, correlationID string) structuredError {
 	case strings.Contains(text, "permission denied"), strings.Contains(text, "access denied"), strings.Contains(text, "requires administrator"):
 		mapped.Kind = errorKindPolicyDenied
 		mapped.Remediation = "Run with the required host permissions or adjust the host policy outside microagent."
-	case strings.Contains(text, "timeout"), strings.Contains(text, "temporar"), strings.Contains(text, "connection refused"), strings.Contains(text, "connection reset"):
+	case strings.Contains(text, "timeout"), strings.Contains(text, "temporar"), strings.Contains(text, "unreachable"), strings.Contains(text, "connection refused"), strings.Contains(text, "connection reset"):
 		mapped.Kind = errorKindTransient
 		mapped.RetryAfterMS = 1000
 		mapped.Remediation = "Retry after the host resource or runtime service becomes available."

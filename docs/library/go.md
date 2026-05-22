@@ -286,6 +286,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent apply` | `workspace.Apply` |
 | `microagent supervise` | `workspace.Supervise` |
 | `microagent connect` | `workspace.DialConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
+| `microagent exec` | `workspace.Exec` |
 | `microagent logs` | `workspace.ReadLogs` |
 | `microagent cp` | `workspace.Copy` |
 | `microagent clone` | `workspace.Clone` |

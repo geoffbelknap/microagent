@@ -9,6 +9,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
 func TestMCPInitializeAndToolsList(t *testing.T) {
@@ -126,6 +129,112 @@ func TestMCPIdempotencyCache(t *testing.T) {
 	}
 	if result["idempotency_replay"] != true {
 		t.Fatalf("idempotency_replay = %#v", result["idempotency_replay"])
+	}
+}
+
+func TestMCPWorkspaceExecReturnsStructuredResult(t *testing.T) {
+	seen := make(chan execprotocol.ExecRequest, 1)
+	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+		seen <- req
+		code := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		result.Stdout = []byte("Linux demo\n")
+		return result
+	})
+	defer stop()
+	stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
+	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
+		"name":      "research",
+		"state_dir": stateDir,
+		"argv":      []any{"uname", "-a"},
+		"env":       map[string]any{"TEST_VAR": "hello"},
+		"cwd":       "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("runMCPTool: %v", err)
+	}
+	result, ok := envelope["result"].(execprotocol.ExecResult)
+	if !ok {
+		t.Fatalf("result type = %T", envelope["result"])
+	}
+	if result.ExitCode == nil || *result.ExitCode != 0 || string(result.Stdout) != "Linux demo\n" || result.Status != execprotocol.ExecStatusExited {
+		t.Fatalf("result = %#v", result)
+	}
+	req := <-seen
+	if strings.Join(req.Argv, " ") != "uname -a" || req.Env["TEST_VAR"] != "hello" || req.Cwd != "/tmp" {
+		t.Fatalf("request = %#v", req)
+	}
+}
+
+func TestMCPWorkspaceExecErrorKinds(t *testing.T) {
+	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
+		"name":      "missing",
+		"state_dir": t.TempDir(),
+		"argv":      []any{"true"},
+	})
+	if err == nil {
+		t.Fatal("runMCPTool err = nil, want not found")
+	}
+	structured, ok := envelope["error"].(structuredError)
+	if !ok {
+		t.Fatalf("error type = %T", envelope["error"])
+	}
+	if structured.Kind != errorKindNotFound {
+		t.Fatalf("kind = %q, want not_found", structured.Kind)
+	}
+}
+
+func TestMCPWorkspaceExecToolCallErrorMapsKind(t *testing.T) {
+	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "call-1",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "workspace.exec",
+			"arguments": map[string]any{
+				"name":      "missing",
+				"state_dir": t.TempDir(),
+				"argv":      []string{"true"},
+			},
+		},
+	}))
+	var output bytes.Buffer
+	if err := serveMCP(context.Background(), input, &output); err != nil {
+		t.Fatalf("serveMCP: %v", err)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	errObj, ok := responses[0]["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("response = %#v, want JSON-RPC error", responses[0])
+	}
+	data, ok := errObj["data"].(map[string]any)
+	if !ok || data["kind"] != string(errorKindNotFound) {
+		t.Fatalf("error data = %#v", errObj["data"])
+	}
+}
+
+func TestMCPDescribeWorkspaceExecStructuredSchema(t *testing.T) {
+	manifest := microagentCapabilityManifest()
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{"workspace.exec", "argv", "exit_code", "stdout_truncated", "contentEncoding"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("manifest missing %q: %s", want, text)
+		}
+	}
+}
+
+func TestMCPWorkspaceExecLegacyCommandStringUsesExplicitShell(t *testing.T) {
+	req, err := mcpExecRequest(map[string]any{"command": "echo hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(req.Argv, " ") != "sh -lc echo hello" {
+		t.Fatalf("argv = %#v", req.Argv)
 	}
 }
 

@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
 var mcpIdempotencyCache sync.Map
@@ -185,7 +187,7 @@ func mcpTools() []map[string]any {
 			"state_dir": map[string]any{"type": "string"}, "profile": map[string]any{"type": "string"}, "dry_run": map[string]any{"type": "boolean"},
 		}),
 		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.exec", "Send a console command to a running workspace.", []string{"name", "command"}, map[string]any{"name": map[string]any{"type": "string"}, "command": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.exec", "Run a structured command in a running workspace.", []string{"name"}, workspaceExecInputSchema()),
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("workspace.list", "List workspaces.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
@@ -263,7 +265,7 @@ func microagentCapabilityManifest() map[string]any {
 			"name":               name,
 			"description":        tool["description"],
 			"input_schema":       tool["inputSchema"],
-			"output_schema":      mcpToolOutputSchema(),
+			"output_schema":      mcpToolOutputSchema(name),
 			"side_effects":       mcpToolSideEffects(name),
 			"idempotency":        mcpToolIdempotency(name),
 			"principal_scope":    mcpToolPrincipalScope(name),
@@ -289,7 +291,18 @@ func microagentCapabilityManifest() map[string]any {
 	}
 }
 
-func mcpToolOutputSchema() map[string]any {
+func mcpToolOutputSchema(name string) map[string]any {
+	if name == "workspace.exec" {
+		return map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"result":            execResultSchema(),
+				"error":             map[string]any{"type": "object"},
+				"timing_ms":         map[string]any{"type": "integer"},
+				"principal_context": map[string]any{"type": "object"},
+			},
+		}
+	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -305,6 +318,39 @@ func mcpToolOutputSchema() map[string]any {
 			"error":             map[string]any{"type": "object"},
 			"timing_ms":         map[string]any{"type": "integer"},
 			"principal_context": map[string]any{"type": "object"},
+		},
+	}
+}
+
+func workspaceExecInputSchema() map[string]any {
+	return map[string]any{
+		"name":                      map[string]any{"type": "string"},
+		"command":                   map[string]any{"description": "Legacy shell command string, or argv array.", "oneOf": []map[string]any{{"type": "string"}, {"type": "array", "items": map[string]any{"type": "string"}}}},
+		"argv":                      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+		"env":                       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+		"cwd":                       map[string]any{"type": "string"},
+		"stdin":                     map[string]any{"type": "string", "description": "Bounded stdin bytes represented as a JSON string."},
+		"timeout_ms":                map[string]any{"type": "integer"},
+		"output_limit_bytes_stdout": map[string]any{"type": "integer"},
+		"output_limit_bytes_stderr": map[string]any{"type": "integer"},
+		"state_dir":                 map[string]any{"type": "string"},
+	}
+}
+
+func execResultSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"protocol_version": map[string]any{"type": "string"},
+			"started_at":       map[string]any{"type": "string"},
+			"completed_at":     map[string]any{"type": "string"},
+			"exit_code":        map[string]any{"type": "integer"},
+			"stdout":           map[string]any{"type": "string", "contentEncoding": "base64"},
+			"stderr":           map[string]any{"type": "string", "contentEncoding": "base64"},
+			"stdout_truncated": map[string]any{"type": "boolean"},
+			"stderr_truncated": map[string]any{"type": "boolean"},
+			"status":           map[string]any{"type": "string", "enum": []string{string(execprotocol.ExecStatusExited), string(execprotocol.ExecStatusSignaled), string(execprotocol.ExecStatusTimedOut), string(execprotocol.ExecStatusFailedToStart)}},
+			"error":            map[string]any{"type": "object"},
 		},
 	}
 }
@@ -412,6 +458,14 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 	if preview := previewDestructiveMCPTool(name, args); preview != nil {
 		return preview, nil
 	}
+	if name == "workspace.exec" {
+		envelope, err := runMCPWorkspaceExec(ctx, args, start)
+		if cacheKey != "" && err == nil {
+			mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
+			envelope["idempotency_replay"] = false
+		}
+		return envelope, err
+	}
 	cliArgs, err := mcpCLIArgs(name, args)
 	if err != nil {
 		return nil, err
@@ -433,6 +487,62 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		envelope["idempotency_replay"] = false
 	}
 	return envelope, cliErr
+}
+
+func runMCPWorkspaceExec(ctx context.Context, args map[string]any, start time.Time) (map[string]any, error) {
+	if err := requireToolArgs(args, "workspace.exec", "name"); err != nil {
+		return nil, err
+	}
+	req, err := mcpExecRequest(args)
+	if err != nil {
+		return nil, err
+	}
+	stateDir := stringArg(args, "state_dir")
+	if stateDir == "" {
+		stateDir = defaultStateDir()
+	}
+	result, err := workspace.Exec(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
+	envelope := map[string]any{
+		"result":            result,
+		"timing_ms":         time.Since(start).Milliseconds(),
+		"principal_context": principalContextArg(args),
+	}
+	if err != nil {
+		envelope["error"] = mapStructuredError(err, newRequestID())
+	}
+	return envelope, err
+}
+
+func mcpExecRequest(args map[string]any) (execprotocol.ExecRequest, error) {
+	argv, err := mcpExecArgv(args)
+	if err != nil {
+		return execprotocol.ExecRequest{}, err
+	}
+	req := execprotocol.NewExecRequest(argv)
+	req.Env = mcpStringMapArg(args, "env")
+	req.Cwd = stringArg(args, "cwd")
+	req.Stdin = []byte(rawStringArg(args, "stdin"))
+	req.TimeoutMS = int64Arg(args, "timeout_ms")
+	req.OutputLimitBytesStdout = int64Arg(args, "output_limit_bytes_stdout")
+	req.OutputLimitBytesStderr = int64Arg(args, "output_limit_bytes_stderr")
+	if err := req.Validate(); err != nil {
+		return execprotocol.ExecRequest{}, err
+	}
+	return req, nil
+}
+
+func mcpExecArgv(args map[string]any) ([]string, error) {
+	if argv, ok, err := stringSliceArg(args, "argv"); ok || err != nil {
+		return argv, err
+	}
+	if argv, ok, err := stringSliceArg(args, "command"); ok || err != nil {
+		return argv, err
+	}
+	command := stringArg(args, "command")
+	if command != "" {
+		return []string{"sh", "-lc", command}, nil
+	}
+	return nil, fmt.Errorf("workspace.exec requires argv or command")
 }
 
 func previewDestructiveMCPTool(name string, args map[string]any) map[string]any {
@@ -574,11 +684,18 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		return appendOptionalFlag([]string{"--mode=ax", "start", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.exec":
-		if err := requireToolArgs(args, name, "name", "command"); err != nil {
+		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "connect", stringArg(args, "name"), "-send", stringArg(args, "command")}
-		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
+		argv, err := mcpExecArgv(args)
+		if err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "exec", stringArg(args, "name")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		cli = append(cli, "--")
+		cli = append(cli, argv...)
+		return cli, nil
 	case "workspace.halt":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
@@ -667,6 +784,59 @@ func stringArg(args map[string]any, name string) string {
 		return strings.TrimSpace(value)
 	}
 	return ""
+}
+
+func rawStringArg(args map[string]any, name string) string {
+	if args == nil {
+		return ""
+	}
+	if value, ok := args[name].(string); ok {
+		return value
+	}
+	return ""
+}
+
+func stringSliceArg(args map[string]any, name string) ([]string, bool, error) {
+	if args == nil {
+		return nil, false, nil
+	}
+	raw, ok := args[name]
+	if !ok || raw == nil {
+		return nil, false, nil
+	}
+	switch value := raw.(type) {
+	case []string:
+		return append([]string(nil), value...), true, nil
+	case []any:
+		out := make([]string, 0, len(value))
+		for i, item := range value {
+			text, ok := item.(string)
+			if !ok {
+				return nil, true, fmt.Errorf("%s[%d] must be a string", name, i)
+			}
+			out = append(out, text)
+		}
+		return out, true, nil
+	default:
+		return nil, false, nil
+	}
+}
+
+func mcpStringMapArg(args map[string]any, name string) map[string]string {
+	if args == nil {
+		return nil
+	}
+	raw, ok := args[name].(map[string]any)
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(raw))
+	for key, value := range raw {
+		if text, ok := value.(string); ok {
+			out[key] = text
+		}
+	}
+	return out
 }
 
 func boolArg(args map[string]any, name string) bool {
