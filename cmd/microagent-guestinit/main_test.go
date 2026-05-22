@@ -126,10 +126,27 @@ func TestKernelConfigOverrideUpdatesShellPort(t *testing.T) {
 	}
 }
 
+func TestKernelConfigOverrideUpdatesExecPort(t *testing.T) {
+	cfg := config{ExecPort: 23000}
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "console=ttyS0 microagent_exec_port=25279 root=/dev/vda"); err != nil {
+		t.Fatalf("applyKernelConfigOverridesFromCmdline: %v", err)
+	}
+	if cfg.ExecPort != 25279 {
+		t.Fatalf("ExecPort = %d, want 25279", cfg.ExecPort)
+	}
+}
+
 func TestKernelConfigOverrideRejectsBadShellPort(t *testing.T) {
 	cfg := config{ShellPort: 22000}
 	if err := applyKernelConfigOverridesFromCmdline(&cfg, "microagent_shell_port=0"); err == nil {
 		t.Fatal("applyKernelConfigOverridesFromCmdline error = nil, want bad shell port error")
+	}
+}
+
+func TestKernelConfigOverrideRejectsBadExecPort(t *testing.T) {
+	cfg := config{ExecPort: 23000}
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "microagent_exec_port=0"); err == nil {
+		t.Fatal("applyKernelConfigOverridesFromCmdline error = nil, want bad exec port error")
 	}
 }
 
