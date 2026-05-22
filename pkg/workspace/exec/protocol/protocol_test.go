@@ -135,6 +135,12 @@ func TestDecodeMessageRejectsLengthAboveMaxBeforePayloadRead(t *testing.T) {
 	}
 }
 
+func TestDefaultMaxMessageBytesIncludesJSONEncodingHeadroom(t *testing.T) {
+	if DefaultMaxMessageBytes != 4*DefaultOutputLimitBytes {
+		t.Fatalf("DefaultMaxMessageBytes = %d, want %d", DefaultMaxMessageBytes, 4*DefaultOutputLimitBytes)
+	}
+}
+
 func TestExecStatusValidation(t *testing.T) {
 	for _, status := range []ExecStatus{ExecStatusExited, ExecStatusSignaled, ExecStatusTimedOut, ExecStatusFailedToStart} {
 		if err := status.Validate(); err != nil {

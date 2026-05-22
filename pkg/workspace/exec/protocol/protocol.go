@@ -12,8 +12,12 @@ import (
 const (
 	CurrentProtocolVersion  = "exec.v1"
 	DefaultOutputLimitBytes = 10 * 1024 * 1024
-	DefaultMaxMessageBytes  = 2 * DefaultOutputLimitBytes
-	DefaultTimeout          = 5 * time.Minute
+	// A result may carry stdout and stderr at the per-stream output ceiling.
+	// JSON encodes byte slices as base64, which adds roughly 33% overhead, and
+	// the surrounding envelope adds more bytes. Two 10 MiB streams therefore
+	// approach 27 MiB on the wire, so use a 40 MiB framing ceiling for headroom.
+	DefaultMaxMessageBytes = 4 * DefaultOutputLimitBytes
+	DefaultTimeout         = 5 * time.Minute
 )
 
 type ExecMode string
