@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-19_
+_Last updated: 2026-05-22_
 
 | Command | Purpose |
 |---|---|
@@ -29,6 +29,7 @@ _Last updated: 2026-05-19_
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
 | [`connect`](/cli/connect/) | Open the workspace console |
+| [`exec`](/cli/exec/) | Run a structured command in a workspace |
 | [`profiles`](/cli/profiles/) | List exact named resource profiles |
 | [`images`](/cli/images/) | List or prune local image records |
 | [`prune`](/cli/prune/) | Prune stale records and optional reusable image baselines |

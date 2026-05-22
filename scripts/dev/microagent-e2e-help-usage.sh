@@ -85,7 +85,7 @@ expect_failure_contains() {
 assert_stdout_contains top-help "Commands:" "$CLI" help
 assert_stdout_contains top-help-rm-alias "rm[[:space:]]+Alias for delete" "$CLI" help
 assert_stdout_contains top-help-inspect-alias "inspect[[:space:]]+Alias for status" "$CLI" help
-assert_stdout_contains top-help-exec-guidance "exec[[:space:]]+Not supported" "$CLI" help
+assert_stdout_contains top-help-exec "exec[[:space:]]+Run a structured command" "$CLI" help
 assert_stdout_contains default-help "rootfs build" "$CLI"
 assert_stdout_contains create-help "Create a workspace from an image" "$CLI" create --help
 assert_stdout_contains run-help "Run a command from an image" "$CLI" run --help
@@ -95,6 +95,7 @@ assert_stdout_contains run-help-rm-alias "-rm" "$CLI" run --help
 assert_stdout_contains run-help-volume-alias "-v SRC:DST" "$CLI" run --help
 assert_stdout_contains run-help-container-examples "Container-style examples" "$CLI" run --help
 assert_stdout_contains run-help-noncompat "container-engine APIs, compose projects, pods, privileged mode" "$CLI" run --help
+assert_stdout_contains exec-help "Run a structured command in a running workspace" "$CLI" exec --help
 assert_stdout_contains perf-help "Measure workspace performance" "$CLI" perf --help
 assert_stdout_contains kernel-help "Advanced kernel commands" "$CLI" kernel --help
 assert_stdout_contains rootfs-help "Build a rootfs from an OCI image" "$CLI" rootfs --help
@@ -111,7 +112,7 @@ expect_failure_contains run-exec-positional-conflict "both --exec and positional
 expect_failure_contains run-rm-keep-conflict "both --rm and --keep" "$CLI" run --rm --keep example.com/acme/image:latest true --state-dir "$STATE_DIR"
 mkdir -p "$STATE_DIR/host-bind"
 expect_failure_contains run-volume-bind-reject "does not expose host bind mounts" "$CLI" run -v "$STATE_DIR/host-bind:/workspace:rw" example.com/acme/image:latest true --state-dir "$STATE_DIR"
-expect_failure_contains exec-unsupported "use microagent connect <name> --send <command>" "$CLI" exec example.com/acme/image:latest true
+expect_failure_contains exec-missing-separator "usage: microagent exec" "$CLI" exec example.com/acme/image:latest true
 expect_failure_contains inspect-usage "usage: microagent status" "$CLI" inspect --state-dir "$STATE_DIR"
 expect_failure_contains compose-unsupported "compose-style multi-workspace projects are not supported" "$CLI" compose up
 expect_failure_contains run-privileged-unsupported "microVM boundary" "$CLI" run --privileged example.com/acme/image:latest true

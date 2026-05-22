@@ -4,7 +4,7 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-19_
+_Last updated: 2026-05-22_
 
 ```text
 microagent serve mcp
@@ -32,7 +32,7 @@ discovery, and cost estimation.
 | `microagent.ping` | Validate the MCP transport |
 | `workspace.create` | Create or dry-run a workspace |
 | `workspace.start` | Start a prepared workspace |
-| `workspace.exec` | Send a console command to a running workspace |
+| `workspace.exec` | Run a structured command in a running workspace |
 | `workspace.halt` | Halt a workspace and preserve disk state |
 | `workspace.delete` | Delete a workspace, with optional preview |
 | `workspace.list` | List workspaces |
@@ -49,9 +49,14 @@ MCP tool responses are structured for agent clients. Mutation tools return a
 consistent envelope with `result`, optional structured `error`, `timing_ms`, and
 `principal_context` fields.
 
+`workspace.exec` returns the structured exec result directly under `result`:
+`status`, optional `exit_code`, base64-encoded `stdout` and `stderr`,
+truncation flags, timestamps, protocol version, and optional service error. A
+nonzero command exit is not a tool error; it is represented by `status:
+exited` and a nonzero `exit_code`.
+
 ## Example
 
 ```bash
 microagent serve mcp
 ```
-

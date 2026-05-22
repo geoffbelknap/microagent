@@ -28,6 +28,7 @@ import (
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
 func TestMain(m *testing.M) {
@@ -260,10 +261,304 @@ func TestAXModeLogsOutput(t *testing.T) {
 	}
 }
 
-func TestExecAliasReturnsMicroAgentEquivalent(t *testing.T) {
+func TestStructuredExecRequiresSeparator(t *testing.T) {
 	err := run(t.Context(), []string{"exec", "research", "echo hello"}, os.Stdout)
-	if err == nil || !strings.Contains(err.Error(), "use microagent connect <name> --send <command>") {
-		t.Fatalf("err = %v, want connect --send guidance", err)
+	if err == nil || !strings.Contains(err.Error(), "usage: microagent exec") {
+		t.Fatalf("err = %v, want exec usage", err)
+	}
+}
+
+func TestStructuredExecUXWritesSeparatedStreamsAndCommandExit(t *testing.T) {
+	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+		if strings.Join(req.Argv, " ") != "sh -c echo out; echo err >&2; exit 7" {
+			t.Fatalf("argv = %#v", req.Argv)
+		}
+		code := 7
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		result.Stdout = []byte("out\n")
+		result.Stderr = []byte("err\n")
+		return result
+	})
+	defer stop()
+	stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
+	stdoutPath := filepath.Join(t.TempDir(), "stdout")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	err = runStructuredExec(t.Context(), []string{"research", "--state-dir", stateDir, "--", "sh", "-c", "echo out; echo err >&2; exit 7"}, stdout, &stderr)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	var exitErr cliExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 7 || !exitErr.Silent {
+		t.Fatalf("err = %#v, want silent exit 7", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "out\n" {
+		t.Fatalf("stdout = %q", data)
+	}
+	if stderr.String() != "err\n" {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestStructuredExecBuildsExpectedRequestShape(t *testing.T) {
+	stdinPath := filepath.Join(t.TempDir(), "stdin.txt")
+	if err := os.WriteFile(stdinPath, []byte("input bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(chan execprotocol.ExecRequest, 1)
+	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+		seen <- req
+		code := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		return result
+	})
+	defer stop()
+	stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
+	stdoutPath := filepath.Join(t.TempDir(), "stdout")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	err = runStructuredExec(t.Context(), []string{
+		"research",
+		"--state-dir", stateDir,
+		"--env", "TEST_VAR=hello",
+		"--cwd", "/work",
+		"--timeout", "30s",
+		"--stdin", stdinPath,
+		"--stdout-limit", "1024",
+		"--stderr-limit", "2048",
+		"--", "cat",
+	}, stdout, &stderr)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runStructuredExec: %v", err)
+	}
+	req := <-seen
+	if strings.Join(req.Argv, " ") != "cat" || req.Env["TEST_VAR"] != "hello" || req.Cwd != "/work" || string(req.Stdin) != "input bytes" || req.TimeoutMS != 30000 || req.OutputLimitBytesStdout != 1024 || req.OutputLimitBytesStderr != 2048 {
+		t.Fatalf("request = %#v", req)
+	}
+}
+
+func TestStructuredExecUXTruncationWarningsAndStatusExitCodes(t *testing.T) {
+	tests := []struct {
+		name string
+		res  execprotocol.ExecResult
+		code int
+		warn string
+	}{
+		{name: "timeout", res: execprotocol.NewExecResult(execprotocol.ExecStatusTimedOut), code: execTimeoutExitCode},
+		{name: "signaled", res: execprotocol.NewExecResult(execprotocol.ExecStatusSignaled), code: execSignaledExitCode},
+		{name: "failed to start", res: execprotocol.NewExecResult(execprotocol.ExecStatusFailedToStart), code: execFailedToStartCode},
+		{name: "truncated", res: func() execprotocol.ExecResult {
+			code := 0
+			result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+			result.ExitCode = &code
+			result.Stdout = []byte("abc")
+			result.Stderr = []byte("def")
+			result.StdoutTruncated = true
+			result.StderrTruncated = true
+			return result
+		}(), code: 0, warn: "stdout truncated"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+				return tt.res
+			})
+			defer stop()
+			stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
+			stdoutPath := filepath.Join(t.TempDir(), "stdout")
+			stdout, err := os.Create(stdoutPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stderr bytes.Buffer
+			err = runStructuredExec(t.Context(), []string{"research", "--state-dir", stateDir, "--", "status-probe"}, stdout, &stderr)
+			if closeErr := stdout.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			if tt.code == 0 && err != nil {
+				t.Fatalf("err = %v, want nil", err)
+			}
+			if tt.code != 0 {
+				var exitErr cliExitError
+				if !errors.As(err, &exitErr) || exitErr.Code != tt.code {
+					t.Fatalf("err = %#v, want exit %d", err, tt.code)
+				}
+			}
+			if tt.warn != "" && !strings.Contains(stderr.String(), tt.warn) {
+				t.Fatalf("stderr = %q, want %q", stderr.String(), tt.warn)
+			}
+		})
+	}
+}
+
+func TestStructuredExecAXWritesResultAndIgnoresCommandExit(t *testing.T) {
+	oldMode := globalOutputMode
+	t.Cleanup(func() { globalOutputMode = oldMode })
+	globalOutputMode = outputModeAX
+	_, port, stop := startCommandExecServer(t, func(req execprotocol.ExecRequest) execprotocol.ExecResult {
+		code := 7
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		result.Stdout = []byte("out\n")
+		return result
+	})
+	defer stop()
+	stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, port)
+	stdoutPath := filepath.Join(t.TempDir(), "stdout")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	if err := runStructuredExec(t.Context(), []string{"research", "--state-dir", stateDir, "--", "sh", "-c", "exit 7"}, stdout, &stderr); err != nil {
+		t.Fatalf("runStructuredExec: %v", err)
+	}
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result execprotocol.ExecResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("decode AX result %q: %v", data, err)
+	}
+	if result.ExitCode == nil || *result.ExitCode != 7 || string(result.Stdout) != "out\n" {
+		t.Fatalf("result = %#v", result)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestStructuredExecAXServiceErrorWritesStructuredErrorToStdout(t *testing.T) {
+	oldMode := globalOutputMode
+	t.Cleanup(func() { globalOutputMode = oldMode })
+	globalOutputMode = outputModeAX
+	stdoutPath := filepath.Join(t.TempDir(), "stdout")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	err = runStructuredExec(t.Context(), []string{"missing", "--state-dir", t.TempDir(), "--", "true"}, stdout, &stderr)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	var exitErr cliExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != execServiceErrorExitCode {
+		t.Fatalf("err = %#v, want service exit", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		t.Fatalf("decode AX error %q: %v", data, err)
+	}
+	if envelope.OK || envelope.Error.Kind != errorKindNotFound {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+}
+
+func TestStructuredExecServiceErrorKinds(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) []string
+		kind  structuredErrorKind
+	}{
+		{
+			name: "not running",
+			setup: func(t *testing.T) []string {
+				stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateStopped, 45000)
+				return []string{"research", "--state-dir", stateDir, "--", "true"}
+			},
+			kind: errorKindConflict,
+		},
+		{
+			name: "unreachable",
+			setup: func(t *testing.T) []string {
+				stateDir := writeCommandExecRuntimeState(t, "research", vmkit.StateRunning, unusedTCPPort(t))
+				return []string{"research", "--state-dir", stateDir, "--", "true"}
+			},
+			kind: errorKindTransient,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+"_ux", func(t *testing.T) {
+			oldMode := globalOutputMode
+			t.Cleanup(func() { globalOutputMode = oldMode })
+			globalOutputMode = outputModeUX
+			stdoutPath := filepath.Join(t.TempDir(), "stdout")
+			stdout, err := os.Create(stdoutPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stderr bytes.Buffer
+			err = runStructuredExec(t.Context(), tt.setup(t), stdout, &stderr)
+			if closeErr := stdout.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			if err == nil {
+				t.Fatal("runStructuredExec err = nil, want service error")
+			}
+			if got := mapStructuredError(err, "req-test").Kind; got != tt.kind {
+				t.Fatalf("kind = %q, want %q for err %v", got, tt.kind, err)
+			}
+		})
+		t.Run(tt.name+"_ax", func(t *testing.T) {
+			oldMode := globalOutputMode
+			t.Cleanup(func() { globalOutputMode = oldMode })
+			globalOutputMode = outputModeAX
+			stdoutPath := filepath.Join(t.TempDir(), "stdout")
+			stdout, err := os.Create(stdoutPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stderr bytes.Buffer
+			err = runStructuredExec(t.Context(), tt.setup(t), stdout, &stderr)
+			if closeErr := stdout.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			var exitErr cliExitError
+			if !errors.As(err, &exitErr) || exitErr.Code != execServiceErrorExitCode {
+				t.Fatalf("err = %#v, want service exit", err)
+			}
+			data, err := os.ReadFile(stdoutPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var envelope errorEnvelope
+			if err := json.Unmarshal(data, &envelope); err != nil {
+				t.Fatalf("decode AX error %q: %v", data, err)
+			}
+			if envelope.Error.Kind != tt.kind {
+				t.Fatalf("kind = %q, want %q", envelope.Error.Kind, tt.kind)
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
 	}
 }
 
@@ -5495,4 +5790,86 @@ func stringSliceContains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func startCommandExecServer(t *testing.T, handle func(execprotocol.ExecRequest) execprotocol.ExecResult) (string, uint16, func()) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	portValue, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				if !errors.Is(err, net.ErrClosed) {
+					t.Errorf("exec server accept: %v", err)
+				}
+				return
+			}
+			go func() {
+				defer conn.Close()
+				var req execprotocol.ExecRequest
+				if err := execprotocol.DecodeMessage(conn, &req); err != nil {
+					t.Errorf("decode exec request: %v", err)
+					return
+				}
+				if strings.Join(req.Argv, " ") == "true" {
+					code := 0
+					result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+					result.ExitCode = &code
+					_ = execprotocol.EncodeMessage(conn, result)
+					return
+				}
+				if err := execprotocol.EncodeMessage(conn, handle(req)); err != nil {
+					t.Errorf("encode exec result: %v", err)
+				}
+			}()
+		}
+	}()
+	return listener.Addr().String(), uint16(portValue), func() {
+		_ = listener.Close()
+		<-done
+	}
+}
+
+func writeCommandExecRuntimeState(t *testing.T, name string, state vmkit.VMState, execPort uint16) string {
+	t.Helper()
+	dir := t.TempDir()
+	opts := workspace.Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker, ExecPort: execPort}
+	req := workspace.Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err := workspace.WriteProcessState(opts, req, state, 1234, ""); err != nil {
+		t.Fatalf("WriteProcessState: %v", err)
+	}
+	return dir
+}
+
+func unusedTCPPort(t *testing.T) uint16 {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if closeErr := listener.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	portValue, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uint16(portValue)
 }

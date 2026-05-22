@@ -49,7 +49,8 @@ microagent create research \
   --profile medium
 
 microagent start research
-microagent connect research --send "uname -a"   # send a line, capture output
+microagent exec research -- uname -a            # structured stdout/stderr/exit code
+microagent connect research                     # interactive console
 microagent halt research                         # clean shutdown, disk preserved
 microagent start research                        # boots the same disk back up
 microagent delete research
@@ -60,6 +61,7 @@ The same workspace can be expressed declaratively — see [`microagent.yaml`](do
 Other useful surfaces:
 
 - `microagent inspect <name>` — structured alias for `status`
+- `microagent exec <name> -- <argv...>` — run a structured command in a running workspace
 - `microagent rm <name>` — alias for `delete`
 - `microagent images pull/list/tag/rm/prune` — manage reusable local rootfs baselines
 - `microagent cp` and `microagent artifacts get` — move files without entering a running VM

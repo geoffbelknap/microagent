@@ -61,6 +61,13 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
+		var exitErr cliExitError
+		if errors.As(err, &exitErr) {
+			if !exitErr.Silent {
+				fmt.Fprintln(os.Stderr, exitErr.Error())
+			}
+			os.Exit(exitErr.Code)
+		}
 		if currentOutputMode() == outputModeAX {
 			if writeErr := writeAXError(os.Stderr, err); writeErr != nil {
 				fmt.Fprintln(os.Stderr, writeErr)
@@ -166,7 +173,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return runWorkspaceStateCommand(ctx, "delete", args[1:], stdout)
 	}
 	if args[0] == "exec" {
-		return fmt.Errorf("microagent exec is not supported; use microagent connect <name> --send <command> for console commands, or microagent cp and artifacts for file exchange")
+		return runStructuredExec(ctx, args[1:], stdout, os.Stderr)
 	}
 	if args[0] == "connect" {
 		return runConnect(ctx, args[1:], stdout)
@@ -5669,7 +5676,7 @@ Commands:
   start                Start a workspace
   supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
-  exec                 Not supported; use connect --send
+  exec                 Run a structured command in a workspace
   ps                   List workspaces
   inspect              Alias for status with JSON output
   status               Show workspace state
