@@ -60,6 +60,9 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	if req.Config.ShellPort != ShellPortForName("agent-1") {
 		t.Fatalf("ShellPort = %d, want %d", req.Config.ShellPort, ShellPortForName("agent-1"))
 	}
+	if req.Config.ExecPort != ExecPortForName("agent-1") {
+		t.Fatalf("ExecPort = %d, want %d", req.Config.ExecPort, ExecPortForName("agent-1"))
+	}
 	if !req.Config.SerialInput {
 		t.Fatal("SerialInput = false")
 	}
@@ -75,6 +78,13 @@ func TestShellPortCanBeExplicit(t *testing.T) {
 	opts := Options{Name: "agent-1", ShellPort: 25000}
 	if got := ShellPort(opts); got != 25000 {
 		t.Fatalf("ShellPort = %d, want 25000", got)
+	}
+}
+
+func TestExecPortCanBeExplicit(t *testing.T) {
+	opts := Options{Name: "agent-1", ExecPort: 45000}
+	if got := ExecPort(opts); got != 45000 {
+		t.Fatalf("ExecPort = %d, want 45000", got)
 	}
 }
 

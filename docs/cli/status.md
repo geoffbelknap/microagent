@@ -4,7 +4,7 @@ description: Show the current state of a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-05-22_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -31,6 +31,8 @@ JSON status also includes `readiness`:
   reached a started runtime state.
 - `shellReady` is true when console input is available and the configured shell
   has reached the backend's readiness gate.
+- `execReady` is true when the structured exec service accepts a no-op exec
+  request and returns a successful structured result.
 - `resultReady` is true when the guest result file has been delivered.
 
 JSON status includes declared network intent under `network`. When a backend

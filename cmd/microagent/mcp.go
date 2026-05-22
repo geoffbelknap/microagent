@@ -278,7 +278,14 @@ func microagentCapabilityManifest() map[string]any {
 		"version":        version,
 		"transport":      "mcp_stdio",
 		"output_mode":    string(outputModeAX),
-		"operations":     operations,
+		"readiness_signals": []map[string]string{
+			{"name": "guestReady", "description": "workspace reached a started terminal or runtime state"},
+			{"name": "shellReady", "description": "interactive console shell is reachable and command round-trip works"},
+			{"name": "execReady", "description": "structured exec service is reachable and a no-op exec succeeds end-to-end"},
+			{"name": "resultReady", "description": "structured guest result is available"},
+			{"name": "mediationReady", "description": "declared mediation channel is ready for a running workspace"},
+		},
+		"operations": operations,
 	}
 }
 
@@ -286,10 +293,30 @@ func mcpToolOutputSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"result":            map[string]any{"type": "object"},
+			"result": map[string]any{"type": "object", "properties": map[string]any{
+				"readiness": map[string]any{"type": "object", "properties": map[string]any{
+					"guestReady":     readinessSignalSchema(),
+					"shellReady":     readinessSignalSchema(),
+					"execReady":      readinessSignalSchema(),
+					"resultReady":    readinessSignalSchema(),
+					"mediationReady": readinessSignalSchema(),
+				}},
+			}},
 			"error":             map[string]any{"type": "object"},
 			"timing_ms":         map[string]any{"type": "integer"},
 			"principal_context": map[string]any{"type": "object"},
+		},
+	}
+}
+
+func readinessSignalSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"ready":      map[string]any{"type": "boolean"},
+			"observedAt": map[string]any{"type": "string"},
+			"detail":     map[string]any{"type": "string"},
+			"error":      map[string]any{"type": "string"},
 		},
 	}
 }

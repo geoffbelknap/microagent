@@ -21,7 +21,7 @@ func TestRuntimeContractCoversBothBackends(t *testing.T) {
 
 func TestRuntimeContractCoversAgentRuntimeChannels(t *testing.T) {
 	contract := NewRuntimeContract()
-	for _, signal := range []string{"guestReady", "shellReady", "resultReady", "mediationReady"} {
+	for _, signal := range []string{"guestReady", "shellReady", "execReady", "resultReady", "mediationReady"} {
 		if !contractHasItem(contract.ReadinessSignals, signal) {
 			t.Fatalf("contract missing readiness signal %q", signal)
 		}

@@ -533,6 +533,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		ConsoleShell:   opts.ConsoleShell,
 		Hostname:       opts.Hostname,
 		ShellPort:      ShellPort(opts),
+		ExecPort:       ExecPort(opts),
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
 		NoImageCommand: opts.PrepareForStart && !HasGuestCommand(opts) && !opts.UseImageCommand,
@@ -1260,6 +1261,9 @@ func readinessFromRuntime(state RuntimeState) vmkit.RuntimeReadiness {
 		if signal, ok := shellReadinessFromRuntime(state); ok {
 			readiness.ShellReady = signal
 		}
+	}
+	if signal, ok := ExecReadinessSignal(context.Background(), state, ExecReadyProbeTimeout); ok {
+		readiness.ExecReady = signal
 	}
 	path := ResultPath(state.Config.StateDir, state.Event.Identity.RuntimeID)
 	if _, err := os.Stat(path); err == nil {

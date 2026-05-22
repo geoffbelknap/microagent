@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
@@ -723,6 +725,9 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	if config != nil && config.ShellPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_shell_port=%d", config.ShellPort))
 	}
+	if config != nil && config.ExecPort != 0 {
+		args = append(args, fmt.Sprintf("microagent_exec_port=%d", config.ExecPort))
+	}
 	if (networkMode(config) == "nat" || networkMode(config) == "user") && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
 		args = append(args,
 			"microagent_net_if=eth0",
@@ -746,6 +751,9 @@ func needsVsock(config *vmkit.Config) bool {
 	if config.Mediation != nil && config.Mediation.Enabled {
 		return true
 	}
+	if config.ExecPort != 0 {
+		return true
+	}
 	return config.Network != nil && len(config.Network.PortForwards) != 0
 }
 
@@ -754,7 +762,7 @@ func hasPortForwards(config *vmkit.Config) bool {
 }
 
 func needsPortForwarder(config *vmkit.Config) bool {
-	return hasPortForwards(config) || (config != nil && config.ShellPort != 0)
+	return hasPortForwards(config) || (config != nil && (config.ShellPort != 0 || config.ExecPort != 0))
 }
 
 func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, error) {
@@ -1747,6 +1755,14 @@ func portForwarderForwards(config vmkit.Config) []vmkit.PortForward {
 			GuestPort: config.ShellPort,
 		})
 	}
+	if config.ExecPort != 0 {
+		forwards = append(forwards, vmkit.PortForward{
+			Protocol:  "tcp",
+			Host:      "127.0.0.1",
+			HostPort:  config.ExecPort,
+			GuestPort: config.ExecPort,
+		})
+	}
 	return forwards
 }
 
@@ -2127,6 +2143,9 @@ func readinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
 			readiness.ShellReady = signal
 		}
 	}
+	if signal, ok := execReadinessFromRuntimeState(state); ok {
+		readiness.ExecReady = signal
+	}
 	resultPath := resultPathFromState(Options{}, state)
 	if _, err := os.Stat(resultPath); err == nil {
 		readiness.ResultReady = vmkit.ReadinessSignal{
@@ -2141,6 +2160,59 @@ func readinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
 		readiness.MediationReady = mediationReadiness(*state.Config.Mediation, state.Event.State, firstEventTime(state.StartedAt, state.Event.ObservedAt))
 	}
 	return readiness
+}
+
+func execReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, bool) {
+	if state.Event.State != vmkit.StateRunning {
+		return vmkit.ReadinessSignal{}, false
+	}
+	observedAt := time.Now().UTC()
+	if state.Config.ExecPort == 0 {
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     "structured exec port is not configured",
+		}, true
+	}
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(state.Config.ExecPort)))
+	req := execprotocol.NewExecRequest([]string{"true"})
+	req.TimeoutMS = 2000
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	start := time.Now()
+	result, err := execclient.New(target).Exec(ctx, req)
+	cancel()
+	elapsed := time.Since(start)
+	if err != nil {
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("exec service unreachable at %s after %s: %v", target, elapsed.Round(time.Millisecond), err),
+		}, true
+	}
+	if result.Error != nil {
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("exec service returned %s: %s", result.Error.Code, result.Error.Message),
+			Error:      result.Error.Error(),
+		}, true
+	}
+	if result.Status != execprotocol.ExecStatusExited || result.ExitCode == nil || *result.ExitCode != 0 {
+		exit := "nil"
+		if result.ExitCode != nil {
+			exit = strconv.Itoa(*result.ExitCode)
+		}
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("exec probe command failed unexpectedly: status=%s exit_code=%s", result.Status, exit),
+		}, true
+	}
+	return vmkit.ReadinessSignal{
+		Ready:      true,
+		ObservedAt: &observedAt,
+		Detail:     fmt.Sprintf("exec service round-trip ready at %s in %s", target, elapsed.Round(time.Millisecond)),
+	}, true
 }
 
 func shellReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, bool) {
