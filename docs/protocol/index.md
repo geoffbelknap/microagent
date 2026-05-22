@@ -4,7 +4,7 @@ description: The JSON request and response format used by backend supervisors.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-12_
+_Last updated: 2026-05-22_
 
 Backend supervisors speak a small JSON protocol: one request in, one response
 out. A request names a lifecycle command such as `prepare`, `start`, or `stop`.
@@ -130,6 +130,10 @@ consumers should treat it as closed by default.
       "ready": true,
       "detail": "console input is available"
     },
+    "execReady": {
+      "ready": true,
+      "detail": "exec service round-trip ready at 127.0.0.1:42000 in 5ms"
+    },
     "resultReady": {
       "ready": false
     },
@@ -189,7 +193,7 @@ writes as divergence. If an enforced hash no longer matches,
 `verification.ok` is false and `verification.divergence` contains entries with
 `artifact`, `field`, `expected`, and `actual`.
 
-`readiness` gives consumers explicit guest, shell, result, and mediation
+`readiness` gives consumers explicit guest, shell, exec, result, and mediation
 readiness signals. Each signal has `ready` plus optional `observedAt`, `detail`,
 and `error`.
 
@@ -255,7 +259,7 @@ Reading the table:
 - **`event`** — present on every command except `host`. Carries identity, state, and `observedAt`.
 - **`host`** — only on the `host` command. Reports backend capability, virtualization availability, supervisor path, kernel and console status.
 - **`verification`** — present whenever the request touched the rootfs or runtime artifacts. Compares recorded vs current SHAs and reports any divergence.
-- **`readiness`** — present after `start` / `run` and on `inspect` of a running workspace. Carries `guestReady`, `shellReady`, `resultReady`, and `mediationReady`.
+- **`readiness`** — present after `start` / `run` and on `inspect` of a running workspace. Carries `guestReady`, `shellReady`, `execReady`, `resultReady`, and `mediationReady`.
 - **`result`** — present when the guest result file has been delivered. *Conditional* means: included if it exists at the time of the response, omitted otherwise. Don't assume it's there.
 - **`artifacts`** — present whenever the workspace declared `bundles` or `outputs`. *Declared* means: included only if the workspace's manifest declares them.
 - **`mediation`** — present whenever the workspace declared a mediation channel.

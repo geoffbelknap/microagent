@@ -2253,6 +2253,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		ConsoleShell:   opts.ConsoleShell,
 		Hostname:       opts.Hostname,
 		ShellPort:      workspace.ShellPort(opts),
+		ExecPort:       workspace.ExecPort(opts),
 		InitBinaryPath: opts.GuestInitPath,
 		ResultPort:     resultPort,
 		NoImageCommand: opts.PrepareForStart && !workspaceHasGuestCommand(opts) && !opts.UseImageCommand,
@@ -2756,6 +2757,9 @@ func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeRea
 		if signal, ok := workspaceShellReadinessFromRuntime(state); ok {
 			readiness.ShellReady = signal
 		}
+	}
+	if signal, ok := workspace.ExecReadinessSignal(context.Background(), state, workspace.ExecReadyProbeTimeout); ok {
+		readiness.ExecReady = signal
 	}
 	path := resultPath(workspaceOptions{StateDir: state.Config.StateDir, Name: state.Event.Identity.RuntimeID})
 	if _, err := os.Stat(path); err == nil {
@@ -4841,7 +4845,7 @@ func workspaceBuildCommandAndPort(opts workspaceOptions) ([]string, uint32) {
 }
 
 func resetGuestConfigCommand(command []string, env map[string]string, port uint32, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
-	return workspace.ResetGuestConfigCommand(command, "", env, port, 0, mounts, forwards, consoleShell, hostname)
+	return workspace.ResetGuestConfigCommand(command, "", env, port, 0, 0, mounts, forwards, consoleShell, hostname)
 }
 
 func envList(env map[string]string) []string {

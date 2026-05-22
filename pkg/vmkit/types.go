@@ -53,6 +53,7 @@ type Config struct {
 	Mediation      *MediationConfig `json:"mediation,omitempty"`
 	Network        *NetworkConfig   `json:"network,omitempty"`
 	ShellPort      uint16           `json:"shellPort,omitempty"`
+	ExecPort       uint16           `json:"execPort,omitempty"`
 	SerialInput    bool             `json:"serialInput,omitempty"`
 	TimeoutSeconds int              `json:"timeoutSeconds,omitempty"`
 }
@@ -175,6 +176,7 @@ type ReadinessSignal struct {
 type RuntimeReadiness struct {
 	GuestReady     ReadinessSignal `json:"guestReady"`
 	ShellReady     ReadinessSignal `json:"shellReady"`
+	ExecReady      ReadinessSignal `json:"execReady"`
 	ResultReady    ReadinessSignal `json:"resultReady"`
 	MediationReady ReadinessSignal `json:"mediationReady"`
 }

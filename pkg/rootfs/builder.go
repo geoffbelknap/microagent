@@ -189,7 +189,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	provenance.BuilderPhase = "write-init"
 	progress.emit("write-init", "writing guest init", 0, 0, 0, 0)
 	command := buildCommand(req, imageConfig)
-	if err := writeInit(stageDir, req.InitPath, command, req.Mode, buildGuestEnv(req.Env, imageConfig), req.InitBinaryPath, req.ResultPort, req.ShellPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
+	if err := writeInit(stageDir, req.InitPath, command, req.Mode, buildGuestEnv(req.Env, imageConfig), req.InitBinaryPath, req.ResultPort, req.ShellPort, req.ExecPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
 		return provenance, err
 	}
 	if err := ensureGuestRuntimeDirs(stageDir); err != nil {
@@ -810,7 +810,7 @@ func removeDirectoryChildren(root *os.Root, dir string) error {
 	return nil
 }
 
-func writeInit(stageDir, initPath string, command []string, mode string, env map[string]string, initBinaryPath string, resultPort uint32, shellPort uint16, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
+func writeInit(stageDir, initPath string, command []string, mode string, env map[string]string, initBinaryPath string, resultPort uint32, shellPort, execPort uint16, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -827,7 +827,7 @@ func writeInit(stageDir, initPath string, command []string, mode string, env map
 		if err := copyFileToRoot(root, initBinaryPath, target, 0o755); err != nil {
 			return fmt.Errorf("copy init binary: %w", err)
 		}
-		return writeGuestRunConfig(stageDir, command, mode, env, resultPort, shellPort, mounts, forwards, consoleShell, hostname)
+		return writeGuestRunConfig(stageDir, command, mode, env, resultPort, shellPort, execPort, mounts, forwards, consoleShell, hostname)
 	}
 	var commandLine string
 	if len(command) > 0 {
@@ -859,13 +859,14 @@ type guestRunConfig struct {
 	Env          []string      `json:"env,omitempty"`
 	Port         uint32        `json:"port"`
 	ShellPort    uint16        `json:"shellPort,omitempty"`
+	ExecPort     uint16        `json:"execPort,omitempty"`
 	Mounts       []Mount       `json:"mounts,omitempty"`
 	HostForwards []PortForward `json:"hostForwards,omitempty"`
 	ConsoleShell string        `json:"consoleShell,omitempty"`
 	Hostname     string        `json:"hostname,omitempty"`
 }
 
-func writeGuestRunConfig(stageDir string, command []string, mode string, env map[string]string, resultPort uint32, shellPort uint16, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
+func writeGuestRunConfig(stageDir string, command []string, mode string, env map[string]string, resultPort uint32, shellPort, execPort uint16, mounts []Mount, forwards []PortForward, consoleShell, hostname string) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
@@ -878,7 +879,7 @@ func writeGuestRunConfig(stageDir string, command []string, mode string, env map
 	if err := root.MkdirAll(path.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create guest config dir: %w", err)
 	}
-	data, err := json.Marshal(guestRunConfig{Command: command, Mode: strings.TrimSpace(mode), Env: envList(env), Port: resultPort, ShellPort: shellPort, Mounts: mounts, HostForwards: forwards, ConsoleShell: strings.TrimSpace(consoleShell), Hostname: strings.TrimSpace(hostname)})
+	data, err := json.Marshal(guestRunConfig{Command: command, Mode: strings.TrimSpace(mode), Env: envList(env), Port: resultPort, ShellPort: shellPort, ExecPort: execPort, Mounts: mounts, HostForwards: forwards, ConsoleShell: strings.TrimSpace(consoleShell), Hostname: strings.TrimSpace(hostname)})
 	if err != nil {
 		return err
 	}

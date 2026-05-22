@@ -494,6 +494,7 @@ func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
 			MemoryMiB:  512,
 			CPUCount:   2,
 			ShellPort:  24279,
+			ExecPort:   25279,
 			Network: &vmkit.NetworkConfig{
 				Mode:    "nat",
 				IP:      "10.43.12.2/29",
@@ -521,6 +522,7 @@ func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
 		!strings.Contains(bootArgs, "microagent_net_ip=10.43.12.2/29") ||
 		!strings.Contains(bootArgs, "microagent_net_gw=10.43.12.1") ||
 		!strings.Contains(bootArgs, "microagent_shell_port=24279") ||
+		!strings.Contains(bootArgs, "microagent_exec_port=25279") ||
 		!strings.Contains(bootArgs, "microagent_net_dns=1.1.1.1,8.8.8.8") {
 		t.Fatalf("boot args = %q", bootArgs)
 	}
@@ -752,9 +754,10 @@ func TestDetachedUserNetworkRequestPreservesConfiguredTimeout(t *testing.T) {
 	}
 }
 
-func TestPortForwarderIncludesShellPort(t *testing.T) {
+func TestPortForwarderIncludesShellAndExecPorts(t *testing.T) {
 	forwards := portForwarderForwards(vmkit.Config{
 		ShellPort: 24279,
+		ExecPort:  25279,
 		Network: &vmkit.NetworkConfig{
 			PortForwards: []vmkit.PortForward{{
 				Protocol:  "tcp",
@@ -764,16 +767,67 @@ func TestPortForwarderIncludesShellPort(t *testing.T) {
 			}},
 		},
 	})
-	if len(forwards) != 2 {
-		t.Fatalf("forwards len = %d, want 2", len(forwards))
+	if len(forwards) != 3 {
+		t.Fatalf("forwards len = %d, want 3", len(forwards))
 	}
 	shell := forwards[1]
 	if shell.Protocol != "tcp" || shell.Host != "127.0.0.1" || shell.HostPort != 24279 || shell.GuestPort != 24279 {
 		t.Fatalf("shell forward = %#v", shell)
 	}
+	exec := forwards[2]
+	if exec.Protocol != "tcp" || exec.Host != "127.0.0.1" || exec.HostPort != 25279 || exec.GuestPort != 25279 {
+		t.Fatalf("exec forward = %#v", exec)
+	}
 	if !needsPortForwarder(&vmkit.Config{ShellPort: 24279}) {
 		t.Fatal("shell port should require port forwarder")
 	}
+	if !needsPortForwarder(&vmkit.Config{ExecPort: 25279}) {
+		t.Fatal("exec port should require port forwarder")
+	}
+}
+
+func TestRunPortForwarderOpensAndClosesExecPort(t *testing.T) {
+	dir := t.TempDir()
+	port := freeTCPPort(t)
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{StateDir: dir, ExecPort: port},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- RunPortForwarder(ctx, opts)
+	}()
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port)))
+	deadline := time.Now().Add(time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 20*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("exec port forwarder did not listen on %s: %v", addr, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RunPortForwarder did not stop after cancel")
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("exec port still in use after forwarder stop: %v", err)
+	}
+	_ = listener.Close()
 }
 
 func TestFirecrackerShellReadinessRequiresLiveShellTarget(t *testing.T) {
@@ -1156,4 +1210,22 @@ type unexpectedResponseError struct {
 
 func (e unexpectedResponseError) Error() string {
 	return "unexpected response"
+}
+
+func freeTCPPort(t *testing.T) uint16 {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return uint16(port)
 }
