@@ -64,6 +64,14 @@ func mapStructuredError(err error, correlationID string) structuredError {
 		mapped.Remediation = "Retry after the guest shell has produced a complete response, or increase the connect timeout."
 		return mapped
 	}
+	var consoleUnknown workspace.ConsoleCompletionUnknownError
+	if errors.As(err, &consoleUnknown) {
+		mapped.Kind = errorKindTransient
+		mapped.RetryAfterMS = 1000
+		mapped.PartialOutput = consoleUnknown.PartialOutput
+		mapped.Remediation = "Retry after the guest shell can complete a command response."
+		return mapped
+	}
 	text := strings.ToLower(err.Error())
 	switch {
 	case errors.Is(err, workspace.WorkspaceNotFoundError{}):

@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -198,8 +199,8 @@ func TestReadinessFromRuntimeRequiresLiveShellTarget(t *testing.T) {
 			if readiness.ShellReady.Ready {
 				t.Fatalf("shell readiness = %#v, want not ready before shell target is reachable", readiness.ShellReady)
 			}
-			if !strings.Contains(readiness.ShellReady.Detail, "unreachable") {
-				t.Fatalf("shell readiness detail = %q, want unreachable probe detail", readiness.ShellReady.Detail)
+			if !strings.Contains(readiness.ShellReady.Detail, "command probe failed") {
+				t.Fatalf("shell readiness detail = %q, want command probe failure detail", readiness.ShellReady.Detail)
 			}
 			if err := os.WriteFile(serialPath, []byte("microagent-init: shell helper listening on vsock port 24279\n"), 0o644); err != nil {
 				t.Fatal(err)
@@ -213,6 +214,46 @@ func TestReadinessFromRuntimeRequiresLiveShellTarget(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer listener.Close()
+			serveDone := make(chan error, 1)
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					serveDone <- err
+					return
+				}
+				defer conn.Close()
+				_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+				var command strings.Builder
+				buf := make([]byte, 1024)
+				for {
+					n, err := conn.Read(buf)
+					if n > 0 {
+						command.Write(buf[:n])
+						if strings.Contains(command.String(), "exit\r") {
+							break
+						}
+					}
+					if err != nil {
+						serveDone <- err
+						return
+					}
+				}
+				text := command.String()
+				tokenStart := strings.Index(text, "__ma_token=")
+				if tokenStart == -1 {
+					serveDone <- fmt.Errorf("command %q missing token assignment", text)
+					return
+				}
+				tokenStart += len("__ma_token=")
+				tokenEnd := strings.Index(text[tokenStart:], ";")
+				if tokenEnd == -1 {
+					serveDone <- fmt.Errorf("command %q missing token terminator", text)
+					return
+				}
+				token := text[tokenStart : tokenStart+tokenEnd]
+				_, err = fmt.Fprintf(conn, "\r\n__MICROAGENT_DONE_%s__0\r\n", token)
+				serveDone <- err
+			}()
 			_, portText, err := net.SplitHostPort(listener.Addr().String())
 			if err != nil {
 				t.Fatal(err)
@@ -224,10 +265,13 @@ func TestReadinessFromRuntimeRequiresLiveShellTarget(t *testing.T) {
 			state.Config.ShellPort = uint16(port)
 			readiness = readinessFromRuntime(state)
 			if !readiness.ShellReady.Ready {
-				t.Fatalf("shell readiness = %#v, want ready when shell target is reachable", readiness.ShellReady)
+				t.Fatalf("shell readiness = %#v, want ready when shell target completes a command probe", readiness.ShellReady)
 			}
-			if !strings.Contains(readiness.ShellReady.Detail, "reachable at") {
+			if !strings.Contains(readiness.ShellReady.Detail, "command round-trip ready at") {
 				t.Fatalf("shell readiness detail = %q", readiness.ShellReady.Detail)
+			}
+			if err := <-serveDone; err != nil {
+				t.Fatalf("shell target probe server: %v", err)
 			}
 		})
 	}

@@ -1278,10 +1278,21 @@ func readinessFromRuntime(state RuntimeState) vmkit.RuntimeReadiness {
 }
 
 func shellReadinessFromRuntime(state RuntimeState) (vmkit.ReadinessSignal, bool) {
-	return ShellReadinessSignal(context.Background(), state, 150*time.Millisecond)
+	return ShellReadinessSignalWithMode(context.Background(), state, 150*time.Millisecond, ShellReadinessProbeCommand)
 }
 
+type ShellReadinessProbeMode int
+
+const (
+	ShellReadinessProbeTCP ShellReadinessProbeMode = iota
+	ShellReadinessProbeCommand
+)
+
 func ShellReadinessSignal(ctx context.Context, state RuntimeState, probeTimeout time.Duration) (vmkit.ReadinessSignal, bool) {
+	return ShellReadinessSignalWithMode(ctx, state, probeTimeout, ShellReadinessProbeTCP)
+}
+
+func ShellReadinessSignalWithMode(ctx context.Context, state RuntimeState, probeTimeout time.Duration, mode ShellReadinessProbeMode) (vmkit.ReadinessSignal, bool) {
 	if _, err := os.Stat(state.SerialInputPath); err != nil {
 		if !os.IsNotExist(err) {
 			return vmkit.ReadinessSignal{Error: err.Error()}, true
@@ -1294,18 +1305,32 @@ func ShellReadinessSignal(ctx context.Context, state RuntimeState, probeTimeout 
 			return vmkit.ReadinessSignal{Ready: false, Error: err.Error()}, true
 		}
 		observedAt := time.Now().UTC()
-		elapsed, err := ProbeShellTarget(ctx, target, probeTimeout, nil)
-		if err != nil {
+		var elapsed time.Duration
+		var probeErr error
+		if mode == ShellReadinessProbeCommand {
+			elapsed, probeErr = ProbeShellCommand(ctx, ConsoleOptions{Name: state.Event.Identity.RuntimeID}, target, probeTimeout, nil)
+		} else {
+			elapsed, probeErr = ProbeShellTarget(ctx, target, probeTimeout, nil)
+		}
+		if probeErr != nil {
+			kind := "unreachable"
+			if mode == ShellReadinessProbeCommand {
+				kind = "command probe failed"
+			}
 			return vmkit.ReadinessSignal{
 				Ready:      false,
 				ObservedAt: &observedAt,
-				Detail:     fmt.Sprintf("shell target unreachable at %s after %s: %v", ShellTargetDescription(target), elapsed.Round(time.Millisecond), err),
+				Detail:     fmt.Sprintf("shell target %s at %s after %s: %v", kind, ShellTargetDescription(target), elapsed.Round(time.Millisecond), probeErr),
 			}, true
+		}
+		detail := fmt.Sprintf("shell target reachable at %s in %s", ShellTargetDescription(target), elapsed.Round(time.Millisecond))
+		if mode == ShellReadinessProbeCommand {
+			detail = fmt.Sprintf("shell command round-trip ready at %s in %s", ShellTargetDescription(target), elapsed.Round(time.Millisecond))
 		}
 		return vmkit.ReadinessSignal{
 			Ready:      true,
 			ObservedAt: &observedAt,
-			Detail:     fmt.Sprintf("shell target reachable at %s in %s", ShellTargetDescription(target), elapsed.Round(time.Millisecond)),
+			Detail:     detail,
 		}, true
 	}
 	return vmkit.ReadinessSignal{
