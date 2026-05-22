@@ -22,11 +22,12 @@ type ShellTarget struct {
 }
 
 type ConsoleOptions struct {
-	StateDir     string
-	Name         string
-	ReadyTimeout time.Duration
-	SendTimeout  time.Duration
-	DialTarget   func(context.Context, ShellTarget) (net.Conn, error)
+	StateDir            string
+	Name                string
+	ReadyTimeout        time.Duration
+	SendTimeout         time.Duration
+	RequireCommandReady bool
+	DialTarget          func(context.Context, ShellTarget) (net.Conn, error)
 }
 
 type ConsoleReadTimeoutError struct {
@@ -40,6 +41,18 @@ func (err ConsoleReadTimeoutError) Error() string {
 		return fmt.Sprintf("console command for workspace %s timed out after %s before completion; partial output: %q", err.Workspace, err.Timeout, err.PartialOutput)
 	}
 	return fmt.Sprintf("console command for workspace %s timed out after %s before completion", err.Workspace, err.Timeout)
+}
+
+type ConsoleCompletionUnknownError struct {
+	Workspace     string
+	PartialOutput string
+}
+
+func (err ConsoleCompletionUnknownError) Error() string {
+	if err.PartialOutput != "" {
+		return fmt.Sprintf("console command for workspace %s ended before completion marker; partial output: %q", err.Workspace, err.PartialOutput)
+	}
+	return fmt.Sprintf("console command for workspace %s ended before completion marker", err.Workspace)
 }
 
 func DialConsole(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
@@ -71,6 +84,10 @@ func SendConsoleCommand(ctx context.Context, opts ConsoleOptions, command string
 		return err
 	}
 	defer conn.Close()
+	return sendConsoleCommandOnConn(conn, opts, command, output)
+}
+
+func sendConsoleCommandOnConn(conn net.Conn, opts ConsoleOptions, command string, output io.Writer) error {
 	token := strconv.FormatInt(time.Now().UnixNano(), 10)
 	doneMarker := "__MICROAGENT_DONE_" + token + "__"
 	statusVar := "__ma_status"
@@ -115,8 +132,9 @@ func SendConsoleCommand(ctx context.Context, opts ConsoleOptions, command string
 				}
 			}
 			if errors.Is(err, io.EOF) {
-				_, writeErr := io.WriteString(writer, cleanConsoleSendOutput(captured.String(), token))
-				return writeErr
+				partial := cleanConsoleSendOutput(captured.String(), token)
+				_, _ = io.WriteString(writer, partial)
+				return ConsoleCompletionUnknownError{Workspace: opts.Name, PartialOutput: partial}
 			}
 			return err
 		}
@@ -194,6 +212,27 @@ func ProbeShellTarget(ctx context.Context, target ShellTarget, timeout time.Dura
 	return elapsed, nil
 }
 
+func ProbeShellCommand(ctx context.Context, opts ConsoleOptions, target ShellTarget, timeout time.Duration, dialTarget func(context.Context, ShellTarget) (net.Conn, error)) (time.Duration, error) {
+	if timeout <= 0 {
+		timeout = time.Second
+	}
+	if dialTarget == nil {
+		dialTarget = DialShellTarget
+	}
+	start := time.Now()
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	conn, err := dialTarget(dialCtx, target)
+	cancel()
+	elapsed := time.Since(start)
+	if err != nil {
+		return elapsed, err
+	}
+	opts.SendTimeout = timeout
+	err = sendConsoleCommandOnConn(conn, opts, ":", io.Discard)
+	_ = conn.Close()
+	return time.Since(start), err
+}
+
 func dialConsoleShell(ctx context.Context, opts ConsoleOptions) (net.Conn, error) {
 	if opts.ReadyTimeout < 0 {
 		return nil, fmt.Errorf("connect ready-timeout must not be negative")
@@ -223,13 +262,28 @@ func dialConsoleShell(ctx context.Context, opts ConsoleOptions) (net.Conn, error
 		if target.Network == "tcp" && state.Config.ShellPort != 0 && !shellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
 			lastErr = fmt.Errorf("guest shell helper is not listening on port %d", state.Config.ShellPort)
 		} else {
-			dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
-			conn, err := dialTarget(dialCtx, target)
-			cancel()
-			if err == nil {
-				return conn, nil
+			if opts.RequireCommandReady {
+				probeTimeout := opts.SendTimeout
+				if probeTimeout <= 0 || probeTimeout > time.Second {
+					probeTimeout = time.Second
+				}
+				_, err := ProbeShellCommand(ctx, opts, target, probeTimeout, dialTarget)
+				if err == nil {
+					conn, err := dialTarget(ctx, target)
+					if err == nil {
+						return conn, nil
+					}
+				}
+				lastErr = err
+			} else {
+				dialCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+				conn, err := dialTarget(dialCtx, target)
+				cancel()
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
 			}
-			lastErr = err
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("guest shell is not ready for workspace %s at %s: %w", opts.Name, ShellTargetDescription(target), lastErr)

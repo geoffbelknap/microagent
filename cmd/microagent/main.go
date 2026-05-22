@@ -1346,10 +1346,11 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		return fmt.Errorf("connect ready-timeout must not be negative")
 	}
 	consoleOpts := workspace.ConsoleOptions{
-		StateDir:     opts.StateDir,
-		Name:         name,
-		ReadyTimeout: time.Duration(*readyTimeoutSeconds) * time.Second,
-		SendTimeout:  time.Duration(*timeoutSeconds) * time.Second,
+		StateDir:            opts.StateDir,
+		Name:                name,
+		ReadyTimeout:        time.Duration(*readyTimeoutSeconds) * time.Second,
+		SendTimeout:         time.Duration(*timeoutSeconds) * time.Second,
+		RequireCommandReady: strings.TrimSpace(*send) != "",
 	}
 	if strings.TrimSpace(*send) != "" {
 		if outputStructured() {
@@ -2773,7 +2774,7 @@ func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeRea
 }
 
 func workspaceShellReadinessFromRuntime(state workspaceRuntimeState) (vmkit.ReadinessSignal, bool) {
-	return workspace.ShellReadinessSignal(context.Background(), state, 150*time.Millisecond)
+	return workspace.ShellReadinessSignalWithMode(context.Background(), state, time.Second, workspace.ShellReadinessProbeCommand)
 }
 
 func mediationReadiness(mediation vmkit.MediationConfig, state vmkit.VMState, observedAt *time.Time) vmkit.ReadinessSignal {

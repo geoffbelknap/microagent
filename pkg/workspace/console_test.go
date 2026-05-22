@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +133,50 @@ func TestSendConsoleCommandCompletionMarkerIsSuccess(t *testing.T) {
 	}
 }
 
+func TestSendConsoleCommandEOFBeforeMarkerIsError(t *testing.T) {
+	dir, name := writeRunningConsoleState(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4096)
+		_, _ = conn.Read(buf)
+		_, _ = conn.Write([]byte("partial output\r\n"))
+	}()
+	dialTarget := func(_ctx context.Context, _target ShellTarget) (net.Conn, error) {
+		return net.Dial("tcp", listener.Addr().String())
+	}
+
+	var output strings.Builder
+	err = SendConsoleCommand(t.Context(), ConsoleOptions{
+		StateDir:     dir,
+		Name:         name,
+		ReadyTimeout: time.Second,
+		SendTimeout:  time.Second,
+		DialTarget:   dialTarget,
+	}, "echo hello", &output)
+	<-done
+	var unknownErr ConsoleCompletionUnknownError
+	if !errors.As(err, &unknownErr) {
+		t.Fatalf("err = %v, want ConsoleCompletionUnknownError", err)
+	}
+	if unknownErr.PartialOutput != "partial output\r\n" {
+		t.Fatalf("partial output = %q", unknownErr.PartialOutput)
+	}
+	if output.String() != "partial output\r\n" {
+		t.Fatalf("writer output = %q", output.String())
+	}
+}
+
 func TestSendConsoleCommandPreservesPromptLikeControlOutput(t *testing.T) {
 	dir, name := writeRunningConsoleState(t)
 	expected := "~ # prompt-like\r\nliteral carriage\rreturn\r\n\x1b[31mred\x1b[0m\r\n$PS1 > not a prompt\r\n"
@@ -178,6 +223,59 @@ func TestSendConsoleCommandClosesSessionBeforeNextSend(t *testing.T) {
 		}
 	}
 	wait()
+}
+
+func TestCommandReadinessRejectsAcceptThenClose(t *testing.T) {
+	dir := t.TempDir()
+	name := "agent"
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req.Config.ShellPort = uint16(port)
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(SerialInputPath(dir, name), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(SerialLogPath(dir, name), []byte(fmt.Sprintf("microagent-init: shell helper listening on vsock port %d\n", port)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+	}()
+	state, err := ReadRuntimeState(Options{StateDir: dir, Name: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signal, ok := ShellReadinessSignalWithMode(t.Context(), state, time.Second, ShellReadinessProbeCommand)
+	<-done
+	if !ok {
+		t.Fatal("readiness signal not reported")
+	}
+	if signal.Ready {
+		t.Fatalf("Ready = true, want false; detail=%q", signal.Detail)
+	}
+	if !strings.Contains(signal.Detail, "command probe failed") {
+		t.Fatalf("Detail = %q, want command probe failure", signal.Detail)
+	}
 }
 
 type scriptedConsoleSession struct {
