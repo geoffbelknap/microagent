@@ -5,12 +5,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/workspace"
+	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
@@ -165,7 +170,198 @@ func TestMCPWorkspaceExecReturnsStructuredResult(t *testing.T) {
 	if strings.Join(req.Argv, " ") != "uname -a" || req.Env["TEST_VAR"] != "hello" || req.Cwd != "/tmp" {
 		t.Fatalf("request = %#v", req)
 	}
+	if envelope["retry_count"] != 0 {
+		t.Fatalf("retry_count = %#v, want 0", envelope["retry_count"])
+	}
+	if envelope["retry_wall_clock_ms"] != int64(0) {
+		t.Fatalf("retry_wall_clock_ms = %#v, want 0", envelope["retry_wall_clock_ms"])
+	}
 }
+
+func TestMCPWorkspaceExecRetriesTCPReset(t *testing.T) {
+	attempts := 0
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		attempts++
+		if attempts == 1 {
+			return execprotocol.ExecResult{}, execclient.ProtocolError{Op: "decode response", Err: syscall.ECONNRESET}
+		}
+		return successfulMCPExecResult("Linux demo\n"), nil
+	})
+	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
+		"name": "research",
+		"argv": []any{"uname", "-a"},
+	})
+	if err != nil {
+		t.Fatalf("runMCPTool: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if envelope["retry_count"] != 1 {
+		t.Fatalf("retry_count = %#v, want 1", envelope["retry_count"])
+	}
+	result := envelope["result"].(execprotocol.ExecResult)
+	if string(result.Stdout) != "Linux demo\n" {
+		t.Fatalf("stdout = %q", result.Stdout)
+	}
+}
+
+func TestMCPWorkspaceExecRetriesConnectionRefused(t *testing.T) {
+	attempts := 0
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		attempts++
+		if attempts == 1 {
+			return execprotocol.ExecResult{}, execclient.UnreachableError{Addr: "127.0.0.1:45000", Err: syscall.ECONNREFUSED}
+		}
+		return successfulMCPExecResult("ok\n"), nil
+	})
+	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
+		"name": "research",
+		"argv": []any{"true"},
+	})
+	if err != nil {
+		t.Fatalf("runMCPTool: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if envelope["retry_count"] != 1 {
+		t.Fatalf("retry_count = %#v, want 1", envelope["retry_count"])
+	}
+}
+
+func TestMCPWorkspaceExecRetriesConnectionTimeout(t *testing.T) {
+	attempts := 0
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		attempts++
+		if attempts == 1 {
+			return execprotocol.ExecResult{}, execclient.UnreachableError{Addr: "127.0.0.1:45000", Err: timeoutMCPExecError{}}
+		}
+		return successfulMCPExecResult("ok\n"), nil
+	})
+	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
+		"name": "research",
+		"argv": []any{"true"},
+	})
+	if err != nil {
+		t.Fatalf("runMCPTool: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if envelope["retry_count"] != 1 {
+		t.Fatalf("retry_count = %#v, want 1", envelope["retry_count"])
+	}
+}
+
+func TestMCPWorkspaceExecRetryExhaustionReturnsStructuredError(t *testing.T) {
+	attempts := 0
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		attempts++
+		return execprotocol.ExecResult{}, execclient.UnreachableError{Addr: "127.0.0.1:45000", Err: syscall.ECONNREFUSED}
+	})
+	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
+		"name": "research",
+		"argv": []any{"true"},
+	})
+	if err == nil {
+		t.Fatal("runMCPTool err = nil, want retry-exhausted error")
+	}
+	if attempts != 4 {
+		t.Fatalf("attempts = %d, want 4", attempts)
+	}
+	if envelope["retry_count"] != 3 {
+		t.Fatalf("retry_count = %#v, want 3", envelope["retry_count"])
+	}
+	if envelope["retry_exhausted"] != true {
+		t.Fatalf("retry_exhausted = %#v, want true", envelope["retry_exhausted"])
+	}
+	structured, ok := envelope["error"].(structuredError)
+	if !ok {
+		t.Fatalf("error type = %T", envelope["error"])
+	}
+	if structured.Kind != errorKindTransient {
+		t.Fatalf("kind = %q, want transient", structured.Kind)
+	}
+	if !strings.Contains(structured.Message, "persisted after 3 retries") {
+		t.Fatalf("message = %q, want retry exhaustion detail", structured.Message)
+	}
+}
+
+func TestMCPWorkspaceExecDoesNotRetryExecCompletedErrors(t *testing.T) {
+	attempts := 0
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		attempts++
+		code := 127
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		result.Stderr = []byte("command not found\n")
+		return result, nil
+	})
+	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
+		"name": "research",
+		"argv": []any{"missing-command"},
+	})
+	if err != nil {
+		t.Fatalf("runMCPTool: %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if envelope["retry_count"] != 0 {
+		t.Fatalf("retry_count = %#v, want 0", envelope["retry_count"])
+	}
+}
+
+func TestMCPWorkspaceExecDoesNotRetryWorkspaceNotRunning(t *testing.T) {
+	attempts := 0
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		attempts++
+		return execprotocol.ExecResult{}, fmt.Errorf("workspace research is not running; structured exec is unavailable in state stopped")
+	})
+	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
+		"name": "research",
+		"argv": []any{"true"},
+	})
+	if err == nil {
+		t.Fatal("runMCPTool err = nil, want workspace-not-running error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if envelope["retry_count"] != 0 {
+		t.Fatalf("retry_count = %#v, want 0", envelope["retry_count"])
+	}
+}
+
+func stubMCPWorkspaceExec(t *testing.T, fn func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error)) {
+	t.Helper()
+	originalExec := mcpWorkspaceExec
+	originalJitter := mcpExecRetryJitter
+	originalSleep := mcpExecRetrySleep
+	mcpWorkspaceExec = fn
+	mcpExecRetryJitter = func() time.Duration { return 0 }
+	mcpExecRetrySleep = func(context.Context, time.Duration) error { return nil }
+	t.Cleanup(func() {
+		mcpWorkspaceExec = originalExec
+		mcpExecRetryJitter = originalJitter
+		mcpExecRetrySleep = originalSleep
+	})
+}
+
+func successfulMCPExecResult(stdout string) execprotocol.ExecResult {
+	code := 0
+	result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+	result.ExitCode = &code
+	result.Stdout = []byte(stdout)
+	return result
+}
+
+type timeoutMCPExecError struct{}
+
+func (timeoutMCPExecError) Error() string   { return "dial tcp 127.0.0.1:45000: i/o timeout" }
+func (timeoutMCPExecError) Timeout() bool   { return true }
+func (timeoutMCPExecError) Temporary() bool { return true }
 
 func TestMCPWorkspaceExecErrorKinds(t *testing.T) {
 	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
