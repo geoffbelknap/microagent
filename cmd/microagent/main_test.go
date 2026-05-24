@@ -1329,7 +1329,7 @@ func TestWriteWorkspaceProcessStateAppendsEventHistory(t *testing.T) {
 	}
 }
 
-func TestStatusReportsVerificationDivergence(t *testing.T) {
+func TestStatusReportsRecordedVerificationForPreparedWorkspace(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
@@ -1413,11 +1413,11 @@ func TestStatusReportsVerificationDivergence(t *testing.T) {
 	if err := json.Unmarshal(data, &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp.Verification == nil || resp.Verification.OK {
-		t.Fatalf("verification = %#v, want divergence", resp.Verification)
+	if resp.Verification == nil || !resp.Verification.OK {
+		t.Fatalf("verification = %#v, want recorded verification without divergence", resp.Verification)
 	}
-	if len(resp.Verification.Divergence) != 1 || resp.Verification.Divergence[0].Artifact != "rootfs" {
-		t.Fatalf("divergence = %#v, want rootfs mismatch", resp.Verification.Divergence)
+	if len(resp.Verification.Divergence) != 0 {
+		t.Fatalf("divergence = %#v, want none for prepared status fast path", resp.Verification.Divergence)
 	}
 	if resp.Verification.ImageDigest != "sha256:abc" || resp.Verification.Kernel.SHA256 == "" || resp.Verification.Rootfs.RecordedSHA256 == "" {
 		t.Fatalf("verification details missing: %#v", resp.Verification)
