@@ -1216,7 +1216,7 @@ func VerificationForStatus(opts Options, name string, manifest Manifest, state v
 		rootfsPath = WorkspaceRootfsPath(opts.StateDir, name, opts.Backend)
 	}
 	verification.Kernel = currentArtifact("kernel", kernelPath, recordedArtifactFor(recorded, "kernel"), &verification, true)
-	verification.Rootfs = currentArtifact("rootfs", rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification, shouldCompareRootfs(state))
+	verification.Rootfs = rootfsArtifactForStatus(rootfsPath, recordedArtifactFor(recorded, "rootfs"), &verification, state)
 	if recorded != nil && recorded.Init != nil {
 		verification.Init = currentArtifact("init", recorded.Init.Path, recorded.Init, &verification, true)
 	}
@@ -1255,6 +1255,15 @@ func readinessFromRuntime(state RuntimeState) vmkit.RuntimeReadiness {
 			Ready:      true,
 			ObservedAt: firstTime(state.StartedAt, state.Event.ObservedAt),
 			Detail:     "workspace reached runtime state " + string(state.Event.State),
+		}
+	}
+	liveUnavailable := liveReadinessUnavailableSignal(state.Event.State, firstTime(state.StartedAt, state.Event.ObservedAt))
+	if liveUnavailable != nil {
+		readiness.ShellReady = *liveUnavailable
+		readiness.ExecReady = *liveUnavailable
+		readiness.ResultReady = *liveUnavailable
+		if state.Config.Mediation != nil && state.Config.Mediation.Enabled {
+			readiness.MediationReady = *liveUnavailable
 		}
 	}
 	if state.Event.State == vmkit.StateRunning && state.SerialInputPath != "" {
@@ -1409,7 +1418,41 @@ func recordedArtifactFor(recorded *vmkit.RuntimeVerification, name string) *vmki
 }
 
 func shouldCompareRootfs(state vmkit.VMState) bool {
-	return state == "" || state == vmkit.StateUnknown || state == vmkit.StatePrepared
+	return state == "" || state == vmkit.StateUnknown
+}
+
+func liveReadinessUnavailableSignal(state vmkit.VMState, observedAt *time.Time) *vmkit.ReadinessSignal {
+	if !liveWorkspaceUnavailableState(state) {
+		return nil
+	}
+	return &vmkit.ReadinessSignal{
+		Ready:      false,
+		ObservedAt: observedAt,
+		Detail:     fmt.Sprintf("workspace is %s; live readiness unavailable", state),
+	}
+}
+
+func liveWorkspaceUnavailableState(state vmkit.VMState) bool {
+	return state == vmkit.StatePrepared || state == vmkit.StateHalted || state == vmkit.StateStopped || state == vmkit.StateQuarantined || state == vmkit.StateFailed
+}
+
+func rootfsArtifactForStatus(path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification, state vmkit.VMState) *vmkit.VerifiedArtifact {
+	if !liveWorkspaceUnavailableState(state) {
+		return currentArtifact("rootfs", path, recorded, verification, shouldCompareRootfs(state))
+	}
+	artifact := &vmkit.VerifiedArtifact{Path: path}
+	if recorded != nil {
+		artifact.RecordedSHA256 = recorded.SHA256
+		artifact.SHA256 = recorded.SHA256
+		if artifact.Path == "" {
+			artifact.Path = recorded.Path
+		}
+	}
+	if strings.TrimSpace(artifact.Path) == "" {
+		artifact.Error = "path is empty"
+		verification.Divergence = append(verification.Divergence, vmkit.VerificationDivergence{Artifact: "rootfs", Error: artifact.Error})
+	}
+	return artifact
 }
 
 func currentArtifact(name, path string, recorded *vmkit.VerifiedArtifact, verification *vmkit.RuntimeVerification, compare bool) *vmkit.VerifiedArtifact {
