@@ -171,6 +171,117 @@ func TestReadinessFromRuntimeReportsWindowsHyperVShell(t *testing.T) {
 	}
 }
 
+func TestStatusNonLiveStatesUseFastReadinessAndRecordedRootfs(t *testing.T) {
+	for _, state := range []vmkit.VMState{vmkit.StatePrepared, vmkit.StateHalted} {
+		t.Run(string(state), func(t *testing.T) {
+			dir := t.TempDir()
+			kernelPath := filepath.Join(dir, "Image")
+			if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			missingRootfs := filepath.Join(dir, "workspaces", "agent", "rootfs.ext4")
+			opts := Options{
+				Name:          "agent",
+				StateDir:      dir,
+				Backend:       vmkit.BackendFirecracker,
+				KernelPath:    kernelPath,
+				Profile:       "tiny",
+				RestartPolicy: DefaultRestartPolicy,
+				Verification: &vmkit.RuntimeVerification{
+					OK: true,
+					Kernel: &vmkit.VerifiedArtifact{
+						Path:   kernelPath,
+						SHA256: "recorded-kernel",
+					},
+					Rootfs: &vmkit.VerifiedArtifact{
+						Path:   missingRootfs,
+						SHA256: "recorded-rootfs",
+					},
+				},
+			}
+			if err := WriteManifest(opts); err != nil {
+				t.Fatalf("WriteManifest: %v", err)
+			}
+			req := Request(opts, "inspect", missingRootfs, "req-1")
+			req.Config.KernelPath = kernelPath
+			req.Config.RootfsPath = missingRootfs
+			if err := WriteProcessState(opts, req, state, 0, ""); err != nil {
+				t.Fatalf("WriteProcessState: %v", err)
+			}
+
+			start := time.Now()
+			resp, err := Status(opts)
+			if err != nil {
+				t.Fatalf("Status: %v", err)
+			}
+			if elapsed := time.Since(start); elapsed >= time.Second {
+				t.Fatalf("Status elapsed = %s, want < 1s", elapsed)
+			}
+			if resp.Verification == nil || resp.Verification.Rootfs == nil {
+				t.Fatalf("verification = %#v", resp.Verification)
+			}
+			if resp.Verification.Rootfs.Error != "" {
+				t.Fatalf("rootfs verification error = %q, want fast recorded metadata", resp.Verification.Rootfs.Error)
+			}
+			if resp.Verification.Rootfs.SHA256 != "recorded-rootfs" || resp.Verification.Rootfs.RecordedSHA256 != "recorded-rootfs" {
+				t.Fatalf("rootfs verification = %#v, want recorded checksum", resp.Verification.Rootfs)
+			}
+			if resp.Readiness == nil {
+				t.Fatal("readiness missing")
+			}
+			if resp.Readiness.ExecReady.Ready || !strings.Contains(resp.Readiness.ExecReady.Detail, "live readiness unavailable") {
+				t.Fatalf("exec readiness = %#v, want fast unavailable detail", resp.Readiness.ExecReady)
+			}
+			if resp.Readiness.ShellReady.Ready || !strings.Contains(resp.Readiness.ShellReady.Detail, "live readiness unavailable") {
+				t.Fatalf("shell readiness = %#v, want fast unavailable detail", resp.Readiness.ShellReady)
+			}
+			if resp.Readiness.ResultReady.Ready || !strings.Contains(resp.Readiness.ResultReady.Detail, "live readiness unavailable") {
+				t.Fatalf("result readiness = %#v, want fast unavailable detail", resp.Readiness.ResultReady)
+			}
+		})
+	}
+}
+
+func TestStatusRunningWorkspaceStillChecksCurrentRootfs(t *testing.T) {
+	dir := t.TempDir()
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missingRootfs := filepath.Join(dir, "workspaces", "agent", "rootfs.ext4")
+	opts := Options{
+		Name:          "agent",
+		StateDir:      dir,
+		Backend:       vmkit.BackendFirecracker,
+		KernelPath:    kernelPath,
+		Profile:       "tiny",
+		RestartPolicy: DefaultRestartPolicy,
+		Verification: &vmkit.RuntimeVerification{
+			OK:     true,
+			Rootfs: &vmkit.VerifiedArtifact{Path: missingRootfs, SHA256: "recorded-rootfs"},
+		},
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	req := Request(opts, "inspect", missingRootfs, "req-1")
+	req.Config.KernelPath = kernelPath
+	req.Config.RootfsPath = missingRootfs
+	if err := WriteProcessState(opts, req, vmkit.StateRunning, 0, ""); err != nil {
+		t.Fatalf("WriteProcessState: %v", err)
+	}
+	resp, err := Status(opts)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if resp.Verification == nil || resp.Verification.Rootfs == nil || resp.Verification.Rootfs.Error == "" {
+		t.Fatalf("rootfs verification = %#v, want current rootfs error for running workspace", resp.Verification)
+	}
+	if !strings.Contains(resp.Verification.Rootfs.Error, "no such file") {
+		t.Fatalf("rootfs error = %q", resp.Verification.Rootfs.Error)
+	}
+}
+
 func TestReadinessFromRuntimeRequiresLiveShellTarget(t *testing.T) {
 	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendAppleVF} {
 		t.Run(backend, func(t *testing.T) {
