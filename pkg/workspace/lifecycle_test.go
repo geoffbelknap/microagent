@@ -183,7 +183,7 @@ func TestStatusNonLiveStatesUseFastReadinessAndRecordedRootfs(t *testing.T) {
 			opts := Options{
 				Name:          "agent",
 				StateDir:      dir,
-				Backend:       vmkit.BackendFirecracker,
+				Backend:       HostBackend(),
 				KernelPath:    kernelPath,
 				Profile:       "tiny",
 				RestartPolicy: DefaultRestartPolicy,
@@ -252,7 +252,7 @@ func TestStatusRunningWorkspaceStillChecksCurrentRootfs(t *testing.T) {
 	opts := Options{
 		Name:          "agent",
 		StateDir:      dir,
-		Backend:       vmkit.BackendFirecracker,
+		Backend:       HostBackend(),
 		KernelPath:    kernelPath,
 		Profile:       "tiny",
 		RestartPolicy: DefaultRestartPolicy,
