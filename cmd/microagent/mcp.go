@@ -158,12 +158,34 @@ type mcpError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+type mcpStructuredError struct {
+	structuredError
+	Retryable bool `json:"retryable"`
+}
+
+func mapMCPStructuredError(err error, correlationID string) mcpStructuredError {
+	mapped := mapStructuredError(err, correlationID)
+	return mcpStructuredError{
+		structuredError: mapped,
+		Retryable:       structuredErrorKindRetryable(mapped.Kind),
+	}
+}
+
+func structuredErrorKindRetryable(kind structuredErrorKind) bool {
+	switch kind {
+	case errorKindTransient, errorKindResourceExhausted:
+		return true
+	default:
+		return false
+	}
+}
+
 func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bool) {
 	var req mcpRequest
 	if err := json.Unmarshal(msg, &req); err != nil {
 		return mcpResponse{
 			JSONRPC: "2.0",
-			Error:   &mcpError{Code: -32700, Message: "parse error", Data: mapStructuredError(err, newRequestID())},
+			Error:   &mcpError{Code: -32700, Message: "parse error", Data: mapMCPStructuredError(err, newRequestID())},
 		}, true
 	}
 	if req.ID == nil {
@@ -180,7 +202,7 @@ func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bo
 		return mcpResponse{
 			JSONRPC: "2.0",
 			ID:      req.ID,
-			Error:   &mcpError{Code: -32601, Message: "method not found", Data: mapStructuredError(fmt.Errorf("unsupported MCP method %s", req.Method), newRequestID())},
+			Error:   &mcpError{Code: -32601, Message: "method not found", Data: mapMCPStructuredError(fmt.Errorf("unsupported MCP method %s", req.Method), newRequestID())},
 		}, true
 	}
 }
@@ -247,7 +269,7 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 	}
 	if len(req.Params) != 0 {
 		if err := json.Unmarshal(req.Params, &params); err != nil {
-			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "invalid params", Data: mapStructuredError(err, newRequestID())}}
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "invalid params", Data: mapMCPStructuredError(err, newRequestID())}}
 		}
 	}
 	if params.Name != "microagent.ping" {
@@ -259,7 +281,7 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 		}
 		result, err := runMCPTool(ctx, params.Name, params.Arguments)
 		if err != nil {
-			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "tool failed", Data: mapStructuredError(err, newRequestID())}}
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "tool failed", Data: mapMCPStructuredError(err, newRequestID())}}
 		}
 		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(result)}
 	}
@@ -500,7 +522,7 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		"principal_context": principalContextArg(args),
 	}
 	if cliErr != nil {
-		envelope["error"] = mapStructuredError(cliErr, newRequestID())
+		envelope["error"] = mapMCPStructuredError(cliErr, newRequestID())
 	}
 	if cacheKey != "" && cliErr == nil {
 		mcpIdempotencyCache.Store(cacheKey, cloneMCPMap(envelope))
@@ -537,7 +559,7 @@ func runMCPWorkspaceExec(ctx context.Context, args map[string]any, start time.Ti
 		envelope["retry_exhausted"] = true
 	}
 	if err != nil {
-		envelope["error"] = mapStructuredError(err, newRequestID())
+		envelope["error"] = mapMCPStructuredError(err, newRequestID())
 	}
 	return envelope, err
 }

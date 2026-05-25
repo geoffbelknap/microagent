@@ -276,12 +276,15 @@ func TestMCPWorkspaceExecRetryExhaustionReturnsStructuredError(t *testing.T) {
 	if envelope["retry_exhausted"] != true {
 		t.Fatalf("retry_exhausted = %#v, want true", envelope["retry_exhausted"])
 	}
-	structured, ok := envelope["error"].(structuredError)
+	structured, ok := envelope["error"].(mcpStructuredError)
 	if !ok {
 		t.Fatalf("error type = %T", envelope["error"])
 	}
 	if structured.Kind != errorKindTransient {
 		t.Fatalf("kind = %q, want transient", structured.Kind)
+	}
+	if !structured.Retryable {
+		t.Fatalf("retryable = false, want true")
 	}
 	if !strings.Contains(structured.Message, "persisted after 3 retries") {
 		t.Fatalf("message = %q, want retry exhaustion detail", structured.Message)
@@ -363,6 +366,64 @@ func (timeoutMCPExecError) Error() string   { return "dial tcp 127.0.0.1:45000: 
 func (timeoutMCPExecError) Timeout() bool   { return true }
 func (timeoutMCPExecError) Temporary() bool { return true }
 
+func TestMCPStructuredErrorRetryableClassification(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		kind      structuredErrorKind
+		retryable bool
+	}{
+		{name: "permanent", err: fmt.Errorf("usage: workspace.exec requires name"), kind: errorKindPermanent, retryable: false},
+		{name: "conflict", err: fmt.Errorf("workspace demo is already running"), kind: errorKindConflict, retryable: false},
+		{name: "not found", err: workspace.WorkspaceNotFoundError{Name: "missing"}, kind: errorKindNotFound, retryable: false},
+		{name: "resource exhausted", err: fmt.Errorf("requested disk size exceeds limit"), kind: errorKindResourceExhausted, retryable: true},
+		{name: "unsupported", err: fmt.Errorf("microagent exec is not supported"), kind: errorKindUnsupported, retryable: false},
+		{name: "policy denied", err: fmt.Errorf("permission denied"), kind: errorKindPolicyDenied, retryable: false},
+		{name: "transient", err: fmt.Errorf("connection refused"), kind: errorKindTransient, retryable: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mapMCPStructuredError(tt.err, "req-test")
+			if got.Kind != tt.kind {
+				t.Fatalf("Kind = %q, want %q", got.Kind, tt.kind)
+			}
+			if got.Retryable != tt.retryable {
+				t.Fatalf("Retryable = %v, want %v", got.Retryable, tt.retryable)
+			}
+			if got.Message != tt.err.Error() {
+				t.Fatalf("Message = %q, want %q", got.Message, tt.err.Error())
+			}
+			if got.CorrelationID != "req-test" {
+				t.Fatalf("CorrelationID = %q, want req-test", got.CorrelationID)
+			}
+			if strings.TrimSpace(got.Remediation) == "" {
+				t.Fatalf("Remediation is empty")
+			}
+		})
+	}
+}
+
+func TestMCPStructuredErrorRetryableAlwaysMarshaled(t *testing.T) {
+	for _, err := range []error{
+		workspace.WorkspaceNotFoundError{Name: "missing"},
+		fmt.Errorf("connection refused"),
+	} {
+		data, marshalErr := json.Marshal(mapMCPStructuredError(err, "req-test"))
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"kind", "message", "remediation", "correlation_id", "retryable"} {
+			if _, ok := decoded[field]; !ok {
+				t.Fatalf("error %q missing field %q after marshal: %s", err, field, data)
+			}
+		}
+	}
+}
+
 func TestMCPWorkspaceExecErrorKinds(t *testing.T) {
 	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
 		"name":      "missing",
@@ -372,12 +433,15 @@ func TestMCPWorkspaceExecErrorKinds(t *testing.T) {
 	if err == nil {
 		t.Fatal("runMCPTool err = nil, want not found")
 	}
-	structured, ok := envelope["error"].(structuredError)
+	structured, ok := envelope["error"].(mcpStructuredError)
 	if !ok {
 		t.Fatalf("error type = %T", envelope["error"])
 	}
 	if structured.Kind != errorKindNotFound {
 		t.Fatalf("kind = %q, want not_found", structured.Kind)
+	}
+	if structured.Retryable {
+		t.Fatalf("retryable = true, want false")
 	}
 }
 
@@ -407,6 +471,16 @@ func TestMCPWorkspaceExecToolCallErrorMapsKind(t *testing.T) {
 	data, ok := errObj["data"].(map[string]any)
 	if !ok || data["kind"] != string(errorKindNotFound) {
 		t.Fatalf("error data = %#v", errObj["data"])
+	}
+	if data["message"] == "" || data["remediation"] == "" || data["correlation_id"] == "" {
+		t.Fatalf("error data missing required fields: %#v", data)
+	}
+	retryable, ok := data["retryable"].(bool)
+	if !ok {
+		t.Fatalf("retryable missing or non-boolean: %#v", data)
+	}
+	if retryable {
+		t.Fatalf("retryable = true, want false: %#v", data)
 	}
 }
 
