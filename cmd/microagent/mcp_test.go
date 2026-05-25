@@ -291,6 +291,54 @@ func TestMCPWorkspaceExecRetryExhaustionReturnsStructuredError(t *testing.T) {
 	}
 }
 
+func TestMCPWorkspaceExecRetryExhaustionIncludesErrorEnvelopeMetadata(t *testing.T) {
+	attempts := 0
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+		attempts++
+		return execprotocol.ExecResult{}, execclient.UnreachableError{Addr: "127.0.0.1:45000", Err: syscall.ECONNREFUSED}
+	})
+	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "call-1",
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "workspace.exec",
+			"arguments": map[string]any{
+				"name": "research",
+				"argv": []string{"true"},
+			},
+		},
+	}))
+	var output bytes.Buffer
+	if err := serveMCP(context.Background(), input, &output); err != nil {
+		t.Fatalf("serveMCP: %v", err)
+	}
+	if attempts != 4 {
+		t.Fatalf("attempts = %d, want 4", attempts)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	errObj, ok := responses[0]["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("response = %#v, want JSON-RPC error", responses[0])
+	}
+	data, ok := errObj["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("error data = %#v", errObj["data"])
+	}
+	if data["kind"] != string(errorKindTransient) || data["retryable"] != true {
+		t.Fatalf("error data classification = %#v", data)
+	}
+	if data["retry_count"] != float64(3) {
+		t.Fatalf("retry_count = %#v, want 3", data["retry_count"])
+	}
+	if data["retry_exhausted"] != true {
+		t.Fatalf("retry_exhausted = %#v, want true", data["retry_exhausted"])
+	}
+	if _, ok := data["retry_wall_clock_ms"].(float64); !ok {
+		t.Fatalf("retry_wall_clock_ms missing or non-number: %#v", data)
+	}
+}
+
 func TestMCPWorkspaceExecDoesNotRetryExecCompletedErrors(t *testing.T) {
 	attempts := 0
 	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
