@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-25_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -209,6 +209,13 @@ Structured exec uses `workspace.Exec(ctx, opts, request)` with
 the guest exec service and decoded a structured result; nonzero guest exit codes
 remain in `ExecResult.exit_code` and are not Go errors. `readiness.execReady`
 uses the same protocol with a no-op command to verify the service end-to-end.
+
+Mediation readiness uses `vmkit.MediationReadinessSignal(ctx, mediation, state,
+observedAt, timeout)` to apply the shared live reachability contract. It returns
+ready only when the workspace is running and the declared mediation target
+accepts a bounded TCP probe. Required mediation target failures include an
+error; optional mediation target failures are reported as not ready without a
+hard error.
 
 ## Kernel API
 

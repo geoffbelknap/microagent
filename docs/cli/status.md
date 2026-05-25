@@ -4,7 +4,7 @@ description: Show the current state of a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-25_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -34,6 +34,10 @@ JSON status also includes `readiness`:
 - `execReady` is true when the structured exec service accepts a no-op exec
   request and returns a successful structured result.
 - `resultReady` is true when the guest result file has been delivered.
+- `mediationReady` is true when configured mediation is enabled on a running
+  workspace and the declared host target accepts a bounded TCP probe. Optional
+  mediation target failures leave the signal not ready without a hard error;
+  required mediation target failures include an error.
 
 JSON status includes declared network intent under `network`. When a backend
 records runtime assignment details, `network.runtime` contains the latest guest

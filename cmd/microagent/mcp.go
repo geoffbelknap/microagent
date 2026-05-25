@@ -327,7 +327,7 @@ func microagentCapabilityManifest() map[string]any {
 			{"name": "shellReady", "description": "interactive console shell is reachable and command round-trip works"},
 			{"name": "execReady", "description": "structured exec service is reachable and a no-op exec succeeds end-to-end"},
 			{"name": "resultReady", "description": "structured guest result is available"},
-			{"name": "mediationReady", "description": "declared mediation channel is ready for a running workspace"},
+			{"name": "mediationReady", "description": "declared mediation channel target is live reachable for a running workspace"},
 		},
 		"operations": operations,
 	}

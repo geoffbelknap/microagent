@@ -4,7 +4,7 @@ description: Where workspace state lives and how identity flows through requests
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-25_
 
 microagent reports VM state changes as JSON events. Every request carries
 an identity block; every response carries an event block describing the
@@ -88,8 +88,10 @@ polling files or serial logs:
 - **`execReady`** — the structured exec service is reachable and a no-op exec
   request completes end-to-end.
 - **`resultReady`** — the guest result file exists.
-- **`mediationReady`** — a declared mediation channel is ready for a running
-  workspace.
+- **`mediationReady`** — a declared mediation channel target is live reachable
+  for a running workspace. Optional mediation reports `ready: false` without a
+  hard `error` when the target is unavailable; required mediation reports an
+  error.
 
 Each signal carries `ready`, optional `observedAt`, and optional detail/error
 fields.

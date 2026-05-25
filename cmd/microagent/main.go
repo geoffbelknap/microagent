@@ -2822,25 +2822,13 @@ func workspaceReadinessFromRuntime(state workspaceRuntimeState) vmkit.RuntimeRea
 		readiness.ResultReady = vmkit.ReadinessSignal{Error: err.Error()}
 	}
 	if state.Config.Mediation != nil && state.Config.Mediation.Enabled {
-		readiness.MediationReady = mediationReadiness(*state.Config.Mediation, state.Event.State, firstTime(state.StartedAt, state.Event.ObservedAt))
+		readiness.MediationReady = vmkit.MediationReadinessSignal(context.Background(), *state.Config.Mediation, state.Event.State, firstTime(state.StartedAt, state.Event.ObservedAt), 150*time.Millisecond)
 	}
 	return readiness
 }
 
 func workspaceShellReadinessFromRuntime(state workspaceRuntimeState) (vmkit.ReadinessSignal, bool) {
 	return workspace.ShellReadinessSignalWithMode(context.Background(), state, time.Second, workspace.ShellReadinessProbeCommand)
-}
-
-func mediationReadiness(mediation vmkit.MediationConfig, state vmkit.VMState, observedAt *time.Time) vmkit.ReadinessSignal {
-	signal := vmkit.ReadinessSignal{
-		Ready:      state == vmkit.StateRunning,
-		ObservedAt: observedAt,
-		Detail:     fmt.Sprintf("mediation required=%t failClosed=%t port=%d target=%s", mediation.Required, mediation.FailClosed, mediation.Port, mediation.Target),
-	}
-	if !signal.Ready && mediation.Required {
-		signal.Error = "required mediation is not ready"
-	}
-	return signal
 }
 
 func firstTime(values ...string) *time.Time {
