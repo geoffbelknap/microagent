@@ -4,7 +4,7 @@ description: The JSON request and response format used by backend supervisors.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-25_
 
 Backend supervisors speak a small JSON protocol: one request in, one response
 out. A request names a lifecycle command such as `prepare`, `start`, or `stop`.
@@ -140,7 +140,7 @@ consumers should treat it as closed by default.
     "mediationReady": {
       "ready": true,
       "observedAt": "2026-05-02T00:00:00Z",
-      "detail": "mediation required=true failClosed=true port=2048 target=127.0.0.1:9900"
+      "detail": "mediation required=true failClosed=true port=2048 target=127.0.0.1:9900; mediation target reachable at 127.0.0.1:9900 in 1ms"
     }
   },
   "result": {
@@ -195,7 +195,10 @@ writes as divergence. If an enforced hash no longer matches,
 
 `readiness` gives consumers explicit guest, shell, exec, result, and mediation
 readiness signals. Each signal has `ready` plus optional `observedAt`, `detail`,
-and `error`.
+and `error`. `mediationReady` is based on a bounded live TCP reachability probe
+to the declared mediation target when the workspace is running. Optional
+mediation reports target failures as not ready without a hard `error`; required
+mediation reports target failures with `error`.
 
 `mediation` reports the declared guest-to-host vsock channel separately from
 ordinary networking and logs. It is the control-plane path between the guest

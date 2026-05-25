@@ -116,6 +116,11 @@ func TestBackendOwnsRuntimeState(t *testing.T) {
 }
 
 func TestReadinessFromRuntimeReportsWindowsHyperVMediation(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
 	state := RuntimeState{
 		Event: EventFile{
 			Identity:   vmkit.Identity{RuntimeID: "agent", Backend: vmkit.BackendWindowsHyperV},
@@ -128,7 +133,7 @@ func TestReadinessFromRuntimeReportsWindowsHyperVMediation(t *testing.T) {
 				Enabled:    true,
 				Required:   true,
 				Port:       2048,
-				Target:     "127.0.0.1:9000",
+				Target:     listener.Addr().String(),
 				FailClosed: true,
 			},
 		},
@@ -138,7 +143,7 @@ func TestReadinessFromRuntimeReportsWindowsHyperVMediation(t *testing.T) {
 	if !readiness.MediationReady.Ready {
 		t.Fatalf("mediation readiness = %#v", readiness.MediationReady)
 	}
-	if !strings.Contains(readiness.MediationReady.Detail, "port=2048") || !strings.Contains(readiness.MediationReady.Detail, "target=127.0.0.1:9000") {
+	if !strings.Contains(readiness.MediationReady.Detail, "port=2048") || !strings.Contains(readiness.MediationReady.Detail, "target="+listener.Addr().String()) {
 		t.Fatalf("mediation readiness detail = %q", readiness.MediationReady.Detail)
 	}
 }

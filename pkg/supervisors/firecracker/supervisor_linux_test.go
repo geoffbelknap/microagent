@@ -303,6 +303,11 @@ func TestRuntimeHasResultListener(t *testing.T) {
 func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
+	mediationListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mediationListener.Close()
 	req := vmkit.Request{
 		Command: "run",
 		Identity: &vmkit.Identity{
@@ -327,7 +332,7 @@ func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 				Enabled:    true,
 				Required:   true,
 				Port:       2048,
-				Target:     "127.0.0.1:9900",
+				Target:     mediationListener.Addr().String(),
 				FailClosed: true,
 			},
 		},

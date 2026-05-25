@@ -3308,11 +3308,16 @@ func TestStatusReportsMediationReadiness(t *testing.T) {
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
 	mediation := vmkit.MediationConfig{
 		Enabled:    true,
 		Required:   true,
 		Port:       2048,
-		Target:     "127.0.0.1:9900",
+		Target:     listener.Addr().String(),
 		FailClosed: true,
 	}
 	opts := workspaceOptions{
@@ -3368,6 +3373,9 @@ func TestStatusReportsMediationReadiness(t *testing.T) {
 	}
 	if !strings.Contains(resp.Readiness.MediationReady.Detail, "port=2048") {
 		t.Fatalf("mediation detail = %q", resp.Readiness.MediationReady.Detail)
+	}
+	if !strings.Contains(resp.Readiness.MediationReady.Detail, "reachable") {
+		t.Fatalf("mediation detail = %q, want live reachability detail", resp.Readiness.MediationReady.Detail)
 	}
 }
 

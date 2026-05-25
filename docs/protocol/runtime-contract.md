@@ -4,7 +4,7 @@ description: Backend-neutral agent runtime semantics shared by microagent backen
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-25_
 
 `microagent --json contract` is the JSON source for the shared runtime
 contract. Agent-runtime builders can depend on one set of semantics across
@@ -25,6 +25,11 @@ state, result, readiness, and diagnostic field shapes for supported commands:
 | Artifacts | `ingress`, `egress`; declared egress artifacts are retrievable by name without entering the workspace |
 | Mediation | `enabled`, `required`, `port`, `target`, `failClosed` |
 | Verification | image digest, kernel hash, rootfs hash, init hash, divergence entries |
+
+`mediationReady` means the declared mediation target is live reachable for a
+running workspace. Optional mediation target failures report `ready: false`
+without a hard `error`; required mediation target failures report `ready: false`
+with an error.
 
 ## Backend rules
 

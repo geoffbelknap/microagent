@@ -67,7 +67,7 @@ func NewRuntimeContract() RuntimeContract {
 			{Name: "shellReady", Description: "interactive shell input path is available"},
 			{Name: "execReady", Description: "structured exec service is reachable and a no-op exec succeeds end-to-end"},
 			{Name: "resultReady", Description: "structured guest result is available"},
-			{Name: "mediationReady", Description: "declared mediation channel is ready for a running workspace"},
+			{Name: "mediationReady", Description: "declared mediation channel target is live reachable for a running workspace"},
 		},
 		ResultFields: []ContractItem{
 			{Name: "identity", Description: "request/runtime identity copied into the result"},
