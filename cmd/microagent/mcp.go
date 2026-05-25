@@ -281,7 +281,7 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 		}
 		result, err := runMCPTool(ctx, params.Name, params.Arguments)
 		if err != nil {
-			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "tool failed", Data: mapMCPStructuredError(err, newRequestID())}}
+			return mcpResponse{JSONRPC: "2.0", ID: req.ID, Error: &mcpError{Code: -32602, Message: "tool failed", Data: mcpToolCallErrorData(err, result)}}
 		}
 		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpToolResult(result)}
 	}
@@ -294,6 +294,41 @@ func handleMCPToolCall(ctx context.Context, req mcpRequest) mcpResponse {
 			},
 		},
 	}
+}
+
+func mcpToolCallErrorData(err error, envelope map[string]any) any {
+	if envelope == nil {
+		return mapMCPStructuredError(err, newRequestID())
+	}
+	structured, ok := envelope["error"].(mcpStructuredError)
+	if !ok {
+		return mapMCPStructuredError(err, newRequestID())
+	}
+	data := map[string]any{
+		"kind":           structured.Kind,
+		"message":        structured.Message,
+		"correlation_id": structured.CorrelationID,
+		"retryable":      structured.Retryable,
+	}
+	if structured.Remediation != "" {
+		data["remediation"] = structured.Remediation
+	}
+	if structured.RetryAfterMS != 0 {
+		data["retry_after_ms"] = structured.RetryAfterMS
+	}
+	if structured.PartialOutput != "" {
+		data["partial_output"] = structured.PartialOutput
+	}
+	if retryExhausted, ok := envelope["retry_exhausted"].(bool); ok && retryExhausted {
+		data["retry_exhausted"] = retryExhausted
+		if retryCount, ok := envelope["retry_count"]; ok {
+			data["retry_count"] = retryCount
+		}
+		if retryWallClockMS, ok := envelope["retry_wall_clock_ms"]; ok {
+			data["retry_wall_clock_ms"] = retryWallClockMS
+		}
+	}
+	return data
 }
 
 func microagentCapabilityManifest() map[string]any {

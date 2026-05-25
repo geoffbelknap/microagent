@@ -4,7 +4,7 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-05-25_
 
 ```text
 microagent serve mcp
@@ -53,7 +53,11 @@ consistent envelope with `result`, optional structured `error`, `timing_ms`, and
 `status`, optional `exit_code`, base64-encoded `stdout` and `stderr`,
 truncation flags, timestamps, protocol version, and optional service error. A
 nonzero command exit is not a tool error; it is represented by `status:
-exited` and a nonzero `exit_code`.
+exited` and a nonzero `exit_code`. Successful `workspace.exec` responses also
+include `retry_count`, `retry_wall_clock_ms`, and matching `metadata` fields.
+When the bounded retry budget is exhausted, the JSON-RPC error `data` includes
+`retry_count`, `retry_wall_clock_ms`, and `retry_exhausted` so clients can
+distinguish retry exhaustion from ordinary task failure.
 
 ## Example
 
