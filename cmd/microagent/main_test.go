@@ -5284,6 +5284,74 @@ func TestFollowLogsExitsWhenNotRunning(t *testing.T) {
 	}
 }
 
+func TestRunEventsSnapshotAndFollow(t *testing.T) {
+	dir := t.TempDir()
+	name := "research"
+	wsDir := filepath.Join(dir, name)
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eventsJSON := `[
+	  {"identity":{},"state":"running","detail":"runtime is started","observedAt":"2026-06-01T00:00:01Z"},
+	  {"identity":{},"state":"halted","detail":"clean shutdown","observedAt":"2026-06-01T00:00:09Z"}
+	]`
+	if err := os.WriteFile(filepath.Join(wsDir, "events.json"), []byte(eventsJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := workspace.ReadEvents(dir, name)
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	if len(events) != 2 || events[0].State != vmkit.StateRunning || events[1].State != vmkit.StateHalted {
+		t.Fatalf("events = %#v", events)
+	}
+
+	outPath := filepath.Join(dir, "out.txt")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- followEvents(context.Background(), dir, name, nil, out) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("followEvents: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("followEvents did not return for a terminal workspace")
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "running") || !strings.Contains(string(got), "halted") {
+		t.Fatalf("followEvents output = %q", got)
+	}
+}
+
+func TestReadEventsMissingAndMalformed(t *testing.T) {
+	dir := t.TempDir()
+	events, err := workspace.ReadEvents(dir, "absent")
+	if err != nil || events != nil {
+		t.Fatalf("missing events: events=%v err=%v", events, err)
+	}
+	wsDir := filepath.Join(dir, "broken")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, "events.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspace.ReadEvents(dir, "broken"); err == nil {
+		t.Fatal("expected error for malformed events.json")
+	}
+}
+
 func TestHighLevelCreateDetection(t *testing.T) {
 	if !hasFlagValue([]string{"--image", "ubuntu:24.04"}, "image") {
 		t.Fatal("expected --image to be detected")

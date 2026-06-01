@@ -152,6 +152,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "logs" || args[0] == "log" {
 		return runLogs(ctx, args[1:], stdout)
 	}
+	if args[0] == "events" {
+		return runEvents(ctx, args[1:], stdout)
+	}
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
 	}
@@ -1191,6 +1194,104 @@ func writeSerialTail(path string, offset int64, stdout *os.File) (int64, error) 
 		return 0, err
 	}
 	return io.Copy(stdout, f)
+}
+
+func runEvents(ctx context.Context, args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	follow := false
+	fs := flag.NewFlagSet("events", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.BoolVar(&follow, "follow", false, "Stream new lifecycle events until the workspace stops or interrupted")
+	fs.BoolVar(&follow, "f", false, "Alias for --follow")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent events <name> [--follow] [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	events, err := workspace.ReadEvents(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	if follow {
+		if outputStructured() {
+			return fmt.Errorf("events --follow is not supported with --json/--output json; omit --follow for a one-shot snapshot")
+		}
+		return followEvents(ctx, opts.StateDir, name, events, stdout)
+	}
+	if outputStructured() {
+		return writeJSON(stdout, map[string]any{"workspace": name, "events": events})
+	}
+	for _, event := range events {
+		writeEventLine(stdout, event)
+	}
+	return nil
+}
+
+func writeEventLine(stdout *os.File, event workspace.EventFile) {
+	line := fmt.Sprintf("%s  %s", event.ObservedAt, event.State)
+	if event.Detail != "" {
+		line += "  " + event.Detail
+	}
+	fmt.Fprintln(stdout, line)
+}
+
+// eventFollowComplete reports whether the latest event is a terminal lifecycle
+// state, so events --follow returns instead of polling forever. Quarantined is
+// not terminal: a quarantined runtime may still be running.
+func eventFollowComplete(events []workspace.EventFile) bool {
+	if len(events) == 0 {
+		return false
+	}
+	switch events[len(events)-1].State {
+	case vmkit.StateHalted, vmkit.StateStopped, vmkit.StateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// followEvents prints the recorded events, then streams newly appended events
+// as the workspace changes state, returning when the workspace reaches a
+// terminal state or the caller interrupts. events.json is rewritten wholesale
+// on each change, so new entries are detected by a growing event count.
+func followEvents(ctx context.Context, stateDir, name string, seen []workspace.EventFile, stdout *os.File) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	for _, event := range seen {
+		writeEventLine(stdout, event)
+	}
+	count := len(seen)
+	if eventFollowComplete(seen) {
+		return nil
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		events, err := workspace.ReadEvents(stateDir, name)
+		if err != nil {
+			return err
+		}
+		if len(events) > count {
+			for _, event := range events[count:] {
+				writeEventLine(stdout, event)
+			}
+			count = len(events)
+		}
+		if eventFollowComplete(events) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
 }
 
 func runNetwork(args []string, stdout *os.File) error {
@@ -5399,7 +5500,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-images":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images":
 		return true
 	default:
 		return false
@@ -5782,6 +5883,7 @@ Commands:
   status               Show workspace state
   result               Show structured workspace result
   logs                 Show workspace logs
+  events               Show or stream the lifecycle event history
   profiles             List resource profiles
   images               List or prune local image records
   prune                Prune stale local records and optional image cache files

@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -47,6 +49,36 @@ func ReadLogs(stateDir, name string) ([]byte, error) {
 		return nil, err
 	}
 	return os.ReadFile(SerialLogPath(stateDir, name))
+}
+
+// EventsPath is the per-workspace lifecycle event history file (a JSON array of
+// EventFile, rewritten atomically on each state change).
+func EventsPath(stateDir, name string) string {
+	return filepath.Join(stateDir, name, "events.json")
+}
+
+// ReadEvents returns the recorded lifecycle events for a workspace, oldest
+// first. A workspace with no event history yet (never started) returns an empty
+// slice and no error.
+func ReadEvents(stateDir, name string) ([]EventFile, error) {
+	if err := ValidateName(name); err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(EventsPath(stateDir, name))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, nil
+	}
+	var events []EventFile
+	if err := json.Unmarshal(data, &events); err != nil {
+		return nil, fmt.Errorf("workspace %s event history is malformed: %w", name, err)
+	}
+	return events, nil
 }
 
 func Network(stateDir, name string) (NetworkStatus, error) {
