@@ -15,6 +15,16 @@ import (
 
 const ExecReadyProbeTimeout = 2 * time.Second
 
+// ExecReadyWait bounds how long Exec waits for the guest structured-exec
+// service to answer before running the caller's command. A command issued
+// immediately after start can otherwise hit the brief window where the host
+// exec forward is bound but the in-guest service is not yet listening.
+const ExecReadyWait = 5 * time.Second
+
+// execReadinessProbe is the readiness check used by the pre-exec gate. It is a
+// package variable so tests can substitute a deterministic probe.
+var execReadinessProbe = ExecReadinessSignal
+
 func Exec(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
 	if err := ValidateName(opts.Name); err != nil {
 		return execprotocol.ExecResult{}, err
@@ -42,8 +52,37 @@ func Exec(ctx context.Context, opts Options, req execprotocol.ExecRequest) (exec
 	if runtimeState.Config.ExecPort == 0 {
 		return execprotocol.ExecResult{}, fmt.Errorf("workspace %s has no structured exec port in runtime state", opts.Name)
 	}
+	// Gate on readiness before issuing the command so the post-start window
+	// where the guest exec service is not yet listening does not surface as a
+	// transient failure. The readiness probe runs an idempotent `true`, so the
+	// caller's command is still issued exactly once, after the service answers
+	// (or the grace elapses, in which case the real attempt surfaces the error).
+	waitForExecReady(ctx, runtimeState, ExecReadyWait)
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(runtimeState.Config.ExecPort)))
 	return execclient.New(addr).Exec(ctx, req)
+}
+
+// waitForExecReady polls the structured-exec readiness probe until it reports
+// ready, the context is cancelled, or the grace period elapses. It never runs
+// the caller's command; it only delays issuing it.
+func waitForExecReady(ctx context.Context, state RuntimeState, grace time.Duration) {
+	if grace <= 0 {
+		return
+	}
+	deadline := time.Now().Add(grace)
+	for {
+		if signal, ok := execReadinessProbe(ctx, state, ExecReadyProbeTimeout); ok && signal.Ready {
+			return
+		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
 }
 
 func ExecReadinessSignal(ctx context.Context, state RuntimeState, probeTimeout time.Duration) (vmkit.ReadinessSignal, bool) {
