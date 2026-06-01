@@ -4,7 +4,7 @@ description: Declarative workspace network intent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 Every workspace declares its network intent. Four modes:
 
@@ -19,7 +19,7 @@ The implementation under each mode varies by backend:
 
 | Backend | What works today |
 |---|---|
-| Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment` — runs in user space inside the framework, no privileges required. `isolated`, static NAT config, and TCP `--publish` work. `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
+| Apple VF | `user` and `nat` both map to `VZNATNetworkDeviceAttachment` - runs in user space inside the framework, no privileges required. `isolated`, static NAT config, and TCP `--publish` work. `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
 | Firecracker | `user` runs Firecracker inside a `pasta` user namespace with a namespace-local TAP. `nat` creates a host-side TAP and installs nftables MASQUERADE rules. `bridged` attaches a transient TAP to an existing host Linux bridge. `isolated` and TCP `--publish` work. |
 | Windows Hyper-V | `user` and `nat` use the managed `microagent-nat` HNS NAT network. `isolated` starts without an external network adapter. TCP `--publish` works through Hyper-V socket bridging. `bridged` attaches to the named HNS network or Hyper-V switch. |
 
@@ -77,7 +77,7 @@ Repeat `--publish` for each TCP forward you need:
 microagent create research --publish 127.0.0.1:8080:80/tcp
 ```
 
-Under the hood, the guest init listens on a vsock port matching the host port; the backend supervisor runs the host-side TCP listener and bridges connections to that vsock port. You don't have to configure either side — declaring the forward wires it up.
+Under the hood, the guest init listens on a vsock port matching the host port; the backend supervisor runs the host-side TCP listener and bridges connections to that vsock port. You don't have to configure either side - declaring the forward wires it up.
 
 Isolated workspaces reject port forwards before the request leaves the CLI: there's no guest network for them to reach.
 
@@ -102,7 +102,7 @@ portable way to expose a service to the host. Published ports are.
 
 ## User mode on Firecracker
 
-`user` is the default Linux mode. The workspace runs inside an unprivileged user namespace, with `pasta` bridging that namespace's network out to the host using ordinary user-space socket calls. No host `setcap`, no `ip_forward=1`, no bridge configuration — `pasta` does the equivalent of NAT entirely in user space.
+`user` is the default Linux mode. The workspace runs inside an unprivileged user namespace, with `pasta` bridging that namespace's network out to the host using ordinary user-space socket calls. No host `setcap`, no `ip_forward=1`, no bridge configuration - `pasta` does the equivalent of NAT entirely in user space.
 
 Host requirements:
 
@@ -119,12 +119,14 @@ Host requirements:
 Host requirements:
 
 - Linux kernel with nftables support (any 4.4+ kernel).
-- `net.ipv4.ip_forward=1`. The supervisor doesn't toggle this for you — it's a host-wide policy decision.
+- `net.ipv4.ip_forward=1`. The supervisor doesn't toggle this for you - it's a host-wide policy decision.
 - `CAP_NET_ADMIN` available to the supervisor process and inheritable by Firecracker. Running as root works. For a non-root flow, grant the supervisor `cap_net_admin,cap_setpcap+ep`; the supervisor uses `CAP_SETPCAP` to add `CAP_NET_ADMIN` to its inheritable set before it launches Firecracker.
 
 If any of those is missing, `nat` fails closed before the VM boots. Transient TAPs and per-workspace nftables rules are cleaned up on `quarantine`, `stop`, `kill`, and `delete`.
 
-Pick `nat` over `user` when you need the throughput — the user-mode stack costs ~10–30% on bandwidth, irrelevant for LLM API calls but noticeable for high-volume traffic.
+Pick `nat` over `user` when you need the throughput. The user-mode stack costs
+about 10-30% on bandwidth. That does not matter much for LLM API calls, but it
+shows up on high-volume traffic.
 
 ## Static NAT on Apple VF
 
@@ -158,7 +160,7 @@ network:
   interface: en0
 ```
 
-The supervisor needs the `com.apple.vm.networking` entitlement. Local ad-hoc builds fail closed during `check` with an error that names the Apple restriction — you'll see it before any VM tries to start.
+The supervisor needs the `com.apple.vm.networking` entitlement. Local ad-hoc builds fail closed during `check` with an error that names the Apple restriction - you'll see it before any VM tries to start.
 
 ## Bridged on Firecracker
 
@@ -172,7 +174,7 @@ network:
 
 The supervisor creates a transient TAP, attaches it to the bridge via Linux netlink, writes the Firecracker network device config, and tears the TAP down on `quarantine`/`stop`/`kill`/`delete`. Missing privileges, non-bridge interfaces, and TAP setup failures all fail closed.
 
-Same `CAP_NET_ADMIN` requirement as `nat` — run as root, or use a supervisor binary with `cap_net_admin,cap_setpcap+ep` so Firecracker can inherit `CAP_NET_ADMIN`.
+Same `CAP_NET_ADMIN` requirement as `nat` - run as root, or use a supervisor binary with `cap_net_admin,cap_setpcap+ep` so Firecracker can inherit `CAP_NET_ADMIN`.
 
 ## Bridged on Windows Hyper-V
 
@@ -189,7 +191,7 @@ the current user cannot create HNS endpoints for HCS compute systems.
 
 ## Mediation channel
 
-Mediation is a separate guest-to-host vsock contract for the body's calls into the host control plane — distinct from ordinary networking. Declare it with:
+Mediation is a separate guest-to-host vsock contract for the body's calls into the host control plane - distinct from ordinary networking. Declare it with:
 
 ```bash
 microagent create research --mediation 2048=127.0.0.1:9900

@@ -5,6 +5,10 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Refreshed README, install, architecture, boundaries, library, and MCP docs for
+  the stable `v0.1.45` release, `microagent-rc` Homebrew formula, and current
+  AX/MCP substrate boundary.
+
 ## v0.1.45 - 2026-06-01
 
 - Added AX output mode for agent-facing structured CLI responses and errors.

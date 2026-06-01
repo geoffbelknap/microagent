@@ -2,11 +2,17 @@
 
 Run AI agent workspaces in microVMs.
 
-Each agent gets its own Linux microVM — kernel, rootfs, state, lifecycle. Boot from an OCI image and tear down, or keep the workspace around and halt/resume it later. Linux uses Firecracker; macOS uses Apple Virtualization.framework; Windows Hyper-V support is experimental. Identity, policy, credentials, and control-plane decisions live in your code, not in this one.
+Each agent gets its own Linux microVM with its own kernel, rootfs, state, and
+lifecycle. Boot from an OCI image and tear down, or keep the workspace around
+and halt/resume it later. Linux uses Firecracker; macOS uses Apple
+Virtualization.framework; Windows Hyper-V support is experimental. Identity,
+policy, credentials, and control-plane decisions live in your code.
 
 The project is a Go library first. The `microagent` CLI is a thin shell over
 the exported packages, so anything the CLI can do, your Go program can do
 directly with typed options and typed results.
+
+Current stable release: `v0.1.45`.
 
 ## Install
 
@@ -14,7 +20,16 @@ directly with typed options and typed results.
 brew install geoffbelknap/tap/microagent
 ```
 
-This installs `microagent` and `microagent-supervisor`, a symlink to the correct supervisor for your host. To build from source, see [`docs/getting-started/install.md`](docs/getting-started/install.md).
+This installs `microagent` and `microagent-supervisor`, a symlink to the
+supervisor for your host. To build from source, see
+[`docs/getting-started/install.md`](docs/getting-started/install.md).
+
+Release candidates are published as a separate Homebrew formula so the stable
+formula remains the default:
+
+```bash
+brew install geoffbelknap/tap/microagent-rc
+```
 
 ## 30-second tour
 
@@ -41,7 +56,7 @@ Private registry pulls use standard registry credential configuration from
 `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`, including configured
 credential helpers.
 
-For workspaces that stick around — halt, resume, copy files in, attach a console:
+For workspaces that stick around:
 
 ```bash
 microagent create research \
@@ -56,24 +71,38 @@ microagent start research                        # boots the same disk back up
 microagent delete research
 ```
 
-The same workspace can be expressed declaratively — see [`microagent.yaml`](docs/cli/spec.md) for the spec format.
+You can also keep the workspace in a spec file. See
+[`microagent.yaml`](docs/cli/spec.md) for the format.
 
 Other useful surfaces:
 
-- `microagent inspect <name>` — structured alias for `status`
-- `microagent exec <name> -- <argv...>` — run a structured command in a running workspace
-- `microagent rm <name>` — alias for `delete`
-- `microagent images pull/list/tag/rm/prune` — manage reusable local rootfs baselines
-- `microagent cp` and `microagent artifacts get` — move files without entering a running VM
-- `microagent perf` — measure boot and runtime footprint
+- `microagent inspect <name>` prints structured status.
+- `microagent exec <name> -- <argv...>` runs a structured command in a running workspace.
+- `microagent serve mcp` exposes the machine-readable MCP stdio endpoint.
+- `microagent rm <name>` is an alias for `delete`.
+- `microagent images pull/list/tag/rm/prune` manages reusable local rootfs baselines.
+- `microagent cp` and `microagent artifacts get` move files without entering a running VM.
+- `microagent perf` measures boot and runtime footprint.
+
+For agent clients, AX mode and the MCP endpoint provide structured tool
+responses for lifecycle, status/inspect, exec, images, copy/artifacts, cost
+estimation, idempotency, and capability discovery. See
+[`microagent serve`](docs/cli/serve.md).
 
 ## What it owns
 
-The VM boundary. Kernel management, OCI-to-rootfs builds, local image records, VM lifecycle (`run`, `create`, `start`, `halt`, `quarantine`, `stop`, `kill`, `delete`), networking and vsock wiring, serial console, file transfer for stopped disks, structured results, declared artifacts, runtime verification, lifecycle events, and backend supervisors.
+The VM boundary: kernel management, OCI-to-rootfs builds, local image records,
+VM lifecycle (`run`, `create`, `start`, `halt`, `quarantine`, `stop`, `kill`,
+`delete`), networking and vsock wiring, serial console, stopped-disk file
+transfer, structured exec, structured results, declared artifacts, readiness,
+runtime verification, lifecycle events, the MCP adapter, and backend
+supervisors.
 
 ## What it doesn't own
 
-Planning loops, LLM calls, tool mediation, policy decisions, credential brokering, audit interpretation. Other projects own those — `microagent` is the substrate they sit on.
+Planning loops, LLM calls, tool mediation, policy decisions, credential
+brokering, and audit interpretation. Other projects own those; `microagent` is
+the substrate they sit on.
 
 It also does not expose container-engine APIs, compose projects, pods,
 privileged mode, namespace/device controls, host directory bind mounts, or named
@@ -108,7 +137,7 @@ Pick the path that matches what you're doing:
 
 ## Project
 
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — development setup and PR conventions
-- [`SECURITY.md`](SECURITY.md) — reporting a security issue
-- [`CHANGELOG.md`](CHANGELOG.md) — release notes and unreleased changes
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) - development setup and PR conventions
+- [`SECURITY.md`](SECURITY.md) - reporting a security issue
+- [`CHANGELOG.md`](CHANGELOG.md) - release notes and unreleased changes
 - License: [`Apache-2.0`](LICENSE)

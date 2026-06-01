@@ -16,6 +16,8 @@ This repository owns the VM pieces:
 - guest metadata and identity propagation
 - serial console, block-device, network, and vsock wiring
 - readiness, structured results, declared artifacts, and event history
+- AX output mode for agent-facing structured CLI responses
+- the MCP stdio adapter over the existing workspace/image/copy/artifact APIs
 - cleanup, state files, and stale temporary artifact policy
 - Firecracker supervisor
 - Apple Virtualization.framework supervisor protocol
@@ -23,9 +25,13 @@ This repository owns the VM pieces:
 
 ## Non-goals
 
-- Do not implement orchestration, planning, LLM calls, tools, or memory.
+- Do not implement orchestration, planning, LLM calls, agent-side tools, or
+  memory. MCP tool wrappers are allowed only as adapters over microagent-owned
+  substrate operations.
 - Do not implement policy, audit meaning, credential mediation, or enforcement
   decisions. Other projects own those.
+- Do not turn the MCP endpoint into a planner, policy engine, or agent
+  framework. It is an adapter over microagent's existing substrate APIs.
 - Do not become a general-purpose Mac VM manager. Lima, Tart, vfkit, and Lume
   already serve that space.
 - Do not grow rootfs build logic into a general image scanner, signer, or
@@ -38,6 +44,8 @@ This repository owns the VM pieces:
 ## Design rules
 
 - Keep public output structured and machine-readable.
+- Keep AX mode and MCP responses structured, typed, and stable enough for agent
+  clients to consume without log scraping.
 - Keep the Apple VF supervisor usable from Go, Python, Rust, Node, and shell scripts.
 - Treat state changes as API output, not log strings.
 - Keep halt, quarantine, readiness, result, artifact, and verification semantics backend-neutral.
@@ -72,6 +80,12 @@ This repository owns the VM pieces:
   update README/docs and run `python3 scripts/dev/markdown-link-check.py` and
   `python3 scripts/dev/docs-last-updated.py --check` and
   `python3 scripts/dev/docs-parity.py`.
+- When MCP tools, AX envelopes, readiness fields, or structured exec semantics
+  change, update `docs/cli/serve.md`, `docs/cli/exec.md`,
+  `docs/concepts/state-and-identity.md`, `docs/protocol/runtime-contract.md`,
+  and `docs/library/go.md` as applicable.
+- Keep release/install docs aligned with the Homebrew tap: stable installs use
+  `microagent`; release candidates use the separate `microagent-rc` formula.
 
 ## Project boundary
 

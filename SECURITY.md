@@ -19,4 +19,4 @@ Security fixes target the latest released version and `main`. Older releases may
 
 ## Trust boundary
 
-For what `microagent` does and doesn't enforce — kernel verification, image pinning, supervisor signing — see [`docs/security.md`](docs/security.md).
+For what `microagent` does and doesn't enforce - kernel verification, image pinning, supervisor signing - see [`docs/security.md`](docs/security.md).
