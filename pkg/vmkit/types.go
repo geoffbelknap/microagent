@@ -27,6 +27,7 @@ const (
 	StatePrepared    VMState = "prepared"
 	StateStarting    VMState = "starting"
 	StateRunning     VMState = "running"
+	StatePaused      VMState = "paused"
 	StateStopping    VMState = "stopping"
 	StateStopped     VMState = "stopped"
 	StateHalted      VMState = "halted"
@@ -248,7 +249,7 @@ func ValidateRequest(req Request) error {
 		if err := ValidateConfig(req.Config); err != nil {
 			return err
 		}
-	case "inspect", "halt", "quarantine", "stop", "kill", "delete":
+	case "inspect", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}

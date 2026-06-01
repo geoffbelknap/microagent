@@ -59,6 +59,19 @@ func TestRuntimeContractQuarantineSemantics(t *testing.T) {
 	t.Fatal("contract missing quarantined state")
 }
 
+func TestRuntimeContractPausedSemantics(t *testing.T) {
+	contract := NewRuntimeContract()
+	for _, state := range contract.States {
+		if state.Name == StatePaused {
+			if !state.DiskPreserved || !state.EventHistoryKept || !state.RuntimeMayContinue {
+				t.Fatalf("paused state = %#v", state)
+			}
+			return
+		}
+	}
+	t.Fatal("contract missing paused state")
+}
+
 func contractHasItem(items []ContractItem, name string) bool {
 	for _, item := range items {
 		if item.Name == name {
