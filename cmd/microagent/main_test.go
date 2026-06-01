@@ -5197,7 +5197,7 @@ func TestRunLogsPrintsSerialLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runLogs([]string{"research", "--state-dir", dir}, stdout)
+	err = runLogs(context.Background(), []string{"research", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -5210,6 +5210,77 @@ func TestRunLogsPrintsSerialLog(t *testing.T) {
 	}
 	if string(got) != "hello\n" {
 		t.Fatalf("logs = %q", got)
+	}
+}
+
+func TestWriteSerialTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "serial.log")
+	if err := os.WriteFile(path, []byte("abcdef"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.txt")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := writeSerialTail(path, 3, out)
+	if err != nil {
+		t.Fatalf("writeSerialTail: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("wrote %d bytes, want 3", n)
+	}
+	// A not-yet-created serial log reads as empty, not an error.
+	missing, err := writeSerialTail(filepath.Join(dir, "nope.log"), 0, out)
+	if err != nil || missing != 0 {
+		t.Fatalf("missing file: n=%d err=%v", missing, err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "def" {
+		t.Fatalf("tail = %q, want %q", got, "def")
+	}
+}
+
+func TestFollowLogsExitsWhenNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	name := "research"
+	if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name, "serial.log"), []byte("boot output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.txt")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- followLogs(context.Background(), dir, name, out) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("followLogs: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("followLogs did not return for a workspace that is not running")
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "boot output") {
+		t.Fatalf("followLogs output missing serial content: %q", got)
 	}
 }
 

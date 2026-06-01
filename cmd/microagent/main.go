@@ -150,7 +150,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return runPS(args[1:], stdout)
 	}
 	if args[0] == "logs" || args[0] == "log" {
-		return runLogs(args[1:], stdout)
+		return runLogs(ctx, args[1:], stdout)
 	}
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
@@ -1095,20 +1095,29 @@ func writePerfSteadyReport(stdout *os.File, report perfSteadyReport) error {
 	return nil
 }
 
-func runLogs(args []string, stdout *os.File) error {
+func runLogs(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	follow := false
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.BoolVar(&follow, "follow", false, "Stream the serial buffer and new output until the workspace stops or interrupted")
+	fs.BoolVar(&follow, "f", false, "Alias for --follow")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: microagent logs <name> [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent logs <name> [--follow] [--state-dir <dir>]")
 	}
 	name := fs.Arg(0)
 	if err := validateWorkspaceName(name); err != nil {
 		return err
+	}
+	if follow {
+		if outputStructured() {
+			return fmt.Errorf("logs --follow is not supported with --json/--output json; omit --follow to capture the buffer once")
+		}
+		return followLogs(ctx, opts.StateDir, name, stdout)
 	}
 	data, err := workspace.ReadLogs(opts.StateDir, name)
 	if err != nil {
@@ -1122,6 +1131,66 @@ func runLogs(args []string, stdout *os.File) error {
 	}
 	_, err = stdout.Write(data)
 	return err
+}
+
+// followLogs prints the captured serial buffer, then streams new output as it
+// is appended, until the workspace leaves the running state or the caller
+// interrupts (Ctrl-C). It is the streaming counterpart to ReadLogs.
+func followLogs(ctx context.Context, stateDir, name string, stdout *os.File) error {
+	// Surface the same "no such workspace" error as the non-follow path before
+	// entering the stream loop.
+	if _, err := workspace.ReadLogs(stateDir, name); err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	serialPath := workspace.SerialLogPath(stateDir, name)
+	var offset int64
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		n, err := writeSerialTail(serialPath, offset, stdout)
+		if err != nil {
+			return err
+		}
+		offset += n
+
+		// Once the workspace is no longer running, drain any final bytes and stop
+		// so the command does not hang on a stopped workspace.
+		state, _, stateErr := workspace.LatestStartState(stateDir, name)
+		if stateErr != nil || state != vmkit.StateRunning {
+			final, _ := writeSerialTail(serialPath, offset, stdout)
+			offset += final
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			final, _ := writeSerialTail(serialPath, offset, stdout)
+			offset += final
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+// writeSerialTail copies bytes from path starting at offset to stdout and
+// returns the number of bytes written. A not-yet-created serial log is treated
+// as empty rather than an error so callers can poll a workspace that is still
+// booting.
+func writeSerialTail(path string, offset int64, stdout *os.File) (int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return 0, err
+	}
+	return io.Copy(stdout, f)
 }
 
 func runNetwork(args []string, stdout *os.File) error {
