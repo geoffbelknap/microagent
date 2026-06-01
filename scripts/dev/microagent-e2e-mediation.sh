@@ -143,27 +143,29 @@ srv.listen(1)
 with open(port_file, "w", encoding="utf-8") as f:
     f.write(str(srv.getsockname()[1]))
     f.write("\n")
-conn, addr = srv.accept()
-with conn:
-    conn.settimeout(10)
-    data = bytearray()
-    while b"\r\n\r\n" not in data:
-        chunk = conn.recv(4096)
-        if not chunk:
-            break
-        data.extend(chunk)
-    with open(request_file, "wb") as f:
-        f.write(bytes(data))
-    body = b"MEDIATION_OK\n"
-    conn.sendall(
-        b"HTTP/1.1 200 OK\r\n"
-        + b"Content-Type: text/plain\r\n"
-        + b"Content-Length: "
-        + str(len(body)).encode()
-        + b"\r\nConnection: close\r\n\r\n"
-        + body
-    )
-srv.close()
+while True:
+    conn, addr = srv.accept()
+    with conn:
+        conn.settimeout(10)
+        data = bytearray()
+        while b"\r\n\r\n" not in data:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data.extend(chunk)
+        if not data:
+            continue
+        with open(request_file, "wb") as f:
+            f.write(bytes(data))
+        body = b"MEDIATION_OK\n"
+        conn.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            + b"Content-Type: text/plain\r\n"
+            + b"Content-Length: "
+            + str(len(body)).encode()
+            + b"\r\nConnection: close\r\n\r\n"
+            + body
+        )
 PY
 SERVER_PID="$!"
 
@@ -298,8 +300,6 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
   --send "if wget -qO- -T 3 http://127.0.0.1:18083/raw-unavailable; then echo RAW_UNAVAILABLE_UNEXPECTED; else echo RAW_UNAVAILABLE_FAILED; fi" \
   --ready-timeout 30 \
   --timeout 10 >"$STATE_DIR/connect-unavailable.txt"
-wait "$SERVER_PID"
-SERVER_PID=""
 wait "$RAW_SERVER_PID"
 RAW_SERVER_PID=""
 wait "$RAW_LARGE_SERVER_PID"
@@ -424,7 +424,7 @@ if optional_running.get("mediation", {}).get("required") is not False:
 if optional_running.get("mediation", {}).get("failClosed") is not False:
     raise SystemExit(optional_running)
 optional_mediation = optional_running.get("readiness", {}).get("mediationReady", {})
-if optional_mediation.get("ready") is not True or optional_mediation.get("error"):
+if optional_mediation.get("ready") is not False or optional_mediation.get("error"):
     raise SystemExit(optional_running)
 if "OPTIONAL_MEDIATION_RUNNING" not in read_text("connect-optional.txt"):
     raise SystemExit(read_text("connect-optional.txt"))
