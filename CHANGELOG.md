@@ -5,6 +5,22 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Added AX output mode for agent-facing structured CLI responses and errors.
+- Added the `microagent serve mcp` stdio endpoint with workspace lifecycle,
+  status, inspect, exec, cost-estimate, mutation-preview, idempotency, and
+  capability-manifest tools.
+- Added the structured exec protocol, guest service, host client, CLI command,
+  and MCP wiring.
+- Added runtime readiness signals for guest, shell, structured exec, result,
+  and mediation state.
+- Added mediation target readiness probing for running workspaces, with
+  fail-closed errors for required mediation and non-error not-ready status for
+  optional mediation.
+- Added bounded retry handling for transient MCP structured-exec connection
+  failures, including retryable error metadata and retry-exhaustion details.
+- Added fast status/inspect readiness behavior for non-live workspace states.
+- Expanded Linux/Firecracker E2E coverage for lifecycle, networking,
+  mediation/transport, supervision, public CLI surface, and runtime contracts.
 - Renamed the project, Go module, Homebrew formula references, and docs from
   `microagent-kit` to `microagent`; the CLI name and `~/.microagent` state
   layout are unchanged.
