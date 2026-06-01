@@ -4,7 +4,7 @@ description: Print the microagent version.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-05_
+_Last updated: 2026-06-01_
 
 ```text
 microagent version
@@ -21,3 +21,7 @@ builds without a release tag.
 $ microagent version
 microagent 0.1.0
 ```
+
+## Related
+
+- [CLI reference](/cli/)

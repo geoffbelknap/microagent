@@ -68,3 +68,8 @@ distinguish retry exhaustion from ordinary task failure.
 ```bash
 microagent serve mcp
 ```
+
+## Related
+
+- [`contract`](/cli/contract/) - the backend-neutral runtime contract the MCP surface exposes
+- [Supervisor protocol](/protocol/) - the JSON shapes returned by the underlying commands

@@ -41,6 +41,10 @@ go build ./cmd/microagent                                         # macOS
 swift build --package-path supervisors/applevf --disable-sandbox  # macOS only
 ```
 
+On Linux, the installed `microagent-supervisor` is a host symlink to this
+built `microagent-firecracker-supervisor` binary, so the two names refer to the
+same supervisor.
+
 To produce an ad-hoc signed supervisor (macOS):
 
 ```bash

@@ -4,7 +4,7 @@ description: Experimental Windows host backend for Linux guests through HCS.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-12_
+_Last updated: 2026-06-01_
 
 The `windows-hyperv` backend is the experimental Windows host backend for
 running Linux guests without WSL and without QEMU. It talks to Windows Host
@@ -81,8 +81,9 @@ Unsupported commands fail closed with structured `ok: false` responses.
 compute system, waits for guest result delivery, records backend-neutral
 runtime state, and returns a stopped event with `result` when the guest exits
 successfully. `start` creates a detached HCS compute system and records enough
-HCS identity in `runtime.json` for later `inspect`, `connect`, `halt`,
-`quarantine`, `stop`, `kill`, and `delete`.
+HCS identity in `runtime.json` for later `inspect`, `halt`, `quarantine`,
+`stop`, `kill`, and `delete` (and for CLI-level `connect` over Hyper-V sockets,
+which is not a supervisor protocol command).
 
 ## Networking
 

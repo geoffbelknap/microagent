@@ -161,7 +161,7 @@ For repeatable deployments, prefer digest-pinned image refs such as
 
 `microagent doctor` reports each of these - start there to find the missing piece.
 
-If your host doesn't allow unprivileged user namespaces and you can't change that policy, fall back to `--network nat` with the supervisor cap setup (see the next entry).
+If your host doesn't allow unprivileged user namespaces and you can't change that policy, fall back to `--network nat` with the supervisor cap setup (see [Firecracker `nat` guest can't reach the internet](#firecracker-nat-guest-cant-reach-the-internet) below).
 
 ### Apple VF `bridged` mode fails closed before start
 

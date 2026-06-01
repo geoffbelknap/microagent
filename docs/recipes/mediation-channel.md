@@ -64,7 +64,11 @@ The supervisor wires up the vsock listener inside the guest and bridges it to th
 
 The body's `process()` function in simple-agent reads one file and writes one file, then exits. With mediation, the body opens a long-lived connection and loops over it.
 
-A skeleton (Python; same shape in any language):
+A skeleton (Python; same shape in any language). The `emit_lifecycle_signal`,
+`process`, `read_message`/`send_message`, and `WorkRequest`/`WorkResult` helpers
+referenced below come from the example's
+[`protocol.py`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/protocol.py)
+and [`body.py`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/body.py):
 
 ```python
 import socket
@@ -72,7 +76,8 @@ import json
 
 VSOCK_PORT = 2048
 
-# AF_VSOCK is socket.AF_VSOCK on Linux; CID_HOST is the conventional host CID.
+# AF_VSOCK requires a Linux host and a vsock-capable guest; CID_HOST is the
+# conventional host CID.
 CID_HOST = 2
 
 def connect_to_mediation():

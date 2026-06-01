@@ -4,7 +4,7 @@ description: Show the current state of a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-25_
+_Last updated: 2026-06-01_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -57,10 +57,12 @@ declared output by name without entering the workspace.
 |---|---|
 | `--name <name>` | Workspace name (also accepted as positional) |
 | `--id <id>` | Workspace ID alias for `--name` |
-| `--state-dir <dir>` | State directory holding the workspace record |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `status`; print structured JSON output |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
 ## Examples
 
@@ -68,6 +70,46 @@ declared output by name without entering the workspace.
 microagent status --name research
 microagent --json status agent-1 --state-dir /tmp/microagent
 microagent inspect research
+```
+
+A trimmed `microagent --json status` response for a running workspace, showing
+the readiness, verification, and network blocks:
+
+```json
+{
+  "ok": true,
+  "backend": "firecracker",
+  "event": {
+    "identity": { "runtimeID": "research", "role": "workload", "backend": "firecracker" },
+    "state": "running",
+    "observedAt": "2026-06-01T12:00:00Z"
+  },
+  "verification": {
+    "ok": true,
+    "imageRef": "docker.io/library/ubuntu:24.04",
+    "imageDigest": "sha256:...",
+    "rootfs": { "sha256": "...", "recordedSHA256": "..." }
+  },
+  "readiness": {
+    "guestReady": { "ready": true },
+    "shellReady": { "ready": true },
+    "execReady": { "ready": true },
+    "resultReady": { "ready": false },
+    "mediationReady": { "ready": false }
+  },
+  "network": {
+    "mode": "nat",
+    "portForwards": [
+      { "protocol": "tcp", "host": "127.0.0.1", "hostPort": 8080, "guestPort": 80 }
+    ],
+    "runtime": {
+      "mode": "nat",
+      "ip": "10.43.12.2/29",
+      "gateway": "10.43.12.1",
+      "dns": ["1.1.1.1"]
+    }
+  }
+}
 ```
 
 ## Related

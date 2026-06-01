@@ -4,7 +4,7 @@ description: Copy regular files into or out of stopped workspace disks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-08_
+_Last updated: 2026-06-01_
 
 ```text
 microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]
@@ -33,6 +33,7 @@ Exactly one endpoint must be a workspace endpoint:
 - Attached disk names refer to the `--disk` or `--bundle` names recorded in
   the workspace manifest.
 - The implementation uses `debugfs`; pass `--debugfs` when it is not on `PATH`.
+- `cp` operates on offline disks; it takes no backend or supervisor selection.
 
 ## Examples
 

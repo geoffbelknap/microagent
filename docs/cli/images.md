@@ -4,7 +4,7 @@ description: List or prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 ```text
 microagent images pull <image> [--state-dir <dir>]
@@ -84,6 +84,31 @@ microagent images rm local/ubuntu:baseline
 microagent create research --image local/ubuntu:baseline
 microagent --json images prune
 microagent --json images prune --delete --yes
+```
+
+`images list` prints one row per recorded image:
+
+```text
+IMAGE                                            DIGEST                       PLATFORM         SIZE       LAST USED
+docker.io/library/ubuntu:24.04                   sha256:abc...                linux/amd64      268435456  2026-06-01T12:00:00Z
+```
+
+With the global `--json` flag, the records are returned under `images`:
+
+```json
+{
+  "images": [
+    {
+      "image_ref": "docker.io/library/ubuntu:24.04",
+      "resolved_ref": "docker.io/library/ubuntu@sha256:abc...",
+      "digest": "sha256:abc...",
+      "platform": { "os": "linux", "architecture": "amd64" },
+      "output_path": "/home/user/.microagent/images/sha256-abc.../rootfs.ext4",
+      "size_bytes": 268435456,
+      "last_used_at": "2026-06-01T12:00:00Z"
+    }
+  ]
+}
 ```
 
 ## Related

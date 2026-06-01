@@ -50,7 +50,7 @@ symbols should be added to this page when they are introduced.
 | Package | Documented symbols |
 |---|---|
 | `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract` |
-| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `ExecReadyProbeTimeout`, `ExecPort`, `ExecPortForName`, `ExecReadinessSignal`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `Network`, `List`, `Control`, `Apply`, `Exec`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `LookupProfile` |
+| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `ExecReadyProbeTimeout`, `ExecPort`, `ExecPortForName`, `ExecReadinessSignal`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `Network`, `List`, `Control`, `Apply`, `Exec`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check` |
@@ -85,9 +85,15 @@ func main() {
 ```
 
 On Linux, Go callers can also use
-`github.com/geoffbelknap/microagent/pkg/supervisors/firecracker` directly:
+`github.com/geoffbelknap/microagent/pkg/supervisors/firecracker` directly. The
+package name is `firecracker`; alias it if you like. The `req` below is any
+`vmkit.Request` you construct:
 
 ```go
+import (
+	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
+)
+
 resp, err := firecrackersupervisor.Supervisor{}.Do(ctx, req)
 ```
 
@@ -207,7 +213,7 @@ readiness.
 Structured exec uses `workspace.Exec(ctx, opts, request)` with
 `pkg/workspace/exec/protocol.ExecRequest`. A nil Go error means the host reached
 the guest exec service and decoded a structured result; nonzero guest exit codes
-remain in `ExecResult.exit_code` and are not Go errors. `readiness.execReady`
+remain in `ExecResult.ExitCode` (JSON tag `exit_code`) and are not Go errors. `readiness.execReady`
 uses the same protocol with a no-op command to verify the service end-to-end.
 
 Mediation readiness uses `vmkit.MediationReadinessSignal(ctx, mediation, state,
@@ -267,7 +273,9 @@ resp, err := diagnostics.Check(ctx, diagnostics.Options{
 	Arch:    "amd64",
 })
 if err != nil {
-	// resp still contains structured support details when available.
+	// resp still carries structured support details when available, so
+	// inspect both. Surface the error rather than swallowing it.
+	log.Printf("diagnostics.Check: %v", err)
 }
 _ = resp
 ```
@@ -300,12 +308,12 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
 | `microagent doctor` / `microagent host` | [`diagnostics.Check`](#diagnostics-api) |
-| `microagent contract` | `vmkit.Contract` |
+| `microagent contract` | `vmkit.NewRuntimeContract` |
 | `microagent kernel install` / `microagent kernel verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
 | `microagent rootfs build` | `rootfs.Builder.Build` |
 | `microagent images` / `microagent prune` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
 | `microagent perf` / `microagent perf boot` / `microagent perf footprint` / `microagent perf steady` | `perf.Boot` / `Footprint` / `Steady` |
-| `microagent profiles` | `workspace.Profiles` / `workspace.ProfileNames` |
+| `microagent profiles` | `workspace.ProfileNames` / `workspace.LookupProfile` |
 | `microagent serve mcp` | CLI-only MCP stdio transport over the existing package APIs |
 | `microagent version` | CLI-only build metadata output |
 | `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |

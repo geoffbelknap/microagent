@@ -4,10 +4,10 @@ description: Open the workspace console.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-06-01_
 
 ```text
-microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--ready-timeout <seconds>]
+microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
 ```
 
 `connect` opens an interactive serial console for a workspace. With `--send`
@@ -37,7 +37,17 @@ Use `--hostname <name>` or `hostname:` in the spec to override it.
 | `--send <line>` | Write one line to the console and print new output |
 | `--timeout <seconds>` | Seconds to wait for output after `--send` |
 | `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before attaching or sending; `0` disables |
-| `--state-dir <dir>` | State directory holding the workspace record |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+
+## Exit status
+
+`connect` exits nonzero when the backend console endpoint or guest shell is not
+ready, or - with `--send` - when the command does not report completion before
+the deadline. On a `--send` timeout the error includes any partial output that
+was captured. In AX mode these surface as structured error envelopes (a console
+read timeout is reported as a `transient` error with `partial_output`).
 
 ## Examples
 

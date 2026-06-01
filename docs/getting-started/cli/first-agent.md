@@ -44,6 +44,9 @@ microagent create \
   --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
 
+`create` takes no `--name` here: the workspace name comes from the `name:`
+field in the spec file.
+
 The spec sets the workspace name to `minimal-body` - that's what the rest of
 the commands refer to. First-time create takes a minute or two: microagent
 pulls the base Python image, builds the rootfs, installs Pydantic and the
@@ -70,8 +73,25 @@ microagent --json result minimal-body
 ```
 
 The body boots, calls the LLM with `bash` / `read_file` / `write_file`
-tools, runs the tool calls inside `/workspace`, and writes a result. You'll
-see the LLM's summary in the result's `content` field.
+tools, runs the tool calls inside `/workspace`, and writes a `WorkResult` to
+`/workspace/result.json` (declared as the `result` output artifact in the
+spec). That file carries the LLM's summary in a top-level `content` field:
+
+```json
+{
+  "request_id": "req-001",
+  "status": "completed",
+  "content": "I created /workspace/hello.py, ran it with python3, and got 'hello from a microVM' followed by the running kernel version.",
+  "error": null,
+  "completed_at": "2026-06-01T00:01:07.482190+00:00",
+  "audit_ref": "audit://req-001"
+}
+```
+
+The `content` string is the LLM's wording, so it varies run to run; the other
+fields (`request_id`, `status`, `audit_ref`) echo the request. `microagent
+--json result` reads this file and reports the run's exit code in its
+`result.exitCode` field - a clean exit is `0`.
 
 The file the LLM wrote is still on the workspace's disk. Pull it out:
 
@@ -79,6 +99,9 @@ The file the LLM wrote is still on the workspace's disk. Pull it out:
 microagent cp minimal-body:/workspace/hello.py ./hello.py
 cat ./hello.py
 ```
+
+The `/workspace/hello.py` path is the one the request in `input-001.json`
+asked for - microagent doesn't dictate it.
 
 ## Halt, ask a follow-up, resume
 

@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -30,13 +30,15 @@ The policy comes from `microagent create --restart ...` or `restart:` in
 
 | Flag | Description |
 |---|---|
-| `--state-dir <dir>` | State directory holding the workspace record |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--backend <name>` | Backend identity override |
 | `--arch <arch>` | Guest architecture |
 | `--kernel <path>` | Kernel path |
 | `--interval <seconds>` | Seconds between state checks |
 | `--max-restarts <n>` | Maximum restarts; `0` means unlimited |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
 ## Example
 

@@ -23,7 +23,8 @@ separate build step.
 ## What you'll need
 
 - microagent installed and `microagent doctor` passing - see [install](/getting-started/install/).
-- On Linux, `pasta` for the default unprivileged network mode. Homebrew installs it as a microagent dependency; on apt-based distros it's `sudo apt install passt`.
+- On Linux, `pasta` for the default unprivileged network mode. Homebrew installs it as a microagent dependency; on apt-based distros it's `sudo apt install passt`, on Fedora it's `sudo dnf install passt`.
+- On macOS the default backend is Apple Virtualization.framework (no `pasta` needed), but the rootfs builder needs `mke2fs` - `brew install e2fsprogs` and pass `--mke2fs` the first time. See [troubleshooting](/troubleshooting/#mke2fs-not-found-rootfs-builds-fail).
 - An Anthropic API key in `ANTHROPIC_API_KEY`. Sign up at [console.anthropic.com](https://console.anthropic.com) if you don't have one.
 
 ## Step 1 - create the workspace
@@ -90,14 +91,18 @@ the user can find the results.
 
 ```bash
 microagent start minimal-body
+microagent --json status minimal-body   # poll until the result is ready
 microagent --json result minimal-body
 ```
 
 The body usually takes 5-10 seconds: the VM boots, the body emits `ready`, runs
-the structural checks, calls Claude, writes the result, and exits. Claude's
-final summary appears in the `content` field. It should look something like:
+the structural checks, calls Claude, writes the result, and exits. `result`
+reads the result file as it stands, so run it after the body has finished -
+`microagent --json status minimal-body` includes the structured `result` once
+it's ready and reports `stopped` after the body exits. Claude's final summary
+appears in the `content` field. It should look something like:
 *"I created `/workspace/hello.py`, ran it with `python3`, and got `hello from a
-microVM` followed by the kernel version `6.1.155`."*
+microVM` followed by the kernel version `6.1.x`."*
 
 The file Claude wrote is still on the workspace's disk. Pull it out:
 

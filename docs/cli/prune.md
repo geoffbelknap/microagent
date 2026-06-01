@@ -4,7 +4,7 @@ description: Prune stale local records and optional reusable image baselines.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-10_
+_Last updated: 2026-06-01_
 
 ```text
 microagent prune [--images] [--yes] [--state-dir <dir>]
@@ -22,7 +22,9 @@ local image store. That path asks for confirmation unless `--yes` is passed.
 |---|---|
 | `--images` | Delete reusable image-store rootfs files and their records |
 | `--yes`, `-y` | Confirm image deletion without prompting |
-| `--state-dir <dir>` | State directory holding local records |
+| `--state-dir <dir>` | State directory holding local records (default `~/.microagent/`) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
 ## Examples
 

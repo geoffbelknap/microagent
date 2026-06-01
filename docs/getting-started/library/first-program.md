@@ -65,9 +65,11 @@ program needs to set - here, the workspace name, the OCI image, and the
 command to run.
 
 `workspace.Run` builds the rootfs from the image, boots the VM, runs the
-command, captures the result, and removes the scratch state when it's done.
-The returned `Result.Result.Stdout` contains the guest's stdout;
-`Result.Result.ExitCode` carries its exit code.
+command, captures the result, and removes the scratch state when it's done. It
+returns a `workspace.Result`, whose nested `Result` field (a `*GuestResult`)
+holds the guest's output - so `res.Result.Stdout` contains the guest's stdout
+and `res.Result.ExitCode` carries its exit code. The doubled name is just the
+outer `workspace.Result` struct's `Result` field, not a typo.
 
 ## What just happened
 
@@ -75,7 +77,7 @@ The returned `Result.Result.Stdout` contains the guest's stdout;
    this host.
 2. It pulled the OCI image and converted it to an ext4 rootfs.
 3. It booted the VM, ran your command, captured stdout/stderr/exit code into
-   `Result.Result`.
+   `res.Result`.
 4. It shut the VM down and removed the scratch state directory.
 
 ## Where to next

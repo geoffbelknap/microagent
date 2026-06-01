@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -37,6 +37,27 @@ protocol must stay the same. Changes to ports, guest wiring, network mode,
 resources, files, setup, image, or service command still require `stop`/`start`
 or recreating the workspace.
 
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--file <path>` | Workspace spec file |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+| `--backend <name>` | Backend identity override |
+| `--arch <arch>` | Guest architecture |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
+## Unsupported changes while running
+
+`apply` does not silently no-op an unsupported change. When the workspace is
+running and the spec asks for anything beyond a live Firecracker/Apple VF
+host-bind change - a different network mode, added or removed forwards, changed
+host or guest ports - `apply` errors and tells you to stop and start the
+workspace to apply it; nothing is written. When the spec matches the current
+manifest, `apply` reports the workspace state with no applied changes.
+
 ## Example
 
 ```bash
@@ -45,13 +66,3 @@ microagent apply --file ./homebridge.yaml
 
 If the workspace is running and only the Firecracker host bind changed,
 `apply` restarts the host-side port-forwarder and leaves the VM running.
-
-## Flags
-
-| Flag | Description |
-|---|---|
-| `--file <path>` | Workspace spec file |
-| `--state-dir <dir>` | State directory holding the workspace record |
-| `--backend <name>` | Backend identity override |
-| `--arch <arch>` | Guest architecture |
-| `--supervisor <path>` | Override the installed host backend supervisor path |
