@@ -5,6 +5,8 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.1.45 - 2026-06-01
+
 - Added AX output mode for agent-facing structured CLI responses and errors.
 - Added the `microagent serve mcp` stdio endpoint with workspace lifecycle,
   status, inspect, exec, cost-estimate, mutation-preview, idempotency, and
