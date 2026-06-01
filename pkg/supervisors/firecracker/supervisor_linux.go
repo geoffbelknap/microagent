@@ -329,6 +329,15 @@ func prepareWorkspace(opts Options, req vmkit.Request) error {
 }
 
 func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached bool) (vmkit.Response, error) {
+	// Snapshot restore/fork rolls the rootfs back to the snapshot copy and
+	// validates kernel/network compatibility once on the host, before any
+	// user-network namespace re-exec carries the request inward.
+	if req.Tag != "" && !insideUserNetworkNamespace() {
+		if err := prepareSnapshotRestore(opts, req); err != nil {
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
+	}
 	if networkMode(req.Config) == "user" && !insideUserNetworkNamespace() {
 		return startUserNetworkProcess(ctx, opts, req, detached)
 	}
@@ -408,8 +417,15 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	}
 	// Boot from the config file and additionally expose the API socket so
 	// pause/resume and snapshot can control the running VM. Only --no-api would
-	// disable the API.
-	cmd := exec.CommandContext(ctx, path, "--api-sock", apiSocketPath(opts), "--config-file", configPath(opts))
+	// disable the API. A snapshot restore/fork instead launches with just the
+	// API socket and loads the snapshot (which carries its own machine config)
+	// over it.
+	loadMode := req.Tag != ""
+	launchArgs := []string{"--api-sock", apiSocketPath(opts)}
+	if !loadMode {
+		launchArgs = append(launchArgs, "--config-file", configPath(opts))
+	}
+	cmd := exec.CommandContext(ctx, path, launchArgs...)
 	cmd.Stdout = serialLog
 	cmd.Stderr = serialLog
 	if serialInput != nil {
@@ -425,6 +441,19 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = serialLog.Close()
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
+	}
+	if loadMode {
+		if err := restoreFromSnapshot(ctx, opts, req.Tag); err != nil {
+			_ = cmd.Process.Kill()
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
+			_ = serialLog.Close()
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
 	}
 	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, networkDevices, firewallRules, ""); err != nil {
 		_ = cmd.Process.Kill()
@@ -653,6 +682,7 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 type vmStateController interface {
 	patchVMState(ctx context.Context, state string) error
 	createSnapshot(ctx context.Context, snapshotPath, memFilePath string) error
+	loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool) error
 }
 
 var newVMStateController = func(socketPath string) vmStateController {

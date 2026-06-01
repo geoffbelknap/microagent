@@ -69,6 +69,9 @@ type Options struct {
 	VsockListeners  []vmkit.VsockListener
 	ProfileExplicit bool
 	KernelExplicit  bool
+	// FromSnapshot, when set, restores the workspace in place from this snapshot
+	// tag instead of booting fresh (start --from-snapshot).
+	FromSnapshot string
 	SpecMemory      bool
 	SpecCPU         bool
 	SpecSize        bool

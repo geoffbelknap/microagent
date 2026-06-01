@@ -131,6 +131,74 @@ func snapshotManifestFromState(tag string, state runtimeState) (vmkit.SnapshotMa
 	}, nil
 }
 
+// restoreFromSnapshot waits for the freshly launched Firecracker API socket and
+// loads the snapshot's vmstate and memory into it, resuming the guest. The
+// rootfs has already been put in place by prepareSnapshotRestore.
+func restoreFromSnapshot(ctx context.Context, opts Options, tag string) error {
+	sock := apiSocketPath(opts)
+	if err := waitForAPISocket(ctx, sock, 10*time.Second); err != nil {
+		return err
+	}
+	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+	return newVMStateController(sock).loadSnapshot(ctx,
+		filepath.Join(dir, vmkit.SnapshotVMStateName),
+		filepath.Join(dir, vmkit.SnapshotMemoryName),
+		true)
+}
+
+// waitForAPISocket polls the Firecracker API unix socket until it accepts a
+// connection, the context is cancelled, or the timeout elapses.
+func waitForAPISocket(ctx context.Context, sock string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		conn, err := net.DialTimeout("unix", sock, 200*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("firecracker api socket %s not ready after %s: %w", sock, timeout, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// prepareSnapshotRestore validates that a snapshot can be loaded into this
+// workspace and rolls the workspace rootfs back to the snapshot's coherent
+// copy. It rejects a kernel mismatch (the snapshot is bound to the kernel it
+// was taken against) and bridged networking (a fork would collide on the shared
+// L2; restore shares the rejection for a single, predictable contract). It runs
+// once on the host before any user-network namespace re-exec.
+func prepareSnapshotRestore(opts Options, req vmkit.Request) error {
+	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag)
+	manifest, err := vmkit.ReadSnapshotManifest(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("snapshot %q not found for workspace %s", req.Tag, opts.Name)
+		}
+		return err
+	}
+	if networkMode(req.Config) == "bridged" {
+		return fmt.Errorf("snapshot restore does not support bridged networking; use user, nat, or isolated")
+	}
+	if manifest.KernelSHA256 != "" {
+		sha, err := fileSHA256(req.Config.KernelPath)
+		if err != nil {
+			return fmt.Errorf("hash kernel for snapshot restore: %w", err)
+		}
+		if sha != manifest.KernelSHA256 {
+			return fmt.Errorf("snapshot %q was taken against kernel sha256 %s but the workspace kernel is %s; refusing to load", req.Tag, manifest.KernelSHA256, sha)
+		}
+	}
+	if err := copyFile(filepath.Join(dir, vmkit.SnapshotRootfsName), req.Config.RootfsPath); err != nil {
+		return fmt.Errorf("restore snapshot rootfs: %w", err)
+	}
+	return nil
+}
+
 // guestIPFromNetwork returns the bare guest IP (no CIDR suffix) recorded for a
 // running workspace, preferring the live runtime network when present.
 func guestIPFromNetwork(network vmkit.NetworkConfig) string {

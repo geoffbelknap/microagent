@@ -333,7 +333,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := os.Remove(ResultPath(opts.StateDir, opts.Name)); err != nil && !os.IsNotExist(err) {
 		return Result{}, err
 	}
-	resp, err := startDetached(opts, Request(opts, "run", rootfsPath, NewRequestID()))
+	startReq := Request(opts, "run", rootfsPath, NewRequestID())
+	startReq.Tag = strings.TrimSpace(opts.FromSnapshot)
+	resp, err := startDetached(opts, startReq)
 	return Result{
 		Workspace:    opts.Name,
 		StateDir:     opts.StateDir,

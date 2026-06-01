@@ -1236,10 +1236,13 @@ func freeTCPPort(t *testing.T) uint16 {
 }
 
 type fakeVMController struct {
-	states    []string
-	snapshots [][2]string
-	err       error
-	snapErr   error
+	states     []string
+	snapshots  [][2]string
+	loads      [][2]string
+	loadResume bool
+	err        error
+	snapErr    error
+	loadErr    error
 }
 
 func (f *fakeVMController) patchVMState(_ context.Context, state string) error {
@@ -1250,6 +1253,12 @@ func (f *fakeVMController) patchVMState(_ context.Context, state string) error {
 func (f *fakeVMController) createSnapshot(_ context.Context, snapshotPath, memFilePath string) error {
 	f.snapshots = append(f.snapshots, [2]string{snapshotPath, memFilePath})
 	return f.snapErr
+}
+
+func (f *fakeVMController) loadSnapshot(_ context.Context, snapshotPath, memFilePath string, resume bool) error {
+	f.loads = append(f.loads, [2]string{snapshotPath, memFilePath})
+	f.loadResume = resume
+	return f.loadErr
 }
 
 func withFakeVMController(t *testing.T, fake *fakeVMController) {
@@ -1413,6 +1422,92 @@ func TestResumeRejectsWorkspaceThatIsNotPaused(t *testing.T) {
 	}
 	if len(fake.states) != 0 {
 		t.Fatalf("controller should not be called, got %#v", fake.states)
+	}
+}
+
+func TestPrepareSnapshotRestoreRollsBackRootfs(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	kernel := filepath.Join(dir, "kernel")
+	if err := os.WriteFile(kernel, []byte("kernel-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootfs := filepath.Join(dir, "rootfs.ext4")
+	if err := os.WriteFile(rootfs, []byte("LIVE-disk-with-marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelSHA, err := fileSHA256(kernel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "base")
+	if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{Tag: "base", NetworkMode: "isolated", KernelSHA256: kernelSHA}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, vmkit.SnapshotRootfsName), []byte("SNAPSHOT-disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{KernelPath: kernel, RootfsPath: rootfs, StateDir: dir, Network: &vmkit.NetworkConfig{Mode: "isolated"}},
+		Tag:      "base",
+	}
+	if err := prepareSnapshotRestore(opts, req); err != nil {
+		t.Fatalf("prepareSnapshotRestore: %v", err)
+	}
+	data, err := os.ReadFile(rootfs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "SNAPSHOT-disk" {
+		t.Fatalf("rootfs = %q, want SNAPSHOT-disk (rolled back)", data)
+	}
+}
+
+func TestPrepareSnapshotRestoreRejectsKernelSkew(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	kernel := filepath.Join(dir, "kernel")
+	if err := os.WriteFile(kernel, []byte("the-real-kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "base")
+	if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{Tag: "base", KernelSHA256: "deadbeef-different"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, vmkit.SnapshotRootfsName), []byte("snap"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{KernelPath: kernel, RootfsPath: filepath.Join(dir, "rootfs.ext4"), StateDir: dir},
+		Tag:      "base",
+	}
+	err := prepareSnapshotRestore(opts, req)
+	if err == nil || !strings.Contains(err.Error(), "kernel") {
+		t.Fatalf("err = %v, want kernel skew rejection", err)
+	}
+}
+
+func TestPrepareSnapshotRestoreRejectsBridged(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "base")
+	if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{Tag: "base"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, vmkit.SnapshotRootfsName), []byte("snap"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{KernelPath: filepath.Join(dir, "k"), RootfsPath: filepath.Join(dir, "rootfs.ext4"), StateDir: dir, Network: &vmkit.NetworkConfig{Mode: "bridged", Interface: "br0"}},
+		Tag:      "base",
+	}
+	err := prepareSnapshotRestore(opts, req)
+	if err == nil || !strings.Contains(err.Error(), "bridged") {
+		t.Fatalf("err = %v, want bridged rejection", err)
 	}
 }
 

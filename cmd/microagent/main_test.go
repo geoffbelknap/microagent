@@ -99,6 +99,34 @@ func TestHelpListsPauseAndResume(t *testing.T) {
 	}
 }
 
+func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		flag string
+		want string
+	}{
+		{"snapshot tag", []string{"agent-1", "--tag", "base", "--state-dir", "/s"}, "-tag", "base"},
+		{"from-snapshot", []string{"agent-1", "--from-snapshot", "base", "--state-dir", "/s"}, "-from-snapshot", "base"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reordered := reorderFlagArgs(tc.args)
+			// The value flag and its argument must stay adjacent so flag parsing
+			// does not mistake the value for a positional and the positional name
+			// for an extra argument.
+			found := false
+			for i := 0; i+1 < len(reordered); i++ {
+				if reordered[i] == tc.flag && reordered[i+1] == tc.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("reorderFlagArgs(%v) = %v; %s value not kept adjacent", tc.args, reordered, tc.flag)
+			}
+		})
+	}
+}
+
 func TestRunSnapshotCreateParsesTagAndName(t *testing.T) {
 	dir := t.TempDir()
 	out, err := os.Create(filepath.Join(dir, "out.txt"))

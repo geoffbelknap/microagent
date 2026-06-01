@@ -1851,6 +1851,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
+	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -5687,6 +5688,7 @@ func reorderFlagArgs(args []string) []string {
 		"-p":                 true,
 		"-state-dir":         true,
 		"-tag":               true,
+		"-from-snapshot":     true,
 		"-url":               true,
 		"-from":              true,
 		"-sha256":            true,
