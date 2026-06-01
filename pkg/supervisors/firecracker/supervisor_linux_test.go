@@ -1234,3 +1234,177 @@ func freeTCPPort(t *testing.T) uint16 {
 	}
 	return uint16(port)
 }
+
+type fakeVMController struct {
+	states []string
+	err    error
+}
+
+func (f *fakeVMController) patchVMState(_ context.Context, state string) error {
+	f.states = append(f.states, state)
+	return f.err
+}
+
+func withFakeVMController(t *testing.T, fake *fakeVMController) {
+	t.Helper()
+	previous := newVMStateController
+	newVMStateController = func(string) vmStateController { return fake }
+	t.Cleanup(func() { newVMStateController = previous })
+}
+
+func startSleepProcess(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	return cmd
+}
+
+func pauseResumeRequest(dir string) vmkit.Request {
+	return vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+}
+
+func TestPausePatchesVMStateAndPreservesAuxProcesses(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	vmProcess := startSleepProcess(t)
+	forwarder := startSleepProcess(t)
+	vsockListener := startSleepProcess(t)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "pause",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err != nil {
+		t.Fatalf("pause: resp=%+v err=%v", resp, err)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StatePaused {
+		t.Fatalf("response = %+v", resp)
+	}
+	if len(fake.states) != 1 || fake.states[0] != "Paused" {
+		t.Fatalf("controller states = %#v, want [Paused]", fake.states)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StatePaused {
+		t.Fatalf("persisted state = %s, want paused", state.Event.State)
+	}
+	if state.PID != vmProcess.Process.Pid || state.PortForwardPID != forwarder.Process.Pid || state.VsockListenerPID != vsockListener.Process.Pid {
+		t.Fatalf("pause dropped process state: %#v", state)
+	}
+}
+
+func TestResumePatchesVMStateBackToRunning(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	vmProcess := startSleepProcess(t)
+	forwarder := startSleepProcess(t)
+	vsockListener := startSleepProcess(t)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StatePaused, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "resume",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err != nil {
+		t.Fatalf("resume: resp=%+v err=%v", resp, err)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("response = %+v", resp)
+	}
+	if len(fake.states) != 1 || fake.states[0] != "Resumed" {
+		t.Fatalf("controller states = %#v, want [Resumed]", fake.states)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateRunning {
+		t.Fatalf("persisted state = %s, want running", state.Event.State)
+	}
+	if state.PortForwardPID != forwarder.Process.Pid || state.VsockListenerPID != vsockListener.Process.Pid {
+		t.Fatalf("resume dropped process state: %#v", state)
+	}
+}
+
+func TestPauseRejectsWorkspaceThatIsNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	if err := writeProcessState(opts, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	_, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "pause",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err == nil {
+		t.Fatal("expected pause to reject a stopped workspace")
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("controller should not be called, got %#v", fake.states)
+	}
+}
+
+func TestResumeRejectsWorkspaceThatIsNotPaused(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	_, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "resume",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err == nil {
+		t.Fatal("expected resume to reject a running workspace")
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("controller should not be called, got %#v", fake.states)
+	}
+}
