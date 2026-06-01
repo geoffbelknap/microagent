@@ -50,7 +50,7 @@ symbols should be added to this page when they are introduced.
 | Package | Documented symbols |
 |---|---|
 | `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract` |
-| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `ExecReadyProbeTimeout`, `ExecPort`, `ExecPortForName`, `ExecReadinessSignal`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `Network`, `List`, `Control`, `Apply`, `Exec`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
+| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecPort`, `ExecPortForName`, `ExecReadinessSignal`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `ReadEvents`, `EventsPath`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Apply`, `Exec`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check` |
@@ -189,6 +189,8 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Copy` | Copy files between the host and a stopped workspace disk |
 | `workspace.Clone` | Clone a stopped/prepared workspace |
 | `workspace.ReadLogs` | Read a workspace serial log |
+| `workspace.ReadEvents` | Read the recorded lifecycle event history |
+| `workspace.SampleStats` | Sample CPU, memory, and I/O for a running workspace |
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
 | `workspace.Control` | Halt, quarantine, stop, kill, or delete a workspace |
@@ -303,6 +305,8 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent connect` | `workspace.DialConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
 | `microagent exec` | `workspace.Exec` |
 | `microagent logs` | `workspace.ReadLogs` |
+| `microagent events` | `workspace.ReadEvents` |
+| `microagent stats` | `workspace.SampleStats` |
 | `microagent cp` | `workspace.Copy` |
 | `microagent clone` | `workspace.Clone` |
 | `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |

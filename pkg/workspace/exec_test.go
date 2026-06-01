@@ -247,3 +247,77 @@ func strconvParseUint16(raw string) (uint16, error) {
 	value, err := strconv.ParseUint(raw, 10, 16)
 	return uint16(value), err
 }
+
+func TestWaitForExecReadyGate(t *testing.T) {
+	saved := execReadinessProbe
+	t.Cleanup(func() { execReadinessProbe = saved })
+
+	t.Run("ready immediately probes once", func(t *testing.T) {
+		calls := 0
+		execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+			calls++
+			return vmkit.ReadinessSignal{Ready: true}, true
+		}
+		start := time.Now()
+		waitForExecReady(context.Background(), RuntimeState{}, ExecReadyWait)
+		if calls != 1 {
+			t.Fatalf("probe calls = %d, want 1", calls)
+		}
+		if time.Since(start) > time.Second {
+			t.Fatal("blocked despite immediate readiness")
+		}
+	})
+
+	t.Run("waits until ready", func(t *testing.T) {
+		calls := 0
+		execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+			calls++
+			return vmkit.ReadinessSignal{Ready: calls >= 3}, true
+		}
+		waitForExecReady(context.Background(), RuntimeState{}, 2*time.Second)
+		if calls < 3 {
+			t.Fatalf("probe calls = %d, want >= 3", calls)
+		}
+	})
+
+	t.Run("bounded by grace when never ready", func(t *testing.T) {
+		calls := 0
+		execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+			calls++
+			return vmkit.ReadinessSignal{Ready: false}, true
+		}
+		start := time.Now()
+		waitForExecReady(context.Background(), RuntimeState{}, 300*time.Millisecond)
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("did not respect grace: %s", elapsed)
+		}
+		if calls == 0 {
+			t.Fatal("expected at least one probe")
+		}
+	})
+
+	t.Run("zero grace skips probing", func(t *testing.T) {
+		calls := 0
+		execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+			calls++
+			return vmkit.ReadinessSignal{Ready: false}, true
+		}
+		waitForExecReady(context.Background(), RuntimeState{}, 0)
+		if calls != 0 {
+			t.Fatalf("probe calls = %d, want 0", calls)
+		}
+	})
+
+	t.Run("cancelled context returns promptly", func(t *testing.T) {
+		execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+			return vmkit.ReadinessSignal{Ready: false}, true
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		start := time.Now()
+		waitForExecReady(ctx, RuntimeState{}, 10*time.Second)
+		if time.Since(start) > 2*time.Second {
+			t.Fatal("cancelled context did not short-circuit")
+		}
+	})
+}

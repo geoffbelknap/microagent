@@ -5197,7 +5197,7 @@ func TestRunLogsPrintsSerialLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runLogs([]string{"research", "--state-dir", dir}, stdout)
+	err = runLogs(context.Background(), []string{"research", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -5210,6 +5210,145 @@ func TestRunLogsPrintsSerialLog(t *testing.T) {
 	}
 	if string(got) != "hello\n" {
 		t.Fatalf("logs = %q", got)
+	}
+}
+
+func TestWriteSerialTail(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "serial.log")
+	if err := os.WriteFile(path, []byte("abcdef"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.txt")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := writeSerialTail(path, 3, out)
+	if err != nil {
+		t.Fatalf("writeSerialTail: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("wrote %d bytes, want 3", n)
+	}
+	// A not-yet-created serial log reads as empty, not an error.
+	missing, err := writeSerialTail(filepath.Join(dir, "nope.log"), 0, out)
+	if err != nil || missing != 0 {
+		t.Fatalf("missing file: n=%d err=%v", missing, err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "def" {
+		t.Fatalf("tail = %q, want %q", got, "def")
+	}
+}
+
+func TestFollowLogsExitsWhenNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	name := "research"
+	if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name, "serial.log"), []byte("boot output\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outPath := filepath.Join(dir, "out.txt")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- followLogs(context.Background(), dir, name, out) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("followLogs: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("followLogs did not return for a workspace that is not running")
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "boot output") {
+		t.Fatalf("followLogs output missing serial content: %q", got)
+	}
+}
+
+func TestRunEventsSnapshotAndFollow(t *testing.T) {
+	dir := t.TempDir()
+	name := "research"
+	wsDir := filepath.Join(dir, name)
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eventsJSON := `[
+	  {"identity":{},"state":"running","detail":"runtime is started","observedAt":"2026-06-01T00:00:01Z"},
+	  {"identity":{},"state":"halted","detail":"clean shutdown","observedAt":"2026-06-01T00:00:09Z"}
+	]`
+	if err := os.WriteFile(filepath.Join(wsDir, "events.json"), []byte(eventsJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := workspace.ReadEvents(dir, name)
+	if err != nil {
+		t.Fatalf("ReadEvents: %v", err)
+	}
+	if len(events) != 2 || events[0].State != vmkit.StateRunning || events[1].State != vmkit.StateHalted {
+		t.Fatalf("events = %#v", events)
+	}
+
+	outPath := filepath.Join(dir, "out.txt")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- followEvents(context.Background(), dir, name, nil, out) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("followEvents: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("followEvents did not return for a terminal workspace")
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "running") || !strings.Contains(string(got), "halted") {
+		t.Fatalf("followEvents output = %q", got)
+	}
+}
+
+func TestReadEventsMissingAndMalformed(t *testing.T) {
+	dir := t.TempDir()
+	events, err := workspace.ReadEvents(dir, "absent")
+	if err != nil || events != nil {
+		t.Fatalf("missing events: events=%v err=%v", events, err)
+	}
+	wsDir := filepath.Join(dir, "broken")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, "events.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workspace.ReadEvents(dir, "broken"); err == nil {
+		t.Fatal("expected error for malformed events.json")
 	}
 }
 

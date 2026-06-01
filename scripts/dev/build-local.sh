@@ -7,9 +7,10 @@ usage() {
   cat >&2 <<'USAGE'
 usage: scripts/dev/build-local.sh [--output PATH] [--arch ARCH]
 
-Builds a local microagent CLI plus the Apple VF supervisor and Linux guest-init
-companions expected by the CLI resolver. The default CLI path is
-.build/dev/microagent.
+Builds a local microagent CLI plus the host backend supervisor and Linux
+guest-init companions expected by the CLI resolver. On Linux it also builds the
+Firecracker supervisor; on macOS it builds the Apple VF supervisor. The default
+CLI path is .build/dev/microagent.
 
 Options:
   --output PATH   CLI output path (default: .build/dev/microagent)
@@ -80,12 +81,23 @@ output_name="$(basename "$output")"
 cli_path="$output_dir/$output_name"
 guest_init_path="$output_dir/microagent-guestinit-$arch"
 supervisor_path="$output_dir/microagent-applevf-supervisor"
+firecracker_supervisor_path="$output_dir/microagent-firecracker-supervisor"
 
 (
   cd "$ROOT"
   go build -o "$cli_path" ./cmd/microagent
   GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -o "$guest_init_path" ./cmd/microagent-guestinit
 )
+
+if [ "$(uname -s)" = "Linux" ]; then
+  # The CLI resolver looks for microagent-firecracker-supervisor next to the
+  # CLI (see pkg/diagnostics.DefaultFirecrackerSupervisorPathFromExecutable),
+  # so build it alongside the CLI to make the dev build self-sufficient.
+  (
+    cd "$ROOT"
+    go build -o "$firecracker_supervisor_path" ./cmd/microagent-firecracker-supervisor
+  )
+fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
   "$ROOT/scripts/dev/applevf-supervisor-build.sh" >/dev/null
@@ -96,5 +108,8 @@ fi
 echo "CLI: $cli_path"
 if [ -f "$supervisor_path" ]; then
   echo "Apple VF supervisor: $supervisor_path"
+fi
+if [ -f "$firecracker_supervisor_path" ]; then
+  echo "Firecracker supervisor: $firecracker_supervisor_path"
 fi
 echo "Guest init: $guest_init_path"

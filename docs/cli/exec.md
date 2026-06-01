@@ -16,6 +16,12 @@ workspace. It does not use the interactive console path. Command arguments after
 `--` are passed as argv directly; use `sh -lc` explicitly when you want shell
 syntax.
 
+A command issued immediately after [`start`](/cli/start/) waits briefly for the
+in-guest exec service to become ready (the post-start window where the host
+forward is bound but the guest service is not yet listening), so the command is
+not rejected by a transient connection error. The wait runs an idempotent
+readiness probe, so your command is still issued exactly once.
+
 In UX mode, command stdout is written to stdout, command stderr is written to
 stderr, and the CLI exits with the command exit code when the command exits
 normally. Timeout, signal, and failed-to-start statuses use nonzero CLI exit

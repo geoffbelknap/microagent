@@ -1,0 +1,76 @@
+package workspace
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestSampleProcStatsParsesProcFiles(t *testing.T) {
+	dir := t.TempDir()
+	pid := 4242
+	procDir := filepath.Join(dir, "4242")
+	if err := os.MkdirAll(procDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// comm deliberately contains spaces and parentheses to exercise the
+	// last-')' parse. After comm: utime is field index 11, stime index 12.
+	stat := "4242 (fire cracker) S 1 4242 4242 0 -1 0 0 0 0 0 1500 700 0 0 20 0 2 0 100\n"
+	if err := os.WriteFile(filepath.Join(procDir, "stat"), []byte(stat), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(procDir, "status"), []byte("Name:\tfc\nVmRSS:\t262144 kB\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(procDir, "io"), []byte("read_bytes: 1048576\nwrite_bytes: 524288\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := procRoot
+	procRoot = dir
+	t.Cleanup(func() { procRoot = saved })
+
+	ticks, err := readProcCPUTicks(pid)
+	if err != nil {
+		t.Fatalf("readProcCPUTicks: %v", err)
+	}
+	if ticks != 2200 {
+		t.Fatalf("ticks = %d, want 2200 (utime 1500 + stime 700)", ticks)
+	}
+
+	rss, err := readProcRSSBytes(pid)
+	if err != nil {
+		t.Fatalf("readProcRSSBytes: %v", err)
+	}
+	if rss != 262144*1024 {
+		t.Fatalf("rss = %d, want %d", rss, 262144*1024)
+	}
+
+	read, write := readProcIO(pid)
+	if read != 1048576 || write != 524288 {
+		t.Fatalf("io = %d/%d, want 1048576/524288", read, write)
+	}
+
+	stats, err := sampleProcStats(pid)
+	if err != nil {
+		t.Fatalf("sampleProcStats: %v", err)
+	}
+	if stats.PID != pid || stats.MemoryBytes != 262144*1024 || stats.IOReadBytes != 1048576 || stats.IOWriteBytes != 524288 {
+		t.Fatalf("stats = %#v", stats)
+	}
+	// CPU% is 0 because both samples read the same static fixture.
+	if stats.CPUPercent != 0 {
+		t.Fatalf("cpu = %f, want 0 for static fixture", stats.CPUPercent)
+	}
+}
+
+func TestReadProcIOMissingIsZero(t *testing.T) {
+	dir := t.TempDir()
+	saved := procRoot
+	procRoot = dir
+	t.Cleanup(func() { procRoot = saved })
+	read, write := readProcIO(999999)
+	if read != 0 || write != 0 {
+		t.Fatalf("missing io = %d/%d, want 0/0", read, write)
+	}
+}
