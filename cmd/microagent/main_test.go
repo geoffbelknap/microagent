@@ -73,6 +73,32 @@ func TestRunVersionAliases(t *testing.T) {
 	}
 }
 
+func TestHelpListsPauseAndResume(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"help"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run help: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := string(data)
+	for _, command := range []string{"pause", "resume"} {
+		if !strings.Contains(help, "\n  "+command+" ") {
+			t.Fatalf("help missing %q command:\n%s", command, help)
+		}
+	}
+}
+
 func TestCreateHelpUsesWorkspaceHelp(t *testing.T) {
 	dir := t.TempDir()
 	stdoutPath := filepath.Join(dir, "stdout.txt")
@@ -974,6 +1000,16 @@ func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 			name:        "quarantine",
 			args:        []string{"quarantine", "agent-1", "--state-dir", "/tmp/state"},
 			wantCommand: "quarantine",
+		},
+		{
+			name:        "pause",
+			args:        []string{"pause", "agent-1", "--state-dir", "/tmp/state"},
+			wantCommand: "pause",
+		},
+		{
+			name:        "resume",
+			args:        []string{"resume", "agent-1", "--state-dir", "/tmp/state"},
+			wantCommand: "resume",
 		},
 		{
 			name:        "kill",

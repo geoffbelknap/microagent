@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +14,25 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		Name:           "agent-1",
+		StateDir:       dir,
+		Backend:        vmkit.BackendFirecracker,
+		SupervisorPath: filepath.Join(dir, "no-such-supervisor"),
+	}
+	// With a missing supervisor binary, both calls fail at dispatch — but they
+	// must get past Control's command whitelist, proving pause/resume are wired
+	// through as supervisor commands rather than rejected as unsupported.
+	if _, err := Pause(context.Background(), opts); err == nil || strings.Contains(err.Error(), "unsupported workspace control command") {
+		t.Fatalf("Pause not wired to a pause control command: %v", err)
+	}
+	if _, err := Resume(context.Background(), opts); err == nil || strings.Contains(err.Error(), "unsupported workspace control command") {
+		t.Fatalf("Resume not wired to a resume control command: %v", err)
+	}
+}
 
 func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	dir := t.TempDir()

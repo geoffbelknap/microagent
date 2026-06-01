@@ -1,0 +1,49 @@
+---
+title: microagent resume
+description: Thaw a paused workspace and return it to the running state.
+---
+
+<!-- docs-last-updated -->
+_Last updated: 2026-06-01_
+
+```text
+microagent resume <name> [--state-dir <dir>]
+```
+
+`resume` thaws a [`paused`](/cli/pause/) workspace and records its state as
+`running` again. The VM's vCPUs continue executing from exactly where they were
+frozen, with guest memory, disk state, and the host-side network, port
+forwarding, and vsock paths intact. After resume, [`exec`](/cli/exec/),
+[`connect`](/cli/connect/), and [`stats`](/cli/stats/) work again.
+
+`resume` requires the workspace to be paused. It is Firecracker-only; Apple VF
+and Windows Hyper-V do not support pause/resume.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--name <name>` | Workspace name; positional name is also accepted |
+| `--id <id>` | Workspace ID alias for `--name` |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+| `--backend <name>` | Backend identity override |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
+## Exit status
+
+`resume` exits nonzero when the workspace cannot be found, is not paused, or
+when the backend cannot thaw the VM. In AX mode a failure is written as a
+structured error envelope.
+
+## Example
+
+```bash
+microagent pause research
+microagent resume research
+```
+
+## Related
+
+- [`pause`](/cli/pause/), [`status`](/cli/status/), [`start`](/cli/start/)

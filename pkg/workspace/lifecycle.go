@@ -471,7 +471,7 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		return vmkit.Response{}, err
 	}
 	switch command {
-	case "halt", "quarantine", "stop", "kill", "delete":
+	case "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
 	default:
 		return vmkit.Response{}, fmt.Errorf("unsupported workspace control command: %s", command)
 	}
@@ -490,6 +490,18 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+// Pause freezes a running workspace's vCPUs while preserving memory and disk
+// state. The runtime process keeps running so the workspace can be resumed in
+// place; structured exec, console, and stats are unavailable until Resume.
+func Pause(ctx context.Context, opts Options) (vmkit.Response, error) {
+	return Control(ctx, opts, "pause")
+}
+
+// Resume thaws a paused workspace's vCPUs, returning it to the running state.
+func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
+	return Control(ctx, opts, "resume")
 }
 
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {

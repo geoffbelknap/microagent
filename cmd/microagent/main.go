@@ -170,7 +170,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		return runWorkspaceStateCommand(ctx, "status", args[1:], stdout)
 	}
-	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
+	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "pause" || args[0] == "resume" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
 		if wantsHelp(args[1:]) || hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 		}
@@ -560,7 +560,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		req.Command = "start"
 		return req, nil
-	case "status", "halt", "quarantine", "stop", "kill", "delete":
+	case "status", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
 		req, err := stateRequestFromFlagsOrJSON(command, jsonPath, args, identity, config)
 		if err != nil {
 			return vmkit.Request{}, err
@@ -5963,6 +5963,8 @@ Commands:
   serve mcp            Serve the MCP stdio endpoint
   halt                 Halt a workspace and preserve disk state
   quarantine           Sever host-side network and mediation
+  pause                Pause a running workspace, freezing vCPUs with memory and disk preserved
+  resume               Resume a paused workspace
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace

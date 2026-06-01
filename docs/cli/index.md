@@ -19,6 +19,8 @@ _Last updated: 2026-06-01_
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
 | [`halt`](/cli/halt/) | Clean disk-preserving shutdown |
 | [`quarantine`](/cli/quarantine/) | Sever host-side network and mediation |
+| [`pause`](/cli/pause/) | Freeze a running workspace's vCPUs, preserving memory and disk |
+| [`resume`](/cli/resume/) | Thaw a paused workspace back to running |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |

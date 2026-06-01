@@ -47,6 +47,9 @@ func SampleStats(stateDir, name string) (Stats, error) {
 	if state == "" {
 		return Stats{}, WorkspaceNotFoundError{Name: name}
 	}
+	if state == vmkit.StatePaused {
+		return Stats{}, fmt.Errorf("workspace %s is paused; resume it first", name)
+	}
 	if state != vmkit.StateRunning {
 		return Stats{}, fmt.Errorf("workspace %s is not running; stats are unavailable in state %s", name, state)
 	}
