@@ -504,6 +504,78 @@ func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
 	return Control(ctx, opts, "resume")
 }
 
+// Snapshot captures a tagged snapshot of a running or paused workspace via the
+// backend supervisor and returns the resulting manifest, enriched with the
+// workspace image reference. A running workspace is briefly paused and resumed
+// around the capture; an already-paused workspace stays paused.
+func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
+	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	if err := ValidateName(opts.Name); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	if strings.TrimSpace(tag) == "" {
+		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot tag is required")
+	}
+	req := vmkit.Request{
+		Command: "snapshot",
+		Identity: &vmkit.Identity{
+			RequestID: NewRequestID(),
+			RuntimeID: opts.Name,
+			Role:      vmkit.RoleWorkload,
+			Backend:   opts.Backend,
+		},
+		Config: &vmkit.Config{StateDir: opts.StateDir},
+		Tag:    tag,
+	}
+	if _, err := Dispatch(ctx, opts, req); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+	manifest, err := vmkit.ReadSnapshotManifest(dir)
+	if err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	if manifest.ImageRef == "" {
+		if workspaceManifest, err := ReadManifest(opts.StateDir, opts.Name); err == nil && workspaceManifest.Verification != nil {
+			if ref := strings.TrimSpace(workspaceManifest.Verification.ImageRef); ref != "" {
+				manifest.ImageRef = ref
+				if err := vmkit.WriteSnapshotManifest(dir, manifest); err != nil {
+					return vmkit.SnapshotManifest{}, err
+				}
+			}
+		}
+	}
+	return manifest, nil
+}
+
+// SnapshotList returns the snapshots recorded for a workspace. It is a host-side
+// read of the snapshot directory and needs no running VM.
+func SnapshotList(opts Options) ([]vmkit.SnapshotInfo, error) {
+	if err := ValidateName(opts.Name); err != nil {
+		return nil, err
+	}
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = StateDir()
+	}
+	return vmkit.ListSnapshots(stateDir, opts.Name)
+}
+
+// SnapshotRemove deletes a single snapshot tag. It is a host-side operation and
+// needs no running VM.
+func SnapshotRemove(opts Options, tag string) error {
+	if err := ValidateName(opts.Name); err != nil {
+		return err
+	}
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = StateDir()
+	}
+	return vmkit.RemoveSnapshot(stateDir, opts.Name, tag)
+}
+
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	req := buildRootfsRequest(opts, rootfsPath)
