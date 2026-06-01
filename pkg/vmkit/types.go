@@ -102,6 +102,8 @@ type Request struct {
 	Command  string    `json:"command,omitempty"`
 	Identity *Identity `json:"identity,omitempty"`
 	Config   *Config   `json:"config,omitempty"`
+	// Tag names the snapshot a snapshot/load request operates on.
+	Tag string `json:"tag,omitempty"`
 }
 
 type Event struct {
@@ -255,6 +257,19 @@ func ValidateRequest(req Request) error {
 		}
 		if req.Config == nil || strings.TrimSpace(req.Config.StateDir) == "" {
 			return errors.New("config.stateDir is required")
+		}
+	case "snapshot":
+		if err := ValidateIdentity(req.Identity); err != nil {
+			return err
+		}
+		if req.Config == nil || strings.TrimSpace(req.Config.StateDir) == "" {
+			return errors.New("config.stateDir is required")
+		}
+		if strings.TrimSpace(req.Tag) == "" {
+			return errors.New("snapshot tag is required")
+		}
+		if !SafeIdentifier(req.Tag) {
+			return fmt.Errorf("snapshot tag must be a safe basename: %s", req.Tag)
 		}
 	default:
 		return fmt.Errorf("unknown command %q", req.Command)

@@ -78,6 +78,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return pauseWorkspace(ctx, opts, req)
 	case "resume":
 		return resumeWorkspace(ctx, opts, req)
+	case "snapshot":
+		return snapshotWorkspace(ctx, opts, req)
 	case "stop":
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateStopped)
 	case "kill":
@@ -650,6 +652,7 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 // tests can substitute a fake without a live Firecracker process.
 type vmStateController interface {
 	patchVMState(ctx context.Context, state string) error
+	createSnapshot(ctx context.Context, snapshotPath, memFilePath string) error
 }
 
 var newVMStateController = func(socketPath string) vmStateController {
