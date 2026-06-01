@@ -29,6 +29,7 @@ _Last updated: 2026-06-01_
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
 | [`events`](/cli/events/) | Show or stream the lifecycle event history |
+| [`stats`](/cli/stats/) | Show or stream workspace resource usage |
 | [`connect`](/cli/connect/) | Open the workspace console |
 | [`exec`](/cli/exec/) | Run a structured command in a workspace |
 | [`profiles`](/cli/profiles/) | List exact named resource profiles |

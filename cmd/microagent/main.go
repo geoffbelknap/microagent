@@ -155,6 +155,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "events" {
 		return runEvents(ctx, args[1:], stdout)
 	}
+	if args[0] == "stats" {
+		return runStats(ctx, args[1:], stdout)
+	}
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
 	}
@@ -1253,6 +1256,74 @@ func eventFollowComplete(events []workspace.EventFile) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func runStats(ctx context.Context, args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	follow := false
+	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.BoolVar(&follow, "follow", false, "Stream resource samples until the workspace stops or interrupted")
+	fs.BoolVar(&follow, "f", false, "Alias for --follow")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent stats <name> [--follow] [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	if follow {
+		if outputStructured() {
+			return fmt.Errorf("stats --follow is not supported with --json/--output json; omit --follow for a single sample")
+		}
+		return followStats(ctx, opts.StateDir, name, stdout)
+	}
+	stats, err := workspace.SampleStats(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	if outputStructured() {
+		return writeJSON(stdout, stats)
+	}
+	fmt.Fprintln(stdout, formatStatsLine(stats))
+	return nil
+}
+
+func formatStatsLine(stats workspace.Stats) string {
+	const mib = 1024 * 1024
+	return fmt.Sprintf("pid=%d  cpu=%.1f%%  mem=%.1f MiB  io_read=%.1f MiB  io_write=%.1f MiB",
+		stats.PID,
+		stats.CPUPercent,
+		float64(stats.MemoryBytes)/mib,
+		float64(stats.IOReadBytes)/mib,
+		float64(stats.IOWriteBytes)/mib,
+	)
+}
+
+func followStats(ctx context.Context, stateDir, name string, stdout *os.File) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	for {
+		stats, err := workspace.SampleStats(stateDir, name)
+		if err != nil {
+			// Stop quietly once the workspace is no longer running; surface any
+			// other error.
+			if state, _, stateErr := workspace.LatestStartState(stateDir, name); stateErr == nil && state != vmkit.StateRunning {
+				return nil
+			}
+			return err
+		}
+		fmt.Fprintln(stdout, formatStatsLine(stats))
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(800 * time.Millisecond):
+		}
 	}
 }
 
@@ -5884,6 +5955,7 @@ Commands:
   result               Show structured workspace result
   logs                 Show workspace logs
   events               Show or stream the lifecycle event history
+  stats                Show or stream workspace resource usage
   profiles             List resource profiles
   images               List or prune local image records
   prune                Prune stale local records and optional image cache files
