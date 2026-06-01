@@ -4,17 +4,20 @@ description: Run AI agent workspaces in microVMs.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 `microagent` is a Go library and CLI for running Linux workspaces inside
-microVMs. The Go packages are the primary integration surface; the CLI is the
-operator and scripting adapter over those packages. Each host OS uses one
-backend: Firecracker on Linux, Apple Virtualization.framework on macOS, and
-experimental Windows Hyper-V on Windows. microagent owns the kernel,
-OCI-to-disk conversion, local image records, VM lifecycle, networking/vsock
-wiring, console access, file transfer for stopped disks, structured results,
-artifacts, and runtime verification. Identity, policy, credentials, and
-control-plane decisions stay outside this project.
+microVMs. The Go packages are the integration surface; the CLI is the operator
+and scripting layer over those packages. Each host OS uses one backend:
+Firecracker on Linux, Apple Virtualization.framework on macOS, and experimental
+Windows Hyper-V on Windows.
+
+microagent owns the substrate work: kernel management, OCI-to-disk conversion,
+local image records, VM lifecycle, networking/vsock wiring, console access,
+stopped-disk file transfer, structured exec, structured results, artifacts,
+readiness, runtime verification, and the MCP stdio adapter over those APIs.
+Identity, policy, credentials, planning, and control-plane decisions stay
+outside this project.
 
 For one-shot use, `microagent run IMAGE [COMMAND ARG...]` boots a VM, runs the
 command, and removes scratch state. For persistent workspaces, use `create`,
@@ -24,29 +27,24 @@ cleanly to microVM behavior.
 
 ## Where to start
 
-Pick the path that matches what you're doing:
-
-- **Trying it out from the CLI** — [Install](/getting-started/install/),
-  [run your first microVM](/getting-started/cli/first-microvm/),
-  [run your first agent](/getting-started/cli/first-agent/), then
-  [keep workspaces around](/getting-started/cli/named-workspaces/).
-- **Embedding microVMs in a Go program** — [Library overview](/library/),
-  [run microagent from a Go program](/getting-started/library/first-program/),
-  then use the [Go library reference](/library/go/) for package-level details.
-- **Integrating with the protocol** — [architecture overview](/concepts/architecture/),
-  [networking](/concepts/networking/), [supervisor protocol](/protocol/), and
-  the [runtime contract](/protocol/runtime-contract/).
+If you are trying it from the CLI, start with [Install](/getting-started/install/),
+[run your first microVM](/getting-started/cli/first-microvm/), then
+[run your first agent](/getting-started/cli/first-agent/). If you are embedding
+it from Go, start with the [library overview](/library/) and the
+[first program](/getting-started/library/first-program/). For lower-level
+integrations, read the [architecture overview](/concepts/architecture/),
+[supervisor protocol](/protocol/), and [runtime contract](/protocol/runtime-contract/).
+For agent clients, read the [MCP endpoint](/cli/serve/), AX-mode
+[structured exec](/cli/exec/), and [readiness signals](/concepts/state-and-identity/).
 
 ## Sections
 
-- [Getting started](/getting-started/install/) — install, plus CLI and library
-  quickstarts.
-- [Library](/library/) — Go package overview, reference, and CLI-to-library
-  mapping.
-- [Concepts](/concepts/architecture/) — architecture, backends, boundaries,
+- [Getting started](/getting-started/install/): install, plus CLI and library quickstarts.
+- [Library](/library/): Go package overview, reference, and CLI-to-library mapping.
+- [Concepts](/concepts/architecture/): architecture, backends, boundaries,
   networking, state and identity, [glossary](/concepts/glossary/).
-- [CLI reference](/cli/) — every subcommand.
-- [Protocol](/protocol/) — shared supervisor protocol and backend notes.
-- [Recipes](/recipes/) — end-to-end examples.
-- [Security](/security/) — trust boundary and reporting.
-- [Troubleshooting](/troubleshooting/) — common failure modes, indexed by symptom.
+- [CLI reference](/cli/): every subcommand.
+- [Protocol](/protocol/): shared supervisor protocol and backend notes.
+- [Recipes](/recipes/): end-to-end examples.
+- [Security](/security/): trust boundary and reporting.
+- [Troubleshooting](/troubleshooting/): common failure modes, indexed by symptom.

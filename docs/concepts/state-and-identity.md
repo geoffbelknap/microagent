@@ -4,7 +4,7 @@ description: Where workspace state lives and how identity flows through requests
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-25_
+_Last updated: 2026-06-01_
 
 microagent reports VM state changes as JSON events. Every request carries
 an identity block; every response carries an event block describing the
@@ -25,19 +25,19 @@ Every request has an identity:
 }
 ```
 
-- **`requestID`** — unique for this call. Echoed in the event so callers can
+- **`requestID`** - unique for this call. Echoed in the event so callers can
   correlate.
-- **`runtimeID`** — the workspace identifier. Equivalent to `--name` /
+- **`runtimeID`** - the workspace identifier. Equivalent to `--name` /
   `--id`.
-- **`role`** — caller-supplied label. Defaults to `workload`. microagent
-  records it in requests, state files, and events but does not interpret it —
+- **`role`** - caller-supplied label. Defaults to `workload`. microagent
+  records it in requests, state files, and events but does not interpret it -
   use `workload` for an agent workspace; pick another label only if you're
   starting an enforcement component or other non-workload caller in your own
   runtime.
-- **`backend`** — the backend the supervisor should target.
+- **`backend`** - the backend the supervisor should target.
 
 The CLI builds the identity automatically on the high-level `run` and
-`create` paths — workspaces default to `role: workload` and the runtime ID
+`create` paths - workspaces default to `role: workload` and the runtime ID
 comes from `--name` / `--id`. The lower-level `create --rootfs` path and
 `--json` requests let callers set `role` explicitly; see
 [`microagent create`](/cli/create/) for the flag surface.
@@ -80,15 +80,15 @@ hash checks for immutable runtime artifacts.
 Status responses include readiness signals so callers can sequence work without
 polling files or serial logs:
 
-- **`guestReady`** — the backend has concrete evidence that the guest reached
+- **`guestReady`** - the backend has concrete evidence that the guest reached
   a started runtime state. Backends do not have to treat a hypervisor process
   state as guest readiness.
-- **`shellReady`** — console input is available and the configured shell has
+- **`shellReady`** - console input is available and the configured shell has
   reached the backend's readiness gate.
-- **`execReady`** — the structured exec service is reachable and a no-op exec
+- **`execReady`** - the structured exec service is reachable and a no-op exec
   request completes end-to-end.
-- **`resultReady`** — the guest result file exists.
-- **`mediationReady`** — a declared mediation channel target is live reachable
+- **`resultReady`** - the guest result file exists.
+- **`mediationReady`** - a declared mediation channel target is live reachable
   for a running workspace. Optional mediation reports `ready: false` without a
   hard `error` when the target is unavailable; required mediation reports an
   error.
@@ -151,10 +151,10 @@ stateDiagram-v2
 
 Two non-obvious things to read from that diagram:
 
-- **Nothing goes directly from `quarantined` back to `start`.** Quarantine is a forensic state — you have to halt, stop, or kill it first, then start from the resulting clean state.
+- **Nothing goes directly from `quarantined` back to `start`.** Quarantine is a forensic state - you have to halt, stop, or kill it first, then start from the resulting clean state.
 - **`running` has no direct path to `delete`.** `delete` refuses while a VM process is alive (Firecracker), so you have to take the workspace through halt, stop, or kill first.
 
-`unknown` and `stopping` are real states the API can report — `unknown` for unrecognized state files, `stopping` as the transient between `running` and a terminal state — but neither sits between user-driven transitions, so they're omitted above.
+`unknown` and `stopping` are real states the API can report - `unknown` for unrecognized state files, `stopping` as the transient between `running` and a terminal state - but neither sits between user-driven transitions, so they're omitted above.
 
 Each state write updates `<state-dir>/<runtimeID>/event.json` with the latest
 event and appends the same record to `<state-dir>/<runtimeID>/events.json`.

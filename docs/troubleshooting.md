@@ -4,11 +4,11 @@ description: Common failure modes, what they mean, and how to fix them.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-16_
+_Last updated: 2026-06-01_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
-This page is indexed by symptom — search for whatever you're seeing.
+This page is indexed by symptom - search for whatever you're seeing.
 
 ## Host setup
 
@@ -25,7 +25,7 @@ Common causes and fixes:
 
 ### `microagent doctor` reports KVM available, but `start` fails with permission denied
 
-Your user can see `/dev/kvm` but can't open it. Same `kvm` group fix as above. Verify with `cat /dev/kvm` — if you get "Operation not permitted" it's a permissions problem; if you get "Invalid argument" you're fine (kernel just rejects raw reads).
+Your user can see `/dev/kvm` but can't open it. Same `kvm` group fix as above. Verify with `cat /dev/kvm` - if you get "Operation not permitted" it's a permissions problem; if you get "Invalid argument" you're fine (kernel just rejects raw reads).
 
 ### `firecracker` binary not found (Linux)
 
@@ -59,7 +59,7 @@ For a custom kernel or air-gapped install, see [`microagent kernel`](/cli/kernel
 
 ### `microagent kernel verify` reports a SHA mismatch
 
-The kernel file on disk doesn't match its expected SHA-256. Either it's corrupted or someone replaced it. Don't ignore this — booting from a kernel you don't trust is the textbook supply-chain failure.
+The kernel file on disk doesn't match its expected SHA-256. Either it's corrupted or someone replaced it. Don't ignore this - booting from a kernel you don't trust is the textbook supply-chain failure.
 
 ```bash
 microagent kernel install   # reinstall from the trusted source
@@ -99,7 +99,7 @@ attaching a network endpoint.
 
 ### `microagent delete` refuses while the VM is running (Firecracker)
 
-The recorded VM process is still alive. By design, `delete` won't tear down a workspace whose VM hasn't been stopped — it'd orphan the process.
+The recorded VM process is still alive. By design, `delete` won't tear down a workspace whose VM hasn't been stopped - it'd orphan the process.
 
 ```bash
 microagent halt <name>     # clean disk-preserving stop
@@ -111,7 +111,7 @@ microagent delete <name>
 
 ### `microagent start` fails because the workspace is `quarantined`
 
-Quarantined workspaces preserve disk and event history while host-side network and mediation paths are severed. They can't be `start`ed directly — that's the whole point of the state.
+Quarantined workspaces preserve disk and event history while host-side network and mediation paths are severed. They can't be `start`ed directly - that's the whole point of the state.
 
 ```bash
 microagent halt <name>     # or stop / kill
@@ -130,7 +130,7 @@ microagent logs <name>
 
 Usual causes:
 
-- **`files:` source missing.** Check the `microagent.yaml` `files:` paths — they're resolved relative to the spec file's directory. A typo or wrong relative path means the file never lands in the rootfs.
+- **`files:` source missing.** Check the `microagent.yaml` `files:` paths - they're resolved relative to the spec file's directory. A typo or wrong relative path means the file never lands in the rootfs.
 - **Entrypoint references a path that wasn't created.** `setup:` runs first; `mkdir -p` your target directories there if they don't exist in the base image.
 - **Missing dependency.** If `setup:` did a `pip install` and a dependency is wrong, the entrypoint sees `ImportError`. The serial log shows the Python traceback.
 - **Wrong shebang or interpreter.** A shell script entrypoint without `#!/bin/sh` and without an explicit `bash`/`sh` wrapper won't execute.
@@ -155,11 +155,11 @@ For repeatable deployments, prefer digest-pinned image refs such as
 
 `user` mode needs three things:
 
-- `pasta` on `PATH` (from the `passt` package — `apt install passt` on Debian/Ubuntu, `dnf install passt` on Fedora; Homebrew installs it as a microagent dependency).
-- Unprivileged user namespaces enabled. Check `sysctl user.max_user_namespaces` (returns a non-zero count when enabled). Some distros also gate this via `kernel.unprivileged_userns_clone` — set both to `1` if either is `0`.
+- `pasta` on `PATH` (from the `passt` package - `apt install passt` on Debian/Ubuntu, `dnf install passt` on Fedora; Homebrew installs it as a microagent dependency).
+- Unprivileged user namespaces enabled. Check `sysctl user.max_user_namespaces` (returns a non-zero count when enabled). Some distros also gate this via `kernel.unprivileged_userns_clone` - set both to `1` if either is `0`.
 - `/dev/net/tun` readable by the calling user.
 
-`microagent doctor` reports each of these — start there to find the missing piece.
+`microagent doctor` reports each of these - start there to find the missing piece.
 
 If your host doesn't allow unprivileged user namespaces and you can't change that policy, fall back to `--network nat` with the supervisor cap setup (see the next entry).
 
@@ -180,7 +180,7 @@ Fixes:
 
 `bridged` mode needs both:
 
-- The named host interface to actually be a Linux bridge — not a regular interface, not loopback.
+- The named host interface to actually be a Linux bridge - not a regular interface, not loopback.
 - `CAP_NET_ADMIN` in the supervisor process and inherited by Firecracker, or root.
 
 Fixes:
@@ -219,7 +219,7 @@ The workspace declared a mediation channel as required (the default) but the hos
 Fixes:
 
 - **Stand up the mediation listener** at the declared `host:port` before `microagent start`.
-- **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this — the channel is fail-closed for a reason ([security](/security/)).
+- **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this - the channel is fail-closed for a reason ([security](/security/)).
 
 ## Console
 
@@ -231,7 +231,7 @@ Fixes:
 
 - **Look at the serial log** to see what the guest is doing: `microagent logs <name>`.
 - **Disable the wait** if you know the workspace doesn't expose an interactive shell: `microagent connect <name> --ready-timeout 0`. You'll see raw serial output without the readiness gate.
-- **Check workspace state** with `microagent --json status <name>` — if it's `failed`, the guest never reached a usable state and connect won't help.
+- **Check workspace state** with `microagent --json status <name>` - if it's `failed`, the guest never reached a usable state and connect won't help.
 
 ### `microagent connect` says "console input is unavailable"
 
@@ -248,13 +248,13 @@ The backend's console capability is fine but this specific workspace doesn't hav
 error: image reference is mutable, pass --allow-mutable to override
 ```
 
-`rootfs build` defaults to refusing tag references (e.g. `ubuntu:24.04`) because they're not reproducible — the same tag can resolve to different content tomorrow. Two paths:
+`rootfs build` defaults to refusing tag references (e.g. `ubuntu:24.04`) because they're not reproducible - the same tag can resolve to different content tomorrow. Two paths:
 
 - **Pin by digest** (recommended for production):
   `microagent rootfs build --image docker.io/library/ubuntu@sha256:...`
 - **Override** (development only): pass `--allow-mutable`.
 
-`microagent create` and `microagent run` are looser — they accept tags by default and record the resolved digest in the workspace's verification record. See [security](/security/) for the trust-boundary discussion.
+`microagent create` and `microagent run` are looser - they accept tags by default and record the resolved digest in the workspace's verification record. See [security](/security/) for the trust-boundary discussion.
 
 ### `microagent images pull` is slow or fails
 
@@ -265,5 +265,5 @@ error: image reference is mutable, pass --allow-mutable to override
 
 - Run `microagent --json doctor` for the full host capability report.
 - Run `microagent --json status <name>` for the workspace state plus verification details.
-- Check `microagent logs <name>` for serial output — most guest-side issues surface there.
+- Check `microagent logs <name>` for serial output - most guest-side issues surface there.
 - File an issue at [github.com/geoffbelknap/microagent/issues](https://github.com/geoffbelknap/microagent/issues) with the doctor output and the failing command.

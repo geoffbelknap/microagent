@@ -4,19 +4,23 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-25_
+_Last updated: 2026-06-01_
 
 ```text
 microagent serve mcp
 ```
 
 `serve` starts long-running machine-readable endpoints for agent clients. The
-initial endpoint is `mcp`, which serves the MicroAgent MCP stdio transport from
+current endpoint is `mcp`, which serves the MicroAgent MCP stdio transport from
 the main `microagent` binary.
 
 The MCP server automatically uses AX output mode. It exposes structured tools
 for workspace lifecycle, inspection, images, copy/artifact access, capability
 discovery, and cost estimation.
+
+It is the full microagent MCP surface for the current release. It intentionally
+stops at substrate operations: it does not plan, call an LLM, interpret audit
+meaning, broker credentials, or make policy decisions.
 
 ## Commands
 
@@ -34,7 +38,7 @@ discovery, and cost estimation.
 | `workspace.start` | Start a prepared workspace |
 | `workspace.exec` | Run a structured command in a running workspace |
 | `workspace.halt` | Halt a workspace and preserve disk state |
-| `workspace.delete` | Delete a workspace, with optional preview |
+| `workspace.delete` | Delete a workspace, with optional preview and force |
 | `workspace.list` | List workspaces |
 | `workspace.inspect` | Inspect workspace state with `summary` or `full` output |
 | `workspace.estimate_cost` | Estimate workspace resources before action |

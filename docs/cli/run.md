@@ -4,7 +4,7 @@ description: Boot a VM from an OCI image, run a command, and tear down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -65,7 +65,7 @@ command.
 
 ## Image references
 
-`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path — it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
+`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path - it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
 
 ## Examples
 
@@ -141,6 +141,6 @@ microagent run \
 
 ## Related
 
-- [`create`](/cli/create/) — keep the workspace between starts
-- [`kernel install`](/cli/kernel/) — manage kernels explicitly
-- [`rootfs build`](/cli/rootfs/) — build a rootfs without booting
+- [`create`](/cli/create/) - keep the workspace between starts
+- [`kernel install`](/cli/kernel/) - manage kernels explicitly
+- [`rootfs build`](/cli/rootfs/) - build a rootfs without booting

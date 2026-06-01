@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-25_
+_Last updated: 2026-06-01_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -16,7 +16,7 @@ The library doesn't require agent semantics. The same packages back the CLI's
 agent-flavored workflows and any program that just wants microVMs: build a
 rootfs from an OCI image, boot a VM, run a command, tear it down. The
 high-level [`pkg/workspace`](#workspace-api) API treats every workspace as a
-`workload`-role identity by default — you get caller-visible identity for
+`workload`-role identity by default - you get caller-visible identity for
 free without writing agent-aware code, and you can drop down to
 [`pkg/vmkit`](#supervisor-types) when you need a different role or a custom
 supervisor request.
@@ -167,8 +167,8 @@ func main() {
 captured from the guest. `Result.Response` carries the supervisor's structured
 response (state, identity, verification).
 
-For non-defaults — backend override, custom kernel, sized memory/CPUs, networking
-— set the matching `Options` fields before calling `Run`. The lifecycle API:
+For non-defaults - backend override, custom kernel, sized memory/CPUs, networking
+- set the matching `Options` fields before calling `Run`. The lifecycle API:
 
 | Function | Purpose |
 |---|---|

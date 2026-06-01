@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-06-01_
 
 | Command | Purpose |
 |---|---|
@@ -58,14 +58,14 @@ their meaning.
 
 ## Workspace spec
 
-[`microagent.yaml`](/cli/spec/) is the declarative form of `microagent create` — image, profile, restart policy, networking, mounts, mediation, and outputs in a single file you can keep in source control.
+[`microagent.yaml`](/cli/spec/) is the declarative form of `microagent create` - image, profile, restart policy, networking, mounts, mediation, and outputs in a single file you can keep in source control.
 
 ## Global flags
 
-- `--json` — print JSON output; place before the subcommand
-- `--text` — print human-readable output
-- `--output <json|text>` — select output format
-- `--supervisor <path>` — override the installed host backend supervisor path
+- `--json` - print JSON output; place before the subcommand
+- `--text` - print human-readable output
+- `--output <json|text>` - select output format
+- `--supervisor <path>` - override the installed host backend supervisor path
   (`MICROAGENT_APPLEVF_SUPERVISOR` and
   `MICROAGENT_FIRECRACKER_SUPERVISOR` work too)
 

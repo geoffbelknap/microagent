@@ -4,10 +4,10 @@ description: Boot a microVM, point it at an LLM, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-11_
+_Last updated: 2026-06-01_
 
-This walks through running an agent — a body that calls an LLM with `bash`,
-`read_file`, and `write_file` tools — inside a microVM. The example ships in
+This walks through running an agent - a body that calls an LLM with `bash`,
+`read_file`, and `write_file` tools - inside a microVM. The example ships in
 three flavors: Anthropic Claude, OpenAI, and Google Gemini. The flow is
 identical; only the example folder and the API key env var change.
 
@@ -44,7 +44,7 @@ microagent create \
   --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
 
-The spec sets the workspace name to `minimal-body` — that's what the rest of
+The spec sets the workspace name to `minimal-body` - that's what the rest of
 the commands refer to. First-time create takes a minute or two: microagent
 pulls the base Python image, builds the rootfs, installs Pydantic and the
 Anthropic SDK, and copies the body source in. The API key is passed in as an
@@ -59,7 +59,7 @@ with `microagent cp`:
 microagent cp examples/minimal-body/demo/input-001.json minimal-body:/workspace/input.json
 ```
 
-The request asks for a concrete task — write a Python script, run it, show
+The request asks for a concrete task - write a Python script, run it, show
 the output.
 
 ## Run it
@@ -82,7 +82,7 @@ cat ./hello.py
 
 ## Halt, ask a follow-up, resume
 
-The workspace persists between starts — disk, files, all of it. Halt cleanly,
+The workspace persists between starts - disk, files, all of it. Halt cleanly,
 drop in a new request, start again. The LLM can read whatever it wrote on the
 previous run.
 
@@ -107,9 +107,9 @@ microagent delete minimal-body
 
 ## What's next
 
-- [Build a simple agent](/recipes/simple-agent/) — the same flow with more
+- [Build a simple agent](/recipes/simple-agent/) - the same flow with more
   on the body's structure, prompt caching, and the production-shape gaps
   (mediation channel, host-side proxy for keys).
-- [`microagent.yaml`](/cli/spec/) — the full workspace spec reference.
-- [State and identity](/concepts/state-and-identity/) — what `microagent --json status` reports and how lifecycle events are emitted.
-- [Glossary](/concepts/glossary/) — workspace, mediation, halt vs stop vs kill vs quarantine.
+- [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
+- [State and identity](/concepts/state-and-identity/) - what `microagent --json status` reports and how lifecycle events are emitted.
+- [Glossary](/concepts/glossary/) - workspace, mediation, halt vs stop vs kill vs quarantine.

@@ -4,13 +4,13 @@ description: Trust boundary and reporting issues.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-11_
+_Last updated: 2026-06-01_
 
 ## Trust boundary
 
 `microagent` treats the kernel, rootfs, and request files as **executable
 input**. It does not sign images, scan layers, mediate credentials, or enforce
-policy — those concerns belong to the upstream system that calls `microagent`.
+policy - those concerns belong to the upstream system that calls `microagent`.
 See [Boundaries](/concepts/boundaries/) for the full list.
 
 That means:

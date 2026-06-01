@@ -4,7 +4,7 @@ description: Create a named, persistent workspace from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 ```text
 microagent create [--name <name>] --image <ref> [flags]
@@ -12,7 +12,7 @@ microagent create <name> --image <ref> [flags]
 ```
 
 `create` builds a workspace and records it under `--state-dir`. Unlike
-[`run`](/cli/run/), the state survives — you can `start`, `stop`, `connect`,
+[`run`](/cli/run/), the state survives - you can `start`, `stop`, `connect`,
 and `delete` it later. If the default kernel is missing, `create` installs it
 first.
 
@@ -60,7 +60,7 @@ first.
 
 ## Image references
 
-`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags (`docker.io/library/ubuntu:24.04`). Both are allowed here — `create` records the resolved digest in the workspace verification record so `microagent --json status` can flag drift later. Pin by digest if you want reproducible workspaces.
+`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags (`docker.io/library/ubuntu:24.04`). Both are allowed here - `create` records the resolved digest in the workspace verification record so `microagent --json status` can flag drift later. Pin by digest if you want reproducible workspaces.
 
 [`microagent rootfs build`](/cli/rootfs/) is stricter: it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
 
@@ -200,7 +200,7 @@ path doesn't expose:
 | Flag | Description |
 |---|---|
 | `--id <id>` | Runtime ID for the workspace. Required on the `--rootfs` path |
-| `--role <role>` | Caller-supplied role label. Defaults to `workload`. microagent records it in requests, state files, and events but does not interpret it — see [state and identity](/concepts/state-and-identity/) |
+| `--role <role>` | Caller-supplied role label. Defaults to `workload`. microagent records it in requests, state files, and events but does not interpret it - see [state and identity](/concepts/state-and-identity/) |
 
 Validate without creating:
 

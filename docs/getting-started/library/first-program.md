@@ -1,10 +1,10 @@
 ---
 title: Run microagent from a Go program
-description: Boot a microVM, run a command, and tear it down — in a few lines of Go.
+description: Boot a microVM, run a command, and tear it down - in a few lines of Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-11_
+_Last updated: 2026-06-01_
 
 *If you'd rather drive microagent from the command line, see [run your first microVM](/getting-started/cli/first-microvm/) instead.*
 
@@ -18,7 +18,7 @@ script from Go.
 
 ## Prerequisites
 
-1. [Install the CLI](/getting-started/install/) — the library and the CLI ship
+1. [Install the CLI](/getting-started/install/) - the library and the CLI ship
    together.
 2. Run `microagent doctor` to confirm the host can boot microVMs.
 3. Install the default kernel so the library can find it on disk:
@@ -61,7 +61,7 @@ func main() {
 `workspace.DefaultOptions()` picks the host backend (Firecracker on Linux,
 Apple Virtualization.framework on macOS), the guest architecture, the default
 kernel path, and the default state directory. You override only what your
-program needs to set — here, the workspace name, the OCI image, and the
+program needs to set - here, the workspace name, the OCI image, and the
 command to run.
 
 `workspace.Run` builds the rootfs from the image, boots the VM, runs the
@@ -80,16 +80,16 @@ The returned `Result.Result.Stdout` contains the guest's stdout;
 
 ## Where to next
 
-- Keep a workspace around between runs and inspect it as it lives — see the
+- Keep a workspace around between runs and inspect it as it lives - see the
   [`workspace.Create`, `Start`, `Inspect`, `Control`](/library/go/) functions.
-- Build a rootfs without booting anything — `pkg/rootfs`.
-- Talk to a supervisor directly without going through `pkg/workspace` — see
+- Build a rootfs without booting anything - `pkg/rootfs`.
+- Talk to a supervisor directly without going through `pkg/workspace` - see
   [`pkg/vmkit`](/library/go/#supervisor-types) and the
   [supervisor protocol](/protocol/).
 - Already agent-flavored: the library treats every workspace as a
   `workload`-role identity by default. `opts.Name` becomes the `RuntimeID`
   carried in requests, state files, and events. For enforcement-role
-  components or custom requests, build a `vmkit.Request` directly —
+  components or custom requests, build a `vmkit.Request` directly -
   see [`pkg/vmkit`](/library/go/#supervisor-types).
 
 For the full set of exported packages and CLI ↔ library mapping, see the

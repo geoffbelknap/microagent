@@ -4,7 +4,7 @@ description: The JSON request and response format used by backend supervisors.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-25_
+_Last updated: 2026-06-01_
 
 Backend supervisors speak a small JSON protocol: one request in, one response
 out. A request names a lifecycle command such as `prepare`, `start`, or `stop`.
@@ -240,7 +240,7 @@ and event history are preserved for a later `start`. `quarantined` preserves
 disk state and event history while severing host-side network, mediation, and
 side-effect paths.
 
-For the visual state machine — including which transitions `start`, `halt`, `quarantine`, `stop`, `kill`, and `delete` allow — see [State and identity](/concepts/state-and-identity/).
+For the visual state machine - including which transitions `start`, `halt`, `quarantine`, `stop`, `kill`, and `delete` allow - see [State and identity](/concepts/state-and-identity/).
 
 ## Field presence by command
 
@@ -249,23 +249,23 @@ return a subset:
 
 | Command | `event` | `host` | `verification` | `readiness` | `result` | `artifacts` | `mediation` |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `host` | — | ✓ | — | — | — | — | — |
-| `check` | ✓ | — | ✓ | — | — | — | declared |
-| `prepare` | ✓ | — | ✓ | — | — | declared | declared |
-| `start` / `run` | ✓ | — | ✓ | ✓ | conditional | declared | declared |
-| `console` | ✓ | — | — | — | — | — | — |
-| `inspect` | ✓ | — | ✓ | ✓ | conditional | declared | declared |
-| `halt` / `quarantine` / `stop` / `kill` / `delete` | ✓ | — | — | — | — | — | — |
+| `host` | - | ✓ | - | - | - | - | - |
+| `check` | ✓ | - | ✓ | - | - | - | declared |
+| `prepare` | ✓ | - | ✓ | - | - | declared | declared |
+| `start` / `run` | ✓ | - | ✓ | ✓ | conditional | declared | declared |
+| `console` | ✓ | - | - | - | - | - | - |
+| `inspect` | ✓ | - | ✓ | ✓ | conditional | declared | declared |
+| `halt` / `quarantine` / `stop` / `kill` / `delete` | ✓ | - | - | - | - | - | - |
 
 Reading the table:
 
-- **`event`** — present on every command except `host`. Carries identity, state, and `observedAt`.
-- **`host`** — only on the `host` command. Reports backend capability, virtualization availability, supervisor path, kernel and console status.
-- **`verification`** — present whenever the request touched the rootfs or runtime artifacts. Compares recorded vs current SHAs and reports any divergence.
-- **`readiness`** — present after `start` / `run` and on `inspect` of a running workspace. Carries `guestReady`, `shellReady`, `execReady`, `resultReady`, and `mediationReady`.
-- **`result`** — present when the guest result file has been delivered. *Conditional* means: included if it exists at the time of the response, omitted otherwise. Don't assume it's there.
-- **`artifacts`** — present whenever the workspace declared `bundles` or `outputs`. *Declared* means: included only if the workspace's manifest declares them.
-- **`mediation`** — present whenever the workspace declared a mediation channel.
+- **`event`** - present on every command except `host`. Carries identity, state, and `observedAt`.
+- **`host`** - only on the `host` command. Reports backend capability, virtualization availability, supervisor path, kernel and console status.
+- **`verification`** - present whenever the request touched the rootfs or runtime artifacts. Compares recorded vs current SHAs and reports any divergence.
+- **`readiness`** - present after `start` / `run` and on `inspect` of a running workspace. Carries `guestReady`, `shellReady`, `execReady`, `resultReady`, and `mediationReady`.
+- **`result`** - present when the guest result file has been delivered. *Conditional* means: included if it exists at the time of the response, omitted otherwise. Don't assume it's there.
+- **`artifacts`** - present whenever the workspace declared `bundles` or `outputs`. *Declared* means: included only if the workspace's manifest declares them.
+- **`mediation`** - present whenever the workspace declared a mediation channel.
 
 `ok` and `backend` appear on every response.
 
