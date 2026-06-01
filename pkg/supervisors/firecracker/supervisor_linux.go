@@ -389,7 +389,21 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		serialInput = input
 	}
-	cmd := exec.CommandContext(ctx, path, "--no-api", "--config-file", configPath(opts))
+	// Firecracker refuses to start if the API socket already exists.
+	if err := os.Remove(apiSocketPath(opts)); err != nil && !os.IsNotExist(err) {
+		cleanupTransientFirewallRules(firewallRules)
+		cleanupTransientNetworkDevices(networkDevices)
+		_ = serialLog.Close()
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
+		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+		return failedResponse(req, err.Error()), err
+	}
+	// Boot from the config file and additionally expose the API socket so
+	// pause/resume and snapshot can control the running VM. Only --no-api would
+	// disable the API.
+	cmd := exec.CommandContext(ctx, path, "--api-sock", apiSocketPath(opts), "--config-file", configPath(opts))
 	cmd.Stdout = serialLog
 	cmd.Stderr = serialLog
 	if serialInput != nil {
@@ -2525,6 +2539,14 @@ func failedResponse(req vmkit.Request, errorText string) vmkit.Response {
 
 func configPath(opts Options) string {
 	return filepath.Join(opts.StateDir, opts.Name, "firecracker.json")
+}
+
+// apiSocketPath is the Firecracker API unix socket. It is deterministic from
+// the workspace identity, so pause/resume/snapshot reach it without recording
+// it in runtime state. The VM boots from the config file; the API socket is
+// additionally exposed (only --no-api would disable it) for runtime control.
+func apiSocketPath(opts Options) string {
+	return filepath.Join(opts.StateDir, opts.Name, "firecracker-api.sock")
 }
 
 func serialLogPath(opts Options) string {

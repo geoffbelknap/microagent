@@ -39,23 +39,13 @@ func TestAPIClientEndpoints(t *testing.T) {
 	}))
 	c := newAPIClient(sock)
 	ctx := context.Background()
-	mustNoErr(t, c.putMachineConfig(ctx, machineConfig{VCPUCount: 2, MemSizeMiB: 512}))
-	mustNoErr(t, c.putBootSource(ctx, bootSource{KernelImagePath: "/k", BootArgs: "console=ttyS0"}))
-	mustNoErr(t, c.putDrive(ctx, drive{DriveID: "rootfs", PathOnHost: "/r", IsRootDevice: true}))
-	mustNoErr(t, c.putNetworkInterface(ctx, networkInterface{IfaceID: "eth0", HostDevName: "tap0"}))
-	mustNoErr(t, c.putVsock(ctx, vsockConfig{VsockID: "vsock0", GuestCID: 3, UDSPath: "/v.sock"}))
-	mustNoErr(t, c.instanceStart(ctx))
 	mustNoErr(t, c.patchVMState(ctx, "Paused"))
+	mustNoErr(t, c.patchVMState(ctx, "Resumed"))
 	mustNoErr(t, c.createSnapshot(ctx, "/s/vmstate", "/s/mem"))
 	mustNoErr(t, c.loadSnapshot(ctx, "/s/vmstate", "/s/mem", true))
 
 	want := []struct{ method, path string }{
-		{"PUT", "/machine-config"},
-		{"PUT", "/boot-source"},
-		{"PUT", "/drives/rootfs"},
-		{"PUT", "/network-interfaces/eth0"},
-		{"PUT", "/vsock"},
-		{"PUT", "/actions"},
+		{"PATCH", "/vm"},
 		{"PATCH", "/vm"},
 		{"PUT", "/snapshot/create"},
 		{"PUT", "/snapshot/load"},
@@ -69,25 +59,20 @@ func TestAPIClientEndpoints(t *testing.T) {
 		}
 	}
 
-	var mc map[string]any
-	mustNoErr(t, json.Unmarshal([]byte(got[0].body), &mc))
-	if mc["vcpu_count"].(float64) != 2 || mc["mem_size_mib"].(float64) != 512 {
-		t.Fatalf("machine-config body = %s", got[0].body)
-	}
-	var action map[string]any
-	mustNoErr(t, json.Unmarshal([]byte(got[5].body), &action))
-	if action["action_type"] != "InstanceStart" {
-		t.Fatalf("action body = %s", got[5].body)
-	}
-	var vm map[string]any
-	mustNoErr(t, json.Unmarshal([]byte(got[6].body), &vm))
-	if vm["state"] != "Paused" {
-		t.Fatalf("vm body = %s", got[6].body)
+	var pause map[string]any
+	mustNoErr(t, json.Unmarshal([]byte(got[0].body), &pause))
+	if pause["state"] != "Paused" {
+		t.Fatalf("pause body = %s", got[0].body)
 	}
 	var snap map[string]any
-	mustNoErr(t, json.Unmarshal([]byte(got[7].body), &snap))
+	mustNoErr(t, json.Unmarshal([]byte(got[2].body), &snap))
 	if snap["snapshot_type"] != "Full" || snap["snapshot_path"] != "/s/vmstate" || snap["mem_file_path"] != "/s/mem" {
-		t.Fatalf("snapshot/create body = %s", got[7].body)
+		t.Fatalf("snapshot/create body = %s", got[2].body)
+	}
+	var load map[string]any
+	mustNoErr(t, json.Unmarshal([]byte(got[3].body), &load))
+	if load["resume_vm"] != true {
+		t.Fatalf("snapshot/load body = %s", got[3].body)
 	}
 }
 
@@ -97,7 +82,7 @@ func TestAPIClientSurfacesErrorBody(t *testing.T) {
 		_, _ = io.WriteString(w, `{"fault_message":"the kernel is wrong"}`)
 	}))
 	c := newAPIClient(sock)
-	err := c.instanceStart(context.Background())
+	err := c.patchVMState(context.Background(), "Paused")
 	if err == nil || !strings.Contains(err.Error(), "the kernel is wrong") {
 		t.Fatalf("err = %v, want it to contain the fault message", err)
 	}

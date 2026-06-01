@@ -10,10 +10,10 @@ import (
 	"net/http"
 )
 
-// apiClient talks to a single Firecracker instance over its API unix socket.
-// Firecracker's config-file format is the union of the API request bodies, so
-// the same config sub-objects (machineConfig, bootSource, drive, ...) are sent
-// here unchanged.
+// apiClient performs runtime control on a running Firecracker instance over its
+// API unix socket. The VM is booted from the config file (--config-file); the
+// API socket is additionally exposed (only --no-api would disable it) so the
+// supervisor can pause/resume and snapshot the running VM.
 type apiClient struct {
 	http *http.Client
 }
@@ -53,34 +53,12 @@ func (c *apiClient) do(ctx context.Context, method, path string, body any) error
 	return nil
 }
 
-func (c *apiClient) putMachineConfig(ctx context.Context, m machineConfig) error {
-	return c.do(ctx, http.MethodPut, "/machine-config", m)
-}
-
-func (c *apiClient) putBootSource(ctx context.Context, b bootSource) error {
-	return c.do(ctx, http.MethodPut, "/boot-source", b)
-}
-
-func (c *apiClient) putDrive(ctx context.Context, d drive) error {
-	return c.do(ctx, http.MethodPut, "/drives/"+d.DriveID, d)
-}
-
-func (c *apiClient) putNetworkInterface(ctx context.Context, n networkInterface) error {
-	return c.do(ctx, http.MethodPut, "/network-interfaces/"+n.IfaceID, n)
-}
-
-func (c *apiClient) putVsock(ctx context.Context, v vsockConfig) error {
-	return c.do(ctx, http.MethodPut, "/vsock", v)
-}
-
-func (c *apiClient) instanceStart(ctx context.Context) error {
-	return c.do(ctx, http.MethodPut, "/actions", map[string]string{"action_type": "InstanceStart"})
-}
-
+// patchVMState pauses ("Paused") or resumes ("Resumed") the running VM.
 func (c *apiClient) patchVMState(ctx context.Context, state string) error {
 	return c.do(ctx, http.MethodPatch, "/vm", map[string]string{"state": state})
 }
 
+// createSnapshot writes a full snapshot. The VM must be paused first.
 func (c *apiClient) createSnapshot(ctx context.Context, snapshotPath, memFilePath string) error {
 	return c.do(ctx, http.MethodPut, "/snapshot/create", map[string]string{
 		"snapshot_type": "Full",
@@ -89,6 +67,7 @@ func (c *apiClient) createSnapshot(ctx context.Context, snapshotPath, memFilePat
 	})
 }
 
+// loadSnapshot loads a snapshot into a freshly launched Firecracker process.
 func (c *apiClient) loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool) error {
 	return c.do(ctx, http.MethodPut, "/snapshot/load", map[string]any{
 		"snapshot_path": snapshotPath,
