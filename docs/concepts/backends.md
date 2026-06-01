@@ -4,7 +4,7 @@ description: One backend per host OS. Same lifecycle surface, different mechanic
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-19_
+_Last updated: 2026-06-01_
 
 microagent installs with one backend for the host OS: Firecracker on Linux,
 Apple VF on macOS, and experimental Windows Hyper-V on Windows. The CLI does
@@ -32,7 +32,7 @@ supervisor-shaped request/response boundary. Windows Hyper-V uses the same
   `<prefix>/libexec/firecracker`, or `MICROAGENT_FIRECRACKER`).
 - `delete` refuses to remove state while the recorded VM process is still
   running. Use `stop` or `kill` first.
-- Supports interactive `connect` and `connect --send`. Use
+- Supports interactive [`connect`](/cli/connect/) and `connect --send`. Use
   [`logs`](/cli/logs/) when you only need captured serial output.
 - The default kernel path is `~/.microagent/kernels/firecracker/<arch>/Image`.
 
@@ -47,6 +47,33 @@ supervisor-shaped request/response boundary. Windows Hyper-V uses the same
   `--supervisor` or `MICROAGENT_APPLEVF_SUPERVISOR`.
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
+
+## Windows Hyper-V (experimental)
+
+- Targets Linux microVM-style workspaces on Windows without WSL or QEMU.
+- Uses the backend name `windows-hyperv`.
+- Uses Host Compute Service through `vmcompute.dll`.
+- Consumes VHD root disks at
+  `~/.microagent/workspaces/<name>/rootfs.vhd`.
+- Supports `host`, `check`, `prepare`, `run`, `start`, `inspect`, `connect`,
+  `halt`, `quarantine`, `stop`, `kill`, and `delete` experimentally.
+- Supports HNS NAT networking and published TCP ports through Hyper-V socket
+  bridging.
+- Fails closed for the direct supervisor `console` command; use
+  [`connect`](/cli/connect/).
+- See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
+  details and current limitations.
+
+## Selecting a host
+
+`microagent doctor` reports the active backend, backend-specific host support,
+virtualization availability, guest-init availability, and the default kernel
+status.
+
+## Backend validation (for contributors)
+
+This is contributor procedure for validating backends end-to-end, not
+conceptual background. Skip it unless you are running the live test suites.
 
 ### Apple VF validation runbook
 
@@ -111,25 +138,3 @@ Apple's restricted entitlement.
 
 Keep one-off run logs and investigation notes out of `docs/`; update the
 Notion task or another tracker with run evidence instead.
-
-## Windows Hyper-V (experimental)
-
-- Targets Linux microVM-style workspaces on Windows without WSL or QEMU.
-- Uses the backend name `windows-hyperv`.
-- Uses Host Compute Service through `vmcompute.dll`.
-- Consumes VHD root disks at
-  `~/.microagent/workspaces/<name>/rootfs.vhd`.
-- Supports `host`, `check`, `prepare`, `run`, `start`, `inspect`, `connect`,
-  `halt`, `quarantine`, `stop`, `kill`, and `delete` experimentally.
-- Supports HNS NAT networking and published TCP ports through Hyper-V socket
-  bridging.
-- Fails closed for the direct supervisor `console` command; use
-  [`connect`](/cli/connect/).
-- See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
-  details and current limitations.
-
-## Selecting a host
-
-`microagent doctor` reports the active backend, backend-specific host support,
-virtualization availability, guest-init availability, and the default kernel
-status.

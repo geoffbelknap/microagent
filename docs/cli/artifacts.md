@@ -4,7 +4,7 @@ description: List and retrieve declared workspace artifacts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-08_
+_Last updated: 2026-06-01_
 
 ```text
 microagent artifacts <name> [--state-dir <dir>]
@@ -22,9 +22,11 @@ copying, use [`cp`](/cli/cp/).
 
 | Flag | Description |
 |---|---|
-| `--state-dir <dir>` | State directory |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--debugfs <path>` | debugfs binary path for `artifacts get` |
 | `--json` | Global flag before `artifacts`; print structured JSON output |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
 ## Examples
 

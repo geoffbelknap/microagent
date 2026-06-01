@@ -4,7 +4,7 @@ description: Boot a previously created workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -25,7 +25,7 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 
 | Flag | Description |
 |---|---|
-| `--state-dir <dir>` | State directory holding the workspace record |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
 | `--cpus <n>` | CPU count override for this start |
@@ -34,6 +34,16 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 | `--backend <name>` | Backend identity override |
 | `--vsock p=host:port` | Add a vsock mapping for this start. Repeatable |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
+## Exit status
+
+`start` exits nonzero when the workspace cannot be found or fails to boot, and
+when it is started from an invalid state - it rejects workspaces that are
+already `starting` or `running`, and refuses `quarantined` workspaces until they
+are halted, stopped, or killed first. In AX mode these surface as structured
+error envelopes (an invalid-state start maps to `conflict`).
 
 ## Example
 

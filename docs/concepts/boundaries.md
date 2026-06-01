@@ -21,6 +21,7 @@ boundary. The caller owns policy, identity, and intent.
 - MCP stdio adapter over the existing substrate APIs
 - Firecracker supervisor implementation (Go executable)
 - Apple Virtualization.framework supervisor implementation (Swift executable)
+- Windows Hyper-V supervisor implementation (Go, experimental)
 - State files and cleanup
 - Host/guest wiring such as vsock listeners
 
@@ -41,7 +42,7 @@ adapter surfaces.
 ## Design rules
 
 - Public output is structured and machine-readable.
-- AX mode and MCP responses are for clients, not log scraping.
+- [AX mode](/concepts/glossary/) and MCP responses are for clients, not log scraping.
 - The Apple VF supervisor stays usable from Go, Python, Rust, Node, and shell.
 - State changes are API output, not log strings.
 - Identity is preserved explicitly in requests, state files, and events.

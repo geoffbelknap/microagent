@@ -38,7 +38,8 @@ first.
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--backend <name>` | Backend identity override |
 | `--kernel <path>` | Custom kernel path |
-| `--state-dir <dir>` | State directory |
+| `--rootfs <path>` | Use an existing ext4 rootfs instead of building one from `--image`. Enables the lower-level identity flags `--id` and `--role` (see [Examples](#examples)) |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--guest-init <path>` | Guest init path |
 | `--arch <arch>` | Guest architecture |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
@@ -57,6 +58,8 @@ first.
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--dry-run` | Validate config without creating |
 | `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
+
+See [global flags](/cli/#global-flags) for `--text`/`--output`/`--mode`/`--supervisor` and the global `--json` output flag (distinct from the `--json` request-input flag above).
 
 ## Image references
 

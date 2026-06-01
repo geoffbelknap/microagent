@@ -43,6 +43,14 @@ backend-neutral runtime contract.
     "stateDir": "/tmp/microagent",
     "memoryMiB": 512,
     "cpuCount": 2,
+    "disks": [
+      {
+        "name": "config",
+        "path": "/tmp/config.ext4",
+        "mountpoint": "/config",
+        "mode": "ro"
+      }
+    ],
     "network": {
       "mode": "nat",
       "portForwards": [
@@ -65,8 +73,16 @@ backend-neutral runtime contract.
 }
 ```
 
-`config.network.mode` is declarative and must be `nat`, `isolated`, or
-`bridged`. Bridged backends may require `config.network.interface`. Port
+`config.disks` is an optional array of extra disks attached after the rootfs in
+request order. Each entry has `name`, `path`, `mountpoint`, and `mode` (`ro` or
+`rw`).
+
+`config.network.mode` is declarative. The recognized modes are `user`, `nat`,
+`isolated`, and `bridged`; this is not a closed three-value set. Which modes a
+given backend implements, and what each one does, is backend-specific - see the
+[Firecracker](/protocol/firecracker/), [Apple VF](/protocol/applevf/), and
+[Windows Hyper-V](/protocol/windows-hyperv/) pages. Bridged backends may require
+`config.network.interface`. Port
 forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
 `config.mediation` declares the Body-to-host control-plane channel. Required
 mediation must set `failClosed: true`; if the channel is unavailable or broken,
@@ -81,13 +97,20 @@ consumers should treat it as closed by default.
 | `prepare` | Write backend state/config without booting | identity and full config |
 | `start` | Start a prepared workspace | identity and full config |
 | `run` | Start in foreground | identity and full config |
-| `console` | Attach to a running console | identity and full config |
+| `console`* | Attach to a running console | identity and full config |
 | `inspect` | Read latest state | identity and `config.stateDir` |
 | `halt` | Clean disk-preserving shutdown | identity and `config.stateDir` |
 | `quarantine` | Sever host-side network and mediation without stopping the guest | identity and `config.stateDir` |
 | `stop` | Graceful stop | identity and `config.stateDir` |
 | `kill` | Hard stop | identity and `config.stateDir` |
 | `delete` | Remove backend runtime state | identity and `config.stateDir` |
+
+*`console` is not a one-request/one-response supervisor command on current
+backends. It is a CLI-level concern: the CLI drives interactive attach over the
+backend's serial/socket path (Firecracker and Windows Hyper-V reject a
+supervisor `console` command; Apple VF streams interactively rather than
+returning an `event`). It is therefore omitted from the field-presence table
+below.
 
 ## Response
 
@@ -253,7 +276,6 @@ return a subset:
 | `check` | ✓ | - | ✓ | - | - | - | declared |
 | `prepare` | ✓ | - | ✓ | - | - | declared | declared |
 | `start` / `run` | ✓ | - | ✓ | ✓ | conditional | declared | declared |
-| `console` | ✓ | - | - | - | - | - | - |
 | `inspect` | ✓ | - | ✓ | ✓ | conditional | declared | declared |
 | `halt` / `quarantine` / `stop` / `kill` / `delete` | ✓ | - | - | - | - | - | - |
 

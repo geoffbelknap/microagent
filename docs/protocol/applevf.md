@@ -4,7 +4,7 @@ description: One JSON request in, one JSON response out.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 microagent uses the supervisor concept for backend lifecycle work. The
 Apple VF supervisor is packaged as a standalone executable,
@@ -167,13 +167,34 @@ connections to that target.
     "observedAt": "2026-05-02T00:00:00Z"
   },
   "readiness": {
-    "guestReady": {},
-    "shellReady": {},
-    "resultReady": {},
-    "mediationReady": {}
+    "guestReady": {
+      "ready": true,
+      "observedAt": "2026-05-02T00:00:00Z",
+      "detail": "workspace reached runtime state running"
+    },
+    "shellReady": {
+      "ready": true,
+      "observedAt": "2026-05-02T00:00:00Z",
+      "detail": "console input is available"
+    },
+    "resultReady": {
+      "ready": false
+    },
+    "mediationReady": {
+      "ready": true,
+      "observedAt": "2026-05-02T00:00:00Z",
+      "detail": "mediation required=true failClosed=true port=2048 target=127.0.0.1:9900"
+    }
   }
 }
 ```
+
+The Apple VF supervisor surfaces four readiness signals: `guestReady`,
+`shellReady`, `resultReady`, and `mediationReady`. Each signal has `ready` plus
+optional `observedAt`, `detail`, and `error`; signals that have not been
+observed yet are emitted as empty objects. Apple VF does not yet surface the
+shared `execReady` signal described in the
+[runtime contract](/protocol/runtime-contract/).
 
 Host responses use `host` instead of `event`:
 

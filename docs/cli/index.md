@@ -14,7 +14,7 @@ _Last updated: 2026-06-01_
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
 | [`artifacts`](/cli/artifacts/) | List and retrieve declared workspace artifacts |
-| [`network`](/cli/network/) | Inspect workspace network mode and port forwards |
+| [`network`](/cli/network/) | Inspect declared network intent and runtime network state |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
 | [`halt`](/cli/halt/) | Clean disk-preserving shutdown |
@@ -22,9 +22,9 @@ _Last updated: 2026-06-01_
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |
-| `rm` | Alias for `delete` |
+| [`rm`](/cli/delete/) | Alias for `delete` |
 | [`status`](/cli/status/) | Show workspace state |
-| `inspect` | Alias for `status` with JSON output |
+| [`inspect`](/cli/status/) | Alias for `status` with JSON output |
 | [`result`](/cli/result/) | Show structured workspace result |
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
@@ -62,9 +62,18 @@ their meaning.
 
 ## Global flags
 
-- `--json` - print JSON output; place before the subcommand
+These flags are recognized before the subcommand and apply across commands that
+produce output. Subcommand pages link back here rather than repeat them.
+
+- `--json` - print structured JSON output; place before the subcommand
 - `--text` - print human-readable output
 - `--output <json|text>` - select output format
+- `--mode <ux|ax>` - select the output mode. `ux` is the default
+  human-oriented mode; `ax` is the agent mode, which forces JSON output and
+  emits structured error envelopes on failure. `MICROAGENT_MODE` sets the same
+  value (`ux`/`human`/`text` map to UX; `ax`/`agent`/`json` map to AX). `--mode
+  ax` implies `--json`; when neither is set, `MICROAGENT_OUTPUT=json|text`
+  selects the format and output otherwise follows whether stdout is a terminal.
 - `--supervisor <path>` - override the installed host backend supervisor path
   (`MICROAGENT_APPLEVF_SUPERVISOR` and
   `MICROAGENT_FIRECRACKER_SUPERVISOR` work too)

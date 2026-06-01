@@ -9,8 +9,8 @@ _Last updated: 2026-06-01_
 `microagent` is a Go library with a CLI adapter. The library packages handle
 workspace lifecycle, rootfs builds, kernel management, image cache management,
 diagnostics, shared request/response types, structured exec, readiness, and
-backend supervisor dispatch. The CLI has human output for operators and AX
-output for agent clients. The MCP stdio endpoint is an adapter over the same
+backend supervisor dispatch. The CLI has human output for operators and
+[AX output](/concepts/glossary/) for agent clients. The MCP stdio endpoint is an adapter over the same
 package surface, not a second runtime. Each host OS uses one backend.
 
 ```text
@@ -21,7 +21,8 @@ your orchestrator
        └─ vmkit supervisor dispatch
             └─ backend supervisor
                  ├─ Firecracker supervisor (Linux, Go JSON exec)
-                 └─ Apple VF supervisor (macOS, Swift JSON exec)
+                 ├─ Apple VF supervisor (macOS, Swift JSON exec)
+                 └─ Windows Hyper-V supervisor (Windows, Go JSON exec, experimental)
 
 OCI image ──► pkg/rootfs ──► ext4 disk ──► VM
 ```
@@ -36,8 +37,8 @@ exec, images, copy/artifacts, cost estimation, and capability discovery.
 `pkg/workspace` handles lifecycle, manifests, state, results, readiness,
 structured exec, artifacts, logs, network, file copy, clone, and optional
 supervision. The supporting packages are deliberately small: `pkg/kernel`
-manages default kernels, `pkg/imagecache` manages reusable rootfs baselines,
-`pkg/diagnostics` checks host support, `pkg/vmkit` defines the shared
+manages default kernels, `pkg/imagecache` manages reusable rootfs baselines
+and backs the `images` CLI surface, `pkg/diagnostics` checks host support, `pkg/vmkit` defines the shared
 request/response shape, and `pkg/rootfs` turns OCI images into ext4 disks.
 
 Linux callers can import `pkg/supervisors/firecracker` directly when they do

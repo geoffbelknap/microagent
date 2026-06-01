@@ -12,10 +12,11 @@ Every workspace declares its network intent. Four modes:
 |---|---|
 | `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. |
 | `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
-| `isolated` | No guest network device. The body has no network access at all. |
+| `isolated` | No guest network device. The guest has no network access at all. |
 | `bridged` | Workspace gets its own L2 presence on a host bridge. |
 
-The implementation under each mode varies by backend:
+The implementation under each mode varies by backend. Quick matrix across all
+three backends:
 
 | Backend | What works today |
 |---|---|
@@ -37,7 +38,10 @@ The portable contract is the network intent: outbound access in `user` and
 `--publish`, and static guest IP/DNS config where the backend can safely apply
 it.
 
-The backend mechanics are intentionally different:
+The backend mechanics are intentionally different. The table below is a
+Firecracker-vs-Apple VF deep dive on the two production backends; experimental
+Windows Hyper-V is covered in the quick matrix above and in
+[Backends](/concepts/backends/).
 
 | Capability | Firecracker on Linux | Apple VF on macOS |
 |---|---|---|
@@ -76,6 +80,9 @@ Repeat `--publish` for each TCP forward you need:
 ```bash
 microagent create research --publish 127.0.0.1:8080:80/tcp
 ```
+
+A `--publish` flag and a `network.forwards[]` entry in the spec are the same
+thing - the CLI form is just shorthand for one forward object.
 
 Under the hood, the guest init listens on a vsock port matching the host port; the backend supervisor runs the host-side TCP listener and bridges connections to that vsock port. You don't have to configure either side - declaring the forward wires it up.
 
@@ -191,7 +198,7 @@ the current user cannot create HNS endpoints for HCS compute systems.
 
 ## Mediation channel
 
-Mediation is a separate guest-to-host vsock contract for the body's calls into the host control plane - distinct from ordinary networking. Declare it with:
+Mediation is a separate guest-to-host vsock contract for the guest's calls into the host control plane - distinct from ordinary networking. Declare it with:
 
 ```bash
 microagent create research --mediation 2048=127.0.0.1:9900

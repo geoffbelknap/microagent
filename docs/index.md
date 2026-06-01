@@ -31,11 +31,9 @@ If you are trying it from the CLI, start with [Install](/getting-started/install
 [run your first microVM](/getting-started/cli/first-microvm/), then
 [run your first agent](/getting-started/cli/first-agent/). If you are embedding
 it from Go, start with the [library overview](/library/) and the
-[first program](/getting-started/library/first-program/). For lower-level
-integrations, read the [architecture overview](/concepts/architecture/),
-[supervisor protocol](/protocol/), and [runtime contract](/protocol/runtime-contract/).
-For agent clients, read the [MCP endpoint](/cli/serve/), AX-mode
-[structured exec](/cli/exec/), and [readiness signals](/concepts/state-and-identity/).
+[first program](/getting-started/library/first-program/). The **Sections**
+index below is the reference map for everything else - concepts, CLI, protocol,
+and recipes.
 
 ## Sections
 

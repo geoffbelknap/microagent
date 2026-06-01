@@ -4,7 +4,7 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-11_
+_Last updated: 2026-06-01_
 
 ```text
 microagent perf boot [flags]
@@ -34,16 +34,18 @@ host resident set size for the recorded backend process of a running workspace.
 | `--exec <command>` | Guest command used to mark boot completion. Defaults to `true` |
 | `--iterations <n>` | Number of boot measurements. Defaults to 1 |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
-| `--state-dir <dir>` | State directory |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--timeout <seconds>` | Per-iteration timeout |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`. Use `--json` (before `perf`) for the structured measurement records consumed in the examples below.
 
 ## `footprint` Flags
 
 | Flag | Description |
 |---|---|
-| `--state-dir <dir>` | State directory |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
 ## `steady` Flags
 
@@ -51,7 +53,7 @@ host resident set size for the recorded backend process of a running workspace.
 |---|---|
 | `--duration <seconds>` | Sampling duration. Defaults to 10 |
 | `--interval <seconds>` | Sampling interval. Defaults to 1 |
-| `--state-dir <dir>` | State directory |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
 ## Examples
 
@@ -81,3 +83,9 @@ Sample steady-state RSS for one minute:
 ```bash
 microagent --json perf steady research --duration 60 --interval 5
 ```
+
+## Related
+
+- [`run`](/cli/run/) - the one-shot path `perf boot` measures
+- [`host`](/cli/host/) - host backend capabilities that affect boot time
+- [`status`](/cli/status/) - inspect a running workspace before `footprint`/`steady`

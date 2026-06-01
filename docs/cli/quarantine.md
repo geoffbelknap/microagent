@@ -4,7 +4,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-17_
+_Last updated: 2026-06-01_
 
 ```text
 microagent quarantine <name> [--state-dir <dir>]
@@ -30,9 +30,17 @@ recorded runtime PID is preserved in state.
 |---|---|
 | `--name <name>` | Workspace name; positional name is also accepted |
 | `--id <id>` | Workspace ID alias for `--name` |
-| `--state-dir <dir>` | State directory |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
+## Exit status
+
+`quarantine` exits nonzero when the workspace cannot be found or when the
+backend cannot sever its host-side effects. In AX mode a failure is written as a
+structured error envelope.
 
 ## Example
 

@@ -4,7 +4,7 @@ description: Run a structured command in a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-22_
+_Last updated: 2026-06-01_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -32,10 +32,23 @@ when the exec request itself cannot complete.
 | `--env KEY=VALUE`, `-e KEY=VALUE` | Environment variable for the command; repeatable |
 | `--cwd <path>` | Working directory inside the workspace |
 | `--timeout <duration>` | Command timeout, such as `30s` or `5m` |
-| `--stdin <path|- >` | Read command stdin from a file, or from CLI stdin with `-` |
+| `--stdin <path>` or `-` | Read command stdin from a file, or from CLI stdin with `-` |
 | `--stdout-limit <bytes>` | Stdout output limit in bytes |
 | `--stderr-limit <bytes>` | Stderr output limit in bytes |
-| `--state-dir <dir>` | State directory holding the workspace record |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+
+## Exit status
+
+In UX mode, `exec` exits with the guest command's exit code when the command
+exits normally. Timeout, signal, and failed-to-start statuses use distinct
+nonzero CLI exit codes, and a failure of the exec request itself (for example,
+the workspace is not running) is a nonzero exit.
+
+In AX mode, a nonzero command exit is still a successful tool call - reported in
+`exit_code` - and the CLI exits `0`. The CLI exits nonzero only when the exec
+request itself cannot complete, and then writes a structured error envelope.
 
 ## Examples
 

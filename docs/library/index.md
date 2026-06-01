@@ -40,6 +40,7 @@ clients and does not add orchestration, policy, planning, or LLM behavior.
 | `pkg/kernel` | Installing and verifying default backend kernels. |
 | `pkg/imagecache` | Pulling, tagging, listing, removing, and pruning reusable local rootfs baselines. |
 | `pkg/diagnostics` | Checking host backend support before trying to boot a VM. |
+| `pkg/perf` | Measuring boot, footprint, and steady-state VM performance. |
 | `pkg/vmkit` | Backend-neutral supervisor request/response types and executable supervisor clients. |
 
 ## CLI or library?

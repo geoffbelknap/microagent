@@ -4,7 +4,7 @@ description: Check that the host can run microagent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-12_
+_Last updated: 2026-06-01_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -46,12 +46,28 @@ Administrators group.
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `doctor`; print structured JSON output |
 
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
 ## Example
 
 ```bash
 microagent doctor
 microagent --json doctor
 ```
+
+Text output is a short health summary:
+
+```text
+Backend: firecracker
+Status: ok
+Host: amd64, supervisor=/usr/local/lib/microagent/firecracker-supervisor, supervisor available, virtualization supported, KVM available, vsock available
+Console: available (interactive)
+Kernel: installed (/home/user/.microagent/kernels/firecracker/amd64/vmlinux)
+```
+
+`doctor` shares the structured shape with [`host`](/cli/host/): `microagent
+--json doctor` returns the same `vmkit.Response` with `ok`, `backend`, `host`,
+and `kernel` populated. `ok` is `false` when any required check fails.
 
 ## Related
 

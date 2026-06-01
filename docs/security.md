@@ -8,10 +8,14 @@ _Last updated: 2026-06-01_
 
 ## Trust boundary
 
-`microagent` treats the kernel, rootfs, and request files as **executable
-input**. It does not sign images, scan layers, mediate credentials, or enforce
-policy - those concerns belong to the upstream system that calls `microagent`.
-See [Boundaries](/concepts/boundaries/) for the full list.
+What `microagent` secures is the VM substrate: it verifies the kernel against a
+known SHA-256, pins the rootfs image by digest, reports runtime verification
+hashes you can check before `start`, and runs a backend supervisor you can sign.
+What it leaves to the caller is everything above the VM boundary - it treats the
+kernel, rootfs, and request files as **executable input**, and does not sign
+images, scan layers, mediate credentials, or enforce policy. Those concerns
+belong to the upstream system that calls `microagent`. See
+[Boundaries](/concepts/boundaries/) for the full list.
 
 That means:
 

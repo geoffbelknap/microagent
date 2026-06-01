@@ -31,9 +31,7 @@ Every request has an identity:
   `--id`.
 - **`role`** - caller-supplied label. Defaults to `workload`. microagent
   records it in requests, state files, and events but does not interpret it -
-  use `workload` for an agent workspace; pick another label only if you're
-  starting an enforcement component or other non-workload caller in your own
-  runtime.
+  use it however your runtime's identity model needs.
 - **`backend`** - the backend the supervisor should target.
 
 The CLI builds the identity automatically on the high-level `run` and

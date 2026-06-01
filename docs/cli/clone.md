@@ -4,7 +4,7 @@ description: Copy a stopped workspace into a new workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-08_
+_Last updated: 2026-06-01_
 
 ```text
 microagent clone <source> <target> [--state-dir <dir>]
@@ -18,7 +18,9 @@ not copied.
 
 | Flag | Description |
 |---|---|
-| `--state-dir <dir>` | State directory holding the workspace records |
+| `--state-dir <dir>` | State directory holding the workspace records (default `~/.microagent/`) |
+
+`clone` operates on offline disks; it takes no backend or supervisor selection.
 
 ## Semantics
 

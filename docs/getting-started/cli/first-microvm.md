@@ -28,7 +28,7 @@ remaining arguments are the command to run inside the booted VM. The output
 looks something like:
 
 ```text
-Linux microagent 6.1.0 #1 SMP ... x86_64 GNU/Linux
+Linux microagent 6.1.x #1 SMP ... x86_64 GNU/Linux
 ```
 
 The first run also downloads the default kernel for the host backend; later

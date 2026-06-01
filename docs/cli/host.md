@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-12_
+_Last updated: 2026-06-01_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]
@@ -24,6 +24,8 @@ vsock support, and console mode. It uses the same probes as
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `host`; print structured JSON output |
 
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
 ## Console modes
 
 | Backend | Console |
@@ -41,6 +43,36 @@ runtime console input endpoint.
 ```bash
 microagent host
 microagent --json host
+```
+
+The `--json` report carries the capability probes under `host` (and the default
+kernel under `kernel`). A trimmed Firecracker example:
+
+```json
+{
+  "ok": true,
+  "backend": "firecracker",
+  "host": {
+    "backend": "firecracker",
+    "architecture": "amd64",
+    "supervisorPath": "/usr/local/lib/microagent/firecracker-supervisor",
+    "supervisorAvailable": true,
+    "kvmAvailable": true,
+    "vsockAvailable": true,
+    "tunAvailable": true,
+    "userNetworkingAvailable": true,
+    "userNamespacesAvailable": true,
+    "consoleAvailable": true,
+    "consoleMode": "interactive"
+  },
+  "kernel": {
+    "backend": "firecracker",
+    "architecture": "amd64",
+    "status": "installed",
+    "path": "/home/user/.microagent/kernels/firecracker/amd64/vmlinux",
+    "sha256": "..."
+  }
+}
 ```
 
 ## Related

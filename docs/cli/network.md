@@ -4,7 +4,7 @@ description: Inspect workspace network intent and runtime network state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-08_
+_Last updated: 2026-06-01_
 
 ```text
 microagent network <name> [--state-dir <dir>]
@@ -15,6 +15,14 @@ forwards, DNS servers, routes, and IP information recorded for a workspace. The
 top-level `network` field comes from the persistent workspace manifest. When a
 workspace has a runtime state file, `runtime` shows the last network config
 recorded by the backend supervisor.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
 ## Example
 

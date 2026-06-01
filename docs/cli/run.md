@@ -63,6 +63,16 @@ command.
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
+## Exit status
+
+`run` exits nonzero when the workspace fails to build or boot, or when the
+one-shot run cannot complete. The guest command's own exit code is *not*
+propagated to the CLI exit status; it is reported in the result instead - in the
+text output as `Exit code:` and in JSON under `result.exit_code`. Use
+[`exec`](/cli/exec/) when you need the guest exit code to drive the shell.
+
 ## Image references
 
 `--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path - it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
@@ -73,6 +83,28 @@ Run a single command:
 
 ```bash
 microagent run docker.io/library/ubuntu:24.04 uname -a
+```
+
+With `--json` before the subcommand, `run` prints the structured result. A
+trimmed example:
+
+```json
+{
+  "workspace": "run-1730000000000000000",
+  "state_dir": "/home/user/.microagent",
+  "restart": "never",
+  "resources": { "memory_mib": 512, "cpu_count": 2, "size_mib": 4096 },
+  "rootfs_path": "/home/user/.microagent/workspaces/run-.../rootfs.ext4",
+  "kernel_path": "/home/user/.microagent/kernels/firecracker/amd64/vmlinux",
+  "final_state": "stopped",
+  "result": {
+    "started_at": "2026-06-01T12:00:00Z",
+    "exited_at": "2026-06-01T12:00:01Z",
+    "exit_code": 0,
+    "stdout": "Linux 6.1.0 ...\n"
+  },
+  "response": { "ok": true, "backend": "firecracker" }
+}
 ```
 
 Run the image's default command:

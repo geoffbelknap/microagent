@@ -4,7 +4,7 @@ description: Backend-neutral agent runtime semantics shared by microagent backen
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-25_
+_Last updated: 2026-06-01_
 
 `microagent --json contract` is the JSON source for the shared runtime
 contract. Agent-runtime builders can depend on one set of semantics across
@@ -19,7 +19,7 @@ state, result, readiness, and diagnostic field shapes for supported commands:
 | Primitive | Contract |
 |---|---|
 | Lifecycle | `prepare`, `start`, `run`, `inspect`, `halt`, `quarantine`, `stop`, `kill`, `delete` |
-| States | `prepared`, `starting`, `running`, `halted`, `quarantined`, `stopped`, `failed` |
+| States | `unknown` (zero/unobserved state), `prepared`, `starting`, `running`, `halted`, `quarantined`, `stopped`, `failed` |
 | Readiness | `guestReady`, `shellReady`, `execReady`, `resultReady`, `mediationReady` |
 | Result | `identity`, `backend`, `resultPath`, `startedAt`, `completedAt`, `exitCode`, `stdout`, `stderr`, `error` |
 | Artifacts | `ingress`, `egress`; declared egress artifacts are retrievable by name without entering the workspace |
