@@ -134,6 +134,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		printCreateHelp(stdout)
 		return nil
 	}
+	if args[0] == "create" && hasFlagValue(args[1:], "from-snapshot") {
+		return runCreateFromSnapshot(ctx, args[1:], stdout)
+	}
 	if args[0] == "apply" {
 		return runApply(ctx, args[1:], stdout)
 	}
@@ -1816,6 +1819,73 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 		return result.err
 	}
 	return nil
+}
+
+func runCreateFromSnapshot(ctx context.Context, args []string, stdout *os.File) error {
+	backend := hostBackend()
+	supervisorExplicit := hasFlagValue(args, "supervisor")
+	opts := workspaceOptions{
+		Backend:        backend,
+		Architecture:   defaultGuestArch(),
+		StateDir:       defaultStateDir(),
+		SupervisorPath: defaultSupervisorPath(backend),
+		ResultPort:     workspace.DefaultResultPort,
+		SerialInput:    backendSupportsConsoleInput(backend),
+	}
+	opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
+	kernelExplicit := hasFlagValue(args, "kernel")
+	fromSnapshot := ""
+	fs := flag.NewFlagSet("create", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
+	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
+	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	fs.StringVar(&fromSnapshot, "from-snapshot", "", "Fork from <workspace>:<tag>")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if !supervisorExplicit {
+		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	}
+	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
+	opts.KernelExplicit = kernelExplicit
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent create <name> --from-snapshot <workspace>:<tag>")
+	}
+	opts.Name = fs.Arg(0)
+	if err := validateWorkspaceName(opts.Name); err != nil {
+		return err
+	}
+	source, tag, err := parseForkSnapshotRef(fromSnapshot)
+	if err != nil {
+		return err
+	}
+	result, err := workspace.CreateFromSnapshot(ctx, opts, source, tag)
+	if err != nil && result.Workspace == "" {
+		return err
+	}
+	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
+		return encodeErr
+	}
+	return err
+}
+
+// parseForkSnapshotRef splits a create --from-snapshot value of the form
+// <workspace>:<tag> into its parts.
+func parseForkSnapshotRef(ref string) (string, string, error) {
+	ref = strings.TrimSpace(ref)
+	source, tag, ok := strings.Cut(ref, ":")
+	source = strings.TrimSpace(source)
+	tag = strings.TrimSpace(tag)
+	if !ok || source == "" || tag == "" {
+		return "", "", fmt.Errorf("create --from-snapshot requires <workspace>:<tag>, got %q", ref)
+	}
+	return source, tag, nil
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {

@@ -9,6 +9,7 @@ _Last updated: 2026-06-01_
 ```text
 microagent create [--name <name>] --image <ref> [flags]
 microagent create <name> --image <ref> [flags]
+microagent create <name> --from-snapshot <workspace>:<tag> [flags]
 ```
 
 `create` builds a workspace and records it under `--state-dir`. Unlike
@@ -16,11 +17,25 @@ microagent create <name> --image <ref> [flags]
 and `delete` it later. If the default kernel is missing, `create` installs it
 first.
 
+## Fork from a snapshot
+
+`create <name> --from-snapshot <workspace>:<tag>` forks a new workspace from an
+existing workspace's [snapshot](/cli/snapshot/) instead of building from an
+image. The fork gets a fresh identity, a private copy of the snapshot's rootfs,
+and its own network namespace, then resumes from the snapshot's memory and
+device state. Two forks of the same snapshot can run concurrently without
+colliding because each boots its own pasta/tap and host-side ports, even though
+they share the snapshot's recorded guest IP. This is Firecracker-only; the
+snapshot kernel must match and bridged networking is unsupported (use user, nat,
+or isolated). In-flight guest connections do not survive the fork — the guest
+body must reconnect.
+
 ## Flags
 
 | Flag | Description |
 |---|---|
 | `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |
+| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image (Firecracker) |
 | `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
 | `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |

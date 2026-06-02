@@ -578,6 +578,85 @@ func SnapshotRemove(opts Options, tag string) error {
 	return vmkit.RemoveSnapshot(stateDir, opts.Name, tag)
 }
 
+// CreateFromSnapshot forks a new workspace from an existing workspace's
+// snapshot. It provisions a fresh identity whose disk is a copy of the
+// snapshot's rootfs, copies the snapshot into the new workspace so its restore
+// path is self-contained, and resumes it from that snapshot. Each fork boots
+// its own network namespace (its own pasta/tap for user/nat networking), so
+// forks that share the snapshot's recorded guest IP do not collide.
+func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag string) (Result, error) {
+	if opts.Name == "" {
+		return Result{}, fmt.Errorf("create requires a name")
+	}
+	if err := ValidateName(opts.Name); err != nil {
+		return Result{}, err
+	}
+	if err := ValidateName(sourceWorkspace); err != nil {
+		return Result{}, fmt.Errorf("invalid source workspace %q: %w", sourceWorkspace, err)
+	}
+	if strings.TrimSpace(tag) == "" {
+		return Result{}, fmt.Errorf("snapshot tag is required")
+	}
+	if opts.StateDir == "" {
+		opts.StateDir = StateDir()
+	}
+	srcDir := vmkit.SnapshotDir(opts.StateDir, sourceWorkspace, tag)
+	manifest, err := vmkit.ReadSnapshotManifest(srcDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Result{}, fmt.Errorf("snapshot %q not found for workspace %s", tag, sourceWorkspace)
+		}
+		return Result{}, err
+	}
+	if manifest.MemoryMiB > 0 {
+		opts.MemoryMiB = manifest.MemoryMiB
+		opts.SpecMemory = true
+	}
+	if manifest.VCPUCount > 0 {
+		opts.CPUCount = manifest.VCPUCount
+		opts.SpecCPU = true
+	}
+	if strings.TrimSpace(manifest.NetworkMode) != "" {
+		opts.Network = vmkit.NetworkConfig{Mode: manifest.NetworkMode}
+	}
+	if opts.ImageRef == "" {
+		opts.ImageRef = manifest.ImageRef
+	}
+	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureCanCreate(opts); err != nil {
+		return Result{}, err
+	}
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		return Result{}, err
+	}
+	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsName), rootfsPath, 0o644); err != nil {
+		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
+	}
+	if err := WriteManifest(opts); err != nil {
+		return Result{}, err
+	}
+	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err != nil {
+		return Result{}, err
+	}
+	opts.FromSnapshot = tag
+	return Start(ctx, opts)
+}
+
+func copySnapshotInto(srcDir, dstDir string) error {
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return err
+	}
+	for _, name := range []string{vmkit.SnapshotVMStateName, vmkit.SnapshotMemoryName, vmkit.SnapshotRootfsName, vmkit.SnapshotManifestName} {
+		if err := CopyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name), 0o644); err != nil {
+			return fmt.Errorf("copy snapshot %s into fork: %w", name, err)
+		}
+	}
+	return nil
+}
+
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	req := buildRootfsRequest(opts, rootfsPath)

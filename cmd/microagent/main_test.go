@@ -99,6 +99,21 @@ func TestHelpListsPauseAndResume(t *testing.T) {
 	}
 }
 
+func TestParseForkSnapshotRef(t *testing.T) {
+	source, tag, err := parseForkSnapshotRef("base:pre-upgrade")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if source != "base" || tag != "pre-upgrade" {
+		t.Fatalf("got source=%q tag=%q, want base/pre-upgrade", source, tag)
+	}
+	for _, bad := range []string{"", "base", "base:", ":tag", "   "} {
+		if _, _, err := parseForkSnapshotRef(bad); err == nil {
+			t.Fatalf("expected error for %q", bad)
+		}
+	}
+}
+
 func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 	for _, tc := range []struct {
 		name string
