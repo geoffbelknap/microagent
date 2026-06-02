@@ -835,6 +835,7 @@ func WriteManifest(opts Options) error {
 		ConsoleShell:    strings.TrimSpace(opts.ConsoleShell),
 		Hostname:        strings.TrimSpace(opts.Hostname),
 		Mediation:       opts.Mediation,
+		Health:          healthManifest(opts.Health),
 		Disks:           opts.Disks,
 		Artifacts:       ArtifactsFromOptions(opts),
 		Verification:    opts.Verification,

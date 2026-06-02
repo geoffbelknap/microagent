@@ -70,6 +70,7 @@ type Options struct {
 	SizeMiB         int64
 	Network         vmkit.NetworkConfig
 	Mediation       *vmkit.MediationConfig
+	Health          Health
 	Timeout         time.Duration
 	ResultPort      uint32
 	ShellPort       uint16
@@ -111,6 +112,7 @@ type Spec struct {
 	Resources  Resources             `yaml:"resources"`
 	Network    NetworkSpec           `yaml:"network"`
 	Mediation  vmkit.MediationConfig `yaml:"mediation"`
+	Health     Health                `yaml:"health"`
 	Disks      []Disk                `yaml:"disks"`
 	Bundles    []Disk                `yaml:"bundles"`
 	Outputs    []Output              `yaml:"outputs"`
@@ -216,6 +218,7 @@ type Manifest struct {
 	ConsoleShell    string                     `json:"shell,omitempty"`
 	Hostname        string                     `json:"hostname,omitempty"`
 	Mediation       *vmkit.MediationConfig     `json:"mediation,omitempty"`
+	Health          *Health                    `json:"health,omitempty"`
 	Disks           []Disk                     `json:"disks,omitempty"`
 	Artifacts       Artifacts                  `json:"artifacts,omitempty"`
 	Verification    *vmkit.RuntimeVerification `json:"verification,omitempty"`

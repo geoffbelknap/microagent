@@ -63,7 +63,7 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 		} else if startResult.Response.Event != nil {
 			result.FinalState = string(startResult.Response.Event.State)
 		}
-		state, waitErr := WaitForSupervised(ctx, workspaceOpts, opts.Interval)
+		state, waitErr := waitForSupervisedHealthy(ctx, workspaceOpts, opts.Interval)
 		result.FinalState = string(state)
 		if waitErr != nil {
 			result.Stopped = true
@@ -85,6 +85,42 @@ func writeSuperviseStartFailure(opts Options, startErr error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	req := Request(opts, "run", rootfsPath, NewRequestID())
 	_ = WriteProcessState(opts, req, vmkit.StateFailed, 0, startErr.Error())
+}
+
+// waitForSupervisedHealthy waits like WaitForSupervised but, when the workspace
+// declares an applicable health check, also probes the running guest each tick.
+// After Retries consecutive failed probes it force-kills the wedged VM and
+// returns StateFailed so the restart policy (on-failure/always) restarts it.
+func waitForSupervisedHealthy(ctx context.Context, opts Options, interval time.Duration) (vmkit.VMState, error) {
+	if !healthApplicable(opts) {
+		return WaitForSupervised(ctx, opts, interval)
+	}
+	tracker := newHealthTracker(opts.Health, healthNow)
+	for {
+		resp, err := Inspect(ctx, opts)
+		if err != nil {
+			if resp.Event != nil {
+				if isSupervisedTerminalState(resp.Event.State) {
+					return resp.Event.State, nil
+				}
+				return resp.Event.State, err
+			}
+			return vmkit.StateUnknown, err
+		}
+		if resp.Event != nil && isSupervisedTerminalState(resp.Event.State) {
+			return resp.Event.State, nil
+		}
+		running := resp.Event != nil && resp.Event.State == vmkit.StateRunning
+		if tracker.observe(ctx, opts, running, healthProber) {
+			_, _ = Control(ctx, opts, "kill")
+			return vmkit.StateFailed, nil
+		}
+		select {
+		case <-ctx.Done():
+			return vmkit.StateUnknown, ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 func WaitForSupervised(ctx context.Context, opts Options, interval time.Duration) (vmkit.VMState, error) {
@@ -191,7 +227,13 @@ func supervisedOptions(opts SuperviseOptions) (Options, error) {
 	}
 	workspaceOpts.Disks = manifest.Disks
 	workspaceOpts.Mediation = manifest.Mediation
+	if manifest.Health != nil {
+		workspaceOpts.Health = NormalizeHealthCheck(*manifest.Health)
+	}
 	if err := ValidateRestartPolicy(workspaceOpts.RestartPolicy); err != nil {
+		return Options{}, err
+	}
+	if err := ValidateHealthCheck(workspaceOpts.Health); err != nil {
 		return Options{}, err
 	}
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
