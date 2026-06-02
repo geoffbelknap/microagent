@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestConfigOnDemandSecretsJSONRoundTrip(t *testing.T) {
+	in := Config{
+		OnDemandSecrets: []SecretRef{{Name: "DB", Ref: "vault:secret/data/app#db"}},
+		SecretsAudit:    true,
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Config
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.OnDemandSecrets) != 1 || out.OnDemandSecrets[0].Name != "DB" || !out.SecretsAudit {
+		t.Fatalf("on-demand/audit did not round-trip: %+v", out)
+	}
+}
+
 func TestConfigSecretsJSONRoundTrip(t *testing.T) {
 	in := Config{
 		SecretsPort:    1026,
