@@ -85,7 +85,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		}
 	}
 
-	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag); err != nil {
+	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag, purged); err != nil {
 		if autoPaused {
 			_ = controller.patchVMState(ctx, "Resumed")
 			_ = writeSnapshotState(opts, req, state, vmkit.StateRunning)
@@ -123,21 +123,21 @@ func writeSnapshotState(opts Options, req vmkit.Request, state runtimeState, tar
 	return writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), target, state.PID, state.PortForwardPID, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, "")
 }
 
-func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string) error {
+func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string, purged bool) error {
 	if err := controller.createSnapshot(ctx, filepath.Join(dir, vmkit.SnapshotVMStateName), filepath.Join(dir, vmkit.SnapshotMemoryName)); err != nil {
 		return err
 	}
 	if err := copyFile(state.Config.RootfsPath, filepath.Join(dir, vmkit.SnapshotRootfsName)); err != nil {
 		return fmt.Errorf("copy rootfs into snapshot: %w", err)
 	}
-	manifest, err := snapshotManifestFromState(tag, state, opts)
+	manifest, err := snapshotManifestFromState(tag, state, opts, purged)
 	if err != nil {
 		return err
 	}
 	return vmkit.WriteSnapshotManifest(dir, manifest)
 }
 
-func snapshotManifestFromState(tag string, state runtimeState, opts Options) (vmkit.SnapshotManifest, error) {
+func snapshotManifestFromState(tag string, state runtimeState, opts Options, purged bool) (vmkit.SnapshotManifest, error) {
 	kernelSHA := ""
 	if path := strings.TrimSpace(state.Config.KernelPath); path != "" {
 		sha, err := fileSHA256(path)
@@ -173,6 +173,7 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options) (vm
 		NetworkIP:      netIP,
 		NetworkGateway: netGateway,
 		NetworkSubnet:  netSubnet,
+		SecretsPurged:  purged,
 	}, nil
 }
 

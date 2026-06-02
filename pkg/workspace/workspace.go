@@ -29,6 +29,7 @@ const (
 	DefaultNetworkMode         = "user"
 	DefaultResultPort          = 1024
 	DefaultSecretsPort         = 1026
+	DefaultSecretsControlPort  = 1028
 	DefaultShellPortBase       = 22000
 	DefaultShellPortSpan       = 20000
 	DefaultExecPortBase        = 42000
@@ -742,6 +743,15 @@ func SecretsPort(opts Options) uint32 {
 	return DefaultSecretsPort
 }
 
+// SecretsControlPort returns the guest control vsock port when any secrets are
+// declared (used for snapshot purge/rehydrate), or 0 otherwise.
+func SecretsControlPort(opts Options) uint32 {
+	if SecretsPort(opts) == 0 {
+		return 0
+	}
+	return DefaultSecretsControlPort
+}
+
 // onDemandRefsFromOptions converts the on-demand name->ref map into a stable slice.
 func onDemandRefsFromOptions(opts Options) []vmkit.SecretRef {
 	if len(opts.OnDemandSecrets) == 0 {
@@ -808,26 +818,27 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			Backend:   opts.Backend,
 		},
 		Config: &vmkit.Config{
-			KernelPath:      opts.KernelPath,
-			RootfsPath:      rootfsPath,
-			StateDir:        opts.StateDir,
-			MemoryMiB:       opts.MemoryMiB,
-			CPUCount:        opts.CPUCount,
-			Disks:           disks,
-			VsockListeners:  listeners,
-			Mediation:       opts.Mediation,
-			Network:         NetworkConfigPtr(opts.Network),
-			ShellPort:       ShellPort(opts),
-			ExecPort:        ExecPort(opts),
-			SecretsPort:     secretsPort,
-			Secrets:         secretRefs,
-			SecretEnvFiles:  opts.SecretEnvFiles,
-			OnDemandSecrets: onDemandRefsFromOptions(opts),
-			SecretsAudit:    opts.SecretsAudit,
-			GuestShellPort:  opts.GuestShellPort,
-			GuestExecPort:   opts.GuestExecPort,
-			SerialInput:     opts.SerialInput,
-			TimeoutSeconds:  int(opts.Timeout.Seconds()),
+			KernelPath:         opts.KernelPath,
+			RootfsPath:         rootfsPath,
+			StateDir:           opts.StateDir,
+			MemoryMiB:          opts.MemoryMiB,
+			CPUCount:           opts.CPUCount,
+			Disks:              disks,
+			VsockListeners:     listeners,
+			Mediation:          opts.Mediation,
+			Network:            NetworkConfigPtr(opts.Network),
+			ShellPort:          ShellPort(opts),
+			ExecPort:           ExecPort(opts),
+			SecretsPort:        secretsPort,
+			Secrets:            secretRefs,
+			SecretEnvFiles:     opts.SecretEnvFiles,
+			OnDemandSecrets:    onDemandRefsFromOptions(opts),
+			SecretsAudit:       opts.SecretsAudit,
+			SecretsControlPort: SecretsControlPort(opts),
+			GuestShellPort:     opts.GuestShellPort,
+			GuestExecPort:      opts.GuestExecPort,
+			SerialInput:        opts.SerialInput,
+			TimeoutSeconds:     int(opts.Timeout.Seconds()),
 		},
 	}
 }

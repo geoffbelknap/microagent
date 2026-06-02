@@ -249,6 +249,26 @@ func TestManifestPersistsSecretReferences(t *testing.T) {
 	}
 }
 
+func TestRequestSetsSecretsControlPort(t *testing.T) {
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = t.TempDir()
+	opts.Backend = vmkit.BackendFirecracker
+	opts.Secrets = map[string]string{"API": "env:X"}
+	req := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.SecretsControlPort != DefaultSecretsControlPort {
+		t.Fatalf("SecretsControlPort = %d, want %d", req.Config.SecretsControlPort, DefaultSecretsControlPort)
+	}
+
+	bare := DefaultOptions()
+	bare.Name = "ws2"
+	bare.StateDir = t.TempDir()
+	bare.Backend = vmkit.BackendFirecracker
+	if got := Request(bare, "", "/tmp/rootfs.ext4", "req-2").Config.SecretsControlPort; got != 0 {
+		t.Fatalf("SecretsControlPort = %d, want 0 when no secrets declared", got)
+	}
+}
+
 func TestManifestPersistsOnDemandAndAudit(t *testing.T) {
 	dir := t.TempDir()
 	opts := DefaultOptions()
