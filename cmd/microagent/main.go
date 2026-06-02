@@ -2285,6 +2285,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&secretFlags, "secret", "Declare a secret NAME=<scheme>:<ref> (repeatable)")
 	var secretsEnvFile string
 	fs.StringVar(&secretsEnvFile, "secrets-env-file", "", "Load secrets from a dotenv file (plaintext, re-read each start)")
+	var secretOnDemandFlags multiFlag
+	fs.Var(&secretOnDemandFlags, "secret-on-demand", "Declare an on-demand secret NAME=<scheme>:<ref> (fetched at runtime, never written to tmpfs; repeatable)")
+	var secretsAudit bool
+	fs.BoolVar(&secretsAudit, "secrets-audit", false, "Append every secret access to the workspace audit log")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2359,6 +2363,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if strings.TrimSpace(secretsEnvFile) != "" {
 		opts.SecretEnvFiles = []string{secretsEnvFile}
 	}
+	onDemand, err := parseSecretFlags(secretOnDemandFlags)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.OnDemandSecrets = onDemand
+	opts.SecretsAudit = secretsAudit
 	volumes, err := parseWorkspaceVolumes(volumeFlags)
 	if err != nil {
 		return workspaceOptions{}, err
