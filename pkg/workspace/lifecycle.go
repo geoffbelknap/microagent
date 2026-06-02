@@ -581,9 +581,21 @@ func SnapshotRemove(opts Options, tag string) error {
 // CreateFromSnapshot forks a new workspace from an existing workspace's
 // snapshot. It provisions a fresh identity whose disk is a copy of the
 // snapshot's rootfs, copies the snapshot into the new workspace so its restore
-// path is self-contained, and resumes it from that snapshot. Each fork boots
-// its own network namespace (its own pasta/tap for user/nat networking), so
-// forks that share the snapshot's recorded guest IP do not collide.
+// path is self-contained, and resumes it from that snapshot.
+//
+// Networking scope (intentional, revisit if needed): every fork resumes a guest
+// that keeps the snapshot's baked IP, so concurrent forks share one guest IP and
+// each fork's host-side networking must be isolated. user-mode (pasta) gives
+// each fork its own network namespace, so concurrent user-mode forks don't
+// collide — this is the supported path for forking with networking, and it's
+// what we validate. Firecracker "nat" mode runs tap+nftables in the shared host
+// network namespace, so concurrent nat forks would collide on the duplicated
+// guest IP/tap/rules; a nat fork is therefore single-instance and inherits nat's
+// CAP_NET_ADMIN requirement. Per-fork network namespaces for nat are
+// deliberately NOT built: it is a Linux/Firecracker-only edge case that user
+// mode already covers (and on Apple VF "user" and "nat" are the same per-VM
+// NAT), so it isn't worth the complexity now. It can be added if a concrete need
+// for concurrent nat forks appears.
 func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag string) (Result, error) {
 	if opts.Name == "" {
 		return Result{}, fmt.Errorf("create requires a name")

@@ -27,10 +27,16 @@ rootfs, then resumes from the snapshot's memory and device state.
 A Firecracker snapshot binds its vsock socket to the source workspace's path, so
 each fork runs Firecracker in a private mount namespace that maps the fork's own
 directory over the source's, and the fork takes its own host-side service ports
-while bridging them to the guest's snapshot ports. Multiple forks of the same
-snapshot therefore run concurrently without colliding. This is Firecracker-only;
-the snapshot kernel must match and bridged networking is unsupported. In-flight
-guest connections do not survive the fork — the guest body must reconnect.
+while bridging them to the guest's snapshot ports. This is Firecracker-only; the
+snapshot kernel must match and bridged networking is unsupported. In-flight guest
+connections do not survive the fork — the guest body must reconnect.
+
+For forks with networking, use `user` mode (pasta): every fork resumes with the
+snapshot's recorded guest IP, and user-mode gives each fork its own network
+namespace, so any number of forks run concurrently without colliding. `nat`
+forks run in the shared host network namespace and inherit `nat`'s
+`CAP_NET_ADMIN` requirement, so a `nat` fork is single-instance — concurrent
+forks of a networked workspace should use `user` mode.
 
 ## Flags
 
