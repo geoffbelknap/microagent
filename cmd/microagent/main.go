@@ -28,6 +28,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/perf"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/scaffold"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -130,6 +131,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "compose" {
 		return fmt.Errorf("compose-style multi-workspace projects are not supported; run one MicroAgent workspace at a time and keep orchestration outside microagent")
+	}
+	if args[0] == "init" {
+		return runInit(args[1:], stdout)
 	}
 	if args[0] == "create" && wantsHelp(args[1:]) {
 		printCreateHelp(stdout)
@@ -964,6 +968,66 @@ func runProfiles(args []string, stdout *os.File) error {
 		)
 	}
 	return nil
+}
+
+func runInit(args []string, stdout *os.File) error {
+	if wantsHelp(args) {
+		printInitHelp(stdout)
+		return nil
+	}
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	provider := fs.String("provider", string(scaffold.DefaultProvider), "Body provider: anthropic, openai, or gemini")
+	dir := fs.String("dir", "", "Target directory (defaults to ./<name>)")
+	force := fs.Bool("force", false, "Overwrite existing files")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 {
+		return fmt.Errorf("usage: microagent init <name> [--provider anthropic|openai|gemini] [--dir <path>] [--force]")
+	}
+	if fs.NArg() > 1 {
+		return fmt.Errorf("unexpected init argument: %s", fs.Arg(1))
+	}
+	result, err := scaffold.Generate(scaffold.Options{
+		Name:     fs.Arg(0),
+		Dir:      *dir,
+		Provider: scaffold.Provider(*provider),
+		Force:    *force,
+	})
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Scaffolded %s agent %q in %s\n", result.Provider, result.Name, result.Dir)
+	for _, f := range result.Files {
+		fmt.Fprintf(stdout, "  %s\n", f)
+	}
+	fmt.Fprintf(stdout, "\nNext:\n")
+	fmt.Fprintf(stdout, "  cd %s\n", result.Dir)
+	fmt.Fprintf(stdout, "  microagent create --file microagent.yaml --env %s=$%s\n", result.APIKey, result.APIKey)
+	fmt.Fprintf(stdout, "  microagent cp demo/input-001.json %s:/workspace/input.json\n", result.Name)
+	fmt.Fprintf(stdout, "  microagent start %s\n", result.Name)
+	return nil
+}
+
+func printInitHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent init
+
+Scaffold a starter agent body: a microagent.yaml spec, a provider-specific
+body, the shared body protocol, and a runnable demo request. The generated
+project is consumed by the normal create/cp/start flow.
+
+Usage:
+  microagent init <name> [options]
+
+Options:
+  --provider <name>     Body provider: anthropic (default), openai, or gemini
+  --dir <path>          Target directory (defaults to ./<name>)
+  --force               Overwrite existing files
+`)
 }
 
 func runImages(args []string, stdout *os.File) error {
@@ -5784,6 +5848,8 @@ func reorderFlagArgs(args []string) []string {
 		"-p":                 true,
 		"-state-dir":         true,
 		"-tag":               true,
+		"-provider":          true,
+		"-dir":               true,
 		"-from-snapshot":     true,
 		"-url":               true,
 		"-from":              true,
@@ -6232,6 +6298,7 @@ func printHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent
 
 Commands:
+  init                 Scaffold a starter agent body project
   run                  Run a command
   create               Create a workspace
   apply                Apply supported workspace spec changes

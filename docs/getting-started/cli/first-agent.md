@@ -4,7 +4,7 @@ description: Boot a microVM, point it at an LLM, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 This walks through running an agent - a body that calls an LLM with `bash`,
 `read_file`, and `write_file` tools - inside a microVM. The example ships in
@@ -31,6 +31,19 @@ identical; only the example folder and the API key env var change.
    git clone https://github.com/geoffbelknap/microagent.git
    cd microagent
    ```
+
+   **Faster, no clone:** [`microagent init`](/cli/init/) scaffolds the same
+   project anywhere, for any provider:
+
+   ```bash
+   microagent init my-agent --provider anthropic   # or openai, gemini
+   cd my-agent
+   ```
+
+   The generated project uses the workspace name you pass (`my-agent` above)
+   instead of `minimal-body`, and its `body.py`, `protocol.py`, and demo
+   request are identical to the example. Adjust the commands below to your name
+   and run from the generated directory (use `--file microagent.yaml`).
 
 The rest of this page uses the **Anthropic** example. To follow along with
 OpenAI or Gemini instead, swap `minimal-body` for `minimal-body-openai` or

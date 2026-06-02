@@ -5,6 +5,11 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Added `microagent init <name>` to scaffold a starter agent body project — a
+  `microagent.yaml` spec, a provider-specific `body.py` (Anthropic, OpenAI, or
+  Gemini via `--provider`), the shared `protocol.py`, and a runnable demo
+  request. Fails closed on existing files unless `--force`. Backed by the new
+  `pkg/scaffold` package.
 - Refreshed README, install, architecture, boundaries, library, and MCP docs for
   the stable `v0.1.45` release, `microagent-rc` Homebrew formula, and current
   AX/MCP substrate boundary.

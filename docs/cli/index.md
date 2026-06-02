@@ -8,6 +8,7 @@ _Last updated: 2026-06-02_
 
 | Command | Purpose |
 |---|---|
+| [`init`](/cli/init/) | Scaffold a starter agent body project |
 | [`run`](/cli/run/) | Boot an image and run a command, then tear down |
 | [`create`](/cli/create/) | Create a named, persistent workspace |
 | [`apply`](/cli/apply/) | Apply supported workspace spec changes without rebuilding |
