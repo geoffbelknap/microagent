@@ -5,6 +5,14 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Added `microagent commit <workspace> <image-ref>` and `microagent images push`
+  to snapshot a stopped workspace's rootfs back into an OCI image and push it,
+  closing the previously one-way OCI→rootfs loop. commit extracts the rootfs
+  unprivileged via `debugfs`, assembles a single-layer OCI image (new
+  `pkg/ociimage`), and writes it to a local OCI image layout under
+  `<state-dir>/images/oci`; `images push` (or `commit --push`) copies it to the
+  registry with the standard Docker pull credentials. Unprivileged extraction
+  does not preserve file ownership (content, modes, and symlinks are preserved).
 - Added `supervise --install` / `--uninstall` to survive host reboot. `--install`
   writes and registers an OS init unit (systemd user unit on Linux, launchd agent
   on macOS) that runs `supervise <name>` at boot, so a long-running workspace

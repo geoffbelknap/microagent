@@ -13,6 +13,7 @@ _Last updated: 2026-06-02_
 | [`create`](/cli/create/) | Create a named, persistent workspace |
 | [`apply`](/cli/apply/) | Apply supported workspace spec changes without rebuilding |
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
+| [`commit`](/cli/commit/) | Snapshot a stopped workspace rootfs into an OCI image |
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
 | [`artifacts`](/cli/artifacts/) | List and retrieve declared workspace artifacts |
 | [`network`](/cli/network/) | Inspect declared network intent and runtime network state |
