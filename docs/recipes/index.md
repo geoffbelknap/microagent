@@ -4,7 +4,7 @@ description: End-to-end walkthroughs that combine microagent primitives into som
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 Recipes are tutorials. They take you from "I have microagent installed" to "I have a working thing", showing the moving parts as you assemble them.
 
@@ -14,3 +14,4 @@ If you're after the reference docs - what every flag does, what every command re
 
 - [Build a simple agent](/recipes/simple-agent/) - a one-shot agent body that takes a request, calls Claude under operator-supplied constraints, and writes a result. Prompt caching on by default. Halt and resume between requests.
 - [Wire up the mediation channel](/recipes/mediation-channel/) - pattern guide for moving the body from one-request-per-restart to a stream of requests over a guest-to-host vsock contract. Pattern guide, not copy-paste - the listener shape depends on your control plane.
+- [Connect two workspaces on a named network](/recipes/connected-workspaces/) - put an app and a database workspace on one named network so they share a subnet, reach each other directly, and resolve each other by name. Firecracker/Linux.

@@ -4,7 +4,7 @@ description: Run AI agent workspaces in microVMs.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 `microagent` is a Go library and CLI for running Linux workspaces inside
 microVMs. The Go packages are the integration surface; the CLI is the operator
@@ -40,7 +40,7 @@ and recipes.
 - [Getting started](/getting-started/install/): install, plus CLI and library quickstarts.
 - [Library](/library/): Go package overview, reference, and CLI-to-library mapping.
 - [Concepts](/concepts/architecture/): architecture, backends, boundaries,
-  networking, state and identity, [glossary](/concepts/glossary/).
+  networking, storage, state and identity, [glossary](/concepts/glossary/).
 - [CLI reference](/cli/): every subcommand.
 - [Protocol](/protocol/): shared supervisor protocol and backend notes.
 - [Recipes](/recipes/): end-to-end examples.

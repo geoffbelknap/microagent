@@ -49,8 +49,8 @@ microagent run --image docker.io/library/ubuntu:24.04 --exec "uname -a"
 
 If you omit a command, microagent uses the image's Entrypoint/Cmd. Common
 container-style aliases are supported where they map cleanly to microVMs:
-`-e/--env`, `-p/--publish`, `-v/--volume` for tar/ext4 inputs, `--name`, and
-`--rm`.
+`-e/--env`, `-p/--publish`, `-v/--volume` for named volumes, tar bundles, and
+ext4 disk images, `--name`, and `--rm`.
 
 Private registry pulls use standard registry credential configuration from
 `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`, including configured
@@ -105,9 +105,13 @@ brokering, and audit interpretation. Other projects own those; `microagent` is
 the substrate they sit on.
 
 It also does not expose container-engine APIs, compose projects, pods,
-privileged mode, namespace/device controls, host directory bind mounts, or named
-volumes. MicroAgent accepts only the subset that maps cleanly to a microVM
-boundary.
+privileged mode, namespace/device controls, or host directory bind mounts.
+MicroAgent accepts only the subset that maps cleanly to a microVM boundary —
+including [named volumes](docs/concepts/storage.md) and
+[named networks](docs/concepts/networking.md#named-networks) as the microVM
+analogs of their container counterparts (single-attach managed disks; a managed
+bridge with stable IPs and `/etc/hosts` resolution), but never the
+daemon-managed, concurrently-shared container models.
 
 ## Docs
 
