@@ -52,6 +52,8 @@ type Options struct {
 	Env             map[string]string
 	Secrets         map[string]string // name -> scheme-prefixed reference
 	SecretEnvFiles  []string          // dotenv file paths (plaintext, re-read each start)
+	OnDemandSecrets map[string]string // name -> reference (lazy, never materialized)
+	SecretsAudit    bool              // append every access to the audit log
 	Files           []File
 	Profile         string
 	RestartPolicy   string
@@ -204,20 +206,22 @@ type Artifacts struct {
 }
 
 type Manifest struct {
-	Name           string                     `json:"name"`
-	Profile        string                     `json:"profile,omitempty"`
-	Restart        string                     `json:"restart"`
-	Resources      Resources                  `json:"resources"`
-	Network        NetworkSpec                `json:"network,omitempty"`
-	Service        string                     `json:"service_command,omitempty"`
-	ConsoleShell   string                     `json:"shell,omitempty"`
-	Hostname       string                     `json:"hostname,omitempty"`
-	Mediation      *vmkit.MediationConfig     `json:"mediation,omitempty"`
-	Disks          []Disk                     `json:"disks,omitempty"`
-	Artifacts      Artifacts                  `json:"artifacts,omitempty"`
-	Verification   *vmkit.RuntimeVerification `json:"verification,omitempty"`
-	Secrets        []vmkit.SecretRef          `json:"secrets,omitempty"`
-	SecretEnvFiles []string                   `json:"secret_env_files,omitempty"`
+	Name            string                     `json:"name"`
+	Profile         string                     `json:"profile,omitempty"`
+	Restart         string                     `json:"restart"`
+	Resources       Resources                  `json:"resources"`
+	Network         NetworkSpec                `json:"network,omitempty"`
+	Service         string                     `json:"service_command,omitempty"`
+	ConsoleShell    string                     `json:"shell,omitempty"`
+	Hostname        string                     `json:"hostname,omitempty"`
+	Mediation       *vmkit.MediationConfig     `json:"mediation,omitempty"`
+	Disks           []Disk                     `json:"disks,omitempty"`
+	Artifacts       Artifacts                  `json:"artifacts,omitempty"`
+	Verification    *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	Secrets         []vmkit.SecretRef          `json:"secrets,omitempty"`
+	SecretEnvFiles  []string                   `json:"secret_env_files,omitempty"`
+	OnDemandSecrets []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
+	SecretsAudit    bool                       `json:"secrets_audit,omitempty"`
 }
 
 type Resources struct {
@@ -732,10 +736,27 @@ func ExecPort(opts Options) uint16 {
 // SecretsPort returns the host vsock port used to serve secrets, or 0 when no
 // secrets are declared.
 func SecretsPort(opts Options) uint32 {
-	if len(opts.Secrets) == 0 && len(opts.SecretEnvFiles) == 0 {
+	if len(opts.Secrets) == 0 && len(opts.SecretEnvFiles) == 0 && len(opts.OnDemandSecrets) == 0 {
 		return 0
 	}
 	return DefaultSecretsPort
+}
+
+// onDemandRefsFromOptions converts the on-demand name->ref map into a stable slice.
+func onDemandRefsFromOptions(opts Options) []vmkit.SecretRef {
+	if len(opts.OnDemandSecrets) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(opts.OnDemandSecrets))
+	for name := range opts.OnDemandSecrets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	refs := make([]vmkit.SecretRef, 0, len(names))
+	for _, name := range names {
+		refs = append(refs, vmkit.SecretRef{Name: name, Ref: opts.OnDemandSecrets[name]})
+	}
+	return refs
 }
 
 // secretRefsFromOptions converts the name->ref map into a stable slice.
@@ -787,24 +808,26 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			Backend:   opts.Backend,
 		},
 		Config: &vmkit.Config{
-			KernelPath:     opts.KernelPath,
-			RootfsPath:     rootfsPath,
-			StateDir:       opts.StateDir,
-			MemoryMiB:      opts.MemoryMiB,
-			CPUCount:       opts.CPUCount,
-			Disks:          disks,
-			VsockListeners: listeners,
-			Mediation:      opts.Mediation,
-			Network:        NetworkConfigPtr(opts.Network),
-			ShellPort:      ShellPort(opts),
-			ExecPort:       ExecPort(opts),
-			SecretsPort:    secretsPort,
-			Secrets:        secretRefs,
-			SecretEnvFiles: opts.SecretEnvFiles,
-			GuestShellPort: opts.GuestShellPort,
-			GuestExecPort:  opts.GuestExecPort,
-			SerialInput:    opts.SerialInput,
-			TimeoutSeconds: int(opts.Timeout.Seconds()),
+			KernelPath:      opts.KernelPath,
+			RootfsPath:      rootfsPath,
+			StateDir:        opts.StateDir,
+			MemoryMiB:       opts.MemoryMiB,
+			CPUCount:        opts.CPUCount,
+			Disks:           disks,
+			VsockListeners:  listeners,
+			Mediation:       opts.Mediation,
+			Network:         NetworkConfigPtr(opts.Network),
+			ShellPort:       ShellPort(opts),
+			ExecPort:        ExecPort(opts),
+			SecretsPort:     secretsPort,
+			Secrets:         secretRefs,
+			SecretEnvFiles:  opts.SecretEnvFiles,
+			OnDemandSecrets: onDemandRefsFromOptions(opts),
+			SecretsAudit:    opts.SecretsAudit,
+			GuestShellPort:  opts.GuestShellPort,
+			GuestExecPort:   opts.GuestExecPort,
+			SerialInput:     opts.SerialInput,
+			TimeoutSeconds:  int(opts.Timeout.Seconds()),
 		},
 	}
 }

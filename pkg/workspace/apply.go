@@ -116,6 +116,13 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 		}
 	}
 	opts.SecretEnvFiles = manifest.SecretEnvFiles
+	if len(manifest.OnDemandSecrets) > 0 {
+		opts.OnDemandSecrets = make(map[string]string, len(manifest.OnDemandSecrets))
+		for _, ref := range manifest.OnDemandSecrets {
+			opts.OnDemandSecrets[ref.Name] = ref.Ref
+		}
+	}
+	opts.SecretsAudit = manifest.SecretsAudit
 	opts.Outputs = manifest.Artifacts.Egress
 	if opts.KernelPath == "" {
 		opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)
