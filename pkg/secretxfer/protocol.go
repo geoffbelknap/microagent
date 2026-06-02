@@ -21,9 +21,22 @@ const (
 	MaxMessageBytes uint32 = 8 * 1024 * 1024
 )
 
-// Request is sent by the guest to open a secrets exchange.
+// Request is sent by the guest to open a secrets exchange. An empty Name
+// requests the full materialized bundle (boot delivery); a set Name requests a
+// single on-demand secret by name.
 type Request struct {
 	ProtocolVersion string `json:"protocol_version"`
+	Name            string `json:"name,omitempty"`
+}
+
+// GetResponse is the host's reply to a name-scoped Request. Value is base64 in
+// JSON. Error is set (and Value empty) when the secret is undeclared or fails
+// to resolve.
+type GetResponse struct {
+	ProtocolVersion string `json:"protocol_version"`
+	Name            string `json:"name"`
+	Value           []byte `json:"value,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 // Entry is one secret. Value is base64-encoded in JSON, preserving binary bytes.

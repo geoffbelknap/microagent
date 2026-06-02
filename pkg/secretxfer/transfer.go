@@ -33,3 +33,21 @@ func FetchBundle(rw io.ReadWriter) (Bundle, error) {
 	}
 	return bundle, nil
 }
+
+// FetchOne requests a single on-demand secret by name and returns its value.
+func FetchOne(rw io.ReadWriter, name string) ([]byte, error) {
+	if err := EncodeMessage(rw, Request{ProtocolVersion: ProtocolVersion, Name: name}); err != nil {
+		return nil, fmt.Errorf("send secret get request: %w", err)
+	}
+	var resp GetResponse
+	if err := DecodeMessage(rw, &resp); err != nil {
+		return nil, fmt.Errorf("read secret get response: %w", err)
+	}
+	if resp.ProtocolVersion != ProtocolVersion {
+		return nil, fmt.Errorf("unsupported secrets protocol %q", resp.ProtocolVersion)
+	}
+	if resp.Error != "" {
+		return nil, fmt.Errorf("secret %q: %s", name, resp.Error)
+	}
+	return resp.Value, nil
+}
