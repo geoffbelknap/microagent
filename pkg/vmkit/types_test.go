@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestConfigSecretsControlPortJSONRoundTrip(t *testing.T) {
+	in := Config{SecretsControlPort: 1028}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Config
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.SecretsControlPort != 1028 {
+		t.Fatalf("SecretsControlPort = %d, want 1028", out.SecretsControlPort)
+	}
+}
+
 func TestConfigOnDemandSecretsJSONRoundTrip(t *testing.T) {
 	in := Config{
 		OnDemandSecrets: []SecretRef{{Name: "DB", Ref: "vault:secret/data/app#db"}},
