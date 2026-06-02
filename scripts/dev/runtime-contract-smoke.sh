@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-runtime-contract.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 DEBUGFS="$STATE_DIR/debugfs"

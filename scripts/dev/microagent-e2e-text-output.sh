@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-text-output.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 WORKSPACE="text-output"
@@ -15,8 +16,7 @@ case "$(uname -s)" in
     HOST_BACKEND="firecracker"
     ;;
   *)
-    echo "unsupported host OS for microagent text output E2E: $(uname -s)" >&2
-    exit 2
+    e2e_skip "unsupported host OS for microagent text output E2E: $(uname -s)"
     ;;
 esac
 case "$(uname -m)" in
@@ -44,8 +44,7 @@ trap cleanup EXIT
 
 for required in go grep ps; do
   if ! command -v "$required" >/dev/null 2>&1; then
-    echo "$required is required for microagent text output E2E" >&2
-    exit 2
+    e2e_skip "$required is required for microagent text output E2E"
   fi
 done
 

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-firecracker-smoke.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
@@ -21,14 +22,12 @@ case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
     ;;
   *)
-    echo "firecracker boot smoke requires Linux amd64" >&2
-    exit 2
+    e2e_skip "firecracker boot smoke requires Linux amd64"
     ;;
 esac
 
 if [ ! -e /dev/kvm ]; then
-  echo "/dev/kvm is not visible; run this smoke outside the Codex sandbox" >&2
-  exit 2
+  e2e_skip "/dev/kvm is not visible; run this smoke outside the Codex sandbox"
 fi
 
 if [ -n "${MICROAGENT_FIRECRACKER:-}" ]; then
@@ -43,8 +42,7 @@ else
 fi
 
 if [ ! -x "${firecracker:-}" ]; then
-  echo "firecracker binary not found; install microagent or set MICROAGENT_FIRECRACKER inside the script environment" >&2
-  exit 2
+  e2e_skip "firecracker binary not found; install microagent or set MICROAGENT_FIRECRACKER inside the script environment"
 fi
 
 export GOCACHE="$STATE_DIR/gocache"

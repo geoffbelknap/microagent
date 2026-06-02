@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -27,7 +28,6 @@ case "$BACKEND" in
     exec "$ROOT/scripts/dev/applevf-vsock-diagnostic-smoke.sh"
     ;;
   *)
-    echo "microagent transport E2E does not support backend lane: $BACKEND" >&2
-    exit 2
+    e2e_skip "microagent transport E2E does not support backend lane: $BACKEND"
     ;;
 esac

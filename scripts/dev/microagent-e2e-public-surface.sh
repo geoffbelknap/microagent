@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-public-surface.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
@@ -61,10 +62,7 @@ if [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" = "1" ]; then
 fi
 
 for required in go python3 debugfs mke2fs tar; do
-  if ! command -v "$required" >/dev/null 2>&1; then
-    echo "$required is required for microagent public surface E2E" >&2
-    exit 2
-  fi
+  e2e_require_cmd "$required" "$required is required for microagent public surface E2E"
 done
 
 if [ "$(uname -s)" = "Linux" ]; then
@@ -79,16 +77,14 @@ if [ "$(uname -s)" = "Linux" ]; then
     firecracker=""
   fi
   if [ ! -x "${firecracker:-}" ]; then
-    echo "microagent public surface E2E requires the host backend binary on Linux; install firecracker on PATH or set MICROAGENT_FIRECRACKER" >&2
-    exit 2
+    e2e_skip "microagent public surface E2E requires the host backend binary on Linux; install firecracker on PATH or set MICROAGENT_FIRECRACKER"
   fi
   export MICROAGENT_FIRECRACKER="$firecracker"
   export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
 elif [ "$(uname -s)" = "Darwin" ]; then
   SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
   if [ ! -x "$SUPERVISOR" ]; then
-    echo "microagent public surface E2E requires the Apple VF supervisor; run scripts/dev/applevf-supervisor-build.sh or set MICROAGENT_APPLEVF_SUPERVISOR" >&2
-    exit 2
+    e2e_skip "microagent public surface E2E requires the Apple VF supervisor; run scripts/dev/applevf-supervisor-build.sh or set MICROAGENT_APPLEVF_SUPERVISOR"
   fi
   export MICROAGENT_APPLEVF_SUPERVISOR="$SUPERVISOR"
 fi
