@@ -32,6 +32,17 @@ type SnapshotManifest struct {
 	VCPUCount    int    `json:"vcpuCount"`
 	MemoryMiB    int    `json:"memoryMiB"`
 	CreatedAt    string `json:"createdAt"`
+	// ShellPort and ExecPort are the guest vsock service ports baked into the
+	// snapshot. A fork derives different ports from its own name, so it must
+	// adopt these to reach the resumed guest's shell and exec services.
+	ShellPort uint16 `json:"shellPort,omitempty"`
+	ExecPort  uint16 `json:"execPort,omitempty"`
+	// VsockUDSPath is the absolute host path the snapshot's vsock device is
+	// bound to (the source workspace's vsock socket). It is baked into the
+	// Firecracker snapshot and cannot be remapped on load, so a fork into a
+	// different workspace bind-mounts its own directory over the source's to
+	// make this path resolve to the fork's socket.
+	VsockUDSPath string `json:"vsockUDSPath,omitempty"`
 }
 
 // SnapshotInfo is a manifest plus the on-disk size of its snapshot directory,

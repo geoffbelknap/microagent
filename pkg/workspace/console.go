@@ -262,8 +262,12 @@ func dialConsoleShell(ctx context.Context, opts ConsoleOptions) (net.Conn, error
 	deadline := time.Now().Add(opts.ReadyTimeout)
 	var lastErr error
 	for {
-		if target.Network == "tcp" && state.Config.ShellPort != 0 && !shellHelperListening(state.SerialLogPath, state.Config.ShellPort) {
-			lastErr = fmt.Errorf("guest shell helper is not listening on port %d", state.Config.ShellPort)
+		guestShellPort := state.Config.ShellPort
+		if state.Config.GuestShellPort != 0 {
+			guestShellPort = state.Config.GuestShellPort
+		}
+		if target.Network == "tcp" && guestShellPort != 0 && !shellHelperListening(state.SerialLogPath, guestShellPort) {
+			lastErr = fmt.Errorf("guest shell helper is not listening on port %d", guestShellPort)
 		} else {
 			if opts.RequireCommandReady {
 				probeTimeout := opts.SendTimeout

@@ -1425,6 +1425,33 @@ func TestResumeRejectsWorkspaceThatIsNotPaused(t *testing.T) {
 	}
 }
 
+func TestSnapshotForkBindDetectsCrossWorkspace(t *testing.T) {
+	opts := Options{Name: "fork1", StateDir: "/state"}
+	m := vmkit.SnapshotManifest{VsockUDSPath: "/state/forksrc/vsock.sock"}
+	src, dst, need := snapshotForkBind(opts, m)
+	if !need {
+		t.Fatal("a snapshot baked at another workspace's vsock path should need a bind")
+	}
+	if src != "/state/forksrc" || dst != "/state/fork1" {
+		t.Fatalf("bind = %q -> %q, want /state/forksrc -> /state/fork1", src, dst)
+	}
+}
+
+func TestSnapshotForkBindSkipsResumeInPlace(t *testing.T) {
+	opts := Options{Name: "ws", StateDir: "/state"}
+	m := vmkit.SnapshotManifest{VsockUDSPath: "/state/ws/vsock.sock"}
+	if _, _, need := snapshotForkBind(opts, m); need {
+		t.Fatal("resume-in-place (same workspace) must not need a bind")
+	}
+}
+
+func TestSnapshotForkBindSkipsWhenNoVsock(t *testing.T) {
+	opts := Options{Name: "fork1", StateDir: "/state"}
+	if _, _, need := snapshotForkBind(opts, vmkit.SnapshotManifest{}); need {
+		t.Fatal("a snapshot with no vsock path needs no bind")
+	}
+}
+
 func TestPrepareSnapshotRestoreRollsBackRootfs(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}

@@ -622,6 +622,11 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if opts.ImageRef == "" {
 		opts.ImageRef = manifest.ImageRef
 	}
+	// The resumed guest listens on the source's baked vsock service ports. The
+	// fork keeps its own unique host ports (name-derived) and bridges them to
+	// the source's guest ports, so concurrent forks don't collide on the host.
+	opts.GuestShellPort = manifest.ShellPort
+	opts.GuestExecPort = manifest.ExecPort
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}

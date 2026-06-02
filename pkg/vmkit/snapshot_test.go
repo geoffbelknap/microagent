@@ -34,6 +34,9 @@ func TestSnapshotManifestRoundTrip(t *testing.T) {
 		VCPUCount:    2,
 		MemoryMiB:    512,
 		CreatedAt:    "2026-06-01T00:00:00Z",
+		VsockUDSPath: "/state/agent-1/vsock.sock",
+		ShellPort:    28365,
+		ExecPort:     48365,
 	}
 	if err := WriteSnapshotManifest(dir, manifest); err != nil {
 		t.Fatal(err)
