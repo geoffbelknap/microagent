@@ -99,3 +99,34 @@ func TestSecretCheckHelpGoesToStdout(t *testing.T) {
 		t.Fatalf("help not printed to stdout: %q", out)
 	}
 }
+
+func TestParseSecretFlags(t *testing.T) {
+	got, err := parseSecretFlags([]string{"API=vault:secret/data/app#api_key", "TOK=env:CI_TOKEN"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got["API"] != "vault:secret/data/app#api_key" || got["TOK"] != "env:CI_TOKEN" {
+		t.Fatalf("unexpected: %v", got)
+	}
+}
+
+func TestParseSecretFlagsRejectsBadName(t *testing.T) {
+	if _, err := parseSecretFlags([]string{"../bad=env:X"}); err == nil {
+		t.Fatal("expected error for invalid secret name")
+	}
+}
+
+func TestParseSecretFlagsRequiresNameAndRef(t *testing.T) {
+	if _, err := parseSecretFlags([]string{"NOEQUALS"}); err == nil {
+		t.Fatal("expected error for missing =ref")
+	}
+	if _, err := parseSecretFlags([]string{"NAME="}); err == nil {
+		t.Fatal("expected error for empty reference")
+	}
+}
+
+func TestParseSecretFlagsRejectsDuplicate(t *testing.T) {
+	if _, err := parseSecretFlags([]string{"A=env:X", "A=env:Y"}); err == nil {
+		t.Fatal("expected error for duplicate secret name")
+	}
+}
