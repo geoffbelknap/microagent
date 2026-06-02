@@ -109,6 +109,13 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 	opts.Hostname = manifest.Hostname
 	opts.Mediation = manifest.Mediation
 	opts.Disks = manifest.Disks
+	if len(manifest.Secrets) > 0 {
+		opts.Secrets = make(map[string]string, len(manifest.Secrets))
+		for _, ref := range manifest.Secrets {
+			opts.Secrets[ref.Name] = ref.Ref
+		}
+	}
+	opts.SecretEnvFiles = manifest.SecretEnvFiles
 	opts.Outputs = manifest.Artifacts.Egress
 	if opts.KernelPath == "" {
 		opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)

@@ -28,12 +28,17 @@ const (
 	DefaultRestartPolicy       = "never"
 	DefaultNetworkMode         = "user"
 	DefaultResultPort          = 1024
+	DefaultSecretsPort         = 1026
 	DefaultShellPortBase       = 22000
 	DefaultShellPortSpan       = 20000
 	DefaultExecPortBase        = 42000
 	DefaultExecPortSpan        = 20000
 	DefaultTimeout             = 5 * time.Minute
 )
+
+// secretsListenerTarget marks the vsock listener that serves resolved secrets.
+// Must equal the firecracker supervisor's sentinel.
+const secretsListenerTarget = "secrets://serve"
 
 type Options struct {
 	Name            string
@@ -45,6 +50,8 @@ type Options struct {
 	Hostname        string
 	SetupCommands   []string
 	Env             map[string]string
+	Secrets         map[string]string // name -> scheme-prefixed reference
+	SecretEnvFiles  []string          // dotenv file paths (plaintext, re-read each start)
 	Files           []File
 	Profile         string
 	RestartPolicy   string
@@ -197,18 +204,20 @@ type Artifacts struct {
 }
 
 type Manifest struct {
-	Name         string                     `json:"name"`
-	Profile      string                     `json:"profile,omitempty"`
-	Restart      string                     `json:"restart"`
-	Resources    Resources                  `json:"resources"`
-	Network      NetworkSpec                `json:"network,omitempty"`
-	Service      string                     `json:"service_command,omitempty"`
-	ConsoleShell string                     `json:"shell,omitempty"`
-	Hostname     string                     `json:"hostname,omitempty"`
-	Mediation    *vmkit.MediationConfig     `json:"mediation,omitempty"`
-	Disks        []Disk                     `json:"disks,omitempty"`
-	Artifacts    Artifacts                  `json:"artifacts,omitempty"`
-	Verification *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	Name           string                     `json:"name"`
+	Profile        string                     `json:"profile,omitempty"`
+	Restart        string                     `json:"restart"`
+	Resources      Resources                  `json:"resources"`
+	Network        NetworkSpec                `json:"network,omitempty"`
+	Service        string                     `json:"service_command,omitempty"`
+	ConsoleShell   string                     `json:"shell,omitempty"`
+	Hostname       string                     `json:"hostname,omitempty"`
+	Mediation      *vmkit.MediationConfig     `json:"mediation,omitempty"`
+	Disks          []Disk                     `json:"disks,omitempty"`
+	Artifacts      Artifacts                  `json:"artifacts,omitempty"`
+	Verification   *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	Secrets        []vmkit.SecretRef          `json:"secrets,omitempty"`
+	SecretEnvFiles []string                   `json:"secret_env_files,omitempty"`
 }
 
 type Resources struct {
@@ -720,6 +729,32 @@ func ExecPort(opts Options) uint16 {
 	return ExecPortForName(opts.Name)
 }
 
+// SecretsPort returns the host vsock port used to serve secrets, or 0 when no
+// secrets are declared.
+func SecretsPort(opts Options) uint32 {
+	if len(opts.Secrets) == 0 && len(opts.SecretEnvFiles) == 0 {
+		return 0
+	}
+	return DefaultSecretsPort
+}
+
+// secretRefsFromOptions converts the name->ref map into a stable slice.
+func secretRefsFromOptions(opts Options) []vmkit.SecretRef {
+	if len(opts.Secrets) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(opts.Secrets))
+	for name := range opts.Secrets {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	refs := make([]vmkit.SecretRef, 0, len(names))
+	for _, name := range names {
+		refs = append(refs, vmkit.SecretRef{Name: name, Ref: opts.Secrets[name]})
+	}
+	return refs
+}
+
 func Request(opts Options, command, rootfsPath string, requestID string) vmkit.Request {
 	var listeners []vmkit.VsockListener
 	if opts.ResultPort != 0 {
@@ -728,6 +763,11 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 	listeners = append(listeners, opts.VsockListeners...)
 	if opts.Mediation != nil && opts.Mediation.Enabled {
 		listeners = append(listeners, vmkit.VsockListener{Port: opts.Mediation.Port, Target: opts.Mediation.Target})
+	}
+	secretRefs := secretRefsFromOptions(opts)
+	secretsPort := SecretsPort(opts)
+	if secretsPort != 0 {
+		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
 	}
 	disks := make([]vmkit.Disk, 0, len(opts.Disks))
 	for _, disk := range opts.Disks {
@@ -758,6 +798,9 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			Network:        NetworkConfigPtr(opts.Network),
 			ShellPort:      ShellPort(opts),
 			ExecPort:       ExecPort(opts),
+			SecretsPort:    secretsPort,
+			Secrets:        secretRefs,
+			SecretEnvFiles: opts.SecretEnvFiles,
 			GuestShellPort: opts.GuestShellPort,
 			GuestExecPort:  opts.GuestExecPort,
 			SerialInput:    opts.SerialInput,
