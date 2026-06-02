@@ -39,7 +39,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		t.Fatalf("tools/list result = %#v", responses[1]["result"])
 	}
 	tools, ok := result["tools"].([]any)
-	if !ok || len(tools) < 12 {
+	if !ok || len(tools) < 16 {
 		t.Fatalf("tools = %#v, want initial tool set", result["tools"])
 	}
 	names := map[string]bool{}
@@ -58,6 +58,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		"network.inspect", "network.create", "network.list", "network.delete",
 		"volume.create", "volume.list", "volume.inspect", "volume.delete",
 		"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune",
+		"models.pull", "models.list", "models.remove", "models.prune",
 		"profiles.list", "host.inspect", "doctor.check", "host.networking.setup", "contract.get", "kernel.verify", "kernel.install", "rootfs.build",
 		"cp",
 	} {
