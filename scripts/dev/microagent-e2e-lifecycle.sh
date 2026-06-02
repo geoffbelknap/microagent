@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -24,16 +25,14 @@ if [ "$BACKEND" = "firecracker" ]; then
 fi
 
 if [ "$BACKEND" != "applevf" ]; then
-  echo "microagent lifecycle E2E does not support backend lane: $BACKEND" >&2
-  exit 2
+  e2e_skip "microagent lifecycle E2E does not support backend lane: $BACKEND"
 fi
 
 case "$(uname -s):$(uname -m)" in
   Darwin:arm64)
     ;;
   *)
-    echo "Apple VF lifecycle E2E requires macOS on Apple silicon" >&2
-    exit 2
+    e2e_skip "Apple VF lifecycle E2E requires macOS on Apple silicon"
     ;;
 esac
 
@@ -72,12 +71,10 @@ cleanup() {
 trap cleanup EXIT
 
 if [ ! -r "$KERNEL" ]; then
-  echo "kernel is not readable at $KERNEL" >&2
-  exit 2
+  e2e_skip "kernel is not readable at $KERNEL"
 fi
 if [ ! -x "$SUPERVISOR" ]; then
-  echo "supervisor is not executable at $SUPERVISOR; run scripts/dev/applevf-supervisor-build.sh" >&2
-  exit 2
+  e2e_skip "supervisor is not executable at $SUPERVISOR; run scripts/dev/applevf-supervisor-build.sh"
 fi
 export MICROAGENT_APPLEVF_SUPERVISOR="$SUPERVISOR"
 
@@ -86,8 +83,7 @@ if command -v mke2fs >/dev/null 2>&1; then
 elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ]; then
   MKE2FS="/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
 else
-  echo "mke2fs not found; install e2fsprogs" >&2
-  exit 2
+  e2e_skip "mke2fs not found; install e2fsprogs"
 fi
 
 if command -v debugfs >/dev/null 2>&1; then
@@ -95,8 +91,7 @@ if command -v debugfs >/dev/null 2>&1; then
 elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/debugfs ]; then
   DEBUGFS="/opt/homebrew/opt/e2fsprogs/sbin/debugfs"
 else
-  echo "debugfs not found; install e2fsprogs" >&2
-  exit 2
+  e2e_skip "debugfs not found; install e2fsprogs"
 fi
 
 wait_for_status_ready() {

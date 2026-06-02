@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-rootfs-smoke.XXXXXX")"
 OUT="$STATE_DIR/busybox-rootfs.ext4"
 
@@ -31,8 +32,7 @@ if command -v mke2fs >/dev/null 2>&1; then
 elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ]; then
   MKE2FS="/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
 else
-  echo "mke2fs not found; install e2fsprogs to run this smoke" >&2
-  exit 2
+  e2e_skip "mke2fs not found; install e2fsprogs to run this smoke"
 fi
 
 go build -buildvcs=false -o "$STATE_DIR/microagent" "$ROOT/cmd/microagent"

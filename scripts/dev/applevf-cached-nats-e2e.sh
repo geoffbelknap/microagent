@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
 KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
 if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
@@ -43,42 +44,36 @@ case "$(uname -s):$(uname -m)" in
   Darwin:arm64)
     ;;
   *)
-    echo "Apple VF cached NATS E2E requires macOS on Apple silicon" >&2
-    exit 2
+    e2e_skip "Apple VF cached NATS E2E requires macOS on Apple silicon"
     ;;
 esac
 
 if [ ! -r "$KERNEL" ]; then
-  echo "kernel is not readable at $KERNEL" >&2
-  exit 2
+  e2e_skip "kernel is not readable at $KERNEL"
 fi
 if [ ! -x "$SUPERVISOR" ]; then
-  echo "supervisor is not executable at $SUPERVISOR; run scripts/dev/applevf-supervisor-build.sh" >&2
-  exit 2
+  e2e_skip "supervisor is not executable at $SUPERVISOR; run scripts/dev/applevf-supervisor-build.sh"
 fi
 if command -v mke2fs >/dev/null 2>&1; then
   MKE2FS="$(command -v mke2fs)"
 elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ]; then
   MKE2FS="/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
 else
-  echo "mke2fs not found; install e2fsprogs" >&2
-  exit 2
+  e2e_skip "mke2fs not found; install e2fsprogs"
 fi
 if command -v debugfs >/dev/null 2>&1; then
   DEBUGFS="$(command -v debugfs)"
 elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/debugfs ]; then
   DEBUGFS="/opt/homebrew/opt/e2fsprogs/sbin/debugfs"
 else
-  echo "debugfs not found; install e2fsprogs" >&2
-  exit 2
+  e2e_skip "debugfs not found; install e2fsprogs"
 fi
 
 case "$IMAGE_CACHE_POLICY" in
   auto|refresh|require)
     ;;
   *)
-    echo "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY" >&2
-    exit 2
+    e2e_skip "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY"
     ;;
 esac
 
@@ -197,7 +192,7 @@ Apple VF cached NATS E2E image cache policy is require, but the cache is $cache_
 Use --image-cache-policy refresh once to rebuild it, or leave the policy at
 auto for normal validation runs.
 EOF
-      exit 2
+      exit "$E2E_SKIP_EXIT"
       ;;
     auto:usable|require:usable)
       echo "using cached Apple VF NATS rootfs for $IMAGE" >&2
@@ -206,8 +201,7 @@ EOF
     refresh:*|auto:missing|auto:stale-guest-init)
       ;;
     *)
-      echo "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY" >&2
-      exit 2
+      e2e_skip "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY"
       ;;
   esac
   if [ "$cache_status" = "stale-guest-init" ]; then

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-firecracker-user-network.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
@@ -24,35 +25,29 @@ case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
     ;;
   *)
-    echo "firecracker user network smoke requires Linux amd64" >&2
-    exit 2
+    e2e_skip "firecracker user network smoke requires Linux amd64"
     ;;
 esac
 
 for required in pasta getcap; do
   if ! command -v "$required" >/dev/null 2>&1; then
-    echo "$required is required for firecracker user network smoke" >&2
-    exit 2
+    e2e_skip "$required is required for firecracker user network smoke"
   fi
 done
 
 if [ ! -e /dev/kvm ]; then
-  echo "/dev/kvm is not visible; run this smoke outside sandboxed environments" >&2
-  exit 2
+  e2e_skip "/dev/kvm is not visible; run this smoke outside sandboxed environments"
 fi
 
 if [ ! -e /dev/net/tun ]; then
-  echo "/dev/net/tun is not visible; user networking requires tun" >&2
-  exit 2
+  e2e_skip "/dev/net/tun is not visible; user networking requires tun"
 fi
 
 if [ -e /proc/sys/kernel/unprivileged_userns_clone ] && [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" != "1" ]; then
-  echo "kernel.unprivileged_userns_clone is disabled" >&2
-  exit 2
+  e2e_skip "kernel.unprivileged_userns_clone is disabled"
 fi
 if [ -e /proc/sys/user/max_user_namespaces ] && [ "$(cat /proc/sys/user/max_user_namespaces)" = "0" ]; then
-  echo "user.max_user_namespaces is 0" >&2
-  exit 2
+  e2e_skip "user.max_user_namespaces is 0"
 fi
 
 if [ -n "${MICROAGENT_FIRECRACKER:-}" ]; then
@@ -67,8 +62,7 @@ else
 fi
 
 if [ ! -x "${firecracker:-}" ]; then
-  echo "firecracker binary not found; install microagent or set MICROAGENT_FIRECRACKER" >&2
-  exit 2
+  e2e_skip "firecracker binary not found; install microagent or set MICROAGENT_FIRECRACKER"
 fi
 
 export GOCACHE="$STATE_DIR/gocache"

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-help-usage.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_HELP_USAGE:-0}"
@@ -19,8 +20,7 @@ trap cleanup EXIT
 
 for required in go grep; do
   if ! command -v "$required" >/dev/null 2>&1; then
-    echo "$required is required for microagent help/usage E2E" >&2
-    exit 2
+    e2e_skip "$required is required for microagent help/usage E2E"
   fi
 done
 

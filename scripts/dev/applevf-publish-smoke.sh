@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
 KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
 if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
@@ -31,16 +32,13 @@ cleanup() {
 trap cleanup EXIT
 
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-  echo "Apple VF publish smoke requires macOS on Apple silicon" >&2
-  exit 2
+  e2e_skip "Apple VF publish smoke requires macOS on Apple silicon"
 fi
 if [ ! -r "$KERNEL" ]; then
-  echo "kernel is not readable at $KERNEL" >&2
-  exit 2
+  e2e_skip "kernel is not readable at $KERNEL"
 fi
 if [ ! -x "$SUPERVISOR" ]; then
-  echo "supervisor is not executable at $SUPERVISOR; run make signed-supervisor" >&2
-  exit 2
+  e2e_skip "supervisor is not executable at $SUPERVISOR; run make signed-supervisor"
 fi
 
 if command -v mke2fs >/dev/null 2>&1; then
@@ -48,8 +46,7 @@ if command -v mke2fs >/dev/null 2>&1; then
 elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ]; then
   MKE2FS="/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
 else
-  echo "mke2fs not found; install e2fsprogs" >&2
-  exit 2
+  e2e_skip "mke2fs not found; install e2fsprogs"
 fi
 
 host_port="$(python3 - <<'PY'

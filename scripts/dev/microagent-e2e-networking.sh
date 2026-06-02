@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 export PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-networking.XXXXXX")"
 CLI="$STATE_DIR/microagent"
@@ -74,15 +75,13 @@ case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
     ;;
   *)
-    echo "microagent E2E networking requires Linux amd64" >&2
-    exit 2
+    e2e_skip "microagent E2E networking requires Linux amd64"
     ;;
 esac
 
 for required in pasta getcap ip debugfs; do
   if ! command -v "$required" >/dev/null 2>&1; then
-    echo "$required is required for microagent E2E networking" >&2
-    exit 2
+    e2e_skip "$required is required for microagent E2E networking"
   fi
 done
 
@@ -90,28 +89,23 @@ case "$IMAGE_CACHE_POLICY" in
   auto|refresh|require)
     ;;
   *)
-    echo "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY" >&2
-    exit 2
+    e2e_skip "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY"
     ;;
 esac
 
 if [ ! -e /dev/kvm ]; then
-  echo "/dev/kvm is not visible; run this smoke outside sandboxed environments" >&2
-  exit 2
+  e2e_skip "/dev/kvm is not visible; run this smoke outside sandboxed environments"
 fi
 
 if [ ! -e /dev/net/tun ]; then
-  echo "/dev/net/tun is not visible; user networking requires tun" >&2
-  exit 2
+  e2e_skip "/dev/net/tun is not visible; user networking requires tun"
 fi
 
 if [ -e /proc/sys/kernel/unprivileged_userns_clone ] && [ "$(cat /proc/sys/kernel/unprivileged_userns_clone)" != "1" ]; then
-  echo "kernel.unprivileged_userns_clone is disabled" >&2
-  exit 2
+  e2e_skip "kernel.unprivileged_userns_clone is disabled"
 fi
 if [ -e /proc/sys/user/max_user_namespaces ] && [ "$(cat /proc/sys/user/max_user_namespaces)" = "0" ]; then
-  echo "user.max_user_namespaces is 0" >&2
-  exit 2
+  e2e_skip "user.max_user_namespaces is 0"
 fi
 
 if [ -n "${MICROAGENT_FIRECRACKER:-}" ]; then
@@ -126,8 +120,7 @@ else
 fi
 
 if [ ! -x "${firecracker:-}" ]; then
-  echo "Linux microagent E2E requires the Firecracker backend binary; install firecracker on PATH or set MICROAGENT_FIRECRACKER" >&2
-  exit 2
+  e2e_skip "Linux microagent E2E requires the Firecracker backend binary; install firecracker on PATH or set MICROAGENT_FIRECRACKER"
 fi
 
 pick_port() {
@@ -412,7 +405,7 @@ networking E2E image cache policy is require, but the cache is $cache_status.
 Use --image-cache-policy refresh once to rebuild it, or leave the policy at
 auto for normal validation runs.
 EOF
-      exit 2
+      exit "$E2E_SKIP_EXIT"
       ;;
     auto:usable|require:usable)
       echo "using cached networking image rootfs for $IMAGE" >&2
@@ -421,8 +414,7 @@ EOF
     refresh:*|auto:missing|auto:stale-guest-init)
       ;;
     *)
-      echo "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY" >&2
-      exit 2
+      e2e_skip "unknown MICROAGENT_E2E_IMAGE_CACHE_POLICY: $IMAGE_CACHE_POLICY"
       ;;
   esac
   if [ "$cache_status" = "stale-guest-init" ]; then
@@ -625,12 +617,11 @@ Run:
 Then run:
   scripts/dev/microagent-e2e.sh networking
 EOF
-        exit 2
+        exit "$E2E_SKIP_EXIT"
       fi
     fi
   elif [ ! -x "$SUPERVISOR" ]; then
-    echo "MICROAGENT_FIRECRACKER_SUPERVISOR is not executable: $SUPERVISOR" >&2
-    exit 2
+    e2e_skip "MICROAGENT_FIRECRACKER_SUPERVISOR is not executable: $SUPERVISOR"
   fi
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
@@ -651,18 +642,16 @@ Run:
 Then run:
   scripts/dev/microagent-e2e.sh networking
 EOF
-    exit 2
+    exit "$E2E_SKIP_EXIT"
   fi
   if [ -z "$BRIDGE_NAME" ]; then
     BRIDGE_NAME="microagent0"
   fi
   if [ ! -e "/sys/class/net/$BRIDGE_NAME/bridge" ]; then
-    echo "microagent E2E bridge $BRIDGE_NAME does not exist; run scripts/dev/microagent-e2e-linux-network-setup.sh" >&2
-    exit 2
+    e2e_skip "microagent E2E bridge $BRIDGE_NAME does not exist; run scripts/dev/microagent-e2e-linux-network-setup.sh"
   fi
   if [ -e /proc/sys/net/ipv4/ip_forward ] && [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "1" ]; then
-    echo "net.ipv4.ip_forward must be 1; run scripts/dev/microagent-e2e-linux-network-setup.sh" >&2
-    exit 2
+    e2e_skip "net.ipv4.ip_forward must be 1; run scripts/dev/microagent-e2e-linux-network-setup.sh"
   fi
 else
   if [ -z "$BRIDGE_NAME" ]; then
