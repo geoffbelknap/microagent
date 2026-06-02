@@ -40,6 +40,7 @@ type config struct {
 	ShellPort    uint16        `json:"shellPort,omitempty"`
 	ExecPort     uint16        `json:"execPort,omitempty"`
 	SecretsPort  uint16        `json:"secretsPort,omitempty"`
+	SecretsAPI   bool          `json:"secretsApi,omitempty"`
 	ConsoleShell string        `json:"consoleShell,omitempty"`
 	Hostname     string        `json:"hostname,omitempty"`
 }
@@ -1047,6 +1048,9 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 			return fmt.Errorf("microagent_secrets_port must be a positive uint16")
 		}
 		cfg.SecretsPort = port
+	}
+	if values["microagent_secrets_api"] == "1" {
+		cfg.SecretsAPI = true
 	}
 	return nil
 }

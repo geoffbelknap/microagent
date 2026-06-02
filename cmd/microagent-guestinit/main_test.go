@@ -273,6 +273,23 @@ eth0 00000000 0140A8C0 0003 0 0 0 00000000 0 0 0
 	}
 }
 
+func TestApplyKernelConfigOverridesSecretsAPI(t *testing.T) {
+	var cfg config
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "microagent_secrets_port=1026 microagent_secrets_api=1"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if !cfg.SecretsAPI {
+		t.Fatal("SecretsAPI should be true when microagent_secrets_api=1")
+	}
+	var cfg2 config
+	if err := applyKernelConfigOverridesFromCmdline(&cfg2, "microagent_secrets_port=1026"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if cfg2.SecretsAPI {
+		t.Fatal("SecretsAPI should default false")
+	}
+}
+
 func TestApplyKernelConfigOverridesSecretsPort(t *testing.T) {
 	var cfg config
 	if err := applyKernelConfigOverridesFromCmdline(&cfg, "init=/sbin/microagent-init microagent_secrets_port=1026"); err != nil {
