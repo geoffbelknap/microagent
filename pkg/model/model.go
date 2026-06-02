@@ -1,14 +1,20 @@
 package model
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 type Record struct {
@@ -109,6 +115,88 @@ func Find(stateDir, ref string) (Record, error) {
 		}
 	}
 	return Record{}, fmt.Errorf("model %q not found", ref)
+}
+
+type PullOptions struct {
+	StateDir string
+	ModelRef string
+	Token    string
+}
+
+var httpGet = func(ctx context.Context, url, token string) (io.ReadCloser, int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, 0, fmt.Errorf("download %s: unexpected status %s", url, resp.Status)
+	}
+	return resp.Body, resp.ContentLength, nil
+}
+
+func Pull(ctx context.Context, opts PullOptions) (Record, error) {
+	canonical, url, err := resolveHFURL(opts.ModelRef)
+	if err != nil {
+		return Record{}, err
+	}
+	if opts.StateDir == "" {
+		opts.StateDir = workspace.StateDir()
+	}
+	token := opts.Token
+	for _, env := range []string{"HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"} {
+		if token != "" {
+			break
+		}
+		token = os.Getenv(env)
+	}
+	outputPath := ModelPath(opts.StateDir, canonical)
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return Record{}, err
+	}
+	body, _, err := httpGet(ctx, url, token)
+	if err != nil {
+		return Record{}, err
+	}
+	defer body.Close()
+	tmp := outputPath + ".partial"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return Record{}, err
+	}
+	hash := sha256.New()
+	size, copyErr := io.Copy(io.MultiWriter(f, hash), body)
+	closeErr := f.Close()
+	if copyErr != nil {
+		os.Remove(tmp)
+		return Record{}, copyErr
+	}
+	if closeErr != nil {
+		os.Remove(tmp)
+		return Record{}, closeErr
+	}
+	if err := os.Rename(tmp, outputPath); err != nil {
+		return Record{}, err
+	}
+	record := Record{
+		ModelRef:    canonical,
+		ResolvedRef: url,
+		Digest:      "sha256:" + hex.EncodeToString(hash.Sum(nil)),
+		OutputPath:  outputPath,
+		SizeBytes:   size,
+		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := Upsert(opts.StateDir, record); err != nil {
+		return Record{}, err
+	}
+	return record, nil
 }
 
 func resolveHFURL(ref string) (canonical, downloadURL string, err error) {

@@ -1,6 +1,9 @@
 package model
 
 import (
+	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -74,5 +77,36 @@ func TestResolveHFURL(t *testing.T) {
 	}
 	if _, _, err := resolveHFURL("justone"); err == nil {
 		t.Fatal("expected error for malformed ref")
+	}
+}
+
+func TestPullDownloadsAndRecords(t *testing.T) {
+	prev := httpGet
+	httpGet = func(_ context.Context, url, _ string) (io.ReadCloser, int64, error) {
+		if url != "https://huggingface.co/org/repo/resolve/main/m.gguf" {
+			t.Fatalf("unexpected url %q", url)
+		}
+		return io.NopCloser(strings.NewReader("GGUFDATA")), 8, nil
+	}
+	t.Cleanup(func() { httpGet = prev })
+
+	dir := t.TempDir()
+	rec, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"})
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if rec.SizeBytes != 8 || rec.ModelRef != "hf.co/org/repo@main/m.gguf" {
+		t.Fatalf("unexpected record: %+v", rec)
+	}
+	data, err := os.ReadFile(rec.OutputPath)
+	if err != nil || string(data) != "GGUFDATA" {
+		t.Fatalf("blob not written: %q err=%v", data, err)
+	}
+	if !strings.HasPrefix(rec.Digest, "sha256:") {
+		t.Fatalf("missing digest: %q", rec.Digest)
+	}
+	found, err := Find(dir, rec.ModelRef)
+	if err != nil || found.OutputPath != rec.OutputPath {
+		t.Fatalf("record not indexed: %+v err=%v", found, err)
 	}
 }
