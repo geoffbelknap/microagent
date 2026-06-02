@@ -235,3 +235,66 @@ func resolveHFURL(ref string) (canonical, downloadURL string, err error) {
 	downloadURL = fmt.Sprintf("https://huggingface.co/%s/%s/resolve/%s/%s", org, repo, rev, tail)
 	return canonical, downloadURL, nil
 }
+
+type PruneResult struct {
+	Removed []Record `json:"removed"`
+	Deleted []Record `json:"deleted,omitempty"`
+	Kept    []Record `json:"kept"`
+}
+
+func Remove(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
+	idx, err := ReadIndex(stateDir)
+	if err != nil {
+		return PruneResult{}, err
+	}
+	var res PruneResult
+	var kept []Record
+	found := false
+	for _, m := range idx.Models {
+		if MatchesRef(m, ref) {
+			found = true
+			res.Removed = append(res.Removed, m)
+			if deleteFiles && m.OutputPath != "" {
+				if err := os.Remove(m.OutputPath); err == nil {
+					res.Deleted = append(res.Deleted, m)
+				}
+			}
+			continue
+		}
+		kept = append(kept, m)
+	}
+	if !found {
+		return PruneResult{}, fmt.Errorf("model %q not found", ref)
+	}
+	res.Kept = kept
+	return res, WriteIndex(stateDir, Index{Models: kept})
+}
+
+func Prune(stateDir string, deleteFiles bool) (PruneResult, error) {
+	idx, err := ReadIndex(stateDir)
+	if err != nil {
+		return PruneResult{}, err
+	}
+	var res PruneResult
+	var kept []Record
+	for _, m := range idx.Models {
+		if m.OutputPath == "" {
+			res.Removed = append(res.Removed, m)
+			continue
+		}
+		if _, statErr := os.Stat(m.OutputPath); os.IsNotExist(statErr) {
+			res.Removed = append(res.Removed, m)
+			continue
+		}
+		if deleteFiles {
+			if err := os.Remove(m.OutputPath); err == nil {
+				res.Deleted = append(res.Deleted, m)
+				res.Removed = append(res.Removed, m)
+				continue
+			}
+		}
+		kept = append(kept, m)
+	}
+	res.Kept = kept
+	return res, WriteIndex(stateDir, Index{Models: kept})
+}
