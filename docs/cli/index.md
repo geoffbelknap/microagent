@@ -58,11 +58,10 @@ cleanly onto a microVM, common aliases are available: `-e` for `--env`, `-p` for
 `--publish`, `-v`/`--volume` for tar bundles and ext4 disk images, `--name`, and
 `--rm`.
 
-Features that do not map cleanly to a microVM boundary are not implemented:
-container-engine APIs, compose projects, pods, privileged mode, namespace flags,
-devices, host directory bind mounts, and named volumes. When those inputs are
-recognized, microagent returns targeted guidance rather than silently changing
-their meaning.
+Some Docker-style inputs do not map to a microVM boundary — privileged mode,
+namespace flags, devices, and host directory bind mounts. When `microagent run`
+recognizes one of these, it returns targeted guidance rather than silently
+changing its meaning.
 
 ## Workspace spec
 

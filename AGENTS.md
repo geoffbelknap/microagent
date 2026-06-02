@@ -39,7 +39,11 @@ This repository owns the VM pieces:
 - Do not become a container engine. Container-style conveniences are allowed
   only when they map cleanly to microVM semantics. Do not implement
   container-engine APIs, compose projects, pods, privileged mode,
-  namespace/device controls, host directory bind mounts, or named volumes.
+  namespace/device controls, or host directory bind mounts. Named volumes are
+  allowed only as the microVM analog: platform-managed, single-attach ext4
+  disks addressable by name, with a lifecycle independent of any one VM. Do not
+  implement the Docker volume model — daemon-managed, driver-based, or
+  concurrently-shared volumes — which does not map to microVM semantics.
 
 ## Design rules
 
