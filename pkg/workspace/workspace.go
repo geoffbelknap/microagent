@@ -122,6 +122,7 @@ type Spec struct {
 type NetworkSpec struct {
 	Mode         string              `json:"mode,omitempty" yaml:"mode,omitempty"`
 	Interface    string              `json:"interface,omitempty" yaml:"interface,omitempty"`
+	Name         string              `json:"name,omitempty" yaml:"name,omitempty"`
 	PortForwards []vmkit.PortForward `json:"port_forwards,omitempty" yaml:"forwards,omitempty"`
 	DNS          []string            `json:"dns,omitempty" yaml:"dns,omitempty"`
 	Routes       []string            `json:"routes,omitempty" yaml:"routes,omitempty"`
@@ -536,6 +537,7 @@ func NormalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
 		network.Mode = DefaultNetworkMode
 	}
 	network.Interface = strings.TrimSpace(network.Interface)
+	network.Name = strings.TrimSpace(network.Name)
 	network.IP = strings.TrimSpace(network.IP)
 	network.Subnet = strings.TrimSpace(network.Subnet)
 	network.Gateway = strings.TrimSpace(network.Gateway)
@@ -554,6 +556,7 @@ func NetworkSpecFromConfig(network vmkit.NetworkConfig) NetworkSpec {
 	return NetworkSpec{
 		Mode:         network.Mode,
 		Interface:    network.Interface,
+		Name:         network.Name,
 		PortForwards: append([]vmkit.PortForward{}, network.PortForwards...),
 		DNS:          append([]string{}, network.DNS...),
 		Routes:       append([]string{}, network.Routes...),
@@ -567,6 +570,7 @@ func NetworkConfigFromSpec(spec NetworkSpec) vmkit.NetworkConfig {
 	return NormalizeNetworkConfig(vmkit.NetworkConfig{
 		Mode:         spec.Mode,
 		Interface:    spec.Interface,
+		Name:         spec.Name,
 		PortForwards: append([]vmkit.PortForward{}, spec.PortForwards...),
 		DNS:          append([]string{}, spec.DNS...),
 		Routes:       append([]string{}, spec.Routes...),

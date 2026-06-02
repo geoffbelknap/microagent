@@ -2089,6 +2089,30 @@ func TestParseWorkspaceOptionsRejectsUnsupportedVolumeSource(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsNetworkNameImpliesNamedMode(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--network-name", "devnet",
+	})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if opts.Network.Mode != "named" || opts.Network.Name != "devnet" {
+		t.Fatalf("expected named mode for devnet, got mode=%q name=%q", opts.Network.Mode, opts.Network.Name)
+	}
+}
+
+func TestParseWorkspaceOptionsNetworkNameConflictsWithMode(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--network", "nat",
+		"--network-name", "devnet",
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("err = %v, want named/mode conflict", err)
+	}
+}
+
 func TestParseWorkspaceOptionsRejectsUnsupportedContainerCompatibilityFlags(t *testing.T) {
 	tests := []struct {
 		name string

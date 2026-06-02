@@ -726,6 +726,12 @@ type networkBootConfig struct {
 	IP        string
 	Gateway   string
 	DNS       []string
+	Hosts     []hostEntry
+}
+
+type hostEntry struct {
+	Name string
+	IP   string
 }
 
 func startTCPVsockBridges(env []string) error {
@@ -1116,6 +1122,33 @@ func configureBootNetwork() error {
 		}
 		log.Println("microagent-init: resolv.conf written")
 	}
+	if len(cfg.Hosts) != 0 {
+		if err := writeHostsFile(cfg.Hosts); err != nil {
+			return err
+		}
+		log.Printf("microagent-init: /etc/hosts written with %d named-network entries", len(cfg.Hosts))
+	}
+	return nil
+}
+
+// writeHostsFile writes /etc/hosts with the standard loopback entries plus one
+// line per named-network member so members resolve each other by name.
+func writeHostsFile(hosts []hostEntry) error {
+	var b strings.Builder
+	b.WriteString("127.0.0.1\tlocalhost\n")
+	b.WriteString("::1\tlocalhost ip6-localhost ip6-loopback\n")
+	for _, h := range hosts {
+		if net.ParseIP(h.IP) == nil {
+			return fmt.Errorf("invalid host entry IP %q", h.IP)
+		}
+		b.WriteString(h.IP)
+		b.WriteByte('\t')
+		b.WriteString(h.Name)
+		b.WriteByte('\n')
+	}
+	if err := os.WriteFile("/etc/hosts", []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("write /etc/hosts: %w", err)
+	}
 	return nil
 }
 
@@ -1142,6 +1175,17 @@ func readNetworkBootConfig() (networkBootConfig, error) {
 		if dns != "" {
 			cfg.DNS = append(cfg.DNS, dns)
 		}
+	}
+	for _, entry := range strings.Split(values["microagent_net_hosts"], ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		name, ip, ok := strings.Cut(entry, ":")
+		if !ok || strings.TrimSpace(name) == "" || strings.TrimSpace(ip) == "" {
+			continue
+		}
+		cfg.Hosts = append(cfg.Hosts, hostEntry{Name: strings.TrimSpace(name), IP: strings.TrimSpace(ip)})
 	}
 	return cfg, nil
 }

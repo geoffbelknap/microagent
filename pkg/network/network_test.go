@@ -125,6 +125,110 @@ func TestRemoveFailsClosedWithMembers(t *testing.T) {
 	}
 }
 
+func TestJoinAllocatesStableIPs(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Create(dir, "team", "10.44.7.0/24"); err != nil {
+		t.Fatal(err)
+	}
+	ip1, err := Join(dir, "team", "w1")
+	if err != nil {
+		t.Fatalf("join w1: %v", err)
+	}
+	// Gateway is .1, so the first member gets .2.
+	if ip1 != "10.44.7.2" {
+		t.Errorf("expected 10.44.7.2, got %s", ip1)
+	}
+	ip2, err := Join(dir, "team", "w2")
+	if err != nil {
+		t.Fatalf("join w2: %v", err)
+	}
+	if ip2 != "10.44.7.3" {
+		t.Errorf("expected 10.44.7.3, got %s", ip2)
+	}
+	// Re-joining returns the same stable IP.
+	again, err := Join(dir, "team", "w1")
+	if err != nil || again != ip1 {
+		t.Errorf("re-join w1 = %q, %v; want %q", again, err, ip1)
+	}
+	rec, _ := Get(dir, "team")
+	if len(rec.Members) != 2 {
+		t.Errorf("expected 2 members, got %d", len(rec.Members))
+	}
+}
+
+func TestJoinReusesFreedAddress(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Create(dir, "team", "10.44.7.0/24"); err != nil {
+		t.Fatal(err)
+	}
+	ip1, _ := Join(dir, "team", "w1")
+	if _, err := Join(dir, "team", "w2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Leave(dir, "team", "w1"); err != nil {
+		t.Fatalf("leave: %v", err)
+	}
+	// The freed .2 is the lowest free host and gets reused.
+	reused, err := Join(dir, "team", "w3")
+	if err != nil {
+		t.Fatalf("join w3: %v", err)
+	}
+	if reused != ip1 {
+		t.Errorf("expected reuse of %s, got %s", ip1, reused)
+	}
+}
+
+func TestJoinUnknownNetworkFails(t *testing.T) {
+	if _, err := Join(t.TempDir(), "nope", "w1"); err == nil {
+		t.Error("expected join of unknown network to fail")
+	}
+}
+
+func TestLeaveAllAndLeaveIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"a", "b"} {
+		if _, err := Create(dir, n, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Join(dir, n, "w1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Idempotent: leaving twice and leaving a non-member never errors.
+	if err := Leave(dir, "a", "w1"); err != nil {
+		t.Fatalf("leave: %v", err)
+	}
+	if err := Leave(dir, "a", "w1"); err != nil {
+		t.Fatalf("idempotent leave: %v", err)
+	}
+	if err := Leave(dir, "a", "ghost"); err != nil {
+		t.Fatalf("leave non-member: %v", err)
+	}
+	if err := LeaveAll(dir, "w1"); err != nil {
+		t.Fatalf("leave all: %v", err)
+	}
+	for _, n := range []string{"a", "b"} {
+		rec, _ := Get(dir, n)
+		if len(rec.Members) != 0 {
+			t.Errorf("network %s still has members: %+v", n, rec.Members)
+		}
+	}
+}
+
+func TestSubnetExhaustion(t *testing.T) {
+	dir := t.TempDir()
+	// /30 has hosts .1 (gateway) and .2 — only one assignable address.
+	if _, err := Create(dir, "tiny", "10.44.9.0/30"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Join(dir, "tiny", "w1"); err != nil {
+		t.Fatalf("first join: %v", err)
+	}
+	if _, err := Join(dir, "tiny", "w2"); err == nil {
+		t.Error("expected exhausted subnet to fail")
+	}
+}
+
 func TestReadIndexMissingIsEmpty(t *testing.T) {
 	idx, err := ReadIndex(t.TempDir())
 	if err != nil {

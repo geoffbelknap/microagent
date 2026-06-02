@@ -1836,6 +1836,10 @@ Options:
   --subnet <cidr>       Subnet for create; auto-allocated from 10.44.0.0/16 when omitted
   --force               Remove a network even if it still has members
   --state-dir <dir>     State directory
+
+Join a workspace to a named network with create/run --network-name <name>:
+members get a stable IP from the subnet, share a managed bridge, and resolve
+each other by name (Firecracker/Linux only).
 `)
 }
 
@@ -2143,6 +2147,8 @@ func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force b
 		// attached to a deleted workspace. Best-effort: a stale holder is
 		// reclaimed on next attach regardless.
 		_ = volume.DetachAll(opts.StateDir, opts.Name)
+		// Leave any named networks so a deleted workspace frees its address.
+		_ = network.LeaveAll(opts.StateDir, opts.Name)
 	}
 	return resp, err
 }
@@ -2821,8 +2827,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
-	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: user, nat, isolated, or bridged")
+	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: user, nat, isolated, bridged, or named")
 	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
+	fs.StringVar(&opts.Network.Name, "network-name", opts.Network.Name, "Join a user-defined named network by name")
 	mediationMapping := ""
 	fs.StringVar(&mediationMapping, "mediation", "", "Required mediation vsock mapping port=host:port")
 	mediationOptional := false
@@ -2948,6 +2955,16 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.RestartPolicy = normalizeRestartPolicy(opts.RestartPolicy)
+	// --network-name selects a user-defined named network; it implies named mode
+	// unless the operator explicitly chose a different mode (which is a conflict).
+	if strings.TrimSpace(opts.Network.Name) != "" {
+		switch strings.TrimSpace(opts.Network.Mode) {
+		case "", defaultNetworkMode, "named":
+			opts.Network.Mode = "named"
+		default:
+			return workspaceOptions{}, fmt.Errorf("--network-name cannot be combined with --network %s; named networks use their own managed bridge", opts.Network.Mode)
+		}
+	}
 	opts.Network = normalizeNetworkConfig(opts.Network)
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
 		return workspaceOptions{}, err
@@ -6306,6 +6323,7 @@ func reorderFlagArgs(args []string) []string {
 		"-restart":           true,
 		"-network":           true,
 		"-network-interface": true,
+		"-network-name":      true,
 		"-mediation":         true,
 		"-publish":           true,
 		"-p":                 true,
@@ -6845,9 +6863,10 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, bridged, or named
   -network-interface <if>
                          Host interface for bridged network mode
+  -network-name <name>  Join a user-defined named network by name
   -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
   -cpus <n>             CPU count
   -vsock p=host:port    Add a vsock mapping
@@ -6919,9 +6938,10 @@ Options:
   -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, bridged, or named
   -network-interface <if>
                          Host interface for bridged network mode
+  -network-name <name>  Join a user-defined named network by name
   -p host:guest[/tcp]   Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
@@ -6978,9 +6998,10 @@ Options:
   -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, or bridged
+  -network <mode>       Network mode: user, nat, isolated, bridged, or named
   -network-interface <if>
                          Host interface for bridged network mode
+  -network-name <name>  Join a user-defined named network by name
   -p host:guest[/tcp]   Publish a TCP port
   -publish host:guest[/tcp]
                          Publish a TCP port

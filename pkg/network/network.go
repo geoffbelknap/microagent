@@ -213,6 +213,119 @@ func Remove(stateDir, name string, force bool) error {
 	return fmt.Errorf("network %q not found", name)
 }
 
+// Join allocates a stable member IP for workspace on the named network and
+// persists it. If the workspace is already a member, its existing IP is
+// returned unchanged so an address survives stop/start. It fails closed when
+// the subnet has no free host address.
+func Join(stateDir, name, workspace string) (string, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "", fmt.Errorf("workspace name is required to join a network")
+	}
+	idx, err := ReadIndex(stateDir)
+	if err != nil {
+		return "", err
+	}
+	for i := range idx.Networks {
+		r := &idx.Networks[i]
+		if r.Name != name {
+			continue
+		}
+		for _, m := range r.Members {
+			if m.Workspace == workspace {
+				return m.IP, nil
+			}
+		}
+		ip, err := nextFreeHost(*r)
+		if err != nil {
+			return "", err
+		}
+		r.Members = append(r.Members, Member{Workspace: workspace, IP: ip})
+		if err := WriteIndex(stateDir, idx); err != nil {
+			return "", err
+		}
+		return ip, nil
+	}
+	return "", fmt.Errorf("network %q not found", name)
+}
+
+// Leave removes a workspace's membership from a network, freeing its IP. It is
+// idempotent and never errors on an unknown network or non-member.
+func Leave(stateDir, name, workspace string) error {
+	idx, err := ReadIndex(stateDir)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i := range idx.Networks {
+		if idx.Networks[i].Name != name {
+			continue
+		}
+		if removed := removeMember(&idx.Networks[i], workspace); removed {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return WriteIndex(stateDir, idx)
+}
+
+// LeaveAll removes a workspace from every network it belongs to. Use it when a
+// workspace is deleted so no network keeps a member that no longer exists.
+func LeaveAll(stateDir, workspace string) error {
+	idx, err := ReadIndex(stateDir)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i := range idx.Networks {
+		if removeMember(&idx.Networks[i], workspace) {
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return WriteIndex(stateDir, idx)
+}
+
+func removeMember(record *Record, workspace string) bool {
+	for i, m := range record.Members {
+		if m.Workspace == workspace {
+			record.Members = append(record.Members[:i], record.Members[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// nextFreeHost returns the lowest unused host address in the record's subnet,
+// skipping the network address and the gateway.
+func nextFreeHost(record Record) (string, error) {
+	prefix, err := netip.ParsePrefix(record.Subnet)
+	if err != nil {
+		return "", fmt.Errorf("parse network %q subnet %q: %w", record.Name, record.Subnet, err)
+	}
+	used := map[string]bool{record.Gateway: true}
+	for _, m := range record.Members {
+		used[m.IP] = true
+	}
+	addr := prefix.Masked().Addr().Next() // first host
+	for prefix.Contains(addr) {
+		next := addr.Next()
+		if !next.IsValid() || !prefix.Contains(next) {
+			// addr is the broadcast/last address; stop before using it.
+			break
+		}
+		if !used[addr.String()] {
+			return addr.String(), nil
+		}
+		addr = next
+	}
+	return "", fmt.Errorf("network %q subnet %s has no free address", record.Name, record.Subnet)
+}
+
 // nextFreeSubnet returns the lowest unused /24 in the managed range.
 func nextFreeSubnet(existing []Record) (netip.Prefix, error) {
 	used := make(map[string]bool, len(existing))

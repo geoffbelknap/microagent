@@ -112,15 +112,19 @@ type MediationConfig struct {
 }
 
 type NetworkConfig struct {
-	Mode         string         `json:"mode" yaml:"mode"`
-	Interface    string         `json:"interface,omitempty" yaml:"interface,omitempty"`
-	PortForwards []PortForward  `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
-	DNS          []string       `json:"dns,omitempty" yaml:"dns,omitempty"`
-	Routes       []string       `json:"routes,omitempty" yaml:"routes,omitempty"`
-	IP           string         `json:"ip,omitempty" yaml:"ip,omitempty"`
-	Subnet       string         `json:"subnet,omitempty" yaml:"subnet,omitempty"`
-	Gateway      string         `json:"gateway,omitempty" yaml:"gateway,omitempty"`
-	Runtime      *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
+	Mode         string        `json:"mode" yaml:"mode"`
+	Interface    string        `json:"interface,omitempty" yaml:"interface,omitempty"`
+	Name         string        `json:"name,omitempty" yaml:"name,omitempty"`
+	PortForwards []PortForward `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
+	DNS          []string      `json:"dns,omitempty" yaml:"dns,omitempty"`
+	Routes       []string      `json:"routes,omitempty" yaml:"routes,omitempty"`
+	IP           string        `json:"ip,omitempty" yaml:"ip,omitempty"`
+	Subnet       string        `json:"subnet,omitempty" yaml:"subnet,omitempty"`
+	Gateway      string        `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	// Hosts carries "name:ip" entries for the guest /etc/hosts so members of a
+	// named network resolve each other. Populated by the supervisor at start.
+	Hosts   []string       `json:"hosts,omitempty" yaml:"hosts,omitempty"`
+	Runtime *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
 }
 
 type PortForward struct {
@@ -444,9 +448,15 @@ func ValidateNetworkConfig(network NetworkConfig) error {
 		mode = "user"
 	}
 	switch mode {
-	case "user", "nat", "isolated", "bridged":
+	case "user", "nat", "isolated", "bridged", "named":
 	default:
-		return fmt.Errorf("network.mode must be user, nat, isolated, or bridged")
+		return fmt.Errorf("network.mode must be user, nat, isolated, bridged, or named")
+	}
+	if mode == "named" && strings.TrimSpace(network.Name) == "" {
+		return fmt.Errorf("network.mode named requires a network name")
+	}
+	if strings.TrimSpace(network.Name) != "" && mode != "named" {
+		return fmt.Errorf("network.name requires named mode")
 	}
 	if mode == "isolated" && len(network.PortForwards) != 0 {
 		return fmt.Errorf("network.portForwards require user, nat, or bridged mode")

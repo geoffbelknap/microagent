@@ -35,14 +35,43 @@ microagent network rm backend
 ```
 
 `network rm` fails closed while a network still has members; pass `--force` to
-remove it anyway. Joining a workspace to a network and the resulting cross-VM
-connectivity and name resolution are realized by the backend supervisor.
+remove it anyway.
+
+## Joining a network
+
+Attach a workspace to a named network with `--network-name` on `create`/`run`:
+
+```bash
+microagent network create devnet
+microagent create --name web --image docker.io/library/python:3.12 --network-name devnet
+microagent create --name db  --image docker.io/library/postgres:16 --network-name devnet
+```
+
+Each member is allocated a **stable IP** from the network's subnet (persisted in
+the registry, so it survives stop/start). Members share a managed Linux bridge
+(Firecracker/Linux only), so they reach each other directly:
+
+```bash
+microagent exec web -- ping db        # resolve by name and reach the peer
+```
+
+Name resolution is provided by `/etc/hosts`, injected at boot from the current
+member set (the cmdline → guest-init seam, parallel to DNS). Because it is a
+boot-time snapshot, a member learns peers that joined **before** it booted;
+restart a workspace to pick up members that joined later. Cross-VM connectivity
+by IP is always available regardless of boot order. Deleting a workspace frees
+its address; the shared bridge is removed once the last member stops.
+
+Named networking requires `net.ipv4.ip_forward=1` on the host (as with `nat`
+mode) and CAP_NET_ADMIN in the supervisor. Apple Virtualization.framework NAT
+cannot share a subnet, so named networks are Firecracker/Linux only.
 
 ## Flags
 
 | Flag | Description |
 |---|---|
 | `--subnet <cidr>` | Subnet for `create`; auto-allocated from `10.44.0.0/16` when omitted |
+| `--network-name <name>` | On `create`/`run`: join a workspace to a named network (implies named mode) |
 | `--force` | Remove a network even if it still has members |
 | `--state-dir <dir>` | State directory holding the workspace and network records (default `~/.microagent/`) |
 
