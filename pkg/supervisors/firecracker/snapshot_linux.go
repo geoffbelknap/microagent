@@ -52,6 +52,25 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		return vmkit.Response{}, err
 	}
 
+	// Purge materialized secrets from the guest tmpfs while the VM is still
+	// running (before the auto-pause below), so the captured memory holds zeros.
+	// Fail closed: a snapshot of a secrets-bearing workspace is never created
+	// with un-purged plaintext.
+	purged := false
+	if materializedSecretsDeclared(&state.Config) && state.Config.SecretsControlPort != 0 {
+		if current != vmkit.StateRunning {
+			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s is %s, must be running", opts.Name, current)
+			_ = os.RemoveAll(dir)
+			return failedResponse(req, err.Error()), err
+		}
+		if err := purgeGuestSecrets(opts, state.Config.SecretsControlPort); err != nil {
+			_ = os.RemoveAll(dir)
+			wrapped := fmt.Errorf("purge guest secrets before snapshot: %w", err)
+			return failedResponse(req, wrapped.Error()), wrapped
+		}
+		purged = true
+	}
+
 	controller := newVMStateController(apiSocketPath(opts))
 	autoPaused := current == vmkit.StateRunning
 	if autoPaused {
@@ -66,7 +85,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		}
 	}
 
-	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag); err != nil {
+	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag, purged); err != nil {
 		if autoPaused {
 			_ = controller.patchVMState(ctx, "Resumed")
 			_ = writeSnapshotState(opts, req, state, vmkit.StateRunning)
@@ -84,6 +103,16 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		if err := writeSnapshotState(opts, req, state, vmkit.StateRunning); err != nil {
 			return vmkit.Response{}, err
 		}
+		// Rehydrate the source after resume: the snapshot is already captured
+		// (purged), so re-fetch the secrets so the running source keeps working.
+		// Best-effort: the snapshot artifact is correct regardless, and a failed
+		// rehydrate is a recoverable runtime condition, not a reason to fail the
+		// completed snapshot.
+		if purged {
+			if err := rehydrateGuestSecrets(opts, state.Config.SecretsControlPort); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: rehydrate source secrets after snapshot failed: %v\n", err)
+			}
+		}
 	}
 	return eventResponse(req, finalState, ""), nil
 }
@@ -94,21 +123,21 @@ func writeSnapshotState(opts Options, req vmkit.Request, state runtimeState, tar
 	return writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), target, state.PID, state.PortForwardPID, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, "")
 }
 
-func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string) error {
+func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string, purged bool) error {
 	if err := controller.createSnapshot(ctx, filepath.Join(dir, vmkit.SnapshotVMStateName), filepath.Join(dir, vmkit.SnapshotMemoryName)); err != nil {
 		return err
 	}
 	if err := copyFile(state.Config.RootfsPath, filepath.Join(dir, vmkit.SnapshotRootfsName)); err != nil {
 		return fmt.Errorf("copy rootfs into snapshot: %w", err)
 	}
-	manifest, err := snapshotManifestFromState(tag, state, opts)
+	manifest, err := snapshotManifestFromState(tag, state, opts, purged)
 	if err != nil {
 		return err
 	}
 	return vmkit.WriteSnapshotManifest(dir, manifest)
 }
 
-func snapshotManifestFromState(tag string, state runtimeState, opts Options) (vmkit.SnapshotManifest, error) {
+func snapshotManifestFromState(tag string, state runtimeState, opts Options, purged bool) (vmkit.SnapshotManifest, error) {
 	kernelSHA := ""
 	if path := strings.TrimSpace(state.Config.KernelPath); path != "" {
 		sha, err := fileSHA256(path)
@@ -144,6 +173,7 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options) (vm
 		NetworkIP:      netIP,
 		NetworkGateway: netGateway,
 		NetworkSubnet:  netSubnet,
+		SecretsPurged:  purged,
 	}, nil
 }
 

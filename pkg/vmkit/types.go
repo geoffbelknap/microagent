@@ -76,6 +76,9 @@ type Config struct {
 	OnDemandSecrets []SecretRef `json:"onDemandSecrets,omitempty"`
 	// SecretsAudit enables the per-workspace secret-access audit log.
 	SecretsAudit bool `json:"secretsAudit,omitempty"`
+	// SecretsControlPort is the guest vsock port the host connects to (via the
+	// firecracker CONNECT protocol) to signal purge/rehydrate around snapshots.
+	SecretsControlPort uint32 `json:"secretsControlPort,omitempty"`
 	// GuestShellPort/GuestExecPort are the in-guest vsock ports for the shell
 	// and structured-exec services when they differ from the host-side ports
 	// (ShellPort/ExecPort). A fork resumes a guest that listens on the source's

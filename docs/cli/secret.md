@@ -141,7 +141,30 @@ microagent create --name app \
   ```
 
 Audit granularity is per-workspace + secret name (the vsock channel is
-anonymous). Snapshot purge/rehydrate is sub-project #4; there is no guest CLI.
+anonymous). There is no guest CLI.
+
+## Snapshots: purge and rehydrate
+
+A snapshot captures the full guest RAM, so the `/run/secrets` tmpfs would land in
+the memory image (and travel into every restore and fork). When a workspace with
+materialized secrets is snapshotted, microagent automatically:
+
+- **Purges** `/run/secrets` while the VM is still running, just before snapshot
+  create's internal pause — each file is overwritten with zeros (scrubbing the
+  captured RAM) and removed. **Fail-closed:** if the guest can't confirm the
+  purge, snapshot create is **aborted** and no memory file is written, so a
+  snapshot of a secrets-bearing workspace never contains un-purged plaintext.
+- **Rehydrates** the source after it resumes, and rehydrates the guest after a
+  `--from-snapshot` restore or fork — re-fetching the bundle and rewriting the
+  files (references are re-resolved, so a fork gets its own resolved secrets).
+
+This is automatic when secrets are declared; there are no flags. Plain `pause` /
+`resume` is unaffected (it keeps RAM in memory, writes no disk artifact).
+`SecretsPurged` is recorded in the snapshot manifest as provenance.
+
+**Boundary:** only the tmpfs microagent owns is scrubbed. An on-demand value a
+workload copied into its own memory is captured in the snapshot and cannot be
+scrubbed — on-demand minimizes residency but does not guarantee zero.
 
 ## Scope
 

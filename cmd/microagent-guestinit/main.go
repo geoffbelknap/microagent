@@ -31,18 +31,19 @@ const consoleShellExitedMarker = "microagent-init: console shell exited; closing
 const defaultGuestPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 type config struct {
-	Command      []string      `json:"command"`
-	Env          []string      `json:"env,omitempty"`
-	Port         uint32        `json:"port"`
-	Mode         string        `json:"mode,omitempty"`
-	Mounts       []mount       `json:"mounts,omitempty"`
-	HostForwards []hostForward `json:"hostForwards,omitempty"`
-	ShellPort    uint16        `json:"shellPort,omitempty"`
-	ExecPort     uint16        `json:"execPort,omitempty"`
-	SecretsPort  uint16        `json:"secretsPort,omitempty"`
-	SecretsAPI   bool          `json:"secretsApi,omitempty"`
-	ConsoleShell string        `json:"consoleShell,omitempty"`
-	Hostname     string        `json:"hostname,omitempty"`
+	Command            []string      `json:"command"`
+	Env                []string      `json:"env,omitempty"`
+	Port               uint32        `json:"port"`
+	Mode               string        `json:"mode,omitempty"`
+	Mounts             []mount       `json:"mounts,omitempty"`
+	HostForwards       []hostForward `json:"hostForwards,omitempty"`
+	ShellPort          uint16        `json:"shellPort,omitempty"`
+	ExecPort           uint16        `json:"execPort,omitempty"`
+	SecretsPort        uint16        `json:"secretsPort,omitempty"`
+	SecretsAPI         bool          `json:"secretsApi,omitempty"`
+	SecretsControlPort uint16        `json:"secretsControlPort,omitempty"`
+	ConsoleShell       string        `json:"consoleShell,omitempty"`
+	Hostname           string        `json:"hostname,omitempty"`
 }
 
 type mount struct {
@@ -106,6 +107,12 @@ func run() int {
 			return 127
 		}
 		cfg.Env = append(cfg.Env, "MICROAGENT_SECRETS_SOCK="+secretsAPISock)
+	}
+	if cfg.SecretsControlPort != 0 && cfg.SecretsPort != 0 {
+		if err := serveSecretsControl(cfg.SecretsControlPort, cfg.SecretsPort); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 127
+		}
 	}
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
@@ -1058,6 +1065,13 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 	}
 	if values["microagent_secrets_api"] == "1" {
 		cfg.SecretsAPI = true
+	}
+	if raw := values["microagent_secrets_ctl_port"]; strings.TrimSpace(raw) != "" {
+		port, err := parseUint16(raw)
+		if err != nil || port == 0 {
+			return fmt.Errorf("microagent_secrets_ctl_port must be a positive uint16")
+		}
+		cfg.SecretsControlPort = port
 	}
 	return nil
 }

@@ -50,6 +50,9 @@ type SnapshotManifest struct {
 	// different workspace bind-mounts its own directory over the source's to
 	// make this path resolve to the fork's socket.
 	VsockUDSPath string `json:"vsockUDSPath,omitempty"`
+	// SecretsPurged records that the guest tmpfs secrets were scrubbed before
+	// the memory image was captured.
+	SecretsPurged bool `json:"secretsPurged,omitempty"`
 }
 
 // SnapshotInfo is a manifest plus the on-disk size of its snapshot directory,
