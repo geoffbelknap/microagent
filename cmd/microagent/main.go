@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/scaffold"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
+	"github.com/geoffbelknap/microagent/pkg/superviseunit"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -2200,6 +2202,8 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	fs.StringVar(&opts.KernelPath, "kernel", opts.KernelPath, "Linux kernel path")
 	intervalSeconds := fs.Int("interval", int(opts.Interval.Seconds()), "Seconds between state checks")
 	fs.IntVar(&opts.MaxRestarts, "max-restarts", 0, "Maximum restarts; 0 means unlimited")
+	install := fs.Bool("install", false, "Install a boot unit that supervises the workspace, then exit")
+	uninstall := fs.Bool("uninstall", false, "Remove the installed boot unit, then exit")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -2208,6 +2212,12 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent supervise <name> [--state-dir <dir>]")
+	}
+	if *install && *uninstall {
+		return fmt.Errorf("supervise: --install and --uninstall are mutually exclusive")
+	}
+	if *install || *uninstall {
+		return runSuperviseUnit(fs.Arg(0), opts.StateDir, *uninstall, stdout)
 	}
 	if *intervalSeconds <= 0 {
 		return fmt.Errorf("supervise interval must be positive")
@@ -2229,6 +2239,64 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 		}
 	}
 	return err
+}
+
+func runSuperviseUnit(name, stateDir string, uninstall bool, stdout *os.File) error {
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	if !uninstall {
+		if _, err := workspace.ReadManifest(stateDir, name); err != nil {
+			return fmt.Errorf("workspace %q not found; create it before installing a boot unit: %w", name, err)
+		}
+	}
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve microagent executable: %w", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
+	unit, err := superviseunit.Build(superviseunit.Options{
+		Name:     name,
+		ExecPath: execPath,
+		StateDir: stateDir,
+		Home:     home,
+		GOOS:     runtime.GOOS,
+	})
+	if err != nil {
+		return err
+	}
+	if uninstall {
+		if err := superviseunit.Uninstall(unit); err != nil {
+			return err
+		}
+		if outputJSON(stdout) {
+			return writeJSON(stdout, map[string]any{"uninstalled": unit.Label, "path": unit.Path})
+		}
+		fmt.Fprintf(stdout, "Removed boot unit %s (%s)\n", unit.Label, unit.Path)
+		return nil
+	}
+	enableErr, err := superviseunit.Install(unit)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		out := map[string]any{"installed": unit.Label, "path": unit.Path, "enabled": enableErr == nil}
+		if enableErr != nil {
+			out["enable_error"] = enableErr.Error()
+			out["enable_command"] = strings.Join(unit.EnableArgs, " ")
+		}
+		return writeJSON(stdout, out)
+	}
+	fmt.Fprintf(stdout, "Installed boot unit %s (%s)\n", unit.Label, unit.Path)
+	if enableErr != nil {
+		fmt.Fprintf(stdout, "Could not register it automatically: %v\nEnable it manually with:\n  %s\n", enableErr, strings.Join(unit.EnableArgs, " "))
+	} else {
+		fmt.Fprintf(stdout, "Registered to start %q at boot.\n", name)
+	}
+	return nil
 }
 
 func superviseWorkspace(ctx context.Context, opts superviseOptions) (superviseResult, error) {
@@ -6020,7 +6088,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall":
 		return true
 	default:
 		return false
