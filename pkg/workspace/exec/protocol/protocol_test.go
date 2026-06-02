@@ -181,6 +181,45 @@ func TestExecModeValidation(t *testing.T) {
 	}
 }
 
+func TestExecStreamMessageRoundTripAndValidate(t *testing.T) {
+	chunk := NewExecStreamChunk(ExecStreamStdout, []byte("hello"))
+	var buf bytes.Buffer
+	if err := EncodeMessage(&buf, chunk); err != nil {
+		t.Fatalf("encode chunk: %v", err)
+	}
+	var got ExecStreamMessage
+	if err := DecodeMessage(&buf, &got); err != nil {
+		t.Fatalf("decode chunk: %v", err)
+	}
+	if got.Kind != ExecStreamStdout || string(got.Data) != "hello" {
+		t.Fatalf("chunk round-trip = %#v", got)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("chunk Validate: %v", err)
+	}
+
+	code := 0
+	result := NewExecResult(ExecStatusExited)
+	result.ExitCode = &code
+	resultFrame := NewExecStreamResult(result)
+	if err := resultFrame.Validate(); err != nil {
+		t.Fatalf("result frame Validate: %v", err)
+	}
+
+	// A result frame without a result is invalid.
+	if err := (ExecStreamMessage{Kind: ExecStreamResult}).Validate(); err == nil {
+		t.Fatal("result frame without result should be invalid")
+	}
+	// A chunk frame carrying a result is invalid.
+	if err := (ExecStreamMessage{Kind: ExecStreamStdout, Result: &result}).Validate(); err == nil {
+		t.Fatal("chunk frame with result should be invalid")
+	}
+	// Unknown kind is invalid.
+	if err := (ExecStreamMessage{Kind: "weird"}).Validate(); err == nil {
+		t.Fatal("unknown stream kind should be invalid")
+	}
+}
+
 func TestExecResultEmptyOutputRoundTripsAsNonNilSlices(t *testing.T) {
 	result := NewExecResult(ExecStatusFailedToStart)
 	data, err := json.Marshal(result)

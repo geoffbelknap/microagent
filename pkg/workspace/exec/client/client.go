@@ -91,3 +91,52 @@ func (c *Client) Exec(ctx context.Context, req protocol.ExecRequest) (protocol.E
 	}
 	return result, nil
 }
+
+// ExecStream runs req in streaming mode. onChunk, when non-nil, is invoked for
+// each stdout and stderr chunk as it arrives; chunk data is owned by the caller
+// only for the duration of the call. ExecStream returns the final ExecResult
+// from the terminal result frame. The request's Mode is forced to stream.
+func (c *Client) ExecStream(ctx context.Context, req protocol.ExecRequest, onChunk func(kind protocol.ExecStreamKind, data []byte)) (protocol.ExecResult, error) {
+	req.Mode = protocol.ExecModeStream
+	if req.ProtocolVersion == "" {
+		req.ProtocolVersion = protocol.CurrentProtocolVersion
+	}
+	dialer := c.dialer
+	if dialer == nil {
+		dialer = &net.Dialer{}
+	}
+	conn, err := dialer.DialContext(ctx, "tcp", c.addr)
+	if err != nil {
+		return protocol.ExecResult{}, UnreachableError{Addr: c.addr, Err: err}
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	} else {
+		_ = conn.SetDeadline(time.Time{})
+	}
+	if err := protocol.EncodeMessage(conn, req); err != nil {
+		return protocol.ExecResult{}, ProtocolError{Op: "encode request", Err: err}
+	}
+	maxBytes := c.maxResponseBytes
+	if maxBytes == 0 {
+		maxBytes = DefaultMaxResponseBytes
+	}
+	for {
+		var msg protocol.ExecStreamMessage
+		if err := protocol.DecodeMessageWithMax(conn, &msg, maxBytes); err != nil {
+			return protocol.ExecResult{}, ProtocolError{Op: "decode stream frame", Err: err}
+		}
+		if err := msg.Validate(); err != nil {
+			return protocol.ExecResult{}, ProtocolError{Op: "validate stream frame", Err: err}
+		}
+		switch msg.Kind {
+		case protocol.ExecStreamStdout, protocol.ExecStreamStderr:
+			if onChunk != nil {
+				onChunk(msg.Kind, msg.Data)
+			}
+		case protocol.ExecStreamResult:
+			return *msg.Result, nil
+		}
+	}
+}

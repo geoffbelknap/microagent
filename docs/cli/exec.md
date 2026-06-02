@@ -4,7 +4,7 @@ description: Run a structured command in a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -31,12 +31,29 @@ In AX mode, stdout is one JSON `ExecResult`. A nonzero command exit is still a
 successful tool call and is reported in `exit_code`; the CLI exits nonzero only
 when the exec request itself cannot complete.
 
+## Streaming
+
+By default `exec` buffers output and returns one final result. With `--stream`,
+the guest delivers stdout and stderr incrementally as the command runs, so a
+long-running command's output appears live instead of all at once. The exec
+protocol carries a sequence of chunk frames followed by a terminal result frame
+that holds the status, exit code, timing, and truncation flags (the streamed
+result does not re-send the output bytes). The per-stream output limits still
+apply — output past the limit is dropped and the truncation flag is set.
+
+`--stream` is a UX-mode convenience for incremental terminal output. AX mode
+always emits one structured `ExecResult` envelope and ignores `--stream`, since
+interleaving raw bytes with the JSON envelope would not be machine-parseable.
+The streaming transport is also available to Go callers via
+`workspace.ExecStream`.
+
 ## Flags
 
 | Flag | Description |
 |---|---|
 | `--env KEY=VALUE`, `-e KEY=VALUE` | Environment variable for the command; repeatable |
 | `--cwd <path>` | Working directory inside the workspace |
+| `--stream` | Stream stdout/stderr incrementally as the command runs (UX mode) |
 | `--timeout <duration>` | Command timeout, such as `30s` or `5m` |
 | `--stdin <path>` or `-` | Read command stdin from a file, or from CLI stdin with `-` |
 | `--stdout-limit <bytes>` | Stdout output limit in bytes |
