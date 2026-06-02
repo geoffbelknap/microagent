@@ -13,6 +13,11 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
+// secretsListenerTarget marks a vsock listener that serves the resolved secrets
+// bundle rather than forwarding to a TCP target or writing a result file. Must
+// equal the workspace package's sentinel.
+const secretsListenerTarget = "secrets://serve"
+
 // resolveSecretsBundle resolves every declared reference and loads every env
 // file into an in-memory bundle. It fails closed: any unresolved reference,
 // unreadable env file, invalid name, or duplicate name is an error and no

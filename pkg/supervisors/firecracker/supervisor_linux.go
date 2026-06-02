@@ -1913,6 +1913,30 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 	}
 	set := &vsockListenerSet{}
 	for _, listener := range config.VsockListeners {
+		if listener.Target == secretsListenerTarget {
+			bundle, err := resolveSecretsBundle(context.Background(), config)
+			if err != nil {
+				set.Close()
+				return nil, fmt.Errorf("resolve secrets: %w", err)
+			}
+			path := firecrackerGuestVsockPath(opts, listener.Port)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				set.Close()
+				return nil, err
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				set.Close()
+				return nil, err
+			}
+			unixListener, err := net.Listen("unix", path)
+			if err != nil {
+				set.Close()
+				return nil, fmt.Errorf("listen secrets vsock port %d: %w", listener.Port, err)
+			}
+			set.listeners = append(set.listeners, unixListener)
+			go serveSecretsListener(unixListener, bundle)
+			continue
+		}
 		if !isAllowedVsockTarget(opts, listener.Target) {
 			set.Close()
 			return nil, fmt.Errorf("firecracker vsock listener %d target must be host:port or the workspace result path", listener.Port)
