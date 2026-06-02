@@ -167,6 +167,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
 	}
+	if args[0] == "secret" {
+		return runSecret(ctx, args[1:], stdout)
+	}
 	if args[0] == "result" {
 		return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 	}
@@ -6200,6 +6203,7 @@ Commands:
   events               Show or stream the lifecycle event history
   stats                Show or stream workspace resource usage
   snapshot             Create, list, or remove workspace snapshots
+  secret check         Resolve and validate secret references
   profiles             List resource profiles
   images               List or prune local image records
   prune                Prune stale local records and optional image cache files
