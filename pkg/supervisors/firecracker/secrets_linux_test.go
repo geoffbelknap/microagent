@@ -3,15 +3,80 @@
 package firecracker
 
 import (
+	"bufio"
 	"context"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+func TestPurgeGuestSecretsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "ws", StateDir: dir}
+	uds := vsockSocketPath(opts)
+	if err := os.MkdirAll(filepath.Dir(uds), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", uds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+
+	gotOp := make(chan string, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		reader := bufio.NewReader(conn)
+		if _, err := reader.ReadString('\n'); err != nil { // "CONNECT <port>\n"
+			return
+		}
+		if _, err := conn.Write([]byte("OK 0\n")); err != nil {
+			return
+		}
+		var req secretxfer.ControlRequest
+		if err := secretxfer.DecodeMessage(reader, &req); err != nil {
+			return
+		}
+		gotOp <- req.Op
+		_ = secretxfer.EncodeMessage(conn, secretxfer.ControlResponse{ProtocolVersion: secretxfer.ProtocolVersion, OK: true})
+	}()
+
+	if err := purgeGuestSecrets(opts, 1028); err != nil {
+		t.Fatalf("purgeGuestSecrets: %v", err)
+	}
+	select {
+	case op := <-gotOp:
+		if op != secretxfer.OpPurge {
+			t.Fatalf("op = %q, want purge", op)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest never received the control op")
+	}
+}
+
+func TestMaterializedSecretsDeclared(t *testing.T) {
+	if materializedSecretsDeclared(&vmkit.Config{}) {
+		t.Fatal("empty config should not need purge")
+	}
+	if !materializedSecretsDeclared(&vmkit.Config{Secrets: []vmkit.SecretRef{{Name: "A", Ref: "env:X"}}}) {
+		t.Fatal("declared --secret should need purge")
+	}
+	if !materializedSecretsDeclared(&vmkit.Config{SecretEnvFiles: []string{"/x"}}) {
+		t.Fatal("declared env-file should need purge")
+	}
+	if materializedSecretsDeclared(&vmkit.Config{OnDemandSecrets: []vmkit.SecretRef{{Name: "A", Ref: "env:X"}}}) {
+		t.Fatal("on-demand-only should NOT need purge (nothing materialized)")
+	}
+}
 
 func TestResolveSecretsBundleEnvRefAndEnvFile(t *testing.T) {
 	t.Setenv("MA_TEST_TOK", "from-env")

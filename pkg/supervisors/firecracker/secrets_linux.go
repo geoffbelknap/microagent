@@ -171,3 +171,32 @@ func (s *secretsServer) handle(conn net.Conn) {
 func serveSecretsListener(listener net.Listener, srv *secretsServer) {
 	srv.serve(listener)
 }
+
+// materializedSecretsDeclared reports whether the workspace has secrets written
+// to the guest tmpfs (so a snapshot must purge them). On-demand-only secrets are
+// never materialized, so they do not require a purge.
+func materializedSecretsDeclared(config *vmkit.Config) bool {
+	if config == nil {
+		return false
+	}
+	return len(config.Secrets) > 0 || len(config.SecretEnvFiles) > 0
+}
+
+// sendGuestControl connects to the guest control listener over the firecracker
+// CONNECT protocol and sends one control op, waiting for the guest's ack.
+func sendGuestControl(opts Options, ctlPort uint32, op string) error {
+	conn, reader, err := dialGuestVsock(vsockSocketPath(opts), ctlPort)
+	if err != nil {
+		return fmt.Errorf("connect guest control port %d: %w", ctlPort, err)
+	}
+	defer conn.Close()
+	return secretxfer.SendControl(conn, reader, op)
+}
+
+func purgeGuestSecrets(opts Options, ctlPort uint32) error {
+	return sendGuestControl(opts, ctlPort, secretxfer.OpPurge)
+}
+
+func rehydrateGuestSecrets(opts Options, ctlPort uint32) error {
+	return sendGuestControl(opts, ctlPort, secretxfer.OpRehydrate)
+}
