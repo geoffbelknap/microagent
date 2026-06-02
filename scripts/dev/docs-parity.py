@@ -203,6 +203,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "NormalizeMediationConfig",
         "OptionsFromManifest",
         "SetupCommandFromFile",
+        "SecretsControlPort",
         "SecretsPort",
         "SetupCommandsFromFiles",
         "SetupCommandsFromSpec",
