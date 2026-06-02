@@ -7,7 +7,52 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 )
+
+func TestSecretAuditReadsLog(t *testing.T) {
+	dir := t.TempDir()
+	logPath := secretxfer.AccessLogPath(dir, "ws")
+	if err := secretxfer.AppendAccessRecord(logPath, secretxfer.AccessRecord{
+		At: "2026-06-02T00:00:00Z", RuntimeID: "ws", Name: "DB", Access: "on-demand", Result: "ok",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runSecretCapture(t, nil, "secret", "audit", "--state-dir", dir, "ws")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !strings.Contains(out, "DB") || !strings.Contains(out, "on-demand") {
+		t.Fatalf("audit output missing record: %q", out)
+	}
+}
+
+func TestSecretAuditJSON(t *testing.T) {
+	dir := t.TempDir()
+	logPath := secretxfer.AccessLogPath(dir, "ws")
+	_ = secretxfer.AppendAccessRecord(logPath, secretxfer.AccessRecord{
+		At: "2026-06-02T00:00:00Z", RuntimeID: "ws", Name: "DB", Access: "on-demand", Result: "ok",
+	})
+	out, err := runSecretCapture(t, nil, "--json", "secret", "audit", "--state-dir", dir, "ws")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var recs []map[string]any
+	if err := json.Unmarshal([]byte(out), &recs); err != nil {
+		t.Fatalf("not JSON array: %v\n%s", err, out)
+	}
+	if len(recs) != 1 || recs[0]["name"] != "DB" {
+		t.Fatalf("unexpected JSON: %s", out)
+	}
+}
+
+func TestSecretAuditRequiresWorkspace(t *testing.T) {
+	_, err := runSecretCapture(t, nil, "secret", "audit")
+	if err == nil {
+		t.Fatal("expected usage error with no workspace")
+	}
+}
 
 // runSecretCapture runs the CLI with the given args and env overrides,
 // returning stdout contents.
