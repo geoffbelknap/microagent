@@ -464,6 +464,15 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
 		}
+		// The restored/forked guest resumes with a zeroed /run/secrets (purged
+		// before the source snapshot). Rehydrate it by re-fetching the bundle.
+		// Best-effort: the guest is already running, so a transient failure is
+		// retryable and should not kill a freshly restored VM.
+		if materializedSecretsDeclared(runtimeReq.Config) && runtimeReq.Config.SecretsControlPort != 0 {
+			if err := rehydrateGuestSecrets(opts, runtimeReq.Config.SecretsControlPort); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: rehydrate secrets after restore failed: %v\n", err)
+			}
+		}
 	}
 	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, networkDevices, firewallRules, ""); err != nil {
 		_ = cmd.Process.Kill()
