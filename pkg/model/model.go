@@ -1,7 +1,10 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -82,4 +85,27 @@ func List(stateDir string) ([]Record, error) {
 
 func Sort(models []Record) {
 	sort.Slice(models, func(i, j int) bool { return models[i].ModelRef < models[j].ModelRef })
+}
+
+func ModelPath(stateDir, canonicalRef string) string {
+	sum := sha256.Sum256([]byte(canonicalRef))
+	name := hex.EncodeToString(sum[:])[:24] + ".gguf"
+	return filepath.Join(stateDir, "models", "blobs", name)
+}
+
+func MatchesRef(m Record, ref string) bool {
+	return m.ModelRef == ref || m.ResolvedRef == ref || m.Digest == ref
+}
+
+func Find(stateDir, ref string) (Record, error) {
+	idx, err := ReadIndex(stateDir)
+	if err != nil {
+		return Record{}, err
+	}
+	for _, m := range idx.Models {
+		if MatchesRef(m, ref) {
+			return m, nil
+		}
+	}
+	return Record{}, fmt.Errorf("model %q not found", ref)
 }

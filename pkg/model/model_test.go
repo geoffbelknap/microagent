@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -26,5 +27,31 @@ func TestUpsertListAndReadWriteIndex(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].SizeBytes != 456 {
 		t.Fatalf("expected 1 record size 456, got %+v", list)
+	}
+}
+
+func TestModelPathStableAndFind(t *testing.T) {
+	a := ModelPath("/tmp/state", "hf.co/org/repo@main/m.gguf")
+	b := ModelPath("/tmp/state", "hf.co/org/repo@main/m.gguf")
+	if a != b {
+		t.Fatalf("ModelPath not stable: %q %q", a, b)
+	}
+	if !strings.HasSuffix(a, ".gguf") || !strings.Contains(a, "/models/blobs/") {
+		t.Fatalf("unexpected ModelPath: %q", a)
+	}
+	dir := t.TempDir()
+	rec := Record{ModelRef: "hf.co/org/repo@main/m.gguf", Digest: "sha256:zzz"}
+	if err := Upsert(dir, rec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Find(dir, "hf.co/org/repo@main/m.gguf")
+	if err != nil || got.Digest != "sha256:zzz" {
+		t.Fatalf("Find by ref: %+v err=%v", got, err)
+	}
+	if _, err := Find(dir, "sha256:zzz"); err != nil {
+		t.Fatalf("Find by digest: %v", err)
+	}
+	if _, err := Find(dir, "missing"); err == nil {
+		t.Fatal("expected error for missing ref")
 	}
 }
