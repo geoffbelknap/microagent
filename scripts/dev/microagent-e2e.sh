@@ -120,6 +120,8 @@ Environment:
     backend-agnostic feature scenarios.
   MICROAGENT_E2E_ALLOW_NETPRIV=1 opts the privileged networking lane in when you
     hold CAP_NET_ADMIN without uid 0 (file caps / capability-granting sandbox).
+  MICROAGENT_E2E_HEARTBEAT=<seconds> sets the "still running" heartbeat interval
+    for long scenarios (default 20; scenarios faster than this stay quiet).
 
 Scenarios that need a microVM backend (or privileged networking) skip with a
 reason when the host lacks the prerequisite; a preflight line and a final
@@ -348,7 +350,17 @@ for name in "${selected[@]}"; do
   printf '\n==> %s\n' "$name"
   start="$(date +%s)"
   status=0
-  ( cd "$ROOT"; "$script" ) || status=$?
+  # Run in the background so a heartbeat can show the scenario is alive during
+  # long silent stretches (VM boots, perf loops). Scenario output still streams
+  # live; the heartbeat only fires once a scenario runs past the interval.
+  ( cd "$ROOT"; "$script" ) &
+  run_pid=$!
+  hb_interval="${MICROAGENT_E2E_HEARTBEAT:-20}"
+  while sleep "$hb_interval"; do
+    kill -0 "$run_pid" 2>/dev/null || break
+    printf '   .. %s still running (%ss elapsed)\n' "$name" "$(( $(date +%s) - start ))"
+  done
+  wait "$run_pid" || status=$?
   end="$(date +%s)"
   if [ "$status" -eq 0 ]; then
     printf '<== %s passed in %ss\n' "$name" "$((end - start))"
