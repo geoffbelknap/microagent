@@ -208,8 +208,9 @@ microagent create \
   -v /tmp/workspace.ext4:/workspace:rw
 ```
 
-This does not expose host directory bind mounts or named volumes. Use a
-tar archive for one-time ingress, an ext4 image for an attached disk,
+Attach a [named volume](/cli/volume/) by name with `-v data:/work` for
+persistent, VM-independent storage. Host directory bind mounts are not exposed:
+use a tar archive for one-time ingress, an ext4 image for an attached disk,
 `microagent cp` for stopped-workspace file transfer, and declared `--output`
 paths for egress.
 

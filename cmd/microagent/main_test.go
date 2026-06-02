@@ -2062,12 +2062,29 @@ func TestParseWorkspaceOptionsRejectsHostBindMountVolume(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceOptionsRejectsUnsupportedContainerStyleVolume(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{
+func TestParseWorkspaceOptionsAcceptsManagedVolumeByName(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
 		"--volume", "cache:/cache:rw",
 	})
-	if err == nil || !strings.Contains(err.Error(), "not named volumes or host bind mounts") {
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(opts.Disks) != 1 {
+		t.Fatalf("expected 1 disk, got %d", len(opts.Disks))
+	}
+	d := opts.Disks[0]
+	if !d.ManagedVolume || d.Name != "cache" || d.Mountpoint != "/cache" || d.Mode != "rw" {
+		t.Fatalf("unexpected managed volume disk: %+v", d)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsUnsupportedVolumeSource(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--volume", "./data.bin:/data:rw",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not host bind mounts") {
 		t.Fatalf("err = %v, want unsupported volume rejection", err)
 	}
 }
