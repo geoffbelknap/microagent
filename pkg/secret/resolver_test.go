@@ -3,6 +3,7 @@ package secret
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +90,37 @@ func TestRegistrySecureSchemeNoWarning(t *testing.T) {
 	}
 	if warned != "" {
 		t.Fatalf("expected no warning for secure scheme, got %q", warned)
+	}
+}
+
+func TestDefaultRegistryResolvesEnvAndVaultSchemes(t *testing.T) {
+	getenv := func(k string) string {
+		switch k {
+		case "MY_SECRET":
+			return "from-env"
+		case "VAULT_ADDR":
+			return "http://127.0.0.1:8200"
+		case "VAULT_TOKEN":
+			return "tok"
+		}
+		return ""
+	}
+	r := DefaultRegistry(getenv, nil)
+
+	got, err := r.Resolve(context.Background(), "env:MY_SECRET")
+	if err != nil {
+		t.Fatalf("env resolve error: %v", err)
+	}
+	if string(got) != "from-env" {
+		t.Fatalf("env value = %q, want %q", got, "from-env")
+	}
+	// vault scheme is registered (a bad ref errors at the provider, not as
+	// "unknown scheme").
+	_, err = r.Resolve(context.Background(), "vault:no-hash")
+	if err == nil {
+		t.Fatal("expected a vault reference error")
+	}
+	if strings.Contains(err.Error(), "unknown secret scheme") {
+		t.Fatalf("vault scheme not registered: %v", err)
 	}
 }
