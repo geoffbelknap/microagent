@@ -3349,57 +3349,6 @@ func virtioBlockDevice(index int) string {
 	return workspace.VirtioBlockDevice(index)
 }
 
-func prepareWorkspaceDisks(ctx context.Context, opts workspaceOptions) ([]workspaceDisk, error) {
-	if len(opts.Disks) == 0 {
-		return nil, nil
-	}
-	disks := make([]workspaceDisk, 0, len(opts.Disks))
-	seenNames := map[string]bool{}
-	seenMountpoints := map[string]bool{}
-	for _, disk := range opts.Disks {
-		if disk.ManagedVolume {
-			path, err := volume.Path(opts.StateDir, disk.Name)
-			if err != nil {
-				return nil, err
-			}
-			if _, err := volume.Attach(opts.StateDir, disk.Name, opts.Name, workspaceRunningPredicate(opts.StateDir)); err != nil {
-				return nil, err
-			}
-			disk.SourcePath = path
-			disk.Path = path
-			disk.Bundle = false
-			disk.ManagedVolume = false
-		}
-		if err := validateWorkspaceDisk(disk); err != nil {
-			return nil, err
-		}
-		if seenNames[disk.Name] {
-			return nil, fmt.Errorf("duplicate disk name %q", disk.Name)
-		}
-		seenNames[disk.Name] = true
-		if seenMountpoints[disk.Mountpoint] {
-			return nil, fmt.Errorf("duplicate disk mountpoint %q", disk.Mountpoint)
-		}
-		seenMountpoints[disk.Mountpoint] = true
-		if disk.Bundle {
-			outputPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "disks", disk.Name+".ext4")
-			_, err := rootfs.NewBuilder().BuildBundle(ctx, rootfs.BundleRequest{
-				SourcePath: disk.SourcePath,
-				OutputPath: outputPath,
-				StateDir:   filepath.Join(opts.StateDir, "build"),
-				Mke2fsPath: opts.Mke2fsPath,
-				SizeMiB:    64,
-			})
-			if err != nil {
-				return nil, err
-			}
-			disk.Path = outputPath
-		}
-		disks = append(disks, disk)
-	}
-	return disks, nil
-}
-
 func writeWorkspaceManifest(opts workspaceOptions) error {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
