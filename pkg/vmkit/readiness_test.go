@@ -77,5 +77,23 @@ func unusedTCPAddr(t *testing.T) string {
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
+	// On some network stacks (notably WSL2) closing a listener takes a few
+	// milliseconds to propagate, during which the port still completes TCP
+	// handshakes. A caller that immediately probes the address would see it as
+	// reachable. Wait until the address genuinely refuses connections before
+	// handing it out; close propagation is monotonic, so once it refuses it
+	// stays refused for the rest of the test.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err != nil {
+			break
+		}
+		_ = conn.Close()
+		if time.Now().After(deadline) {
+			t.Fatalf("address %s still reachable after closing its listener; could not obtain an unused port", addr)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	return addr
 }
