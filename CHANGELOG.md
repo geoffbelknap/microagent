@@ -5,6 +5,15 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Added managed named volumes: `microagent volume create/ls/inspect/rm` and
+  attach-by-name with `--volume <name>:/mount`. A named volume is a
+  platform-managed ext4 disk with a lifecycle independent of any one workspace
+  (new `pkg/volume` registry at `<state-dir>/volumes/index.json` plus a backing
+  `<name>.ext4`), the in-boundary analog of a container volume. Volumes are
+  single-attach: at most one running workspace holds a volume at a time, a stale
+  holder (a stopped or crashed workspace) is reclaimed automatically, and
+  deleting a workspace releases the volumes it held. This is deliberately not the
+  Docker volume model — no daemon, no drivers, no concurrent sharing.
 - Added `microagent commit <workspace> <image-ref>` and `microagent images push`
   to snapshot a stopped workspace's rootfs back into an OCI image and push it,
   closing the previously one-way OCI→rootfs loop. commit extracts the rootfs

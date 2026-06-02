@@ -137,6 +137,10 @@ type Disk struct {
 	Mountpoint string `json:"mountpoint" yaml:"mountpoint"`
 	Mode       string `json:"mode" yaml:"mode"`
 	Bundle     bool   `json:"bundle,omitempty" yaml:"bundle,omitempty"`
+	// ManagedVolume marks a disk that refers to a named managed volume by name.
+	// It is resolved to a backing ext4 path before the disk is persisted, so it
+	// is transient and never serialized.
+	ManagedVolume bool `json:"-" yaml:"-"`
 }
 
 type Output struct {

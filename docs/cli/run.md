@@ -139,9 +139,11 @@ microagent run \
   ls /config /workspace
 ```
 
-Host directory bind mounts and named volumes are not exposed. Package a directory
-as a tar archive for ingress, attach an ext4 disk, use `microagent cp` with a
-stopped workspace, and declare `--output` paths for egress.
+Attach a [named volume](/cli/volume/) by name with `-v data:/work` for
+persistent, VM-independent storage. Host directory bind mounts are not exposed:
+package a directory as a tar archive for ingress, attach an ext4 disk, use
+`microagent cp` with a stopped workspace, and declare `--output` paths for
+egress.
 
 Unsupported container-engine features such as compose projects, pods,
 privileged mode, namespace flags, devices, and host bind mounts fail with

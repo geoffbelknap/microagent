@@ -17,6 +17,7 @@ _Last updated: 2026-06-02_
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
 | [`artifacts`](/cli/artifacts/) | List and retrieve declared workspace artifacts |
 | [`network`](/cli/network/) | Inspect declared network intent and runtime network state |
+| [`volume`](/cli/volume/) | Manage named volumes — VM-independent ext4 disks attached by name |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
 | [`halt`](/cli/halt/) | Clean disk-preserving shutdown |
@@ -55,8 +56,8 @@ _Last updated: 2026-06-02_
 `microagent run` accepts both the explicit `--image IMAGE --exec "cmd"` form and
 the shorter `microagent run IMAGE [COMMAND ARG...]` form. For flags that map
 cleanly onto a microVM, common aliases are available: `-e` for `--env`, `-p` for
-`--publish`, `-v`/`--volume` for tar bundles and ext4 disk images, `--name`, and
-`--rm`.
+`--publish`, `-v`/`--volume` for [named volumes](/cli/volume/), tar bundles, and
+ext4 disk images, `--name`, and `--rm`.
 
 Some Docker-style inputs do not map to a microVM boundary — privileged mode,
 namespace flags, devices, and host directory bind mounts. When `microagent run`

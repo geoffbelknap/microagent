@@ -326,6 +326,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent commit` / `microagent images push` | `commit.Commit` / `commit.Push` |
 | `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
+| `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |
 | `microagent doctor` / `microagent host` | [`diagnostics.Check`](#diagnostics-api) |
 | `microagent contract` | `vmkit.NewRuntimeContract` |
