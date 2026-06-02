@@ -93,6 +93,12 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
+	if cfg.SecretsPort != 0 {
+		if err := fetchAndWriteSecrets(cfg.SecretsPort); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 127
+		}
+	}
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
 	if err := mountDisks(cfg.Mounts); err != nil {
