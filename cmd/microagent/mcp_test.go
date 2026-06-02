@@ -39,7 +39,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		t.Fatalf("tools/list result = %#v", responses[1]["result"])
 	}
 	tools, ok := result["tools"].([]any)
-	if !ok || len(tools) < 12 {
+	if !ok || len(tools) < 16 {
 		t.Fatalf("tools = %#v, want initial tool set", result["tools"])
 	}
 	names := map[string]bool{}
@@ -50,7 +50,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		}
 		names[tool["name"].(string)] = true
 	}
-	for _, name := range []string{"microagent.ping", "microagent.describe", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.estimate_cost", "images.pull", "images.list", "cp", "artifacts.get"} {
+	for _, name := range []string{"microagent.ping", "microagent.describe", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.estimate_cost", "images.pull", "images.list", "models.pull", "models.list", "models.remove", "models.prune", "cp", "artifacts.get"} {
 		if !names[name] {
 			t.Fatalf("tools missing %s: %#v", name, names)
 		}

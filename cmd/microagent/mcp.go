@@ -237,6 +237,10 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.estimate_cost", "Estimate workspace resource consumption before creating or starting it.", nil, map[string]any{"profile": map[string]any{"type": "string"}, "memory_mib": map[string]any{"type": "integer"}, "cpus": map[string]any{"type": "integer"}, "size_mib": map[string]any{"type": "integer"}, "price_per_hour": map[string]any{"type": "number"}}),
 		mcpTool("images.pull", "Pull a reusable image rootfs.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}}),
 		mcpTool("images.list", "List reusable local image records.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.pull", "Pull a GGUF model from HuggingFace into the local store.", []string{"model"}, map[string]any{"model": map[string]any{"type": "string"}, "token": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.list", "List locally stored models.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.remove", "Remove a model from the local store.", []string{"model"}, map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.prune", "Prune local model records whose blobs are missing.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("cp", "Copy files into or out of a stopped workspace.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("artifacts.get", "Copy a declared workspace artifact out to the host.", []string{"name", "artifact", "target"}, map[string]any{"name": map[string]any{"type": "string"}, "artifact": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 	}
@@ -922,6 +926,25 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		return cli, nil
 	case "images.list":
 		return appendOptionalFlag([]string{"--mode=ax", "images", "list"}, "-state-dir", stateDir), nil
+	case "models.pull":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "model", "pull", stringArg(args, "model")}
+		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		return cli, nil
+	case "models.list":
+		return appendOptionalFlag([]string{"--mode=ax", "model", "ls"}, "-state-dir", stateDir), nil
+	case "models.remove":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "model", "rm", stringArg(args, "model")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		return cli, nil
+	case "models.prune":
+		return appendOptionalFlag([]string{"--mode=ax", "model", "prune"}, "-state-dir", stateDir), nil
 	case "cp":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err
