@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -108,5 +109,36 @@ func TestPullDownloadsAndRecords(t *testing.T) {
 	found, err := Find(dir, rec.ModelRef)
 	if err != nil || found.OutputPath != rec.OutputPath {
 		t.Fatalf("record not indexed: %+v err=%v", found, err)
+	}
+}
+
+func TestRemoveAndPrune(t *testing.T) {
+	dir := t.TempDir()
+	blob := ModelPath(dir, "hf.co/org/repo@main/m.gguf")
+	if err := os.MkdirAll(filepath.Dir(blob), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blob, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Upsert(dir, Record{ModelRef: "hf.co/org/repo@main/m.gguf", OutputPath: blob}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Remove(dir, "hf.co/org/repo@main/m.gguf", true); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := os.Stat(blob); !os.IsNotExist(err) {
+		t.Fatal("blob not deleted")
+	}
+	list, _ := List(dir)
+	if len(list) != 0 {
+		t.Fatalf("expected empty index, got %+v", list)
+	}
+	if err := Upsert(dir, Record{ModelRef: "hf.co/org/repo@main/gone.gguf", OutputPath: dir + "/models/blobs/none.gguf"}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Prune(dir, false)
+	if err != nil || len(res.Removed) != 1 {
+		t.Fatalf("Prune: %+v err=%v", res, err)
 	}
 }
