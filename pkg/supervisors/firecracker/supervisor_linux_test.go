@@ -1730,3 +1730,14 @@ func TestSnapshotRejectsStoppedWorkspace(t *testing.T) {
 		t.Fatalf("createSnapshot should not be called, got %#v", fake.snapshots)
 	}
 }
+
+func TestFirecrackerBootArgsIncludesSecretsPort(t *testing.T) {
+	args := firecrackerBootArgs(&vmkit.Config{SecretsPort: 1026})
+	if !strings.Contains(args, "microagent_secrets_port=1026") {
+		t.Fatalf("boot args missing secrets port: %q", args)
+	}
+	none := firecrackerBootArgs(&vmkit.Config{})
+	if strings.Contains(none, "microagent_secrets_port") {
+		t.Fatalf("boot args should omit secrets port when zero: %q", none)
+	}
+}
