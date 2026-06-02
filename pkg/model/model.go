@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 type Record struct {
@@ -108,4 +109,41 @@ func Find(stateDir, ref string) (Record, error) {
 		}
 	}
 	return Record{}, fmt.Errorf("model %q not found", ref)
+}
+
+func resolveHFURL(ref string) (canonical, downloadURL string, err error) {
+	raw := strings.TrimSpace(ref)
+	if raw == "" {
+		return "", "", fmt.Errorf("model reference is required")
+	}
+	for _, p := range []string{"https://", "http://", "hf.co/", "huggingface.co/"} {
+		raw = strings.TrimPrefix(raw, p)
+	}
+	org, rest, ok := strings.Cut(raw, "/")
+	if !ok {
+		return "", "", fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
+	}
+	repo, tail, ok := strings.Cut(rest, "/")
+	if !ok {
+		return "", "", fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
+	}
+	rev := "main"
+	if r, after, hasRev := strings.Cut(repo, "@"); hasRev {
+		repo, rev = r, after
+	}
+	if strings.HasPrefix(tail, "resolve/") {
+		parts := strings.SplitN(strings.TrimPrefix(tail, "resolve/"), "/", 2)
+		if len(parts) == 2 {
+			rev, tail = parts[0], parts[1]
+		}
+	}
+	if !strings.HasSuffix(tail, ".gguf") {
+		return "", "", fmt.Errorf("model reference %q must point to a .gguf file", ref)
+	}
+	if org == "" || repo == "" {
+		return "", "", fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
+	}
+	canonical = fmt.Sprintf("hf.co/%s/%s@%s/%s", org, repo, rev, tail)
+	downloadURL = fmt.Sprintf("https://huggingface.co/%s/%s/resolve/%s/%s", org, repo, rev, tail)
+	return canonical, downloadURL, nil
 }

@@ -55,3 +55,24 @@ func TestModelPathStableAndFind(t *testing.T) {
 		t.Fatal("expected error for missing ref")
 	}
 }
+
+func TestResolveHFURL(t *testing.T) {
+	cases := []struct{ in, canon, url string }{
+		{"hf.co/org/repo/m.gguf", "hf.co/org/repo@main/m.gguf", "https://huggingface.co/org/repo/resolve/main/m.gguf"},
+		{"org/repo/m.gguf", "hf.co/org/repo@main/m.gguf", "https://huggingface.co/org/repo/resolve/main/m.gguf"},
+		{"org/repo@v2/sub/m.gguf", "hf.co/org/repo@v2/sub/m.gguf", "https://huggingface.co/org/repo/resolve/v2/sub/m.gguf"},
+		{"https://huggingface.co/org/repo/resolve/main/m.gguf", "hf.co/org/repo@main/m.gguf", "https://huggingface.co/org/repo/resolve/main/m.gguf"},
+	}
+	for _, c := range cases {
+		canon, url, err := resolveHFURL(c.in)
+		if err != nil || canon != c.canon || url != c.url {
+			t.Fatalf("resolveHFURL(%q) = (%q,%q,%v), want (%q,%q,nil)", c.in, canon, url, err, c.canon, c.url)
+		}
+	}
+	if _, _, err := resolveHFURL("org/repo/notagguf.txt"); err == nil {
+		t.Fatal("expected error for non-gguf ref")
+	}
+	if _, _, err := resolveHFURL("justone"); err == nil {
+		t.Fatal("expected error for malformed ref")
+	}
+}
