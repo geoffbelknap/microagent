@@ -453,7 +453,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		return failedResponse(req, err.Error()), err
 	}
 	if loadMode {
-		if err := restoreFromSnapshot(ctx, opts, req.Tag); err != nil {
+		if err := restoreFromSnapshot(ctx, opts, req.Tag, snapshotNetworkOverrides(opts, req.Config)); err != nil {
 			_ = cmd.Process.Kill()
 			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
@@ -692,7 +692,7 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 type vmStateController interface {
 	patchVMState(ctx context.Context, state string) error
 	createSnapshot(ctx context.Context, snapshotPath, memFilePath string) error
-	loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool) error
+	loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool, networkOverrides []networkOverride) error
 }
 
 var newVMStateController = func(socketPath string) vmStateController {

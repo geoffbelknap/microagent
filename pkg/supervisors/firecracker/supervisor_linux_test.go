@@ -1255,7 +1255,7 @@ func (f *fakeVMController) createSnapshot(_ context.Context, snapshotPath, memFi
 	return f.snapErr
 }
 
-func (f *fakeVMController) loadSnapshot(_ context.Context, snapshotPath, memFilePath string, resume bool) error {
+func (f *fakeVMController) loadSnapshot(_ context.Context, snapshotPath, memFilePath string, resume bool, _ []networkOverride) error {
 	f.loads = append(f.loads, [2]string{snapshotPath, memFilePath})
 	f.loadResume = resume
 	return f.loadErr
@@ -1450,6 +1450,47 @@ func TestSnapshotForkBindSkipsWhenNoVsock(t *testing.T) {
 	if _, _, need := snapshotForkBind(opts, vmkit.SnapshotManifest{}); need {
 		t.Fatal("a snapshot with no vsock path needs no bind")
 	}
+}
+
+func TestForkMountExecArgsMapRoot(t *testing.T) {
+	withRoot := forkMountExecArgs(true, "/sup", "/state/src", "/state/fork", "/fc", []string{"--api-sock", "/state/fork/api.sock"})
+	if withRoot[0] != "--map-root-user" || withRoot[1] != "--mount" {
+		t.Fatalf("host-side fork args = %v, want --map-root-user --mount first", withRoot)
+	}
+	if !containsSeq(withRoot, []string{"--", "/fc", "--api-sock", "/state/fork/api.sock"}) {
+		t.Fatalf("firecracker argv missing after --: %v", withRoot)
+	}
+
+	// A user-networked fork is already root inside pasta's userns: no
+	// --map-root-user, just a nested mount namespace.
+	inNS := forkMountExecArgs(false, "/sup", "/state/src", "/state/fork", "/fc", []string{"--api-sock", "/state/fork/api.sock"})
+	if inNS[0] != "--mount" {
+		t.Fatalf("user-networked fork args = %v, want --mount first (no --map-root-user)", inNS)
+	}
+	for _, a := range inNS {
+		if a == "--map-root-user" {
+			t.Fatalf("user-networked fork must not remap root: %v", inNS)
+		}
+	}
+	if !containsSeq(inNS, []string{"--bind-src", "/state/src", "--bind-dst", "/state/fork"}) {
+		t.Fatalf("bind spec missing: %v", inNS)
+	}
+}
+
+func containsSeq(haystack, needle []string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		match := true
+		for j := range needle {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPrepareSnapshotRestoreRollsBackRootfs(t *testing.T) {

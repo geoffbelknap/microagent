@@ -68,10 +68,23 @@ func (c *apiClient) createSnapshot(ctx context.Context, snapshotPath, memFilePat
 }
 
 // loadSnapshot loads a snapshot into a freshly launched Firecracker process.
-func (c *apiClient) loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool) error {
-	return c.do(ctx, http.MethodPut, "/snapshot/load", map[string]any{
+// networkOverride remaps a restored network interface to a host tap that exists
+// in the loading process's network namespace. A fork's tap name is derived from
+// its own (different) workspace name, so the snapshot's baked tap must be
+// remapped on load or the restored guest has no network backend.
+type networkOverride struct {
+	IfaceID     string `json:"iface_id"`
+	HostDevName string `json:"host_dev_name"`
+}
+
+func (c *apiClient) loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool, networkOverrides []networkOverride) error {
+	body := map[string]any{
 		"snapshot_path": snapshotPath,
 		"mem_file_path": memFilePath,
 		"resume_vm":     resume,
-	})
+	}
+	if len(networkOverrides) > 0 {
+		body["network_overrides"] = networkOverrides
+	}
+	return c.do(ctx, http.MethodPut, "/snapshot/load", body)
 }

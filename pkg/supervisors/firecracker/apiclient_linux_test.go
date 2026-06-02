@@ -42,7 +42,7 @@ func TestAPIClientEndpoints(t *testing.T) {
 	mustNoErr(t, c.patchVMState(ctx, "Paused"))
 	mustNoErr(t, c.patchVMState(ctx, "Resumed"))
 	mustNoErr(t, c.createSnapshot(ctx, "/s/vmstate", "/s/mem"))
-	mustNoErr(t, c.loadSnapshot(ctx, "/s/vmstate", "/s/mem", true))
+	mustNoErr(t, c.loadSnapshot(ctx, "/s/vmstate", "/s/mem", true, []networkOverride{{IfaceID: "eth0", HostDevName: "tap-fork1"}}))
 
 	want := []struct{ method, path string }{
 		{"PATCH", "/vm"},

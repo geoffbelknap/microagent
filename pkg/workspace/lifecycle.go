@@ -617,7 +617,15 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		opts.SpecCPU = true
 	}
 	if strings.TrimSpace(manifest.NetworkMode) != "" {
-		opts.Network = vmkit.NetworkConfig{Mode: manifest.NetworkMode}
+		// The resumed guest keeps the source's baked IP, so the fork configures
+		// its own tap/pasta (in its own namespace) with the source's addressing
+		// rather than deriving a fresh subnet from the fork's name.
+		opts.Network = vmkit.NetworkConfig{
+			Mode:    manifest.NetworkMode,
+			IP:      manifest.NetworkIP,
+			Gateway: manifest.NetworkGateway,
+			Subnet:  manifest.NetworkSubnet,
+		}
 	}
 	if opts.ImageRef == "" {
 		opts.ImageRef = manifest.ImageRef

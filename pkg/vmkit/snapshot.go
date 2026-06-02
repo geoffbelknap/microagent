@@ -37,6 +37,13 @@ type SnapshotManifest struct {
 	// adopt these to reach the resumed guest's shell and exec services.
 	ShellPort uint16 `json:"shellPort,omitempty"`
 	ExecPort  uint16 `json:"execPort,omitempty"`
+	// NetworkIP/NetworkGateway/NetworkSubnet capture the source's runtime
+	// network addressing (user/nat modes). The resumed guest keeps the baked IP,
+	// so a fork configures its own tap/pasta with this same addressing (in its
+	// own namespace) rather than deriving a new subnet from its name.
+	NetworkIP      string `json:"networkIP,omitempty"`
+	NetworkGateway string `json:"networkGateway,omitempty"`
+	NetworkSubnet  string `json:"networkSubnet,omitempty"`
 	// VsockUDSPath is the absolute host path the snapshot's vsock device is
 	// bound to (the source workspace's vsock socket). It is baked into the
 	// Firecracker snapshot and cannot be remapped on load, so a fork into a

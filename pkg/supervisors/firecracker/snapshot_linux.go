@@ -118,25 +118,32 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options) (vm
 		kernelSHA = sha
 	}
 	mode, guestIP := "", ""
+	netIP, netGateway, netSubnet := "", "", ""
 	if state.Config.Network != nil {
 		mode = strings.TrimSpace(state.Config.Network.Mode)
 		guestIP = guestIPFromNetwork(*state.Config.Network)
+		netIP = strings.TrimSpace(state.Config.Network.IP)
+		netGateway = strings.TrimSpace(state.Config.Network.Gateway)
+		netSubnet = strings.TrimSpace(state.Config.Network.Subnet)
 	}
 	vsockPath := ""
 	if needsVsock(&state.Config) {
 		vsockPath = vsockSocketPath(opts)
 	}
 	return vmkit.SnapshotManifest{
-		Tag:          tag,
-		NetworkMode:  mode,
-		GuestIP:      guestIP,
-		KernelSHA256: kernelSHA,
-		VCPUCount:    state.Config.CPUCount,
-		MemoryMiB:    state.Config.MemoryMiB,
-		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
-		VsockUDSPath: vsockPath,
-		ShellPort:    state.Config.ShellPort,
-		ExecPort:     state.Config.ExecPort,
+		Tag:            tag,
+		NetworkMode:    mode,
+		GuestIP:        guestIP,
+		KernelSHA256:   kernelSHA,
+		VCPUCount:      state.Config.CPUCount,
+		MemoryMiB:      state.Config.MemoryMiB,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		VsockUDSPath:   vsockPath,
+		ShellPort:      state.Config.ShellPort,
+		ExecPort:       state.Config.ExecPort,
+		NetworkIP:      netIP,
+		NetworkGateway: netGateway,
+		NetworkSubnet:  netSubnet,
 	}, nil
 }
 
@@ -146,7 +153,7 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options) (vm
 // unshare in a user+mount namespace that bind-mounts the fork's directory over
 // the source's so the baked vsock path resolves to the fork's socket.
 func firecrackerLaunchCommand(ctx context.Context, opts Options, req vmkit.Request, firecracker string, launchArgs []string, loadMode bool) (*exec.Cmd, error) {
-	if loadMode && !insideUserNetworkNamespace() {
+	if loadMode {
 		manifest, err := vmkit.ReadSnapshotManifest(vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag))
 		if err != nil {
 			return nil, fmt.Errorf("read snapshot manifest for load: %w", err)
@@ -160,7 +167,13 @@ func firecrackerLaunchCommand(ctx context.Context, opts Options, req vmkit.Reque
 			if err != nil {
 				return nil, fmt.Errorf("resolve supervisor executable for fork: %w", err)
 			}
-			return exec.CommandContext(ctx, unsharePath, forkMountExecArgs(supervisor, src, dst, firecracker, launchArgs)...), nil
+			// A host-side fork creates a fresh user+mount namespace
+			// (--map-root-user keeps /dev/kvm reachable). A user-networked fork
+			// already runs as root inside pasta's namespace, so it only needs a
+			// nested mount namespace; mapping root again would shadow pasta's
+			// network setup.
+			mapRoot := !insideUserNetworkNamespace()
+			return exec.CommandContext(ctx, unsharePath, forkMountExecArgs(mapRoot, supervisor, src, dst, firecracker, launchArgs)...), nil
 		}
 	}
 	return exec.CommandContext(ctx, firecracker, launchArgs...), nil
@@ -186,18 +199,23 @@ func snapshotForkBind(opts Options, manifest vmkit.SnapshotManifest) (src, dst s
 }
 
 // forkMountExecArgs builds the argv passed to the unshare binary that launches
-// Firecracker inside a fresh user+mount namespace with the fork's directory
-// bind-mounted over the source's. --map-root-user keeps /dev/kvm reachable; the
+// Firecracker inside a mount namespace with the fork's directory bind-mounted
+// over the source's. mapRoot adds --map-root-user to create a user namespace
+// (so /dev/kvm stays reachable) for a host-side fork; a user-networked fork is
+// already root inside pasta's namespace and only needs the mount namespace. The
 // supervisor's --fork-mount-exec handler performs the bind and execs Firecracker.
-func forkMountExecArgs(supervisor, src, dst, firecracker string, launchArgs []string) []string {
-	args := []string{
-		"--map-root-user",
+func forkMountExecArgs(mapRoot bool, supervisor, src, dst, firecracker string, launchArgs []string) []string {
+	args := []string{}
+	if mapRoot {
+		args = append(args, "--map-root-user")
+	}
+	args = append(args,
 		"--mount",
 		supervisor, "--fork-mount-exec",
 		"--bind-src", src,
 		"--bind-dst", dst,
 		"--", firecracker,
-	}
+	)
 	return append(args, launchArgs...)
 }
 
@@ -246,7 +264,7 @@ exec:
 // restoreFromSnapshot waits for the freshly launched Firecracker API socket and
 // loads the snapshot's vmstate and memory into it, resuming the guest. The
 // rootfs has already been put in place by prepareSnapshotRestore.
-func restoreFromSnapshot(ctx context.Context, opts Options, tag string) error {
+func restoreFromSnapshot(ctx context.Context, opts Options, tag string, networkOverrides []networkOverride) error {
 	sock := apiSocketPath(opts)
 	if err := waitForAPISocket(ctx, sock, 10*time.Second); err != nil {
 		return err
@@ -255,7 +273,20 @@ func restoreFromSnapshot(ctx context.Context, opts Options, tag string) error {
 	return newVMStateController(sock).loadSnapshot(ctx,
 		filepath.Join(dir, vmkit.SnapshotVMStateName),
 		filepath.Join(dir, vmkit.SnapshotMemoryName),
-		true)
+		true, networkOverrides)
+}
+
+// snapshotNetworkOverrides remaps the restored guest network interface to this
+// workspace's tap. The tap name is derived from the workspace name, so a fork
+// (a different name) must remap the snapshot's baked tap to its own; for
+// resume-in-place the name matches and the override is a no-op. Returns nil for
+// workspaces without a host network interface (isolated mode).
+func snapshotNetworkOverrides(opts Options, config *vmkit.Config) []networkOverride {
+	iface, ok := firecrackerNetworkInterface(opts, config)
+	if !ok {
+		return nil
+	}
+	return []networkOverride{{IfaceID: iface.IfaceID, HostDevName: iface.HostDevName}}
 }
 
 // waitForAPISocket polls the Firecracker API unix socket until it accepts a
