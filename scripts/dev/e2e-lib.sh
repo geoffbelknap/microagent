@@ -47,6 +47,18 @@ e2e_require_cmd() {
 e2e_have_kvm() { [ -e /dev/kvm ] && [ -r /dev/kvm ]; }
 
 # e2e_resolve_firecracker: print the firecracker binary path, or empty.
+# e2e_resolve_firecracker: print the firecracker binary path, or empty.
+#
+# microagent does NOT expect firecracker on $PATH — an install bundles it in
+# libexec next to the microagent binary (its own resolution is env -> PATH ->
+# <exe>/../libexec/firecracker). The e2e suite builds a dev CLI in a temp dir,
+# so it can't use that relative libexec; instead it locates the bundled binary
+# via an installed microagent and exports it as MICROAGENT_FIRECRACKER. Order:
+#   1. explicit MICROAGENT_FIRECRACKER override
+#   2. firecracker on PATH (uncommon, but honored)
+#   3. ask an installed `microagent` where its bundled firecracker is (doctor)
+#   4. derive the libexec sibling of an installed `microagent` binary
+#   5. a Homebrew microagent formula's libexec
 e2e_resolve_firecracker() {
   if [ -n "${MICROAGENT_FIRECRACKER:-}" ] && [ -x "${MICROAGENT_FIRECRACKER:-}" ]; then
     printf '%s\n' "$MICROAGENT_FIRECRACKER"
@@ -55,6 +67,19 @@ e2e_resolve_firecracker() {
   if command -v firecracker >/dev/null 2>&1; then
     command -v firecracker
     return 0
+  fi
+  if command -v microagent >/dev/null 2>&1; then
+    # microagent doctor reports the firecracker path it resolved as host.binaryPath.
+    fc="$(microagent --json doctor 2>/dev/null | sed -n 's/.*"binaryPath"[: ]*"\([^"]*\)".*/\1/p' | head -1)"
+    if [ -n "$fc" ] && [ -x "$fc" ]; then
+      printf '%s\n' "$fc"
+      return 0
+    fi
+    mdir="$(dirname "$(readlink -f "$(command -v microagent)" 2>/dev/null || command -v microagent)")"
+    if [ -n "$mdir" ] && [ -x "$mdir/../libexec/firecracker" ]; then
+      printf '%s\n' "$mdir/../libexec/firecracker"
+      return 0
+    fi
   fi
   if command -v brew >/dev/null 2>&1; then
     prefix="$(brew --prefix microagent 2>/dev/null || true)"
@@ -118,7 +143,7 @@ e2e_have_netpriv() {
   return 1
 }
 
-e2e_require_vm() { e2e_have_vm || e2e_skip "no microVM backend available (need /dev/kvm + firecracker on Linux amd64, or macOS on Apple silicon)"; }
+e2e_require_vm() { e2e_have_vm || e2e_skip "no microVM backend available (need /dev/kvm + a microagent install that bundles firecracker, or MICROAGENT_FIRECRACKER, on Linux amd64; or macOS on Apple silicon)"; }
 e2e_require_netpriv() { e2e_have_netpriv || e2e_skip "privileged networking unavailable (need root/CAP_NET_ADMIN + net.ipv4.ip_forward=1 on Linux)"; }
 e2e_require_linux() { [ "$(uname -s)" = "Linux" ] || e2e_skip "Linux-only scenario"; }
 
