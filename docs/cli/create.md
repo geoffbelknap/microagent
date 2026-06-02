@@ -71,8 +71,9 @@ forks of a networked workspace should use `user` mode.
 | `--arch <arch>` | Guest architecture |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `bridged` |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, `bridged`, or `named` |
 | `--network-interface <if>` | Host interface identifier or display name for bridged mode |
+| `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
 | `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 | `-p <mapping>` | Alias for `--publish` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |

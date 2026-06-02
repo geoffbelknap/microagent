@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
@@ -119,13 +120,18 @@ func validateFirecrackerConfig(config *vmkit.Config) error {
 	switch mode {
 	case "user", "nat", "isolated":
 		return nil
+	case "named":
+		if strings.TrimSpace(config.Network.Name) == "" {
+			return fmt.Errorf("firecracker network.mode named requires a network name")
+		}
+		return nil
 	case "bridged":
 		if strings.TrimSpace(config.Network.Interface) == "" {
 			return fmt.Errorf("firecracker network.interface is required for bridged mode")
 		}
 		return validateLinuxBridge(strings.TrimSpace(config.Network.Interface))
 	default:
-		return fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, or bridged", mode)
+		return fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, bridged, or named", mode)
 	}
 }
 
@@ -863,7 +869,8 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	if config != nil && config.SecretsControlPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_secrets_ctl_port=%d", config.SecretsControlPort))
 	}
-	if (networkMode(config) == "nat" || networkMode(config) == "user") && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
+	mode := networkMode(config)
+	if (mode == "nat" || mode == "user" || mode == "named") && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
 		args = append(args,
 			"microagent_net_if=eth0",
 			"microagent_net_ip="+config.Network.IP,
@@ -871,6 +878,9 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 		)
 		if len(config.Network.DNS) != 0 {
 			args = append(args, "microagent_net_dns="+strings.Join(config.Network.DNS, ","))
+		}
+		if len(config.Network.Hosts) != 0 {
+			args = append(args, "microagent_net_hosts="+strings.Join(config.Network.Hosts, ","))
 		}
 	}
 	return strings.Join(args, " ")
@@ -972,7 +982,7 @@ func hasVsockListeners(config *vmkit.Config) bool {
 
 func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInterface, bool) {
 	mode := networkMode(config)
-	if mode != "bridged" && mode != "nat" && mode != "user" {
+	if mode != "bridged" && mode != "nat" && mode != "user" && mode != "named" {
 		return networkInterface{}, false
 	}
 	return networkInterface{
@@ -1019,9 +1029,11 @@ func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetw
 		return prepareUserNetworkForStart(opts, config)
 	case "nat":
 		return prepareNATForStart(opts, config)
+	case "named":
+		return prepareNamedNetworkForStart(opts, config)
 	case "bridged":
 	default:
-		return nil, nil, nil, fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, or bridged", networkMode(config))
+		return nil, nil, nil, fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, bridged, or named", networkMode(config))
 	}
 	bridge := strings.TrimSpace(config.Network.Interface)
 	if err := validateLinuxBridge(bridge); err != nil {
@@ -1093,6 +1105,146 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 	network := runtimeNetworkConfig(config, plan.Subnet, plan.GuestCIDR, plan.Gateway)
 	network.Mode = mode
 	return cleanupDevices, rules, &network, nil
+}
+
+// prepareNamedNetworkForStart joins a workspace to a user-defined named network:
+// it allocates a stable address from the network's subnet, ensures the shared
+// Linux bridge exists with the gateway address, attaches a TAP to the bridge,
+// installs masquerade rules for outbound traffic, and returns a runtime network
+// config carrying /etc/hosts entries for every member so they resolve by name.
+func prepareNamedNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+	if err := requireIPv4Forwarding(); err != nil {
+		return nil, nil, nil, err
+	}
+	name := strings.TrimSpace(config.Network.Name)
+	record, err := network.Get(opts.StateDir, name)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("join named network: %w", err)
+	}
+	ip, err := network.Join(opts.StateDir, name, opts.Name)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("allocate address on network %q: %w", name, err)
+	}
+	// Refresh the record so the /etc/hosts entries include this member.
+	record, err = network.Get(opts.StateDir, name)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	prefix, err := subnetPrefixLen(record.Subnet)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	bridge := bridgeName(name)
+	if err := ensureNetworkBridge(bridge, record.Gateway, prefix); err != nil {
+		return nil, nil, nil, err
+	}
+	tap := tapName(opts)
+	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: bridge, Created: true}
+	if err := createBridgeTap(tap, bridge); err != nil {
+		return nil, nil, nil, networkPrivilegeError("attach firecracker tap to network bridge "+bridge, err)
+	}
+	cleanupDevices := []transientNetworkDevice{device}
+	rules, err := installNATFirewallRules(tap, record.Subnet)
+	if err != nil {
+		cleanupTransientFirewallRules(rules)
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, err
+	}
+
+	runtime := vmkit.NetworkConfig{
+		Mode:    "named",
+		Name:    name,
+		IP:      ip + "/" + strconv.Itoa(prefix),
+		Subnet:  record.Subnet,
+		Gateway: record.Gateway,
+		Routes:  []string{"0.0.0.0/0 via " + record.Gateway},
+		Hosts:   namedNetworkHosts(record),
+	}
+	if config.Network != nil && len(config.Network.DNS) != 0 {
+		runtime.DNS = config.Network.DNS
+	} else {
+		runtime.DNS = []string{"1.1.1.1", "8.8.8.8"}
+	}
+	return cleanupDevices, rules, &runtime, nil
+}
+
+// namedNetworkHosts renders one "name:ip" entry per member for the guest
+// /etc/hosts file.
+func namedNetworkHosts(record network.Record) []string {
+	hosts := make([]string, 0, len(record.Members))
+	for _, m := range record.Members {
+		hosts = append(hosts, m.Workspace+":"+m.IP)
+	}
+	return hosts
+}
+
+// bridgeName derives a stable, valid (<=15 char) Linux bridge name for a named
+// network. The "mbr" prefix marks it as microagent-managed so cleanup may reap
+// it without touching operator-provided bridges used by bridged mode.
+func bridgeName(networkName string) string {
+	sum := sha1.Sum([]byte(networkName))
+	return fmt.Sprintf("mbr%x", sum[:4])
+}
+
+func isManagedNetworkBridge(name string) bool {
+	return strings.HasPrefix(name, "mbr") && len(name) == 11
+}
+
+func subnetPrefixLen(subnet string) (int, error) {
+	_, parsed, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return 0, fmt.Errorf("parse network subnet %q: %w", subnet, err)
+	}
+	ones, _ := parsed.Mask.Size()
+	return ones, nil
+}
+
+// ensureNetworkBridge creates the shared bridge if absent, assigns the gateway
+// address, and brings it up. It is idempotent so concurrent member starts and
+// restarts converge on the same bridge.
+func ensureNetworkBridge(bridge, gateway string, prefix int) error {
+	link, err := netlink.LinkByName(bridge)
+	if err != nil {
+		if !linkNotFoundError(err) {
+			return networkPrivilegeError("inspect network bridge "+bridge, err)
+		}
+		if err := netlink.LinkAdd(&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: bridge}}); err != nil && !alreadyExistsError(err) {
+			return networkPrivilegeError("create network bridge "+bridge, err)
+		}
+		link, err = netlink.LinkByName(bridge)
+		if err != nil {
+			return networkPrivilegeError("inspect network bridge "+bridge, err)
+		}
+	}
+	gwCIDR := gateway + "/" + strconv.Itoa(prefix)
+	addr, err := netlink.ParseAddr(gwCIDR)
+	if err != nil {
+		return fmt.Errorf("parse network bridge address %s: %w", gwCIDR, err)
+	}
+	if err := netlink.AddrAdd(link, addr); err != nil && !alreadyExistsError(err) {
+		return networkPrivilegeError("assign network bridge address "+gwCIDR, err)
+	}
+	if err := netlink.LinkSetUp(link); err != nil {
+		return networkPrivilegeError("bring network bridge "+bridge+" up", err)
+	}
+	return nil
+}
+
+// reapNetworkBridgeIfEmpty deletes a microagent-managed network bridge once it
+// has no remaining enslaved interfaces, so a stopped last member leaves no
+// orphan bridge. Best-effort: any error is non-fatal to teardown.
+func reapNetworkBridgeIfEmpty(bridge string) {
+	if !isManagedNetworkBridge(bridge) {
+		return
+	}
+	entries, err := os.ReadDir(filepath.Join("/sys/class/net", bridge, "brif"))
+	if err != nil || len(entries) > 0 {
+		return
+	}
+	if link, err := netlink.LinkByName(bridge); err == nil {
+		_ = netlink.LinkDel(link)
+	}
 }
 
 type tapNATAddress struct {
@@ -1473,6 +1625,9 @@ func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
 				continue
 			}
 			_ = deleteTap(device.Name)
+			// For named networks the TAP is enslaved to a shared managed bridge;
+			// reap that bridge once this was its last member.
+			reapNetworkBridgeIfEmpty(device.Interface)
 		}
 	}
 }

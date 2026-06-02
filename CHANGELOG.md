@@ -5,6 +5,17 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Completed user-defined named networks: workspaces join a network with
+  `create`/`run` `--network-name <name>`. Each member gets a stable IP from the
+  network subnet (persisted in the registry, surviving stop/start), members
+  share a per-network managed Linux bridge so they reach each other directly,
+  and `/etc/hosts` name resolution is injected at boot via the kernel-cmdline →
+  guest-init seam (parallel to DNS). Deleting a workspace frees its address; the
+  shared bridge is reaped once the last member stops. Firecracker/Linux only
+  (requires `net.ipv4.ip_forward=1` and CAP_NET_ADMIN, as with `nat` mode);
+  Apple Virtualization.framework NAT cannot share a subnet. `/etc/hosts` is a
+  boot-time snapshot — restart a member to pick up peers that joined later.
+  Builds on the named-network registry (`pkg/network`) added earlier.
 - Added managed named volumes: `microagent volume create/ls/inspect/rm` and
   attach-by-name with `--volume <name>:/mount`. A named volume is a
   platform-managed ext4 disk with a lifecycle independent of any one workspace

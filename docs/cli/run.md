@@ -44,8 +44,9 @@ command.
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--file <path>` | Workspace spec file; flags override matching spec fields |
 | `--restart <policy>` | Restart policy for kept/named runs: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `bridged` |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, `bridged`, or `named` |
 | `--network-interface <if>` | Host interface identifier or display name for bridged mode |
+| `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
 | `--publish <mapping>` | Forward `[host:]hostPort:guestPort[/tcp]` |
 | `-p <mapping>` | Alias for `--publish` |
 | `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
