@@ -100,8 +100,48 @@ microagent create --name app --secret API_KEY=env:CI_TOKEN --secrets-env-file /e
 - Backing credentials (`VAULT_TOKEN`, etc.) stay on the host; only resolved
   values cross vsock, which is a host↔guest-only transport.
 
-`--secrets-stdin`, an on-demand fetch API, and snapshot purge/rehydrate are
-future work.
+`--secrets-stdin` and snapshot purge/rehydrate are future work.
+
+## On-demand secrets and the audited tier
+
+Some secrets are better fetched only when needed rather than written to a tmpfs
+file. Declare these with `--secret-on-demand`:
+
+```bash
+microagent create --name app \
+  --secret-on-demand DB_PASSWORD=vault:secret/data/app#db \
+  --secrets-audit
+```
+
+- `--secret-on-demand NAME=<scheme>:<ref>` (repeatable) is persisted as a
+  reference and **never materialized** to `/run/secrets`. The host resolves it
+  **lazily, per fetch**, so backend rotation/revocation takes effect immediately.
+  A name not declared on-demand is denied.
+- When on-demand secrets are declared, the guest runs an agent on a UNIX socket
+  whose path is exported to the workload as **`$MICROAGENT_SECRETS_SOCK`**
+  (`/run/secrets-api.sock`, mode `0600`). The workload sends `GET <name>\n` and
+  reads one JSON line:
+
+  ```text
+  GET DB_PASSWORD
+  {"ok":true,"value":"<base64-of-the-value>"}
+  ```
+
+  On failure the line is `{"ok":false,"error":"..."}`. The value lives only in
+  the workload's memory — never on the rootfs, the tmpfs, or any disk snapshot.
+- `--secrets-audit` (workspace-level) turns on the audited tier: the host appends
+  one record per access (boot materialization and every on-demand fetch) to a
+  per-workspace append-only log. Records carry `at`, `name`, `access`
+  (`materialize`/`on-demand`), and `result` (`ok`/`denied`/`error`) — **never the
+  value**. Read them with:
+
+  ```bash
+  microagent secret audit app
+  microagent --json secret audit app
+  ```
+
+Audit granularity is per-workspace + secret name (the vsock channel is
+anonymous). Snapshot purge/rehydrate is sub-project #4; there is no guest CLI.
 
 ## Scope
 

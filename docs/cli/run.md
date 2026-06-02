@@ -36,6 +36,8 @@ command.
 | `-e KEY=VALUE` | Alias for `--env` |
 | `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME` over vsock. Repeatable. See [`secret`](/cli/secret/) |
 | `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret (plaintext, re-read each start) |
+| `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable. See [`secret`](/cli/secret/) |
+| `--secrets-audit` | Append every secret access to the workspace audit log (`microagent secret audit`) |
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
 | `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |

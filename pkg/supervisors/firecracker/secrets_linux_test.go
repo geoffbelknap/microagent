@@ -168,6 +168,29 @@ func TestStartVsockListenersServesSecrets(t *testing.T) {
 	}
 }
 
+func TestOnDemandServeLiveVault(t *testing.T) {
+	if os.Getenv("VAULT_ADDR") == "" || os.Getenv("VAULT_TOKEN") == "" {
+		t.Skip("set VAULT_ADDR and VAULT_TOKEN (and write secret/app db) to run the live Vault check")
+	}
+	dir := t.TempDir()
+	srv := newSecretsServer("ws", dir, secretxfer.Bundle{ProtocolVersion: secretxfer.ProtocolVersion},
+		map[string]string{"DB": "vault:secret/data/app#db"}, true)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close(); client.Close() })
+	go srv.handle(server)
+	got, err := secretxfer.FetchOne(client, "DB")
+	if err != nil {
+		t.Fatalf("FetchOne: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("empty live value")
+	}
+	recs, _ := secretxfer.ReadAccessRecords(secretxfer.AccessLogPath(dir, "ws"))
+	if len(recs) != 1 || recs[0].Result != "ok" {
+		t.Fatalf("audit: %+v", recs)
+	}
+}
+
 func TestStartVsockListenersServesOnDemand(t *testing.T) {
 	t.Setenv("MA_OD_TOK", "on-demand-val")
 	dir := t.TempDir()
