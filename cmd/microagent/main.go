@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
@@ -150,6 +151,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "clone" {
 		return runClone(args[1:], stdout)
+	}
+	if args[0] == "commit" {
+		return runCommit(ctx, args[1:], stdout)
 	}
 	if args[0] == "cp" {
 		return runCP(args[1:], stdout)
@@ -1016,6 +1020,82 @@ func runInit(args []string, stdout *os.File) error {
 	return nil
 }
 
+func runCommit(ctx context.Context, args []string, stdout *os.File) error {
+	if wantsHelp(args) {
+		printCommitHelp(stdout)
+		return nil
+	}
+	stateDir := defaultStateDir()
+	backend := hostBackend()
+	debugfsPath := defaultDebugFSPath()
+	arch := defaultGuestArch()
+	fs := flag.NewFlagSet("commit", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	fs.StringVar(&backend, "backend", backend, "Backend identity override")
+	fs.StringVar(&debugfsPath, "debugfs", debugfsPath, "debugfs binary path")
+	fs.StringVar(&arch, "arch", arch, "OCI image architecture")
+	push := fs.Bool("push", false, "Push the committed image to its registry after committing")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: microagent commit <workspace> <image-ref> [--push] [--arch <arch>] [--debugfs <path>] [--state-dir <dir>]")
+	}
+	if err := validateWorkspaceName(fs.Arg(0)); err != nil {
+		return err
+	}
+	result, err := commit.Commit(ctx, commit.Options{
+		StateDir:     stateDir,
+		DebugFSPath:  debugfsPath,
+		Workspace:    fs.Arg(0),
+		Backend:      backend,
+		Reference:    fs.Arg(1),
+		Architecture: arch,
+	})
+	if err != nil {
+		return err
+	}
+	pushed := false
+	if *push {
+		if err := commit.Push(ctx, stateDir, result.Reference); err != nil {
+			return err
+		}
+		pushed = true
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{
+			"reference": result.Reference, "digest": result.Digest,
+			"size_bytes": result.SizeBytes, "layout_path": result.LayoutPath, "pushed": pushed,
+		})
+	}
+	fmt.Fprintf(stdout, "Committed %s\n  digest: %s\n  layer:  %d bytes\n  layout: %s\n", result.Reference, result.Digest, result.SizeBytes, result.LayoutPath)
+	if pushed {
+		fmt.Fprintf(stdout, "Pushed %s\n", result.Reference)
+	} else {
+		fmt.Fprintf(stdout, "Push it with: microagent images push %s\n", result.Reference)
+	}
+	return nil
+}
+
+func printCommitHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent commit
+
+Snapshot a stopped workspace's rootfs into an OCI image, stored in the local
+image layout. Closes the OCI->rootfs loop; push it with `+"`microagent images push`"+`.
+
+Usage:
+  microagent commit <workspace> <image-ref> [options]
+
+Options:
+  --push                Push to the registry immediately after committing
+  --arch <arch>         OCI image architecture (defaults to the guest arch)
+  --debugfs <path>      debugfs binary path used to extract the rootfs
+  --backend <name>      Backend identity override
+  --state-dir <dir>     State directory
+`)
+}
+
 func printInitHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent init
 
@@ -1079,6 +1159,18 @@ func runImages(args []string, stdout *os.File) error {
 			return err
 		}
 		return writeImageRecord(stdout, record)
+	case "push":
+		if fs.NArg() != 2 {
+			return fmt.Errorf("usage: microagent images push <image> [--state-dir <dir>]")
+		}
+		if err := commit.Push(context.Background(), opts.StateDir, fs.Arg(1)); err != nil {
+			return err
+		}
+		if outputJSON(stdout) {
+			return writeJSON(stdout, map[string]any{"pushed": fs.Arg(1)})
+		}
+		fmt.Fprintf(stdout, "Pushed %s\n", fs.Arg(1))
+		return nil
 	case "tag":
 		if fs.NArg() != 3 {
 			return fmt.Errorf("usage: microagent images tag <source> <target> [--state-dir <dir>]")
@@ -6088,7 +6180,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
 		return true
 	default:
 		return false
@@ -6485,6 +6577,7 @@ Commands:
   create               Create a workspace
   apply                Apply supported workspace spec changes
   clone                Clone a stopped workspace
+  commit               Snapshot a stopped workspace rootfs into an OCI image
   cp                   Copy files into or out of a stopped workspace
   artifacts            List or retrieve declared workspace artifacts
   network              Inspect workspace network or manage named networks

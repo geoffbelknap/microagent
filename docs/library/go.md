@@ -323,6 +323,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent stats` | `workspace.SampleStats` |
 | `microagent cp` | `workspace.Copy` |
 | `microagent clone` | `workspace.Clone` |
+| `microagent commit` / `microagent images push` | `commit.Commit` / `commit.Push` |
 | `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |

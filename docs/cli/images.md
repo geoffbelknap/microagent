@@ -4,11 +4,12 @@ description: List or prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 ```text
 microagent images pull <image> [--state-dir <dir>]
 microagent images list [--state-dir <dir>]
+microagent images push <image> [--state-dir <dir>]
 microagent images tag <source> <target> [--state-dir <dir>]
 microagent images rm <image> [--delete] [--yes] [--state-dir <dir>]
 microagent images prune [--delete] [--yes] [--state-dir <dir>]
@@ -24,6 +25,7 @@ platform, rootfs path, size, and last-used time.
 |---|---|
 | `pull` | Build and record a reusable local rootfs from an OCI image |
 | `list` | Show locally recorded images |
+| `push` | Push a [committed](/cli/commit/) image from the local OCI layout to its registry |
 | `tag` | Add another local name for an existing image record |
 | `rm` | Remove a local image record, optionally deleting an unshared baseline |
 | `prune` | Remove stale records, and optionally delete reusable local rootfs baselines |
