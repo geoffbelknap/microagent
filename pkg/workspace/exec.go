@@ -36,6 +36,9 @@ func Exec(ctx context.Context, opts Options, req execprotocol.ExecRequest) (exec
 	if state == "" {
 		return execprotocol.ExecResult{}, WorkspaceNotFoundError{Name: opts.Name}
 	}
+	if state == vmkit.StatePaused {
+		return execprotocol.ExecResult{}, fmt.Errorf("workspace %s is paused; resume it first", opts.Name)
+	}
 	if state != vmkit.StateRunning {
 		return execprotocol.ExecResult{}, fmt.Errorf("workspace %s is not running; structured exec is unavailable in state %s", opts.Name, state)
 	}

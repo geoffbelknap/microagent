@@ -48,6 +48,24 @@ func TestValidateRequestAcceptsQuarantineWithStateDir(t *testing.T) {
 	}
 }
 
+func TestValidateRequestAcceptsPauseAndResumeWithStateDir(t *testing.T) {
+	for _, command := range []string{"pause", "resume"} {
+		req := Request{
+			Command: command,
+			Identity: &Identity{
+				RequestID: "req-1",
+				RuntimeID: "agent-1",
+				Role:      RoleWorkload,
+				Backend:   BackendFirecracker,
+			},
+			Config: &Config{StateDir: "/tmp/state"},
+		}
+		if err := ValidateRequest(req); err != nil {
+			t.Fatalf("ValidateRequest rejected %s: %v", command, err)
+		}
+	}
+}
+
 func TestValidateRequestRejectsRuntimeIDTraversal(t *testing.T) {
 	req := Request{
 		Command: "delete",

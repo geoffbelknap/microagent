@@ -158,6 +158,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "stats" {
 		return runStats(ctx, args[1:], stdout)
 	}
+	if args[0] == "snapshot" {
+		return runSnapshot(ctx, args[1:], stdout)
+	}
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
 	}
@@ -170,7 +173,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		return runWorkspaceStateCommand(ctx, "status", args[1:], stdout)
 	}
-	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
+	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "pause" || args[0] == "resume" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
 		if wantsHelp(args[1:]) || hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 		}
@@ -560,7 +563,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		req.Command = "start"
 		return req, nil
-	case "status", "halt", "quarantine", "stop", "kill", "delete":
+	case "status", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
 		req, err := stateRequestFromFlagsOrJSON(command, jsonPath, args, identity, config)
 		if err != nil {
 			return vmkit.Request{}, err
@@ -762,6 +765,173 @@ func runArtifactGet(args []string, stdout *os.File) error {
 		return err
 	}
 	return writeCopyResult(stdout, result)
+}
+
+func runSnapshot(ctx context.Context, args []string, stdout *os.File) error {
+	if len(args) == 0 || wantsHelp(args) {
+		fmt.Fprint(stdout, `microagent snapshot — create, list, or remove workspace snapshots
+
+  microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]
+  microagent snapshot list <name> [--state-dir <dir>]
+  microagent snapshot rm <name> <tag> [--state-dir <dir>]
+`)
+		return nil
+	}
+	switch args[0] {
+	case "create":
+		return runSnapshotCreate(ctx, args[1:], stdout)
+	case "list", "ls":
+		return runSnapshotList(args[1:], stdout)
+	case "rm", "remove", "delete":
+		return runSnapshotRemove(args[1:], stdout)
+	default:
+		return fmt.Errorf("unknown snapshot subcommand %q; use create, list, or rm", args[0])
+	}
+}
+
+func runSnapshotCreate(ctx context.Context, args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	backend := hostBackend()
+	supervisorPath := defaultSupervisorPath(backend)
+	supervisorExplicit := hasFlagValue(args, "supervisor")
+	name := ""
+	tag := ""
+	fs := flag.NewFlagSet("snapshot create", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
+	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
+	fs.StringVar(&name, "name", "", "Workspace name")
+	fs.StringVar(&name, "id", "", "Workspace ID")
+	fs.StringVar(&tag, "tag", "", "Snapshot tag (defaults to a timestamp)")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if !supervisorExplicit {
+		supervisorPath = defaultSupervisorPath(backend)
+	}
+	if fs.NArg() > 1 {
+		return fmt.Errorf("usage: microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]")
+	}
+	if fs.NArg() == 1 {
+		if name != "" {
+			return fmt.Errorf("workspace name specified twice")
+		}
+		name = fs.Arg(0)
+	}
+	if name == "" {
+		return fmt.Errorf("usage: microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]")
+	}
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	if strings.TrimSpace(tag) == "" {
+		tag = "snap-" + time.Now().UTC().Format("20060102-150405")
+	}
+	opts := workspaceOptions{StateDir: stateDir, Name: name, Backend: backend, SupervisorPath: supervisorPath}
+	manifest, err := workspace.Snapshot(ctx, opts, tag)
+	if err != nil {
+		return err
+	}
+	return writeSnapshotManifestResult(stdout, manifest)
+}
+
+func runSnapshotList(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	name := ""
+	fs := flag.NewFlagSet("snapshot list", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	fs.StringVar(&name, "name", "", "Workspace name")
+	fs.StringVar(&name, "id", "", "Workspace ID")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return fmt.Errorf("usage: microagent snapshot list <name> [--state-dir <dir>]")
+	}
+	if fs.NArg() == 1 {
+		if name != "" {
+			return fmt.Errorf("workspace name specified twice")
+		}
+		name = fs.Arg(0)
+	}
+	if name == "" {
+		return fmt.Errorf("usage: microagent snapshot list <name> [--state-dir <dir>]")
+	}
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	infos, err := workspace.SnapshotList(workspaceOptions{StateDir: stateDir, Name: name})
+	if err != nil {
+		return err
+	}
+	return writeSnapshotListResult(stdout, name, infos)
+}
+
+func runSnapshotRemove(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	name := ""
+	fs := flag.NewFlagSet("snapshot rm", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	fs.StringVar(&name, "name", "", "Workspace name")
+	fs.StringVar(&name, "id", "", "Workspace ID")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	tag := ""
+	if name == "" {
+		if len(rest) != 2 {
+			return fmt.Errorf("usage: microagent snapshot rm <name> <tag> [--state-dir <dir>]")
+		}
+		name = rest[0]
+		tag = rest[1]
+	} else {
+		if len(rest) != 1 {
+			return fmt.Errorf("usage: microagent snapshot rm <name> <tag> [--state-dir <dir>]")
+		}
+		tag = rest[0]
+	}
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	if err := workspace.SnapshotRemove(workspaceOptions{StateDir: stateDir, Name: name}, tag); err != nil {
+		return err
+	}
+	return writeSnapshotRemoveResult(stdout, name, tag)
+}
+
+func writeSnapshotManifestResult(stdout *os.File, manifest vmkit.SnapshotManifest) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, manifest)
+	}
+	fmt.Fprintf(stdout, "snapshot %s created (%d MiB RAM, %d vCPU) at %s\n", manifest.Tag, manifest.MemoryMiB, manifest.VCPUCount, manifest.CreatedAt)
+	return nil
+}
+
+func writeSnapshotListResult(stdout *os.File, name string, infos []vmkit.SnapshotInfo) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"workspace": name, "snapshots": infos})
+	}
+	if len(infos) == 0 {
+		fmt.Fprintf(stdout, "no snapshots for %s\n", name)
+		return nil
+	}
+	fmt.Fprintf(stdout, "%-24s %-12s %-21s %s\n", "TAG", "SIZE", "CREATED", "IMAGE")
+	for _, info := range infos {
+		fmt.Fprintf(stdout, "%-24s %-12s %-21s %s\n", info.Tag, formatBytes(info.SizeBytes), info.CreatedAt, info.ImageRef)
+	}
+	return nil
+}
+
+func writeSnapshotRemoveResult(stdout *os.File, name, tag string) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"workspace": name, "removed": tag})
+	}
+	fmt.Fprintf(stdout, "removed snapshot %s of %s\n", tag, name)
+	return nil
 }
 
 func runProfiles(args []string, stdout *os.File) error {
@@ -1681,6 +1851,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
+	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -5516,6 +5687,8 @@ func reorderFlagArgs(args []string) []string {
 		"-publish":           true,
 		"-p":                 true,
 		"-state-dir":         true,
+		"-tag":               true,
+		"-from-snapshot":     true,
 		"-url":               true,
 		"-from":              true,
 		"-sha256":            true,
@@ -5956,6 +6129,7 @@ Commands:
   logs                 Show workspace logs
   events               Show or stream the lifecycle event history
   stats                Show or stream workspace resource usage
+  snapshot             Create, list, or remove workspace snapshots
   profiles             List resource profiles
   images               List or prune local image records
   prune                Prune stale local records and optional image cache files
@@ -5963,6 +6137,8 @@ Commands:
   serve mcp            Serve the MCP stdio endpoint
   halt                 Halt a workspace and preserve disk state
   quarantine           Sever host-side network and mediation
+  pause                Pause a running workspace, freezing vCPUs with memory and disk preserved
+  resume               Resume a paused workspace
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace

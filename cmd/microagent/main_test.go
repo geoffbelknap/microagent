@@ -73,6 +73,121 @@ func TestRunVersionAliases(t *testing.T) {
 	}
 }
 
+func TestHelpListsPauseAndResume(t *testing.T) {
+	dir := t.TempDir()
+	stdoutPath := filepath.Join(dir, "stdout.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"help"}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run help: %v", err)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	help := string(data)
+	for _, command := range []string{"pause", "resume", "snapshot"} {
+		if !strings.Contains(help, "\n  "+command+" ") {
+			t.Fatalf("help missing %q command:\n%s", command, help)
+		}
+	}
+}
+
+func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		flag string
+		want string
+	}{
+		{"snapshot tag", []string{"agent-1", "--tag", "base", "--state-dir", "/s"}, "-tag", "base"},
+		{"from-snapshot", []string{"agent-1", "--from-snapshot", "base", "--state-dir", "/s"}, "-from-snapshot", "base"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reordered := reorderFlagArgs(tc.args)
+			// The value flag and its argument must stay adjacent so flag parsing
+			// does not mistake the value for a positional and the positional name
+			// for an extra argument.
+			found := false
+			for i := 0; i+1 < len(reordered); i++ {
+				if reordered[i] == tc.flag && reordered[i+1] == tc.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("reorderFlagArgs(%v) = %v; %s value not kept adjacent", tc.args, reordered, tc.flag)
+			}
+		})
+	}
+}
+
+func TestRunSnapshotCreateParsesTagAndName(t *testing.T) {
+	dir := t.TempDir()
+	out, err := os.Create(filepath.Join(dir, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With a missing supervisor the create fails at dispatch, but it must get
+	// past argument parsing — proving --tag is recognized as a value flag and
+	// the positional name is accepted rather than mistaken for extra arguments.
+	rerr := run(t.Context(), []string{"snapshot", "create", "agent-1", "--tag", "base", "--state-dir", dir, "--supervisor", filepath.Join(dir, "no-supervisor")}, out)
+	_ = out.Close()
+	if rerr == nil {
+		t.Fatal("expected dispatch error with a missing supervisor")
+	}
+	if strings.Contains(rerr.Error(), "usage:") {
+		t.Fatalf("snapshot create mis-parsed --tag/name: %v", rerr)
+	}
+}
+
+func TestRunSnapshotListAndRemove(t *testing.T) {
+	dir := t.TempDir()
+	name := "agent-1"
+	for _, tag := range []string{"snap-a", "snap-b"} {
+		sdir := vmkit.SnapshotDir(dir, name, tag)
+		if err := vmkit.WriteSnapshotManifest(sdir, vmkit.SnapshotManifest{Tag: tag, MemoryMiB: 512, CreatedAt: "2026-06-01T00:00:00Z"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	listPath := filepath.Join(dir, "list.json")
+	stdout, err := os.Create(listPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"--json", "snapshot", "list", name, "--state-dir", dir}, stdout)
+	_ = stdout.Close()
+	if err != nil {
+		t.Fatalf("snapshot list: %v", err)
+	}
+	data, err := os.ReadFile(listPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "snap-a") || !strings.Contains(string(data), "snap-b") {
+		t.Fatalf("snapshot list output missing tags:\n%s", data)
+	}
+
+	rmOut, err := os.Create(filepath.Join(dir, "rm.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"snapshot", "rm", name, "snap-a", "--state-dir", dir}, rmOut)
+	_ = rmOut.Close()
+	if err != nil {
+		t.Fatalf("snapshot rm: %v", err)
+	}
+	if _, err := os.Stat(vmkit.SnapshotDir(dir, name, "snap-a")); !os.IsNotExist(err) {
+		t.Fatalf("snap-a should be removed, stat err = %v", err)
+	}
+}
+
 func TestCreateHelpUsesWorkspaceHelp(t *testing.T) {
 	dir := t.TempDir()
 	stdoutPath := filepath.Join(dir, "stdout.txt")
@@ -974,6 +1089,16 @@ func TestRequestForCommandMapsHumanCommands(t *testing.T) {
 			name:        "quarantine",
 			args:        []string{"quarantine", "agent-1", "--state-dir", "/tmp/state"},
 			wantCommand: "quarantine",
+		},
+		{
+			name:        "pause",
+			args:        []string{"pause", "agent-1", "--state-dir", "/tmp/state"},
+			wantCommand: "pause",
+		},
+		{
+			name:        "resume",
+			args:        []string{"resume", "agent-1", "--state-dir", "/tmp/state"},
+			wantCommand: "resume",
 		},
 		{
 			name:        "kill",

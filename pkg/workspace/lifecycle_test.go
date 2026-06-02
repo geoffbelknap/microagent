@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +14,66 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+func TestSnapshotListAndRemoveAreHostSide(t *testing.T) {
+	dir := t.TempDir()
+	name := "agent-1"
+	for _, tag := range []string{"snap-a", "snap-b"} {
+		sdir := vmkit.SnapshotDir(dir, name, tag)
+		if err := vmkit.WriteSnapshotManifest(sdir, vmkit.SnapshotManifest{Tag: tag, MemoryMiB: 512, CreatedAt: "2026-06-01T00:00:0" + tag[len(tag)-1:] + "Z"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sdir, vmkit.SnapshotMemoryName), make([]byte, 256), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+
+	infos, err := SnapshotList(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("SnapshotList = %d entries, want 2", len(infos))
+	}
+
+	if err := SnapshotRemove(opts, "snap-a"); err != nil {
+		t.Fatal(err)
+	}
+	infos, err = SnapshotList(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 1 || infos[0].Tag != "snap-b" {
+		t.Fatalf("after remove = %#v, want only snap-b", infos)
+	}
+}
+
+func TestSnapshotRemoveRejectsMissingTag(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: t.TempDir(), Backend: vmkit.BackendFirecracker}
+	if err := SnapshotRemove(opts, "ghost"); err == nil {
+		t.Fatal("expected error removing a missing snapshot")
+	}
+}
+
+func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		Name:           "agent-1",
+		StateDir:       dir,
+		Backend:        vmkit.BackendFirecracker,
+		SupervisorPath: filepath.Join(dir, "no-such-supervisor"),
+	}
+	// With a missing supervisor binary, both calls fail at dispatch — but they
+	// must get past Control's command whitelist, proving pause/resume are wired
+	// through as supervisor commands rather than rejected as unsupported.
+	if _, err := Pause(context.Background(), opts); err == nil || strings.Contains(err.Error(), "unsupported workspace control command") {
+		t.Fatalf("Pause not wired to a pause control command: %v", err)
+	}
+	if _, err := Resume(context.Background(), opts); err == nil || strings.Contains(err.Error(), "unsupported workspace control command") {
+		t.Fatalf("Resume not wired to a resume control command: %v", err)
+	}
+}
 
 func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	dir := t.TempDir()

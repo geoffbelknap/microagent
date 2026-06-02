@@ -19,6 +19,20 @@ import (
 
 var consoleSendTokenPattern = regexp.MustCompile(`__ma_token=([0-9]+)`)
 
+func TestDialConsoleRejectsPausedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	name := "agent"
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err := WriteProcessState(opts, req, vmkit.StatePaused, 123, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := DialConsole(context.Background(), ConsoleOptions{StateDir: dir, Name: name})
+	if err == nil || !strings.Contains(err.Error(), "paused; resume it first") {
+		t.Fatalf("err = %v, want paused; resume it first", err)
+	}
+}
+
 func TestSendConsoleCommandReturnsTimeoutWithPartialOutput(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent"

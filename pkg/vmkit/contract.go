@@ -57,6 +57,7 @@ func NewRuntimeContract() RuntimeContract {
 			{Name: StatePrepared, Description: "workspace state/config exists but runtime is not started", DiskPreserved: true, EventHistoryKept: true},
 			{Name: StateStarting, Description: "backend accepted start and is bringing up the runtime", DiskPreserved: true, EventHistoryKept: true},
 			{Name: StateRunning, Description: "runtime is started", DiskPreserved: true, EventHistoryKept: true, RuntimeMayContinue: true},
+			{Name: StatePaused, Description: "runtime is paused; vCPUs are frozen with memory and disk preserved, resumable in place", DiskPreserved: true, EventHistoryKept: true, RuntimeMayContinue: true},
 			{Name: StateHalted, Description: "clean disk-preserving shutdown completed", DiskPreserved: true, EventHistoryKept: true},
 			{Name: StateQuarantined, Description: "host-side network, mediation, and side-effect paths are severed", DiskPreserved: true, EventHistoryKept: true, RuntimeMayContinue: true},
 			{Name: StateStopped, Description: "runtime process has stopped", DiskPreserved: true, EventHistoryKept: true},

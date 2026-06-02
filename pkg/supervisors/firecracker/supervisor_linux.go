@@ -74,6 +74,12 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateHalted)
 	case "quarantine":
 		return quarantineWorkspace(opts, req)
+	case "pause":
+		return pauseWorkspace(ctx, opts, req)
+	case "resume":
+		return resumeWorkspace(ctx, opts, req)
+	case "snapshot":
+		return snapshotWorkspace(ctx, opts, req)
 	case "stop":
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateStopped)
 	case "kill":
@@ -323,6 +329,15 @@ func prepareWorkspace(opts Options, req vmkit.Request) error {
 }
 
 func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached bool) (vmkit.Response, error) {
+	// Snapshot restore/fork rolls the rootfs back to the snapshot copy and
+	// validates kernel/network compatibility once on the host, before any
+	// user-network namespace re-exec carries the request inward.
+	if req.Tag != "" && !insideUserNetworkNamespace() {
+		if err := prepareSnapshotRestore(opts, req); err != nil {
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
+	}
 	if networkMode(req.Config) == "user" && !insideUserNetworkNamespace() {
 		return startUserNetworkProcess(ctx, opts, req, detached)
 	}
@@ -402,8 +417,15 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	}
 	// Boot from the config file and additionally expose the API socket so
 	// pause/resume and snapshot can control the running VM. Only --no-api would
-	// disable the API.
-	cmd := exec.CommandContext(ctx, path, "--api-sock", apiSocketPath(opts), "--config-file", configPath(opts))
+	// disable the API. A snapshot restore/fork instead launches with just the
+	// API socket and loads the snapshot (which carries its own machine config)
+	// over it.
+	loadMode := req.Tag != ""
+	launchArgs := []string{"--api-sock", apiSocketPath(opts)}
+	if !loadMode {
+		launchArgs = append(launchArgs, "--config-file", configPath(opts))
+	}
+	cmd := exec.CommandContext(ctx, path, launchArgs...)
 	cmd.Stdout = serialLog
 	cmd.Stderr = serialLog
 	if serialInput != nil {
@@ -419,6 +441,19 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = serialLog.Close()
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
+	}
+	if loadMode {
+		if err := restoreFromSnapshot(ctx, opts, req.Tag); err != nil {
+			_ = cmd.Process.Kill()
+			cleanupTransientFirewallRules(firewallRules)
+			cleanupTransientNetworkDevices(networkDevices)
+			if serialInput != nil {
+				_ = serialInput.Close()
+			}
+			_ = serialLog.Close()
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+			return failedResponse(req, err.Error()), err
+		}
 	}
 	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, networkDevices, firewallRules, ""); err != nil {
 		_ = cmd.Process.Kill()
@@ -639,6 +674,64 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 		return vmkit.Response{}, err
 	}
 	return eventResponse(req, vmkit.StateQuarantined, ""), nil
+}
+
+// vmStateController issues runtime state transitions over a running VM's API
+// unix socket. It is satisfied by *apiClient and is a package variable so unit
+// tests can substitute a fake without a live Firecracker process.
+type vmStateController interface {
+	patchVMState(ctx context.Context, state string) error
+	createSnapshot(ctx context.Context, snapshotPath, memFilePath string) error
+	loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool) error
+}
+
+var newVMStateController = func(socketPath string) vmStateController {
+	return newAPIClient(socketPath)
+}
+
+func pauseWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
+	return transitionVMState(ctx, opts, req, "Paused", vmkit.StateRunning, vmkit.StatePaused)
+}
+
+func resumeWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
+	return transitionVMState(ctx, opts, req, "Resumed", vmkit.StatePaused, vmkit.StateRunning)
+}
+
+// transitionVMState pauses or resumes the running VM over its API socket. It
+// requires the workspace to be in fromState, issues the PATCH /vm transition,
+// and persists toState while preserving the host-side aux processes (port
+// forwarder, vsock listener, transient network) so resume keeps working. The
+// VM process is untouched; only its vCPUs are frozen or thawed.
+func transitionVMState(ctx context.Context, opts Options, req vmkit.Request, apiState string, fromState, toState vmkit.VMState) (vmkit.Response, error) {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if state.Event.State != fromState {
+		err := fmt.Errorf("firecracker workspace %s is %s; %s requires state %s", opts.Name, state.Event.State, req.Command, fromState)
+		return failedResponse(req, err.Error()), err
+	}
+	if state.PID == 0 {
+		err := fmt.Errorf("firecracker workspace %s has no running VM process to %s", opts.Name, req.Command)
+		return failedResponse(req, err.Error()), err
+	}
+	active, err := processActive(state.PID)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	if !active {
+		err := fmt.Errorf("firecracker workspace %s VM process %d is not running", opts.Name, state.PID)
+		return failedResponse(req, err.Error()), err
+	}
+	if err := newVMStateController(apiSocketPath(opts)).patchVMState(ctx, apiState); err != nil {
+		// The PATCH is atomic; on failure the VM stays in fromState, so leave the
+		// persisted state untouched rather than recording a spurious failure.
+		return failedResponse(req, err.Error()), err
+	}
+	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), toState, state.PID, state.PortForwardPID, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+		return vmkit.Response{}, err
+	}
+	return eventResponse(req, toState, ""), nil
 }
 
 func ensureCanDelete(opts Options) error {

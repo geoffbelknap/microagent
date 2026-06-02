@@ -8,6 +8,7 @@ _Last updated: 2026-06-01_
 
 ```text
 microagent start <name> [--state-dir <dir>]
+microagent start <name> --from-snapshot <tag> [--state-dir <dir>]
 ```
 
 `start` boots a workspace that was previously created. The workspace must
@@ -16,6 +17,20 @@ exist in the state directory (default `~/.microagent/`).
 Start is disk-state resume, not memory resume. It boots from the persisted
 workspace disk after `prepared`, `halted`, `stopped`, or `failed`. It rejects
 workspaces that are already `starting` or `running`.
+
+## Resume in place from a snapshot
+
+`start <name> --from-snapshot <tag>` restores the workspace in place from a
+[snapshot](/cli/snapshot/) instead of booting fresh: it rolls the workspace
+rootfs back to the snapshot's copy and loads the snapshot's memory and device
+state, so the guest resumes exactly where it was checkpointed. This is
+Firecracker-only and the snapshot's kernel must match the workspace kernel (the
+load is rejected on kernel skew). Bridged networking is not supported for
+restore; use user, nat, or isolated.
+
+In-flight guest connections do not survive a restore — outbound TCP and live
+vsock sessions (exec/shell/mediation) are reset and the guest body must
+reconnect. Stop the workspace before restoring it in place.
 
 `quarantined` is intentionally distinct: host-side network, mediation, and
 side-effect paths were severed while the runtime may still exist. Run `halt`,
@@ -26,6 +41,7 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+| `--from-snapshot <tag>` | Restore the workspace in place from this snapshot tag (Firecracker) |
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
 | `--cpus <n>` | CPU count override for this start |
@@ -60,4 +76,4 @@ VF, Firecracker, or Windows Hyper-V, or read serial output with
 
 ## Related
 
-- [`create`](/cli/create/), [`stop`](/cli/stop/), [`status`](/cli/status/)
+- [`create`](/cli/create/), [`stop`](/cli/stop/), [`status`](/cli/status/), [`snapshot`](/cli/snapshot/)

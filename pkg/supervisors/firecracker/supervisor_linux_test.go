@@ -1234,3 +1234,431 @@ func freeTCPPort(t *testing.T) uint16 {
 	}
 	return uint16(port)
 }
+
+type fakeVMController struct {
+	states     []string
+	snapshots  [][2]string
+	loads      [][2]string
+	loadResume bool
+	err        error
+	snapErr    error
+	loadErr    error
+}
+
+func (f *fakeVMController) patchVMState(_ context.Context, state string) error {
+	f.states = append(f.states, state)
+	return f.err
+}
+
+func (f *fakeVMController) createSnapshot(_ context.Context, snapshotPath, memFilePath string) error {
+	f.snapshots = append(f.snapshots, [2]string{snapshotPath, memFilePath})
+	return f.snapErr
+}
+
+func (f *fakeVMController) loadSnapshot(_ context.Context, snapshotPath, memFilePath string, resume bool) error {
+	f.loads = append(f.loads, [2]string{snapshotPath, memFilePath})
+	f.loadResume = resume
+	return f.loadErr
+}
+
+func withFakeVMController(t *testing.T, fake *fakeVMController) {
+	t.Helper()
+	previous := newVMStateController
+	newVMStateController = func(string) vmStateController { return fake }
+	t.Cleanup(func() { newVMStateController = previous })
+}
+
+func startSleepProcess(t *testing.T) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	return cmd
+}
+
+func pauseResumeRequest(dir string) vmkit.Request {
+	return vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "/tmp/kernel",
+			RootfsPath: "/tmp/rootfs.ext4",
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+	}
+}
+
+func TestPausePatchesVMStateAndPreservesAuxProcesses(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	vmProcess := startSleepProcess(t)
+	forwarder := startSleepProcess(t)
+	vsockListener := startSleepProcess(t)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "pause",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err != nil {
+		t.Fatalf("pause: resp=%+v err=%v", resp, err)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StatePaused {
+		t.Fatalf("response = %+v", resp)
+	}
+	if len(fake.states) != 1 || fake.states[0] != "Paused" {
+		t.Fatalf("controller states = %#v, want [Paused]", fake.states)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StatePaused {
+		t.Fatalf("persisted state = %s, want paused", state.Event.State)
+	}
+	if state.PID != vmProcess.Process.Pid || state.PortForwardPID != forwarder.Process.Pid || state.VsockListenerPID != vsockListener.Process.Pid {
+		t.Fatalf("pause dropped process state: %#v", state)
+	}
+}
+
+func TestResumePatchesVMStateBackToRunning(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	vmProcess := startSleepProcess(t)
+	forwarder := startSleepProcess(t)
+	vsockListener := startSleepProcess(t)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StatePaused, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "resume",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err != nil {
+		t.Fatalf("resume: resp=%+v err=%v", resp, err)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("response = %+v", resp)
+	}
+	if len(fake.states) != 1 || fake.states[0] != "Resumed" {
+		t.Fatalf("controller states = %#v, want [Resumed]", fake.states)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateRunning {
+		t.Fatalf("persisted state = %s, want running", state.Event.State)
+	}
+	if state.PortForwardPID != forwarder.Process.Pid || state.VsockListenerPID != vsockListener.Process.Pid {
+		t.Fatalf("resume dropped process state: %#v", state)
+	}
+}
+
+func TestPauseRejectsWorkspaceThatIsNotRunning(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	if err := writeProcessState(opts, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	_, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "pause",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err == nil {
+		t.Fatal("expected pause to reject a stopped workspace")
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("controller should not be called, got %#v", fake.states)
+	}
+}
+
+func TestResumeRejectsWorkspaceThatIsNotPaused(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	_, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "resume",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+	})
+	if err == nil {
+		t.Fatal("expected resume to reject a running workspace")
+	}
+	if len(fake.states) != 0 {
+		t.Fatalf("controller should not be called, got %#v", fake.states)
+	}
+}
+
+func TestPrepareSnapshotRestoreRollsBackRootfs(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	kernel := filepath.Join(dir, "kernel")
+	if err := os.WriteFile(kernel, []byte("kernel-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootfs := filepath.Join(dir, "rootfs.ext4")
+	if err := os.WriteFile(rootfs, []byte("LIVE-disk-with-marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelSHA, err := fileSHA256(kernel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "base")
+	if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{Tag: "base", NetworkMode: "isolated", KernelSHA256: kernelSHA}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, vmkit.SnapshotRootfsName), []byte("SNAPSHOT-disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{KernelPath: kernel, RootfsPath: rootfs, StateDir: dir, Network: &vmkit.NetworkConfig{Mode: "isolated"}},
+		Tag:      "base",
+	}
+	if err := prepareSnapshotRestore(opts, req); err != nil {
+		t.Fatalf("prepareSnapshotRestore: %v", err)
+	}
+	data, err := os.ReadFile(rootfs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "SNAPSHOT-disk" {
+		t.Fatalf("rootfs = %q, want SNAPSHOT-disk (rolled back)", data)
+	}
+}
+
+func TestPrepareSnapshotRestoreRejectsKernelSkew(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	kernel := filepath.Join(dir, "kernel")
+	if err := os.WriteFile(kernel, []byte("the-real-kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "base")
+	if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{Tag: "base", KernelSHA256: "deadbeef-different"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, vmkit.SnapshotRootfsName), []byte("snap"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{KernelPath: kernel, RootfsPath: filepath.Join(dir, "rootfs.ext4"), StateDir: dir},
+		Tag:      "base",
+	}
+	err := prepareSnapshotRestore(opts, req)
+	if err == nil || !strings.Contains(err.Error(), "kernel") {
+		t.Fatalf("err = %v, want kernel skew rejection", err)
+	}
+}
+
+func TestPrepareSnapshotRestoreRejectsBridged(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "base")
+	if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{Tag: "base"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, vmkit.SnapshotRootfsName), []byte("snap"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{KernelPath: filepath.Join(dir, "k"), RootfsPath: filepath.Join(dir, "rootfs.ext4"), StateDir: dir, Network: &vmkit.NetworkConfig{Mode: "bridged", Interface: "br0"}},
+		Tag:      "base",
+	}
+	err := prepareSnapshotRestore(opts, req)
+	if err == nil || !strings.Contains(err.Error(), "bridged") {
+		t.Fatalf("err = %v, want bridged rejection", err)
+	}
+}
+
+func snapshotSourceRequest(t *testing.T, dir string) vmkit.Request {
+	t.Helper()
+	kernel := filepath.Join(dir, "kernel")
+	rootfs := filepath.Join(dir, "rootfs.ext4")
+	if err := os.WriteFile(kernel, []byte("kernel-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfs, []byte("rootfs-bytes-coherent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendFirecracker,
+		},
+		Config: &vmkit.Config{
+			KernelPath: kernel,
+			RootfsPath: rootfs,
+			StateDir:   dir,
+			MemoryMiB:  512,
+			CPUCount:   2,
+			Network:    &vmkit.NetworkConfig{Mode: "nat", IP: "10.43.0.2/29"},
+		},
+	}
+}
+
+func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := snapshotSourceRequest(t, dir)
+	vmProcess := startSleepProcess(t)
+	forwarder := startSleepProcess(t)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, 0, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "snapshot",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+		Tag:      "snap-1",
+	})
+	if err != nil {
+		t.Fatalf("snapshot: resp=%+v err=%v", resp, err)
+	}
+	// Auto-pause then resume around the snapshot.
+	if len(fake.states) != 2 || fake.states[0] != "Paused" || fake.states[1] != "Resumed" {
+		t.Fatalf("controller states = %#v, want [Paused Resumed]", fake.states)
+	}
+	if len(fake.snapshots) != 1 {
+		t.Fatalf("createSnapshot calls = %d, want 1", len(fake.snapshots))
+	}
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "snap-1")
+	if fake.snapshots[0][0] != filepath.Join(snapDir, vmkit.SnapshotVMStateName) {
+		t.Fatalf("snapshot path = %q", fake.snapshots[0][0])
+	}
+	if fake.snapshots[0][1] != filepath.Join(snapDir, vmkit.SnapshotMemoryName) {
+		t.Fatalf("mem path = %q", fake.snapshots[0][1])
+	}
+	// Coherent rootfs copy taken while paused.
+	rootfsCopy := filepath.Join(snapDir, vmkit.SnapshotRootfsName)
+	if data, err := os.ReadFile(rootfsCopy); err != nil || string(data) != "rootfs-bytes-coherent" {
+		t.Fatalf("rootfs copy = %q err=%v", data, err)
+	}
+	manifest, err := vmkit.ReadSnapshotManifest(snapDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Tag != "snap-1" || manifest.NetworkMode != "nat" || manifest.VCPUCount != 2 || manifest.MemoryMiB != 512 {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+	if manifest.KernelSHA256 == "" {
+		t.Fatal("manifest kernel sha256 is empty")
+	}
+	if manifest.CreatedAt == "" {
+		t.Fatal("manifest createdAt is empty")
+	}
+	// Workspace returns to running, aux processes preserved.
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateRunning || state.PID != vmProcess.Process.Pid || state.PortForwardPID != forwarder.Process.Pid {
+		t.Fatalf("post-snapshot state = %#v", state)
+	}
+}
+
+func TestSnapshotCreateInPlaceWhenAlreadyPaused(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := snapshotSourceRequest(t, dir)
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StatePaused, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "snapshot",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+		Tag:      "snap-paused",
+	})
+	if err != nil {
+		t.Fatalf("snapshot: resp=%+v err=%v", resp, err)
+	}
+	// Already paused: no pause/resume transitions, snapshot in place.
+	if len(fake.states) != 0 {
+		t.Fatalf("controller states = %#v, want none (already paused)", fake.states)
+	}
+	if len(fake.snapshots) != 1 {
+		t.Fatalf("createSnapshot calls = %d, want 1", len(fake.snapshots))
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StatePaused {
+		t.Fatalf("workspace should stay paused, got %s", state.Event.State)
+	}
+}
+
+func TestSnapshotRejectsStoppedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := snapshotSourceRequest(t, dir)
+	if err := writeProcessState(opts, req, vmkit.StateStopped, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	_, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "snapshot",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+		Tag:      "snap-x",
+	})
+	if err == nil {
+		t.Fatal("expected snapshot to reject a stopped workspace")
+	}
+	if len(fake.snapshots) != 0 {
+		t.Fatalf("createSnapshot should not be called, got %#v", fake.snapshots)
+	}
+}

@@ -62,6 +62,14 @@ func TestExecWorkspaceNotRunning(t *testing.T) {
 	}
 }
 
+func TestExecRejectsPausedWorkspace(t *testing.T) {
+	opts := writeExecRuntimeState(t, vmkit.BackendFirecracker, vmkit.StatePaused, 45000)
+	_, err := Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
+	if err == nil || !strings.Contains(err.Error(), "paused; resume it first") {
+		t.Fatalf("err = %v, want paused; resume it first", err)
+	}
+}
+
 func TestExecRejectsNonFirecrackerBackend(t *testing.T) {
 	opts := writeExecRuntimeState(t, vmkit.BackendWindowsHyperV, vmkit.StateRunning, 45000)
 	_, err := Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))

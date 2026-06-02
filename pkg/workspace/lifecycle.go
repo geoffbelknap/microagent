@@ -333,7 +333,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := os.Remove(ResultPath(opts.StateDir, opts.Name)); err != nil && !os.IsNotExist(err) {
 		return Result{}, err
 	}
-	resp, err := startDetached(opts, Request(opts, "run", rootfsPath, NewRequestID()))
+	startReq := Request(opts, "run", rootfsPath, NewRequestID())
+	startReq.Tag = strings.TrimSpace(opts.FromSnapshot)
+	resp, err := startDetached(opts, startReq)
 	return Result{
 		Workspace:    opts.Name,
 		StateDir:     opts.StateDir,
@@ -471,7 +473,7 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		return vmkit.Response{}, err
 	}
 	switch command {
-	case "halt", "quarantine", "stop", "kill", "delete":
+	case "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
 	default:
 		return vmkit.Response{}, fmt.Errorf("unsupported workspace control command: %s", command)
 	}
@@ -490,6 +492,90 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+// Pause freezes a running workspace's vCPUs while preserving memory and disk
+// state. The runtime process keeps running so the workspace can be resumed in
+// place; structured exec, console, and stats are unavailable until Resume.
+func Pause(ctx context.Context, opts Options) (vmkit.Response, error) {
+	return Control(ctx, opts, "pause")
+}
+
+// Resume thaws a paused workspace's vCPUs, returning it to the running state.
+func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
+	return Control(ctx, opts, "resume")
+}
+
+// Snapshot captures a tagged snapshot of a running or paused workspace via the
+// backend supervisor and returns the resulting manifest, enriched with the
+// workspace image reference. A running workspace is briefly paused and resumed
+// around the capture; an already-paused workspace stays paused.
+func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
+	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	if err := ValidateName(opts.Name); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	if strings.TrimSpace(tag) == "" {
+		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot tag is required")
+	}
+	req := vmkit.Request{
+		Command: "snapshot",
+		Identity: &vmkit.Identity{
+			RequestID: NewRequestID(),
+			RuntimeID: opts.Name,
+			Role:      vmkit.RoleWorkload,
+			Backend:   opts.Backend,
+		},
+		Config: &vmkit.Config{StateDir: opts.StateDir},
+		Tag:    tag,
+	}
+	if _, err := Dispatch(ctx, opts, req); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+	manifest, err := vmkit.ReadSnapshotManifest(dir)
+	if err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	if manifest.ImageRef == "" {
+		if workspaceManifest, err := ReadManifest(opts.StateDir, opts.Name); err == nil && workspaceManifest.Verification != nil {
+			if ref := strings.TrimSpace(workspaceManifest.Verification.ImageRef); ref != "" {
+				manifest.ImageRef = ref
+				if err := vmkit.WriteSnapshotManifest(dir, manifest); err != nil {
+					return vmkit.SnapshotManifest{}, err
+				}
+			}
+		}
+	}
+	return manifest, nil
+}
+
+// SnapshotList returns the snapshots recorded for a workspace. It is a host-side
+// read of the snapshot directory and needs no running VM.
+func SnapshotList(opts Options) ([]vmkit.SnapshotInfo, error) {
+	if err := ValidateName(opts.Name); err != nil {
+		return nil, err
+	}
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = StateDir()
+	}
+	return vmkit.ListSnapshots(stateDir, opts.Name)
+}
+
+// SnapshotRemove deletes a single snapshot tag. It is a host-side operation and
+// needs no running VM.
+func SnapshotRemove(opts Options, tag string) error {
+	if err := ValidateName(opts.Name); err != nil {
+		return err
+	}
+	stateDir := opts.StateDir
+	if stateDir == "" {
+		stateDir = StateDir()
+	}
+	return vmkit.RemoveSnapshot(stateDir, opts.Name, tag)
 }
 
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {

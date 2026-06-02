@@ -3,8 +3,24 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+func TestSampleStatsRejectsPausedWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir, Backend: vmkit.BackendFirecracker}
+	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err := WriteProcessState(opts, req, vmkit.StatePaused, 1234, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err := SampleStats(dir, "agent-1")
+	if err == nil || !strings.Contains(err.Error(), "paused; resume it first") {
+		t.Fatalf("err = %v, want paused; resume it first", err)
+	}
+}
 
 func TestSampleProcStatsParsesProcFiles(t *testing.T) {
 	dir := t.TempDir()

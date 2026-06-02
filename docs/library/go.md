@@ -49,8 +49,8 @@ symbols should be added to this page when they are introduced.
 
 | Package | Documented symbols |
 |---|---|
-| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract` |
-| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecPort`, `ExecPortForName`, `ExecReadinessSignal`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `ReadEvents`, `EventsPath`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Apply`, `Exec`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
+| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `SnapshotManifest`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotsDir`, `SnapshotDir`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot` |
+| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecPort`, `ExecPortForName`, `ExecReadinessSignal`, `Create`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `Clone`, `ReadLogs`, `ReadEvents`, `EventsPath`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `Snapshot`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check` |
@@ -194,6 +194,9 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
 | `workspace.Control` | Halt, quarantine, stop, kill, or delete a workspace |
+| `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place (Firecracker) |
+| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace (Firecracker) |
+| `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side) |
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
 | `workspace.ReadManifest` / `workspace.WriteManifest` | Manage workspace manifests directly |
 
@@ -300,6 +303,8 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent result` | `workspace.ResultStatus` |
 | `microagent ps` | `workspace.List` |
 | `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` / `microagent rm` | `workspace.Control` (one function, action picked via options) |
+| `microagent pause` / `microagent resume` | `workspace.Pause` / `workspace.Resume` |
+| `microagent snapshot` create / list / rm | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
 | `microagent apply` | `workspace.Apply` |
 | `microagent supervise` | `workspace.Supervise` |
 | `microagent connect` | `workspace.DialConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
