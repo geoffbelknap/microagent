@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
@@ -68,9 +69,45 @@ func resolveSecretsBundle(ctx context.Context, config *vmkit.Config) (secretxfer
 	return bundle, nil
 }
 
-// serveSecretsListener accepts guest connections and serves the resolved bundle
-// to each. It runs for the workspace lifetime (the path sub-project #4 reuses).
-func serveSecretsListener(listener net.Listener, bundle secretxfer.Bundle) {
+// secretsServer serves the materialized bundle (empty-name requests, #2) and
+// resolves on-demand secrets by name (lazy, per request). It optionally appends
+// an audit record per access.
+type secretsServer struct {
+	runtimeID string
+	stateDir  string
+	bundle    secretxfer.Bundle
+	onDemand  map[string]string // name -> reference
+	registry  *secret.Registry
+	audit     bool
+}
+
+func newSecretsServer(runtimeID, stateDir string, bundle secretxfer.Bundle, onDemand map[string]string, audit bool) *secretsServer {
+	return &secretsServer{
+		runtimeID: runtimeID,
+		stateDir:  stateDir,
+		bundle:    bundle,
+		onDemand:  onDemand,
+		registry: secret.DefaultRegistry(os.Getenv, func(msg string) {
+			fmt.Fprintln(os.Stderr, "warning: "+msg)
+		}),
+		audit: audit,
+	}
+}
+
+func (s *secretsServer) record(name, access, result string) {
+	if !s.audit {
+		return
+	}
+	_ = secretxfer.AppendAccessRecord(secretxfer.AccessLogPath(s.stateDir, s.runtimeID), secretxfer.AccessRecord{
+		At:        time.Now().UTC().Format(time.RFC3339Nano),
+		RuntimeID: s.runtimeID,
+		Name:      name,
+		Access:    access,
+		Result:    result,
+	})
+}
+
+func (s *secretsServer) serve(listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -78,7 +115,59 @@ func serveSecretsListener(listener net.Listener, bundle secretxfer.Bundle) {
 		}
 		go func(c net.Conn) {
 			defer c.Close()
-			_ = secretxfer.ServeBundle(c, c, bundle)
+			s.handle(c)
 		}(conn)
 	}
+}
+
+func (s *secretsServer) handle(conn net.Conn) {
+	var req secretxfer.Request
+	if err := secretxfer.DecodeMessage(conn, &req); err != nil {
+		return
+	}
+	if req.ProtocolVersion != secretxfer.ProtocolVersion {
+		return
+	}
+	if req.Name == "" {
+		// Materialized bundle (boot delivery, #2).
+		for _, e := range s.bundle.Secrets {
+			s.record(e.Name, "materialize", "ok")
+		}
+		bundle := s.bundle
+		bundle.ProtocolVersion = secretxfer.ProtocolVersion
+		_ = secretxfer.EncodeMessage(conn, bundle)
+		return
+	}
+	ref, ok := s.onDemand[req.Name]
+	if !ok {
+		s.record(req.Name, "on-demand", "denied")
+		_ = secretxfer.EncodeMessage(conn, secretxfer.GetResponse{
+			ProtocolVersion: secretxfer.ProtocolVersion,
+			Name:            req.Name,
+			Error:           "secret is not declared on-demand",
+		})
+		return
+	}
+	value, err := s.registry.Resolve(context.Background(), ref)
+	if err != nil {
+		s.record(req.Name, "on-demand", "error")
+		_ = secretxfer.EncodeMessage(conn, secretxfer.GetResponse{
+			ProtocolVersion: secretxfer.ProtocolVersion,
+			Name:            req.Name,
+			Error:           "resolve failed",
+		})
+		return
+	}
+	s.record(req.Name, "on-demand", "ok")
+	_ = secretxfer.EncodeMessage(conn, secretxfer.GetResponse{
+		ProtocolVersion: secretxfer.ProtocolVersion,
+		Name:            req.Name,
+		Value:           value,
+	})
+}
+
+// serveSecretsListener accepts guest connections and serves them via srv. It
+// runs for the workspace lifetime (the path sub-project #4 reuses).
+func serveSecretsListener(listener net.Listener, srv *secretsServer) {
+	srv.serve(listener)
 }

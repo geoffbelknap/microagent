@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/geoffbelknap/microagent/pkg/secret"
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 )
 
 func runSecret(ctx context.Context, args []string, stdout *os.File) error {
@@ -19,6 +20,8 @@ func runSecret(ctx context.Context, args []string, stdout *os.File) error {
 	switch args[0] {
 	case "check":
 		return runSecretCheck(ctx, args[1:], stdout)
+	case "audit":
+		return runSecretAudit(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown secret command: %s", args[0])
 	}
@@ -70,6 +73,39 @@ func runSecretCheck(ctx context.Context, args []string, stdout *os.File) error {
 	return nil
 }
 
+func runSecretAudit(args []string, stdout *os.File) error {
+	fs := flag.NewFlagSet("secret audit", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stateDir := fs.String("state-dir", defaultStateDir(), "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent secret audit <workspace>")
+	}
+	name := fs.Arg(0)
+	records, err := secretxfer.ReadAccessRecords(secretxfer.AccessLogPath(*stateDir, name))
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(records)
+	}
+	if len(records) == 0 {
+		fmt.Fprintln(stdout, "no secret accesses recorded")
+		return nil
+	}
+	for _, r := range records {
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", r.At, r.Name, r.Access, r.Result)
+	}
+	return nil
+}
+
 func writeSecretCheckLine(stdout *os.File, res secret.CheckResult) {
 	if !res.OK {
 		fmt.Fprintf(stdout, "%s\tFAILED\t%s\n", res.Name, res.Error)
@@ -91,6 +127,7 @@ resolves from an external manager.
 
 Commands:
   check NAME=<scheme>:<ref> [...]   Validate that references resolve
+  audit <workspace>                 Show the secret-access audit log
 
 Schemes:
   env:VAR                   Value from the CLI's environment (plaintext, warned)

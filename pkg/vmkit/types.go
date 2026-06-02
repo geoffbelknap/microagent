@@ -71,6 +71,11 @@ type Config struct {
 	// SecretEnvFiles are dotenv file paths whose KEY=VALUE pairs are loaded by
 	// the host at start (plaintext, warned). Only paths are persisted.
 	SecretEnvFiles []string `json:"secretEnvFiles,omitempty"`
+	// OnDemandSecrets are references the host resolves lazily, per fetch, and
+	// never materializes to the guest tmpfs.
+	OnDemandSecrets []SecretRef `json:"onDemandSecrets,omitempty"`
+	// SecretsAudit enables the per-workspace secret-access audit log.
+	SecretsAudit bool `json:"secretsAudit,omitempty"`
 	// GuestShellPort/GuestExecPort are the in-guest vsock ports for the shell
 	// and structured-exec services when they differ from the host-side ports
 	// (ShellPort/ExecPort). A fork resumes a guest that listens on the source's

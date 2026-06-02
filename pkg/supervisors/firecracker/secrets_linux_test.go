@@ -64,7 +64,7 @@ func TestServeSecretsListenerEndToEnd(t *testing.T) {
 		ProtocolVersion: secretxfer.ProtocolVersion,
 		Secrets:         []secretxfer.Entry{{Name: "API", Value: []byte("sekret")}},
 	}
-	go serveSecretsListener(ln, bundle)
+	go serveSecretsListener(ln, newSecretsServer("ws", t.TempDir(), bundle, nil, false))
 
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
@@ -100,7 +100,7 @@ func TestResolveAndServeLiveVault(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ln.Close() })
-	go serveSecretsListener(ln, bundle)
+	go serveSecretsListener(ln, newSecretsServer("ws", t.TempDir(), bundle, nil, false))
 	conn, err := net.Dial("unix", sock)
 	if err != nil {
 		t.Fatal(err)
@@ -165,5 +165,142 @@ func TestStartVsockListenersServesSecrets(t *testing.T) {
 	}
 	if len(got.Secrets) != 1 || string(got.Secrets[0].Value) != "sekret" {
 		t.Fatalf("unexpected bundle: %+v", got)
+	}
+}
+
+func TestOnDemandServeLiveVault(t *testing.T) {
+	if os.Getenv("VAULT_ADDR") == "" || os.Getenv("VAULT_TOKEN") == "" {
+		t.Skip("set VAULT_ADDR and VAULT_TOKEN (and write secret/app db) to run the live Vault check")
+	}
+	dir := t.TempDir()
+	srv := newSecretsServer("ws", dir, secretxfer.Bundle{ProtocolVersion: secretxfer.ProtocolVersion},
+		map[string]string{"DB": "vault:secret/data/app#db"}, true)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close(); client.Close() })
+	go srv.handle(server)
+	got, err := secretxfer.FetchOne(client, "DB")
+	if err != nil {
+		t.Fatalf("FetchOne: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("empty live value")
+	}
+	recs, _ := secretxfer.ReadAccessRecords(secretxfer.AccessLogPath(dir, "ws"))
+	if len(recs) != 1 || recs[0].Result != "ok" {
+		t.Fatalf("audit: %+v", recs)
+	}
+}
+
+func TestStartVsockListenersServesOnDemand(t *testing.T) {
+	t.Setenv("MA_OD_TOK", "on-demand-val")
+	dir := t.TempDir()
+	opts := Options{Name: "ws", StateDir: dir}
+	cfg := &vmkit.Config{
+		SecretsPort:     1026,
+		OnDemandSecrets: []vmkit.SecretRef{{Name: "DB", Ref: "env:MA_OD_TOK"}},
+		SecretsAudit:    true,
+		VsockListeners:  []vmkit.VsockListener{{Port: 1026, Target: secretsListenerTarget}},
+	}
+	set, err := startVsockListeners(opts, cfg)
+	if err != nil {
+		t.Fatalf("start listeners: %v", err)
+	}
+	defer set.Close()
+
+	conn, err := net.Dial("unix", firecrackerGuestVsockPath(opts, 1026))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	got, err := secretxfer.FetchOne(conn, "DB")
+	if err != nil {
+		t.Fatalf("FetchOne: %v", err)
+	}
+	if string(got) != "on-demand-val" {
+		t.Fatalf("value = %q", got)
+	}
+	recs, _ := secretxfer.ReadAccessRecords(secretxfer.AccessLogPath(dir, "ws"))
+	if len(recs) != 1 || recs[0].Name != "DB" {
+		t.Fatalf("audit not written: %+v", recs)
+	}
+}
+
+func TestSecretsServerGetByNameResolvesOnDemand(t *testing.T) {
+	t.Setenv("MA_OD_TOK", "on-demand-val")
+	dir := t.TempDir()
+	srv := newSecretsServer("ws", dir, secretxfer.Bundle{ProtocolVersion: secretxfer.ProtocolVersion},
+		map[string]string{"DB": "env:MA_OD_TOK"}, false)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close(); client.Close() })
+	go srv.handle(server)
+	got, err := secretxfer.FetchOne(client, "DB")
+	if err != nil {
+		t.Fatalf("FetchOne: %v", err)
+	}
+	if string(got) != "on-demand-val" {
+		t.Fatalf("value = %q", got)
+	}
+}
+
+func TestSecretsServerDeniesUndeclaredName(t *testing.T) {
+	srv := newSecretsServer("ws", t.TempDir(), secretxfer.Bundle{ProtocolVersion: secretxfer.ProtocolVersion}, map[string]string{}, false)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close(); client.Close() })
+	go srv.handle(server)
+	if _, err := secretxfer.FetchOne(client, "NOPE"); err == nil {
+		t.Fatal("expected denial for undeclared name")
+	}
+}
+
+func TestSecretsServerEmptyNameReturnsBundle(t *testing.T) {
+	bundle := secretxfer.Bundle{ProtocolVersion: secretxfer.ProtocolVersion, Secrets: []secretxfer.Entry{{Name: "API", Value: []byte("v")}}}
+	srv := newSecretsServer("ws", t.TempDir(), bundle, map[string]string{}, false)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close(); client.Close() })
+	go srv.handle(server)
+	got, err := secretxfer.FetchBundle(client)
+	if err != nil {
+		t.Fatalf("FetchBundle: %v", err)
+	}
+	if len(got.Secrets) != 1 || got.Secrets[0].Name != "API" {
+		t.Fatalf("bundle back-compat broken: %+v", got)
+	}
+}
+
+func TestSecretsServerAuditRecordsAccessNotValue(t *testing.T) {
+	t.Setenv("MA_OD_TOK", "super-secret")
+	dir := t.TempDir()
+	srv := newSecretsServer("ws", dir, secretxfer.Bundle{ProtocolVersion: secretxfer.ProtocolVersion},
+		map[string]string{"DB": "env:MA_OD_TOK"}, true)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close(); client.Close() })
+	go srv.handle(server)
+	if _, err := secretxfer.FetchOne(client, "DB"); err != nil {
+		t.Fatalf("FetchOne: %v", err)
+	}
+	recs, err := secretxfer.ReadAccessRecords(secretxfer.AccessLogPath(dir, "ws"))
+	if err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	if len(recs) != 1 || recs[0].Name != "DB" || recs[0].Access != "on-demand" || recs[0].Result != "ok" {
+		t.Fatalf("unexpected audit: %+v", recs)
+	}
+	if recs[0].RuntimeID != "ws" {
+		t.Fatalf("runtime id = %q", recs[0].RuntimeID)
+	}
+}
+
+func TestSecretsServerAuditOffWritesNothing(t *testing.T) {
+	t.Setenv("MA_OD_TOK", "v")
+	dir := t.TempDir()
+	srv := newSecretsServer("ws", dir, secretxfer.Bundle{ProtocolVersion: secretxfer.ProtocolVersion},
+		map[string]string{"DB": "env:MA_OD_TOK"}, false)
+	server, client := net.Pipe()
+	t.Cleanup(func() { server.Close(); client.Close() })
+	go srv.handle(server)
+	_, _ = secretxfer.FetchOne(client, "DB")
+	recs, _ := secretxfer.ReadAccessRecords(secretxfer.AccessLogPath(dir, "ws"))
+	if len(recs) != 0 {
+		t.Fatalf("audit should be empty when disabled, got %+v", recs)
 	}
 }

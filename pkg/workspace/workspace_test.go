@@ -249,6 +249,54 @@ func TestManifestPersistsSecretReferences(t *testing.T) {
 	}
 }
 
+func TestManifestPersistsOnDemandAndAudit(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.OnDemandSecrets = map[string]string{"DB": "vault:secret/data/app#db"}
+	opts.SecretsAudit = true
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(manifest.OnDemandSecrets) != 1 || manifest.OnDemandSecrets[0].Name != "DB" || !manifest.SecretsAudit {
+		t.Fatalf("on-demand/audit not persisted: %+v", manifest)
+	}
+	restored := OptionsFromManifest(opts, manifest)
+	if restored.OnDemandSecrets["DB"] != "vault:secret/data/app#db" || !restored.SecretsAudit {
+		t.Fatalf("OptionsFromManifest lost on-demand/audit: %+v", restored)
+	}
+}
+
+func TestRequestThreadsOnDemandAndAudit(t *testing.T) {
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = t.TempDir()
+	opts.Backend = vmkit.BackendFirecracker
+	opts.OnDemandSecrets = map[string]string{"DB": "env:X"}
+	opts.SecretsAudit = true
+	req := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.SecretsPort != DefaultSecretsPort {
+		t.Fatalf("SecretsPort = %d, want %d (on-demand should enable the port)", req.Config.SecretsPort, DefaultSecretsPort)
+	}
+	if len(req.Config.OnDemandSecrets) != 1 || req.Config.OnDemandSecrets[0].Ref != "env:X" || !req.Config.SecretsAudit {
+		t.Fatalf("on-demand/audit not threaded: %+v", req.Config)
+	}
+	found := false
+	for _, l := range req.Config.VsockListeners {
+		if l.Port == DefaultSecretsPort && l.Target == "secrets://serve" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("secrets listener missing for on-demand-only workspace: %+v", req.Config.VsockListeners)
+	}
+}
+
 func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"
