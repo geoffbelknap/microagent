@@ -77,12 +77,36 @@ microagent --json secret check DB=vault:secret/data/app#db_password
 ]
 ```
 
+## Delivery to the guest
+
+Declare secrets on `run`, `create`, or `start`:
+
+```text
+microagent run IMAGE --secret API_KEY=vault:secret/data/app#api_key
+microagent create --name app --secret API_KEY=env:CI_TOKEN --secrets-env-file /etc/app.env
+```
+
+- `--secret NAME=<scheme>:<ref>` (repeatable) and `--secrets-env-file PATH` are
+  stored in the workspace manifest as **references and paths — never values** —
+  and are **re-resolved on every start/resume**. `NAME` must be a safe
+  identifier (the shape of an environment-variable name).
+- At start the host resolves every reference (failing closed: an unresolved
+  reference aborts the start before the VM boots) and serves the resolved bundle
+  on a dedicated vsock port advertised to the guest via the kernel cmdline.
+- The guest mounts a **tmpfs at `/run/secrets`** (`0700`) and writes one file
+  per secret (`/run/secrets/<NAME>`, mode `0400`, value verbatim). Values never
+  touch the rootfs, the manifest, or any disk snapshot. If delivery fails the
+  guest aborts boot — a workload never runs without its declared secrets.
+- Backing credentials (`VAULT_TOKEN`, etc.) stay on the host; only resolved
+  values cross vsock, which is a host↔guest-only transport.
+
+`--secrets-stdin`, an on-demand fetch API, and snapshot purge/rehydrate are
+future work.
+
 ## Scope
 
-This command is the host-side resolution layer. Delivering resolved secrets into
-a workspace guest over vsock (a tmpfs `/run/secrets`, on-demand fetch, and
-snapshot purge/rehydrate) is built on top of this layer and is not part of
-`secret check`.
+`secret check` itself is the host-side resolution layer (it never delivers to a
+guest). The delivery described above is built on the same resolver.
 
 ## Related
 

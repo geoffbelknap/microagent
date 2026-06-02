@@ -80,6 +80,41 @@ func TestServeSecretsListenerEndToEnd(t *testing.T) {
 	}
 }
 
+// TestResolveAndServeLiveVault validates the full host path against a real Vault
+// when VAULT_ADDR/VAULT_TOKEN are set (run `vault server -dev` and
+// `vault kv put secret/app api_key=...` first). It is skipped otherwise, so CI
+// without Vault is unaffected.
+func TestResolveAndServeLiveVault(t *testing.T) {
+	if os.Getenv("VAULT_ADDR") == "" || os.Getenv("VAULT_TOKEN") == "" {
+		t.Skip("set VAULT_ADDR and VAULT_TOKEN (and write secret/app api_key) to run the live Vault check")
+	}
+	cfg := &vmkit.Config{Secrets: []vmkit.SecretRef{{Name: "API", Ref: "vault:secret/data/app#api_key"}}}
+	bundle, err := resolveSecretsBundle(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("resolve live vault: %v", err)
+	}
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "secrets.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go serveSecretsListener(ln, bundle)
+	conn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	got, err := secretxfer.FetchBundle(conn)
+	if err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+	if len(got.Secrets) != 1 || got.Secrets[0].Name != "API" || len(got.Secrets[0].Value) == 0 {
+		t.Fatalf("unexpected live bundle: %+v", got)
+	}
+}
+
 func TestStartVsockListenersSecretsSocketIsOwnerOnly(t *testing.T) {
 	t.Setenv("MA_TEST_TOK", "sekret")
 	dir := t.TempDir()
