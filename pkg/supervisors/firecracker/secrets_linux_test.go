@@ -168,6 +168,40 @@ func TestStartVsockListenersServesSecrets(t *testing.T) {
 	}
 }
 
+func TestStartVsockListenersServesOnDemand(t *testing.T) {
+	t.Setenv("MA_OD_TOK", "on-demand-val")
+	dir := t.TempDir()
+	opts := Options{Name: "ws", StateDir: dir}
+	cfg := &vmkit.Config{
+		SecretsPort:     1026,
+		OnDemandSecrets: []vmkit.SecretRef{{Name: "DB", Ref: "env:MA_OD_TOK"}},
+		SecretsAudit:    true,
+		VsockListeners:  []vmkit.VsockListener{{Port: 1026, Target: secretsListenerTarget}},
+	}
+	set, err := startVsockListeners(opts, cfg)
+	if err != nil {
+		t.Fatalf("start listeners: %v", err)
+	}
+	defer set.Close()
+
+	conn, err := net.Dial("unix", firecrackerGuestVsockPath(opts, 1026))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	got, err := secretxfer.FetchOne(conn, "DB")
+	if err != nil {
+		t.Fatalf("FetchOne: %v", err)
+	}
+	if string(got) != "on-demand-val" {
+		t.Fatalf("value = %q", got)
+	}
+	recs, _ := secretxfer.ReadAccessRecords(secretxfer.AccessLogPath(dir, "ws"))
+	if len(recs) != 1 || recs[0].Name != "DB" {
+		t.Fatalf("audit not written: %+v", recs)
+	}
+}
+
 func TestSecretsServerGetByNameResolvesOnDemand(t *testing.T) {
 	t.Setenv("MA_OD_TOK", "on-demand-val")
 	dir := t.TempDir()
