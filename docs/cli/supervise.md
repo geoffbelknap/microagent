@@ -54,10 +54,31 @@ requires `on-failure` or `always`. Probe forms:
 An unhealthy probe surfaces as a `failed` state in the supervise result, so the
 restart accounting (and `--max-restarts`) applies the same as an exit failure.
 
+## Survive host reboot
+
+`supervise` runs in the foreground and does not survive a host reboot. To keep a
+long-running workspace alive across reboots without microagent adding a
+persistent daemon, install an OS init unit that runs `supervise` at boot:
+
+```bash
+microagent supervise research --install     # write + register a boot unit
+microagent supervise research --uninstall   # remove it
+```
+
+`--install` writes a **systemd user unit** (`~/.config/systemd/user/microagent-supervise-<name>.service`)
+on Linux or a **launchd agent** (`~/Library/LaunchAgents/com.microagent.supervise.<name>.plist`)
+on macOS, then registers it for boot. The OS init — not microagent — supervises
+the workspace, so the no-daemon model is preserved. The workspace must already
+exist. If automatic registration can't run (for example, no active user init
+session), the unit file is still written and the CLI prints the manual enable
+command.
+
 ## Flags
 
 | Flag | Description |
 |---|---|
+| `--install` | Write and register a boot unit that supervises the workspace, then exit |
+| `--uninstall` | Remove the installed boot unit, then exit |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--backend <name>` | Backend identity override |

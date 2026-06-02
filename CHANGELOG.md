@@ -5,6 +5,12 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Added `supervise --install` / `--uninstall` to survive host reboot. `--install`
+  writes and registers an OS init unit (systemd user unit on Linux, launchd agent
+  on macOS) that runs `supervise <name>` at boot, so a long-running workspace
+  survives a reboot without microagent adding a persistent daemon. The unit file
+  is always written; if automatic registration can't run, the manual enable
+  command is reported. Backed by the new `pkg/superviseunit`.
 - Added user-defined named networks: `microagent network create/ls/rm`. A named
   network is a VM-independent record (new `pkg/network` registry at
   `<state-dir>/networks/index.json`) with an auto-allocated `/24` from
