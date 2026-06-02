@@ -100,6 +100,13 @@ func run() int {
 			return 127
 		}
 	}
+	if cfg.SecretsAPI && cfg.SecretsPort != 0 {
+		if err := serveSecretsAPI(secretsAPISock, cfg.SecretsPort); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 127
+		}
+		cfg.Env = append(cfg.Env, "MICROAGENT_SECRETS_SOCK="+secretsAPISock)
+	}
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
 	if err := mountDisks(cfg.Mounts); err != nil {
