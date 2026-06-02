@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -25,6 +25,34 @@ again.
 
 The policy comes from `microagent create --restart ...` or `restart:` in
 `microagent.yaml`.
+
+## Health checks
+
+By default `supervise` only restarts a workspace that exits — it cannot tell an
+alive-but-wedged guest from a healthy one. Declare a [`health`](/cli/spec/)
+probe in `microagent.yaml` to close that gap:
+
+```yaml
+restart: on-failure
+health:
+  exec: ["python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 1)"]
+  intervalSeconds: 15
+  retries: 3
+  startPeriodSeconds: 10
+```
+
+While the workspace runs, `supervise` probes it every `intervalSeconds` (after a
+`startPeriodSeconds` grace). After `retries` consecutive failures the workspace
+is force-killed and the restart policy restarts it — so health-based restart
+requires `on-failure` or `always`. Probe forms:
+
+- `exec` — a command run in the guest via structured exec (Firecracker only);
+  healthy on exit 0.
+- `httpGet` + `port` — a host-side GET against a published guest port; healthy
+  on a non-error status.
+
+An unhealthy probe surfaces as a `failed` state in the supervise result, so the
+restart accounting (and `--max-restarts`) applies the same as an exit failure.
 
 ## Flags
 

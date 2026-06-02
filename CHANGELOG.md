@@ -5,6 +5,12 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Added a `health:` block to the workspace spec and restart-on-unhealthy to
+  `supervise`. An exec probe (guest command, Firecracker) or httpGet probe
+  (host-side GET to a published port) runs while the workspace is running; after
+  `retries` consecutive failures the wedged VM is force-killed and the restart
+  policy (`on-failure`/`always`) restarts it. Closes the gap where supervise
+  only restarted on exit, not on alive-but-wedged.
 - Added `microagent init <name>` to scaffold a starter agent body project — a
   `microagent.yaml` spec, a provider-specific `body.py` (Anthropic, OpenAI, or
   Gemini via `--provider`), the shared `protocol.py`, and a runnable demo

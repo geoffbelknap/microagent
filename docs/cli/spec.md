@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-10_
+_Last updated: 2026-06-02_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is consumed by [`microagent create`](/cli/create/).
@@ -36,6 +36,12 @@ mediation:
   port: 2048
   target: 127.0.0.1:9900
   failClosed: true
+health:
+  exec: ["python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 1)"]
+  intervalSeconds: 15
+  timeoutSeconds: 2
+  retries: 3
+  startPeriodSeconds: 10
 disks:
   - name: workspace
     path: /tmp/workspace.ext4
@@ -92,6 +98,14 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `mediation.port` | Guest vsock port used by the Body |
 | `mediation.target` | Host address and port for the enforcer/orchestrator |
 | `mediation.failClosed` | Treats a required channel break as closed by default |
+| `health` | Liveness probe; an unhealthy workspace is restarted by [`supervise`](/cli/supervise/) under the restart policy |
+| `health.exec` | Probe command run in the guest (structured exec, Firecracker only); healthy on exit 0. Declare either `exec` or `httpGet` |
+| `health.httpGet` | Probe path for a host-side GET against a published guest port (e.g. `/healthz`); healthy on a non-error status |
+| `health.port` | Published guest port the `httpGet` probe targets |
+| `health.intervalSeconds` | Seconds between probes (default 30) |
+| `health.timeoutSeconds` | Per-probe timeout (default 5) |
+| `health.retries` | Consecutive failures before the workspace is considered unhealthy (default 3) |
+| `health.startPeriodSeconds` | Grace period after start before probing begins (default 0) |
 | `disks` | Existing ext4 disks to attach |
 | `bundles` | Tar bundles to build into ext4 disks and attach |
 | `outputs` | Declared output artifact paths inside the workspace |

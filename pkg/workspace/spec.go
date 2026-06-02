@@ -80,6 +80,13 @@ func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions)
 		}
 		opts.Mediation = &mediation
 	}
+	if spec.Health.Declared() {
+		health := NormalizeHealthCheck(spec.Health)
+		if err := ValidateHealthCheck(health); err != nil {
+			return err
+		}
+		opts.Health = health
+	}
 	if strings.TrimSpace(spec.Entrypoint) != "" {
 		opts.Entrypoint = spec.Entrypoint
 	}
