@@ -4,16 +4,17 @@ description: Declarative workspace network intent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
-Every workspace declares its network intent. Four modes:
+Every workspace declares its network intent. Five modes:
 
 | Mode | What it does |
 |---|---|
 | `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. |
 | `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
 | `isolated` | No guest network device. The guest has no network access at all. |
-| `bridged` | Workspace gets its own L2 presence on a host bridge. |
+| `bridged` | Workspace gets its own L2 presence on an existing host bridge. |
+| `named` | Workspace joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a shared managed bridge so members reach each other, and `/etc/hosts` name resolution. Firecracker/Linux only. |
 
 The implementation under each mode varies by backend. Quick matrix across all
 three backends:
@@ -195,6 +196,55 @@ network:
 
 The Windows backend fails closed if the named network cannot be found or if
 the current user cannot create HNS endpoints for HCS compute systems.
+
+## Named networks
+
+`bridged` mode attaches to a bridge *you* already created. A **named network**
+is microagent's own managed equivalent: declare it once, and any number of
+workspaces join it by name and become peers on a shared subnet. It is the
+in-boundary analog of a Docker user-defined network. Firecracker/Linux only —
+Apple VF's NAT attachment cannot share a subnet between VMs.
+
+Create the network (a VM-independent registry record, no host devices yet):
+
+```bash
+microagent network create devnet              # auto-allocated /24 from 10.44.0.0/16
+microagent network create devnet --subnet 10.44.50.0/24
+```
+
+Join workspaces with `--network-name` on `create`/`run`:
+
+```bash
+microagent create web --image docker.io/library/python:3.12 --network-name devnet
+microagent create db  --image docker.io/library/postgres:16 --network-name devnet
+microagent exec web -- ping db                # reach a peer by name
+```
+
+What joining does, realized by the Firecracker supervisor at start:
+
+- **Stable address.** Each member is allocated the lowest free host in the
+  network's subnet (the gateway is `.1`), persisted in the registry so the
+  address survives stop/start. Deleting a workspace frees its address.
+- **Shared bridge.** A managed Linux bridge (`mbr<hash>`) is created on demand
+  with the gateway address; each member's TAP is enslaved to it, so members are
+  on one L2 segment and reach each other directly. The bridge is reaped once the
+  last member stops — no orphan devices.
+- **Name resolution.** `/etc/hosts` is injected at boot from the current member
+  set via the kernel-cmdline → guest-init seam (`microagent_net_hosts`,
+  parallel to DNS). Outbound egress goes through the gateway with NAT, exactly
+  like `nat` mode.
+
+`/etc/hosts` is a **boot-time snapshot**: a member resolves peers that joined
+*before* it booted. Reachability by IP is always order-independent (it's L2);
+to refresh an earlier member's name table after newcomers join, restart it.
+Live cross-member name updates would need a guest agent and are intentionally
+out of scope for now.
+
+Host requirements match `nat`: `net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in
+the supervisor (run as root, or grant `cap_net_admin,cap_setpcap+ep`).
+`network rm` fails closed while members exist; pass `--force` to override. See
+[`network`](/cli/network/) for the full command surface and
+[Connect two workspaces](/recipes/connected-workspaces/) for a worked example.
 
 ## Mediation channel
 
