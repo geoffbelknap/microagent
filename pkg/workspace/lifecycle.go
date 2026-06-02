@@ -826,18 +826,20 @@ func WriteManifest(opts Options) error {
 		return err
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), Manifest{
-		Name:         opts.Name,
-		Profile:      opts.Profile,
-		Restart:      NormalizeRestartPolicy(opts.RestartPolicy),
-		Resources:    ResourcesFromOptions(opts),
-		Network:      NetworkSpecFromConfig(opts.Network),
-		Service:      strings.TrimSpace(opts.ServiceCommand),
-		ConsoleShell: strings.TrimSpace(opts.ConsoleShell),
-		Hostname:     strings.TrimSpace(opts.Hostname),
-		Mediation:    opts.Mediation,
-		Disks:        opts.Disks,
-		Artifacts:    ArtifactsFromOptions(opts),
-		Verification: opts.Verification,
+		Name:           opts.Name,
+		Profile:        opts.Profile,
+		Restart:        NormalizeRestartPolicy(opts.RestartPolicy),
+		Resources:      ResourcesFromOptions(opts),
+		Network:        NetworkSpecFromConfig(opts.Network),
+		Service:        strings.TrimSpace(opts.ServiceCommand),
+		ConsoleShell:   strings.TrimSpace(opts.ConsoleShell),
+		Hostname:       strings.TrimSpace(opts.Hostname),
+		Mediation:      opts.Mediation,
+		Disks:          opts.Disks,
+		Artifacts:      ArtifactsFromOptions(opts),
+		Verification:   opts.Verification,
+		Secrets:        secretRefsFromOptions(opts),
+		SecretEnvFiles: opts.SecretEnvFiles,
 	})
 }
 

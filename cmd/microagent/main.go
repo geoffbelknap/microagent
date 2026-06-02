@@ -28,6 +28,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/perf"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
@@ -2280,6 +2281,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var envVars multiFlag
 	fs.Var(&envVars, "env", "Guest environment variable KEY=VALUE")
 	fs.Var(&envVars, "e", "Guest environment variable KEY=VALUE")
+	var secretFlags multiFlag
+	fs.Var(&secretFlags, "secret", "Declare a secret NAME=<scheme>:<ref> (repeatable)")
+	var secretsEnvFile string
+	fs.StringVar(&secretsEnvFile, "secrets-env-file", "", "Load secrets from a dotenv file (plaintext, re-read each start)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2346,6 +2351,14 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.Env = mergeEnv(opts.Env, env)
+	secrets, err := parseSecretFlags(secretFlags)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.Secrets = secrets
+	if strings.TrimSpace(secretsEnvFile) != "" {
+		opts.SecretEnvFiles = []string{secretsEnvFile}
+	}
 	volumes, err := parseWorkspaceVolumes(volumeFlags)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -6164,6 +6177,31 @@ func parseEnvFlags(values []string) (map[string]string, error) {
 		env[key] = value
 	}
 	return env, nil
+}
+
+func parseSecretFlags(values []string) (map[string]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	secrets := make(map[string]string, len(values))
+	for _, raw := range values {
+		name, ref, ok := strings.Cut(raw, "=")
+		name = strings.TrimSpace(name)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("secret must be NAME=<scheme>:<ref>: %s", raw)
+		}
+		if !secretxfer.ValidName(name) {
+			return nil, fmt.Errorf("secret name is invalid: %s", name)
+		}
+		if strings.TrimSpace(ref) == "" {
+			return nil, fmt.Errorf("secret reference is empty for %s", name)
+		}
+		if _, dup := secrets[name]; dup {
+			return nil, fmt.Errorf("duplicate secret name: %s", name)
+		}
+		secrets[name] = ref
+	}
+	return secrets, nil
 }
 
 func validEnvName(key string) bool {

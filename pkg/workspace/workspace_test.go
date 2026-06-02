@@ -217,3 +217,58 @@ func TestApplyProfileAndRestartValidation(t *testing.T) {
 		t.Fatal("ValidateRestartPolicy accepted invalid policy")
 	}
 }
+
+func TestManifestPersistsSecretReferences(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.Secrets = map[string]string{"API": "vault:secret/data/app#api_key"}
+	opts.SecretEnvFiles = []string{"/etc/app.env"}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if len(manifest.Secrets) != 1 || manifest.Secrets[0].Name != "API" || manifest.Secrets[0].Ref != "vault:secret/data/app#api_key" {
+		t.Fatalf("secrets not persisted as references: %+v", manifest.Secrets)
+	}
+	if len(manifest.SecretEnvFiles) != 1 || manifest.SecretEnvFiles[0] != "/etc/app.env" {
+		t.Fatalf("env files not persisted: %+v", manifest.SecretEnvFiles)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "workspaces", "ws", "workspace.json"))
+	if strings.Contains(string(raw), "api_key\":\"") {
+		t.Fatal("manifest unexpectedly contains a resolved value")
+	}
+
+	restored := OptionsFromManifest(opts, manifest)
+	if restored.Secrets["API"] != "vault:secret/data/app#api_key" {
+		t.Fatalf("OptionsFromManifest lost secrets: %+v", restored.Secrets)
+	}
+}
+
+func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = t.TempDir()
+	opts.Backend = vmkit.BackendFirecracker
+	opts.Secrets = map[string]string{"API": "env:CI_TOKEN"}
+	req := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.SecretsPort != DefaultSecretsPort {
+		t.Fatalf("SecretsPort = %d, want %d", req.Config.SecretsPort, DefaultSecretsPort)
+	}
+	if len(req.Config.Secrets) != 1 || req.Config.Secrets[0].Ref != "env:CI_TOKEN" {
+		t.Fatalf("secrets not threaded into config: %+v", req.Config.Secrets)
+	}
+	found := false
+	for _, l := range req.Config.VsockListeners {
+		if l.Port == DefaultSecretsPort && l.Target == "secrets://serve" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("secrets vsock listener missing: %+v", req.Config.VsockListeners)
+	}
+}

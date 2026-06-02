@@ -1,6 +1,31 @@
 package vmkit
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestConfigSecretsJSONRoundTrip(t *testing.T) {
+	in := Config{
+		SecretsPort:    1026,
+		Secrets:        []SecretRef{{Name: "API_KEY", Ref: "vault:secret/data/app#api_key"}},
+		SecretEnvFiles: []string{"/etc/app.env"},
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out Config
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.SecretsPort != 1026 || len(out.Secrets) != 1 || out.Secrets[0].Name != "API_KEY" {
+		t.Fatalf("secrets did not round-trip: %+v", out)
+	}
+	if out.Secrets[0].Ref != "vault:secret/data/app#api_key" || len(out.SecretEnvFiles) != 1 {
+		t.Fatalf("secret ref/env-files did not round-trip: %+v", out)
+	}
+}
 
 func TestValidateConfigAppliesDefaults(t *testing.T) {
 	cfg := &Config{

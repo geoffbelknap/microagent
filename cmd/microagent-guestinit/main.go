@@ -39,6 +39,7 @@ type config struct {
 	HostForwards []hostForward `json:"hostForwards,omitempty"`
 	ShellPort    uint16        `json:"shellPort,omitempty"`
 	ExecPort     uint16        `json:"execPort,omitempty"`
+	SecretsPort  uint16        `json:"secretsPort,omitempty"`
 	ConsoleShell string        `json:"consoleShell,omitempty"`
 	Hostname     string        `json:"hostname,omitempty"`
 }
@@ -91,6 +92,12 @@ func run() int {
 	if err := applyKernelConfigOverrides(&cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
+	}
+	if cfg.SecretsPort != 0 {
+		if err := fetchAndWriteSecrets(cfg.SecretsPort); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 127
+		}
 	}
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
@@ -1033,6 +1040,13 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 			return fmt.Errorf("microagent_exec_port must be a positive uint16")
 		}
 		cfg.ExecPort = port
+	}
+	if raw := values["microagent_secrets_port"]; strings.TrimSpace(raw) != "" {
+		port, err := parseUint16(raw)
+		if err != nil || port == 0 {
+			return fmt.Errorf("microagent_secrets_port must be a positive uint16")
+		}
+		cfg.SecretsPort = port
 	}
 	return nil
 }

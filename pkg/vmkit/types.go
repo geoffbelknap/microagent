@@ -43,6 +43,14 @@ type Identity struct {
 	HomeHash  string        `json:"homeHash,omitempty"`
 }
 
+// SecretRef declares a secret by name and a scheme-prefixed reference (e.g.
+// "vault:secret/data/app#api_key"). References name sources, never values, and
+// are safe to persist; the host resolves them at start and never stores values.
+type SecretRef struct {
+	Name string `json:"name"`
+	Ref  string `json:"ref"`
+}
+
 type Config struct {
 	KernelPath     string           `json:"kernelPath"`
 	RootfsPath     string           `json:"rootfsPath"`
@@ -55,6 +63,14 @@ type Config struct {
 	Network        *NetworkConfig   `json:"network,omitempty"`
 	ShellPort      uint16           `json:"shellPort,omitempty"`
 	ExecPort       uint16           `json:"execPort,omitempty"`
+	// SecretsPort is the host vsock port the guest connects to at boot to fetch
+	// resolved secrets. Zero means no secrets are delivered.
+	SecretsPort uint32 `json:"secretsPort,omitempty"`
+	// Secrets are scheme-prefixed references resolved by the host at start.
+	Secrets []SecretRef `json:"secrets,omitempty"`
+	// SecretEnvFiles are dotenv file paths whose KEY=VALUE pairs are loaded by
+	// the host at start (plaintext, warned). Only paths are persisted.
+	SecretEnvFiles []string `json:"secretEnvFiles,omitempty"`
 	// GuestShellPort/GuestExecPort are the in-guest vsock ports for the shell
 	// and structured-exec services when they differ from the host-side ports
 	// (ShellPort/ExecPort). A fork resumes a guest that listens on the source's

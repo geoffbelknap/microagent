@@ -845,6 +845,9 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	if config != nil && config.ExecPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_exec_port=%d", config.ExecPort))
 	}
+	if config != nil && config.SecretsPort != 0 {
+		args = append(args, fmt.Sprintf("microagent_secrets_port=%d", config.SecretsPort))
+	}
 	if (networkMode(config) == "nat" || networkMode(config) == "user") && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
 		args = append(args,
 			"microagent_net_if=eth0",
@@ -1910,6 +1913,38 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 	}
 	set := &vsockListenerSet{}
 	for _, listener := range config.VsockListeners {
+		if listener.Target == secretsListenerTarget {
+			bundle, err := resolveSecretsBundle(context.Background(), config)
+			if err != nil {
+				set.Close()
+				return nil, fmt.Errorf("resolve secrets: %w", err)
+			}
+			path := firecrackerGuestVsockPath(opts, listener.Port)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				set.Close()
+				return nil, err
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				set.Close()
+				return nil, err
+			}
+			unixListener, err := net.Listen("unix", path)
+			if err != nil {
+				set.Close()
+				return nil, fmt.Errorf("listen secrets vsock port %d: %w", listener.Port, err)
+			}
+			// The secrets socket carries the plaintext bundle, so restrict it to
+			// the owner (firecracker runs as the same user). Default socket perms
+			// are world-accessible.
+			if err := os.Chmod(path, 0o600); err != nil {
+				_ = unixListener.Close()
+				set.Close()
+				return nil, fmt.Errorf("restrict secrets vsock socket %d: %w", listener.Port, err)
+			}
+			set.listeners = append(set.listeners, unixListener)
+			go serveSecretsListener(unixListener, bundle)
+			continue
+		}
 		if !isAllowedVsockTarget(opts, listener.Target) {
 			set.Close()
 			return nil, fmt.Errorf("firecracker vsock listener %d target must be host:port or the workspace result path", listener.Port)
