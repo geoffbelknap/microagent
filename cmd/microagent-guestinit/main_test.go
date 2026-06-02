@@ -273,6 +273,20 @@ eth0 00000000 0140A8C0 0003 0 0 0 00000000 0 0 0
 	}
 }
 
+func TestApplyKernelConfigOverridesSecretsControlPort(t *testing.T) {
+	var cfg config
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "microagent_secrets_ctl_port=1028"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if cfg.SecretsControlPort != 1028 {
+		t.Fatalf("SecretsControlPort = %d, want 1028", cfg.SecretsControlPort)
+	}
+	var cfg2 config
+	if err := applyKernelConfigOverridesFromCmdline(&cfg2, "microagent_secrets_ctl_port=bad"); err == nil {
+		t.Fatal("expected error for non-numeric control port")
+	}
+}
+
 func TestApplyKernelConfigOverridesSecretsAPI(t *testing.T) {
 	var cfg config
 	if err := applyKernelConfigOverridesFromCmdline(&cfg, "microagent_secrets_port=1026 microagent_secrets_api=1"); err != nil {
