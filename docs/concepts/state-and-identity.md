@@ -4,7 +4,7 @@ description: Where workspace state lives and how identity flows through requests
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 microagent reports VM state changes as JSON events. Every request carries
 an identity block; every response carries an event block describing the
@@ -111,13 +111,19 @@ Lifecycle responses include an event:
 ```
 
 States cover the lifecycle: `unknown`, `prepared`, `starting`, `running`,
-`stopping`, `halted`, `quarantined`, `stopped`, and `failed`. `halted` means
-the workspace was cleanly stopped with disk state and identity preserved for a
-later `start`. `quarantined` means host-side network, mediation, and side
-effect paths were severed while preserving disk state and event history.
-`start` is disk-state resume from `prepared`, `halted`, `stopped`, or
-`failed`; `quarantined` must be explicitly halted, stopped, or killed before it
-can be started again.
+`paused`, `stopping`, `halted`, `quarantined`, `stopped`, and `failed`.
+`halted` means the workspace was cleanly stopped with disk state and identity
+preserved for a later `start`. `quarantined` means host-side network,
+mediation, and side effect paths were severed while preserving disk state and
+event history. `start` is disk-state resume from `prepared`, `halted`,
+`stopped`, or `failed`; `quarantined` must be explicitly halted, stopped, or
+killed before it can be started again.
+
+`paused` is memory state, not disk state: `pause` freezes a running
+workspace's vCPUs while preserving memory and disk, and `resume` thaws it back
+to `running` exactly where it left off (Firecracker; `exec`, `connect`, and
+`stats` are rejected while paused). This is distinct from `halt`, which
+discards memory and reboots from disk on the next `start`.
 Commands such as `kill` and `delete` still return lifecycle events, usually
 with state `stopped` and a `detail` field. Callers should treat these strings as
 the authoritative source of truth, not log scraping.
@@ -137,6 +143,9 @@ stateDiagram-v2
     running --> stopped     : stop / kill
     running --> quarantined : quarantine
     running --> failed      : runtime error
+
+    running --> paused      : pause
+    paused  --> running     : resume
 
     quarantined --> halted  : halt
     quarantined --> stopped : stop / kill

@@ -256,6 +256,8 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	}
 	host.ConsoleAvailable = true
 	host.ConsoleMode = "interactive"
+	host.PauseResumeAvailable = true
+	host.SnapshotAvailable = true
 	resp := vmkit.Response{
 		OK:      len(issues) == 0,
 		Backend: opts.Backend,
@@ -323,6 +325,8 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		}
 		resp.Host.ConsoleAvailable = true
 		resp.Host.ConsoleMode = "interactive"
+		resp.Host.PauseResumeAvailable = true
+		resp.Host.SnapshotAvailable = true
 	case vmkit.BackendWindowsHyperV:
 		if resp.Host.ConsoleMode == "" {
 			resp.Host.ConsoleMode = "unsupported"

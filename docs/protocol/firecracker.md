@@ -4,7 +4,7 @@ description: Linux backend lifecycle through the executable Go supervisor.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 The Firecracker backend uses the same executable supervisor protocol as Apple
 VF. The supervisor is packaged as `microagent-firecracker-supervisor`.
@@ -17,7 +17,10 @@ The supervisor:
 
 - validates `vmkit.Request`
 - writes `firecracker.json`
-- starts `firecracker --no-api --config-file ...`
+- starts `firecracker --api-sock ... --config-file ...` — the config file boots
+  the VM and the API socket stays open so pause/resume and snapshot can control
+  the running VM (a snapshot restore/fork instead launches with just the API
+  socket and loads the snapshot over it)
 - records runtime state and PID under `config.stateDir`
 - emits `vmkit.Response` lifecycle events
 - sends `SIGTERM` for `stop`, `SIGKILL` for `kill`, and does not signal the VM
@@ -46,8 +49,10 @@ Important files include:
 |---|---|
 | `runtime.json` | latest lifecycle state |
 | `firecracker.json` | generated Firecracker config |
+| `firecracker-api.sock` | Firecracker API socket for pause/resume/snapshot control |
 | `serial.log` | guest serial output |
 | `serial.in` | console input FIFO for running workspaces |
+| `snapshots/<tag>/` | snapshot artifacts: `vmstate`, `memory`, `rootfs.ext4`, `manifest.json` |
 | transient `magtap*` device | TAP created for `nat` or `bridged` mode and removed on quarantine/stop/kill/delete |
 
 Persistent workspace disks live under:
@@ -104,6 +109,33 @@ deleted on `quarantine`, `stop`, `kill`, or `delete`. Missing
 `network.interface`, a
 nonexistent interface, a non-bridge interface, missing permissions, or TAP
 setup failure all fail closed with explicit errors.
+
+## Pause/resume and snapshots
+
+Because the VM boots with its API socket open, the supervisor controls the
+running VM over it (`pauseResumeAvailable` and `snapshotAvailable` are `true` in
+Firecracker host reports):
+
+- `pause`/`resume` issue `PATCH /vm` (`Paused`/`Resumed`) and record `paused`/
+  `running`, keeping the VM process and host-side aux processes alive.
+- `snapshot` auto-pauses a running VM (recorded in the event history), issues
+  `PUT /snapshot/create`, copies the workspace `rootfs.ext4` while paused so
+  memory and disk are coherent, writes `manifest.json`, and resumes. An
+  already-paused workspace is snapshotted in place.
+- `start --from-snapshot <tag>` restores in place: it rolls the rootfs back to
+  the snapshot's copy, launches `firecracker --api-sock`, and `PUT
+  /snapshot/load` with `resume_vm`. The snapshot's baked kernel hash must match.
+- `create --from-snapshot <ws>:<tag>` forks a new workspace. Because a snapshot
+  bakes the source's vsock socket path, a fork launches Firecracker in a
+  per-fork mount namespace that bind-mounts the fork's directory over the
+  source's, takes its own host-side service ports (bridged to the guest's
+  snapshot ports), and remaps the restored network device with Firecracker
+  `network_overrides`. Concurrent networked forks use `user` mode (each fork in
+  its own pasta namespace); a `nat` fork is single-instance.
+
+Restoring or forking re-establishes host networking fresh: in-flight guest
+connections (outbound TCP, exec/shell/mediation vsock) reset and the guest body
+must reconnect.
 
 ## Quarantine
 

@@ -4,7 +4,7 @@ description: Backend-neutral agent runtime semantics shared by microagent backen
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 `microagent --json contract` is the JSON source for the shared runtime
 contract. Agent-runtime builders can depend on one set of semantics across
@@ -18,8 +18,8 @@ state, result, readiness, and diagnostic field shapes for supported commands:
 
 | Primitive | Contract |
 |---|---|
-| Lifecycle | `prepare`, `start`, `run`, `inspect`, `halt`, `quarantine`, `stop`, `kill`, `delete` |
-| States | `unknown` (zero/unobserved state), `prepared`, `starting`, `running`, `halted`, `quarantined`, `stopped`, `failed` |
+| Lifecycle | `prepare`, `start`, `run`, `inspect`, `halt`, `quarantine`, `pause`, `resume`, `snapshot`, `stop`, `kill`, `delete` |
+| States | `unknown` (zero/unobserved state), `prepared`, `starting`, `running`, `paused`, `halted`, `quarantined`, `stopped`, `failed` |
 | Readiness | `guestReady`, `shellReady`, `execReady`, `resultReady`, `mediationReady` |
 | Result | `identity`, `backend`, `resultPath`, `startedAt`, `completedAt`, `exitCode`, `stdout`, `stderr`, `error` |
 | Artifacts | `ingress`, `egress`; declared egress artifacts are retrievable by name without entering the workspace |
@@ -51,6 +51,30 @@ process PID while severing those host-side paths; another backend may use
 different mechanics, but the public state remains `quarantined`.
 Consumers must not treat `quarantined` as a normal stopped state. The workspace
 must be halted, stopped, or killed before `start` boots it again from disk.
+
+## Pause/resume and snapshots (capability-gated)
+
+`pause`, `resume`, and `snapshot` are memory-state primitives, distinct from
+the disk-state `halt`/`start`:
+
+- `pause` freezes a running workspace's vCPUs while preserving memory and disk
+  (state `paused`, `runtimeMayContinue: true`); `resume` thaws it back to
+  `running`. `exec`, `connect`, and `stats` are rejected while paused.
+- `snapshot` captures a memory-plus-disk checkpoint. `start --from-snapshot`
+  restores it in place (rollback); `create --from-snapshot` forks a new
+  workspace from it.
+
+These are capability-gated, not universal. A backend advertises support through
+`microagent --json host`: `pauseResumeAvailable` and `snapshotAvailable` are
+`true` on Firecracker and absent/false on Apple VF and Windows Hyper-V, which
+return a structured unsupported error for these commands (the same pattern as
+console input). The `paused` state and the commands stay in the backend-neutral
+contract so clients share one vocabulary; availability is per host.
+
+**Connection-reset contract:** restoring or forking a snapshot re-establishes
+host networking fresh, so in-flight guest connections — outbound TCP and live
+vsock sessions (exec/shell/mediation) — do not survive. The guest body must
+reconnect. Bridged networking is unsupported for snapshot/fork.
 
 ## Contract command
 
