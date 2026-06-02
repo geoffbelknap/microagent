@@ -181,13 +181,42 @@ func TestStructuredExecServiceRejectsInvalidRequest(t *testing.T) {
 	}
 }
 
-func TestStructuredExecServiceRejectsUnsupportedMode(t *testing.T) {
-	req := execRequest("true")
+func TestStructuredExecServiceStreamsOutput(t *testing.T) {
+	req := execRequest("sh", "-c", "echo out; echo err >&2")
 	req.Mode = execprotocol.ExecModeStream
-	result := roundTripStructuredExec(t, req)
+	stdout, stderr, result := roundTripStreamingExec(t, req)
+	assertExecStatus(t, result, execprotocol.ExecStatusExited)
+	assertExitCode(t, result, 0)
+	if string(stdout) != "out\n" {
+		t.Fatalf("streamed stdout = %q, want out newline", stdout)
+	}
+	if string(stderr) != "err\n" {
+		t.Fatalf("streamed stderr = %q, want err newline", stderr)
+	}
+	// In stream mode the terminal result carries status/exit, not the bytes.
+	if len(result.Stdout) != 0 || len(result.Stderr) != 0 {
+		t.Fatalf("stream result should not duplicate output: stdout=%q stderr=%q", result.Stdout, result.Stderr)
+	}
+}
+
+func TestStructuredExecServiceStreamsInvalidRequestAsResultFrame(t *testing.T) {
+	req := execprotocol.NewExecRequest(nil) // empty argv is invalid
+	req.Mode = execprotocol.ExecModeStream
+	_, _, result := roundTripStreamingExec(t, req)
 	assertExecStatus(t, result, execprotocol.ExecStatusFailedToStart)
-	if result.Error == nil || result.Error.Code != "unsupported_mode" {
-		t.Fatalf("error = %#v, want unsupported_mode", result.Error)
+	if result.Error == nil || result.Error.Code != "invalid_request" {
+		t.Fatalf("error = %#v, want invalid_request", result.Error)
+	}
+}
+
+func TestStructuredExecServiceStreamsNonzeroExit(t *testing.T) {
+	req := execRequest("sh", "-c", "printf partial; exit 3")
+	req.Mode = execprotocol.ExecModeStream
+	stdout, _, result := roundTripStreamingExec(t, req)
+	assertExecStatus(t, result, execprotocol.ExecStatusExited)
+	assertExitCode(t, result, 3)
+	if string(stdout) != "partial" {
+		t.Fatalf("streamed stdout = %q, want partial", stdout)
 	}
 }
 
@@ -267,6 +296,46 @@ func roundTripStructuredExec(t *testing.T, req execprotocol.ExecRequest) execpro
 		t.Fatal("stderr = nil, want empty or populated slice")
 	}
 	return result
+}
+
+// roundTripStreamingExec drives a stream-mode request and returns the
+// concatenated stdout/stderr chunk data and the terminal result.
+func roundTripStreamingExec(t *testing.T, req execprotocol.ExecRequest) ([]byte, []byte, execprotocol.ExecResult) {
+	t.Helper()
+	client, server := net.Pipe()
+	go func() {
+		handleStructuredExecConnection(server, structuredExecService{
+			env:              baseTestEnv(),
+			terminationGrace: 25 * time.Millisecond,
+			now:              time.Now,
+		})
+	}()
+	if err := execprotocol.EncodeMessage(client, req); err != nil {
+		t.Fatalf("EncodeMessage: %v", err)
+	}
+	var stdout, stderr []byte
+	var result execprotocol.ExecResult
+	for {
+		var msg execprotocol.ExecStreamMessage
+		if err := execprotocol.DecodeMessage(client, &msg); err != nil {
+			t.Fatalf("DecodeMessage: %v", err)
+		}
+		if err := msg.Validate(); err != nil {
+			t.Fatalf("invalid stream frame: %v", err)
+		}
+		switch msg.Kind {
+		case execprotocol.ExecStreamStdout:
+			stdout = append(stdout, msg.Data...)
+		case execprotocol.ExecStreamStderr:
+			stderr = append(stderr, msg.Data...)
+		case execprotocol.ExecStreamResult:
+			result = *msg.Result
+			if err := client.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				t.Fatalf("close client: %v", err)
+			}
+			return stdout, stderr, result
+		}
+	}
 }
 
 func execRequest(argv ...string) execprotocol.ExecRequest {

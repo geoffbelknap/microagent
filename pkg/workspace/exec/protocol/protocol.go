@@ -179,6 +179,73 @@ func (result ExecResult) Validate() error {
 	return nil
 }
 
+// ExecStreamKind tags a frame in a streaming exec response (Mode=stream).
+type ExecStreamKind string
+
+const (
+	ExecStreamStdout ExecStreamKind = "stdout"
+	ExecStreamStderr ExecStreamKind = "stderr"
+	ExecStreamResult ExecStreamKind = "result"
+)
+
+func (kind ExecStreamKind) Validate() error {
+	switch kind {
+	case ExecStreamStdout, ExecStreamStderr, ExecStreamResult:
+		return nil
+	default:
+		return fmt.Errorf("exec stream kind must be one of %q, %q, or %q, got %q", ExecStreamStdout, ExecStreamStderr, ExecStreamResult, kind)
+	}
+}
+
+// ExecStreamMessage is one frame of a streaming exec response. The server emits
+// zero or more stdout/stderr chunk frames as the command runs, then exactly one
+// result frame carrying the final ExecResult. In stream mode the result frame's
+// Stdout/Stderr are empty — those bytes were delivered as chunks — but
+// ExitCode, Status, timing, and the truncation flags are populated as usual.
+type ExecStreamMessage struct {
+	ProtocolVersion string         `json:"protocol_version"`
+	Kind            ExecStreamKind `json:"kind"`
+	Data            []byte         `json:"data,omitempty"`
+	Result          *ExecResult    `json:"result,omitempty"`
+}
+
+// NewExecStreamChunk builds a stdout/stderr chunk frame copying data.
+func NewExecStreamChunk(kind ExecStreamKind, data []byte) ExecStreamMessage {
+	return ExecStreamMessage{
+		ProtocolVersion: CurrentProtocolVersion,
+		Kind:            kind,
+		Data:            append([]byte(nil), data...),
+	}
+}
+
+// NewExecStreamResult builds the terminal result frame.
+func NewExecStreamResult(result ExecResult) ExecStreamMessage {
+	return ExecStreamMessage{
+		ProtocolVersion: CurrentProtocolVersion,
+		Kind:            ExecStreamResult,
+		Result:          &result,
+	}
+}
+
+func (msg ExecStreamMessage) Validate() error {
+	if msg.ProtocolVersion != "" && msg.ProtocolVersion != CurrentProtocolVersion {
+		return fmt.Errorf("unsupported exec protocol version %q", msg.ProtocolVersion)
+	}
+	if err := msg.Kind.Validate(); err != nil {
+		return err
+	}
+	if msg.Kind == ExecStreamResult {
+		if msg.Result == nil {
+			return fmt.Errorf("exec stream result frame requires a result")
+		}
+		return msg.Result.Validate()
+	}
+	if msg.Result != nil {
+		return fmt.Errorf("exec stream %q frame must not carry a result", msg.Kind)
+	}
+	return nil
+}
+
 type ExecError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

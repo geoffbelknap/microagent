@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -123,18 +124,39 @@ func handleStructuredExecConnection(conn execReadWriteCloser, service structured
 		_ = execprotocol.EncodeMessage(conn, execServiceErrorResult("invalid_request", "decode exec request", err.Error(), service.now))
 		return
 	}
+	if req.Mode == execprotocol.ExecModeStream {
+		handleStreamingExecConnection(conn, req, service)
+		return
+	}
 	result := handleStructuredExecRequest(req, service)
 	if err := execprotocol.EncodeMessage(conn, result); err != nil {
 		log.Printf("microagent-init: encode structured exec response: %v", err)
 	}
 }
 
+// handleStreamingExecConnection serves a stream-mode request: it always speaks
+// the frame protocol back, delivering errors and the terminal status as a result
+// frame so the streaming client decodes a uniform sequence.
+func handleStreamingExecConnection(conn execReadWriteCloser, req execprotocol.ExecRequest, service structuredExecService) {
+	sendResult := func(result execprotocol.ExecResult) {
+		if err := execprotocol.EncodeMessage(conn, execprotocol.NewExecStreamResult(result)); err != nil {
+			log.Printf("microagent-init: encode streaming exec result: %v", err)
+		}
+	}
+	if req.ProtocolVersion != "" && req.ProtocolVersion != execprotocol.CurrentProtocolVersion {
+		sendResult(execServiceErrorResult("unsupported_protocol_version", "unsupported exec protocol version", req.ProtocolVersion, service.now))
+		return
+	}
+	if err := req.Validate(); err != nil {
+		sendResult(execServiceErrorResult("invalid_request", "invalid exec request", err.Error(), service.now))
+		return
+	}
+	sendResult(executeStreamingExec(conn, req, service))
+}
+
 func handleStructuredExecRequest(req execprotocol.ExecRequest, service structuredExecService) execprotocol.ExecResult {
 	if req.ProtocolVersion != "" && req.ProtocolVersion != execprotocol.CurrentProtocolVersion {
 		return execServiceErrorResult("unsupported_protocol_version", "unsupported exec protocol version", req.ProtocolVersion, service.now)
-	}
-	if req.Mode == execprotocol.ExecModeStream {
-		return execServiceErrorResult("unsupported_mode", "streaming exec mode is reserved but not implemented", "", service.now)
 	}
 	if err := req.Validate(); err != nil {
 		return execServiceErrorResult("invalid_request", "invalid exec request", err.Error(), service.now)
@@ -214,6 +236,113 @@ func executeStructuredExec(req execprotocol.ExecRequest, service structuredExecS
 	result.StdoutTruncated = stdout.Truncated()
 	result.StderrTruncated = stderr.Truncated()
 	return result
+}
+
+// executeStreamingExec runs the command, emitting stdout/stderr as chunk frames
+// on conn as they arrive, and returns the terminal ExecResult. In stream mode
+// the returned result carries status/exit/timing/truncation but not the output
+// bytes — those were delivered as chunks.
+func executeStreamingExec(conn execReadWriteCloser, req execprotocol.ExecRequest, service structuredExecService) execprotocol.ExecResult {
+	started := service.now().UTC()
+	result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+	result.StartedAt = started.Format(time.RFC3339Nano)
+
+	var mu sync.Mutex
+	stdout := newExecStreamWriter(conn, &mu, execprotocol.ExecStreamStdout, execOutputLimit(req.OutputLimitBytesStdout))
+	stderr := newExecStreamWriter(conn, &mu, execprotocol.ExecStreamStderr, execOutputLimit(req.OutputLimitBytesStderr))
+	cmd := osexec.Command(req.Argv[0], req.Argv[1:]...)
+	cmd.Env = mergeExecEnv(service.env, req.Env)
+	if req.Cwd != "" {
+		cmd.Dir = req.Cwd
+	}
+	if req.Stdin != nil {
+		cmd.Stdin = bytes.NewReader(req.Stdin)
+	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Start(); err != nil {
+		result.Status = execprotocol.ExecStatusFailedToStart
+		result.CompletedAt = service.now().UTC().Format(time.RFC3339Nano)
+		result.StdoutTruncated = stdout.Truncated()
+		result.StderrTruncated = stderr.Truncated()
+		result.Error = &execprotocol.ExecError{
+			Code:    "failed_to_start",
+			Message: "failed to start command",
+			Detail:  err.Error(),
+		}
+		return result
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	timeout := execTimeout(req.TimeoutMS)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-waitCh:
+		applyExecWaitResult(&result, err)
+	case <-timer.C:
+		terminateTimedOutProcess(cmd, waitCh, service.terminationGrace)
+		result.Status = execprotocol.ExecStatusTimedOut
+		result.ExitCode = nil
+	}
+
+	result.CompletedAt = service.now().UTC().Format(time.RFC3339Nano)
+	result.StdoutTruncated = stdout.Truncated()
+	result.StderrTruncated = stderr.Truncated()
+	return result
+}
+
+// execStreamWriter emits each Write as an exec stream chunk frame on a shared
+// connection (serialized by mu so stdout and stderr frames never interleave
+// mid-message), enforcing the same per-stream byte ceiling as the buffered path.
+type execStreamWriter struct {
+	conn      execReadWriteCloser
+	mu        *sync.Mutex
+	kind      execprotocol.ExecStreamKind
+	limit     int64
+	written   int64
+	truncated bool
+}
+
+func newExecStreamWriter(conn execReadWriteCloser, mu *sync.Mutex, kind execprotocol.ExecStreamKind, limit int64) *execStreamWriter {
+	return &execStreamWriter{conn: conn, mu: mu, kind: kind, limit: limit}
+}
+
+func (w *execStreamWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	chunk := p
+	if w.limit > 0 {
+		remaining := w.limit - w.written
+		if remaining <= 0 {
+			if n > 0 {
+				w.truncated = true
+			}
+			return n, nil
+		}
+		if int64(len(chunk)) > remaining {
+			chunk = chunk[:remaining]
+			w.truncated = true
+		}
+	}
+	if len(chunk) == 0 {
+		return n, nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := execprotocol.EncodeMessage(w.conn, execprotocol.NewExecStreamChunk(w.kind, chunk)); err != nil {
+		return n, err
+	}
+	w.written += int64(len(chunk))
+	return n, nil
+}
+
+func (w *execStreamWriter) Truncated() bool {
+	return w.truncated
 }
 
 func execTimeout(timeoutMS int64) time.Duration {

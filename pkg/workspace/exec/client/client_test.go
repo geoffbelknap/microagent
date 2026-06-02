@@ -40,6 +40,49 @@ func TestClientExecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestClientExecStream(t *testing.T) {
+	addr, stop := startExecProtocolServer(t, func(conn net.Conn) {
+		var req protocol.ExecRequest
+		if err := protocol.DecodeMessage(conn, &req); err != nil {
+			t.Errorf("DecodeMessage request: %v", err)
+			return
+		}
+		if req.Mode != protocol.ExecModeStream {
+			t.Errorf("mode = %q, want stream", req.Mode)
+		}
+		_ = protocol.EncodeMessage(conn, protocol.NewExecStreamChunk(protocol.ExecStreamStdout, []byte("out1")))
+		_ = protocol.EncodeMessage(conn, protocol.NewExecStreamChunk(protocol.ExecStreamStderr, []byte("err1")))
+		_ = protocol.EncodeMessage(conn, protocol.NewExecStreamChunk(protocol.ExecStreamStdout, []byte("out2")))
+		code := 0
+		result := protocol.NewExecResult(protocol.ExecStatusExited)
+		result.ExitCode = &code
+		_ = protocol.EncodeMessage(conn, protocol.NewExecStreamResult(result))
+	})
+	defer stop()
+
+	var stdout, stderr []byte
+	result, err := New(addr).ExecStream(context.Background(), protocol.NewExecRequest([]string{"echo", "hi"}), func(kind protocol.ExecStreamKind, data []byte) {
+		switch kind {
+		case protocol.ExecStreamStdout:
+			stdout = append(stdout, data...)
+		case protocol.ExecStreamStderr:
+			stderr = append(stderr, data...)
+		}
+	})
+	if err != nil {
+		t.Fatalf("ExecStream: %v", err)
+	}
+	if string(stdout) != "out1out2" {
+		t.Fatalf("stdout = %q, want out1out2", stdout)
+	}
+	if string(stderr) != "err1" {
+		t.Fatalf("stderr = %q, want err1", stderr)
+	}
+	if result.Status != protocol.ExecStatusExited || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestClientExecDialFailure(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -58,6 +58,7 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	fs.Var(&envFlags, "env", "Environment variable KEY=VALUE")
 	fs.Var(&envFlags, "e", "Environment variable KEY=VALUE")
 	cwd := fs.String("cwd", "", "Working directory inside the workspace")
+	stream := fs.Bool("stream", false, "Stream stdout/stderr incrementally as the command runs")
 	fs.DurationVar(&timeout, "timeout", 0, "Command timeout")
 	fs.StringVar(&stdinPath, "stdin", "", "Read command stdin from path, or '-' for stdin")
 	fs.Int64Var(&stdoutLimit, "stdout-limit", stdoutLimit, "Stdout output limit in bytes")
@@ -91,7 +92,14 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	result, err := workspace.Exec(ctx, workspace.Options{Name: workspaceName, StateDir: stateDir}, req)
+	opts := workspace.Options{Name: workspaceName, StateDir: stateDir}
+	// Streaming delivers stdout/stderr incrementally to the terminal. AX mode
+	// must emit one structured JSON envelope, so it always uses the buffered
+	// path; --stream applies to human output.
+	if *stream && currentOutputMode() != outputModeAX {
+		return runStreamingExec(ctx, opts, req, stdout, stderr)
+	}
+	result, err := workspace.Exec(ctx, opts, req)
 	if err != nil {
 		if currentOutputMode() == outputModeAX {
 			if writeErr := writeAXErrorTo(stdout, err); writeErr != nil {
@@ -117,6 +125,31 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	}
 	if result.StderrTruncated {
 		fmt.Fprintf(stderr, "[microagent: stderr truncated at %d bytes]\n", len(result.Stderr))
+	}
+	exitCode := structuredExecUXExitCode(result)
+	if exitCode != 0 {
+		return cliExitError{Code: exitCode, Silent: true}
+	}
+	return nil
+}
+
+func runStreamingExec(ctx context.Context, opts workspace.Options, req execprotocol.ExecRequest, stdout *os.File, stderr io.Writer) error {
+	result, err := workspace.ExecStream(ctx, opts, req, func(kind execprotocol.ExecStreamKind, data []byte) {
+		switch kind {
+		case execprotocol.ExecStreamStdout:
+			_, _ = stdout.Write(data)
+		case execprotocol.ExecStreamStderr:
+			_, _ = stderr.Write(data)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if result.StdoutTruncated {
+		fmt.Fprintf(stderr, "[microagent: stdout truncated at the output limit]\n")
+	}
+	if result.StderrTruncated {
+		fmt.Fprintf(stderr, "[microagent: stderr truncated at the output limit]\n")
 	}
 	exitCode := structuredExecUXExitCode(result)
 	if exitCode != 0 {
@@ -184,6 +217,7 @@ Options:
   -env KEY=VALUE        Environment variable for the command
   -e KEY=VALUE          Environment variable for the command
   -cwd <path>           Working directory inside the workspace
+  -stream               Stream stdout/stderr incrementally (human output)
   -timeout <duration>   Command timeout, e.g. 30s or 5m
   -stdin <path|- >      Read command stdin from a file or stdin
   -stdout-limit <bytes> Stdout output limit in bytes

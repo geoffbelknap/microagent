@@ -26,34 +26,57 @@ const ExecReadyWait = 5 * time.Second
 var execReadinessProbe = ExecReadinessSignal
 
 func Exec(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
-	if err := ValidateName(opts.Name); err != nil {
-		return execprotocol.ExecResult{}, err
-	}
-	state, _, err := LatestStartState(opts.StateDir, opts.Name)
+	addr, err := execDialAddr(ctx, opts)
 	if err != nil {
 		return execprotocol.ExecResult{}, err
 	}
+	return execclient.New(addr).Exec(ctx, req)
+}
+
+// ExecStream runs req against the workspace's structured exec service in
+// streaming mode. onChunk, when non-nil, is invoked for each stdout and stderr
+// chunk as it arrives. It returns the final ExecResult; in stream mode the
+// result's Stdout/Stderr are empty (delivered as chunks) but status, exit code,
+// timing, and truncation flags are populated.
+func ExecStream(ctx context.Context, opts Options, req execprotocol.ExecRequest, onChunk func(kind execprotocol.ExecStreamKind, data []byte)) (execprotocol.ExecResult, error) {
+	addr, err := execDialAddr(ctx, opts)
+	if err != nil {
+		return execprotocol.ExecResult{}, err
+	}
+	return execclient.New(addr).ExecStream(ctx, req, onChunk)
+}
+
+// execDialAddr validates that the workspace is running with a reachable
+// structured exec service, gates on readiness, and returns the dial address.
+func execDialAddr(ctx context.Context, opts Options) (string, error) {
+	if err := ValidateName(opts.Name); err != nil {
+		return "", err
+	}
+	state, _, err := LatestStartState(opts.StateDir, opts.Name)
+	if err != nil {
+		return "", err
+	}
 	if state == "" {
-		return execprotocol.ExecResult{}, WorkspaceNotFoundError{Name: opts.Name}
+		return "", WorkspaceNotFoundError{Name: opts.Name}
 	}
 	if state == vmkit.StatePaused {
-		return execprotocol.ExecResult{}, fmt.Errorf("workspace %s is paused; resume it first", opts.Name)
+		return "", fmt.Errorf("workspace %s is paused; resume it first", opts.Name)
 	}
 	if state != vmkit.StateRunning {
-		return execprotocol.ExecResult{}, fmt.Errorf("workspace %s is not running; structured exec is unavailable in state %s", opts.Name, state)
+		return "", fmt.Errorf("workspace %s is not running; structured exec is unavailable in state %s", opts.Name, state)
 	}
 	runtimeState, err := ReadRuntimeState(opts)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return execprotocol.ExecResult{}, fmt.Errorf("workspace %s runtime state is missing; structured exec is unavailable", opts.Name)
+			return "", fmt.Errorf("workspace %s runtime state is missing; structured exec is unavailable", opts.Name)
 		}
-		return execprotocol.ExecResult{}, err
+		return "", err
 	}
 	if runtimeState.Event.Identity.Backend != vmkit.BackendFirecracker {
-		return execprotocol.ExecResult{}, fmt.Errorf("structured exec is unsupported for backend %s", runtimeState.Event.Identity.Backend)
+		return "", fmt.Errorf("structured exec is unsupported for backend %s", runtimeState.Event.Identity.Backend)
 	}
 	if runtimeState.Config.ExecPort == 0 {
-		return execprotocol.ExecResult{}, fmt.Errorf("workspace %s has no structured exec port in runtime state", opts.Name)
+		return "", fmt.Errorf("workspace %s has no structured exec port in runtime state", opts.Name)
 	}
 	// Gate on readiness before issuing the command so the post-start window
 	// where the guest exec service is not yet listening does not surface as a
@@ -61,8 +84,7 @@ func Exec(ctx context.Context, opts Options, req execprotocol.ExecRequest) (exec
 	// caller's command is still issued exactly once, after the service answers
 	// (or the grace elapses, in which case the real attempt surfaces the error).
 	waitForExecReady(ctx, runtimeState, ExecReadyWait)
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(runtimeState.Config.ExecPort)))
-	return execclient.New(addr).Exec(ctx, req)
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(int(runtimeState.Config.ExecPort))), nil
 }
 
 // waitForExecReady polls the structured-exec readiness probe until it reports

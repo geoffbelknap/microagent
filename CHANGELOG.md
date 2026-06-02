@@ -5,6 +5,11 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Implemented streaming structured exec (`exec --stream` / `workspace.ExecStream`).
+  The guest now delivers stdout/stderr as incremental chunk frames followed by a
+  terminal result frame, so long-running commands stream output live instead of
+  buffering until completion. AX mode keeps emitting a single structured
+  envelope. Previously `stream` mode was reserved but unimplemented.
 - Added a `health:` block to the workspace spec and restart-on-unhealthy to
   `supervise`. An exec probe (guest command, Firecracker) or httpGet probe
   (host-side GET to a published port) runs while the workspace is running; after
