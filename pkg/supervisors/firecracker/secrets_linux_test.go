@@ -80,6 +80,30 @@ func TestServeSecretsListenerEndToEnd(t *testing.T) {
 	}
 }
 
+func TestStartVsockListenersSecretsSocketIsOwnerOnly(t *testing.T) {
+	t.Setenv("MA_TEST_TOK", "sekret")
+	dir := t.TempDir()
+	opts := Options{Name: "ws", StateDir: dir}
+	cfg := &vmkit.Config{
+		SecretsPort:    1026,
+		Secrets:        []vmkit.SecretRef{{Name: "API", Ref: "env:MA_TEST_TOK"}},
+		VsockListeners: []vmkit.VsockListener{{Port: 1026, Target: secretsListenerTarget}},
+	}
+	set, err := startVsockListeners(opts, cfg)
+	if err != nil {
+		t.Fatalf("start listeners: %v", err)
+	}
+	defer set.Close()
+
+	info, err := os.Stat(firecrackerGuestVsockPath(opts, 1026))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("secrets socket mode = %v, want 0600 (owner-only; the bundle is plaintext)", info.Mode().Perm())
+	}
+}
+
 func TestStartVsockListenersServesSecrets(t *testing.T) {
 	t.Setenv("MA_TEST_TOK", "sekret")
 	dir := t.TempDir()
