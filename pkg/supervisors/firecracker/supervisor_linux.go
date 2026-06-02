@@ -1944,8 +1944,13 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 				set.Close()
 				return nil, fmt.Errorf("restrict secrets vsock socket %d: %w", listener.Port, err)
 			}
+			onDemand := make(map[string]string, len(config.OnDemandSecrets))
+			for _, ref := range config.OnDemandSecrets {
+				onDemand[ref.Name] = ref.Ref
+			}
+			srv := newSecretsServer(opts.Name, opts.StateDir, bundle, onDemand, config.SecretsAudit)
 			set.listeners = append(set.listeners, unixListener)
-			go serveSecretsListener(unixListener, bundle)
+			go serveSecretsListener(unixListener, srv)
 			continue
 		}
 		if !isAllowedVsockTarget(opts, listener.Target) {
