@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 | Command | Purpose |
 |---|---|
@@ -33,6 +33,7 @@ _Last updated: 2026-06-01_
 | [`events`](/cli/events/) | Show or stream the lifecycle event history |
 | [`stats`](/cli/stats/) | Show or stream workspace resource usage |
 | [`snapshot`](/cli/snapshot/) | Create, list, or remove workspace snapshots |
+| [`secret`](/cli/secret/) | Resolve and validate secret references |
 | [`connect`](/cli/connect/) | Open the workspace console |
 | [`exec`](/cli/exec/) | Run a structured command in a workspace |
 | [`profiles`](/cli/profiles/) | List exact named resource profiles |

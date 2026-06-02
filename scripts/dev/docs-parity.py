@@ -37,6 +37,7 @@ NESTED_HELP_COMMANDS = {
     "perf footprint",
     "perf steady",
     "serve mcp",
+    "secret check",
 }
 PUBLIC_GO_PACKAGES = {
     "github.com/geoffbelknap/microagent/pkg/diagnostics",

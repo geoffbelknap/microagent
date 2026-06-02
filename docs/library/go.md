@@ -317,6 +317,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent clone` | `workspace.Clone` |
 | `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
+| `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |
 | `microagent doctor` / `microagent host` | [`diagnostics.Check`](#diagnostics-api) |
 | `microagent contract` | `vmkit.NewRuntimeContract` |
 | `microagent kernel install` / `microagent kernel verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
