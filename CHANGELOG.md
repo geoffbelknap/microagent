@@ -5,6 +5,13 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Added user-defined named networks: `microagent network create/ls/rm`. A named
+  network is a VM-independent record (new `pkg/network` registry at
+  `<state-dir>/networks/index.json`) with an auto-allocated `/24` from
+  `10.44.0.0/16` (or an explicit `--subnet`) and a gateway. `rm` fails closed
+  while members exist unless `--force`. This is the registry foundation for
+  multi-workspace networking; joining workspaces and cross-VM connectivity +
+  name resolution are realized by the backend supervisor (follow-up).
 - Implemented streaming structured exec (`exec --stream` / `workspace.ExecStream`).
   The guest now delivers stdout/stderr as incremental chunk frames followed by a
   terminal result frame, so long-running commands stream output live instead of
