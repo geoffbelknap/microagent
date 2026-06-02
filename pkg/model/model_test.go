@@ -112,6 +112,26 @@ func TestPullDownloadsAndRecords(t *testing.T) {
 	}
 }
 
+func TestRemovePropagatesDeleteError(t *testing.T) {
+	dir := t.TempDir()
+	// Point OutputPath at a NON-EMPTY directory so os.Remove fails with a
+	// non-IsNotExist error (ENOTEMPTY) portably.
+	blobDir := filepath.Join(dir, "models", "blobs", "stuck.gguf")
+	if err := os.MkdirAll(filepath.Join(blobDir, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := Upsert(dir, Record{ModelRef: "hf.co/org/repo@main/stuck.gguf", OutputPath: blobDir}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Remove(dir, "hf.co/org/repo@main/stuck.gguf", true); err == nil {
+		t.Fatal("expected Remove to propagate non-IsNotExist delete error")
+	}
+	// Prune with deleteFiles=true must likewise propagate.
+	if _, err := Prune(dir, true); err == nil {
+		t.Fatal("expected Prune to propagate non-IsNotExist delete error")
+	}
+}
+
 func TestRemoveAndPrune(t *testing.T) {
 	dir := t.TempDir()
 	blob := ModelPath(dir, "hf.co/org/repo@main/m.gguf")

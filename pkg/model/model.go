@@ -257,6 +257,8 @@ func Remove(stateDir, ref string, deleteFiles bool) (PruneResult, error) {
 			if deleteFiles && m.OutputPath != "" {
 				if err := os.Remove(m.OutputPath); err == nil {
 					res.Deleted = append(res.Deleted, m)
+				} else if !os.IsNotExist(err) {
+					return PruneResult{}, err
 				}
 			}
 			continue
@@ -282,16 +284,26 @@ func Prune(stateDir string, deleteFiles bool) (PruneResult, error) {
 			res.Removed = append(res.Removed, m)
 			continue
 		}
-		if _, statErr := os.Stat(m.OutputPath); os.IsNotExist(statErr) {
-			res.Removed = append(res.Removed, m)
-			continue
+		if _, statErr := os.Stat(m.OutputPath); statErr != nil {
+			if os.IsNotExist(statErr) {
+				res.Removed = append(res.Removed, m)
+				continue
+			}
+			return PruneResult{}, statErr
 		}
 		if deleteFiles {
-			if err := os.Remove(m.OutputPath); err == nil {
+			err := os.Remove(m.OutputPath)
+			if err == nil {
 				res.Deleted = append(res.Deleted, m)
 				res.Removed = append(res.Removed, m)
 				continue
 			}
+			if !os.IsNotExist(err) {
+				return PruneResult{}, err
+			}
+			// File already gone: treat as removed.
+			res.Removed = append(res.Removed, m)
+			continue
 		}
 		kept = append(kept, m)
 	}
