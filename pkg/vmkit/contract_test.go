@@ -7,7 +7,7 @@ func TestRuntimeContractCoversBothBackends(t *testing.T) {
 	if !contains(contract.Backends, BackendAppleVF) || !contains(contract.Backends, BackendFirecracker) || !contains(contract.Backends, BackendWindowsHyperV) {
 		t.Fatalf("backends = %#v", contract.Backends)
 	}
-	for _, command := range []string{"prepare", "start", "run", "inspect", "halt", "quarantine", "stop", "kill", "delete"} {
+	for _, command := range []string{"prepare", "start", "run", "inspect", "halt", "quarantine", "pause", "resume", "snapshot", "stop", "kill", "delete"} {
 		if !contractHasItem(contract.Commands, command) {
 			t.Fatalf("contract missing command %q", command)
 		}

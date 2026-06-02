@@ -134,6 +134,8 @@ type HostSupport struct {
 	BinaryVersion           string `json:"binaryVersion,omitempty"`
 	KVMAvailable            bool   `json:"kvmAvailable,omitempty"`
 	VsockAvailable          bool   `json:"vsockAvailable,omitempty"`
+	PauseResumeAvailable    bool   `json:"pauseResumeAvailable,omitempty"`
+	SnapshotAvailable       bool   `json:"snapshotAvailable,omitempty"`
 	ConsoleAvailable        bool   `json:"consoleAvailable"`
 	ConsoleMode             string `json:"consoleMode,omitempty"`
 	UserNetworkingAvailable bool   `json:"userNetworkingAvailable,omitempty"`

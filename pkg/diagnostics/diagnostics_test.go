@@ -51,6 +51,9 @@ func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
 	if !resp.Host.GuestInitAvailable || resp.Host.GuestInitPath != "/usr/local/libexec/microagent-guestinit-amd64" {
 		t.Fatalf("guest init support = %#v", resp.Host)
 	}
+	if !resp.Host.PauseResumeAvailable || !resp.Host.SnapshotAvailable {
+		t.Fatalf("firecracker should advertise pause/resume and snapshot: %#v", resp.Host)
+	}
 }
 
 func TestCheckFirecrackerReportsMissingSupport(t *testing.T) {

@@ -4,7 +4,7 @@ description: The JSON request and response format used by backend supervisors.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 Backend supervisors speak a small JSON protocol: one request in, one response
 out. A request names a lifecycle command such as `prepare`, `start`, or `stop`.
@@ -101,6 +101,8 @@ consumers should treat it as closed by default.
 | `inspect` | Read latest state | identity and `config.stateDir` |
 | `halt` | Clean disk-preserving shutdown | identity and `config.stateDir` |
 | `quarantine` | Sever host-side network and mediation without stopping the guest | identity and `config.stateDir` |
+| `pause` / `resume` | Freeze/thaw a running workspace's vCPUs (Firecracker; capability-gated) | identity and `config.stateDir` |
+| `snapshot` | Capture a memory-plus-disk checkpoint (Firecracker; capability-gated) | identity, `config.stateDir`, and `tag` |
 | `stop` | Graceful stop | identity and `config.stateDir` |
 | `kill` | Hard stop | identity and `config.stateDir` |
 | `delete` | Remove backend runtime state | identity and `config.stateDir` |
@@ -256,12 +258,13 @@ Host responses use `host` instead of `event`.
 }
 ```
 
-Valid states are `unknown`, `prepared`, `starting`, `running`, `stopping`,
-`halted`, `quarantined`, `stopped`, and `failed`. `halted` is a terminal
-runtime state where the VM process is gone but the workspace disk, identity,
-and event history are preserved for a later `start`. `quarantined` preserves
-disk state and event history while severing host-side network, mediation, and
-side-effect paths.
+Valid states are `unknown`, `prepared`, `starting`, `running`, `paused`,
+`stopping`, `halted`, `quarantined`, `stopped`, and `failed`. `halted` is a
+terminal runtime state where the VM process is gone but the workspace disk,
+identity, and event history are preserved for a later `start`. `paused` keeps
+the VM process alive with its memory and disk frozen, resumable in place
+(Firecracker). `quarantined` preserves disk state and event history while
+severing host-side network, mediation, and side-effect paths.
 
 For the visual state machine - including which transitions `start`, `halt`, `quarantine`, `stop`, `kill`, and `delete` allow - see [State and identity](/concepts/state-and-identity/).
 
