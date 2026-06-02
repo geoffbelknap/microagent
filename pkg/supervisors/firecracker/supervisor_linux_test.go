@@ -1741,3 +1741,17 @@ func TestFirecrackerBootArgsIncludesSecretsPort(t *testing.T) {
 		t.Fatalf("boot args should omit secrets port when zero: %q", none)
 	}
 }
+
+func TestFirecrackerBootArgsIncludesSecretsAPI(t *testing.T) {
+	args := firecrackerBootArgs(&vmkit.Config{
+		SecretsPort:     1026,
+		OnDemandSecrets: []vmkit.SecretRef{{Name: "DB", Ref: "env:X"}},
+	})
+	if !strings.Contains(args, "microagent_secrets_api=1") {
+		t.Fatalf("boot args missing secrets api flag: %q", args)
+	}
+	none := firecrackerBootArgs(&vmkit.Config{SecretsPort: 1026})
+	if strings.Contains(none, "microagent_secrets_api") {
+		t.Fatalf("boot args should omit secrets api when no on-demand secrets: %q", none)
+	}
+}
