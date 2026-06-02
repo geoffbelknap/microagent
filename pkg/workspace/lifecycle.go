@@ -578,6 +578,110 @@ func SnapshotRemove(opts Options, tag string) error {
 	return vmkit.RemoveSnapshot(stateDir, opts.Name, tag)
 }
 
+// CreateFromSnapshot forks a new workspace from an existing workspace's
+// snapshot. It provisions a fresh identity whose disk is a copy of the
+// snapshot's rootfs, copies the snapshot into the new workspace so its restore
+// path is self-contained, and resumes it from that snapshot.
+//
+// Networking scope (intentional, revisit if needed): every fork resumes a guest
+// that keeps the snapshot's baked IP, so concurrent forks share one guest IP and
+// each fork's host-side networking must be isolated. user-mode (pasta) gives
+// each fork its own network namespace, so concurrent user-mode forks don't
+// collide — this is the supported path for forking with networking, and it's
+// what we validate. Firecracker "nat" mode runs tap+nftables in the shared host
+// network namespace, so concurrent nat forks would collide on the duplicated
+// guest IP/tap/rules; a nat fork is therefore single-instance and inherits nat's
+// CAP_NET_ADMIN requirement. Per-fork network namespaces for nat are
+// deliberately NOT built: it is a Linux/Firecracker-only edge case that user
+// mode already covers (and on Apple VF "user" and "nat" are the same per-VM
+// NAT), so it isn't worth the complexity now. It can be added if a concrete need
+// for concurrent nat forks appears.
+func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag string) (Result, error) {
+	if opts.Name == "" {
+		return Result{}, fmt.Errorf("create requires a name")
+	}
+	if err := ValidateName(opts.Name); err != nil {
+		return Result{}, err
+	}
+	if err := ValidateName(sourceWorkspace); err != nil {
+		return Result{}, fmt.Errorf("invalid source workspace %q: %w", sourceWorkspace, err)
+	}
+	if strings.TrimSpace(tag) == "" {
+		return Result{}, fmt.Errorf("snapshot tag is required")
+	}
+	if opts.StateDir == "" {
+		opts.StateDir = StateDir()
+	}
+	srcDir := vmkit.SnapshotDir(opts.StateDir, sourceWorkspace, tag)
+	manifest, err := vmkit.ReadSnapshotManifest(srcDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Result{}, fmt.Errorf("snapshot %q not found for workspace %s", tag, sourceWorkspace)
+		}
+		return Result{}, err
+	}
+	if manifest.MemoryMiB > 0 {
+		opts.MemoryMiB = manifest.MemoryMiB
+		opts.SpecMemory = true
+	}
+	if manifest.VCPUCount > 0 {
+		opts.CPUCount = manifest.VCPUCount
+		opts.SpecCPU = true
+	}
+	if strings.TrimSpace(manifest.NetworkMode) != "" {
+		// The resumed guest keeps the source's baked IP, so the fork configures
+		// its own tap/pasta (in its own namespace) with the source's addressing
+		// rather than deriving a fresh subnet from the fork's name.
+		opts.Network = vmkit.NetworkConfig{
+			Mode:    manifest.NetworkMode,
+			IP:      manifest.NetworkIP,
+			Gateway: manifest.NetworkGateway,
+			Subnet:  manifest.NetworkSubnet,
+		}
+	}
+	if opts.ImageRef == "" {
+		opts.ImageRef = manifest.ImageRef
+	}
+	// The resumed guest listens on the source's baked vsock service ports. The
+	// fork keeps its own unique host ports (name-derived) and bridges them to
+	// the source's guest ports, so concurrent forks don't collide on the host.
+	opts.GuestShellPort = manifest.ShellPort
+	opts.GuestExecPort = manifest.ExecPort
+	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureCanCreate(opts); err != nil {
+		return Result{}, err
+	}
+	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+		return Result{}, err
+	}
+	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsName), rootfsPath, 0o644); err != nil {
+		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
+	}
+	if err := WriteManifest(opts); err != nil {
+		return Result{}, err
+	}
+	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err != nil {
+		return Result{}, err
+	}
+	opts.FromSnapshot = tag
+	return Start(ctx, opts)
+}
+
+func copySnapshotInto(srcDir, dstDir string) error {
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return err
+	}
+	for _, name := range []string{vmkit.SnapshotVMStateName, vmkit.SnapshotMemoryName, vmkit.SnapshotRootfsName, vmkit.SnapshotManifestName} {
+		if err := CopyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name), 0o644); err != nil {
+			return fmt.Errorf("copy snapshot %s into fork: %w", name, err)
+		}
+	}
+	return nil
+}
+
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	req := buildRootfsRequest(opts, rootfsPath)

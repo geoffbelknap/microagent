@@ -55,8 +55,16 @@ type Config struct {
 	Network        *NetworkConfig   `json:"network,omitempty"`
 	ShellPort      uint16           `json:"shellPort,omitempty"`
 	ExecPort       uint16           `json:"execPort,omitempty"`
-	SerialInput    bool             `json:"serialInput,omitempty"`
-	TimeoutSeconds int              `json:"timeoutSeconds,omitempty"`
+	// GuestShellPort/GuestExecPort are the in-guest vsock ports for the shell
+	// and structured-exec services when they differ from the host-side ports
+	// (ShellPort/ExecPort). A fork resumes a guest that listens on the source's
+	// ports while taking its own unique host ports, so the forwarder bridges
+	// host ShellPort/ExecPort to these guest ports. Zero means the guest port
+	// equals the host port (the normal case).
+	GuestShellPort uint16 `json:"guestShellPort,omitempty"`
+	GuestExecPort  uint16 `json:"guestExecPort,omitempty"`
+	SerialInput    bool   `json:"serialInput,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
 }
 
 type Disk struct {

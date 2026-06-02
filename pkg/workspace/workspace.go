@@ -64,6 +64,8 @@ type Options struct {
 	ResultPort      uint32
 	ShellPort       uint16
 	ExecPort        uint16
+	GuestShellPort  uint16
+	GuestExecPort   uint16
 	Disks           []Disk
 	Outputs         []Output
 	VsockListeners  []vmkit.VsockListener
@@ -71,7 +73,7 @@ type Options struct {
 	KernelExplicit  bool
 	// FromSnapshot, when set, restores the workspace in place from this snapshot
 	// tag instead of booting fresh (start --from-snapshot).
-	FromSnapshot string
+	FromSnapshot    string
 	SpecMemory      bool
 	SpecCPU         bool
 	SpecSize        bool
@@ -756,6 +758,8 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			Network:        NetworkConfigPtr(opts.Network),
 			ShellPort:      ShellPort(opts),
 			ExecPort:       ExecPort(opts),
+			GuestShellPort: opts.GuestShellPort,
+			GuestExecPort:  opts.GuestExecPort,
 			SerialInput:    opts.SerialInput,
 			TimeoutSeconds: int(opts.Timeout.Seconds()),
 		},

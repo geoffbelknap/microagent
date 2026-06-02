@@ -4,11 +4,12 @@ description: Create a named, persistent workspace from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 ```text
 microagent create [--name <name>] --image <ref> [flags]
 microagent create <name> --image <ref> [flags]
+microagent create <name> --from-snapshot <workspace>:<tag> [flags]
 ```
 
 `create` builds a workspace and records it under `--state-dir`. Unlike
@@ -16,11 +17,33 @@ microagent create <name> --image <ref> [flags]
 and `delete` it later. If the default kernel is missing, `create` installs it
 first.
 
+## Fork from a snapshot
+
+`create <name> --from-snapshot <workspace>:<tag>` forks a new workspace from an
+existing workspace's [snapshot](/cli/snapshot/) instead of building from an
+image. The fork gets a fresh identity and a private copy of the snapshot's
+rootfs, then resumes from the snapshot's memory and device state.
+
+A Firecracker snapshot binds its vsock socket to the source workspace's path, so
+each fork runs Firecracker in a private mount namespace that maps the fork's own
+directory over the source's, and the fork takes its own host-side service ports
+while bridging them to the guest's snapshot ports. This is Firecracker-only; the
+snapshot kernel must match and bridged networking is unsupported. In-flight guest
+connections do not survive the fork — the guest body must reconnect.
+
+For forks with networking, use `user` mode (pasta): every fork resumes with the
+snapshot's recorded guest IP, and user-mode gives each fork its own network
+namespace, so any number of forks run concurrently without colliding. `nat`
+forks run in the shared host network namespace and inherit `nat`'s
+`CAP_NET_ADMIN` requirement, so a `nat` fork is single-instance — concurrent
+forks of a networked workspace should use `user` mode.
+
 ## Flags
 
 | Flag | Description |
 |---|---|
 | `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |
+| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image (Firecracker) |
 | `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
 | `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |

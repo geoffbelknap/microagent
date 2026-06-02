@@ -34,6 +34,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		return firecrackersupervisor.RunPortForwarder(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
 	}
+	if len(args) > 0 && args[0] == "--fork-mount-exec" {
+		return firecrackersupervisor.RunForkMountExec(args[1:])
+	}
 	if len(args) > 0 && args[0] == "--vsock-listener" {
 		fs := flag.NewFlagSet("vsock-listener", flag.ContinueOnError)
 		stateDir := fs.String("state-dir", "", "State directory")

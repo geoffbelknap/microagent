@@ -425,7 +425,17 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	if !loadMode {
 		launchArgs = append(launchArgs, "--config-file", configPath(opts))
 	}
-	cmd := exec.CommandContext(ctx, path, launchArgs...)
+	cmd, err := firecrackerLaunchCommand(ctx, opts, req, path, launchArgs, loadMode)
+	if err != nil {
+		cleanupTransientFirewallRules(firewallRules)
+		cleanupTransientNetworkDevices(networkDevices)
+		if serialInput != nil {
+			_ = serialInput.Close()
+		}
+		_ = serialLog.Close()
+		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+		return failedResponse(req, err.Error()), err
+	}
 	cmd.Stdout = serialLog
 	cmd.Stderr = serialLog
 	if serialInput != nil {
@@ -443,7 +453,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		return failedResponse(req, err.Error()), err
 	}
 	if loadMode {
-		if err := restoreFromSnapshot(ctx, opts, req.Tag); err != nil {
+		if err := restoreFromSnapshot(ctx, opts, req.Tag, snapshotNetworkOverrides(opts, req.Config)); err != nil {
 			_ = cmd.Process.Kill()
 			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
@@ -682,7 +692,7 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 type vmStateController interface {
 	patchVMState(ctx context.Context, state string) error
 	createSnapshot(ctx context.Context, snapshotPath, memFilePath string) error
-	loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool) error
+	loadSnapshot(ctx context.Context, snapshotPath, memFilePath string, resume bool, networkOverrides []networkOverride) error
 }
 
 var newVMStateController = func(socketPath string) vmStateController {
@@ -1838,9 +1848,9 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 			}
 			return fmt.Errorf("listen %s: %w", addr, err)
 		}
-		fmt.Fprintf(os.Stderr, "forward tcp %s to guest port %d via vsock port %d\n", addr, forward.GuestPort, forward.HostPort)
+		fmt.Fprintf(os.Stderr, "forward tcp %s to guest vsock port %d\n", addr, forward.GuestPort)
 		listeners = append(listeners, listener)
-		go servePortForward(listener, vsockSocketPath(opts), uint32(forward.HostPort))
+		go servePortForward(listener, vsockSocketPath(opts), uint32(forward.GuestPort))
 	}
 	<-ctx.Done()
 	for _, listener := range listeners {
@@ -1859,7 +1869,7 @@ func portForwarderForwards(config vmkit.Config) []vmkit.PortForward {
 			Protocol:  "tcp",
 			Host:      "127.0.0.1",
 			HostPort:  config.ShellPort,
-			GuestPort: config.ShellPort,
+			GuestPort: guestShellPort(config),
 		})
 	}
 	if config.ExecPort != 0 {
@@ -1867,10 +1877,27 @@ func portForwarderForwards(config vmkit.Config) []vmkit.PortForward {
 			Protocol:  "tcp",
 			Host:      "127.0.0.1",
 			HostPort:  config.ExecPort,
-			GuestPort: config.ExecPort,
+			GuestPort: guestExecPort(config),
 		})
 	}
 	return forwards
+}
+
+// guestShellPort and guestExecPort return the in-guest vsock port for the shell
+// and exec services, which differs from the host-side port only for a fork that
+// resumed a guest listening on the source's ports.
+func guestShellPort(config vmkit.Config) uint16 {
+	if config.GuestShellPort != 0 {
+		return config.GuestShellPort
+	}
+	return config.ShellPort
+}
+
+func guestExecPort(config vmkit.Config) uint16 {
+	if config.GuestExecPort != 0 {
+		return config.GuestExecPort
+	}
+	return config.ExecPort
 }
 
 type vsockListenerSet struct {
