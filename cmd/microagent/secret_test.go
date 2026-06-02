@@ -34,7 +34,7 @@ func runSecretCapture(t *testing.T, env map[string]string, args ...string) (stri
 }
 
 func TestSecretCheckTextReportsOKAndWarning(t *testing.T) {
-	out, err := runSecretCapture(t, map[string]string{"MY_TOK": "abcdef"}, "secret", "check", "API=env:MY_TOK")
+	out, err := runSecretCapture(t, map[string]string{"MY_TOK": "abcdef"}, "--text", "secret", "check", "API=env:MY_TOK")
 	if err != nil {
 		t.Fatalf("run error: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestSecretCheckTextReportsOKAndWarning(t *testing.T) {
 }
 
 func TestSecretCheckJSONFlag(t *testing.T) {
-	out, err := runSecretCapture(t, map[string]string{"MY_TOK": "abcdef"}, "secret", "check", "--json", "API=env:MY_TOK")
+	out, err := runSecretCapture(t, map[string]string{"MY_TOK": "abcdef"}, "--json", "secret", "check", "API=env:MY_TOK")
 	if err != nil {
 		t.Fatalf("run error: %v", err)
 	}
@@ -87,5 +87,15 @@ func TestSecretUnknownSubcommandErrors(t *testing.T) {
 	_, err := runSecretCapture(t, nil, "secret", "bogus")
 	if err == nil {
 		t.Fatal("expected error for unknown secret subcommand")
+	}
+}
+
+func TestSecretCheckHelpGoesToStdout(t *testing.T) {
+	out, err := runSecretCapture(t, nil, "secret", "check", "--help")
+	if err != nil {
+		t.Fatalf("run error: %v", err)
+	}
+	if !strings.Contains(out, "microagent secret") || !strings.Contains(out, "check NAME=") {
+		t.Fatalf("help not printed to stdout: %q", out)
 	}
 }

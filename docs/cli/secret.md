@@ -7,7 +7,7 @@ description: Resolve and validate secret references without writing secrets to d
 _Last updated: 2026-06-02_
 
 ```text
-microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...] [--json]
+microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]
 ```
 
 microagent is a **secret conduit, not a store**. It never owns secrets at rest:
@@ -43,13 +43,11 @@ Unknown schemes, references missing a scheme, and values that resolve empty all
 warning. It **never prints the secret value**. If any entry fails to resolve,
 the command exits non-zero so scripts can gate on it.
 
-## Flags
+## Output
 
-| Flag | Description |
-|---|---|
-| `--json` | Emit results as a JSON array |
-
-See [global flags](/cli/#global-flags) for `--mode ax`, which also forces JSON.
+Place the global `--json` flag before the subcommand for a JSON array; see
+[global flags](/cli/#global-flags). `--mode ax` (or piping to a non-terminal)
+also produces JSON.
 
 ## Examples
 
@@ -65,7 +63,7 @@ API	ok	source=env	bytes=40	warning: secret scheme "env" is plaintext: not encryp
 ```bash
 export VAULT_ADDR=https://vault.internal:8200
 export VAULT_TOKEN=...
-microagent secret check --json DB=vault:secret/data/app#db_password
+microagent --json secret check DB=vault:secret/data/app#db_password
 ```
 
 ```json

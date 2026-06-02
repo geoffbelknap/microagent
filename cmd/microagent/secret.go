@@ -25,9 +25,12 @@ func runSecret(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runSecretCheck(ctx context.Context, args []string, stdout *os.File) error {
+	if wantsHelp(args) {
+		printSecretHelp(stdout)
+		return nil
+	}
 	fs := flag.NewFlagSet("secret check", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	jsonOut := fs.Bool("json", false, "Emit results as JSON")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -50,7 +53,7 @@ func runSecretCheck(ctx context.Context, args []string, stdout *os.File) error {
 			allOK = false
 		}
 	}
-	if *jsonOut || currentOutputMode() == outputModeAX {
+	if outputJSON(stdout) {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(results); err != nil {
@@ -96,9 +99,8 @@ Schemes:
   vault:<mount>/data/<path>#<field>
                             HashiCorp Vault KV v2 (VAULT_ADDR / VAULT_TOKEN)
 
-Options:
-  --json                    Emit results as JSON
-
 check reports ok, source, and byte length and never prints the secret value.
+Use the global JSON flag before the subcommand for machine output:
+microagent --json secret check NAME=<scheme>:<ref>.
 `)
 }
