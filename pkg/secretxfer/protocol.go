@@ -51,6 +51,25 @@ type Bundle struct {
 	Secrets         []Entry `json:"secrets"`
 }
 
+// Control operations carried over the guest control channel.
+const (
+	OpPurge     = "purge"
+	OpRehydrate = "rehydrate"
+)
+
+// ControlRequest is a host->guest lifecycle signal (purge or rehydrate).
+type ControlRequest struct {
+	ProtocolVersion string `json:"protocol_version"`
+	Op              string `json:"op"`
+}
+
+// ControlResponse is the guest's ack for a ControlRequest.
+type ControlResponse struct {
+	ProtocolVersion string `json:"protocol_version"`
+	OK              bool   `json:"ok"`
+	Error           string `json:"error,omitempty"`
+}
+
 // EncodeMessage writes a 4-byte big-endian length prefix followed by JSON.
 func EncodeMessage(w io.Writer, msg any) error {
 	data, err := json.Marshal(msg)
