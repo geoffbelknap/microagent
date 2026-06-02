@@ -25,9 +25,21 @@ func writeFetchedSecrets(rw io.ReadWriter, root string) error {
 	return secretxfer.WriteSecrets(root, bundle)
 }
 
-// fetchAndWriteSecrets mounts a tmpfs at /run/secrets, dials the host secrets
-// port over vsock, and writes the bundle. Any failure is fatal to boot: a
-// workload must never run without its declared secrets.
+// dialAndWriteSecrets dials the host secrets port, fetches the bundle, and
+// writes it into root (no mount). Used for boot delivery and for rehydrate.
+func dialAndWriteSecrets(port uint16, root string) error {
+	fd, err := dialHostVsock(uint32(port), secretsConnectTimeout)
+	if err != nil {
+		return fmt.Errorf("connect secrets vsock port %d: %w", port, err)
+	}
+	conn := os.NewFile(uintptr(fd), "secrets-vsock")
+	defer conn.Close()
+	return writeFetchedSecrets(conn, root)
+}
+
+// fetchAndWriteSecrets mounts a tmpfs at /run/secrets and writes the bundle.
+// Any failure is fatal to boot: a workload must never run without its declared
+// secrets.
 func fetchAndWriteSecrets(port uint16) error {
 	if err := os.MkdirAll(secretsDir, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", secretsDir, err)
@@ -35,11 +47,5 @@ func fetchAndWriteSecrets(port uint16) error {
 	if err := unix.Mount("tmpfs", secretsDir, "tmpfs", 0, "mode=0700"); err != nil {
 		return fmt.Errorf("mount tmpfs at %s: %w", secretsDir, err)
 	}
-	fd, err := dialHostVsock(uint32(port), secretsConnectTimeout)
-	if err != nil {
-		return fmt.Errorf("connect secrets vsock port %d: %w", port, err)
-	}
-	conn := os.NewFile(uintptr(fd), "secrets-vsock")
-	defer conn.Close()
-	return writeFetchedSecrets(conn, secretsDir)
+	return dialAndWriteSecrets(port, secretsDir)
 }
