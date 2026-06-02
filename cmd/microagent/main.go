@@ -28,6 +28,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
+	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/perf"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
@@ -179,6 +180,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
+	}
+	if args[0] == "model" {
+		return runModel(args[1:], stdout)
 	}
 	if args[0] == "volume" {
 		return runVolume(ctx, args[1:], stdout)
@@ -1850,6 +1854,113 @@ members get a stable IP from the subnet, share a managed bridge, and resolve
 each other by name. Workspace attachment is currently implemented by
 Firecracker on Linux; Apple VF does not currently implement network.mode=named.
 `)
+}
+
+func runModel(args []string, stdout *os.File) error {
+	if wantsHelp(args) {
+		fmt.Fprintln(stdout, "usage: microagent model <pull|ls|rm|prune> ...")
+		return nil
+	}
+	if len(args) > 0 {
+		switch args[0] {
+		case "pull":
+			return runModelPull(args[1:], stdout)
+		case "ls", "list":
+			return runModelList(args[1:], stdout)
+		case "rm", "remove", "delete":
+			return runModelRemove(args[1:], stdout)
+		case "prune":
+			return runModelPrune(args[1:], stdout)
+		}
+	}
+	return fmt.Errorf("usage: microagent model <pull|ls|rm|prune> ...")
+}
+
+func runModelPull(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model pull", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	token := fs.String("token", "", "HuggingFace bearer token (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]")
+	}
+	record, err := model.Pull(context.Background(), model.PullOptions{StateDir: stateDir, ModelRef: fs.Arg(0), Token: *token})
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, record)
+	}
+	fmt.Fprintf(stdout, "Pulled %s (%d bytes, %s)\n", record.ModelRef, record.SizeBytes, record.Digest)
+	return nil
+}
+
+func runModelList(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model ls", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	list, err := model.List(stateDir)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, list)
+	}
+	for _, m := range list {
+		fmt.Fprintf(stdout, "%s\t%d\t%s\n", m.ModelRef, m.SizeBytes, m.Digest)
+	}
+	return nil
+}
+
+func runModelRemove(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model rm", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	keepFiles := fs.Bool("keep-files", false, "Remove the index entry but keep the blob on disk")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model rm <ref> [--keep-files] [--state-dir <dir>]")
+	}
+	res, err := model.Remove(stateDir, fs.Arg(0), !*keepFiles)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, res)
+	}
+	fmt.Fprintf(stdout, "Removed %d model(s)\n", len(res.Removed))
+	return nil
+}
+
+func runModelPrune(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model prune", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	deleteFiles := fs.Bool("delete-files", false, "Also delete blob files for pruned entries")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	res, err := model.Prune(stateDir, *deleteFiles)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, res)
+	}
+	fmt.Fprintf(stdout, "Pruned %d model(s)\n", len(res.Removed))
+	return nil
 }
 
 func runVolume(ctx context.Context, args []string, stdout *os.File) error {
@@ -6778,6 +6889,7 @@ Commands:
   cp                   Copy files into or out of a stopped workspace
   artifacts            List or retrieve declared workspace artifacts
   network              Inspect workspace network or manage named networks
+  model                Pull or manage local HuggingFace model files
   volume               Manage named volumes (create, ls, inspect, rm)
   start                Start a workspace
   supervise            Run host restart supervision for a workspace
