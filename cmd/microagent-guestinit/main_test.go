@@ -272,3 +272,17 @@ eth0 00000000 0140A8C0 0003 0 0 0 00000000 0 0 0
 		t.Fatalf("defaultGatewayNameserver = %q, %v; want 192.168.64.1, true", got, ok)
 	}
 }
+
+func TestApplyKernelConfigOverridesSecretsPort(t *testing.T) {
+	var cfg config
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "init=/sbin/microagent-init microagent_secrets_port=1026"); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if cfg.SecretsPort != 1026 {
+		t.Fatalf("SecretsPort = %d, want 1026", cfg.SecretsPort)
+	}
+	var cfg2 config
+	if err := applyKernelConfigOverridesFromCmdline(&cfg2, "microagent_secrets_port=notanumber"); err == nil {
+		t.Fatal("expected error for non-numeric secrets port")
+	}
+}
