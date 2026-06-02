@@ -118,6 +118,7 @@ Pick the path that matches what you're doing:
 | [Install](docs/getting-started/install.md) | Homebrew, source, host check |
 | [First microVM](docs/getting-started/cli/first-microvm.md) | Boot, run a command, tear down with `microagent run` |
 | [First agent](docs/getting-started/cli/first-agent.md) | An LLM body running inside a microVM (Anthropic / OpenAI / Gemini) |
+| [`microagent init`](docs/cli/init.md) | Scaffold a starter agent body in one command |
 | [Named workspaces](docs/getting-started/cli/named-workspaces.md) | Create, start, stop, resume |
 | [CLI reference](docs/cli/index.md) | Every subcommand |
 

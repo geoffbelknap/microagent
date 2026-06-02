@@ -298,6 +298,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | CLI command | Library call |
 |---|---|
 | `microagent run` | [`workspace.Run`](#workspace-api) |
+| `microagent init` | `scaffold.Generate` |
 | `microagent create` | `workspace.Create` |
 | `microagent start` | `workspace.Start` |
 | `microagent status` / `microagent inspect` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
