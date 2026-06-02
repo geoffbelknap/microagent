@@ -52,7 +52,7 @@ make smoke-rootfs
 The hosted CI workflow runs the portable microagent E2E scenarios:
 
 ```bash
-scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output
+scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output init
 ```
 
 Live backend validation is split by host capability:
@@ -87,11 +87,47 @@ scripts/dev/microagent-e2e.sh \
   supervision
 ```
 
-List scenarios with `scripts/dev/microagent-e2e.sh --list`. Before fresh live
-runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to check for preserved
-temporary state from failed tests; pass `--yes` only when the candidates are
-safe to delete. Successful E2E scenarios are expected to remove their own
-temporary state.
+List scenarios with `scripts/dev/microagent-e2e.sh --list` (each shows its
+platform and requirement). Before fresh live runs, use
+`scripts/dev/cleanup-temp.sh` in dry-run mode to check for preserved temporary
+state from failed tests; pass `--yes` only when the candidates are safe to
+delete. Successful E2E scenarios are expected to remove their own temporary
+state.
+
+### Feature coverage
+
+Beyond the contract/lifecycle/networking/transport/supervision lanes, dedicated
+scenarios cover each shipped feature: `init` (project scaffold, no VM),
+`volumes` (named-volume registry + attach-by-name persistence + single-attach),
+`commit-images` (rootfs → OCI commit into the local layout), `health` (health
+probe config + boot), `exec-stream` (streaming structured exec),
+`survive-reboot` (boot-unit install/uninstall), and `named-network` (two VMs on
+a managed bridge with `/etc/hosts` resolution).
+
+### Validating a new machine (WSL, macOS, Linux)
+
+Run the whole suite — it self-selects what the host supports and **skips with a
+reason** instead of failing when a prerequisite is missing:
+
+```bash
+scripts/dev/microagent-e2e.sh
+```
+
+A preflight line reports `os/arch/wsl/vm/netpriv`, and a final
+`PASSED / SKIPPED / FAILED` summary tells you exactly what was validated. Each
+scenario declares a requirement:
+
+- `none` — always runs (CLI surfaces, scaffold).
+- `vm` — needs a microVM backend; skips with a reason when `/dev/kvm` +
+  Firecracker (Linux) or Apple Virtualization.framework (macOS) is absent.
+- `netpriv` — privileged Linux networking (`named-network`); needs root /
+  `CAP_NET_ADMIN` and `net.ipv4.ip_forward=1`, otherwise skips.
+
+On **WSL2**, enable nested virtualization and `/dev/kvm` to exercise the `vm`
+lane; run as root (or `sudo`) for the `netpriv` lane. If you hold
+`CAP_NET_ADMIN` without uid 0 (granted file caps, a capability-granting sandbox,
+or a privileged CI runner), set `MICROAGENT_E2E_ALLOW_NETPRIV=1` to opt the
+privileged lane in. Run `microagent doctor` for a capability readout.
 
 Live Firecracker tests must run outside sandboxed environments on Linux hosts
 with KVM, `/dev/kvm`, `/dev/vhost-vsock`, `/dev/net/tun`, Firecracker on

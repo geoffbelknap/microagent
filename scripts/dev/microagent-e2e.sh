@@ -2,28 +2,42 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 
+# Each entry: name:script:platform:requirement
+#   platform    = all | linux | darwin (selected only on a matching host)
+#   requirement = none | vm | netpriv
+#     none    - always runnable (no microVM boot needed)
+#     vm      - needs a microVM backend (skip-with-reason when absent)
+#     netpriv - needs privileged Linux networking (root/CAP_NET_ADMIN + ip_forward)
 SCENARIOS=(
-  "contract:scripts/dev/runtime-contract-smoke.sh:all"
-  "help-usage:scripts/dev/microagent-e2e-help-usage.sh:all"
-  "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all"
-  "text-output:scripts/dev/microagent-e2e-text-output.sh:all"
-  "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all"
-  "lifecycle-deep:scripts/dev/microagent-e2e-lifecycle.sh:all"
-  "networking-deep:scripts/dev/microagent-e2e-networking-contract.sh:all"
-  "transport-deep:scripts/dev/microagent-e2e-transport.sh:all"
-  "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all"
-  "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux"
-  "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:linux"
-  "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux"
-  "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:linux"
-  "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin"
-  "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin"
-  "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin"
-  "applevf-workspace-connect:scripts/dev/applevf-workspace-connect-smoke.sh:darwin"
-  "applevf-network-mode:scripts/dev/applevf-network-mode-smoke.sh:darwin"
-  "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin"
-  "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin"
+  "contract:scripts/dev/runtime-contract-smoke.sh:all:none"
+  "help-usage:scripts/dev/microagent-e2e-help-usage.sh:all:none"
+  "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all:none"
+  "text-output:scripts/dev/microagent-e2e-text-output.sh:all:none"
+  "init:scripts/dev/microagent-e2e-init.sh:all:none"
+  "survive-reboot:scripts/dev/microagent-e2e-survive-reboot.sh:all:vm"
+  "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all:vm"
+  "lifecycle-deep:scripts/dev/microagent-e2e-lifecycle.sh:all:vm"
+  "networking-deep:scripts/dev/microagent-e2e-networking-contract.sh:all:vm"
+  "transport-deep:scripts/dev/microagent-e2e-transport.sh:all:vm"
+  "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all:vm"
+  "volumes:scripts/dev/microagent-e2e-volumes.sh:all:vm"
+  "commit-images:scripts/dev/microagent-e2e-commit.sh:all:vm"
+  "health:scripts/dev/microagent-e2e-health.sh:all:vm"
+  "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
+  "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
+  "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:linux:vm"
+  "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm"
+  "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:linux:vm"
+  "named-network:scripts/dev/microagent-e2e-named-network.sh:linux:netpriv"
+  "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin:vm"
+  "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin:vm"
+  "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin:vm"
+  "applevf-workspace-connect:scripts/dev/applevf-workspace-connect-smoke.sh:darwin:vm"
+  "applevf-network-mode:scripts/dev/applevf-network-mode-smoke.sh:darwin:vm"
+  "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin:vm"
+  "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin:vm"
 )
 
 usage() {
@@ -57,6 +71,20 @@ Scenarios:
   transport-deep     Backend-neutral mediation/vsock transport feature contract.
   supervision-deep   Backend-neutral restart supervision, signal, failure, and
                      cleanup feature contract.
+  init               Agent-body scaffold (no VM): generated files, providers,
+                     --force, and that the generated spec validates.
+  volumes            Named-volume registry, ext4 backing, attach-by-name
+                     persistence across runs, and single-attach enforcement.
+  commit-images      Commit a stopped rootfs into the local OCI image layout;
+                     refuses a running workspace.
+  health             Health-probe config contract (valid boots, invalid is
+                     rejected) and probe success in the guest.
+  exec-stream        Streaming structured exec (exec --stream) line delivery and
+                     exit-status propagation.
+  survive-reboot     supervise --install/--uninstall boot-unit generation
+                     (systemd user unit / launchd plist); no real reboot.
+  named-network      Two workspaces on a managed named-network bridge: stable
+                     IPs, cross-VM reach by IP and by name. Privileged (netpriv).
   firecracker-lifecycle-host
                     Firecracker/Linux host mechanics probe behind lifecycle.
   firecracker-networking-host
@@ -90,6 +118,12 @@ Environment:
     for compatibility with older validation commands.
   MICROAGENT_E2E_BACKEND=firecracker|applevf selects the backend lane for
     backend-agnostic feature scenarios.
+  MICROAGENT_E2E_ALLOW_NETPRIV=1 opts the privileged networking lane in when you
+    hold CAP_NET_ADMIN without uid 0 (file caps / capability-granting sandbox).
+
+Scenarios that need a microVM backend (or privileged networking) skip with a
+reason when the host lacks the prerequisite; a preflight line and a final
+PASSED/SKIPPED/FAILED summary report what was validated.
   MICROAGENT_FIRECRACKER_SUPERVISOR=<path> uses a prepared supervisor binary.
   MICROAGENT_E2E_BRIDGE=<name> uses a prepared Linux bridge for bridged tests.
   MICROAGENT_APPLEVF_SUPERVISOR=<path> uses a prepared Apple VF supervisor binary.
@@ -103,33 +137,31 @@ Apple VF setup:
 EOF
 }
 
-scenario_script() {
+# scenario_field <name> <index>: print field 2=script, 3=platform, 4=requirement.
+scenario_field() {
   wanted="$(canonical_scenario "$1")"
   for entry in "${SCENARIOS[@]}"; do
-    name="${entry%%:*}"
-    rest="${entry#*:}"
-    script="${rest%%:*}"
-    if [ "$name" = "$wanted" ]; then
-      printf '%s\n' "$script"
+    f_name="${entry%%:*}"
+    if [ "$f_name" = "$wanted" ]; then
+      rest="${entry#*:}"
+      f_script="${rest%%:*}"
+      rest="${rest#*:}"
+      f_platform="${rest%%:*}"
+      f_req="${rest#*:}"
+      case "$2" in
+        2) printf '%s\n' "$f_script" ;;
+        3) printf '%s\n' "$f_platform" ;;
+        4) printf '%s\n' "${f_req:-vm}" ;;
+      esac
       return 0
     fi
   done
   return 1
 }
 
-scenario_platform() {
-  wanted="$(canonical_scenario "$1")"
-  for entry in "${SCENARIOS[@]}"; do
-    name="${entry%%:*}"
-    rest="${entry#*:}"
-    platform="${rest##*:}"
-    if [ "$name" = "$wanted" ]; then
-      printf '%s\n' "$platform"
-      return 0
-    fi
-  done
-  return 1
-}
+scenario_script() { scenario_field "$1" 2; }
+scenario_platform() { scenario_field "$1" 3; }
+scenario_requirement() { scenario_field "$1" 4; }
 
 canonical_scenario() {
   case "$1" in
@@ -170,10 +202,13 @@ scenario_supported() {
 }
 
 list_scenarios() {
+  printf '%-28s %-8s %s\n' "SCENARIO" "PLATFORM" "REQUIRES"
   for entry in "${SCENARIOS[@]}"; do
     name="${entry%%:*}"
-    platform="${entry##*:}"
-    printf '%-18s %s\n' "$name" "$platform"
+    rest="${entry#*:}"; rest="${rest#*:}"
+    platform="${rest%%:*}"
+    req="${rest#*:}"
+    printf '%-28s %-8s %s\n' "$name" "$platform" "${req:-vm}"
   done
 }
 
@@ -275,7 +310,17 @@ else
   done
 fi
 
+# Preflight: probe host capabilities once so the summary explains skips.
+have_vm=no; e2e_have_vm && have_vm=yes
+have_netpriv=no; e2e_have_netpriv && have_netpriv=yes
+is_wsl=no; e2e_is_wsl && is_wsl=yes
+printf 'microagent E2E preflight: os=%s arch=%s wsl=%s vm=%s netpriv=%s\n' \
+  "$(uname -s)" "$(uname -m)" "$is_wsl" "$have_vm" "$have_netpriv"
+if [ "$have_vm" = "no" ]; then
+  printf '  (no microVM backend: vm/netpriv scenarios will SKIP. Run microagent doctor for details.)\n'
+fi
 printf 'microagent E2E suite: %s\n' "${selected[*]}"
+
 start_suite="$(date +%s)"
 suite_cache_dir="${MICROAGENT_E2E_CACHE_DIR:-$ROOT/.cache/microagent-e2e}"
 export GOCACHE="${GOCACHE:-$suite_cache_dir/go-build}"
@@ -283,17 +328,46 @@ export GOMODCACHE="${GOMODCACHE:-$suite_cache_dir/gomodcache}"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 mkdir -p "$GOCACHE" "$GOMODCACHE"
 
+passed=(); skipped=(); failed=()
 for name in "${selected[@]}"; do
   script="$(scenario_script "$name")"
+  requirement="$(scenario_requirement "$name")"
+
+  # Requirement gating: skip cleanly (with a reason) when the host can't run it.
+  if [ "$requirement" = "vm" ] && [ "$have_vm" = "no" ]; then
+    printf '\n==> %s\n.. SKIP (no microVM backend)\n' "$name"
+    skipped+=("$name (no vm)")
+    continue
+  fi
+  if [ "$requirement" = "netpriv" ] && [ "$have_netpriv" = "no" ]; then
+    printf '\n==> %s\n.. SKIP (no privileged networking: need root/CAP_NET_ADMIN + ip_forward)\n' "$name"
+    skipped+=("$name (no netpriv)")
+    continue
+  fi
+
   printf '\n==> %s\n' "$name"
   start="$(date +%s)"
-  (
-    cd "$ROOT"
-    "$script"
-  )
+  status=0
+  ( cd "$ROOT"; "$script" ) || status=$?
   end="$(date +%s)"
-  printf '<== %s passed in %ss\n' "$name" "$((end - start))"
+  if [ "$status" -eq 0 ]; then
+    printf '<== %s passed in %ss\n' "$name" "$((end - start))"
+    passed+=("$name")
+  elif [ "$status" -eq "$E2E_SKIP_EXIT" ]; then
+    printf '<== %s skipped\n' "$name"
+    skipped+=("$name (self)")
+  else
+    printf '<== %s FAILED (exit %s) in %ss\n' "$name" "$status" "$((end - start))"
+    failed+=("$name")
+  fi
 done
 
 end_suite="$(date +%s)"
-printf '\nmicroagent E2E suite passed in %ss\n' "$((end_suite - start_suite))"
+printf '\n==== microagent E2E summary (%ss) ====\n' "$((end_suite - start_suite))"
+printf 'PASSED:  %s\n' "${#passed[@]}"
+printf 'SKIPPED: %s%s\n' "${#skipped[@]}" "$([ "${#skipped[@]}" -gt 0 ] && printf '  [%s]' "${skipped[*]}")"
+printf 'FAILED:  %s%s\n' "${#failed[@]}" "$([ "${#failed[@]}" -gt 0 ] && printf '  [%s]' "${failed[*]}")"
+if [ "${#failed[@]}" -gt 0 ]; then
+  exit 1
+fi
+printf 'microagent E2E suite OK\n'

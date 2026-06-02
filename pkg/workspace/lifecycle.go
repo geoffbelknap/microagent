@@ -19,6 +19,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"github.com/geoffbelknap/microagent/pkg/volume"
 )
 
 type Result struct {
@@ -781,6 +782,24 @@ func CandidateWorkspaceRootfsPaths(stateDir, name, backend string) []string {
 	return []string{primary, secondary}
 }
 
+// volumeHolderActive reports whether a workspace still counts as holding a
+// named volume — i.e. it is in a state where the VM could be using the disk.
+// A stopped, halted, failed, or absent workspace is reclaimable.
+func volumeHolderActive(stateDir string) func(string) bool {
+	return func(name string) bool {
+		event, err := ReadEvent(Options{StateDir: stateDir, Name: name})
+		if err != nil {
+			return false
+		}
+		switch event.State {
+		case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused, vmkit.StateQuarantined:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
 func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 	if len(opts.Disks) == 0 {
 		return nil, nil
@@ -789,6 +808,19 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 	seenNames := map[string]bool{}
 	seenMountpoints := map[string]bool{}
 	for _, disk := range opts.Disks {
+		if disk.ManagedVolume {
+			path, err := volume.Path(opts.StateDir, disk.Name)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := volume.Attach(opts.StateDir, disk.Name, opts.Name, volumeHolderActive(opts.StateDir)); err != nil {
+				return nil, err
+			}
+			disk.SourcePath = path
+			disk.Path = path
+			disk.Bundle = false
+			disk.ManagedVolume = false
+		}
 		if err := ValidateDisk(disk); err != nil {
 			return nil, err
 		}
