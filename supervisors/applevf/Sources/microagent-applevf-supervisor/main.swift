@@ -1213,20 +1213,32 @@ final class TCPSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchec
             connection.close()
             return false
         }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + .milliseconds(10)) {
+            self.proxy(connection: connection, remoteFD: remoteFD)
+        }
+        return true
+    }
+
+    private func proxy(connection: VZVirtioSocketConnection, remoteFD: Int32) {
         let localFD = connection.fileDescriptor
-        Thread.detachNewThread {
+        let group = DispatchGroup()
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
             copyFD(from: localFD, to: remoteFD)
             shutdown(remoteFD, SHUT_WR)
-            connection.close()
+            group.leave()
         }
-        Thread.detachNewThread {
+        group.enter()
+        DispatchQueue.global(qos: .utility).async {
             copyFD(from: remoteFD, to: localFD)
             shutdown(localFD, SHUT_WR)
+            group.leave()
+        }
+        group.notify(queue: .global(qos: .utility)) {
             close(remoteFD)
             connection.close()
             self.release(connection)
         }
-        return true
     }
 
     private func retain(_ connection: VZVirtioSocketConnection) -> Bool {
@@ -1966,14 +1978,43 @@ func dialTCP(_ target: TCPHostPort) -> Int32 {
             connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
         }
     }
-    if result != 0 {
-        close(fd)
-        return -1
+    if result == 0 {
+        return fd
     }
-    return fd
+    let saved = errno
+    if saved == EINTR || saved == EINPROGRESS || saved == EALREADY {
+        if waitForTCPConnect(fd: fd, timeoutMillis: 5_000) {
+            return fd
+        }
+    }
+    close(fd)
+    return -1
 }
 
-func copyFD(from source: Int32, to destination: Int32) {
+func waitForTCPConnect(fd: Int32, timeoutMillis: Int32) -> Bool {
+    var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+    while true {
+        let result = poll(&pfd, 1, timeoutMillis)
+        if result < 0 && errno == EINTR {
+            continue
+        }
+        if result <= 0 {
+            close(fd)
+            return false
+        }
+        var error: Int32 = 0
+        var length = socklen_t(MemoryLayout<Int32>.size)
+        if getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0 || error != 0 {
+            close(fd)
+            return false
+        }
+        return true
+    }
+}
+
+@discardableResult
+func copyFD(from source: Int32, to destination: Int32) -> Int64 {
+    var total: Int64 = 0
     var buffer = [UInt8](repeating: 0, count: 32 * 1024)
     while true {
         let readCount = buffer.withUnsafeMutableBytes {
@@ -1984,7 +2025,7 @@ func copyFD(from source: Int32, to destination: Int32) {
             continue
         }
         if readCount <= 0 {
-            return
+            return total
         }
         var written = 0
         while written < readCount {
@@ -1996,9 +2037,10 @@ func copyFD(from source: Int32, to destination: Int32) {
                 continue
             }
             if result <= 0 {
-                return
+                return total
             }
             written += result
+            total += Int64(result)
         }
     }
 }

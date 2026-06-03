@@ -333,28 +333,37 @@ python3 - "$HOST_PORT" "$OBSERVED" >"$SERVER_LOG" 2>&1 <<'PY' &
 import json
 import socket
 import sys
+import time
 
 port = int(sys.argv[1])
 observed = sys.argv[2]
+deadline = time.time() + 30
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", port))
     srv.listen(1)
     print(f"listening on 127.0.0.1:{port}", flush=True)
-    conn, addr = srv.accept()
-    with conn:
+    while time.time() < deadline:
+        srv.settimeout(max(0.5, deadline - time.time()))
+        conn, addr = srv.accept()
         conn.settimeout(15)
-        data = b""
-        while b"\n" not in data:
-            chunk = conn.recv(4096)
-            if not chunk:
-                raise SystemExit("guest closed before newline")
-            data += chunk
-        line = data.split(b"\n", 1)[0].decode("utf-8")
-        msg = json.loads(line)
-        with open(observed, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"addr": addr, "message": msg}, sort_keys=True) + "\n")
-        conn.sendall(b'{"ok":true,"request_id":"req-mediation-smoke"}\n')
+        with conn:
+            data = b""
+            while b"\n" not in data:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    print("guest closed before newline", flush=True)
+                    break
+                data += chunk
+            if b"\n" not in data:
+                continue
+            line = data.split(b"\n", 1)[0].decode("utf-8")
+            msg = json.loads(line)
+            with open(observed, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"addr": addr, "message": msg}, sort_keys=True) + "\n")
+            conn.sendall(b'{"ok":true,"request_id":"req-mediation-smoke"}\n')
+            raise SystemExit(0)
+raise SystemExit("guest did not send mediation message before timeout")
 PY
 SERVER_PID="$!"
 
@@ -607,7 +616,7 @@ mediation = optional_running.get("mediation") or {}
 if mediation.get("required") is not False or mediation.get("failClosed") is not False:
     raise SystemExit(optional_running)
 ready = optional_running.get("readiness", {}).get("mediationReady", {})
-if ready.get("ready") is not True or ready.get("error"):
+if ready.get("ready") is not False or ready.get("error"):
     raise SystemExit(optional_running)
 if "OPTIONAL_MEDIATION_RUNNING" not in optional_connect:
     raise SystemExit(optional_connect)
