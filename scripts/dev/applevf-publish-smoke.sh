@@ -83,7 +83,7 @@ PY
 
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "printf PUBLISH_READY | nc -l -p 8080 &" \
+  --send "sh -c 'printf PUBLISH_READY | nc -l -p 8080 &'" \
   --timeout 2 >"$STATE_DIR/connect.txt"
 
 python3 - "$host_port" "$STATE_DIR/tcp.txt" <<'PY'

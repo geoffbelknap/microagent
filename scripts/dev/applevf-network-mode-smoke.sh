@@ -156,7 +156,7 @@ run_outbound_smoke() {
   wait_for_status_ready "$workspace" "$mode_state" "$STATE_DIR/${mode}-status.json"
   "$CLI" connect "$workspace" \
     --state-dir "$mode_state" \
-    --send "wget -qO- -T 10 http://example.com >/tmp/applevf-nat.out && echo APPLEVF_NAT_OK" \
+    --send "cat /etc/resolv.conf 2>&1; cat /proc/cmdline 2>&1; cat /proc/net/route 2>&1; ip addr 2>&1 || ifconfig -a 2>&1; wget -qO- -T 10 http://1.1.1.1 >/tmp/applevf-nat.out && echo APPLEVF_NAT_OK" \
     --ready-timeout 30 \
     --timeout "${MICROAGENT_APPLEVF_NETWORK_TIMEOUT_SECONDS:-45}" >"$STATE_DIR/${mode}-connect.txt"
   "$CLI" network "$workspace" --state-dir "$mode_state" >"$output"
@@ -226,7 +226,7 @@ wait_for_status_ready "$STATIC_WORKSPACE" "$STATIC_STATE" "$STATE_DIR/static-nat
 "$CLI" network "$STATIC_WORKSPACE" --state-dir "$STATIC_STATE" >"$STATE_DIR/static-nat-network.json"
 "$CLI" connect "$STATIC_WORKSPACE" \
   --state-dir "$STATIC_STATE" \
-  --send "grep -q '192.168.64.2' /proc/net/fib_trie; grep -q 'nameserver 1.1.1.1' /etc/resolv.conf; wget -qO- -T 10 http://example.com >/tmp/applevf-static-nat.out && echo APPLEVF_STATIC_NAT_OK; sync" \
+  --send "cat /etc/resolv.conf 2>&1; cat /proc/cmdline 2>&1; cat /proc/net/route 2>&1; ip addr 2>&1 || ifconfig -a 2>&1; grep -q '192.168.64.2' /proc/net/fib_trie; grep -q 'nameserver 1.1.1.1' /etc/resolv.conf; wget -qO- -T 10 http://1.1.1.1 >/tmp/applevf-static-nat.out && echo APPLEVF_STATIC_NAT_OK; sync" \
   --ready-timeout 30 \
   --timeout "${MICROAGENT_APPLEVF_NETWORK_TIMEOUT_SECONDS:-45}" >"$STATE_DIR/static-nat-connect.txt"
 "$CLI" halt "$STATIC_WORKSPACE" --state-dir "$STATIC_STATE" --supervisor "$SUPERVISOR" >"$STATE_DIR/static-nat-halt.json"

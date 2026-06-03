@@ -115,6 +115,10 @@ Environment:
   MICROAGENT_E2E_CACHE_DIR=<dir> overrides the shared Go build/module cache.
   MICROAGENT_E2E_IMAGE_CACHE_DIR=<dir> overrides the persistent E2E image cache.
   MICROAGENT_ROOTFS_BASE_CACHE_DIR=<dir> overrides the persistent rootfs base cache.
+  DOCKER_CONFIG=<dir> overrides registry credential discovery for image pulls.
+    When unset, the suite uses an empty test-local Docker config for public
+    image scenarios so host credential-helper state cannot break E2E pulls.
+    The registry-auth scenario preserves the original DOCKER_CONFIG state.
   MICROAGENT_E2E_IMAGE_CACHE_POLICY=auto|refresh|require controls persistent
     E2E image cache use for scenarios that support it.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
@@ -339,6 +343,16 @@ export GOMODCACHE="${GOMODCACHE:-$suite_cache_dir/gomodcache}"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 mkdir -p "$GOCACHE" "$GOMODCACHE"
 
+original_docker_config_set=0
+original_docker_config=""
+if [ "${DOCKER_CONFIG+x}" = "x" ]; then
+  original_docker_config_set=1
+  original_docker_config="$DOCKER_CONFIG"
+else
+  export DOCKER_CONFIG="$suite_cache_dir/docker-config-empty"
+  mkdir -p "$DOCKER_CONFIG"
+fi
+
 passed=(); skipped=(); failed=()
 for name in "${selected[@]}"; do
   script="$(scenario_script "$name")"
@@ -362,7 +376,13 @@ for name in "${selected[@]}"; do
   # Run in the background so a heartbeat can show the scenario is alive during
   # long silent stretches (VM boots, perf loops). Scenario output still streams
   # live; the heartbeat only fires once a scenario runs past the interval.
-  ( cd "$ROOT"; "$script" ) &
+  if [ "$name" = "registry-auth" ] && [ "$original_docker_config_set" = "0" ]; then
+    ( cd "$ROOT"; env -u DOCKER_CONFIG "$script" ) &
+  elif [ "$name" = "registry-auth" ]; then
+    ( cd "$ROOT"; DOCKER_CONFIG="$original_docker_config" "$script" ) &
+  else
+    ( cd "$ROOT"; "$script" ) &
+  fi
   run_pid=$!
   hb_interval="${MICROAGENT_E2E_HEARTBEAT:-20}"
   while sleep "$hb_interval"; do
