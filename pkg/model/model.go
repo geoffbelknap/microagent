@@ -200,6 +200,12 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 	return record, nil
 }
 
+// Resolve returns the canonical ref and HTTPS download URL for a HuggingFace
+// model reference, without contacting the network.
+func Resolve(ref string) (canonicalRef, downloadURL string, err error) {
+	return resolveHFURL(ref)
+}
+
 func resolveHFURL(ref string) (canonical, downloadURL string, err error) {
 	raw := strings.TrimSpace(ref)
 	if raw == "" {
