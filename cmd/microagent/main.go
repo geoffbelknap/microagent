@@ -4204,6 +4204,7 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 			fmt.Fprintf(stdout, " (%s)", resp.Host.ConsoleMode)
 		}
 		fmt.Fprintln(stdout)
+		printNetworkingSection(stdout, resp.Host)
 	}
 	if resp.Kernel != nil {
 		fmt.Fprintf(stdout, "Kernel: %s", nonEmpty(resp.Kernel.Status, "unknown"))
@@ -4216,6 +4217,25 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 		fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
 	}
 	return nil
+}
+
+func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
+	if host == nil {
+		return
+	}
+	ready := func(b bool) string {
+		if b {
+			return "ready"
+		}
+		return "unavailable"
+	}
+	fmt.Fprintf(stdout, "Networking: isolated %s, user %s, nat/bridged/named %s\n",
+		ready(host.IsolatedNetworkReady),
+		ready(host.UserNetworkReady),
+		ready(host.PrivilegedNetworkReady))
+	if hint := diagnostics.NetworkRemediation(host); hint != "" {
+		fmt.Fprintf(stdout, "  %s\n", hint)
+	}
 }
 
 func writeRuntimeContract(stdout *os.File, contract vmkit.RuntimeContract) error {

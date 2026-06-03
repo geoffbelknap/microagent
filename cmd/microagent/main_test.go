@@ -6201,3 +6201,37 @@ func unusedTCPPort(t *testing.T) uint16 {
 	}
 	return uint16(portValue)
 }
+
+func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
+	oldOutput := outputFormat
+	t.Cleanup(func() { outputFormat = oldOutput })
+	outputFormat = "text"
+	f, err := os.CreateTemp(t.TempDir(), "doctor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	resp := vmkit.Response{
+		OK:      true,
+		Backend: "firecracker",
+		Host: &vmkit.HostSupport{
+			Backend:                "firecracker",
+			Architecture:           "amd64",
+			IPForwardEnabled:       true,
+			IsolatedNetworkReady:   true,
+			UserNetworkReady:       true,
+			PrivilegedNetworkReady: false, // cap missing
+		},
+	}
+	if err := writeDoctorResponse(f, resp); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(f.Name())
+	out := string(data)
+	if !strings.Contains(out, "Networking:") {
+		t.Errorf("expected a Networking section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "setup-networking") {
+		t.Errorf("expected remediation hint, got:\n%s", out)
+	}
+}
