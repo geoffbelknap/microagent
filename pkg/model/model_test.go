@@ -112,6 +112,34 @@ func TestPullDownloadsAndRecords(t *testing.T) {
 	}
 }
 
+func TestPruneDeleteFilesRemovesPresentBlob(t *testing.T) {
+	dir := t.TempDir()
+	blob := ModelPath(dir, "hf.co/org/repo@main/present.gguf")
+	if err := os.MkdirAll(filepath.Dir(blob), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blob, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Upsert(dir, Record{ModelRef: "hf.co/org/repo@main/present.gguf", OutputPath: blob}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Prune(dir, true)
+	if err != nil {
+		t.Fatalf("Prune(true): %v", err)
+	}
+	if len(res.Deleted) != 1 || len(res.Removed) != 1 {
+		t.Fatalf("expected 1 deleted + 1 removed, got %+v", res)
+	}
+	if _, statErr := os.Stat(blob); !os.IsNotExist(statErr) {
+		t.Fatal("blob should have been deleted")
+	}
+	list, _ := List(dir)
+	if len(list) != 0 {
+		t.Fatalf("expected empty index, got %+v", list)
+	}
+}
+
 func TestRemovePropagatesDeleteError(t *testing.T) {
 	dir := t.TempDir()
 	// Point OutputPath at a NON-EMPTY directory so os.Remove fails with a

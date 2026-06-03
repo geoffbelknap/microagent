@@ -485,6 +485,8 @@ func mcpToolSideEffects(name string) []string {
 		return []string{"host_state"}
 	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
 		return []string{"host_state", "workspace_state"}
+	case "models.pull", "models.remove", "models.prune":
+		return []string{"host_state"}
 	default:
 		return nil
 	}
@@ -492,11 +494,11 @@ func mcpToolSideEffects(name string) []string {
 
 func mcpToolIdempotency(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "snapshot.delete":
+	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
-	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
-	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -517,6 +519,8 @@ func mcpToolPrincipalScope(name string) []string {
 		return []string{"images.read", "images.write"}
 	case "artifacts.list", "cp", "artifacts.get":
 		return []string{"workspace.files"}
+	case "models.pull", "models.list", "models.remove", "models.prune":
+		return []string{"models.read", "models.write"}
 	case "host.networking.setup", "kernel.install", "rootfs.build":
 		return []string{"host.write"}
 	case "host.inspect", "doctor.check", "contract.get", "kernel.verify", "profiles.list":
@@ -528,11 +532,11 @@ func mcpToolPrincipalScope(name string) []string {
 
 func mcpToolCostClass(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "kernel.install", "rootfs.build":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "kernel.install", "rootfs.build":
 		return "host_compute_and_storage"
 	case "host.networking.setup":
 		return "host_privileged"
-	case "cp", "artifacts.get":
+	case "cp", "artifacts.get", "models.remove", "models.prune":
 		return "host_io"
 	default:
 		return "metadata"
@@ -941,7 +945,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 
 func mcpMutationTool(name string) bool {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return true
 	default:
 		return false
