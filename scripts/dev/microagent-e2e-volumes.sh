@@ -31,9 +31,11 @@ SUPERVISOR=""
 
 cleanup() {
   status="$?"
-  if [ -x "$CLI" ] && [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_VOLUMES:-0}" != "1" ]; then
+  if [ -x "$CLI" ]; then
     "$CLI" kill holder --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
-    "$CLI" delete holder --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_VOLUMES:-0}" != "1" ]; then
+      "$CLI" delete holder --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    fi
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_VOLUMES:-0}" != "1" ]; then
