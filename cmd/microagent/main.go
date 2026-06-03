@@ -314,6 +314,14 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runHost(ctx context.Context, args []string, stdout *os.File) error {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		switch args[0] {
+		case "setup-networking":
+			return runHostSetupNetworking(args[1:], stdout)
+		default:
+			return fmt.Errorf("unknown host command: %s", args[0])
+		}
+	}
 	opts := doctorOptions{
 		Backend: hostBackend(),
 		Arch:    defaultGuestArch(),
@@ -339,6 +347,10 @@ func runHost(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	resp, _ := doctorResponse(ctx, opts)
 	return writeDoctorResponse(stdout, resp)
+}
+
+func runHostSetupNetworking(args []string, stdout *os.File) error {
+	return fmt.Errorf("not implemented")
 }
 
 func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, error) {

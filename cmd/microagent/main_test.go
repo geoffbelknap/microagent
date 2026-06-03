@@ -865,6 +865,28 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 	}
 }
 
+func TestHostUnknownSubcommandErrors(t *testing.T) {
+	f, _ := os.CreateTemp(t.TempDir(), "out")
+	defer f.Close()
+	err := run(t.Context(), []string{"host", "bogus-subcommand"}, f)
+	if err == nil || !strings.Contains(err.Error(), "bogus-subcommand") {
+		t.Fatalf("expected unknown host subcommand error, got %v", err)
+	}
+}
+
+func TestHostNoSubcommandStillReportsDiagnostics(t *testing.T) {
+	f, _ := os.CreateTemp(t.TempDir(), "out")
+	defer f.Close()
+	// Existing behavior must be preserved: `host` with only flags reports.
+	if err := run(t.Context(), []string{"--json", "host", "--backend", hostBackend(), "--arch", defaultGuestArch()}, f); err != nil {
+		t.Fatalf("host report should not error: %v", err)
+	}
+	data, _ := os.ReadFile(f.Name())
+	if !strings.Contains(string(data), "\"backend\"") {
+		t.Fatalf("expected diagnostics JSON, got: %s", data)
+	}
+}
+
 func TestHostCommandRejectsNonHostBackend(t *testing.T) {
 	otherBackend := vmkit.BackendFirecracker
 	if hostBackend() == vmkit.BackendFirecracker {
