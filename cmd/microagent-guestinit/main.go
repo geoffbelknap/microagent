@@ -42,6 +42,8 @@ type config struct {
 	SecretsPort        uint16        `json:"secretsPort,omitempty"`
 	SecretsAPI         bool          `json:"secretsApi,omitempty"`
 	SecretsControlPort uint16        `json:"secretsControlPort,omitempty"`
+	ModelGuestPort     uint16        `json:"modelGuestPort,omitempty"`
+	ModelVsockPort     uint32        `json:"modelVsockPort,omitempty"`
 	ConsoleShell       string        `json:"consoleShell,omitempty"`
 	Hostname           string        `json:"hostname,omitempty"`
 }
@@ -70,6 +72,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "exec-service" {
 		os.Exit(runExecService(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "model-forward-helper" {
+		os.Exit(runModelForwardHelper(os.Args[2:]))
 	}
 	code := run()
 	poweroff()
@@ -169,6 +174,11 @@ func run() int {
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		_ = sendResult(cfg.Port, res)
 		return code
+	}
+	if cfg.ModelGuestPort != 0 && cfg.ModelVsockPort != 0 {
+		if err := startModelForwarder(cfg.ModelGuestPort, cfg.ModelVsockPort); err != nil {
+			fmt.Fprintf(os.Stderr, "model forwarder: %v\n", err)
+		}
 	}
 	if err := startShellHelper(cfg.ShellPort, cfg.ConsoleShell, guestEnv(cfg.Env)); err != nil {
 		code = 127
@@ -1004,6 +1014,57 @@ func runHostForwardHelper(args []string) int {
 	return 0
 }
 
+// startModelForwarder spawns a model-forward-helper subprocess that listens on
+// 127.0.0.1:guestPort and tunnels each accepted connection to the host model
+// server over host vsock vsockPort. Using a subprocess (rather than a goroutine)
+// ensures the forwarder survives modes where run() hands off via syscall.Exec
+// (e.g. "service" mode), which would kill any goroutines.
+func startModelForwarder(guestPort uint16, vsockPort uint32) error {
+	if err := bringUpLoopback(); err != nil {
+		return err
+	}
+	cmd := exec.Command(os.Args[0], "model-forward-helper", strconv.Itoa(int(guestPort)), strconv.Itoa(int(vsockPort)))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start model forward helper on guest port %d: %w", guestPort, err)
+	}
+	return nil
+}
+
+// runModelForwardHelper is the blocking accept loop run by the model-forward-helper
+// subprocess. It listens on 127.0.0.1:guestPort and proxies each connection to
+// the host vsock at vsockPort.
+func runModelForwardHelper(args []string) int {
+	if len(args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: microagent-init model-forward-helper <guestPort> <vsockPort>")
+		return 127
+	}
+	guestPort, err := parseUint16(args[0])
+	if err != nil || guestPort == 0 {
+		fmt.Fprintf(os.Stderr, "parse guest port: %v\n", err)
+		return 127
+	}
+	vsockPort64, err := strconv.ParseUint(strings.TrimSpace(args[1]), 10, 32)
+	if err != nil || vsockPort64 == 0 {
+		fmt.Fprintf(os.Stderr, "parse vsock port: %v\n", err)
+		return 127
+	}
+	vsockPort := uint32(vsockPort64)
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", guestPort))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listen model forwarder on 127.0.0.1:%d: %v\n", guestPort, err)
+		return 127
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return 0
+		}
+		go proxyTCPToHostVsock(conn, vsockPort)
+	}
+}
+
 func openHostForwardListener(forward hostForward) (int, error) {
 	if err := validateHostForward(forward); err != nil {
 		return -1, err
@@ -1078,6 +1139,22 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 			return fmt.Errorf("microagent_secrets_ctl_port must be a positive uint16")
 		}
 		cfg.SecretsControlPort = port
+	}
+	if raw := values["microagent_model_fwd"]; strings.TrimSpace(raw) != "" {
+		guestRaw, vsockRaw, ok := strings.Cut(raw, ":")
+		if !ok {
+			return fmt.Errorf("microagent_model_fwd must be guestPort:vsockPort")
+		}
+		gp, err := parseUint16(guestRaw)
+		if err != nil || gp == 0 {
+			return fmt.Errorf("microagent_model_fwd guest port must be a positive uint16")
+		}
+		vp, err := strconv.ParseUint(strings.TrimSpace(vsockRaw), 10, 32)
+		if err != nil || vp == 0 {
+			return fmt.Errorf("microagent_model_fwd vsock port must be a positive uint32")
+		}
+		cfg.ModelGuestPort = gp
+		cfg.ModelVsockPort = uint32(vp)
 	}
 	return nil
 }
