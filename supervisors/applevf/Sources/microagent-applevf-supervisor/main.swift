@@ -2077,23 +2077,126 @@ func linuxKernelCommandLine(for config: Config) -> String {
     case "user", "nat", "bridged":
         let ip = config.network?.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let gateway = config.network?.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let dns = config.network?.dns?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
         if !ip.isEmpty && !gateway.isEmpty {
             args.append("microagent_net_if=eth0")
             args.append("microagent_net_ip=\(ip)")
             args.append("microagent_net_gw=\(gateway)")
-            let dns = config.network?.dns?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
             if !dns.isEmpty {
                 args.append("microagent_net_dns=\(dns.joined(separator: ","))")
             }
         } else {
             args.append("ip=dhcp")
-            args.append("microagent_dns=192.168.64.1")
+            args.append("microagent_dns=\(dhcpDNSNameservers(explicit: dns).joined(separator: ","))")
             args.append("microagent_dns_fallback_gateway=1")
         }
     default:
         break
     }
     return args.joined(separator: " ")
+}
+
+struct HostDNSResolver {
+    var nameservers: [String]
+    var interface: String
+    var flags: String
+}
+
+func dhcpDNSNameservers(explicit: [String]) -> [String] {
+    if !explicit.isEmpty {
+        return explicit
+    }
+    let host = hostIPv4DNSNameservers()
+    if !host.isEmpty {
+        return host
+    }
+    return ["1.1.1.1", "8.8.8.8"]
+}
+
+func hostIPv4DNSNameservers() -> [String] {
+    guard let output = scutilDNSOutput() else {
+        return []
+    }
+    var resolvers: [HostDNSResolver] = []
+    var nameservers: [String] = []
+    var iface = ""
+    var flags = ""
+
+    func finishResolver() {
+        if !nameservers.isEmpty {
+            resolvers.append(HostDNSResolver(nameservers: nameservers, interface: iface, flags: flags))
+        }
+        nameservers = []
+        iface = ""
+        flags = ""
+    }
+
+    for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("resolver #") {
+            finishResolver()
+            continue
+        }
+        if trimmed.hasPrefix("nameserver[") {
+            let value = trimmed.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) ?? ""
+            if isIPv4Address(value) {
+                nameservers.append(value)
+            }
+            continue
+        }
+        if trimmed.hasPrefix("if_index") {
+            if let open = trimmed.firstIndex(of: "("), let close = trimmed.firstIndex(of: ")"), open < close {
+                iface = String(trimmed[trimmed.index(after: open)..<close])
+            }
+            continue
+        }
+        if trimmed.hasPrefix("flags") {
+            flags = trimmed.split(separator: ":", maxSplits: 1).last?.trimmingCharacters(in: .whitespaces) ?? ""
+        }
+    }
+    finishResolver()
+
+    let preferred = resolvers.first {
+        !$0.interface.hasPrefix("utun") && !$0.flags.contains("Supplemental")
+    }
+    if let preferred {
+        return uniqueIPv4Nameservers(preferred.nameservers)
+    }
+    return uniqueIPv4Nameservers(resolvers.flatMap { $0.nameservers })
+}
+
+func scutilDNSOutput() -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/sbin/scutil")
+    process.arguments = ["--dns"]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return nil
+    }
+    guard process.terminationStatus == 0 else {
+        return nil
+    }
+    return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+}
+
+func isIPv4Address(_ value: String) -> Bool {
+    var addr = in_addr()
+    return value.withCString { inet_pton(AF_INET, $0, &addr) == 1 }
+}
+
+func uniqueIPv4Nameservers(_ values: [String]) -> [String] {
+    var seen = Set<String>()
+    var unique: [String] = []
+    for value in values where !seen.contains(value) {
+        seen.insert(value)
+        unique.append(value)
+    }
+    return unique
 }
 
 func guestExecPort(_ config: Config) -> UInt16 {

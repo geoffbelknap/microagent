@@ -88,15 +88,8 @@ done
 
 "$STATE_DIR/microagent" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "echo CONNECT_READY; poweroff -f" \
+  --send "echo CONNECT_READY" \
   --timeout 10 >"$CONNECT_RESULT"
-
-for _ in $(seq 1 50); do
-  if "$STATE_DIR/microagent" status --name "$WORKSPACE" --state-dir "$STATE_DIR" | grep -q '"state" : "stopped"'; then
-    break
-  fi
-  sleep 0.2
-done
 
 python3 - "$CREATE_RESULT" "$START_RESULT" "$CONNECT_RESULT" "$STATE_DIR/$WORKSPACE/serial.log" <<'PY'
 import json

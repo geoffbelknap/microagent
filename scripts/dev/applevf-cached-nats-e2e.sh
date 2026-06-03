@@ -421,7 +421,7 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 "$CLI" network "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/network-running.json"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "mkdir -p /data/jetstream; /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 >/tmp/nats.log 2>&1 & wget -qO- -T 10 http://example.com >/tmp/outbound.html && echo APPLEVF_NATS_OUTBOUND_READY; printf '{\"ok\":true,\"phase\":\"running\",\"service\":\"nats\"}' > /report.json; sync" \
+  --send "mkdir -p /data/jetstream; /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 >/tmp/nats.log 2>&1 & wget -qO- -T 10 http://1.1.1.1 >/tmp/outbound.html && echo APPLEVF_NATS_OUTBOUND_READY; printf '{\"ok\":true,\"phase\":\"running\",\"service\":\"nats\"}' > /report.json; sync" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect-running.txt"
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-running.json"
@@ -485,7 +485,7 @@ mkdir -p "$ARTIFACT_DIR/running"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
 "$CLI" connect "$WORKSPACE" \
   --state-dir "$STATE_DIR" \
-  --send "mkdir -p /data/jetstream; /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 >/tmp/nats-resumed.log 2>&1 & wget -qO- -T 10 http://example.com >/tmp/outbound-resumed.html && echo APPLEVF_NATS_OUTBOUND_RESUMED; printf '{\"ok\":true,\"phase\":\"resumed\",\"service\":\"nats\"}' > /report.json; sync" \
+  --send "mkdir -p /data/jetstream; /usr/local/bin/nats-server -js -sd /data/jetstream -m 8222 -a 0.0.0.0 -p 4222 >/tmp/nats-resumed.log 2>&1 & wget -qO- -T 10 http://1.1.1.1 >/tmp/outbound-resumed.html && echo APPLEVF_NATS_OUTBOUND_RESUMED; printf '{\"ok\":true,\"phase\":\"resumed\",\"service\":\"nats\"}' > /report.json; sync" \
   --ready-timeout 30 \
   --timeout 15 >"$STATE_DIR/connect-resumed.txt"
 nats_assert monitor "$monitor_port" "$STATE_DIR/monitor-resumed.json"

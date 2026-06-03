@@ -134,6 +134,15 @@ func run() int {
 		_ = sendResult(cfg.Port, res)
 		return code
 	}
+	if err := configureKernelDHCPNetwork(); err != nil {
+		code = 127
+		res.Error = err.Error()
+		fmt.Fprintln(os.Stderr, err)
+		res.ExitCode = code
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		_ = sendResult(cfg.Port, res)
+		return code
+	}
 	if err := configureKernelDHCPDNS(); err != nil {
 		code = 127
 		res.Error = err.Error()
@@ -549,6 +558,68 @@ func mountDisks(mounts []mount) error {
 	}
 	return nil
 }
+
+func configureKernelDHCPNetwork() error {
+	if err := ensureProcMounted(); err != nil {
+		return err
+	}
+	cmdline, err := os.ReadFile("/proc/cmdline")
+	if err != nil || !cmdlineRequestsDHCP(string(cmdline)) {
+		return nil
+	}
+	if _, ok := defaultGatewayNameserver("/proc/net/route"); ok {
+		return nil
+	}
+	iface := firstGuestNetworkInterface()
+	if iface == "" {
+		log.Println("microagent-init: DHCP requested but no guest network interface is present")
+		return nil
+	}
+	if err := setInterfaceUp(iface); err != nil {
+		return fmt.Errorf("bring up DHCP interface %s: %w", iface, err)
+	}
+	udhcpc, err := findGuestExecutable("udhcpc")
+	if err != nil {
+		return fmt.Errorf("DHCP requested but udhcpc is not available: %w", err)
+	}
+	script := "/tmp/microagent-udhcpc.script"
+	if err := os.WriteFile(script, []byte(udhcpcScript), 0o755); err != nil {
+		return fmt.Errorf("write udhcpc script: %w", err)
+	}
+	out, err := exec.Command(udhcpc, "-i", iface, "-n", "-q", "-t", "5", "-T", "1", "-s", script).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("run udhcpc on %s: %w: %s", iface, err, strings.TrimSpace(string(out)))
+	}
+	log.Printf("microagent-init: DHCP configured %s", iface)
+	return nil
+}
+
+const udhcpcScript = `#!/bin/sh
+case "$1" in
+  bound|renew)
+    if [ -n "$ip" ] && [ -n "$subnet" ]; then
+      ifconfig "$interface" "$ip" netmask "$subnet" up
+    else
+      ifconfig "$interface" up
+    fi
+    if [ -n "$router" ]; then
+      for r in $router; do
+        route del default 2>/dev/null || true
+        route add default gw "$r" "$interface"
+        break
+      done
+    fi
+    if [ -n "$dns" ]; then
+      mkdir -p /etc
+      : >/etc/resolv.conf
+      for d in $dns; do
+        echo "nameserver $d" >>/etc/resolv.conf
+      done
+    fi
+    ;;
+esac
+exit 0
+`
 
 func configureKernelDHCPDNS() error {
 	if err := ensureProcMounted(); err != nil {
@@ -1201,6 +1272,26 @@ func listNetInterfaces() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func firstGuestNetworkInterface() string {
+	for _, name := range listNetInterfaces() {
+		if name == "lo" || strings.HasPrefix(name, "sit") || strings.HasPrefix(name, "ip6") {
+			continue
+		}
+		return name
+	}
+	return ""
+}
+
+func findGuestExecutable(name string) (string, error) {
+	for _, dir := range filepath.SplitList(defaultGuestPath) {
+		path := filepath.Join(dir, name)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return path, nil
+		}
+	}
+	return "", exec.ErrNotFound
 }
 
 func configureStaticIPv4(cfg networkBootConfig) error {
