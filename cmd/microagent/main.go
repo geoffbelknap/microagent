@@ -6806,6 +6806,7 @@ Commands:
   rm                   Alias for delete
   contract             Show backend-neutral runtime contract
   host                 Report host capabilities
+  host setup-networking  Enable nat/bridged/named networking (Linux; needs root). --check / --revert
   doctor               Check the host
   rootfs build         Build a rootfs from an OCI image
   version              Print the version
