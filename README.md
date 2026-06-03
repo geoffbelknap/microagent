@@ -80,6 +80,7 @@ Other useful surfaces:
 - `microagent exec <name> -- <argv...>` runs a structured command in a running workspace.
 - `microagent serve mcp` exposes the machine-readable MCP stdio endpoint.
 - `microagent rm <name>` is an alias for `delete`.
+- `microagent model pull/ls/rm/prune` downloads and manages local HuggingFace GGUF model files.
 - `microagent images pull/list/tag/rm/prune` manages reusable local rootfs baselines.
 - `microagent cp` and `microagent artifacts get` move files without entering a running VM.
 - `microagent perf` measures boot and runtime footprint.
