@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-03_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is consumed by [`microagent create`](/cli/create/).
@@ -99,7 +99,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `mediation.target` | Host address and port for the enforcer/orchestrator |
 | `mediation.failClosed` | Treats a required channel break as closed by default |
 | `health` | Liveness probe; an unhealthy workspace is restarted by [`supervise`](/cli/supervise/) under the restart policy |
-| `health.exec` | Probe command run in the guest (structured exec, Firecracker only); healthy on exit 0. Declare either `exec` or `httpGet` |
+| `health.exec` | Probe command run in the guest through structured exec when the selected backend exposes `execReady`; healthy on exit 0. Declare either `exec` or `httpGet` |
 | `health.httpGet` | Probe path for a host-side GET against a published guest port (e.g. `/healthz`); healthy on a non-error status |
 | `health.port` | Published guest port the `httpGet` probe targets |
 | `health.intervalSeconds` | Seconds between probes (default 30) |

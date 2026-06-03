@@ -10,15 +10,28 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 e2e_require_vm
 e2e_require_cmd mke2fs "mke2fs (e2fsprogs) is required to format named volumes"
 
+default_backend() {
+  case "$(uname -s):$(uname -m)" in
+    Linux:x86_64|Linux:amd64)
+      printf '%s\n' firecracker
+      ;;
+    Darwin:arm64)
+      printf '%s\n' applevf
+      ;;
+    *)
+      printf '%s\n' unsupported
+      ;;
+  esac
+}
+
+BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-volumes.XXXXXX")"
 CLI="$STATE_DIR/microagent"
-SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
-GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
-IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox:1.36}"
+SUPERVISOR=""
 
 cleanup() {
   status="$?"
-  if [ -x "$CLI" ]; then
+  if [ -x "$CLI" ] && [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_VOLUMES:-0}" != "1" ]; then
     "$CLI" kill holder --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
     "$CLI" delete holder --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
   fi
@@ -34,17 +47,61 @@ trap cleanup EXIT
 cd "$ROOT"
 export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
 export GOMODCACHE="${GOMODCACHE:-$STATE_DIR/gomodcache}"
-e2e_build_firecracker_stack "$CLI" "$SUPERVISOR" "$GUEST_INIT"
+if [ -z "${DOCKER_CONFIG:-}" ]; then
+  mkdir -p "$STATE_DIR/docker-config"
+  export DOCKER_CONFIG="$STATE_DIR/docker-config"
+fi
 
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json" 2>/dev/null || e2e_fail "kernel install"
-kernel_path="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["path"])' "$STATE_DIR/kernel-install.json")"
-[ -r "$kernel_path" ] || e2e_fail "kernel install did not produce a readable image"
+case "$BACKEND" in
+  firecracker)
+    SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
+    GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
+    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox:1.36}"
+    e2e_build_firecracker_stack "$CLI" "$SUPERVISOR" "$GUEST_INIT"
+    "$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json" 2>/dev/null || e2e_fail "kernel install"
+    KERNEL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["path"])' "$STATE_DIR/kernel-install.json")"
+    CREATE_FLAGS=(--kernel "$KERNEL" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" --state-dir "$STATE_DIR" --size-mib 128 --result-port 0)
+    RUN_FLAGS=(--kernel "$KERNEL" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" --state-dir "$STATE_DIR" --size-mib 128 --result-port 0)
+    START_FLAGS=(--state-dir "$STATE_DIR" --supervisor "$SUPERVISOR")
+    ;;
+  applevf)
+    case "$(uname -s):$(uname -m)" in
+      Darwin:arm64)
+        ;;
+      *)
+        e2e_skip "Apple VF volumes E2E requires macOS on Apple silicon"
+        ;;
+    esac
+    SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
+    KERNEL="${MICROAGENT_APPLEVF_KERNEL:-$HOME/.microagent/kernels/apple-vf/arm64/Image}"
+    if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
+      KERNEL="$HOME/.microagent/kernels/apple-vf/Image"
+    fi
+    if [ ! -x "$SUPERVISOR" ]; then
+      e2e_skip "supervisor is not executable at $SUPERVISOR; run scripts/dev/applevf-supervisor-build.sh"
+    fi
+    if [ ! -r "$KERNEL" ]; then
+      e2e_skip "kernel is not readable at $KERNEL"
+    fi
+    ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
+    IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
+    GUEST_INIT="$STATE_DIR/microagent-guestinit"
+    go build -buildvcs=false -o "$CLI" ./cmd/microagent
+    GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
+    CREATE_FLAGS=(--backend apple-vf --kernel "$KERNEL" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" --state-dir "$STATE_DIR" --size-mib 128 --result-port 0)
+    RUN_FLAGS=(--backend apple-vf --kernel "$KERNEL" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" --state-dir "$STATE_DIR" --size-mib 128 --result-port 0)
+    START_FLAGS=(--state-dir "$STATE_DIR" --supervisor "$SUPERVISOR")
+    ;;
+  *)
+    e2e_skip "volumes E2E does not support backend lane: $BACKEND"
+    ;;
+esac
+
+[ -r "$KERNEL" ] || e2e_fail "kernel is not readable at $KERNEL"
 
 run_iso() { # run_iso <name-hint> <volume-spec> <exec>
   "$CLI" run --image "$IMAGE" --network isolated \
-    --kernel "$kernel_path" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" \
-    --state-dir "$STATE_DIR" --size-mib 128 --result-port 0 --timeout 40 --keep \
-    --volume "$2" --exec "$3"
+    "${RUN_FLAGS[@]}" --timeout 40 --keep --volume "$2" --exec "$3"
 }
 
 e2e_step "volume create / ls / inspect"
@@ -64,14 +121,13 @@ grep -q "persisted-ok" "$STATE_DIR/w2.json" || e2e_fail "volume did not persist 
 
 e2e_step "single-attach: a running holder blocks a second attach"
 "$CLI" create holder --image "$IMAGE" --network isolated --service-command "sleep 120" \
-  --volume data:/work --kernel "$kernel_path" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" \
-  --state-dir "$STATE_DIR" --size-mib 128 --result-port 0 >/dev/null 2>&1 || e2e_fail "create holder"
-"$CLI" start holder --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || e2e_fail "start holder"
+  --volume data:/work "${CREATE_FLAGS[@]}" >/dev/null 2>&1 || e2e_fail "create holder"
+"$CLI" start holder "${START_FLAGS[@]}" >/dev/null 2>&1 || e2e_fail "start holder"
 if run_iso intruder "data:/work" "true" >"$STATE_DIR/intruder.json" 2>&1; then
   e2e_fail "second attach to a running holder should fail"
 fi
 grep -qi "already attached" "$STATE_DIR/intruder.json" || e2e_log "note: expected 'already attached' message (got other failure, still refused)"
-"$CLI" kill holder --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+"$CLI" kill holder "${START_FLAGS[@]}" >/dev/null 2>&1 || true
 
 e2e_step "rm removes the volume and its backing file"
 "$CLI" volume rm data --force --state-dir "$STATE_DIR" >/dev/null || e2e_fail "volume rm"

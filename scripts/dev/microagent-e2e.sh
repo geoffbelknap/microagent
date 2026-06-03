@@ -24,6 +24,7 @@ SCENARIOS=(
   "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all:vm"
   "volumes:scripts/dev/microagent-e2e-volumes.sh:all:vm"
   "commit-images:scripts/dev/microagent-e2e-commit.sh:all:vm"
+  "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm"
   "health:scripts/dev/microagent-e2e-health.sh:all:vm"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
@@ -77,6 +78,8 @@ Scenarios:
                      persistence across runs, and single-attach enforcement.
   commit-images      Commit a stopped rootfs into the local OCI image layout;
                      refuses a running workspace.
+  secrets            Materialized and on-demand secret delivery over vsock,
+                     with host audit records that do not leak values.
   health             Health-probe config contract (valid boots, invalid is
                      rejected) and probe success in the guest.
   exec-stream        Streaming structured exec (exec --stream) line delivery and

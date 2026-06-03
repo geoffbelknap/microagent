@@ -44,6 +44,14 @@ struct Config: Codable {
     var mediation: MediationConfig?
     var network: NetworkConfig?
     var shellPort: UInt16?
+    var execPort: UInt16?
+    var guestExecPort: UInt16?
+    var secretsPort: UInt32?
+    var secrets: [SecretRef]?
+    var secretEnvFiles: [String]?
+    var onDemandSecrets: [SecretRef]?
+    var secretsAudit: Bool?
+    var secretsControlPort: UInt32?
     var serialInput: Bool?
 }
 
@@ -92,6 +100,11 @@ struct VsockListener: Codable {
     var target: String
 }
 
+struct SecretRef: Codable {
+    var name: String
+    var ref: String
+}
+
 struct Request: Codable {
     var command: String
     var identity: Identity?
@@ -126,6 +139,7 @@ struct ReadinessSignal: Codable {
 struct RuntimeReadiness: Codable {
     var guestReady: ReadinessSignal
     var shellReady: ReadinessSignal
+    var execReady: ReadinessSignal
     var resultReady: ReadinessSignal
     var mediationReady: ReadinessSignal
 }
@@ -187,6 +201,9 @@ let quarantineControlSignal = SIGUSR1
 let applyControlSignal = SIGUSR2
 let maxSocketConnections = 128
 let maxResultSocketBytes = 16 * 1024 * 1024
+let secretsListenerTarget = "secrets://serve"
+let secretsProtocolVersion = "secrets.v1"
+let maxSecretsMessageBytes = 8 * 1024 * 1024
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
 let encoder = JSONEncoder()
@@ -696,6 +713,7 @@ func readiness(event: Event, config: Config) -> RuntimeReadiness {
     var readiness = RuntimeReadiness(
         guestReady: ReadinessSignal(),
         shellReady: ReadinessSignal(),
+        execReady: ReadinessSignal(),
         resultReady: ReadinessSignal(),
         mediationReady: ReadinessSignal()
     )
@@ -707,6 +725,9 @@ func readiness(event: Event, config: Config) -> RuntimeReadiness {
         if FileManager.default.fileExists(atPath: path.path) {
             readiness.shellReady = ReadinessSignal(ready: true, observedAt: fileModTime(path), detail: "console input is available", error: nil)
         }
+    }
+    if event.state == .running, let execPort = config.execPort, execPort > 0 {
+        readiness.execReady = ReadinessSignal(ready: true, observedAt: event.observedAt, detail: "structured exec forward is configured on 127.0.0.1:\(execPort)", error: nil)
     }
     let path = resultPath(identity: event.identity, stateDir: config.stateDir)
     if FileManager.default.fileExists(atPath: path.path) {
@@ -1238,6 +1259,166 @@ extension TCPSocketDelegate: QuarantineClosable {
     }
 }
 
+struct SecretsRequest: Codable {
+    var protocolVersion: String
+    var name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case name
+    }
+}
+
+struct SecretsEntry: Codable {
+    var name: String
+    var value: Data
+}
+
+struct SecretsBundle: Codable {
+    var protocolVersion: String
+    var secrets: [SecretsEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case secrets
+    }
+}
+
+struct SecretsGetResponse: Codable {
+    var protocolVersion: String
+    var name: String
+    var value: Data?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case name
+        case value
+        case error
+    }
+}
+
+@available(macOS 13.0, *)
+final class SecretsSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
+    private let runtimeID: String
+    private let stateDir: String
+    private let bundle: SecretsBundle
+    private let onDemand: [String: String]
+    private let audit: Bool
+    private let lock = NSLock()
+    private var connections: [VZVirtioSocketConnection] = []
+
+    init(identity: Identity, config: Config) throws {
+        self.runtimeID = identity.runtimeID
+        self.stateDir = config.stateDir
+        self.bundle = try resolveSecretsBundle(config: config)
+        var refs: [String: String] = [:]
+        for ref in config.onDemandSecrets ?? [] {
+            refs[ref.name] = ref.ref
+        }
+        self.onDemand = refs
+        self.audit = config.secretsAudit == true
+    }
+
+    func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
+        if !retain(connection) {
+            connection.close()
+            return false
+        }
+        let fd = connection.fileDescriptor
+        DispatchQueue.global(qos: .utility).async {
+            defer {
+                connection.close()
+                self.release(connection)
+            }
+            self.handle(fd: fd)
+        }
+        return true
+    }
+
+    private func handle(fd: Int32) {
+        guard let req: SecretsRequest = try? readFramedJSON(fd: fd), req.protocolVersion == secretsProtocolVersion else {
+            return
+        }
+        let name = req.name ?? ""
+        if name.isEmpty {
+            for entry in bundle.secrets {
+                record(name: entry.name, access: "materialize", result: "ok")
+            }
+            _ = try? writeFramedJSON(fd: fd, bundle)
+            return
+        }
+        guard let ref = onDemand[name] else {
+            record(name: name, access: "on-demand", result: "denied")
+            _ = try? writeFramedJSON(fd: fd, SecretsGetResponse(protocolVersion: secretsProtocolVersion, name: name, value: nil, error: "secret is not declared on-demand"))
+            return
+        }
+        do {
+            let value = try resolveSecret(ref: ref)
+            record(name: name, access: "on-demand", result: "ok")
+            try writeFramedJSON(fd: fd, SecretsGetResponse(protocolVersion: secretsProtocolVersion, name: name, value: value, error: nil))
+        } catch {
+            record(name: name, access: "on-demand", result: "error")
+            _ = try? writeFramedJSON(fd: fd, SecretsGetResponse(protocolVersion: secretsProtocolVersion, name: name, value: nil, error: "resolve failed"))
+        }
+    }
+
+    private func record(name: String, access: String, result: String) {
+        guard audit else {
+            return
+        }
+        let path = URL(fileURLWithPath: stateDir).appendingPathComponent(runtimeID).appendingPathComponent("secrets-access.jsonl")
+        let rec = [
+            "at": ISO8601DateFormatter().string(from: Date()),
+            "runtime_id": runtimeID,
+            "name": name,
+            "access": access,
+            "result": result,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: rec, options: [.sortedKeys]) else {
+            return
+        }
+        try? FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        if !FileManager.default.fileExists(atPath: path.path) {
+            FileManager.default.createFile(atPath: path.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        }
+        if let handle = try? FileHandle(forWritingTo: path) {
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data + Data([0x0a]))
+            try? handle.close()
+        }
+    }
+
+    private func retain(_ connection: VZVirtioSocketConnection) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if connections.count >= maxSocketConnections {
+            return false
+        }
+        connections.append(connection)
+        return true
+    }
+
+    private func release(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.removeAll { $0 === connection }
+        lock.unlock()
+    }
+}
+
+@available(macOS 13.0, *)
+extension SecretsSocketDelegate: QuarantineClosable {
+    func quarantineClose() {
+        lock.lock()
+        let retainedConnections = connections
+        connections = []
+        lock.unlock()
+        for connection in retainedConnections {
+            connection.close()
+        }
+    }
+}
+
 @available(macOS 13.0, *)
 final class QuarantineController {
     private let identity: Identity
@@ -1349,6 +1530,178 @@ final class ApplyController {
     }
 }
 #endif
+
+func resolveSecretsBundle(config: Config) throws -> SecretsBundle {
+    var entries: [SecretsEntry] = []
+    var seen: Set<String> = []
+    func add(name: String, value: Data) throws {
+        if !validSecretName(name) {
+            throw ProtocolError.invalid("invalid secret name \(name)")
+        }
+        if seen.contains(name) {
+            throw ProtocolError.invalid("duplicate secret name \(name)")
+        }
+        seen.insert(name)
+        entries.append(SecretsEntry(name: name, value: value))
+    }
+    for ref in config.secrets ?? [] {
+        try add(name: ref.name, value: resolveSecret(ref: ref.ref))
+    }
+    for path in config.secretEnvFiles ?? [] {
+        fputs("warning: secrets env file \"\(path)\" is plaintext: not encrypted at rest, not for production\n", stderr)
+        let values = try loadDotenv(path: path)
+        for key in values.keys.sorted() {
+            try add(name: key, value: Data(values[key]!.utf8))
+        }
+    }
+    return SecretsBundle(protocolVersion: secretsProtocolVersion, secrets: entries)
+}
+
+func resolveSecret(ref: String) throws -> Data {
+    guard let idx = ref.firstIndex(of: ":") else {
+        throw ProtocolError.invalid("secret reference \(ref) is missing a scheme")
+    }
+    let scheme = String(ref[..<idx])
+    let rest = String(ref[ref.index(after: idx)...])
+    let value: Data
+    switch scheme {
+    case "env":
+        if rest.isEmpty {
+            throw ProtocolError.invalid("env reference is missing a variable name")
+        }
+        fputs("warning: secret scheme \"env\" is plaintext: not encrypted at rest, not for production\n", stderr)
+        value = Data((ProcessInfo.processInfo.environment[rest] ?? "").utf8)
+    case "file":
+        if rest.isEmpty {
+            throw ProtocolError.invalid("file reference is missing a path")
+        }
+        fputs("warning: secret scheme \"file\" is plaintext: not encrypted at rest, not for production\n", stderr)
+        value = try Data(contentsOf: URL(fileURLWithPath: rest))
+    case "dotenv":
+        let parts = rest.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        if parts.count != 2 || parts[0].isEmpty || parts[1].isEmpty {
+            throw ProtocolError.invalid("dotenv reference \(rest) must be PATH#KEY")
+        }
+        fputs("warning: secret scheme \"dotenv\" is plaintext: not encrypted at rest, not for production\n", stderr)
+        let values = try loadDotenv(path: String(parts[0]))
+        guard let found = values[String(parts[1])] else {
+            throw ProtocolError.invalid("key \(parts[1]) not found in dotenv file \(parts[0])")
+        }
+        value = Data(found.utf8)
+    default:
+        throw ProtocolError.invalid("unknown secret scheme \(scheme)")
+    }
+    if value.isEmpty {
+        throw ProtocolError.invalid("secret \(ref) resolved to an empty value")
+    }
+    return value
+}
+
+func loadDotenv(path: String) throws -> [String: String] {
+    let text = try String(contentsOfFile: path, encoding: .utf8)
+    var out: [String: String] = [:]
+    for (idx, rawLine) in text.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+        var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.isEmpty || line.hasPrefix("#") {
+            continue
+        }
+        if line.hasPrefix("export ") {
+            line.removeFirst("export ".count)
+        }
+        guard let eq = line.firstIndex(of: "=") else {
+            throw ProtocolError.invalid("dotenv line \(idx + 1) is not KEY=VALUE")
+        }
+        let key = line[..<eq].trimmingCharacters(in: .whitespacesAndNewlines)
+        if key.isEmpty {
+            throw ProtocolError.invalid("dotenv line \(idx + 1) has an empty key")
+        }
+        var value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.count >= 2, let first = value.first, let last = value.last, (first == "\"" && last == "\"") || (first == "'" && last == "'") {
+            value.removeFirst()
+            value.removeLast()
+        }
+        out[key] = value
+    }
+    return out
+}
+
+func validSecretName(_ name: String) -> Bool {
+    if name.isEmpty || name.count > 128 {
+        return false
+    }
+    for scalar in name.unicodeScalars {
+        let v = scalar.value
+        let ok = (v >= 65 && v <= 90) || (v >= 97 && v <= 122) || (v >= 48 && v <= 57) || v == 95 || v == 45 || v == 46
+        if !ok {
+            return false
+        }
+    }
+    return true
+}
+
+func readFramedJSON<T: Decodable>(fd: Int32) throws -> T {
+    let prefix = try readExact(fd: fd, count: 4)
+    let length = prefix.withUnsafeBytes { raw -> UInt32 in
+        let bytes = raw.bindMemory(to: UInt8.self)
+        return (UInt32(bytes[0]) << 24) | (UInt32(bytes[1]) << 16) | (UInt32(bytes[2]) << 8) | UInt32(bytes[3])
+    }
+    if length > maxSecretsMessageBytes {
+        throw ProtocolError.invalid("secretxfer message length \(length) exceeds maximum \(maxSecretsMessageBytes)")
+    }
+    let data = try readExact(fd: fd, count: Int(length))
+    return try JSONDecoder().decode(T.self, from: data)
+}
+
+func writeFramedJSON<T: Encodable>(fd: Int32, _ msg: T) throws {
+    let data = try JSONEncoder().encode(msg)
+    if data.count > UInt32.max {
+        throw ProtocolError.invalid("secretxfer message length exceeds uint32 prefix")
+    }
+    var frame = Data([
+        UInt8((UInt32(data.count) >> 24) & 0xff),
+        UInt8((UInt32(data.count) >> 16) & 0xff),
+        UInt8((UInt32(data.count) >> 8) & 0xff),
+        UInt8(UInt32(data.count) & 0xff),
+    ])
+    frame.append(data)
+    try writeAll(fd: fd, data: frame)
+}
+
+func readExact(fd: Int32, count: Int) throws -> Data {
+    var out = Data()
+    var buffer = [UInt8](repeating: 0, count: min(4096, max(count, 1)))
+    while out.count < count {
+        let wanted = min(buffer.count, count - out.count)
+        let n = read(fd, &buffer, wanted)
+        if n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+            continue
+        }
+        if n <= 0 {
+            throw ProtocolError.invalid("short read")
+        }
+        out.append(buffer, count: n)
+    }
+    return out
+}
+
+func writeAll(fd: Int32, data: Data) throws {
+    try data.withUnsafeBytes { raw in
+        guard let base = raw.baseAddress else {
+            return
+        }
+        var written = 0
+        while written < data.count {
+            let n = write(fd, base.advanced(by: written), data.count - written)
+            if n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue
+            }
+            if n <= 0 {
+                throw ProtocolError.invalid("short write")
+            }
+            written += n
+        }
+    }
+}
 
 func updateRuntime(identity: Identity, config: Config, state: VMState, error: String?) {
     let event = Event(identity: identity, state: state, detail: "serial=\(serialLogPath(identity: identity, stateDir: config.stateDir).path)", observedAt: Date())
@@ -1479,7 +1832,9 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
     for listenerConfig in listeners {
         let listener = VZVirtioSocketListener()
         let delegate: VZVirtioSocketListenerDelegate
-        if let target = try? parseTCPHostPort(listenerConfig.target) {
+        if listenerConfig.target == secretsListenerTarget {
+            delegate = try SecretsSocketDelegate(identity: identity, config: config)
+        } else if let target = try? parseTCPHostPort(listenerConfig.target) {
             delegate = TCPSocketDelegate(target: target)
         } else {
             if normalizedFilePath(listenerConfig.target) != normalizedFilePath(resultPath(identity: identity, stateDir: config.stateDir).path) {
@@ -1511,11 +1866,17 @@ func tcpPublishForwards(config: Config) -> [PortForward] {
     if let shellPort = config.shellPort, shellPort > 0 {
         forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: shellPort, guestPort: shellPort))
     }
+    if let execPort = config.execPort, execPort > 0 {
+        forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: execPort, guestPort: guestExecPort(config)))
+    }
     return forwards
 }
 
 func livePortForwardHostOnlyChange(oldConfig: Config, newConfig: Config) -> Bool {
     if oldConfig.shellPort != newConfig.shellPort {
+        return false
+    }
+    if oldConfig.execPort != newConfig.execPort || oldConfig.guestExecPort != newConfig.guestExecPort {
         return false
     }
     let oldNetwork = oldConfig.network
@@ -1689,7 +2050,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
         }
         vmConfig.serialPorts = [serial]
     }
-    if !(config.vsockListeners ?? []).isEmpty || config.mediation?.enabled == true || !(config.network?.portForwards ?? []).isEmpty {
+    if !(config.vsockListeners ?? []).isEmpty || config.mediation?.enabled == true || !(config.network?.portForwards ?? []).isEmpty || config.shellPort != nil || config.execPort != nil || config.secretsPort != nil {
         vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
     }
     return vmConfig
@@ -1699,6 +2060,18 @@ func linuxKernelCommandLine(for config: Config) -> String {
     var args = ["console=hvc0", "root=/dev/vda", "rw", "init=/sbin/microagent-init"]
     if let shellPort = config.shellPort, shellPort > 0 {
         args.append("microagent_shell_port=\(shellPort)")
+    }
+    if let execPort = config.execPort, execPort > 0 {
+        args.append("microagent_exec_port=\(guestExecPort(config))")
+    }
+    if let secretsPort = config.secretsPort, secretsPort > 0 {
+        args.append("microagent_secrets_port=\(secretsPort)")
+    }
+    if !(config.onDemandSecrets ?? []).isEmpty {
+        args.append("microagent_secrets_api=1")
+    }
+    if let secretsControlPort = config.secretsControlPort, secretsControlPort > 0 {
+        args.append("microagent_secrets_ctl_port=\(secretsControlPort)")
     }
     switch normalizedNetworkMode(config.network) {
     case "user", "nat", "bridged":
@@ -1721,6 +2094,13 @@ func linuxKernelCommandLine(for config: Config) -> String {
         break
     }
     return args.joined(separator: " ")
+}
+
+func guestExecPort(_ config: Config) -> UInt16 {
+    if let guestExecPort = config.guestExecPort, guestExecPort > 0 {
+        return guestExecPort
+    }
+    return config.execPort ?? 0
 }
 
 @available(macOS 13.0, *)

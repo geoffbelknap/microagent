@@ -1226,6 +1226,24 @@ func applyManifest(opts *Options, manifest Manifest) {
 	}
 	opts.Disks = manifest.Disks
 	opts.Mediation = manifest.Mediation
+	if len(manifest.Secrets) > 0 {
+		opts.Secrets = make(map[string]string, len(manifest.Secrets))
+		for _, ref := range manifest.Secrets {
+			opts.Secrets[ref.Name] = ref.Ref
+		}
+	} else {
+		opts.Secrets = nil
+	}
+	opts.SecretEnvFiles = manifest.SecretEnvFiles
+	if len(manifest.OnDemandSecrets) > 0 {
+		opts.OnDemandSecrets = make(map[string]string, len(manifest.OnDemandSecrets))
+		for _, ref := range manifest.OnDemandSecrets {
+			opts.OnDemandSecrets[ref.Name] = ref.Ref
+		}
+	} else {
+		opts.OnDemandSecrets = nil
+	}
+	opts.SecretsAudit = manifest.SecretsAudit
 }
 
 func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
