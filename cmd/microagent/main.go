@@ -29,6 +29,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
+	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/perf"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
@@ -1849,7 +1850,7 @@ each other by name (Firecracker/Linux only).
 
 func runModel(args []string, stdout *os.File) error {
 	if wantsHelp(args) {
-		fmt.Fprintln(stdout, "usage: microagent model <pull|ls|rm|prune> ...")
+		fmt.Fprintln(stdout, "usage: microagent model <pull|ls|rm|prune|serve|stop|runners> ...")
 		return nil
 	}
 	if len(args) > 0 {
@@ -1862,9 +1863,15 @@ func runModel(args []string, stdout *os.File) error {
 			return runModelRemove(args[1:], stdout)
 		case "prune":
 			return runModelPrune(args[1:], stdout)
+		case "serve":
+			return runModelServe(args[1:], stdout)
+		case "stop":
+			return runModelStop(args[1:], stdout)
+		case "runners", "ps":
+			return runModelRunners(args[1:], stdout)
 		}
 	}
-	return fmt.Errorf("usage: microagent model <pull|ls|rm|prune> ...")
+	return fmt.Errorf("usage: microagent model <pull|ls|rm|prune|serve|stop|runners> ...")
 }
 
 func runModelPull(args []string, stdout *os.File) error {
@@ -1951,6 +1958,101 @@ func runModelPrune(args []string, stdout *os.File) error {
 		return writeJSON(stdout, res)
 	}
 	fmt.Fprintf(stdout, "Pruned %d model(s)\n", len(res.Removed))
+	return nil
+}
+
+func runModelServe(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model serve", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	dedicated := fs.Bool("dedicated", false, "Start a dedicated runner instead of sharing one")
+	token := fs.String("token", "", "HuggingFace token for auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]")
+	}
+	ref := fs.Arg(0)
+	canonical, _, err := model.Resolve(ref)
+	if err != nil {
+		return err
+	}
+	rec, err := model.Find(stateDir, canonical)
+	if err != nil {
+		// Not in the store yet — auto-pull, like run does for images.
+		rec, err = model.Pull(context.Background(), model.PullOptions{StateDir: stateDir, ModelRef: ref, Token: *token})
+		if err != nil {
+			return err
+		}
+	}
+	binPath, err := modelrunner.ResolveLlamaServerPath()
+	if err != nil {
+		return err
+	}
+	runner, err := modelrunner.Ensure(context.Background(), modelrunner.EnsureOptions{
+		StateDir:  stateDir,
+		ModelRef:  rec.ModelRef,
+		ModelPath: rec.OutputPath,
+		Engine:    modelrunner.LlamaCPP{BinPath: binPath},
+		Pinned:    true,
+		Dedicated: *dedicated,
+	})
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, runner)
+	}
+	fmt.Fprintf(stdout, "Serving %s on %s:%d (pid %d)\n", runner.ModelRef, runner.Host, runner.Port, runner.PID)
+	return nil
+}
+
+func runModelStop(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model stop", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model stop <hf-ref> [--state-dir <dir>]")
+	}
+	canonical, _, err := model.Resolve(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	n, err := modelrunner.Stop(stateDir, canonical)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"stopped": n})
+	}
+	fmt.Fprintf(stdout, "Stopped %d runner(s)\n", n)
+	return nil
+}
+
+func runModelRunners(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model runners", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	list, err := modelrunner.List(stateDir)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"runners": list})
+	}
+	for _, r := range list {
+		fmt.Fprintf(stdout, "%s\t%s:%d\tpid=%d\tholders=%d\tpinned=%t\n", r.ModelRef, r.Host, r.Port, r.PID, len(r.Holders), r.Pinned)
+	}
 	return nil
 }
 

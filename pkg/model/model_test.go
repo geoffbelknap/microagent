@@ -81,6 +81,13 @@ func TestResolveHFURL(t *testing.T) {
 	}
 }
 
+func TestResolveExported(t *testing.T) {
+	canon, url, err := Resolve("org/repo/m.gguf")
+	if err != nil || canon != "hf.co/org/repo@main/m.gguf" || url != "https://huggingface.co/org/repo/resolve/main/m.gguf" {
+		t.Fatalf("Resolve: %q %q %v", canon, url, err)
+	}
+}
+
 func TestPullDownloadsAndRecords(t *testing.T) {
 	prev := httpGet
 	httpGet = func(_ context.Context, url, _ string) (io.ReadCloser, int64, error) {
