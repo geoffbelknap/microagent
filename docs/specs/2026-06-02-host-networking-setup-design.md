@@ -1,3 +1,6 @@
+<!-- docs-last-updated -->
+_Last updated: 2026-06-03_
+
 # Host networking setup + capability visibility — design
 
 - Status: approved (design)
