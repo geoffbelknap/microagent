@@ -1766,3 +1766,76 @@ func TestFirecrackerBootArgsIncludesSecretsControlPort(t *testing.T) {
 		t.Fatalf("boot args should omit control port when zero: %q", none)
 	}
 }
+
+// The guest listens on its baked vsock ports, which can differ from the host
+// bind ports after a host-port fallback (see ensureBindableManagementPorts) or
+// a fork. Boot args must tell the guest its own (guest) ports, not the host
+// bind ports, or the host->guest bridge targets the wrong vsock port.
+func TestFirecrackerBootArgsUsesGuestPortsWhenSet(t *testing.T) {
+	args := firecrackerBootArgs(&vmkit.Config{
+		ShellPort:      40000,
+		ExecPort:       60000,
+		GuestShellPort: 22500,
+		GuestExecPort:  42500,
+	})
+	if !strings.Contains(args, "microagent_shell_port=22500") {
+		t.Fatalf("boot args should use guest shell port, got %q", args)
+	}
+	if !strings.Contains(args, "microagent_exec_port=42500") {
+		t.Fatalf("boot args should use guest exec port, got %q", args)
+	}
+	// When no distinct guest port is set, the host port doubles as the guest port.
+	plain := firecrackerBootArgs(&vmkit.Config{ShellPort: 40000, ExecPort: 60000})
+	if !strings.Contains(plain, "microagent_shell_port=40000") {
+		t.Fatalf("boot args should fall back to host shell port, got %q", plain)
+	}
+	if !strings.Contains(plain, "microagent_exec_port=60000") {
+		t.Fatalf("boot args should fall back to host exec port, got %q", plain)
+	}
+}
+
+// On WSL2, Windows reserves dynamic TCP port ranges that are unbindable inside
+// the distro even though no Linux process holds them. A name-hashed shell/exec
+// host port can land in such a range and fail to bind. ensureBindableManagementPorts
+// must detect an unbindable host port, move the host bind to a free port, and
+// preserve the original as the guest vsock port so the bridge still targets it.
+func TestEnsureBindableManagementPortsFallsBackWhenHostPortUnavailable(t *testing.T) {
+	// An active listener makes its port unbindable (EADDRINUSE even with
+	// SO_REUSEADDR), standing in for a WSL2-reserved host port.
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	busyPort := uint16(busy.Addr().(*net.TCPAddr).Port)
+
+	freeL, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	freePort := uint16(freeL.Addr().(*net.TCPAddr).Port)
+	_ = freeL.Close()
+
+	cfg := &vmkit.Config{ShellPort: busyPort, ExecPort: freePort}
+	ensureBindableManagementPorts(cfg)
+
+	if cfg.ShellPort == busyPort {
+		t.Fatalf("unbindable shell host port %d should have been reassigned", busyPort)
+	}
+	if cfg.GuestShellPort != busyPort {
+		t.Fatalf("guest shell vsock port should preserve original %d, got %d", busyPort, cfg.GuestShellPort)
+	}
+	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(cfg.ShellPort))))
+	if err != nil {
+		t.Fatalf("reassigned shell host port %d is not bindable: %v", cfg.ShellPort, err)
+	}
+	_ = l.Close()
+
+	// A bindable port is left untouched, and no guest override is introduced.
+	if cfg.ExecPort != freePort {
+		t.Fatalf("bindable exec host port should be unchanged, got %d want %d", cfg.ExecPort, freePort)
+	}
+	if cfg.GuestExecPort != 0 {
+		t.Fatalf("guest exec port should stay unset when no fallback occurs, got %d", cfg.GuestExecPort)
+	}
+}

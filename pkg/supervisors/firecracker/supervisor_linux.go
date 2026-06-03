@@ -370,6 +370,11 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		return failedResponse(req, err.Error()), err
 	}
 	runtimeReq := requestWithRuntimeNetwork(req, runtimeNetwork)
+	// Move the shell/exec host binds off any unbindable port (e.g. a WSL2/Windows
+	// reserved range) before the VM config (boot args) and runtime state are
+	// written, so the guest, the forwarder, and readiness/connect all agree on
+	// the final ports.
+	ensureBindableManagementPorts(runtimeReq.Config)
 	if err := writeConfig(opts, runtimeReq); err != nil {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -854,11 +859,14 @@ func writeConfig(opts Options, req vmkit.Request) error {
 
 func firecrackerBootArgs(config *vmkit.Config) string {
 	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init"}
-	if config != nil && config.ShellPort != 0 {
-		args = append(args, fmt.Sprintf("microagent_shell_port=%d", config.ShellPort))
+	// The guest listens on its own vsock ports, which differ from the host bind
+	// ports when a fork or a host-port fallback (ensureBindableManagementPorts)
+	// has moved the host side. Tell the guest its own ports, not the host ports.
+	if config != nil && guestShellPort(*config) != 0 {
+		args = append(args, fmt.Sprintf("microagent_shell_port=%d", guestShellPort(*config)))
 	}
-	if config != nil && config.ExecPort != 0 {
-		args = append(args, fmt.Sprintf("microagent_exec_port=%d", config.ExecPort))
+	if config != nil && guestExecPort(*config) != 0 {
+		args = append(args, fmt.Sprintf("microagent_exec_port=%d", guestExecPort(*config)))
 	}
 	if config != nil && config.SecretsPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_secrets_port=%d", config.SecretsPort))
@@ -908,6 +916,60 @@ func hasPortForwards(config *vmkit.Config) bool {
 
 func needsPortForwarder(config *vmkit.Config) bool {
 	return hasPortForwards(config) || (config != nil && (config.ShellPort != 0 || config.ExecPort != 0))
+}
+
+// bindableHostPort returns a host port that can actually be bound on 127.0.0.1.
+// If the preferred port binds it is returned unchanged. Otherwise — most notably
+// on WSL2, where Windows reserves dynamic TCP port ranges that are unbindable
+// inside the distro even though no Linux process holds them (visible via
+// `netsh.exe interface ipv4 show excludedportrange protocol=tcp`) — an
+// OS-assigned free port is returned. The bool reports whether the port changed.
+func bindableHostPort(preferred uint16) (uint16, bool) {
+	if preferred == 0 {
+		return 0, false
+	}
+	if l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(preferred)))); err == nil {
+		_ = l.Close()
+		return preferred, false
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		// Could not secure any port; leave the preferred port in place and let
+		// the forwarder surface the original bind error.
+		return preferred, false
+	}
+	port := uint16(l.Addr().(*net.TCPAddr).Port)
+	_ = l.Close()
+	return port, true
+}
+
+// ensureBindableManagementPorts moves the host bind for the shell and exec
+// services off any unbindable port (e.g. a WSL2/Windows-reserved range) onto a
+// free port, preserving the original as the guest vsock port so the host->guest
+// bridge and the guest's own listeners still agree. The guest side is unaffected
+// by host port reservations because it listens on vsock, not host TCP. User
+// port-forwards are intentionally left untouched: those ports are operator
+// intent and a conflict there should surface, not be silently reassigned.
+func ensureBindableManagementPorts(config *vmkit.Config) {
+	if config == nil {
+		return
+	}
+	if config.ShellPort != 0 {
+		if port, changed := bindableHostPort(config.ShellPort); changed {
+			if config.GuestShellPort == 0 {
+				config.GuestShellPort = config.ShellPort
+			}
+			config.ShellPort = port
+		}
+	}
+	if config.ExecPort != 0 {
+		if port, changed := bindableHostPort(config.ExecPort); changed {
+			if config.GuestExecPort == 0 {
+				config.GuestExecPort = config.ExecPort
+			}
+			config.ExecPort = port
+		}
+	}
 }
 
 func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, error) {
