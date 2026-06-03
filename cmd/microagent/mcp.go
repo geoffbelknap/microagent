@@ -452,6 +452,8 @@ func mcpToolSideEffects(name string) []string {
 	switch name {
 	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "images.pull", "cp", "artifacts.get":
 		return []string{"host_state", "workspace_state"}
+	case "models.pull", "models.remove", "models.prune":
+		return []string{"host_state"}
 	default:
 		return nil
 	}
@@ -459,9 +461,9 @@ func mcpToolSideEffects(name string) []string {
 
 func mcpToolIdempotency(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.halt", "workspace.delete", "images.pull":
+	case "workspace.create", "workspace.start", "workspace.halt", "workspace.delete", "images.pull", "models.pull":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
-	case "workspace.list", "workspace.inspect", "workspace.estimate_cost", "images.list", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.estimate_cost", "images.list", "microagent.describe", "models.list":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -476,6 +478,8 @@ func mcpToolPrincipalScope(name string) []string {
 		return []string{"images.read", "images.write"}
 	case "cp", "artifacts.get":
 		return []string{"workspace.files"}
+	case "models.pull", "models.list", "models.remove", "models.prune":
+		return []string{"models.read", "models.write"}
 	default:
 		return []string{"microagent.read"}
 	}
@@ -483,9 +487,9 @@ func mcpToolPrincipalScope(name string) []string {
 
 func mcpToolCostClass(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "images.pull":
+	case "workspace.create", "workspace.start", "workspace.exec", "images.pull", "models.pull":
 		return "host_compute_and_storage"
-	case "cp", "artifacts.get":
+	case "cp", "artifacts.get", "models.remove", "models.prune":
 		return "host_io"
 	default:
 		return "metadata"
@@ -816,7 +820,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 
 func mcpMutationTool(name string) bool {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "images.pull", "cp", "artifacts.get":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "images.pull", "cp", "artifacts.get", "models.pull", "models.remove", "models.prune":
 		return true
 	default:
 		return false

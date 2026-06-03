@@ -183,6 +183,7 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		return Record{}, closeErr
 	}
 	if err := os.Rename(tmp, outputPath); err != nil {
+		os.Remove(tmp)
 		return Record{}, err
 	}
 	record := Record{

@@ -1903,7 +1903,7 @@ func runModelList(args []string, stdout *os.File) error {
 		return err
 	}
 	if outputJSON(stdout) {
-		return writeJSON(stdout, list)
+		return writeJSON(stdout, map[string]any{"models": list})
 	}
 	for _, m := range list {
 		fmt.Fprintf(stdout, "%s\t%d\t%s\n", m.ModelRef, m.SizeBytes, m.Digest)
