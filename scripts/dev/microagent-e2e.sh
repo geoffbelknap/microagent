@@ -342,7 +342,7 @@ for name in "${selected[@]}"; do
     continue
   fi
   if [ "$requirement" = "netpriv" ] && [ "$have_netpriv" = "no" ]; then
-    printf '\n==> %s\n.. SKIP (no privileged networking: need root/CAP_NET_ADMIN + ip_forward)\n' "$name"
+    printf '\n==> %s\n.. SKIP (privileged networking not enabled)\n   To enable: sudo microagent host setup-networking, then run as root or set MICROAGENT_E2E_ALLOW_NETPRIV=1\n' "$name"
     skipped+=("$name (no netpriv)")
     continue
   fi
@@ -379,6 +379,11 @@ printf '\n==== microagent E2E summary (%ss) ====\n' "$((end_suite - start_suite)
 printf 'PASSED:  %s\n' "${#passed[@]}"
 printf 'SKIPPED: %s%s\n' "${#skipped[@]}" "$([ "${#skipped[@]}" -gt 0 ] && printf '  [%s]' "${skipped[*]}")"
 printf 'FAILED:  %s%s\n' "${#failed[@]}" "$([ "${#failed[@]}" -gt 0 ] && printf '  [%s]' "${failed[*]}")"
+if [ "${#skipped[@]}" -gt 0 ]; then
+  printf '\nTo unlock skipped scenarios:\n'
+  printf '  nat/bridged networking:  scripts/dev/microagent-e2e-linux-network-setup.sh, then re-run\n'
+  printf '  named-network (netpriv): sudo microagent host setup-networking, then run as root\n'
+fi
 if [ "${#failed[@]}" -gt 0 ]; then
   exit 1
 fi
