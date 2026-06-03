@@ -4,17 +4,19 @@ description: Put two microVMs on one named network so they reach and resolve eac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-03_
 
 This recipe wires two workspaces together on a [named network](/concepts/networking/#named-networks)
 so they share a subnet, reach each other directly, and resolve each other by
 name. The example is a classic split: an app workspace (`web`) talking to a
 database workspace (`db`).
 
-Named networks are **Firecracker/Linux only** and need the same host setup as
-`nat` mode: `net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in the supervisor (run
-as root, or grant `cap_net_admin,cap_setpcap+ep`). On macOS (Apple VF) the NAT
-attachment can't share a subnet between VMs, so this pattern doesn't apply.
+Named workspace attachment is currently implemented by the Firecracker/Linux
+backend and needs the same host setup as `nat` mode:
+`net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in the supervisor (run as root, or
+grant `cap_net_admin,cap_setpcap+ep`). The named-network registry commands can
+run on macOS, but Apple VF does not currently implement `network.mode=named`,
+so this recipe does not apply to Apple VF workspaces.
 
 ## 1. Create the network
 

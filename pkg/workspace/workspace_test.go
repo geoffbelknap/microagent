@@ -292,6 +292,42 @@ func TestManifestPersistsOnDemandAndAudit(t *testing.T) {
 	}
 }
 
+func TestApplyManifestRestoresSecretsForStartRequest(t *testing.T) {
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = t.TempDir()
+	opts.Backend = vmkit.BackendAppleVF
+	manifest := Manifest{
+		Secrets:         []vmkit.SecretRef{{Name: "API", Ref: "env:API_TOKEN"}},
+		SecretEnvFiles:  []string{"/tmp/app.env"},
+		OnDemandSecrets: []vmkit.SecretRef{{Name: "DB", Ref: "env:DB_TOKEN"}},
+		SecretsAudit:    true,
+	}
+	applyManifest(&opts, manifest)
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.SecretsPort != DefaultSecretsPort || req.Config.SecretsControlPort != DefaultSecretsControlPort {
+		t.Fatalf("secrets ports not restored into request: %+v", req.Config)
+	}
+	if len(req.Config.Secrets) != 1 || req.Config.Secrets[0].Ref != "env:API_TOKEN" {
+		t.Fatalf("materialized secrets not restored: %+v", req.Config.Secrets)
+	}
+	if len(req.Config.SecretEnvFiles) != 1 || req.Config.SecretEnvFiles[0] != "/tmp/app.env" {
+		t.Fatalf("secret env files not restored: %+v", req.Config.SecretEnvFiles)
+	}
+	if len(req.Config.OnDemandSecrets) != 1 || req.Config.OnDemandSecrets[0].Ref != "env:DB_TOKEN" || !req.Config.SecretsAudit {
+		t.Fatalf("on-demand/audit not restored: %+v", req.Config)
+	}
+	found := false
+	for _, l := range req.Config.VsockListeners {
+		if l.Port == DefaultSecretsPort && l.Target == "secrets://serve" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("secrets listener missing after manifest apply: %+v", req.Config.VsockListeners)
+	}
+}
+
 func TestRequestThreadsOnDemandAndAudit(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"

@@ -4,7 +4,7 @@ description: Declarative workspace network intent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-03_
 
 Every workspace declares its network intent. Five modes:
 
@@ -14,7 +14,7 @@ Every workspace declares its network intent. Five modes:
 | `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
 | `isolated` | No guest network device. The guest has no network access at all. |
 | `bridged` | Workspace gets its own L2 presence on an existing host bridge. |
-| `named` | Workspace joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a shared managed bridge so members reach each other, and `/etc/hosts` name resolution. Firecracker/Linux only. |
+| `named` | Workspace joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a shared managed bridge so members reach each other, and `/etc/hosts` name resolution. Currently implemented by Firecracker on Linux. |
 
 The implementation under each mode varies by backend. Quick matrix across all
 three backends:
@@ -202,8 +202,9 @@ the current user cannot create HNS endpoints for HCS compute systems.
 `bridged` mode attaches to a bridge *you* already created. A **named network**
 is microagent's own managed equivalent: declare it once, and any number of
 workspaces join it by name and become peers on a shared subnet. It is the
-in-boundary analog of a Docker user-defined network. Firecracker/Linux only —
-Apple VF's NAT attachment cannot share a subnet between VMs.
+in-boundary analog of a Docker user-defined network. Workspace attachment is
+currently implemented by the Firecracker/Linux backend; Apple VF does not
+currently implement `network.mode=named`.
 
 Create the network (a VM-independent registry record, no host devices yet):
 
@@ -237,8 +238,7 @@ What joining does, realized by the Firecracker supervisor at start:
 `/etc/hosts` is a **boot-time snapshot**: a member resolves peers that joined
 *before* it booted. Reachability by IP is always order-independent (it's L2);
 to refresh an earlier member's name table after newcomers join, restart it.
-Live cross-member name updates would need a guest agent and are intentionally
-out of scope for now.
+Live cross-member name updates are not currently implemented.
 
 Host requirements match `nat`: `net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in
 the supervisor (run as root, or grant `cap_net_admin,cap_setpcap+ep`).

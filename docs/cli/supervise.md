@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-03_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -46,7 +46,8 @@ While the workspace runs, `supervise` probes it every `intervalSeconds` (after a
 is force-killed and the restart policy restarts it — so health-based restart
 requires `on-failure` or `always`. Probe forms:
 
-- `exec` — a command run in the guest via structured exec (Firecracker only);
+- `exec` — a command run in the guest via structured exec when the selected
+  backend exposes `execReady`;
   healthy on exit 0.
 - `httpGet` + `port` — a host-side GET against a published guest port; healthy
   on a non-error status.

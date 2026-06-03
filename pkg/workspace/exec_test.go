@@ -70,11 +70,47 @@ func TestExecRejectsPausedWorkspace(t *testing.T) {
 	}
 }
 
-func TestExecRejectsNonFirecrackerBackend(t *testing.T) {
-	opts := writeExecRuntimeState(t, vmkit.BackendWindowsHyperV, vmkit.StateRunning, 45000)
-	_, err := Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
-	if err == nil || !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("err = %v, want unsupported", err)
+func TestExecAcceptsAppleVFBackendWithExecPort(t *testing.T) {
+	_, port, stop := startWorkspaceExecServer(t, func(conn net.Conn) {
+		var req execprotocol.ExecRequest
+		if err := execprotocol.DecodeMessage(conn, &req); err != nil {
+			t.Errorf("DecodeMessage: %v", err)
+			return
+		}
+		code := 0
+		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+		result.ExitCode = &code
+		if strings.Join(req.Argv, " ") != "true" {
+			result.Stdout = []byte("apple-vf exec\n")
+		}
+		if err := execprotocol.EncodeMessage(conn, result); err != nil {
+			t.Errorf("EncodeMessage: %v", err)
+		}
+	})
+	defer stop()
+	opts := writeExecRuntimeState(t, vmkit.BackendAppleVF, vmkit.StateRunning, port)
+	result, err := Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"echo", "ok"}))
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if string(result.Stdout) != "apple-vf exec\n" {
+		t.Fatalf("stdout = %q", result.Stdout)
+	}
+}
+
+func TestExecRejectsMissingExecPort(t *testing.T) {
+	opts := writeExecRuntimeState(t, vmkit.BackendWindowsHyperV, vmkit.StateRunning, 0)
+	state, err := ReadRuntimeState(opts)
+	if err != nil {
+		t.Fatalf("ReadRuntimeState: %v", err)
+	}
+	state.Config.ExecPort = 0
+	if err := writeJSONFile(filepath.Join(opts.StateDir, opts.Name, "runtime.json"), state); err != nil {
+		t.Fatalf("write runtime state: %v", err)
+	}
+	_, err = Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
+	if err == nil || !strings.Contains(err.Error(), "no structured exec port") {
+		t.Fatalf("err = %v, want missing exec port", err)
 	}
 }
 

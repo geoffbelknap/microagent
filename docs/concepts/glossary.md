@@ -4,7 +4,7 @@ description: Terms used throughout the microagent docs and what they actually me
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-03_
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse - and the distinctions matter for what you can do next.
 
@@ -29,7 +29,7 @@ A handful of terms come up often enough that it's worth pinning them down before
 - **disk** - an ext4 image attached to a workspace at a mountpoint, in addition to the rootfs. microagent never exposes host directories; everything the guest reads or writes is a block device. See [Storage](/concepts/storage/).
 - **bundle** - a tar archive (`.tar`/`.tar.gz`/`.tgz`) built into a one-shot ext4 disk at start. The portable way to get a directory's contents into a workspace.
 - **named volume** - a platform-managed ext4 disk addressed by name, with a lifecycle independent of any one workspace. Single-attach (one running workspace at a time); the in-boundary analog of a container volume. Attach with `-v name:/mount`.
-- **named network** - a user-defined network workspaces join with `--network-name`. Members get a stable IP from its subnet, share a managed bridge so they reach each other, and resolve each other via `/etc/hosts`. Firecracker/Linux only. See [Networking](/concepts/networking/#named-networks).
+- **named network** - a user-defined network workspaces join with `--network-name`. Members get a stable IP from its subnet, share a managed bridge so they reach each other, and resolve each other via `/etc/hosts`. Workspace attachment is currently implemented by Firecracker on Linux. See [Networking](/concepts/networking/#named-networks).
 
 ## Control surface
 

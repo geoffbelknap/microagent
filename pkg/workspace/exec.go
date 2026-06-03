@@ -72,9 +72,6 @@ func execDialAddr(ctx context.Context, opts Options) (string, error) {
 		}
 		return "", err
 	}
-	if runtimeState.Event.Identity.Backend != vmkit.BackendFirecracker {
-		return "", fmt.Errorf("structured exec is unsupported for backend %s", runtimeState.Event.Identity.Backend)
-	}
 	if runtimeState.Config.ExecPort == 0 {
 		return "", fmt.Errorf("workspace %s has no structured exec port in runtime state", opts.Name)
 	}
@@ -115,14 +112,6 @@ func ExecReadinessSignal(ctx context.Context, state RuntimeState, probeTimeout t
 		return vmkit.ReadinessSignal{}, false
 	}
 	observedAt := time.Now().UTC()
-	if state.Event.Identity.Backend != vmkit.BackendFirecracker {
-		return vmkit.ReadinessSignal{
-			Ready:      false,
-			ObservedAt: &observedAt,
-			Detail:     fmt.Sprintf("structured exec unsupported for backend %s", state.Event.Identity.Backend),
-			Error:      "structured exec unsupported for backend",
-		}, true
-	}
 	if state.Config.ExecPort == 0 {
 		return vmkit.ReadinessSignal{
 			Ready:      false,

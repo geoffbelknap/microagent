@@ -4,7 +4,7 @@ description: Inspect workspace network intent and runtime network state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-03_
 
 ```text
 microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's network
@@ -48,8 +48,8 @@ microagent create --name db  --image docker.io/library/postgres:16 --network-nam
 ```
 
 Each member is allocated a **stable IP** from the network's subnet (persisted in
-the registry, so it survives stop/start). Members share a managed Linux bridge
-(Firecracker/Linux only), so they reach each other directly:
+the registry, so it survives stop/start). On Firecracker/Linux, members share a
+managed Linux bridge so they reach each other directly:
 
 ```bash
 microagent exec web -- ping db        # resolve by name and reach the peer
@@ -62,9 +62,11 @@ restart a workspace to pick up members that joined later. Cross-VM connectivity
 by IP is always available regardless of boot order. Deleting a workspace frees
 its address; the shared bridge is removed once the last member stops.
 
-Named networking requires `net.ipv4.ip_forward=1` on the host (as with `nat`
-mode) and CAP_NET_ADMIN in the supervisor. Apple Virtualization.framework NAT
-cannot share a subnet, so named networks are Firecracker/Linux only.
+Named workspace attachment is currently implemented by the Firecracker/Linux
+backend. It requires `net.ipv4.ip_forward=1` on the host (as with `nat` mode)
+and CAP_NET_ADMIN in the supervisor. The `network create` registry commands can
+run on macOS, but Apple VF does not currently implement `network.mode=named`;
+starting an Apple VF workspace on a named network fails backend validation.
 
 ## Flags
 

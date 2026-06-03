@@ -1847,7 +1847,8 @@ Options:
 
 Join a workspace to a named network with create/run --network-name <name>:
 members get a stable IP from the subnet, share a managed bridge, and resolve
-each other by name (Firecracker/Linux only).
+each other by name. Workspace attachment is currently implemented by
+Firecracker on Linux; Apple VF does not currently implement network.mode=named.
 `)
 }
 
