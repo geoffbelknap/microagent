@@ -170,6 +170,14 @@ type HostSupport struct {
 	UserNetworkingBinary    string `json:"userNetworkingBinary,omitempty"`
 	UserNamespacesAvailable bool   `json:"userNamespacesAvailable,omitempty"`
 	TunAvailable            bool   `json:"tunAvailable,omitempty"`
+
+	// Privileged-networking readiness (Linux/Firecracker). nat/bridged/named
+	// require IPv4 forwarding and the supervisor binary holding CAP_NET_ADMIN.
+	IPForwardEnabled          bool `json:"ipForwardEnabled,omitempty"`
+	SupervisorNetAdminCapable bool `json:"supervisorNetAdminCapable,omitempty"`
+	IsolatedNetworkReady      bool `json:"isolatedNetworkReady,omitempty"`
+	UserNetworkReady          bool `json:"userNetworkReady,omitempty"`
+	PrivilegedNetworkReady    bool `json:"privilegedNetworkReady,omitempty"`
 }
 
 type KernelSupport struct {

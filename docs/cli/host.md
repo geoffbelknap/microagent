@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-02_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]
@@ -25,6 +25,34 @@ vsock support, and console mode. It uses the same probes as
 | `--json` | Global flag before `host`; print structured JSON output |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
+## `setup-networking`
+
+```text
+microagent host setup-networking [--check | --revert]
+```
+
+On Linux, the `nat`, `bridged`, and `named` network modes need the host to have
+IPv4 forwarding enabled and the Firecracker supervisor to hold `CAP_NET_ADMIN`.
+`isolated` and `user` (passt) modes work without any setup. This subcommand
+prepares the host for the privileged modes; run [`doctor`](/cli/doctor/) to see
+which modes are currently available.
+
+Run as root (it mutates host state):
+
+```bash
+sudo microagent host setup-networking
+```
+
+It persists `net.ipv4.ip_forward=1` (via `/etc/sysctl.d/99-microagent.conf`) and
+runs `setcap cap_net_admin+eip` on the installed supervisor. A `brew upgrade`
+reinstalls the supervisor and clears the capability, so re-run it after
+upgrading.
+
+| Flag | Description |
+|---|---|
+| `--check` | Report readiness without changing the host (no root needed); non-zero exit if not ready |
+| `--revert` | Remove the sysctl drop-in and drop the supervisor capability |
 
 ## Console modes
 

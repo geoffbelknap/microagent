@@ -329,6 +329,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |
 | `microagent doctor` / `microagent host` | [`diagnostics.Check`](#diagnostics-api) |
+| `microagent host setup-networking` | `diagnostics.DeriveNetworkReadiness` / `diagnostics.NetworkRemediation` (CLI applies `setcap` + `ip_forward`) |
 | `microagent contract` | `vmkit.NewRuntimeContract` |
 | `microagent kernel install` / `microagent kernel verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
 | `microagent rootfs build` | `rootfs.Builder.Build` |

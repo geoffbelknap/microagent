@@ -22,13 +22,14 @@ type Options struct {
 }
 
 type FirecrackerProbe struct {
-	ResolveBinary     func() (string, error)
-	ResolveSupervisor func(Options) (string, error)
-	ResolveGuestInit  func(Options) (string, error)
-	Stat              func(string) (os.FileInfo, error)
-	BinaryVersion     func(string) string
-	LookPath          func(string) (string, error)
-	ReadFile          func(string) ([]byte, error)
+	ResolveBinary          func() (string, error)
+	ResolveSupervisor      func(Options) (string, error)
+	ResolveGuestInit       func(Options) (string, error)
+	Stat                   func(string) (os.FileInfo, error)
+	BinaryVersion          func(string) string
+	LookPath               func(string) (string, error)
+	ReadFile               func(string) ([]byte, error)
+	ReadBinaryCapabilities func(path string) (bool, error)
 }
 
 type WindowsHyperVProbe struct {
@@ -71,9 +72,10 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 		return resp, err
 	case vmkit.BackendFirecracker:
 		resp, err := CheckFirecracker(opts, FirecrackerProbe{
-			ResolveBinary: ResolveFirecrackerPath,
-			Stat:          os.Stat,
-			BinaryVersion: FirecrackerVersion,
+			ResolveBinary:          ResolveFirecrackerPath,
+			Stat:                   os.Stat,
+			BinaryVersion:          FirecrackerVersion,
+			ReadBinaryCapabilities: BinaryHasNetAdmin,
 		})
 		AugmentHostSupport(&resp, opts)
 		return resp, err
@@ -254,6 +256,17 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if usernsIssue != "" {
 		issues = append(issues, usernsIssue)
 	}
+	if probe.ReadFile != nil {
+		if data, err := probe.ReadFile("/proc/sys/net/ipv4/ip_forward"); err == nil {
+			host.IPForwardEnabled = strings.TrimSpace(string(data)) == "1"
+		}
+	}
+	if probe.ReadBinaryCapabilities != nil && host.SupervisorPath != "" {
+		if ok, err := probe.ReadBinaryCapabilities(host.SupervisorPath); err == nil {
+			host.SupervisorNetAdminCapable = ok
+		}
+	}
+	DeriveNetworkReadiness(host)
 	host.ConsoleAvailable = true
 	host.ConsoleMode = "interactive"
 	host.PauseResumeAvailable = true

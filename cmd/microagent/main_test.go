@@ -865,6 +865,28 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 	}
 }
 
+func TestHostUnknownSubcommandErrors(t *testing.T) {
+	f, _ := os.CreateTemp(t.TempDir(), "out")
+	defer f.Close()
+	err := run(t.Context(), []string{"host", "bogus-subcommand"}, f)
+	if err == nil || !strings.Contains(err.Error(), "bogus-subcommand") {
+		t.Fatalf("expected unknown host subcommand error, got %v", err)
+	}
+}
+
+func TestHostNoSubcommandStillReportsDiagnostics(t *testing.T) {
+	f, _ := os.CreateTemp(t.TempDir(), "out")
+	defer f.Close()
+	// Existing behavior must be preserved: `host` with only flags reports.
+	if err := run(t.Context(), []string{"--json", "host", "--backend", hostBackend(), "--arch", defaultGuestArch()}, f); err != nil {
+		t.Fatalf("host report should not error: %v", err)
+	}
+	data, _ := os.ReadFile(f.Name())
+	if !strings.Contains(string(data), "\"backend\"") {
+		t.Fatalf("expected diagnostics JSON, got: %s", data)
+	}
+}
+
 func TestHostCommandRejectsNonHostBackend(t *testing.T) {
 	otherBackend := vmkit.BackendFirecracker
 	if hostBackend() == vmkit.BackendFirecracker {
@@ -6200,4 +6222,38 @@ func unusedTCPPort(t *testing.T) uint16 {
 		t.Fatal(err)
 	}
 	return uint16(portValue)
+}
+
+func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
+	oldOutput := outputFormat
+	t.Cleanup(func() { outputFormat = oldOutput })
+	outputFormat = "text"
+	f, err := os.CreateTemp(t.TempDir(), "doctor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	resp := vmkit.Response{
+		OK:      true,
+		Backend: "firecracker",
+		Host: &vmkit.HostSupport{
+			Backend:                "firecracker",
+			Architecture:           "amd64",
+			IPForwardEnabled:       true,
+			IsolatedNetworkReady:   true,
+			UserNetworkReady:       true,
+			PrivilegedNetworkReady: false, // cap missing
+		},
+	}
+	if err := writeDoctorResponse(f, resp); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(f.Name())
+	out := string(data)
+	if !strings.Contains(out, "Networking:") {
+		t.Errorf("expected a Networking section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "setup-networking") {
+		t.Errorf("expected remediation hint, got:\n%s", out)
+	}
 }

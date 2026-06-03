@@ -314,6 +314,14 @@ func runDoctor(ctx context.Context, args []string, stdout *os.File) error {
 }
 
 func runHost(ctx context.Context, args []string, stdout *os.File) error {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		switch args[0] {
+		case "setup-networking":
+			return runHostSetupNetworking(args[1:], stdout)
+		default:
+			return fmt.Errorf("unknown host command: %s", args[0])
+		}
+	}
 	opts := doctorOptions{
 		Backend: hostBackend(),
 		Arch:    defaultGuestArch(),
@@ -4204,6 +4212,7 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 			fmt.Fprintf(stdout, " (%s)", resp.Host.ConsoleMode)
 		}
 		fmt.Fprintln(stdout)
+		printNetworkingSection(stdout, resp.Host)
 	}
 	if resp.Kernel != nil {
 		fmt.Fprintf(stdout, "Kernel: %s", nonEmpty(resp.Kernel.Status, "unknown"))
@@ -4216,6 +4225,25 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 		fmt.Fprintf(stdout, "Error: %s\n", resp.Error)
 	}
 	return nil
+}
+
+func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
+	if host == nil {
+		return
+	}
+	ready := func(b bool) string {
+		if b {
+			return "ready"
+		}
+		return "unavailable"
+	}
+	fmt.Fprintf(stdout, "Networking: isolated %s, user %s, nat/bridged/named %s\n",
+		ready(host.IsolatedNetworkReady),
+		ready(host.UserNetworkReady),
+		ready(host.PrivilegedNetworkReady))
+	if hint := diagnostics.NetworkRemediation(host); hint != "" {
+		fmt.Fprintf(stdout, "  %s\n", hint)
+	}
 }
 
 func writeRuntimeContract(stdout *os.File, contract vmkit.RuntimeContract) error {
@@ -6778,6 +6806,7 @@ Commands:
   rm                   Alias for delete
   contract             Show backend-neutral runtime contract
   host                 Report host capabilities
+  host setup-networking  Enable nat/bridged/named networking (Linux; needs root). --check / --revert
   doctor               Check the host
   rootfs build         Build a rootfs from an OCI image
   version              Print the version
