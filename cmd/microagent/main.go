@@ -668,6 +668,18 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 		printRunHelp(stdout)
 		return nil
 	}
+	// Pre-scan --model and --model-token before flag parsing so we can drive
+	// orchestration after opts are assembled but before the workspace lifecycle.
+	modelRefRaw, _ := flagValue(args, "model")
+	modelToken, _ := flagValue(args, "model-token")
+	if modelToken == "" {
+		if v := os.Getenv("HF_TOKEN"); v != "" {
+			modelToken = v
+		} else if v := os.Getenv("HUGGING_FACE_HUB_TOKEN"); v != "" {
+			modelToken = v
+		}
+	}
+
 	opts, err := parseWorkspaceOptions("run", args)
 	if err != nil {
 		return err
@@ -681,6 +693,53 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+
+	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
+	var modelHolder, modelCanonicalRef, modelStateDir string
+	if strings.TrimSpace(modelRefRaw) != "" {
+		canonical, _, err := model.Resolve(modelRefRaw)
+		if err != nil {
+			return err
+		}
+		rec, err := model.Find(opts.StateDir, canonical)
+		if err != nil {
+			// Not in the store — auto-pull (one-shot convenience).
+			rec, err = model.Pull(ctx, model.PullOptions{StateDir: opts.StateDir, ModelRef: modelRefRaw, Token: modelToken})
+			if err != nil {
+				return fmt.Errorf("pull model %s: %w", modelRefRaw, err)
+			}
+		}
+		binPath, err := modelrunner.ResolveLlamaServerPath()
+		if err != nil {
+			return err
+		}
+		runner, err := modelrunner.Ensure(ctx, modelrunner.EnsureOptions{
+			StateDir:     opts.StateDir,
+			ModelRef:     rec.ModelRef,
+			ModelPath:    rec.OutputPath,
+			Engine:       modelrunner.LlamaCPP{BinPath: binPath},
+			Holder:       opts.Name,
+			ReadyTimeout: 120 * time.Second,
+		})
+		if err != nil {
+			return fmt.Errorf("start model runner: %w", err)
+		}
+		// Activate pairing on the workspace options.
+		opts.ModelTarget = fmt.Sprintf("%s:%d", runner.Host, runner.Port)
+		if opts.Env == nil {
+			opts.Env = map[string]string{}
+		}
+		modelURL := fmt.Sprintf("http://127.0.0.1:%d/v1", workspace.DefaultModelGuestPort)
+		opts.Env["MICROAGENT_MODEL_URL"] = modelURL
+		opts.Env["OPENAI_BASE_URL"] = modelURL
+		modelHolder = opts.Name
+		modelCanonicalRef = rec.ModelRef
+		modelStateDir = opts.StateDir
+	}
+	if modelHolder != "" {
+		defer func() { _ = modelrunner.Release(modelStateDir, modelCanonicalRef, modelHolder) }()
+	}
+
 	result, err := workspace.Run(ctx, opts)
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
@@ -3070,6 +3129,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	rm := false
 	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
+	// --model and --model-token are consumed by runWorkspace before this call;
+	// register them here so the flagset accepts them without error and shows
+	// them in --help output.
+	var absorbedModelRef, absorbedModelToken string
+	fs.StringVar(&absorbedModelRef, "model", "", "Pair this run with a locally-served model (HuggingFace GGUF ref); injects MICROAGENT_MODEL_URL/OPENAI_BASE_URL")
+	fs.StringVar(&absorbedModelToken, "model-token", "", "HuggingFace token for model auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
 	if err := rejectUnsupportedContainerCompatibilityFlags(args); err != nil {
 		return workspaceOptions{}, err
 	}
@@ -6544,6 +6609,8 @@ func reorderFlagArgs(args []string) []string {
 		"-result-port":       true,
 		"-send":              true,
 		"-e":                 true,
+		"-model":             true,
+		"-model-token":       true,
 	}
 	var flags []string
 	var positional []string
@@ -7147,6 +7214,10 @@ Options:
   -rm                   Explicitly remove state after run
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
+  -model <ref>          Pair with a locally-served model (HuggingFace GGUF ref);
+                         injects MICROAGENT_MODEL_URL and OPENAI_BASE_URL
+  -model-token <token>  HuggingFace token for model auto-pull
+                         (defaults to HF_TOKEN or HUGGING_FACE_HUB_TOKEN)
 
 Container-style examples:
   microagent run alpine echo hello
