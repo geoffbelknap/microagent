@@ -349,10 +349,6 @@ func runHost(ctx context.Context, args []string, stdout *os.File) error {
 	return writeDoctorResponse(stdout, resp)
 }
 
-func runHostSetupNetworking(args []string, stdout *os.File) error {
-	return fmt.Errorf("not implemented")
-}
-
 func doctorResponse(ctx context.Context, opts doctorOptions) (vmkit.Response, error) {
 	return diagnostics.Check(ctx, diagnostics.Options{Backend: opts.Backend, Arch: opts.Arch, SupervisorPath: opts.SupervisorPath})
 }
