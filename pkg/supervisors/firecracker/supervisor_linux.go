@@ -869,6 +869,9 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	if config != nil && config.SecretsControlPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_secrets_ctl_port=%d", config.SecretsControlPort))
 	}
+	if config != nil && config.ModelGuestPort != 0 && config.ModelVsockPort != 0 {
+		args = append(args, fmt.Sprintf("microagent_model_fwd=%d:%d", config.ModelGuestPort, config.ModelVsockPort))
+	}
 	mode := networkMode(config)
 	if (mode == "nat" || mode == "user" || mode == "named") && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
 		args = append(args,

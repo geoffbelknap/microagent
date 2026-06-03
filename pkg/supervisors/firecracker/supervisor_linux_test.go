@@ -1766,3 +1766,14 @@ func TestFirecrackerBootArgsIncludesSecretsControlPort(t *testing.T) {
 		t.Fatalf("boot args should omit control port when zero: %q", none)
 	}
 }
+
+func TestFirecrackerBootArgsModelForward(t *testing.T) {
+	args := firecrackerBootArgs(&vmkit.Config{ModelGuestPort: 11434, ModelVsockPort: 62100})
+	if !strings.Contains(args, "microagent_model_fwd=11434:62100") {
+		t.Fatalf("missing model fwd cmdline: %q", args)
+	}
+	none := firecrackerBootArgs(&vmkit.Config{})
+	if strings.Contains(none, "microagent_model_fwd") {
+		t.Fatalf("boot args should omit model fwd when zero: %q", none)
+	}
+}
