@@ -376,3 +376,28 @@ func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
 		t.Fatalf("secrets vsock listener missing: %+v", req.Config.VsockListeners)
 	}
 }
+
+func TestRequestWiresModelTarget(t *testing.T) {
+	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "firecracker", ModelTarget: "127.0.0.1:38001"}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	found := false
+	for _, l := range req.Config.VsockListeners {
+		if l.Port == DefaultModelVsockPort && l.Target == "127.0.0.1:38001" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("model vsock listener not wired: %+v", req.Config.VsockListeners)
+	}
+	if req.Config.ModelGuestPort != DefaultModelGuestPort || req.Config.ModelVsockPort != DefaultModelVsockPort {
+		t.Fatalf("model ports not set: guest=%d vsock=%d", req.Config.ModelGuestPort, req.Config.ModelVsockPort)
+	}
+}
+
+func TestRequestNoModelTarget(t *testing.T) {
+	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "firecracker"}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.ModelGuestPort != 0 || req.Config.ModelVsockPort != 0 {
+		t.Fatalf("model ports should be zero when unpaired")
+	}
+}
