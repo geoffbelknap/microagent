@@ -50,10 +50,70 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		}
 		names[tool["name"].(string)] = true
 	}
-	for _, name := range []string{"microagent.ping", "microagent.describe", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.estimate_cost", "images.pull", "images.list", "cp", "artifacts.get"} {
+	for _, name := range []string{"microagent.ping", "microagent.describe", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.logs", "workspace.events", "workspace.commit", "workspace.estimate_cost", "network.inspect", "network.create", "network.list", "network.delete", "volume.create", "volume.list", "volume.inspect", "volume.delete", "images.pull", "images.list", "images.push", "cp", "artifacts.get"} {
 		if !names[name] {
 			t.Fatalf("tools missing %s: %#v", name, names)
 		}
+	}
+}
+
+func TestMCPManagementToolCLIArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		args map[string]any
+		want []string
+	}{
+		{
+			name: "workspace.logs",
+			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
+			want: []string{"--mode=ax", "logs", "demo", "-state-dir", "/tmp/state"},
+		},
+		{
+			name: "workspace.events",
+			args: map[string]any{"name": "demo"},
+			want: []string{"--mode=ax", "events", "demo"},
+		},
+		{
+			name: "workspace.commit",
+			args: map[string]any{"name": "demo", "image": "example.com/acme/demo:rc", "state_dir": "/tmp/state", "arch": "arm64", "push": true},
+			want: []string{"--mode=ax", "commit", "demo", "example.com/acme/demo:rc", "-state-dir", "/tmp/state", "-arch", "arm64", "-push"},
+		},
+		{
+			name: "network.create",
+			args: map[string]any{"name": "devnet", "subnet": "10.44.9.0/24"},
+			want: []string{"--mode=ax", "network", "create", "devnet", "-subnet", "10.44.9.0/24"},
+		},
+		{
+			name: "network.delete",
+			args: map[string]any{"name": "devnet", "force": true},
+			want: []string{"--mode=ax", "network", "rm", "devnet", "-force"},
+		},
+		{
+			name: "volume.create",
+			args: map[string]any{"name": "data", "size_mib": float64(2048)},
+			want: []string{"--mode=ax", "volume", "create", "data", "-size-mib", "2048"},
+		},
+		{
+			name: "volume.delete",
+			args: map[string]any{"name": "data", "force": true},
+			want: []string{"--mode=ax", "volume", "rm", "data", "-force"},
+		},
+		{
+			name: "images.push",
+			args: map[string]any{"image": "example.com/acme/demo:rc", "state_dir": "/tmp/state"},
+			want: []string{"--mode=ax", "images", "push", "example.com/acme/demo:rc", "-state-dir", "/tmp/state"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := mcpCLIArgs(tt.name, tt.args)
+			if err != nil {
+				t.Fatalf("mcpCLIArgs: %v", err)
+			}
+			if strings.Join(got, "\x00") != strings.Join(tt.want, "\x00") {
+				t.Fatalf("args = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -82,6 +142,24 @@ func TestMCPDeletePreview(t *testing.T) {
 	}
 }
 
+func TestMCPManagementDeletePreview(t *testing.T) {
+	for _, tool := range []string{"network.delete", "volume.delete"} {
+		t.Run(tool, func(t *testing.T) {
+			result, err := runMCPTool(context.Background(), tool, map[string]any{"name": "demo", "preview": true, "force": true})
+			if err != nil {
+				t.Fatalf("runMCPTool preview: %v", err)
+			}
+			data, err := json.Marshal(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), `"preview":true`) || !strings.Contains(string(data), `"force":true`) {
+				t.Fatalf("preview = %s", data)
+			}
+		})
+	}
+}
+
 func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
 	summary, ok := summarizeWorkspaceInspect(map[string]any{
 		"ok":      true,
@@ -100,6 +178,44 @@ func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
 	points, ok := summary["next_decision_points"].([]string)
 	if !ok || len(points) == 0 {
 		t.Fatalf("next_decision_points = %#v", summary["next_decision_points"])
+	}
+}
+
+func TestMCPSummarizeWorkspaceLogs(t *testing.T) {
+	summary, ok := summarizeWorkspaceLogs(map[string]any{
+		"workspace": "demo",
+		"logs":      "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\n",
+	}).(map[string]any)
+	if !ok {
+		t.Fatalf("summary type = %T", summary)
+	}
+	if summary["format"] != "summary" || summary["workspace"] != "demo" || summary["line_count"] != 9 {
+		t.Fatalf("summary = %#v", summary)
+	}
+	tail, ok := summary["tail_lines"].([]string)
+	if !ok || len(tail) != 8 || tail[0] != "two" || tail[7] != "nine" {
+		t.Fatalf("tail_lines = %#v", summary["tail_lines"])
+	}
+}
+
+func TestMCPSummarizeWorkspaceEvents(t *testing.T) {
+	summary, ok := summarizeWorkspaceEvents(map[string]any{
+		"workspace": "demo",
+		"events": []any{
+			map[string]any{"state": "prepared", "observedAt": "2026-06-04T00:00:00Z"},
+			map[string]any{"state": "running", "observedAt": "2026-06-04T00:00:01Z", "detail": "serial=serial.log"},
+			map[string]any{"state": "halted", "observedAt": "2026-06-04T00:00:02Z"},
+		},
+	}, 2).(map[string]any)
+	if !ok {
+		t.Fatalf("summary type = %T", summary)
+	}
+	if summary["format"] != "summary" || summary["workspace"] != "demo" || summary["event_count"] != 3 || summary["latest_state"] != "halted" {
+		t.Fatalf("summary = %#v", summary)
+	}
+	recent, ok := summary["recent"].([]any)
+	if !ok || len(recent) != 2 {
+		t.Fatalf("recent = %#v", summary["recent"])
 	}
 }
 

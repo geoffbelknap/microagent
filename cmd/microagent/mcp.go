@@ -234,9 +234,21 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.delete", "Delete a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("workspace.list", "List workspaces.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.inspect", "Inspect workspace state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}}),
+		mcpTool("workspace.logs", "Read workspace serial logs. Defaults to a compact summary; pass format=full for the complete log buffer.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}}),
+		mcpTool("workspace.events", "Read workspace lifecycle events. Defaults to a compact recent-event summary; pass format=full for all events.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}, "limit": map[string]any{"type": "integer"}}),
+		mcpTool("workspace.commit", "Commit a stopped workspace rootfs into a local OCI image, optionally pushing it.", []string{"name", "image"}, map[string]any{"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "push": map[string]any{"type": "boolean"}}),
 		mcpTool("workspace.estimate_cost", "Estimate workspace resource consumption before creating or starting it.", nil, map[string]any{"profile": map[string]any{"type": "string"}, "memory_mib": map[string]any{"type": "integer"}, "cpus": map[string]any{"type": "integer"}, "size_mib": map[string]any{"type": "integer"}, "price_per_hour": map[string]any{"type": "number"}}),
+		mcpTool("network.inspect", "Inspect a named microVM network record.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("network.create", "Create a named microVM network record.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "subnet": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("network.list", "List named microVM network records.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("network.delete", "Delete a named microVM network record.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
+		mcpTool("volume.create", "Create a named managed ext4 volume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "size_mib": map[string]any{"type": "integer"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("volume.list", "List named managed volumes.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("volume.inspect", "Inspect one named managed volume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("volume.delete", "Delete a named managed volume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("images.pull", "Pull a reusable image rootfs.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}}),
 		mcpTool("images.list", "List reusable local image records.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("images.push", "Push a locally committed OCI image to its registry.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("cp", "Copy files into or out of a stopped workspace.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("artifacts.get", "Copy a declared workspace artifact out to the host.", []string{"name", "artifact", "target"}, map[string]any{"name": map[string]any{"type": "string"}, "artifact": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 	}
@@ -357,6 +369,15 @@ func microagentCapabilityManifest() map[string]any {
 		"version":        version,
 		"transport":      "mcp_stdio",
 		"output_mode":    string(outputModeAX),
+		"agent_experience": map[string]any{
+			"defaults": []string{
+				"use compact summary outputs for repeated state checks",
+				"request format=full only when a complete log, event, or inspect payload is needed",
+				"use preview=true before destructive delete operations when user confirmation is still pending",
+				"use idempotency_key on retryable mutation calls",
+			},
+			"evidence": "external AX harness runs showed lower token waste when agents used compact structured MCP state instead of scraping prose or repeatedly requesting full state",
+		},
 		"readiness_signals": []map[string]string{
 			{"name": "guestReady", "description": "workspace reached a started terminal or runtime state"},
 			{"name": "shellReady", "description": "interactive console shell is reachable and command round-trip works"},
@@ -446,7 +467,7 @@ func readinessSignalSchema() map[string]any {
 
 func mcpToolSideEffects(name string) []string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "images.pull", "cp", "artifacts.get":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.commit", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "cp", "artifacts.get":
 		return []string{"host_state", "workspace_state"}
 	default:
 		return nil
@@ -455,9 +476,11 @@ func mcpToolSideEffects(name string) []string {
 
 func mcpToolIdempotency(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.halt", "workspace.delete", "images.pull":
+	case "workspace.create", "workspace.start", "workspace.halt", "workspace.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
-	case "workspace.list", "workspace.inspect", "workspace.estimate_cost", "images.list", "microagent.describe":
+	case "workspace.exec", "workspace.commit", "cp", "artifacts.get":
+		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
+	case "workspace.list", "workspace.inspect", "workspace.logs", "workspace.events", "workspace.estimate_cost", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -466,9 +489,13 @@ func mcpToolIdempotency(name string) string {
 
 func mcpToolPrincipalScope(name string) []string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.logs", "workspace.events", "workspace.commit":
 		return []string{"workspace.lifecycle"}
-	case "images.pull", "images.list":
+	case "network.inspect", "network.create", "network.list", "network.delete":
+		return []string{"network.read", "network.write"}
+	case "volume.create", "volume.list", "volume.inspect", "volume.delete":
+		return []string{"volume.read", "volume.write"}
+	case "images.pull", "images.list", "images.push":
 		return []string{"images.read", "images.write"}
 	case "cp", "artifacts.get":
 		return []string{"workspace.files"}
@@ -479,7 +506,7 @@ func mcpToolPrincipalScope(name string) []string {
 
 func mcpToolCostClass(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "images.pull":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.commit", "volume.create", "volume.delete", "images.pull", "images.push":
 		return "host_compute_and_storage"
 	case "cp", "artifacts.get":
 		return "host_io"
@@ -548,8 +575,14 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		return nil, err
 	}
 	result, cliErr := runCLIForMCP(ctx, cliArgs)
-	if cliErr == nil && name == "workspace.inspect" && strings.EqualFold(stringArg(args, "format"), "summary") {
+	if cliErr == nil && name == "workspace.inspect" && !strings.EqualFold(stringArg(args, "format"), "full") {
 		result = summarizeWorkspaceInspect(result)
+	}
+	if cliErr == nil && name == "workspace.logs" && !strings.EqualFold(stringArg(args, "format"), "full") {
+		result = summarizeWorkspaceLogs(result)
+	}
+	if cliErr == nil && name == "workspace.events" && !strings.EqualFold(stringArg(args, "format"), "full") {
+		result = summarizeWorkspaceEvents(result, intArg(args, "limit"))
 	}
 	envelope := map[string]any{
 		"result":            result,
@@ -761,6 +794,18 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 			"timing_ms":         int64(0),
 			"principal_context": principalContextArg(args),
 		}
+	case "network.delete", "volume.delete":
+		return map[string]any{
+			"result": map[string]any{
+				"preview": true,
+				"tool":    name,
+				"name":    stringArg(args, "name"),
+				"actions": []string{"delete " + strings.TrimSuffix(name, ".delete")},
+				"force":   boolArg(args, "force"),
+			},
+			"timing_ms":         int64(0),
+			"principal_context": principalContextArg(args),
+		}
 	default:
 		return nil
 	}
@@ -802,6 +847,60 @@ func summarizeWorkspaceInspect(result any) any {
 	return summary
 }
 
+func summarizeWorkspaceLogs(result any) any {
+	resp, ok := result.(map[string]any)
+	if !ok {
+		return result
+	}
+	logs, _ := resp["logs"].(string)
+	lines := strings.Split(strings.TrimRight(logs, "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = nil
+	}
+	tail := lines
+	if len(tail) > 8 {
+		tail = tail[len(tail)-8:]
+	}
+	return map[string]any{
+		"format":      "summary",
+		"workspace":   resp["workspace"],
+		"byte_count":  len(logs),
+		"line_count":  len(lines),
+		"tail_lines":  tail,
+		"full_output": "call workspace.logs with format=full to retrieve the complete serial log buffer",
+	}
+}
+
+func summarizeWorkspaceEvents(result any, limit int) any {
+	resp, ok := result.(map[string]any)
+	if !ok {
+		return result
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	events, _ := resp["events"].([]any)
+	recent := events
+	if len(recent) > limit {
+		recent = recent[len(recent)-limit:]
+	}
+	summary := map[string]any{
+		"format":      "summary",
+		"workspace":   resp["workspace"],
+		"event_count": len(events),
+		"recent":      recent,
+		"full_output": "call workspace.events with format=full to retrieve all lifecycle events",
+	}
+	if len(events) > 0 {
+		if latest, ok := events[len(events)-1].(map[string]any); ok {
+			summary["latest_state"] = latest["state"]
+			summary["latest_observed_at"] = latest["observedAt"]
+			summary["latest_detail"] = latest["detail"]
+		}
+	}
+	return summary
+}
+
 func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 	key := stringArg(args, "idempotency_key")
 	if key == "" || !mcpMutationTool(name) {
@@ -812,7 +911,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 
 func mcpMutationTool(name string) bool {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "images.pull", "cp", "artifacts.get":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.commit", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "cp", "artifacts.get":
 		return true
 	default:
 		return false
@@ -912,6 +1011,79 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag([]string{"--mode=ax", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "workspace.logs":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag([]string{"--mode=ax", "logs", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "workspace.events":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag([]string{"--mode=ax", "events", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "workspace.commit":
+		if err := requireToolArgs(args, name, "name", "image"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "commit", stringArg(args, "name"), stringArg(args, "image")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
+		if boolArg(args, "push") {
+			cli = append(cli, "-push")
+		}
+		return cli, nil
+	case "network.inspect":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag([]string{"--mode=ax", "network", "inspect", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "network.create":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "network", "create", stringArg(args, "name")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		cli = appendOptionalFlag(cli, "-subnet", stringArg(args, "subnet"))
+		return cli, nil
+	case "network.list":
+		return appendOptionalFlag([]string{"--mode=ax", "network", "ls"}, "-state-dir", stateDir), nil
+	case "network.delete":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "network", "rm", stringArg(args, "name")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		if boolArg(args, "force") {
+			cli = append(cli, "-force")
+		}
+		return cli, nil
+	case "volume.create":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "volume", "create", stringArg(args, "name")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		if size := int64Arg(args, "size_mib"); size > 0 {
+			cli = append(cli, "-size-mib", strconv.FormatInt(size, 10))
+		}
+		return cli, nil
+	case "volume.list":
+		return appendOptionalFlag([]string{"--mode=ax", "volume", "ls"}, "-state-dir", stateDir), nil
+	case "volume.inspect":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag([]string{"--mode=ax", "volume", "inspect", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "volume.delete":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "volume", "rm", stringArg(args, "name")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		if boolArg(args, "force") {
+			cli = append(cli, "-force")
+		}
+		return cli, nil
 	case "images.pull":
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
@@ -922,6 +1094,12 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		return cli, nil
 	case "images.list":
 		return appendOptionalFlag([]string{"--mode=ax", "images", "list"}, "-state-dir", stateDir), nil
+	case "images.push":
+		if err := requireToolArgs(args, name, "image"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "images", "push", stringArg(args, "image")}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "cp":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err
