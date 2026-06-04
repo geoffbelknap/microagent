@@ -16,6 +16,22 @@ been cut into a release yet.
   Apple Virtualization.framework NAT cannot share a subnet. `/etc/hosts` is a
   boot-time snapshot — restart a member to pick up peers that joined later.
   Builds on the named-network registry (`pkg/network`) added earlier.
+- Brought Apple Virtualization.framework validation up to the backend-neutral
+  E2E surface. The unified `scripts/dev/microagent-e2e.sh` runner now selects
+  the Darwin/Apple VF scenarios on macOS, covering public CLI surface,
+  lifecycle, networking, transport/mediation, supervision, volumes,
+  commit-images, secrets, health, streaming exec, and Apple VF host probes.
+  The latest full macOS arm64 run on `main` passed 23 scenarios with no skips
+  or failures.
+- Fixed Apple VF networking and transport parity issues found by the expanded
+  suite: guest DHCP/DNS setup for Apple VF boots, publish/workspace-connect
+  smoke races, external-DNS-independent networking probes, optional mediation
+  readiness semantics, and TCP-vsock bridge connection handling.
+- Added host networking readiness/setup visibility for Linux privileged network
+  modes. `doctor` and host diagnostics now report IP-forwarding and supervisor
+  `CAP_NET_ADMIN` readiness, and `host setup-networking` can persist
+  `ip_forward` plus set the supervisor capability on Linux while stubbing
+  unsupported hosts explicitly.
 - Added managed named volumes: `microagent volume create/ls/inspect/rm` and
   attach-by-name with `--volume <name>:/mount`. A named volume is a
   platform-managed ext4 disk with a lifecycle independent of any one workspace
