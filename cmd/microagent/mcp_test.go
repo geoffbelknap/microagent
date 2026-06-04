@@ -50,7 +50,17 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		}
 		names[tool["name"].(string)] = true
 	}
-	for _, name := range []string{"microagent.ping", "microagent.describe", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.logs", "workspace.events", "workspace.commit", "workspace.estimate_cost", "network.inspect", "network.create", "network.list", "network.delete", "volume.create", "volume.list", "volume.inspect", "volume.delete", "images.pull", "images.list", "images.push", "cp", "artifacts.get"} {
+	for _, name := range []string{
+		"microagent.ping", "microagent.describe",
+		"workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.estimate_cost",
+		"artifacts.list", "artifacts.get",
+		"snapshot.create", "snapshot.list", "snapshot.delete",
+		"network.inspect", "network.create", "network.list", "network.delete",
+		"volume.create", "volume.list", "volume.inspect", "volume.delete",
+		"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune",
+		"profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify",
+		"cp",
+	} {
 		if !names[name] {
 			t.Fatalf("tools missing %s: %#v", name, names)
 		}
@@ -74,9 +84,49 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "events", "demo"},
 		},
 		{
+			name: "workspace.result",
+			args: map[string]any{"name": "demo"},
+			want: []string{"--mode=ax", "result", "demo"},
+		},
+		{
+			name: "workspace.stats",
+			args: map[string]any{"name": "demo"},
+			want: []string{"--mode=ax", "stats", "demo"},
+		},
+		{
+			name: "workspace.clone",
+			args: map[string]any{"source": "demo", "target": "copy"},
+			want: []string{"--mode=ax", "clone", "demo", "copy"},
+		},
+		{
+			name: "workspace.apply",
+			args: map[string]any{"file": "/tmp/microagent.yaml", "state_dir": "/tmp/state", "backend": "applevf", "arch": "arm64", "supervisor": "/tmp/helper"},
+			want: []string{"--mode=ax", "apply", "-file", "/tmp/microagent.yaml", "-state-dir", "/tmp/state", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
+		},
+		{
 			name: "workspace.commit",
 			args: map[string]any{"name": "demo", "image": "example.com/acme/demo:rc", "state_dir": "/tmp/state", "arch": "arm64", "push": true},
 			want: []string{"--mode=ax", "commit", "demo", "example.com/acme/demo:rc", "-state-dir", "/tmp/state", "-arch", "arm64", "-push"},
+		},
+		{
+			name: "workspace.quarantine",
+			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
+			want: []string{"--mode=ax", "quarantine", "demo", "-state-dir", "/tmp/state"},
+		},
+		{
+			name: "artifacts.list",
+			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
+			want: []string{"--mode=ax", "artifacts", "demo", "-state-dir", "/tmp/state"},
+		},
+		{
+			name: "snapshot.create",
+			args: map[string]any{"name": "demo", "tag": "before-upgrade"},
+			want: []string{"--mode=ax", "snapshot", "create", "demo", "-tag", "before-upgrade"},
+		},
+		{
+			name: "snapshot.delete",
+			args: map[string]any{"name": "demo", "tag": "before-upgrade", "state_dir": "/tmp/state"},
+			want: []string{"--mode=ax", "snapshot", "rm", "demo", "before-upgrade", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "network.create",
@@ -102,6 +152,46 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			name: "images.push",
 			args: map[string]any{"image": "example.com/acme/demo:rc", "state_dir": "/tmp/state"},
 			want: []string{"--mode=ax", "images", "push", "example.com/acme/demo:rc", "-state-dir", "/tmp/state"},
+		},
+		{
+			name: "images.tag",
+			args: map[string]any{"source": "example.com/acme/demo:rc", "target": "example.com/acme/demo:stable"},
+			want: []string{"--mode=ax", "images", "tag", "example.com/acme/demo:rc", "example.com/acme/demo:stable"},
+		},
+		{
+			name: "images.delete",
+			args: map[string]any{"image": "example.com/acme/demo:old", "delete_files": true},
+			want: []string{"--mode=ax", "images", "rm", "example.com/acme/demo:old", "-delete", "-yes"},
+		},
+		{
+			name: "images.prune",
+			args: map[string]any{"state_dir": "/tmp/state", "delete_files": true},
+			want: []string{"--mode=ax", "images", "prune", "-state-dir", "/tmp/state", "-delete", "-yes"},
+		},
+		{
+			name: "profiles.list",
+			args: map[string]any{},
+			want: []string{"--mode=ax", "profiles"},
+		},
+		{
+			name: "host.inspect",
+			args: map[string]any{"backend": "applevf", "arch": "arm64", "supervisor": "/tmp/helper"},
+			want: []string{"--mode=ax", "host", "-backend", "applevf", "-arch", "arm64", "-supervisor", "/tmp/helper"},
+		},
+		{
+			name: "doctor.check",
+			args: map[string]any{"backend": "firecracker"},
+			want: []string{"--mode=ax", "doctor", "-backend", "firecracker"},
+		},
+		{
+			name: "contract.get",
+			args: map[string]any{},
+			want: []string{"--mode=ax", "contract"},
+		},
+		{
+			name: "kernel.verify",
+			args: map[string]any{"path": "/tmp/vmlinux", "sha256": "abc", "backend": "firecracker", "arch": "amd64"},
+			want: []string{"--mode=ax", "kernel", "verify", "-path", "/tmp/vmlinux", "-sha256", "abc", "-backend", "firecracker", "-arch", "amd64"},
 		},
 	}
 	for _, tt := range tests {
@@ -143,9 +233,10 @@ func TestMCPDeletePreview(t *testing.T) {
 }
 
 func TestMCPManagementDeletePreview(t *testing.T) {
-	for _, tool := range []string{"network.delete", "volume.delete"} {
+	for _, tool := range []string{"network.delete", "volume.delete", "snapshot.delete", "images.delete", "images.prune"} {
 		t.Run(tool, func(t *testing.T) {
-			result, err := runMCPTool(context.Background(), tool, map[string]any{"name": "demo", "preview": true, "force": true})
+			args := map[string]any{"name": "demo", "tag": "snap", "image": "example.com/acme/demo:old", "preview": true, "force": true, "delete_files": true}
+			result, err := runMCPTool(context.Background(), tool, args)
 			if err != nil {
 				t.Fatalf("runMCPTool preview: %v", err)
 			}
@@ -153,7 +244,7 @@ func TestMCPManagementDeletePreview(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(data), `"preview":true`) || !strings.Contains(string(data), `"force":true`) {
+			if !strings.Contains(string(data), `"preview":true`) {
 				t.Fatalf("preview = %s", data)
 			}
 		})

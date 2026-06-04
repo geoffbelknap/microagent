@@ -15,8 +15,9 @@ current endpoint is `mcp`, which serves the MicroAgent MCP stdio transport from
 the main `microagent` binary.
 
 The MCP server automatically uses AX output mode. It exposes structured tools
-for workspace lifecycle, inspection, logs, events, images, networks, volumes,
-copy/artifact access, capability discovery, and cost estimation.
+for workspace lifecycle, inspection, results, stats, logs, events, snapshots,
+images, networks, volumes, copy/artifact access, host diagnostics, capability
+discovery, and cost estimation.
 
 It is the full microagent MCP surface for the current release. It intentionally
 stops at substrate operations: it does not plan, call an LLM, interpret audit
@@ -38,13 +39,27 @@ meaning, broker credentials, or make policy decisions.
 | `workspace.start` | Start a prepared workspace |
 | `workspace.exec` | Run a structured command in a running workspace |
 | `workspace.halt` | Halt a workspace and preserve disk state |
+| `workspace.stop` | Stop a workspace runtime |
+| `workspace.kill` | Force stop a workspace runtime |
+| `workspace.quarantine` | Sever host-side network and mediation |
+| `workspace.pause` | Pause a running workspace when supported |
+| `workspace.resume` | Resume a paused workspace when supported |
 | `workspace.delete` | Delete a workspace, with optional preview and force |
 | `workspace.list` | List workspaces |
 | `workspace.inspect` | Inspect workspace state with `summary` or `full` output |
+| `workspace.result` | Read the structured workspace result |
+| `workspace.stats` | Sample workspace resource usage |
 | `workspace.logs` | Read workspace serial logs with `summary` or `full` output |
 | `workspace.events` | Read lifecycle events with `summary` or `full` output |
+| `workspace.clone` | Clone a stopped workspace |
+| `workspace.apply` | Apply supported changes from a workspace spec file |
 | `workspace.commit` | Commit a stopped workspace rootfs to an OCI image |
 | `workspace.estimate_cost` | Estimate workspace resources before action |
+| `artifacts.list` | List declared workspace artifacts |
+| `artifacts.get` | Retrieve a declared workspace artifact |
+| `snapshot.create` | Create a backend snapshot when supported |
+| `snapshot.list` | List workspace snapshots |
+| `snapshot.delete` | Delete a workspace snapshot, with optional preview |
 | `network.inspect` | Inspect a named microVM network |
 | `network.create` | Create a named microVM network record |
 | `network.list` | List named microVM network records |
@@ -56,8 +71,21 @@ meaning, broker credentials, or make policy decisions.
 | `images.pull` | Pull a reusable image rootfs |
 | `images.list` | List reusable local image records |
 | `images.push` | Push a locally committed OCI image |
+| `images.tag` | Tag a local image record |
+| `images.delete` | Delete a local image record, with optional preview |
+| `images.prune` | Prune stale local image records, with optional preview |
+| `profiles.list` | List resource profiles |
+| `host.inspect` | Report host capabilities |
+| `doctor.check` | Run host diagnostics |
+| `contract.get` | Return the backend-neutral runtime contract |
+| `kernel.verify` | Verify a kernel artifact |
 | `cp` | Copy files into or out of stopped workspace disks |
-| `artifacts.get` | Retrieve a declared workspace artifact |
+
+`connect`, streaming `logs`/`events`/`stats`, `supervise`,
+`host setup-networking`, `kernel install`, `rootfs build`, `perf`, and `init`
+remain CLI-only. They are interactive, streaming, host-remediating, or project
+scaffolding workflows that need more specific MCP interaction and permission
+semantics than a bounded request/response tool.
 
 ## Output
 
@@ -71,11 +99,11 @@ history or full serial logs. Pass `format: "full"` when the complete underlying
 AX payload is required. `workspace.events` also accepts `limit` for summary
 event count.
 
-`workspace.delete`, `network.delete`, and `volume.delete` accept
-`preview: true` to return the actions that would be taken without changing host
-state. Mutating tools accept an optional `idempotency_key`; tools that are not
-inherently idempotent replay the first successful MCP envelope for a
-client-supplied key.
+`workspace.delete`, `network.delete`, `volume.delete`, `snapshot.delete`,
+`images.delete`, and `images.prune` accept `preview: true` to return the
+actions that would be taken without changing host state. Mutating tools accept
+an optional `idempotency_key`; tools that are not inherently idempotent replay
+the first successful MCP envelope for a client-supplied key.
 
 `workspace.exec` returns the structured exec result directly under `result`:
 `status`, optional `exit_code`, base64-encoded `stdout` and `stderr`,
