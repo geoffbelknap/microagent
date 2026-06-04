@@ -58,7 +58,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		"network.inspect", "network.create", "network.list", "network.delete",
 		"volume.create", "volume.list", "volume.inspect", "volume.delete",
 		"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune",
-		"profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify",
+		"profiles.list", "host.inspect", "doctor.check", "host.networking.setup", "contract.get", "kernel.verify", "kernel.install", "rootfs.build",
 		"cp",
 	} {
 		if !names[name] {
@@ -184,6 +184,11 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "doctor", "-backend", "firecracker"},
 		},
 		{
+			name: "host.networking.setup",
+			args: map[string]any{"action": "revert"},
+			want: []string{"--mode=ax", "host", "setup-networking", "-revert"},
+		},
+		{
 			name: "contract.get",
 			args: map[string]any{},
 			want: []string{"--mode=ax", "contract"},
@@ -192,6 +197,16 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			name: "kernel.verify",
 			args: map[string]any{"path": "/tmp/vmlinux", "sha256": "abc", "backend": "firecracker", "arch": "amd64"},
 			want: []string{"--mode=ax", "kernel", "verify", "-path", "/tmp/vmlinux", "-sha256", "abc", "-backend", "firecracker", "-arch", "amd64"},
+		},
+		{
+			name: "kernel.install",
+			args: map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "out": "/tmp/vmlinux", "backend": "firecracker", "arch": "amd64"},
+			want: []string{"--mode=ax", "kernel", "install", "-url", "https://example.test/vmlinux", "-sha256", "abc", "-out", "/tmp/vmlinux", "-backend", "firecracker", "-arch", "amd64"},
+		},
+		{
+			name: "rootfs.build",
+			args: map[string]any{"image": "alpine:3.20", "os": "linux", "arch": "amd64", "out": "/tmp/rootfs.ext4", "state_dir": "/tmp/state", "size_mib": float64(2048), "allow_mutable": true},
+			want: []string{"--mode=ax", "rootfs", "build", "-image", "alpine:3.20", "-os", "linux", "-arch", "amd64", "-out", "/tmp/rootfs.ext4", "-state-dir", "/tmp/state", "-size-mib", "2048", "-allow-mutable"},
 		},
 	}
 	for _, tt := range tests {
@@ -251,6 +266,28 @@ func TestMCPManagementDeletePreview(t *testing.T) {
 	}
 }
 
+func TestMCPHostMutationPreviewAndConfirmation(t *testing.T) {
+	args := map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "preview": true}
+	preview, err := runMCPTool(context.Background(), "kernel.install", args)
+	if err != nil {
+		t.Fatalf("runMCPTool preview: %v", err)
+	}
+	result, ok := preview["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("preview result type = %T", preview["result"])
+	}
+	token, ok := result["confirmation_token"].(string)
+	if !ok || token == "" {
+		t.Fatalf("confirmation_token = %#v", result["confirmation_token"])
+	}
+	if _, err := mcpCLIArgs("kernel.install", map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "confirm_token": token}); err != nil {
+		t.Fatalf("mcpCLIArgs confirmed: %v", err)
+	}
+	if _, err := runMCPTool(context.Background(), "kernel.install", map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc"}); err == nil {
+		t.Fatal("runMCPTool without confirm_token err = nil, want confirmation error")
+	}
+}
+
 func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
 	summary, ok := summarizeWorkspaceInspect(map[string]any{
 		"ok":      true,
@@ -276,7 +313,7 @@ func TestMCPSummarizeWorkspaceLogs(t *testing.T) {
 	summary, ok := summarizeWorkspaceLogs(map[string]any{
 		"workspace": "demo",
 		"logs":      "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\n",
-	}).(map[string]any)
+	}, 3).(map[string]any)
 	if !ok {
 		t.Fatalf("summary type = %T", summary)
 	}
@@ -284,7 +321,7 @@ func TestMCPSummarizeWorkspaceLogs(t *testing.T) {
 		t.Fatalf("summary = %#v", summary)
 	}
 	tail, ok := summary["tail_lines"].([]string)
-	if !ok || len(tail) != 8 || tail[0] != "two" || tail[7] != "nine" {
+	if !ok || len(tail) != 3 || tail[0] != "seven" || tail[2] != "nine" {
 		t.Fatalf("tail_lines = %#v", summary["tail_lines"])
 	}
 }
@@ -297,7 +334,7 @@ func TestMCPSummarizeWorkspaceEvents(t *testing.T) {
 			map[string]any{"state": "running", "observedAt": "2026-06-04T00:00:01Z", "detail": "serial=serial.log"},
 			map[string]any{"state": "halted", "observedAt": "2026-06-04T00:00:02Z"},
 		},
-	}, 2).(map[string]any)
+	}, 2, 1).(map[string]any)
 	if !ok {
 		t.Fatalf("summary type = %T", summary)
 	}
@@ -307,6 +344,9 @@ func TestMCPSummarizeWorkspaceEvents(t *testing.T) {
 	recent, ok := summary["recent"].([]any)
 	if !ok || len(recent) != 2 {
 		t.Fatalf("recent = %#v", summary["recent"])
+	}
+	if summary["next_after_index"] != 3 || summary["after_index"] != 1 {
+		t.Fatalf("cursor fields = %#v", summary)
 	}
 }
 

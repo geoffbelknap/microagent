@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	crand "crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -241,8 +243,8 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.inspect", "Inspect workspace state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}}),
 		mcpTool("workspace.result", "Read the structured workspace result.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.stats", "Sample current workspace resource usage.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("workspace.logs", "Read workspace serial logs. Defaults to a compact summary; pass format=full for the complete log buffer.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}}),
-		mcpTool("workspace.events", "Read workspace lifecycle events. Defaults to a compact recent-event summary; pass format=full for all events.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}, "limit": map[string]any{"type": "integer"}}),
+		mcpTool("workspace.logs", "Read workspace serial logs. Defaults to a compact tail summary; pass format=full for the complete log buffer.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}, "tail_lines": map[string]any{"type": "integer"}}),
+		mcpTool("workspace.events", "Read workspace lifecycle events. Defaults to a compact recent-event summary; pass format=full for all events.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}, "limit": map[string]any{"type": "integer"}, "after_index": map[string]any{"type": "integer"}}),
 		mcpTool("workspace.clone", "Clone a stopped workspace to a new workspace name.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.apply", "Apply supported changes from a workspace spec file.", []string{"file"}, map[string]any{"file": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
 		mcpTool("workspace.commit", "Commit a stopped workspace rootfs into a local OCI image, optionally pushing it.", []string{"name", "image"}, map[string]any{"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "push": map[string]any{"type": "boolean"}}),
@@ -268,8 +270,11 @@ func mcpTools() []map[string]any {
 		mcpTool("profiles.list", "List resource profiles.", nil, nil),
 		mcpTool("host.inspect", "Report host capabilities for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
 		mcpTool("doctor.check", "Run host diagnostics for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
+		mcpTool("host.networking.setup", "Apply or revert Linux privileged networking setup after preview confirmation.", nil, map[string]any{"action": map[string]any{"type": "string", "enum": []string{"apply", "revert"}}, "preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}}),
 		mcpTool("contract.get", "Return the backend-neutral runtime contract.", nil, nil),
 		mcpTool("kernel.verify", "Verify the configured or supplied kernel artifact.", nil, map[string]any{"path": map[string]any{"type": "string"}, "sha256": map[string]any{"type": "string"}, "backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}}),
+		mcpTool("kernel.install", "Install a kernel artifact after preview confirmation.", nil, map[string]any{"url": map[string]any{"type": "string"}, "from": map[string]any{"type": "string"}, "sha256": map[string]any{"type": "string"}, "out": map[string]any{"type": "string"}, "backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}}),
+		mcpTool("rootfs.build", "Build a rootfs from an OCI image after preview confirmation.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "os": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "out": map[string]any{"type": "string"}, "init": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "mke2fs": map[string]any{"type": "string"}, "size_mib": map[string]any{"type": "integer"}, "exec": map[string]any{"type": "string"}, "allow_mutable": map[string]any{"type": "boolean"}, "keep_stage": map[string]any{"type": "boolean"}, "stage_snapshot": map[string]any{"type": "string"}, "preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}}),
 		mcpTool("cp", "Copy files into or out of a stopped workspace.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("artifacts.get", "Copy a declared workspace artifact out to the host.", []string{"name", "artifact", "target"}, map[string]any{"name": map[string]any{"type": "string"}, "artifact": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 	}
@@ -394,7 +399,9 @@ func microagentCapabilityManifest() map[string]any {
 			"defaults": []string{
 				"use compact summary outputs for repeated state checks",
 				"request format=full only when a complete log, event, or inspect payload is needed",
+				"use tail_lines and after_index for bounded stream polling instead of long-running follow calls",
 				"use preview=true before destructive delete operations when user confirmation is still pending",
+				"use the preview confirmation_token for host-mutating install/setup/build operations",
 				"use idempotency_key on retryable mutation calls",
 			},
 			"evidence": "external AX harness runs showed lower token waste when agents used compact structured MCP state instead of scraping prose or repeatedly requesting full state",
@@ -488,6 +495,8 @@ func readinessSignalSchema() map[string]any {
 
 func mcpToolSideEffects(name string) []string {
 	switch name {
+	case "host.networking.setup", "kernel.install", "rootfs.build":
+		return []string{"host_state"}
 	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
 		return []string{"host_state", "workspace_state"}
 	default:
@@ -499,7 +508,7 @@ func mcpToolIdempotency(name string) string {
 	switch name {
 	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "snapshot.delete":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
-	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "cp", "artifacts.get":
+	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
 	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
@@ -522,6 +531,8 @@ func mcpToolPrincipalScope(name string) []string {
 		return []string{"images.read", "images.write"}
 	case "artifacts.list", "cp", "artifacts.get":
 		return []string{"workspace.files"}
+	case "host.networking.setup", "kernel.install", "rootfs.build":
+		return []string{"host.write"}
 	case "host.inspect", "doctor.check", "contract.get", "kernel.verify", "profiles.list":
 		return []string{"host.read"}
 	default:
@@ -531,8 +542,10 @@ func mcpToolPrincipalScope(name string) []string {
 
 func mcpToolCostClass(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "kernel.install", "rootfs.build":
 		return "host_compute_and_storage"
+	case "host.networking.setup":
+		return "host_privileged"
 	case "cp", "artifacts.get":
 		return "host_io"
 	default:
@@ -587,6 +600,9 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 	if preview := previewDestructiveMCPTool(name, args); preview != nil {
 		return preview, nil
 	}
+	if preview, err := requireConfirmedMCPHostMutation(name, args); preview != nil || err != nil {
+		return preview, err
+	}
 	if name == "workspace.exec" {
 		envelope, err := runMCPWorkspaceExec(ctx, args, start)
 		if cacheKey != "" && err == nil {
@@ -604,10 +620,10 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		result = summarizeWorkspaceInspect(result)
 	}
 	if cliErr == nil && name == "workspace.logs" && !strings.EqualFold(stringArg(args, "format"), "full") {
-		result = summarizeWorkspaceLogs(result)
+		result = summarizeWorkspaceLogs(result, intArg(args, "tail_lines"))
 	}
 	if cliErr == nil && name == "workspace.events" && !strings.EqualFold(stringArg(args, "format"), "full") {
-		result = summarizeWorkspaceEvents(result, intArg(args, "limit"))
+		result = summarizeWorkspaceEvents(result, intArg(args, "limit"), intArg(args, "after_index"))
 	}
 	envelope := map[string]any{
 		"result":            result,
@@ -622,6 +638,74 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		envelope["idempotency_replay"] = false
 	}
 	return envelope, cliErr
+}
+
+func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[string]any, error) {
+	if !mcpHostMutationTool(name) {
+		return nil, nil
+	}
+	token := mcpConfirmationToken(name, args)
+	if boolArg(args, "preview") {
+		return map[string]any{
+			"result": map[string]any{
+				"preview":            true,
+				"tool":               name,
+				"actions":            mcpHostMutationActions(name, args),
+				"confirmation_token": token,
+				"confirm_with":       "call the same tool with confirm_token set to confirmation_token and preview omitted or false",
+			},
+			"timing_ms":         int64(0),
+			"principal_context": principalContextArg(args),
+		}, nil
+	}
+	if stringArg(args, "confirm_token") != token {
+		return nil, fmt.Errorf("%s requires preview confirmation; call with preview=true and retry with the returned confirm_token", name)
+	}
+	return nil, nil
+}
+
+func mcpHostMutationTool(name string) bool {
+	switch name {
+	case "host.networking.setup", "kernel.install", "rootfs.build":
+		return true
+	default:
+		return false
+	}
+}
+
+func mcpHostMutationActions(name string, args map[string]any) []string {
+	switch name {
+	case "host.networking.setup":
+		action := stringArg(args, "action")
+		if action == "" {
+			action = "apply"
+		}
+		if action == "revert" {
+			return []string{"revert Linux privileged networking setup"}
+		}
+		return []string{"enable Linux ip_forward", "grant CAP_NET_ADMIN to the supervisor binary"}
+	case "kernel.install":
+		return []string{"download or copy kernel artifact", "write kernel artifact to host path", "verify sha256 when supplied or defaulted"}
+	case "rootfs.build":
+		return []string{"pull OCI image layers when needed", "build ext4 rootfs", "write rootfs output path"}
+	default:
+		return nil
+	}
+}
+
+func mcpConfirmationToken(name string, args map[string]any) string {
+	clean := map[string]any{}
+	for key, value := range args {
+		switch key {
+		case "preview", "confirm_token", "idempotency_key", "principal":
+			continue
+		default:
+			clean[key] = value
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{"tool": name, "arguments": clean})
+	sum := sha256.Sum256(payload)
+	return "mcp-confirm-" + hex.EncodeToString(sum[:8])
 }
 
 func runMCPWorkspaceExec(ctx context.Context, args map[string]any, start time.Time) (map[string]any, error) {
@@ -903,10 +987,13 @@ func summarizeWorkspaceInspect(result any) any {
 	return summary
 }
 
-func summarizeWorkspaceLogs(result any) any {
+func summarizeWorkspaceLogs(result any, tailLimit int) any {
 	resp, ok := result.(map[string]any)
 	if !ok {
 		return result
+	}
+	if tailLimit <= 0 {
+		tailLimit = 8
 	}
 	logs, _ := resp["logs"].(string)
 	lines := strings.Split(strings.TrimRight(logs, "\n"), "\n")
@@ -914,20 +1001,21 @@ func summarizeWorkspaceLogs(result any) any {
 		lines = nil
 	}
 	tail := lines
-	if len(tail) > 8 {
-		tail = tail[len(tail)-8:]
+	if len(tail) > tailLimit {
+		tail = tail[len(tail)-tailLimit:]
 	}
 	return map[string]any{
 		"format":      "summary",
 		"workspace":   resp["workspace"],
 		"byte_count":  len(logs),
 		"line_count":  len(lines),
+		"tail_count":  len(tail),
 		"tail_lines":  tail,
 		"full_output": "call workspace.logs with format=full to retrieve the complete serial log buffer",
 	}
 }
 
-func summarizeWorkspaceEvents(result any, limit int) any {
+func summarizeWorkspaceEvents(result any, limit int, afterIndex int) any {
 	resp, ok := result.(map[string]any)
 	if !ok {
 		return result
@@ -936,16 +1024,25 @@ func summarizeWorkspaceEvents(result any, limit int) any {
 		limit = 5
 	}
 	events, _ := resp["events"].([]any)
-	recent := events
+	startIndex := 0
+	if afterIndex > 0 && afterIndex < len(events) {
+		startIndex = afterIndex
+	}
+	recent := events[startIndex:]
 	if len(recent) > limit {
 		recent = recent[len(recent)-limit:]
 	}
 	summary := map[string]any{
-		"format":      "summary",
-		"workspace":   resp["workspace"],
-		"event_count": len(events),
-		"recent":      recent,
-		"full_output": "call workspace.events with format=full to retrieve all lifecycle events",
+		"format":             "summary",
+		"workspace":          resp["workspace"],
+		"event_count":        len(events),
+		"after_index":        afterIndex,
+		"next_after_index":   len(events),
+		"returned_count":     len(recent),
+		"recent":             recent,
+		"full_output":        "call workspace.events with format=full to retrieve all lifecycle events",
+		"polling_contract":   "pass next_after_index as after_index on the next call to fetch newer events without a long-running follow call",
+		"truncated_by_limit": len(events[startIndex:]) > len(recent),
 	}
 	if len(events) > 0 {
 		if latest, ok := events[len(events)-1].(map[string]any); ok {
@@ -967,7 +1064,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 
 func mcpMutationTool(name string) bool {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return true
 	default:
 		return false
@@ -1265,6 +1362,16 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		cli = appendOptionalFlag(cli, "-supervisor", stringArg(args, "supervisor"))
 		return cli, nil
+	case "host.networking.setup":
+		cli := []string{"--mode=ax", "host", "setup-networking"}
+		switch stringArg(args, "action") {
+		case "", "apply":
+		case "revert":
+			cli = append(cli, "-revert")
+		default:
+			return nil, fmt.Errorf("host.networking.setup action must be apply or revert")
+		}
+		return cli, nil
 	case "contract.get":
 		return []string{"--mode=ax", "contract"}, nil
 	case "kernel.verify":
@@ -1273,6 +1380,38 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-sha256", stringArg(args, "sha256"))
 		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
+		return cli, nil
+	case "kernel.install":
+		cli := []string{"--mode=ax", "kernel", "install"}
+		cli = appendOptionalFlag(cli, "-url", stringArg(args, "url"))
+		cli = appendOptionalFlag(cli, "-from", stringArg(args, "from"))
+		cli = appendOptionalFlag(cli, "-sha256", stringArg(args, "sha256"))
+		cli = appendOptionalFlag(cli, "-out", stringArg(args, "out"))
+		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
+		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
+		return cli, nil
+	case "rootfs.build":
+		if err := requireToolArgs(args, name, "image"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "rootfs", "build", "-image", stringArg(args, "image")}
+		cli = appendOptionalFlag(cli, "-os", stringArg(args, "os"))
+		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
+		cli = appendOptionalFlag(cli, "-out", stringArg(args, "out"))
+		cli = appendOptionalFlag(cli, "-init", stringArg(args, "init"))
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		cli = appendOptionalFlag(cli, "-mke2fs", stringArg(args, "mke2fs"))
+		if size := int64Arg(args, "size_mib"); size > 0 {
+			cli = append(cli, "-size-mib", strconv.FormatInt(size, 10))
+		}
+		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
+		if boolArg(args, "allow_mutable") {
+			cli = append(cli, "-allow-mutable")
+		}
+		if boolArg(args, "keep_stage") {
+			cli = append(cli, "-keep-stage")
+		}
+		cli = appendOptionalFlag(cli, "-stage-snapshot", stringArg(args, "stage_snapshot"))
 		return cli, nil
 	case "cp":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {

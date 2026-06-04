@@ -77,15 +77,17 @@ meaning, broker credentials, or make policy decisions.
 | `profiles.list` | List resource profiles |
 | `host.inspect` | Report host capabilities |
 | `doctor.check` | Run host diagnostics |
+| `host.networking.setup` | Apply or revert Linux privileged networking after preview confirmation |
 | `contract.get` | Return the backend-neutral runtime contract |
 | `kernel.verify` | Verify a kernel artifact |
+| `kernel.install` | Install a kernel artifact after preview confirmation |
+| `rootfs.build` | Build a rootfs after preview confirmation |
 | `cp` | Copy files into or out of stopped workspace disks |
 
-`connect`, streaming `logs`/`events`/`stats`, `supervise`,
-`host setup-networking`, `kernel install`, `rootfs build`, `perf`, and `init`
-remain CLI-only. They are interactive, streaming, host-remediating, or project
-scaffolding workflows that need more specific MCP interaction and permission
-semantics than a bounded request/response tool.
+`connect`, streaming `logs`/`events`/`stats`, `supervise`, `perf`, `init`, and
+`secret check` remain CLI-only. They are interactive, streaming, benchmarking,
+project scaffolding, or secret-boundary workflows that need more specific MCP
+interaction and permission semantics than a bounded request/response tool.
 
 ## Output
 
@@ -96,14 +98,22 @@ consistent envelope with `result`, optional structured `error`, `timing_ms`, and
 `workspace.inspect`, `workspace.logs`, and `workspace.events` default to compact
 `summary` output so repeated agent state checks do not require full event
 history or full serial logs. Pass `format: "full"` when the complete underlying
-AX payload is required. `workspace.events` also accepts `limit` for summary
-event count.
+AX payload is required. `workspace.logs` accepts `tail_lines` for bounded log
+polling. `workspace.events` accepts `limit` and `after_index`, and returns
+`next_after_index`; pass that value as the next `after_index` to poll for
+new events without a long-running `events --follow` call.
 
 `workspace.delete`, `network.delete`, `volume.delete`, `snapshot.delete`,
 `images.delete`, and `images.prune` accept `preview: true` to return the
 actions that would be taken without changing host state. Mutating tools accept
 an optional `idempotency_key`; tools that are not inherently idempotent replay
 the first successful MCP envelope for a client-supplied key.
+
+`host.networking.setup`, `kernel.install`, and `rootfs.build` use a stricter
+preview-confirm contract. Call the tool with `preview: true` first, inspect the
+returned `actions`, then call the same tool with `confirm_token` set to the
+returned `confirmation_token`. Calls without the matching token fail before
+changing host state.
 
 `workspace.exec` returns the structured exec result directly under `result`:
 `status`, optional `exit_code`, base64-encoded `stdout` and `stderr`,
