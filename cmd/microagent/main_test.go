@@ -565,12 +565,15 @@ func TestStructuredExecAXWritesResultAndIgnoresCommandExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result execprotocol.ExecResult
-	if err := json.Unmarshal(data, &result); err != nil {
+	var envelope structuredExecAXEnvelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
 		t.Fatalf("decode AX result %q: %v", data, err)
 	}
-	if result.ExitCode == nil || *result.ExitCode != 7 || string(result.Stdout) != "out\n" {
-		t.Fatalf("result = %#v", result)
+	if !envelope.OK || envelope.Result == nil || envelope.Result.ExitCode == nil || *envelope.Result.ExitCode != 7 || string(envelope.Result.Stdout) != "out\n" {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+	if envelope.RetryCount != 0 || envelope.RetryWallClockMS != 0 || envelope.Metadata.RetryCount != 0 {
+		t.Fatalf("retry metadata = %#v", envelope)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -602,11 +605,11 @@ func TestStructuredExecAXServiceErrorWritesStructuredErrorToStdout(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var envelope errorEnvelope
+	var envelope structuredExecAXEnvelope
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		t.Fatalf("decode AX error %q: %v", data, err)
 	}
-	if envelope.OK || envelope.Error.Kind != errorKindNotFound {
+	if envelope.OK || envelope.Error == nil || envelope.Error.Kind != errorKindNotFound || envelope.Error.Retryable {
 		t.Fatalf("envelope = %#v", envelope)
 	}
 }
@@ -678,12 +681,12 @@ func TestStructuredExecServiceErrorKinds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var envelope errorEnvelope
+			var envelope structuredExecAXEnvelope
 			if err := json.Unmarshal(data, &envelope); err != nil {
 				t.Fatalf("decode AX error %q: %v", data, err)
 			}
-			if envelope.Error.Kind != tt.kind {
-				t.Fatalf("kind = %q, want %q", envelope.Error.Kind, tt.kind)
+			if envelope.Error == nil || envelope.Error.Kind != tt.kind {
+				t.Fatalf("kind = %#v, want %q", envelope.Error, tt.kind)
 			}
 			if stderr.Len() != 0 {
 				t.Fatalf("stderr = %q, want empty", stderr.String())

@@ -4,42 +4,24 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	crand "crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
-	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
 var mcpIdempotencyCache sync.Map
 
-const (
-	mcpExecMaxTransientRetries = 3
-	mcpExecRetryBackoff        = 750 * time.Millisecond
-	mcpExecRetryJitterWindow   = 100 * time.Millisecond
-	mcpExecRetryBudget         = 3 * time.Second
-)
-
-var (
-	mcpWorkspaceExec   = workspace.Exec
-	mcpExecRetryJitter = randomMCPExecRetryJitter
-	mcpExecRetrySleep  = sleepMCPExecRetry
-	mcpExecRetryNow    = time.Now
-	mcpExecRetrySince  = time.Since
-)
+var mcpWorkspaceExec = workspace.ExecWithMetadata
 
 func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
@@ -592,134 +574,25 @@ func runMCPWorkspaceExec(ctx context.Context, args map[string]any, start time.Ti
 	if stateDir == "" {
 		stateDir = defaultStateDir()
 	}
-	result, err, retryMeta := runMCPWorkspaceExecWithRetry(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
+	result, err, retryMeta := mcpWorkspaceExec(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
 	envelope := map[string]any{
 		"result":              result,
 		"timing_ms":           time.Since(start).Milliseconds(),
-		"retry_count":         retryMeta.count,
-		"retry_wall_clock_ms": retryMeta.wallClock.Milliseconds(),
+		"retry_count":         retryMeta.Count,
+		"retry_wall_clock_ms": retryMeta.WallClockMilliseconds(),
 		"metadata": map[string]any{
-			"retry_count":         retryMeta.count,
-			"retry_wall_clock_ms": retryMeta.wallClock.Milliseconds(),
+			"retry_count":         retryMeta.Count,
+			"retry_wall_clock_ms": retryMeta.WallClockMilliseconds(),
 		},
 		"principal_context": principalContextArg(args),
 	}
-	if retryMeta.exhausted {
+	if retryMeta.Exhausted {
 		envelope["retry_exhausted"] = true
 	}
 	if err != nil {
 		envelope["error"] = mapMCPStructuredError(err, newRequestID())
 	}
 	return envelope, err
-}
-
-type mcpExecRetryMetadata struct {
-	count     int
-	wallClock time.Duration
-	exhausted bool
-}
-
-type mcpExecRetryExhaustedError struct {
-	Retries   int
-	WallClock time.Duration
-	LastErr   error
-}
-
-func (err mcpExecRetryExhaustedError) Error() string {
-	return fmt.Sprintf("structured exec transient connection failure persisted after %d retries over %s retry window: %v", err.Retries, err.WallClock.Round(time.Millisecond), err.LastErr)
-}
-
-func (err mcpExecRetryExhaustedError) Unwrap() error {
-	return err.LastErr
-}
-
-func runMCPWorkspaceExecWithRetry(ctx context.Context, opts workspace.Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error, mcpExecRetryMetadata) {
-	var meta mcpExecRetryMetadata
-	var retryStart time.Time
-	for {
-		result, err := mcpWorkspaceExec(ctx, opts, req)
-		if err == nil || !isRetryableMCPExecTransient(err) {
-			if meta.count > 0 {
-				meta.wallClock = mcpExecRetrySince(retryStart)
-			}
-			return result, err, meta
-		}
-		if retryStart.IsZero() {
-			retryStart = mcpExecRetryNow()
-		}
-		meta.wallClock = mcpExecRetrySince(retryStart)
-		if meta.count >= mcpExecMaxTransientRetries {
-			meta.exhausted = true
-			return result, mcpExecRetryExhaustedError{Retries: meta.count, WallClock: meta.wallClock, LastErr: err}, meta
-		}
-		backoff := mcpExecRetryBackoff + mcpExecRetryJitter()
-		if backoff < 0 {
-			backoff = 0
-		}
-		if meta.wallClock+backoff > mcpExecRetryBudget {
-			meta.exhausted = true
-			return result, mcpExecRetryExhaustedError{Retries: meta.count, WallClock: meta.wallClock, LastErr: err}, meta
-		}
-		meta.count++
-		if err := mcpExecRetrySleep(ctx, backoff); err != nil {
-			if meta.count > 0 {
-				meta.wallClock = mcpExecRetrySince(retryStart)
-			}
-			return result, err, meta
-		}
-	}
-}
-
-func isRetryableMCPExecTransient(err error) bool {
-	var unreachable execclient.UnreachableError
-	if errors.As(err, &unreachable) {
-		return isMCPExecConnectionRefused(unreachable.Err) || isMCPExecConnectionTimeout(unreachable.Err) || isMCPExecConnectionReset(unreachable.Err)
-	}
-	var protocolErr execclient.ProtocolError
-	if errors.As(err, &protocolErr) {
-		return protocolErr.Op == "decode response" && isMCPExecConnectionReset(protocolErr.Err)
-	}
-	return false
-}
-
-func isMCPExecConnectionRefused(err error) bool {
-	return errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(strings.ToLower(err.Error()), "connection refused")
-}
-
-func isMCPExecConnectionReset(err error) bool {
-	return errors.Is(err, syscall.ECONNRESET) || strings.Contains(strings.ToLower(err.Error()), "connection reset by peer")
-}
-
-func isMCPExecConnectionTimeout(err error) bool {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
-}
-
-func randomMCPExecRetryJitter() time.Duration {
-	windowMS := int64(mcpExecRetryJitterWindow / time.Millisecond)
-	if windowMS <= 0 {
-		return 0
-	}
-	var b [1]byte
-	if _, err := crand.Read(b[:]); err != nil {
-		return 0
-	}
-	offset := int64(b[0]) % (2*windowMS + 1)
-	return time.Duration(offset-windowMS) * time.Millisecond
-}
-
-func sleepMCPExecRetry(ctx context.Context, delay time.Duration) error {
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
 
 func mcpExecRequest(args map[string]any) (execprotocol.ExecRequest, error) {

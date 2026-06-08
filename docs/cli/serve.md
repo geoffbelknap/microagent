@@ -4,7 +4,7 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-08_
 
 ```text
 microagent serve mcp
@@ -61,7 +61,8 @@ exited` and a nonzero `exit_code`. Successful `workspace.exec` responses also
 include `retry_count`, `retry_wall_clock_ms`, and matching `metadata` fields.
 When the bounded retry budget is exhausted, the JSON-RPC error `data` includes
 `retry_count`, `retry_wall_clock_ms`, and `retry_exhausted` so clients can
-distinguish retry exhaustion from ordinary task failure.
+distinguish retry exhaustion from ordinary task failure. These retry semantics
+come from the shared workspace exec layer and match CLI AX exec behavior.
 
 ## Example
 
