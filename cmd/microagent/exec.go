@@ -27,6 +27,22 @@ type cliExitError struct {
 	Text   string
 }
 
+type structuredExecAXEnvelope struct {
+	OK               bool                     `json:"ok"`
+	Result           *execprotocol.ExecResult `json:"result,omitempty"`
+	Error            *structuredError         `json:"error,omitempty"`
+	RetryCount       int                      `json:"retry_count"`
+	RetryWallClockMS int64                    `json:"retry_wall_clock_ms"`
+	RetryExhausted   bool                     `json:"retry_exhausted,omitempty"`
+	Metadata         structuredExecAXMetadata `json:"metadata"`
+}
+
+type structuredExecAXMetadata struct {
+	RetryCount       int   `json:"retry_count"`
+	RetryWallClockMS int64 `json:"retry_wall_clock_ms"`
+	RetryExhausted   bool  `json:"retry_exhausted,omitempty"`
+}
+
 func (err cliExitError) Error() string {
 	if err.Text != "" {
 		return err.Text
@@ -99,10 +115,10 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	if *stream && currentOutputMode() != outputModeAX {
 		return runStreamingExec(ctx, opts, req, stdout, stderr)
 	}
-	result, err := workspace.Exec(ctx, opts, req)
+	result, err, retryMeta := workspace.ExecWithMetadata(ctx, opts, req)
 	if err != nil {
 		if currentOutputMode() == outputModeAX {
-			if writeErr := writeAXErrorTo(stdout, err); writeErr != nil {
+			if writeErr := writeStructuredExecAXError(stdout, err, retryMeta); writeErr != nil {
 				return writeErr
 			}
 			return cliExitError{Code: execServiceErrorExitCode, Silent: true}
@@ -110,9 +126,7 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 		return err
 	}
 	if currentOutputMode() == outputModeAX {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		return writeStructuredExecAXResult(stdout, result, retryMeta)
 	}
 	if _, err := stdout.Write(result.Stdout); err != nil {
 		return err
@@ -131,6 +145,41 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 		return cliExitError{Code: exitCode, Silent: true}
 	}
 	return nil
+}
+
+func writeStructuredExecAXResult(w io.Writer, result execprotocol.ExecResult, retryMeta workspace.ExecRetryMetadata) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(structuredExecAXEnvelope{
+		OK:               true,
+		Result:           &result,
+		RetryCount:       retryMeta.Count,
+		RetryWallClockMS: retryMeta.WallClockMilliseconds(),
+		RetryExhausted:   retryMeta.Exhausted,
+		Metadata: structuredExecAXMetadata{
+			RetryCount:       retryMeta.Count,
+			RetryWallClockMS: retryMeta.WallClockMilliseconds(),
+			RetryExhausted:   retryMeta.Exhausted,
+		},
+	})
+}
+
+func writeStructuredExecAXError(w io.Writer, err error, retryMeta workspace.ExecRetryMetadata) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	mapped := mapStructuredError(err, newRequestID())
+	return enc.Encode(structuredExecAXEnvelope{
+		OK:               false,
+		Error:            &mapped,
+		RetryCount:       retryMeta.Count,
+		RetryWallClockMS: retryMeta.WallClockMilliseconds(),
+		RetryExhausted:   retryMeta.Exhausted,
+		Metadata: structuredExecAXMetadata{
+			RetryCount:       retryMeta.Count,
+			RetryWallClockMS: retryMeta.WallClockMilliseconds(),
+			RetryExhausted:   retryMeta.Exhausted,
+		},
+	})
 }
 
 func runStreamingExec(ctx context.Context, opts workspace.Options, req execprotocol.ExecRequest, stdout *os.File, stderr io.Writer) error {

@@ -4,7 +4,7 @@ description: Run a structured command in a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-08_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -27,9 +27,11 @@ stderr, and the CLI exits with the command exit code when the command exits
 normally. Timeout, signal, and failed-to-start statuses use nonzero CLI exit
 codes.
 
-In AX mode, stdout is one JSON `ExecResult`. A nonzero command exit is still a
-successful tool call and is reported in `exit_code`; the CLI exits nonzero only
-when the exec request itself cannot complete.
+In AX mode, stdout is one JSON envelope with `ok`, `result`, `retry_count`,
+`retry_wall_clock_ms`, and matching `metadata` fields. The `result` field holds
+the structured `ExecResult`. A nonzero command exit is still a successful tool
+call and is reported in `result.exit_code`; the CLI exits nonzero only when the
+exec request itself cannot complete.
 
 ## Streaming
 
@@ -42,7 +44,7 @@ result does not re-send the output bytes). The per-stream output limits still
 apply — output past the limit is dropped and the truncation flag is set.
 
 `--stream` is a UX-mode convenience for incremental terminal output. AX mode
-always emits one structured `ExecResult` envelope and ignores `--stream`, since
+always emits one structured exec envelope and ignores `--stream`, since
 interleaving raw bytes with the JSON envelope would not be machine-parseable.
 The streaming transport is also available to Go callers via
 `workspace.ExecStream`.
@@ -70,8 +72,11 @@ nonzero CLI exit codes, and a failure of the exec request itself (for example,
 the workspace is not running) is a nonzero exit.
 
 In AX mode, a nonzero command exit is still a successful tool call - reported in
-`exit_code` - and the CLI exits `0`. The CLI exits nonzero only when the exec
-request itself cannot complete, and then writes a structured error envelope.
+`result.exit_code` - and the CLI exits `0`. The CLI exits nonzero only when the
+exec request itself cannot complete, and then writes a structured error envelope
+with the same retry metadata fields. Transient exec transport failures are
+retried by the shared workspace exec layer before the final result or error is
+reported.
 
 ## Examples
 

@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
@@ -51,6 +53,47 @@ func TestExecWorkspaceNotFound(t *testing.T) {
 	var notFound WorkspaceNotFoundError
 	if !errors.As(err, &notFound) {
 		t.Fatalf("err = %T %v, want WorkspaceNotFoundError", err, err)
+	}
+}
+
+func TestExecWithMetadataRetriesConnectionRefused(t *testing.T) {
+	originalProbe := execReadinessProbe
+	originalSleep := execRetrySleep
+	originalJitter := execRetryJitter
+	t.Cleanup(func() {
+		execReadinessProbe = originalProbe
+		execRetrySleep = originalSleep
+		execRetryJitter = originalJitter
+	})
+	execReadinessProbe = func(context.Context, RuntimeState, time.Duration) (vmkit.ReadinessSignal, bool) {
+		return vmkit.ReadinessSignal{Ready: true}, true
+	}
+	execRetrySleep = func(context.Context, time.Duration) error { return nil }
+	execRetryJitter = func() time.Duration { return 0 }
+
+	opts := writeExecRuntimeState(t, vmkit.BackendFirecracker, vmkit.StateRunning, unusedTCPPort(t))
+	_, err, meta := ExecWithMetadata(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
+	if err == nil {
+		t.Fatal("ExecWithMetadata err = nil, want retry exhaustion")
+	}
+	var exhausted ExecRetryExhaustedError
+	if !errors.As(err, &exhausted) {
+		t.Fatalf("err = %T %v, want ExecRetryExhaustedError", err, err)
+	}
+	if meta.Count != ExecMaxTransientRetries || !meta.Exhausted {
+		t.Fatalf("metadata = %#v, want exhausted after %d retries", meta, ExecMaxTransientRetries)
+	}
+}
+
+func TestIsRetryableExecTransientClassifiesTransportErrors(t *testing.T) {
+	if !IsRetryableExecTransient(execclient.UnreachableError{Addr: "127.0.0.1:1", Err: syscall.ECONNREFUSED}) {
+		t.Fatal("connection refused should be retryable")
+	}
+	if !IsRetryableExecTransient(execclient.ProtocolError{Op: "decode response", Err: syscall.ECONNRESET}) {
+		t.Fatal("decode connection reset should be retryable")
+	}
+	if IsRetryableExecTransient(errors.New("workspace demo is not running")) {
+		t.Fatal("workspace state errors should not be retryable exec transients")
 	}
 }
 
@@ -262,6 +305,26 @@ func startWorkspaceExecServer(t *testing.T, handle func(net.Conn)) (string, uint
 		_ = listener.Close()
 		<-done
 	}
+}
+
+func unusedTCPPort(t *testing.T) uint16 {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if closeErr := listener.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconvParseUint16(portText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return port
 }
 
 func writeExecRuntimeState(t *testing.T, backend string, state vmkit.VMState, execPort uint16) Options {
