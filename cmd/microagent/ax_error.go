@@ -28,6 +28,7 @@ type structuredError struct {
 	Kind          structuredErrorKind `json:"kind"`
 	Message       string              `json:"message"`
 	Remediation   string              `json:"remediation,omitempty"`
+	Retryable     bool                `json:"retryable"`
 	RetryAfterMS  int64               `json:"retry_after_ms,omitempty"`
 	PartialOutput string              `json:"partial_output,omitempty"`
 	CorrelationID string              `json:"correlation_id"`
@@ -51,12 +52,15 @@ func writeAXErrorTo(w io.Writer, err error) error {
 	return enc.Encode(errorEnvelope{OK: false, Error: mapStructuredError(err, newRequestID())})
 }
 
-func mapStructuredError(err error, correlationID string) structuredError {
-	mapped := structuredError{
+func mapStructuredError(err error, correlationID string) (mapped structuredError) {
+	mapped = structuredError{
 		Kind:          errorKindPermanent,
 		Message:       err.Error(),
 		CorrelationID: correlationID,
 	}
+	defer func() {
+		mapped.Retryable = structuredErrorKindRetryable(mapped.Kind)
+	}()
 	if errors.Is(err, flag.ErrHelp) {
 		mapped.Remediation = "Re-run the command without --help, or choose one of the documented command forms."
 		return mapped

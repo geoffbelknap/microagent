@@ -2,10 +2,14 @@ package workspace
 
 import (
 	"context"
+	crand "crypto/rand"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -21,16 +25,147 @@ const ExecReadyProbeTimeout = 2 * time.Second
 // exec forward is bound but the in-guest service is not yet listening.
 const ExecReadyWait = 5 * time.Second
 
+const (
+	ExecMaxTransientRetries = 3
+	ExecRetryBackoff        = 750 * time.Millisecond
+	ExecRetryJitterWindow   = 100 * time.Millisecond
+	ExecRetryBudget         = 3 * time.Second
+)
+
 // execReadinessProbe is the readiness check used by the pre-exec gate. It is a
 // package variable so tests can substitute a deterministic probe.
-var execReadinessProbe = ExecReadinessSignal
+var (
+	execReadinessProbe = ExecReadinessSignal
+	execRetryJitter    = randomExecRetryJitter
+	execRetrySleep     = sleepExecRetry
+	execRetryNow       = time.Now
+	execRetrySince     = time.Since
+)
+
+type ExecRetryMetadata struct {
+	Count     int           `json:"retry_count"`
+	WallClock time.Duration `json:"-"`
+	Exhausted bool          `json:"retry_exhausted,omitempty"`
+}
+
+func (meta ExecRetryMetadata) WallClockMilliseconds() int64 {
+	return meta.WallClock.Milliseconds()
+}
+
+type ExecRetryExhaustedError struct {
+	Retries   int
+	WallClock time.Duration
+	LastErr   error
+}
+
+func (err ExecRetryExhaustedError) Error() string {
+	return fmt.Sprintf("structured exec transient connection failure persisted after %d retries over %s retry window: %v", err.Retries, err.WallClock.Round(time.Millisecond), err.LastErr)
+}
+
+func (err ExecRetryExhaustedError) Unwrap() error {
+	return err.LastErr
+}
 
 func Exec(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
+	result, err, _ := ExecWithMetadata(ctx, opts, req)
+	return result, err
+}
+
+func ExecWithMetadata(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error, ExecRetryMetadata) {
+	var meta ExecRetryMetadata
+	var retryStart time.Time
+	for {
+		result, err := execOnce(ctx, opts, req)
+		if err == nil || !IsRetryableExecTransient(err) {
+			if meta.Count > 0 {
+				meta.WallClock = execRetrySince(retryStart)
+			}
+			return result, err, meta
+		}
+		if retryStart.IsZero() {
+			retryStart = execRetryNow()
+		}
+		meta.WallClock = execRetrySince(retryStart)
+		if meta.Count >= ExecMaxTransientRetries {
+			meta.Exhausted = true
+			return result, ExecRetryExhaustedError{Retries: meta.Count, WallClock: meta.WallClock, LastErr: err}, meta
+		}
+		backoff := ExecRetryBackoff + execRetryJitter()
+		if backoff < 0 {
+			backoff = 0
+		}
+		if meta.WallClock+backoff > ExecRetryBudget {
+			meta.Exhausted = true
+			return result, ExecRetryExhaustedError{Retries: meta.Count, WallClock: meta.WallClock, LastErr: err}, meta
+		}
+		meta.Count++
+		if err := execRetrySleep(ctx, backoff); err != nil {
+			if meta.Count > 0 {
+				meta.WallClock = execRetrySince(retryStart)
+			}
+			return result, err, meta
+		}
+	}
+}
+
+func execOnce(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
 	addr, err := execDialAddr(ctx, opts)
 	if err != nil {
 		return execprotocol.ExecResult{}, err
 	}
 	return execclient.New(addr).Exec(ctx, req)
+}
+
+func IsRetryableExecTransient(err error) bool {
+	var unreachable execclient.UnreachableError
+	if errors.As(err, &unreachable) {
+		return isExecConnectionRefused(unreachable.Err) || isExecConnectionTimeout(unreachable.Err) || isExecConnectionReset(unreachable.Err)
+	}
+	var protocolErr execclient.ProtocolError
+	if errors.As(err, &protocolErr) {
+		return protocolErr.Op == "decode response" && isExecConnectionReset(protocolErr.Err)
+	}
+	return false
+}
+
+func isExecConnectionRefused(err error) bool {
+	return errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(strings.ToLower(err.Error()), "connection refused")
+}
+
+func isExecConnectionReset(err error) bool {
+	return errors.Is(err, syscall.ECONNRESET) || strings.Contains(strings.ToLower(err.Error()), "connection reset by peer")
+}
+
+func isExecConnectionTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func randomExecRetryJitter() time.Duration {
+	windowMS := int64(ExecRetryJitterWindow / time.Millisecond)
+	if windowMS <= 0 {
+		return 0
+	}
+	var b [1]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return 0
+	}
+	offset := int64(b[0]) % (2*windowMS + 1)
+	return time.Duration(offset-windowMS) * time.Millisecond
+}
+
+func sleepExecRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // ExecStream runs req against the workspace's structured exec service in
