@@ -5,6 +5,8 @@ package modelrunner
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -19,14 +21,16 @@ func detachedSysProcAttr() *syscall.SysProcAttr {
 // zombie, so Signal(0) alone cannot distinguish alive from zombie.
 func processIsZombie(pid int) bool {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
-	if err != nil {
-		// /proc not available (macOS) or process already gone — not a zombie.
+	if err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "State:") {
+				return strings.Contains(line, "Z")
+			}
+		}
 		return false
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "State:") {
-			return strings.Contains(line, "Z")
-		}
-	}
-	return false
+	// macOS and other Unix hosts do not expose /proc by default. Fall back to
+	// ps(1), where zombie processes include "Z" in the stat column.
+	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+	return err == nil && strings.Contains(string(out), "Z")
 }

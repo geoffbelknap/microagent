@@ -4,7 +4,7 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-09_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]
