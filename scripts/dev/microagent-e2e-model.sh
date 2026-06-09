@@ -26,11 +26,12 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$ROOT/scripts/dev/e2e-lib.sh"
 CLI="${MICROAGENT_CLI:-$ROOT/.build/dev/microagent}"
 MODEL_REF="${MICROAGENT_E2E_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 IMAGE="docker.io/curlimages/curl:latest"
 
-skip() { echo "SKIP microagent-e2e-model: $1" >&2; exit 0; }
+skip() { e2e_skip "microagent-e2e-model: $1"; }
 fail() { echo "FAIL microagent-e2e-model: $1" >&2; exit 1; }
 
 [ -x "$CLI" ] || skip "CLI not found at $CLI (run scripts/dev/build-local.sh)"
