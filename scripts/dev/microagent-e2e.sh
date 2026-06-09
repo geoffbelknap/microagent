@@ -27,6 +27,7 @@ SCENARIOS=(
   "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm"
   "health:scripts/dev/microagent-e2e-health.sh:all:vm"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
+  "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
   "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:linux:vm"
   "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm"
@@ -84,6 +85,8 @@ Scenarios:
                      rejected) and probe success in the guest.
   exec-stream        Streaming structured exec (exec --stream) line delivery and
                      exit-status propagation.
+  model-serving      Local host model server paired into a workspace over the
+                     backend vsock bridge (Firecracker on Linux, Apple VF on macOS).
   survive-reboot     supervise --install/--uninstall boot-unit generation
                      (systemd user unit / launchd plist); no real reboot.
   named-network      Two workspaces on a managed named-network bridge: stable
