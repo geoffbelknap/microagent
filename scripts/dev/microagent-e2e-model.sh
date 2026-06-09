@@ -34,8 +34,12 @@ IMAGE="docker.io/curlimages/curl:latest"
 skip() { e2e_skip "microagent-e2e-model: $1"; }
 fail() { echo "FAIL microagent-e2e-model: $1" >&2; exit 1; }
 
-[ -x "$CLI" ] || skip "CLI not found at $CLI (run scripts/dev/build-local.sh)"
-[ -n "${MICROAGENT_LLAMA_SERVER:-}" ] && [ -x "${MICROAGENT_LLAMA_SERVER:-/nonexistent}" ] || skip "MICROAGENT_LLAMA_SERVER not set/executable"
+if [ ! -x "$CLI" ]; then
+  skip "CLI not found at $CLI (run scripts/dev/build-local.sh)"
+fi
+if [ -z "${MICROAGENT_LLAMA_SERVER:-}" ] || [ ! -x "${MICROAGENT_LLAMA_SERVER:-/nonexistent}" ]; then
+  skip "MICROAGENT_LLAMA_SERVER not set/executable"
+fi
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -56,8 +60,12 @@ RUN_FLAGS=(--model "$MODEL_REF" --rm "$IMAGE")
 
 case "$BACKEND" in
   firecracker)
-    [ -n "${MICROAGENT_FIRECRACKER:-}" ] && [ -x "${MICROAGENT_FIRECRACKER:-/nonexistent}" ] || skip "MICROAGENT_FIRECRACKER not set/executable"
-    [ -e /dev/kvm ] || skip "/dev/kvm not available"
+    if [ -z "${MICROAGENT_FIRECRACKER:-}" ] || [ ! -x "${MICROAGENT_FIRECRACKER:-/nonexistent}" ]; then
+      skip "MICROAGENT_FIRECRACKER not set/executable"
+    fi
+    if [ ! -e /dev/kvm ]; then
+      skip "/dev/kvm not available"
+    fi
     RUN_FLAGS=(--backend firecracker "${RUN_FLAGS[@]}")
     ;;
   applevf)
