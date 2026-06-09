@@ -5,10 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 # Health checks: a workspace declares a guest liveness probe; supervise restarts
-# it when unhealthy. Here we validate the config contract end to end — a valid
-# health spec builds and boots, an invalid one is rejected — and that an exec
-# probe command actually succeeds in the booted guest. (Restart-on-unhealthy
-# timing is covered by unit tests for the health tracker.)
+# it when unhealthy. Validate the config contract end to end, verify an exec
+# probe succeeds in a booted guest, and exercise the supervise health path with
+# an unhealthy exec probe that must trigger one restart and exit.
 e2e_require_vm
 e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
 
@@ -31,13 +30,18 @@ STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-health.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 SUPERVISOR=""
 WS="health-ok"
+BAD_WS="health-bad-exec"
 
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    for ws in "$WS" "$BAD_WS"; do
+      "$CLI" kill "$ws" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    done
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_HEALTH:-0}" != "1" ]; then
-      "$CLI" delete "$WS" --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      for ws in "$WS" "$BAD_WS"; do
+        "$CLI" delete "$ws" --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      done
     fi
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
@@ -123,6 +127,20 @@ health:
   port: 8080
 YAML
 
+cat >"$STATE_DIR/unhealthy.yaml" <<YAML
+name: $BAD_WS
+image: $IMAGE
+restart: on-failure
+network: { mode: isolated }
+service: sleep 600
+health:
+  exec: ["/bin/false"]
+  intervalSeconds: 1
+  timeoutSeconds: 2
+  retries: 1
+  startPeriodSeconds: 0
+YAML
+
 e2e_step "invalid health spec (both exec and httpGet) is rejected"
 if "$CLI" create --file "$STATE_DIR/invalid.yaml" --dry-run "${CREATE_FLAGS[@]}" >"$STATE_DIR/invalid.json" 2>&1; then
   e2e_fail "expected invalid health spec to be rejected"
@@ -140,5 +158,32 @@ e2e_step "the declared exec probe succeeds in the booted guest"
 e2e_step "status reports the running workspace"
 "$CLI" --json status "$WS" --state-dir "$STATE_DIR" | grep -q '"running"' \
   || e2e_fail "workspace not running"
+
+e2e_step "supervise restarts an unhealthy exec probe"
+"$CLI" create --file "$STATE_DIR/unhealthy.yaml" "${CREATE_FLAGS[@]}" >/dev/null 2>&1 || e2e_fail "create unhealthy health workspace"
+SUPERVISE_OUT="$STATE_DIR/supervise-unhealthy.out"
+"$CLI" supervise "$BAD_WS" "${START_FLAGS[@]}" --interval 1 --max-restarts 1 >"$SUPERVISE_OUT" 2>&1 &
+supervise_pid="$!"
+supervise_status=0
+supervise_wait=0
+while kill -0 "$supervise_pid" 2>/dev/null; do
+  if [ "$supervise_wait" -ge 60 ]; then
+    kill "$supervise_pid" 2>/dev/null || true
+    wait "$supervise_pid" 2>/dev/null || true
+    cat "$SUPERVISE_OUT" >&2
+    e2e_fail "supervise did not exit after unhealthy health probe"
+  fi
+  sleep 1
+  supervise_wait=$((supervise_wait + 1))
+done
+wait "$supervise_pid" || supervise_status="$?"
+if [ "$supervise_status" -ne 0 ]; then
+  cat "$SUPERVISE_OUT" >&2
+  e2e_fail "supervise unhealthy workspace"
+fi
+grep -Eq 'Restarts: 1|"restarts": 1' "$SUPERVISE_OUT" \
+  || { cat "$SUPERVISE_OUT" >&2; e2e_fail "supervise did not report one health-triggered restart"; }
+grep -Eq 'Final state: failed|"final_state": "failed"' "$SUPERVISE_OUT" \
+  || { cat "$SUPERVISE_OUT" >&2; e2e_fail "supervise did not report failed health state"; }
 
 e2e_log "health scenario passed"

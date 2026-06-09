@@ -37,6 +37,13 @@ const (
 	DefaultTimeout             = 5 * time.Minute
 )
 
+// Model pairing transport defaults. The guest forwarder listens on
+// 127.0.0.1:DefaultModelGuestPort and tunnels to host vsock DefaultModelVsockPort.
+const (
+	DefaultModelGuestPort uint16 = 11434
+	DefaultModelVsockPort uint32 = 62100
+)
+
 // secretsListenerTarget marks the vsock listener that serves resolved secrets.
 // Must equal the firecracker supervisor's sentinel.
 const secretsListenerTarget = "secrets://serve"
@@ -80,6 +87,10 @@ type Options struct {
 	Disks           []Disk
 	Outputs         []Output
 	VsockListeners  []vmkit.VsockListener
+	// ModelTarget, when non-empty, is the host TCP address (host:port) of a paired
+	// model server. It is realized as a guest→host vsock channel and a guest
+	// forwarder. Orchestration (starting the runner) happens in the CLI layer.
+	ModelTarget     string
 	ProfileExplicit bool
 	KernelExplicit  bool
 	// FromSnapshot, when set, restores the workspace in place from this snapshot
@@ -806,6 +817,13 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 	if opts.Mediation != nil && opts.Mediation.Enabled {
 		listeners = append(listeners, vmkit.VsockListener{Port: opts.Mediation.Port, Target: opts.Mediation.Target})
 	}
+	var modelGuestPort uint16
+	var modelVsockPort uint32
+	if strings.TrimSpace(opts.ModelTarget) != "" {
+		modelGuestPort = DefaultModelGuestPort
+		modelVsockPort = DefaultModelVsockPort
+		listeners = append(listeners, vmkit.VsockListener{Port: DefaultModelVsockPort, Target: opts.ModelTarget})
+	}
 	secretRefs := secretRefsFromOptions(opts)
 	secretsPort := SecretsPort(opts)
 	if secretsPort != 0 {
@@ -850,6 +868,8 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			GuestExecPort:      opts.GuestExecPort,
 			SerialInput:        opts.SerialInput,
 			TimeoutSeconds:     int(opts.Timeout.Seconds()),
+			ModelGuestPort:     modelGuestPort,
+			ModelVsockPort:     modelVsockPort,
 		},
 	}
 }

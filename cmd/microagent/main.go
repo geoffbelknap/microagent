@@ -28,6 +28,8 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
+	"github.com/geoffbelknap/microagent/pkg/model"
+	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/perf"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
@@ -179,6 +181,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "network" {
 		return runNetwork(args[1:], stdout)
+	}
+	if args[0] == "model" {
+		return runModel(args[1:], stdout)
 	}
 	if args[0] == "volume" {
 		return runVolume(ctx, args[1:], stdout)
@@ -663,6 +668,18 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 		printRunHelp(stdout)
 		return nil
 	}
+	// Pre-scan --model and --model-token before flag parsing so we can drive
+	// orchestration after opts are assembled but before the workspace lifecycle.
+	modelRefRaw, _ := flagValue(args, "model")
+	modelToken, _ := flagValue(args, "model-token")
+	if modelToken == "" {
+		if v := os.Getenv("HF_TOKEN"); v != "" {
+			modelToken = v
+		} else if v := os.Getenv("HUGGING_FACE_HUB_TOKEN"); v != "" {
+			modelToken = v
+		}
+	}
+
 	opts, err := parseWorkspaceOptions("run", args)
 	if err != nil {
 		return err
@@ -676,6 +693,53 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+
+	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
+	var modelHolder, modelCanonicalRef, modelStateDir string
+	if strings.TrimSpace(modelRefRaw) != "" {
+		canonical, _, err := model.Resolve(modelRefRaw)
+		if err != nil {
+			return err
+		}
+		rec, err := model.Find(opts.StateDir, canonical)
+		if err != nil {
+			// Not in the store — auto-pull (one-shot convenience).
+			rec, err = model.Pull(ctx, model.PullOptions{StateDir: opts.StateDir, ModelRef: modelRefRaw, Token: modelToken})
+			if err != nil {
+				return fmt.Errorf("pull model %s: %w", modelRefRaw, err)
+			}
+		}
+		binPath, err := modelrunner.ResolveLlamaServerPath()
+		if err != nil {
+			return err
+		}
+		runner, err := modelrunner.Ensure(ctx, modelrunner.EnsureOptions{
+			StateDir:     opts.StateDir,
+			ModelRef:     rec.ModelRef,
+			ModelPath:    rec.OutputPath,
+			Engine:       modelrunner.LlamaCPP{BinPath: binPath},
+			Holder:       opts.Name,
+			ReadyTimeout: 120 * time.Second,
+		})
+		if err != nil {
+			return fmt.Errorf("start model runner: %w", err)
+		}
+		// Activate pairing on the workspace options.
+		opts.ModelTarget = fmt.Sprintf("%s:%d", runner.Host, runner.Port)
+		if opts.Env == nil {
+			opts.Env = map[string]string{}
+		}
+		modelURL := fmt.Sprintf("http://127.0.0.1:%d/v1", workspace.DefaultModelGuestPort)
+		opts.Env["MICROAGENT_MODEL_URL"] = modelURL
+		opts.Env["OPENAI_BASE_URL"] = modelURL
+		modelHolder = opts.Name
+		modelCanonicalRef = rec.ModelRef
+		modelStateDir = opts.StateDir
+	}
+	if modelHolder != "" {
+		defer func() { _ = modelrunner.Release(modelStateDir, modelCanonicalRef, modelHolder) }()
+	}
+
 	result, err := workspace.Run(ctx, opts)
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
@@ -1852,6 +1916,214 @@ Firecracker on Linux; Apple VF does not currently implement network.mode=named.
 `)
 }
 
+func runModel(args []string, stdout *os.File) error {
+	if wantsHelp(args) {
+		fmt.Fprintln(stdout, "usage: microagent model <pull|ls|rm|prune|serve|stop|runners> ...")
+		return nil
+	}
+	if len(args) > 0 {
+		switch args[0] {
+		case "pull":
+			return runModelPull(args[1:], stdout)
+		case "ls", "list":
+			return runModelList(args[1:], stdout)
+		case "rm", "remove", "delete":
+			return runModelRemove(args[1:], stdout)
+		case "prune":
+			return runModelPrune(args[1:], stdout)
+		case "serve":
+			return runModelServe(args[1:], stdout)
+		case "stop":
+			return runModelStop(args[1:], stdout)
+		case "runners", "ps":
+			return runModelRunners(args[1:], stdout)
+		}
+	}
+	return fmt.Errorf("usage: microagent model <pull|ls|rm|prune|serve|stop|runners> ...")
+}
+
+func runModelPull(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model pull", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	token := fs.String("token", "", "HuggingFace bearer token (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]")
+	}
+	record, err := model.Pull(context.Background(), model.PullOptions{StateDir: stateDir, ModelRef: fs.Arg(0), Token: *token})
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, record)
+	}
+	fmt.Fprintf(stdout, "Pulled %s (%d bytes, %s)\n", record.ModelRef, record.SizeBytes, record.Digest)
+	return nil
+}
+
+func runModelList(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model ls", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	list, err := model.List(stateDir)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"models": list})
+	}
+	for _, m := range list {
+		fmt.Fprintf(stdout, "%s\t%d\t%s\n", m.ModelRef, m.SizeBytes, m.Digest)
+	}
+	return nil
+}
+
+func runModelRemove(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model rm", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	keepFiles := fs.Bool("keep-files", false, "Remove the index entry but keep the blob on disk")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model rm <ref> [--keep-files] [--state-dir <dir>]")
+	}
+	res, err := model.Remove(stateDir, fs.Arg(0), !*keepFiles)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, res)
+	}
+	fmt.Fprintf(stdout, "Removed %d model(s)\n", len(res.Removed))
+	return nil
+}
+
+func runModelPrune(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model prune", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	deleteFiles := fs.Bool("delete-files", false, "Also delete blob files for pruned entries")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	res, err := model.Prune(stateDir, *deleteFiles)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, res)
+	}
+	fmt.Fprintf(stdout, "Pruned %d model(s)\n", len(res.Removed))
+	return nil
+}
+
+func runModelServe(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model serve", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	dedicated := fs.Bool("dedicated", false, "Start a dedicated runner instead of sharing one")
+	token := fs.String("token", "", "HuggingFace token for auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]")
+	}
+	ref := fs.Arg(0)
+	canonical, _, err := model.Resolve(ref)
+	if err != nil {
+		return err
+	}
+	rec, err := model.Find(stateDir, canonical)
+	if err != nil {
+		// Not in the store yet — auto-pull, like run does for images.
+		rec, err = model.Pull(context.Background(), model.PullOptions{StateDir: stateDir, ModelRef: ref, Token: *token})
+		if err != nil {
+			return err
+		}
+	}
+	binPath, err := modelrunner.ResolveLlamaServerPath()
+	if err != nil {
+		return err
+	}
+	runner, err := modelrunner.Ensure(context.Background(), modelrunner.EnsureOptions{
+		StateDir:  stateDir,
+		ModelRef:  rec.ModelRef,
+		ModelPath: rec.OutputPath,
+		Engine:    modelrunner.LlamaCPP{BinPath: binPath},
+		Pinned:    true,
+		Dedicated: *dedicated,
+	})
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, runner)
+	}
+	fmt.Fprintf(stdout, "Serving %s on %s:%d (pid %d)\n", runner.ModelRef, runner.Host, runner.Port, runner.PID)
+	return nil
+}
+
+func runModelStop(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model stop", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model stop <hf-ref> [--state-dir <dir>]")
+	}
+	canonical, _, err := model.Resolve(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	n, err := modelrunner.Stop(stateDir, canonical)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"stopped": n})
+	}
+	fmt.Fprintf(stdout, "Stopped %d runner(s)\n", n)
+	return nil
+}
+
+func runModelRunners(args []string, stdout *os.File) error {
+	stateDir := defaultStateDir()
+	fs := flag.NewFlagSet("model runners", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	list, err := modelrunner.List(stateDir)
+	if err != nil {
+		return err
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, map[string]any{"runners": list})
+	}
+	for _, r := range list {
+		fmt.Fprintf(stdout, "%s\t%s:%d\tpid=%d\tholders=%d\tpinned=%t\n", r.ModelRef, r.Host, r.Port, r.PID, len(r.Holders), r.Pinned)
+	}
+	return nil
+}
+
 func runVolume(ctx context.Context, args []string, stdout *os.File) error {
 	if wantsHelp(args) || len(args) == 0 {
 		printVolumeHelp(stdout)
@@ -2857,6 +3129,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	rm := false
 	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
+	// --model and --model-token are consumed by runWorkspace before this call;
+	// register them here so the flagset accepts them without error and shows
+	// them in --help output.
+	var absorbedModelRef, absorbedModelToken string
+	fs.StringVar(&absorbedModelRef, "model", "", "Pair this run with a locally-served model (HuggingFace GGUF ref); injects MICROAGENT_MODEL_URL/OPENAI_BASE_URL")
+	fs.StringVar(&absorbedModelToken, "model-token", "", "HuggingFace token for model auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
 	if err := rejectUnsupportedContainerCompatibilityFlags(args); err != nil {
 		return workspaceOptions{}, err
 	}
@@ -6331,6 +6609,8 @@ func reorderFlagArgs(args []string) []string {
 		"-result-port":       true,
 		"-send":              true,
 		"-e":                 true,
+		"-model":             true,
+		"-model-token":       true,
 	}
 	var flags []string
 	var positional []string
@@ -6778,6 +7058,7 @@ Commands:
   cp                   Copy files into or out of a stopped workspace
   artifacts            List or retrieve declared workspace artifacts
   network              Inspect workspace network or manage named networks
+  model                Pull or manage local HuggingFace model files
   volume               Manage named volumes (create, ls, inspect, rm)
   start                Start a workspace
   supervise            Run host restart supervision for a workspace
@@ -6933,6 +7214,10 @@ Options:
   -rm                   Explicitly remove state after run
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
+  -model <ref>          Pair with a locally-served model (HuggingFace GGUF ref);
+                         injects MICROAGENT_MODEL_URL and OPENAI_BASE_URL
+  -model-token <token>  HuggingFace token for model auto-pull
+                         (defaults to HF_TOKEN or HUGGING_FACE_HUB_TOKEN)
 
 Container-style examples:
   microagent run alpine echo hello

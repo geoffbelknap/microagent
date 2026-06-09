@@ -1839,3 +1839,14 @@ func TestEnsureBindableManagementPortsFallsBackWhenHostPortUnavailable(t *testin
 		t.Fatalf("guest exec port should stay unset when no fallback occurs, got %d", cfg.GuestExecPort)
 	}
 }
+
+func TestFirecrackerBootArgsModelForward(t *testing.T) {
+	args := firecrackerBootArgs(&vmkit.Config{ModelGuestPort: 11434, ModelVsockPort: 62100})
+	if !strings.Contains(args, "microagent_model_fwd=11434:62100") {
+		t.Fatalf("missing model fwd cmdline: %q", args)
+	}
+	none := firecrackerBootArgs(&vmkit.Config{})
+	if strings.Contains(none, "microagent_model_fwd") {
+		t.Fatalf("boot args should omit model fwd when zero: %q", none)
+	}
+}
