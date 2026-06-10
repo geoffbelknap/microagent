@@ -12,7 +12,9 @@ The project is a Go library first. The `microagent` CLI is a thin shell over
 the exported packages, so anything the CLI can do, your Go program can do
 directly with typed options and typed results.
 
-Current stable release: `v0.1.45`.
+The current stable release is listed on the
+[releases page](https://github.com/geoffbelknap/microagent/releases); see
+[`CHANGELOG.md`](CHANGELOG.md) for what is in it.
 
 ## Install
 

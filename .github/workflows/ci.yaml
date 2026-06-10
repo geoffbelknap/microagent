@@ -25,7 +25,16 @@ jobs:
           cache-dependency-path: go.mod
 
       - name: Test Go
-        run: go test ./...
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Report coverage
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
 
       - name: Lint Go
         uses: golangci/golangci-lint-action@v8
@@ -53,6 +62,14 @@ jobs:
 
       - name: Test Go
         run: go test ./...
+
+      - name: Cache Apple VF supervisor build
+        uses: actions/cache@v4
+        with:
+          path: supervisors/applevf/.build
+          key: applevf-${{ runner.os }}-${{ hashFiles('supervisors/applevf/**/*.swift', 'supervisors/applevf/Package.*') }}
+          restore-keys: |
+            applevf-${{ runner.os }}-
 
       - name: Build Apple VF supervisor
         run: swift build --package-path supervisors/applevf --disable-sandbox
