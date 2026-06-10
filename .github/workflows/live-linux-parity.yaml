@@ -16,9 +16,13 @@ on:
         description: OCI image override for public-surface scenarios
         required: false
         default: ""
+  schedule:
+    # Nightly regression run against main (06:17 UTC).
+    - cron: "17 6 * * *"
   push:
-    branches:
-      - main
+    # Always gate release candidates and releases.
+    tags:
+      - "v*"
 
 permissions:
   contents: read

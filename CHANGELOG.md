@@ -17,9 +17,10 @@ been cut into a release yet.
   (including the stock Ubuntu 24.04 package): pasta was invoked without a
   `--` option terminator, so getopt-permuting versions tried to parse the
   supervisor's `--request-json` flag as their own and aborted.
-- The live Linux parity workflow now runs on GitHub-hosted KVM runners on
-  every push to main; it previously targeted a self-hosted runner label that
-  was never registered, so the suite had never executed in CI.
+- The live Linux parity workflow now runs on GitHub-hosted KVM runners —
+  nightly against main, on every release tag, and on demand — instead of
+  targeting a self-hosted runner label that was never registered (the suite
+  had never executed in CI).
 - Centralized backend differences in a declarative `vmkit.BackendCapabilities`
   table (structured exec, live network apply, rootfs format, runtime-state
   ownership, detached-start style, shell transport and probing, block-device
