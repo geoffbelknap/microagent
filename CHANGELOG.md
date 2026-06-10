@@ -5,6 +5,8 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.1.46 - 2026-06-10
+
 - Retired the `microagent-rc` Homebrew formula. Only stable releases ship to
   the tap; release candidates remain git tags validated by local builds and
   the tag-gated live CI suites. The tap-update workflow skips `-rc` tags.
