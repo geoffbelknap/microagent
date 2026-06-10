@@ -33,6 +33,51 @@ default_arch() {
   esac
 }
 
+dev_version() {
+  local base sha dirty
+
+  base="$(release_line_version)"
+  sha="local"
+  dirty=""
+
+  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    sha="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
+    if ! git -C "$ROOT" diff --quiet --ignore-submodules -- ||
+      ! git -C "$ROOT" diff --cached --quiet --ignore-submodules -- ||
+      [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]; then
+      dirty="-dirty"
+    fi
+  fi
+
+  printf '%s-%s%s\n' "$base" "$sha" "$dirty"
+}
+
+release_line_version() {
+  local tag
+
+  tag=""
+  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    while IFS= read -r tag; do
+      case "$tag" in
+        *-*)
+          continue
+          ;;
+        *)
+          break
+          ;;
+      esac
+    done < <(git -C "$ROOT" tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname)
+  fi
+
+  if [ -z "$tag" ]; then
+    printf '0.0.0\n'
+    return
+  fi
+
+  tag="${tag#v}"
+  printf '%s\n' "$tag"
+}
+
 output="${MICROAGENT_DEV_CLI:-$ROOT/.build/dev/microagent}"
 arch="${MICROAGENT_DEV_ARCH:-$(default_arch)}"
 
@@ -82,10 +127,12 @@ cli_path="$output_dir/$output_name"
 guest_init_path="$output_dir/microagent-guestinit-$arch"
 supervisor_path="$output_dir/microagent-applevf-supervisor"
 firecracker_supervisor_path="$output_dir/microagent-firecracker-supervisor"
+version="$(dev_version)"
+ldflags="-X main.version=$version"
 
 (
   cd "$ROOT"
-  go build -o "$cli_path" ./cmd/microagent
+  go build -ldflags "$ldflags" -o "$cli_path" ./cmd/microagent
   GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -o "$guest_init_path" ./cmd/microagent-guestinit
 )
 
@@ -106,6 +153,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
 fi
 
 echo "CLI: $cli_path"
+echo "Version: $version"
 if [ -f "$supervisor_path" ]; then
   echo "Apple VF supervisor: $supervisor_path"
 fi

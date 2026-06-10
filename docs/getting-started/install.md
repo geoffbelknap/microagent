@@ -31,14 +31,26 @@ the supervisor.
 ```bash
 git clone https://github.com/geoffbelknap/microagent.git
 cd microagent
-go build ./cmd/microagent ./cmd/microagent-firecracker-supervisor  # Linux
-go build ./cmd/microagent                                         # macOS
-swift build --package-path supervisors/applevf --disable-sandbox  # macOS only
+scripts/dev/build-local.sh
+.build/dev/microagent version
+.build/dev/microagent doctor
 ```
 
-On Linux, the installed `microagent-supervisor` is a host symlink to this
-built `microagent-firecracker-supervisor` binary, so the two names refer to the
-same supervisor.
+`build-local.sh` writes a self-contained development build under `.build/dev/`.
+The CLI reports a development version based on the current release line, such
+as `0.1.46-8780315` or `0.1.46-8780315-dirty`, so it is obvious you are not
+running the latest stable Homebrew build. The script derives the `0.1.46`
+prefix from the latest stable tag, ignoring release-candidate and other
+prerelease tags, then adds the short SHA. It also places the host supervisor
+and Linux guest-init companion next to the CLI so the resolver can find them.
+
+If you build by hand instead, set the CLI version explicitly:
+
+```bash
+go build -ldflags "-X main.version=dev-local" ./cmd/microagent
+go build ./cmd/microagent-firecracker-supervisor  # Linux
+swift build --package-path supervisors/applevf --disable-sandbox  # macOS only
+```
 
 To produce an ad-hoc signed supervisor (macOS):
 
