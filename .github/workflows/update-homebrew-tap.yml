@@ -67,5 +67,9 @@ jobs:
               fh.write(text)
           PY
           git add "$formula"
-          git commit -m "microagent: update ${formula%.rb} to ${TAG}"
-          git push
+          if git diff --cached --quiet; then
+            echo "formula already pins ${TAG}; nothing to push"
+          else
+            git commit -m "microagent: update ${formula%.rb} to ${TAG}"
+            git push
+          fi
