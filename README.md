@@ -26,13 +26,6 @@ This installs `microagent` and `microagent-supervisor`, a symlink to the
 supervisor for your host. To build from source, see
 [`docs/getting-started/install.md`](docs/getting-started/install.md).
 
-Release candidates are published as a separate Homebrew formula so the stable
-formula remains the default:
-
-```bash
-brew install geoffbelknap/tap/microagent-rc
-```
-
 ## 30-second tour
 
 ```bash
