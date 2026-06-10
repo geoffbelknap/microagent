@@ -93,6 +93,15 @@ This repository owns the VM pieces:
   validated by local builds and the tag-gated live CI suites; they are not
   published as a formula.
 
+## PR workflow
+
+- Open normal pull requests, not draft pull requests, unless the user
+  explicitly asks for a draft.
+- Before opening or updating a PR, check whether the branch is behind its base
+  branch and update it automatically when possible.
+- After pushing changes to an existing PR branch, update the PR without waiting
+  for another prompt.
+
 ## Project boundary
 
 Other projects supply policy, audit meaning, identity, and user intent. This

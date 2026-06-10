@@ -82,8 +82,9 @@ Other useful surfaces:
 
 For agent clients, AX mode and the MCP endpoint provide structured tool
 responses for lifecycle, status/inspect, exec, images, copy/artifacts, cost
-estimation, idempotency, and capability discovery. See
-[`microagent serve`](docs/cli/serve.md).
+estimation, idempotency, and capability discovery. Coding tools should launch
+the local stdio server with `microagent serve mcp`; see
+[`microagent serve`](docs/cli/serve.md) for client configuration snippets.
 
 ## What it owns
 
