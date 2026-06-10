@@ -5,6 +5,14 @@ been cut into a release yet.
 
 ## Unreleased
 
+- `doctor` now verifies that unprivileged user namespace creation actually
+  works by running a live `CLONE_NEWUSER` probe instead of trusting the
+  classic userns sysctls alone. On hosts where AppArmor blocks the clone
+  (stock Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`),
+  `userNamespacesAvailable` and `userNetworkReady` are now reported `false`
+  with a remediation hint; previously doctor reported user networking ready
+  while pasta failed at runtime. `userNetworkReady` also now requires user
+  namespaces in addition to pasta.
 - Fixed Firecracker `user` networking on hosts with older pasta releases
   (including the stock Ubuntu 24.04 package): pasta was invoked without a
   `--` option terminator, so getopt-permuting versions tried to parse the
