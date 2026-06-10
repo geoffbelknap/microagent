@@ -4,7 +4,7 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-08_
+_Last updated: 2026-06-10_
 
 ```text
 microagent serve mcp
@@ -13,6 +13,11 @@ microagent serve mcp
 `serve` starts long-running machine-readable endpoints for agent clients. The
 current endpoint is `mcp`, which serves the MicroAgent MCP stdio transport from
 the main `microagent` binary.
+
+`microagent serve mcp` is a foreground stdio transport. Configure an MCP client
+to launch it as the server command; do not run it as a background daemon from an
+interactive shell. When started directly from a terminal, the command exits with
+an explanatory error instead of waiting for protocol frames on stdin.
 
 The MCP server automatically uses AX output mode. It exposes structured tools
 for workspace lifecycle, inspection, results, stats, logs, events, snapshots,
