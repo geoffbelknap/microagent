@@ -3,7 +3,9 @@ package workspace
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -56,7 +58,14 @@ func SampleStats(stateDir, name string) (Stats, error) {
 	if pid <= 0 {
 		return Stats{}, fmt.Errorf("workspace %s has no recorded runtime PID", name)
 	}
-	return sampleProcStats(pid)
+	return sampleHostStats(pid)
+}
+
+func sampleHostStats(pid int) (Stats, error) {
+	if runtime.GOOS == "linux" {
+		return sampleProcStats(pid)
+	}
+	return samplePSStats(pid)
 }
 
 func sampleProcStats(pid int) (Stats, error) {
@@ -159,4 +168,29 @@ func readProcIO(pid int) (read, write uint64) {
 		}
 	}
 	return read, write
+}
+
+func samplePSStats(pid int) (Stats, error) {
+	output, err := exec.Command("ps", "-o", "pcpu=", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return Stats{}, err
+	}
+	fields := strings.Fields(string(output))
+	if len(fields) < 2 {
+		return Stats{}, fmt.Errorf("unexpected ps stats output for pid %d", pid)
+	}
+	cpu, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return Stats{}, fmt.Errorf("parse ps cpu for pid %d: %w", pid, err)
+	}
+	rssKB, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return Stats{}, fmt.Errorf("parse ps rss for pid %d: %w", pid, err)
+	}
+	return Stats{
+		PID:         pid,
+		CPUPercent:  cpu,
+		MemoryBytes: rssKB * 1024,
+		SampledAt:   time.Now().UTC().Format(time.RFC3339),
+	}, nil
 }
