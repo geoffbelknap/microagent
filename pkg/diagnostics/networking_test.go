@@ -9,16 +9,18 @@ import (
 
 func TestDeriveNetworkReadiness(t *testing.T) {
 	cases := []struct {
-		name                     string
-		ipForward, cap, passt    bool
-		wantUser, wantPrivileged bool
+		name                          string
+		ipForward, cap, passt, userns bool
+		wantUser, wantPrivileged      bool
 	}{
-		{"nothing", false, false, false, false, false},
-		{"passt only", false, false, true, true, false},
-		{"forward only", true, false, false, false, false},
-		{"cap only", false, true, false, false, false},
-		{"forward+cap", true, true, false, false, true},
-		{"all", true, true, true, true, true},
+		{"nothing", false, false, false, false, false, false},
+		{"passt only", false, false, true, false, false, false},
+		{"userns only", false, false, false, true, false, false},
+		{"passt+userns", false, false, true, true, true, false},
+		{"forward only", true, false, false, false, false, false},
+		{"cap only", false, true, false, false, false, false},
+		{"forward+cap", true, true, false, false, false, true},
+		{"all", true, true, true, true, true, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -26,6 +28,7 @@ func TestDeriveNetworkReadiness(t *testing.T) {
 				IPForwardEnabled:          c.ipForward,
 				SupervisorNetAdminCapable: c.cap,
 				UserNetworkingAvailable:   c.passt,
+				UserNamespacesAvailable:   c.userns,
 			}
 			DeriveNetworkReadiness(h)
 			if !h.IsolatedNetworkReady {

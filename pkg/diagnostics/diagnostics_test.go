@@ -37,6 +37,7 @@ func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
 			ReadFile: func(path string) ([]byte, error) {
 				return []byte("1\n"), nil
 			},
+			ProbeUserNamespaces: func() error { return nil },
 		},
 	)
 	if err != nil {
@@ -44,6 +45,9 @@ func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
 	}
 	if !resp.OK || resp.Host == nil || !resp.Host.KVMAvailable || !resp.Host.VsockAvailable || !resp.Host.UserNetworkingAvailable {
 		t.Fatalf("response = %#v", resp)
+	}
+	if !resp.Host.UserNamespacesAvailable || !resp.Host.UserNetworkReady {
+		t.Fatalf("user networking readiness = %#v", resp.Host)
 	}
 	if !resp.Host.SupervisorAvailable || resp.Host.SupervisorPath != "/usr/local/bin/microagent-firecracker-supervisor" {
 		t.Fatalf("supervisor support = %#v", resp.Host)
@@ -60,12 +64,13 @@ func TestCheckFirecrackerReportsMissingSupport(t *testing.T) {
 	resp, err := CheckFirecracker(
 		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
 		FirecrackerProbe{
-			ResolveBinary:     func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
-			ResolveSupervisor: func(Options) (string, error) { return "", fmt.Errorf("microagent Firecracker supervisor not found") },
-			ResolveGuestInit:  func(Options) (string, error) { return "", fmt.Errorf("microagent guest init not found") },
-			Stat:              func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
-			LookPath:          func(string) (string, error) { return "", os.ErrNotExist },
-			ReadFile:          func(string) ([]byte, error) { return []byte("0\n"), nil },
+			ResolveBinary:       func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
+			ResolveSupervisor:   func(Options) (string, error) { return "", fmt.Errorf("microagent Firecracker supervisor not found") },
+			ResolveGuestInit:    func(Options) (string, error) { return "", fmt.Errorf("microagent guest init not found") },
+			Stat:                func(string) (os.FileInfo, error) { return nil, os.ErrNotExist },
+			LookPath:            func(string) (string, error) { return "", os.ErrNotExist },
+			ReadFile:            func(string) ([]byte, error) { return []byte("0\n"), nil },
+			ProbeUserNamespaces: func() error { return fmt.Errorf("clone: operation not permitted") },
 		},
 	)
 	if err == nil {
@@ -92,8 +97,9 @@ func TestCheckFirecrackerReportsMissingPasta(t *testing.T) {
 			Stat: func(path string) (os.FileInfo, error) {
 				return fakeFileInfo{name: filepath.Base(path)}, nil
 			},
-			LookPath: func(string) (string, error) { return "", os.ErrNotExist },
-			ReadFile: func(string) ([]byte, error) { return []byte("1\n"), nil },
+			LookPath:            func(string) (string, error) { return "", os.ErrNotExist },
+			ReadFile:            func(string) ([]byte, error) { return []byte("1\n"), nil },
+			ProbeUserNamespaces: func() error { return nil },
 		},
 	)
 	if err == nil {
@@ -104,6 +110,136 @@ func TestCheckFirecrackerReportsMissingPasta(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "apt install passt") {
 		t.Fatalf("error = %q", resp.Error)
+	}
+}
+
+func TestCheckFirecrackerReportsAppArmorRestrictedUserNamespaces(t *testing.T) {
+	resp, err := CheckFirecracker(
+		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
+		FirecrackerProbe{
+			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
+			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
+			ResolveGuestInit:  func(Options) (string, error) { return "/usr/local/libexec/microagent-guestinit-amd64", nil },
+			Stat: func(path string) (os.FileInfo, error) {
+				return fakeFileInfo{name: filepath.Base(path)}, nil
+			},
+			BinaryVersion: func(string) string { return "Firecracker v1.15.1" },
+			LookPath: func(name string) (string, error) {
+				if name == "pasta" {
+					return "/usr/bin/pasta", nil
+				}
+				return "", os.ErrNotExist
+			},
+			// Stock Ubuntu 24.04: the classic userns sysctls look permissive,
+			// but AppArmor denies the clone at runtime.
+			ReadFile: func(path string) ([]byte, error) {
+				switch path {
+				case "/proc/sys/user/max_user_namespaces":
+					return []byte("32768\n"), nil
+				case "/proc/sys/kernel/apparmor_restrict_unprivileged_userns":
+					return []byte("1\n"), nil
+				}
+				return nil, os.ErrNotExist
+			},
+			ProbeUserNamespaces: func() error { return fmt.Errorf("fork/exec /usr/bin/true: operation not permitted") },
+		},
+	)
+	if err == nil {
+		t.Fatal("CheckFirecracker returned nil error")
+	}
+	if resp.Host == nil || resp.Host.UserNamespacesAvailable {
+		t.Fatalf("response = %#v", resp)
+	}
+	if !resp.Host.UserNetworkingAvailable {
+		t.Fatalf("pasta presence should still be reported: %#v", resp.Host)
+	}
+	if resp.Host.UserNetworkReady {
+		t.Fatalf("user networking must not be ready without user namespaces: %#v", resp.Host)
+	}
+	if !strings.Contains(resp.Error, "kernel.apparmor_restrict_unprivileged_userns=0") {
+		t.Fatalf("error = %q", resp.Error)
+	}
+}
+
+func TestCheckUserNamespaces(t *testing.T) {
+	readFiles := func(contents map[string]string) func(string) ([]byte, error) {
+		return func(path string) ([]byte, error) {
+			if value, ok := contents[path]; ok {
+				return []byte(value), nil
+			}
+			return nil, os.ErrNotExist
+		}
+	}
+	probeFail := func() error { return fmt.Errorf("clone: operation not permitted") }
+	cases := []struct {
+		name         string
+		files        map[string]string
+		probe        func() error
+		wantOK       bool
+		issueExcerpt string
+	}{
+		{
+			name:   "probe success is authoritative",
+			files:  map[string]string{"/proc/sys/kernel/apparmor_restrict_unprivileged_userns": "1\n"},
+			probe:  func() error { return nil },
+			wantOK: true,
+		},
+		{
+			name: "probe failure with apparmor restriction",
+			files: map[string]string{
+				"/proc/sys/user/max_user_namespaces":                     "32768\n",
+				"/proc/sys/kernel/apparmor_restrict_unprivileged_userns": "1\n",
+			},
+			probe:        probeFail,
+			wantOK:       false,
+			issueExcerpt: "kernel.apparmor_restrict_unprivileged_userns=0",
+		},
+		{
+			name:         "probe failure prefers the disabled-clone sysctl hint",
+			files:        map[string]string{"/proc/sys/kernel/unprivileged_userns_clone": "0\n"},
+			probe:        probeFail,
+			wantOK:       false,
+			issueExcerpt: "kernel.unprivileged_userns_clone=1",
+		},
+		{
+			name:         "probe failure prefers the max-namespaces sysctl hint",
+			files:        map[string]string{"/proc/sys/user/max_user_namespaces": "0\n"},
+			probe:        probeFail,
+			wantOK:       false,
+			issueExcerpt: "user.max_user_namespaces",
+		},
+		{
+			name:         "probe failure without any sysctl evidence",
+			files:        map[string]string{},
+			probe:        probeFail,
+			wantOK:       false,
+			issueExcerpt: "clone: operation not permitted",
+		},
+		{
+			name:         "no probe falls back to apparmor sysctl",
+			files:        map[string]string{"/proc/sys/kernel/apparmor_restrict_unprivileged_userns": "1\n"},
+			wantOK:       false,
+			issueExcerpt: "restricted by AppArmor",
+		},
+		{
+			name:   "no probe and no sysctl evidence",
+			files:  map[string]string{},
+			wantOK: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, issue := checkUserNamespaces(readFiles(tc.files), tc.probe)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %t, want %t (issue %q)", ok, tc.wantOK, issue)
+			}
+			if tc.wantOK && issue != "" {
+				t.Fatalf("issue = %q, want empty", issue)
+			}
+			if tc.issueExcerpt != "" && !strings.Contains(issue, tc.issueExcerpt) {
+				t.Fatalf("issue = %q, want to contain %q", issue, tc.issueExcerpt)
+			}
+		})
 	}
 }
 
@@ -240,6 +376,7 @@ func TestCheckFirecrackerGathersNetworkingFacts(t *testing.T) {
 			return nil, os.ErrNotExist
 		},
 		ReadBinaryCapabilities: func(path string) (bool, error) { return true, nil },
+		ProbeUserNamespaces:    func() error { return nil },
 	}
 	resp, err := CheckFirecracker(Options{Backend: "firecracker", Arch: "amd64"}, probe)
 	if err != nil {

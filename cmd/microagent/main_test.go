@@ -777,6 +777,7 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 			}
 			return nil, os.ErrNotExist
 		},
+		func() error { return nil },
 	)
 	if err != nil {
 		t.Fatalf("firecrackerDoctorResponse: %v", err)
@@ -817,6 +818,7 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 		func(string) string { return "" },
 		func(string) (string, error) { return "", os.ErrNotExist },
 		func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		func() error { return nil },
 	)
 	if err == nil {
 		t.Fatal("firecrackerDoctorResponse returned nil error")

@@ -30,6 +30,7 @@ type FirecrackerProbe struct {
 	LookPath               func(string) (string, error)
 	ReadFile               func(string) ([]byte, error)
 	ReadBinaryCapabilities func(path string) (bool, error)
+	ProbeUserNamespaces    func() error
 }
 
 type WindowsHyperVProbe struct {
@@ -202,6 +203,9 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if probe.ReadFile == nil {
 		probe.ReadFile = os.ReadFile
 	}
+	if probe.ProbeUserNamespaces == nil {
+		probe.ProbeUserNamespaces = defaultUserNamespaceProbe
+	}
 	host := &vmkit.HostSupport{
 		Backend:      opts.Backend,
 		Architecture: opts.Arch,
@@ -251,7 +255,7 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	} else {
 		issues = append(issues, "pasta is not installed; install passt (for example, apt install passt)")
 	}
-	usernsOK, usernsIssue := checkUserNamespaces(probe.ReadFile)
+	usernsOK, usernsIssue := checkUserNamespaces(probe.ReadFile, probe.ProbeUserNamespaces)
 	host.UserNamespacesAvailable = usernsOK
 	if usernsIssue != "" {
 		issues = append(issues, usernsIssue)
@@ -284,7 +288,20 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	return resp, nil
 }
 
-func checkUserNamespaces(readFile func(string) ([]byte, error)) (bool, string) {
+// checkUserNamespaces reports whether the current user can create unprivileged
+// user namespaces (which pasta needs for Firecracker user-mode networking).
+// The live clone probe is authoritative when available; the sysctl reads exist
+// to turn a probe failure into the most specific remediation. Sysctls alone
+// are not trusted for a positive verdict because policy layers such as
+// AppArmor's kernel.apparmor_restrict_unprivileged_userns deny the clone at
+// runtime while the classic userns sysctls still look permissive.
+func checkUserNamespaces(readFile func(string) ([]byte, error), probeUserns func() error) (bool, string) {
+	var probeErr error
+	if probeUserns != nil {
+		if probeErr = probeUserns(); probeErr == nil {
+			return true, ""
+		}
+	}
 	if data, err := readFile("/proc/sys/kernel/unprivileged_userns_clone"); err == nil {
 		if strings.TrimSpace(string(data)) != "1" {
 			return false, "unprivileged user namespaces are disabled; set kernel.unprivileged_userns_clone=1"
@@ -295,6 +312,16 @@ func checkUserNamespaces(readFile func(string) ([]byte, error)) (bool, string) {
 		if value == "" || value == "0" {
 			return false, "user namespaces are disabled; set user.max_user_namespaces above 0"
 		}
+	}
+	if data, err := readFile("/proc/sys/kernel/apparmor_restrict_unprivileged_userns"); err == nil && strings.TrimSpace(string(data)) == "1" {
+		message := "unprivileged user namespaces are restricted by AppArmor; set kernel.apparmor_restrict_unprivileged_userns=0 or grant the microagent binaries an AppArmor profile that allows userns creation"
+		if probeErr != nil {
+			message = fmt.Sprintf("unprivileged user namespaces are restricted by AppArmor (%v); set kernel.apparmor_restrict_unprivileged_userns=0 or grant the microagent binaries an AppArmor profile that allows userns creation", probeErr)
+		}
+		return false, message
+	}
+	if probeErr != nil {
+		return false, fmt.Sprintf("unprivileged user namespace creation failed (%v); a kernel security policy may be blocking CLONE_NEWUSER", probeErr)
 	}
 	return true, ""
 }

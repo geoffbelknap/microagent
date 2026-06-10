@@ -4,7 +4,7 @@ description: Check that the host can run microagent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-10_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -23,8 +23,11 @@ capability report rather than a health check.
 - **Firecracker (Linux):** `firecracker` binary on PATH (or
   `MICROAGENT_FIRECRACKER`), `/dev/kvm` present, `/dev/vhost-vsock` present,
   `/dev/net/tun` present, `pasta` available for user-mode networking,
-  unprivileged user namespaces enabled, default kernel installed, interactive
-  console available.
+  unprivileged user namespace creation actually works (a live `CLONE_NEWUSER`
+  probe, so policy layers like AppArmor's
+  `kernel.apparmor_restrict_unprivileged_userns` are caught, not just the
+  classic userns sysctls), default kernel installed, interactive console
+  available.
 - **Windows Hyper-V (experimental):** Windows Host Compute Service available,
   Hyper-V / Windows Hypervisor Platform support available, HCS access allowed
   for the current user, HCN/HNS networking available, Hyper-V sockets
