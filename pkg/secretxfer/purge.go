@@ -25,7 +25,7 @@ func zeroFile(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.Write(make([]byte, info.Size())); err != nil {
 		return fmt.Errorf("overwrite with zeros: %w", err)
 	}

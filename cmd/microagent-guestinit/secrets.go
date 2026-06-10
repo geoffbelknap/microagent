@@ -33,7 +33,7 @@ func dialAndWriteSecrets(port uint16, root string) error {
 		return fmt.Errorf("connect secrets vsock port %d: %w", port, err)
 	}
 	conn := os.NewFile(uintptr(fd), "secrets-vsock")
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return writeFetchedSecrets(conn, root)
 }
 

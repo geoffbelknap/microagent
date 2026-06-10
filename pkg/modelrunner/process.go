@@ -19,14 +19,14 @@ var spawnProcess = func(argv []string, logPath string) (int, error) {
 	if len(argv) == 0 {
 		return 0, fmt.Errorf("empty argv")
 	}
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, err
 	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, err
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -64,7 +64,7 @@ func allocateFreePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 

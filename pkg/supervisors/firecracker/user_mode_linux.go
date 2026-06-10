@@ -76,23 +76,23 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 		return failedResponse(req, err.Error()), err
 	}
 	dir := userNetworkStateDir(opts)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	stdout, err := os.OpenFile(userNetworkStdoutLog(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	stdout, err := os.OpenFile(userNetworkStdoutLog(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
-	defer stdout.Close()
-	stderr, err := os.OpenFile(userNetworkStderrLog(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	defer func() { _ = stdout.Close() }()
+	stderr, err := os.OpenFile(userNetworkStderrLog(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
-	defer stderr.Close()
+	defer func() { _ = stderr.Close() }()
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
@@ -232,7 +232,7 @@ func newUserNetworkCommand(ctx context.Context, opts Options, req vmkit.Request,
 		return nil, err
 	}
 	pidFile := userNetworkPIDPath(opts)
-	if err := os.MkdirAll(filepath.Dir(pidFile), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(pidFile), 0o700); err != nil {
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, pasta, userNetworkArgs(supervisor, pidFile, string(requestJSON))...)

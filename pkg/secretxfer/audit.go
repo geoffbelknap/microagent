@@ -38,9 +38,12 @@ func AppendAccessRecord(path string, rec AccessRecord) error {
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
 	}
-	defer f.Close()
 	if _, err := f.Write(append(data, '\n')); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write audit record: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close audit log: %w", err)
 	}
 	return nil
 }
@@ -55,7 +58,7 @@ func ReadAccessRecords(path string) ([]AccessRecord, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []AccessRecord
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)

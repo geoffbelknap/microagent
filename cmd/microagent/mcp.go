@@ -716,7 +716,7 @@ func runMCPWorkspaceExec(ctx context.Context, args map[string]any, start time.Ti
 	if stateDir == "" {
 		stateDir = defaultStateDir()
 	}
-	result, err, retryMeta := mcpWorkspaceExec(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
+	result, retryMeta, err := mcpWorkspaceExec(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
 	envelope := map[string]any{
 		"result":              result,
 		"timing_ms":           time.Since(start).Milliseconds(),

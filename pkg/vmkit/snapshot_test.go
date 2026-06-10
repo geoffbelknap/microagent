@@ -26,14 +26,14 @@ func writeFakeSnapshot(t *testing.T, stateDir, name, tag string, manifest Snapsh
 func TestSnapshotManifestRoundTrip(t *testing.T) {
 	dir := SnapshotDir(t.TempDir(), "agent-1", "snap-1")
 	manifest := SnapshotManifest{
-		Tag:          "snap-1",
-		ImageRef:     "docker.io/library/nats:latest",
-		NetworkMode:  "nat",
-		GuestIP:      "169.254.0.2",
-		KernelSHA256: "abc123",
-		VCPUCount:    2,
-		MemoryMiB:    512,
-		CreatedAt:    "2026-06-01T00:00:00Z",
+		Tag:            "snap-1",
+		ImageRef:       "docker.io/library/nats:latest",
+		NetworkMode:    "nat",
+		GuestIP:        "169.254.0.2",
+		KernelSHA256:   "abc123",
+		VCPUCount:      2,
+		MemoryMiB:      512,
+		CreatedAt:      "2026-06-01T00:00:00Z",
 		VsockUDSPath:   "/state/agent-1/vsock.sock",
 		ShellPort:      28365,
 		ExecPort:       48365,

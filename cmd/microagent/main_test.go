@@ -2356,8 +2356,8 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 		},
 		{
 			name: "unknown top-level field",
-			spec: "name: bad\nnetwrok:\n  mode: user\n",
-			want: `unknown top-level field "netwrok"`,
+			spec: "name: bad\nnetwrok:\n  mode: user\n", //nolint:misspell // deliberate typo: exercises unknown-field rejection
+			want: `unknown top-level field "netwrok"`,   //nolint:misspell // deliberate typo: exercises unknown-field rejection
 		},
 	}
 	for _, tt := range tests {
@@ -5150,54 +5150,11 @@ func runExternalOutput(ctx context.Context, exe string, args ...string) ([]byte,
 	return cmd.CombinedOutput()
 }
 
-func waitForExternalResult(t *testing.T, ctx context.Context, cliPath, stateDir, name string, timeout time.Duration) []byte {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var last []byte
-	for {
-		out, err := runExternalOutput(ctx, cliPath, "result", name, "--state-dir", stateDir)
-		last = out
-		if err == nil {
-			return out
-		}
-		if time.Now().After(deadline) {
-			logWindowsHyperVSmokeState(t, stateDir, name)
-			t.Fatalf("result not ready: %v\n%s", err, last)
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(time.Second):
-		}
-	}
-}
-
 func logWindowsHyperVSmokeState(t *testing.T, stateDir, name string) {
 	t.Helper()
 	for _, file := range []string{"serial.log", "hvsock-listener.log", "runtime.json"} {
 		if data, readErr := os.ReadFile(filepath.Join(stateDir, name, file)); readErr == nil {
 			t.Logf("%s:\n%s", file, data)
-		}
-	}
-}
-
-func waitForSerialContains(ctx context.Context, path, needle string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		data, err := os.ReadFile(path)
-		if err == nil && strings.Contains(string(data), needle) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			if err != nil {
-				return fmt.Errorf("serial log did not contain %q before timeout: %w", needle, err)
-			}
-			return fmt.Errorf("serial log did not contain %q before timeout: %s", needle, path)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }

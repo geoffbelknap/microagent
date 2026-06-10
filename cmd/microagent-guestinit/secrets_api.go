@@ -53,7 +53,7 @@ func fetchFromHost(hostPort uint16, name string) ([]byte, error) {
 		return nil, fmt.Errorf("connect host secrets port: %w", err)
 	}
 	conn := os.NewFile(uintptr(fd), "secrets-api-vsock")
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return secretxfer.FetchOne(conn, name)
 }
 
@@ -85,7 +85,7 @@ func serveSecretsAPI(sockPath string, hostPort uint16) error {
 }
 
 func handleWorkloadConn(conn net.Conn, hostPort uint16) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	reqLine, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil && reqLine == "" {
 		return

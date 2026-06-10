@@ -222,14 +222,14 @@ func (c vmcomputeClient) withComputeSystem(ctx context.Context, id, operation st
 	if handle == 0 {
 		return fmt.Errorf("windows-hyperv HCS %s open returned an empty handle", operation)
 	}
-	defer api.CloseComputeSystem(ctx, handle)
+	defer func() { _ = api.CloseComputeSystem(ctx, handle) }()
 	var reg *hcsCallbackRegistration
 	if pendingNotification != 0 {
 		reg, err = registerComputeSystemCallback(ctx, api, handle)
 		if err != nil {
 			return hcsCallError(operation+" register callback", "", err)
 		}
-		defer reg.unregister(ctx, api)
+		defer func() { _ = reg.unregister(ctx, api) }()
 	}
 	result, err = fn(handle)
 	if err != nil && !errors.Is(err, hcsOperationPending) {

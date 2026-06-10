@@ -86,7 +86,7 @@ func SendConsoleCommand(ctx context.Context, opts ConsoleOptions, command string
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return sendConsoleCommandOnConn(conn, opts, command, output)
 }
 

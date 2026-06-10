@@ -75,14 +75,14 @@ func SnapshotDir(stateDir, name, tag string) string {
 // WriteSnapshotManifest writes the manifest into the snapshot directory,
 // creating the directory if needed.
 func WriteSnapshotManifest(dir string, manifest SnapshotManifest) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, SnapshotManifestName), append(data, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(dir, SnapshotManifestName), append(data, '\n'), 0o600)
 }
 
 // ReadSnapshotManifest reads the manifest from a snapshot directory.

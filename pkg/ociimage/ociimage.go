@@ -185,10 +185,10 @@ func buildTar(dir string) ([]byte, error) {
 				return nil, err
 			}
 			if _, err := io.Copy(tw, f); err != nil {
-				f.Close()
+				_ = f.Close()
 				return nil, err
 			}
-			f.Close()
+			_ = f.Close()
 		}
 	}
 	if err := tw.Close(); err != nil {

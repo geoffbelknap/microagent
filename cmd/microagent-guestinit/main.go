@@ -367,30 +367,6 @@ func reapExitedChildren() {
 	}
 }
 
-func startInteractiveShell(env []string, shellPath string) error {
-	command, err := consoleShellCommand(shellPath)
-	if err != nil {
-		return err
-	}
-	log.Printf("microagent-init: starting console shell %v", command)
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start console shell: %w", err)
-	}
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			log.Printf("microagent-init: console shell exited: %v", err)
-			return
-		}
-		log.Println(consoleShellExitedMarker)
-	}()
-	return nil
-}
-
 func configureHostname(hostname string) error {
 	hostname = strings.TrimSpace(hostname)
 	if hostname == "" {
@@ -930,7 +906,7 @@ func runShellSession(fd int, shellPath string) {
 		_ = unix.Close(fd)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	command, err := consoleShellCommand(shellPath)
 	if err != nil {
 		fmt.Fprintf(file, "microagent-init: %v\n", err)
@@ -941,8 +917,8 @@ func runShellSession(fd int, shellPath string) {
 		fmt.Fprintf(file, "microagent-init: open shell pty: %v\n", err)
 		return
 	}
-	defer master.Close()
-	defer slave.Close()
+	defer func() { _ = master.Close() }()
+	defer func() { _ = slave.Close() }()
 	log.Printf("microagent-init: starting connect shell %v", command)
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = shellSessionEnv()
@@ -1407,7 +1383,7 @@ func setInterfaceIPv4(name string, ip, mask net.IP) error {
 	if err != nil {
 		return fmt.Errorf("open control socket for %s: %w", name, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	ifr, err := unix.NewIfreq(name)
 	if err != nil {
 		return fmt.Errorf("prepare address request for %s: %w", name, err)
@@ -1436,7 +1412,7 @@ func setInterfaceUp(name string) error {
 	if err != nil {
 		return fmt.Errorf("open control socket for %s: %w", name, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	ifr, err := unix.NewIfreq(name)
 	if err != nil {
 		return fmt.Errorf("prepare flags request for %s: %w", name, err)
@@ -1488,7 +1464,7 @@ func sendNetlinkRequest(req []byte, seq uint32, action string) error {
 	if err != nil {
 		return fmt.Errorf("%s: open netlink socket: %w", action, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return fmt.Errorf("%s: bind netlink socket: %w", action, err)
 	}
@@ -1592,7 +1568,7 @@ func bringUpLoopback() error {
 	if err != nil {
 		return fmt.Errorf("open control socket for loopback: %w", err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	ifr, err := unix.NewIfreq("lo")
 	if err != nil {
 		return fmt.Errorf("prepare loopback interface request: %w", err)
@@ -1636,7 +1612,7 @@ func serveTCPVsockBridge(listener net.Listener, port uint32) {
 }
 
 func proxyTCPToHostVsock(conn net.Conn, port uint32) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	fd, err := dialHostVsock(port, 10*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect vsock bridge port %d: %v\n", port, err)
@@ -1647,7 +1623,7 @@ func proxyTCPToHostVsock(conn net.Conn, port uint32) {
 		_ = unix.Close(fd)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(file, conn)
@@ -1681,14 +1657,14 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 		_ = unix.Close(fd)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	target, conn, err := dialGuestTCP(guestPort, 10*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect guest tcp port %d: %v\n", guestPort, err)
 		return
 	}
 	log.Printf("microagent-init: host forward connected guest tcp %s", target)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	done := make(chan struct{}, 2)
 	go func() {
 		if _, err := io.Copy(file, conn); err != nil {
@@ -1872,7 +1848,7 @@ func sendResult(port uint32, res result) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	data, err := json.Marshal(res)
 	if err != nil {
 		return err
