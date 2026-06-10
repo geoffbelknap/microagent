@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-03_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]
