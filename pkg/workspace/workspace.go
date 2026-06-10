@@ -950,18 +950,18 @@ func FirecrackerSupervisorPath(opts Options) string {
 func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
 	supervisor, err := Supervisor(opts)
 	if err != nil {
-		err = contextualDispatchError(opts, req, err.Error())
+		err = contextualDispatchError(opts, req, err)
 		return vmkit.Response{Backend: opts.Backend, Error: err.Error()}, err
 	}
 	resp, err := supervisor.Do(ctx, req)
 	if err == nil {
 		return resp, nil
 	}
-	detail := strings.TrimSpace(resp.Error)
-	if detail == "" {
-		detail = err.Error()
+	cause := err
+	if detail := strings.TrimSpace(resp.Error); detail != "" && detail != err.Error() {
+		cause = supervisorError{detail: detail, cause: err}
 	}
-	err = contextualDispatchError(opts, req, detail)
+	err = contextualDispatchError(opts, req, cause)
 	if resp.Backend == "" {
 		resp.Backend = opts.Backend
 	}
@@ -969,7 +969,17 @@ func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Respo
 	return resp, err
 }
 
-func contextualDispatchError(opts Options, req vmkit.Request, detail string) error {
+// supervisorError reports the supervisor's structured error detail as the
+// message while keeping the dispatch error reachable via errors.Is/As.
+type supervisorError struct {
+	detail string
+	cause  error
+}
+
+func (e supervisorError) Error() string { return e.detail }
+func (e supervisorError) Unwrap() error { return e.cause }
+
+func contextualDispatchError(opts Options, req vmkit.Request, cause error) error {
 	command := strings.TrimSpace(req.Command)
 	if command == "" {
 		command = "request"
@@ -1007,7 +1017,7 @@ func contextualDispatchError(opts Options, req vmkit.Request, detail string) err
 	if supervisorPath != "" {
 		fields = append(fields, fmt.Sprintf("supervisor=%s", supervisorPath))
 	}
-	return fmt.Errorf("%s workspace %q failed (%s): %s", command, name, strings.Join(fields, " "), detail)
+	return fmt.Errorf("%s workspace %q failed (%s): %w", command, name, strings.Join(fields, " "), cause)
 }
 
 func ResultPath(stateDir, name string) string {
@@ -1090,7 +1100,10 @@ func ResetGuestConfigCommand(command []string, mode string, env map[string]strin
 		Hostname:     strings.TrimSpace(hostname),
 	})
 	if err != nil {
-		panic(err)
+		// Every field above is a plain value type, so Marshal cannot fail
+		// unless a future edit introduces an unmarshalable type. Fail loudly
+		// rather than emit a broken guest config.
+		panic(fmt.Sprintf("workspace: marshal guest run config: %v", err))
 	}
 	return "printf '%s\\n' " + ShellSingleQuote(string(data)) + " > /etc/microagent/run.json"
 }

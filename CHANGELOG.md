@@ -5,6 +5,13 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Workspace dispatch errors now preserve the underlying error chain, so Go
+  library callers can use `errors.Is`/`errors.As` (for example to reach the
+  supervisor's `*exec.ExitError`). Error message text is unchanged.
+- CI now collects unit-test coverage on the Linux job (summary in the log, full
+  profile uploaded as an artifact) and caches the Apple VF supervisor Swift
+  build on the macOS job.
+- README links to the releases page instead of hardcoding the latest version.
 - **Security:** `model pull` now verifies downloads against the upstream
   digest. The expected LFS sha256 for the file is fetched from the Hugging
   Face paths-info API before the download, and the pull fails closed — on a

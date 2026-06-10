@@ -2,7 +2,9 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -150,6 +152,10 @@ func TestDispatchAddsLifecycleFailureContext(t *testing.T) {
 		if !strings.Contains(resp.Error, want) {
 			t.Fatalf("Response error = %q, want substring %q", resp.Error, want)
 		}
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("Dispatch error = %q, want chain to *exec.ExitError via errors.As", err.Error())
 	}
 	if resp.Backend != backend {
 		t.Fatalf("Response backend = %q, want %q", resp.Backend, backend)
