@@ -4,7 +4,7 @@ description: Install microagent via Homebrew or build from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-10_
 
 ## Homebrew
 
@@ -26,7 +26,10 @@ brew install geoffbelknap/tap/microagent-rc
 ```
 
 Use the stable formula by default. Use `microagent-rc` only when validating a
-candidate release or reproducing a pre-release issue.
+candidate release or reproducing a pre-release issue. The RC formula is
+keg-only, so it installs alongside the stable formula without replacing it;
+run it as `$(brew --prefix)/opt/microagent-rc/bin/microagent` or put that
+`bin` first on your `PATH`.
 
 ## From source
 
