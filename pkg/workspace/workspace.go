@@ -659,7 +659,7 @@ func MountsForBackend(backend string, disks []Disk) []rootfs.Mount {
 }
 
 func BlockDeviceForBackend(backend string, index int) string {
-	if backend == vmkit.BackendWindowsHyperV {
+	if vmkit.BackendCapabilities(backend).SCSIBlockDevices {
 		return SCSIBlockDevice(index)
 	}
 	return VirtioBlockDevice(index)
