@@ -116,6 +116,9 @@ jobs:
       - name: Shellcheck scripts
         run: find scripts -name '*.sh' -print0 | xargs -0 shellcheck
 
+      - name: Lint workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yaml .github/workflows/*.yml
+
   portable-microagent-e2e:
     name: Portable microagent E2E
     runs-on: ubuntu-latest
