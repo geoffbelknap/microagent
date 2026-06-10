@@ -29,11 +29,13 @@ Run the cheap checks before opening a PR:
 
 ```bash
 go test ./...
-go vet ./...
+make lint          # golangci-lint run (includes go vet and gofmt drift)
 python3 scripts/dev/markdown-link-check.py
 python3 scripts/dev/docs-last-updated.py --check
 python3 scripts/dev/docs-parity.py
 ```
+
+Formatting is enforced by lint; fix drift with `make fmt`.
 
 For code that changes shared runtime behavior, also run:
 

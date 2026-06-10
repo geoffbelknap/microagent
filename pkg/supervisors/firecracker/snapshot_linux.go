@@ -48,7 +48,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	}
 
 	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return vmkit.Response{}, err
 	}
 

@@ -5,6 +5,24 @@ been cut into a release yet.
 
 ## Unreleased
 
+- **Breaking (Go library):** `workspace.ExecWithMetadata` now returns
+  `(ExecResult, ExecRetryMetadata, error)` with the error last, matching Go
+  convention. CLI and MCP behavior are unchanged.
+- Tightened host state-file permissions. Files written under the state dir
+  (workspace manifests, runtime/process state, events, network/volume/image/
+  model indexes, snapshot manifests, serial and supervisor logs, volume disks)
+  are now created `0600`, and new state directories `0700`, so workspace
+  topology and runtime configuration are no longer readable by other users on
+  the host. Existing files keep their modes; user-requested outputs (`cp`,
+  artifact exports, `init` scaffolds, kernel downloads) are unchanged.
+- Secret-access audit appends and Hyper-V event-log appends now report file
+  close errors instead of silently dropping a possibly unflushed record.
+- Adopted golangci-lint (`.golangci.yaml`, enforced in CI alongside the
+  existing race tests; `go vet` is included in the lint run). Added package
+  documentation for the exported Go packages and removed dead code left over
+  from the CLI-to-library refactor. New `make fmt`, `make lint`, and
+  `make test-race` targets.
+- Unified the pinned Go toolchain across all CI workflows (1.26.4).
 - Completed user-defined named networks: workspaces join a network with
   `create`/`run` `--network-name <name>`. Each member gets a stable IP from the
   network subnet (persisted in the registry, surviving stop/start), members

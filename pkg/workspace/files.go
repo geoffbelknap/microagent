@@ -196,7 +196,7 @@ func Clone(stateDir, source, target string) (Result, error) {
 		Detail:     "cloned_from=" + source,
 		ObservedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := os.MkdirAll(filepath.Join(stateDir, target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(stateDir, target), 0o700); err != nil {
 		_ = os.RemoveAll(targetWorkspaceDir)
 		return Result{}, err
 	}
@@ -580,7 +580,7 @@ func hasExtSuperblock(imagePath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	magic := []byte{0, 0}
 	n, err := file.ReadAt(magic, 1080)
 	if err != nil {

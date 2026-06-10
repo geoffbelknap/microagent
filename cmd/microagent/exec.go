@@ -115,7 +115,7 @@ func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stde
 	if *stream && currentOutputMode() != outputModeAX {
 		return runStreamingExec(ctx, opts, req, stdout, stderr)
 	}
-	result, err, retryMeta := workspace.ExecWithMetadata(ctx, opts, req)
+	result, retryMeta, err := workspace.ExecWithMetadata(ctx, opts, req)
 	if err != nil {
 		if currentOutputMode() == outputModeAX {
 			if writeErr := writeStructuredExecAXError(stdout, err, retryMeta); writeErr != nil {

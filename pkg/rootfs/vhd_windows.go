@@ -21,7 +21,7 @@ func buildVHDImage(ctx context.Context, stageDir, tmpImage, outputPath string, s
 	if err != nil {
 		return fmt.Errorf("create vhd image: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	reader, writer := io.Pipe()
 	errCh := make(chan error, 1)

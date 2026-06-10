@@ -321,10 +321,10 @@ func prepareWorkspace(opts Options, req vmkit.Request) error {
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o700); err != nil {
 		return err
 	}
-	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -392,12 +392,12 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		defer vsockListeners.Close()
 	}
-	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(serialLogPath(opts)), 0o700); err != nil {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
 		return vmkit.Response{}, err
 	}
-	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	serialLog, err := os.OpenFile(serialLogPath(opts), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -613,7 +613,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 
 func openSerialInputFIFO(opts Options) (*os.File, error) {
 	path := serialInputPath(opts)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	if err := syscall.Mkfifo(path, 0o600); err != nil && !os.IsExist(err) {
@@ -851,7 +851,7 @@ func writeConfig(opts Options, req vmkit.Request) error {
 			IsReadOnly:   disk.Mode == "ro",
 		})
 	}
-	if err := os.MkdirAll(filepath.Dir(configPath(opts)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath(opts)), 0o700); err != nil {
 		return err
 	}
 	return writeJSONFile(configPath(opts), cfg)
@@ -1998,10 +1998,10 @@ func startPortForwarderProcess(opts Options) (int, error) {
 		return 0, err
 	}
 	logPath := filepath.Join(opts.StateDir, opts.Name, "port-forward.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, err
 	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, err
 	}
@@ -2025,10 +2025,10 @@ func startVsockListenerProcess(opts Options) (int, error) {
 		return 0, err
 	}
 	logPath := filepath.Join(opts.StateDir, opts.Name, "vsock-listener.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, err
 	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, err
 	}
@@ -2194,7 +2194,7 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 			set.Close()
 			return nil, err
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			set.Close()
 			return nil, err
 		}
@@ -2233,14 +2233,14 @@ func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
 
 func handleGuestVsockConnection(conn net.Conn, target string) {
 	const maxResultBytes int64 = 16 * 1024 * 1024
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if tcpTarget, ok := parseTCPAddr(target); ok {
 		remote, err := net.Dial("tcp", tcpTarget)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "connect vsock target %s: %v\n", tcpTarget, err)
 			return
 		}
-		defer remote.Close()
+		defer func() { _ = remote.Close() }()
 		go func() {
 			_, _ = io.Copy(remote, conn)
 			closeWriteConn(remote)
@@ -2258,11 +2258,11 @@ func handleGuestVsockConnection(conn net.Conn, target string) {
 		fmt.Fprintf(os.Stderr, "guest vsock result for %s exceeded %d bytes\n", target, maxResultBytes)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		fmt.Fprintf(os.Stderr, "create result directory for %s: %v\n", target, err)
 		return
 	}
-	if err := os.WriteFile(target, data, 0o644); err != nil {
+	if err := os.WriteFile(target, data, 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "write result %s: %v\n", target, err)
 	}
 }
@@ -2294,13 +2294,13 @@ func servePortForward(listener net.Listener, udsPath string, guestPort uint32) {
 }
 
 func proxyTCPToGuestVsock(conn net.Conn, udsPath string, guestPort uint32) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	vsock, reader, err := dialGuestVsock(udsPath, guestPort)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect guest vsock port %d: %v\n", guestPort, err)
 		return
 	}
-	defer vsock.Close()
+	defer func() { _ = vsock.Close() }()
 	done := make(chan struct{}, 2)
 	go func() {
 		if _, err := io.Copy(vsock, conn); err != nil {
@@ -2502,7 +2502,7 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
 	dir := filepath.Join(opts.StateDir, opts.Name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -2991,7 +2991,7 @@ func writeJSONFile(path string, value any) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(0o644); err != nil {
+	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err
 	}

@@ -1,6 +1,15 @@
 UNAME_S := $(shell uname -s)
 
-.PHONY: test dev-build smoke smoke-contract smoke-rootfs smoke-microagent-e2e smoke-microagent-public-surface smoke-microagent-lifecycle-matrix smoke-microagent-networking smoke-microagent-mediation smoke-microagent-supervise smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
+.PHONY: fmt lint test-race test dev-build smoke smoke-contract smoke-rootfs smoke-microagent-e2e smoke-microagent-public-surface smoke-microagent-lifecycle-matrix smoke-microagent-networking smoke-microagent-mediation smoke-microagent-supervise smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
+
+fmt:
+	gofmt -w cmd pkg supervisors
+
+lint:
+	golangci-lint run
+
+test-race:
+	go test -race ./...
 
 test:
 	go test ./...

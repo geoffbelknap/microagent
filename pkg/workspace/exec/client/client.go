@@ -72,7 +72,7 @@ func (c *Client) Exec(ctx context.Context, req protocol.ExecRequest) (protocol.E
 	if err != nil {
 		return protocol.ExecResult{}, UnreachableError{Addr: c.addr, Err: err}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	} else {
@@ -109,7 +109,7 @@ func (c *Client) ExecStream(ctx context.Context, req protocol.ExecRequest, onChu
 	if err != nil {
 		return protocol.ExecResult{}, UnreachableError{Addr: c.addr, Err: err}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	} else {

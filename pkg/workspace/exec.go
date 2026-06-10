@@ -67,11 +67,13 @@ func (err ExecRetryExhaustedError) Unwrap() error {
 }
 
 func Exec(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error) {
-	result, err, _ := ExecWithMetadata(ctx, opts, req)
+	result, _, err := ExecWithMetadata(ctx, opts, req)
 	return result, err
 }
 
-func ExecWithMetadata(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, error, ExecRetryMetadata) {
+// ExecWithMetadata runs a structured exec like Exec and also reports retry
+// metadata describing any transient-failure retries that occurred.
+func ExecWithMetadata(ctx context.Context, opts Options, req execprotocol.ExecRequest) (execprotocol.ExecResult, ExecRetryMetadata, error) {
 	var meta ExecRetryMetadata
 	var retryStart time.Time
 	for {
@@ -80,7 +82,7 @@ func ExecWithMetadata(ctx context.Context, opts Options, req execprotocol.ExecRe
 			if meta.Count > 0 {
 				meta.WallClock = execRetrySince(retryStart)
 			}
-			return result, err, meta
+			return result, meta, err
 		}
 		if retryStart.IsZero() {
 			retryStart = execRetryNow()
@@ -88,7 +90,7 @@ func ExecWithMetadata(ctx context.Context, opts Options, req execprotocol.ExecRe
 		meta.WallClock = execRetrySince(retryStart)
 		if meta.Count >= ExecMaxTransientRetries {
 			meta.Exhausted = true
-			return result, ExecRetryExhaustedError{Retries: meta.Count, WallClock: meta.WallClock, LastErr: err}, meta
+			return result, meta, ExecRetryExhaustedError{Retries: meta.Count, WallClock: meta.WallClock, LastErr: err}
 		}
 		backoff := ExecRetryBackoff + execRetryJitter()
 		if backoff < 0 {
@@ -96,14 +98,14 @@ func ExecWithMetadata(ctx context.Context, opts Options, req execprotocol.ExecRe
 		}
 		if meta.WallClock+backoff > ExecRetryBudget {
 			meta.Exhausted = true
-			return result, ExecRetryExhaustedError{Retries: meta.Count, WallClock: meta.WallClock, LastErr: err}, meta
+			return result, meta, ExecRetryExhaustedError{Retries: meta.Count, WallClock: meta.WallClock, LastErr: err}
 		}
 		meta.Count++
 		if err := execRetrySleep(ctx, backoff); err != nil {
 			if meta.Count > 0 {
 				meta.WallClock = execRetrySince(retryStart)
 			}
-			return result, err, meta
+			return result, meta, err
 		}
 	}
 }

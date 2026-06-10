@@ -627,14 +627,14 @@ func extractLayer(stageDir, mediaType string, rc io.Reader) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
-	var reader io.Reader = rc
+	defer func() { _ = root.Close() }()
+	reader := rc
 	if strings.Contains(mediaType, "gzip") || strings.HasSuffix(mediaType, ".gzip") || strings.HasSuffix(mediaType, "+gzip") {
 		gz, err := gzip.NewReader(rc)
 		if err != nil {
 			return err
 		}
-		defer gz.Close()
+		defer func() { _ = gz.Close() }()
 		reader = gz
 	}
 	tr := tar.NewReader(reader)
@@ -685,7 +685,8 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 		if err := root.MkdirAll(name, mode); err != nil {
 			return err
 		}
-	case tar.TypeReg, tar.TypeRegA:
+	// archive/tar normalizes legacy TypeRegA headers to TypeReg on read.
+	case tar.TypeReg:
 		if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
 			return err
 		}
@@ -815,7 +816,7 @@ func writeInit(stageDir, initPath string, command []string, mode string, env map
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	target, err := safeStageRel(initPath)
 	if err != nil {
 		return err
@@ -871,7 +872,7 @@ func writeGuestRunConfig(stageDir string, command []string, mode string, env map
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	target, err := safeStageRel("/etc/microagent/run.json")
 	if err != nil {
 		return err
@@ -905,32 +906,12 @@ func envList(env map[string]string) []string {
 	return out
 }
 
-func copyFile(src, dst string, mode os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	return out.Close()
-}
-
 func writeDeclaredFiles(stageDir string, files []File) error {
 	root, err := os.OpenRoot(stageDir)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	for _, file := range files {
 		target, err := safeStageRel(file.Path)
 		if err != nil {
@@ -962,7 +943,7 @@ func copyFileToRoot(root *os.Root, src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	if err := root.MkdirAll(path.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -1026,7 +1007,7 @@ func ensureGuestRuntimeDirs(stageDir string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	for _, dir := range []string{"proc", "sys", "dev", "dev/pts"} {
 		if err := root.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create guest runtime dir %s: %w", dir, err)
@@ -1036,42 +1017,6 @@ func ensureGuestRuntimeDirs(stageDir string) error {
 		}
 	}
 	return nil
-}
-
-func copyFileOverwrite(src, dst string, mode os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
-	}
-	if err := out.Close(); err != nil {
-		return err
-	}
-	return os.Chmod(dst, mode)
-}
-
-func safeStagePath(stageDir, guestPath string) (string, error) {
-	if strings.ContainsRune(guestPath, 0) {
-		return "", fmt.Errorf("guest path contains NUL")
-	}
-	guestPath = filepath.Clean(guestPath)
-	if !filepath.IsAbs(guestPath) || guestPath == string(os.PathSeparator) {
-		return "", fmt.Errorf("guest path must be absolute and below root")
-	}
-	rel := strings.TrimPrefix(guestPath, string(os.PathSeparator))
-	parts := strings.Split(rel, string(os.PathSeparator))
-	return filepath.Join(append([]string{stageDir}, parts...)...), nil
 }
 
 func safeStageRel(guestPath string) (string, error) {
@@ -1184,7 +1129,7 @@ func copyStage(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		defer in.Close()
+		defer func() { _ = in.Close() }()
 		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
 		if err != nil {
 			return err
