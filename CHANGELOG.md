@@ -5,6 +5,24 @@ been cut into a release yet.
 
 ## Unreleased
 
+- **Security:** `model pull` now verifies downloads against the upstream
+  digest. The expected LFS sha256 for the file is fetched from the Hugging
+  Face paths-info API before the download, and the pull fails closed — on a
+  digest mismatch, on a file that is not LFS-tracked, or when the upstream
+  digest cannot be resolved — without writing a blob or an index record.
+- **Security:** debugfs requests (`cp`, `artifacts get`) are no longer built
+  by raw string concatenation. Every `-R` argument is validated (no quotes,
+  control characters, or option-like leading dashes) and double-quoted, and
+  remote workspace paths are validated in the copy layer itself so
+  manifest-derived artifact paths get the same checks as CLI endpoints. As a
+  side effect, local target directories containing spaces now work with
+  `cp`/`artifacts get`.
+- **Security:** OCI layer extraction now rejects entry names, hardlink
+  targets, and symlink targets containing backslashes, which the
+  slash-oriented traversal checks previously treated as plain name characters
+  but Windows filesystem APIs treat as path separators. The Windows symlink
+  marker fallback is also written through the `os.Root` sandbox instead of a
+  host-path join outside it.
 - **Breaking (Go library):** `workspace.ExecWithMetadata` now returns
   `(ExecResult, ExecRetryMetadata, error)` with the error last, matching Go
   convention. CLI and MCP behavior are unchanged.

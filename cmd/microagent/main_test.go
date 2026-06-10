@@ -4009,13 +4009,17 @@ goto args
 	script := `#!/usr/bin/env bash
 set -euo pipefail
 log="` + filepath.Join(dir, "debugfs.log") + `"
-printf '%s\n' "$*" | tr ' ' '|' >> "$log"
+# Strip the double quotes that the host adds around -R request arguments,
+# mirroring how real debugfs tokenizes quoted request words.
+printf '%s\n' "$*" | tr -d '"' | tr ' ' '|' >> "$log"
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do
   if [[ "${args[$i]}" == "-R" ]]; then
     cmd="${args[$((i+1))]}"
     if [[ "$cmd" == dump\ * ]]; then
       target="${cmd##* }"
+      target="${target%\"}"
+      target="${target#\"}"
       printf fake-dump > "$target"
     fi
   fi
