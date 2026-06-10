@@ -66,8 +66,19 @@ jobs:
       - name: Inspect preserved test state
         run: scripts/dev/cleanup-temp.sh
 
+      # Build the stack the way the E2E harness does, so doctor sees the
+      # supervisor and the guest init next to the CLI binary.
+      - name: Build microagent stack
+        run: |
+          mkdir -p .build/dev
+          go build -buildvcs=false -o .build/dev/microagent ./cmd/microagent
+          go build -buildvcs=false -o .build/dev/microagent-firecracker-supervisor ./cmd/microagent-firecracker-supervisor
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o .build/dev/microagent-guestinit-amd64 ./cmd/microagent-guestinit
+
       - name: Host doctor
-        run: go run ./cmd/microagent --json doctor
+        env:
+          MICROAGENT_FIRECRACKER_SUPERVISOR: ${{ github.workspace }}/.build/dev/microagent-firecracker-supervisor
+        run: .build/dev/microagent --json doctor
 
       - name: Run full Linux E2E suite
         run: scripts/dev/microagent-e2e.sh
