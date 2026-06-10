@@ -65,6 +65,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "FirecrackerVersion",
         "FirstOutputLine",
         "NetworkRemediation",
+        "ProbeUnprivilegedUserNamespace",
         "ResolveFirecrackerPath",
         "ResolveFirecrackerSupervisorPath",
         "ResolveGuestInitPath",
