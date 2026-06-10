@@ -5,6 +5,9 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Retired the `microagent-rc` Homebrew formula. Only stable releases ship to
+  the tap; release candidates remain git tags validated by local builds and
+  the tag-gated live CI suites. The tap-update workflow skips `-rc` tags.
 - Live Windows Hyper-V smokes now run in CI on GitHub-hosted runners
   (nightly, on release tags, and on demand): hosted windows-latest runners
   ship with the Hyper-V role active, so the parity smokes no longer depend on

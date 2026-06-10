@@ -19,17 +19,9 @@ Virtualization.framework supervisor. Go programs can import the same packages
 that back the CLI; start with the [library overview](/library/) if you are
 embedding microagent rather than using it from a shell.
 
-Release candidates and test builds are published separately:
-
-```bash
-brew install geoffbelknap/tap/microagent-rc
-```
-
-Use the stable formula by default. Use `microagent-rc` only when validating a
-candidate release or reproducing a pre-release issue. The RC formula is
-keg-only, so it installs alongside the stable formula without replacing it;
-run it as `$(brew --prefix)/opt/microagent-rc/bin/microagent` or put that
-`bin` first on your `PATH`.
+Only stable releases ship to Homebrew. Release candidates are validated with
+local builds (see "From source" below) and the tag-gated live CI suites, not
+a published formula.
 
 ## From source
 
