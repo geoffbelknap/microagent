@@ -46,8 +46,17 @@ func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.
 	if len(args) != 0 {
 		return fmt.Errorf("usage: microagent serve mcp")
 	}
+	if mcpStdioIsInteractive(stdin, stdout) {
+		return fmt.Errorf("microagent serve mcp uses MCP stdio and runs in the foreground under an MCP client; configure the client to launch this command instead of running it interactively")
+	}
 	globalOutputMode = outputModeAX
 	return serveMCP(ctx, stdin, stdout)
+}
+
+func mcpStdioIsInteractive(stdin io.Reader, stdout io.Writer) bool {
+	inFile, inOK := stdin.(*os.File)
+	outFile, outOK := stdout.(*os.File)
+	return inOK && outOK && fileIsTerminal(inFile) && fileIsTerminal(outFile)
 }
 
 func serveMCP(ctx context.Context, stdin io.Reader, stdout io.Writer) error {
@@ -1526,5 +1535,9 @@ func printServeMCPHelp(stdout io.Writer) {
 	fmt.Fprint(stdout, `microagent serve mcp
 
 Serve the microagent MCP stdio endpoint.
+
+This command is a foreground stdio transport for MCP clients. Configure the
+client to launch it as the MCP server command; do not run it as a background
+daemon from an interactive shell.
 `)
 }

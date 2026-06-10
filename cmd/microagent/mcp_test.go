@@ -68,6 +68,22 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	}
 }
 
+func TestRunServeMCPAllowsNonInteractiveStdio(t *testing.T) {
+	input := bytes.NewBuffer(nil)
+	input.Write(encodeMCPTestMessage(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize"}))
+	var output bytes.Buffer
+	if err := runServeMCP(context.Background(), nil, input, &output); err != nil {
+		t.Fatalf("runServeMCP: %v", err)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	if len(responses) != 1 {
+		t.Fatalf("responses = %d, want 1", len(responses))
+	}
+	if responses[0]["result"] == nil {
+		t.Fatalf("initialize response missing result: %#v", responses[0])
+	}
+}
+
 func TestMCPManagementToolCLIArgs(t *testing.T) {
 	tests := []struct {
 		name string
