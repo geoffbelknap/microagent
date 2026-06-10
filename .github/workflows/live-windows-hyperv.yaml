@@ -32,7 +32,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     env:
-      MICROAGENT_WINDOWS_HYPERV_KERNEL: ${{ github.workspace }}\.build\kernel\Image
       MICROAGENT_WINDOWS_HYPERV_IMAGE: ${{ inputs.image || 'docker.io/library/busybox:1.36' }}
       MICROAGENT_WINDOWS_HYPERV_GUESTINIT: ${{ github.workspace }}\.build\libexec\microagent-guestinit-amd64
     steps:
@@ -48,7 +47,9 @@ jobs:
       - name: Set state dir
         shell: pwsh
         # runner.temp is not available in job-level env; export from a step.
-        run: '"MICROAGENT_WINDOWS_HYPERV_STATE_DIR=$env:RUNNER_TEMP\microagent-windows-hyperv" | Out-File -Append $env:GITHUB_ENV'
+        run: |
+          "MICROAGENT_WINDOWS_HYPERV_STATE_DIR=$env:RUNNER_TEMP\microagent-windows-hyperv" | Out-File -Append $env:GITHUB_ENV
+          "MICROAGENT_WINDOWS_HYPERV_KERNEL=$env:USERPROFILE\.microagent\kernels\windows-hyperv\amd64\Image" | Out-File -Append $env:GITHUB_ENV
 
       - name: Build microagent binaries
         shell: pwsh
@@ -64,7 +65,7 @@ jobs:
 
       - name: Install guest kernel
         shell: pwsh
-        run: .build\bin\microagent.exe kernel install --out $env:MICROAGENT_WINDOWS_HYPERV_KERNEL
+        run: .build\bin\microagent.exe kernel install
 
       - name: Host doctor
         shell: pwsh
