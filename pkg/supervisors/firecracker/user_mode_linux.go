@@ -245,6 +245,10 @@ func userNetworkArgs(supervisor, pidFile, requestJSON string) []string {
 		"--config-net",
 		"--quiet",
 		"--pid", pidFile,
+		// "--" stops pasta's option parsing: older passt releases (e.g. the
+		// Ubuntu 24.04 package) permute getopt-style and otherwise try to
+		// parse the supervisor's --request-json flag as their own.
+		"--",
 		supervisor,
 		"--request-json", requestJSON,
 	}

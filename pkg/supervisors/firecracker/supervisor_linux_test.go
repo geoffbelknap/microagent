@@ -1850,3 +1850,23 @@ func TestFirecrackerBootArgsModelForward(t *testing.T) {
 		t.Fatalf("boot args should omit model fwd when zero: %q", none)
 	}
 }
+
+func TestUserNetworkArgsStopOptionParsingBeforeCommand(t *testing.T) {
+	args := userNetworkArgs("/usr/local/bin/sup", "/state/pasta.pid", `{"command":"run"}`)
+	want := []string{
+		"--config-net",
+		"--quiet",
+		"--pid", "/state/pasta.pid",
+		"--",
+		"/usr/local/bin/sup",
+		"--request-json", `{"command":"run"}`,
+	}
+	if len(args) != len(want) {
+		t.Fatalf("userNetworkArgs = %q, want %q", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("userNetworkArgs[%d] = %q, want %q (full: %q)", i, args[i], want[i], args)
+		}
+	}
+}
