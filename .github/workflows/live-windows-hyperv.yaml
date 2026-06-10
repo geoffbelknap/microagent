@@ -35,7 +35,6 @@ jobs:
       MICROAGENT_WINDOWS_HYPERV_KERNEL: ${{ github.workspace }}\.build\kernel\Image
       MICROAGENT_WINDOWS_HYPERV_IMAGE: ${{ inputs.image || 'docker.io/library/busybox:1.36' }}
       MICROAGENT_WINDOWS_HYPERV_GUESTINIT: ${{ github.workspace }}\.build\libexec\microagent-guestinit-amd64
-      MICROAGENT_WINDOWS_HYPERV_STATE_DIR: ${{ runner.temp }}\microagent-windows-hyperv
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -45,6 +44,11 @@ jobs:
         with:
           go-version: "1.26.4"
           cache-dependency-path: go.mod
+
+      - name: Set state dir
+        shell: pwsh
+        # runner.temp is not available in job-level env; export from a step.
+        run: '"MICROAGENT_WINDOWS_HYPERV_STATE_DIR=$env:RUNNER_TEMP\microagent-windows-hyperv" | Out-File -Append $env:GITHUB_ENV'
 
       - name: Build microagent binaries
         shell: pwsh
