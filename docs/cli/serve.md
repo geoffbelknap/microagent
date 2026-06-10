@@ -28,6 +28,108 @@ It is the full microagent MCP surface for the current release. It intentionally
 stops at substrate operations: it does not plan, call an LLM, interpret audit
 meaning, broker credentials, or make policy decisions.
 
+## Configure MCP clients
+
+Install `microagent` on the same host where your coding tool will launch the MCP
+server, then verify the host backend there:
+
+```bash
+microagent doctor
+```
+
+For every stdio MCP client, configure the MicroAgent server as this local
+command:
+
+```text
+command: microagent
+args: ["serve", "mcp"]
+```
+
+If the client is a GUI app or a remote editor session that does not inherit your
+shell `PATH`, use the absolute path from `command -v microagent` as the
+`command` value. Do not configure `microagent serve mcp` as an HTTP/SSE server
+or background daemon; the MCP client must start it as a foreground stdio
+process.
+
+For long-running operations such as image pulls, rootfs builds, and VM
+lifecycle calls, raise the client's MCP tool timeout when the client supports
+one. MicroAgent tools use `~/.microagent/` by default; most tools also accept a
+`state_dir` argument when a caller needs an explicit state root.
+
+### Codex
+
+```bash
+codex mcp add microagent -- microagent serve mcp
+```
+
+Or edit `~/.codex/config.toml` or a trusted project `.codex/config.toml`:
+
+```toml
+[mcp_servers.microagent]
+command = "microagent"
+args = ["serve", "mcp"]
+startup_timeout_sec = 20
+tool_timeout_sec = 600
+```
+
+### Claude Code
+
+```bash
+claude mcp add --transport stdio --scope user microagent -- microagent serve mcp
+```
+
+For a project-shared Claude Code configuration, put this in `.mcp.json` at the
+project root:
+
+```json
+{
+  "mcpServers": {
+    "microagent": {
+      "command": "microagent",
+      "args": ["serve", "mcp"],
+      "timeout": 600000
+    }
+  }
+}
+```
+
+### VS Code
+
+For a workspace configuration, create `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "microagent": {
+      "type": "stdio",
+      "command": "microagent",
+      "args": ["serve", "mcp"]
+    }
+  }
+}
+```
+
+If VS Code is connected to a remote machine and you want MicroAgent to run
+there, define the server in the remote workspace or remote user MCP
+configuration.
+
+### Other MCP clients
+
+Use the client's local stdio server form. If it asks for a single command and
+arguments, enter `microagent` and `serve`, `mcp`. If it uses Claude-style JSON,
+the minimum shape is:
+
+```json
+{
+  "mcpServers": {
+    "microagent": {
+      "command": "microagent",
+      "args": ["serve", "mcp"]
+    }
+  }
+}
+```
+
 ## Commands
 
 | Command | Purpose |
