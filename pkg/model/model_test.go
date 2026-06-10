@@ -2,7 +2,11 @@ package model
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,15 +92,42 @@ func TestResolveExported(t *testing.T) {
 	}
 }
 
-func TestPullDownloadsAndRecords(t *testing.T) {
-	prev := httpGet
-	httpGet = func(_ context.Context, url, _ string) (io.ReadCloser, int64, error) {
-		if url != "https://huggingface.co/org/repo/resolve/main/m.gguf" {
-			t.Fatalf("unexpected url %q", url)
+// stubHF stubs httpDo to serve a paths-info response advertising the given
+// JSON for org/repo@main and a download body for m.gguf. It records which
+// URLs were requested.
+func stubHF(t *testing.T, pathsInfoJSON, downloadBody string) *[]string {
+	t.Helper()
+	prev := httpDo
+	urls := &[]string{}
+	httpDo = func(_ context.Context, method, url, _ string, body io.Reader, _ string) (io.ReadCloser, int64, error) {
+		*urls = append(*urls, method+" "+url)
+		switch {
+		case method == http.MethodPost && url == "https://huggingface.co/api/models/org/repo/paths-info/main":
+			data, err := io.ReadAll(body)
+			if err != nil {
+				t.Errorf("read paths-info request body: %v", err)
+			}
+			if !strings.Contains(string(data), `"m.gguf"`) {
+				t.Errorf("paths-info request missing file path: %s", data)
+			}
+			return io.NopCloser(strings.NewReader(pathsInfoJSON)), int64(len(pathsInfoJSON)), nil
+		case method == http.MethodGet && url == "https://huggingface.co/org/repo/resolve/main/m.gguf":
+			return io.NopCloser(strings.NewReader(downloadBody)), int64(len(downloadBody)), nil
 		}
-		return io.NopCloser(strings.NewReader("GGUFDATA")), 8, nil
+		return nil, 0, fmt.Errorf("unexpected request %s %s", method, url)
 	}
-	t.Cleanup(func() { httpGet = prev })
+	t.Cleanup(func() { httpDo = prev })
+	return urls
+}
+
+func lfsPathsInfo(file, digest string) string {
+	return fmt.Sprintf(`[{"type":"file","path":%q,"size":8,"lfs":{"oid":%q,"size":8,"pointerSize":134}}]`, file, digest)
+}
+
+func TestPullDownloadsAndRecords(t *testing.T) {
+	sum := sha256.Sum256([]byte("GGUFDATA"))
+	digest := hex.EncodeToString(sum[:])
+	stubHF(t, lfsPathsInfo("m.gguf", digest), "GGUFDATA")
 
 	dir := t.TempDir()
 	rec, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"})
@@ -110,12 +141,97 @@ func TestPullDownloadsAndRecords(t *testing.T) {
 	if err != nil || string(data) != "GGUFDATA" {
 		t.Fatalf("blob not written: %q err=%v", data, err)
 	}
-	if !strings.HasPrefix(rec.Digest, "sha256:") {
-		t.Fatalf("missing digest: %q", rec.Digest)
+	if rec.Digest != "sha256:"+digest {
+		t.Fatalf("digest = %q, want sha256:%s", rec.Digest, digest)
 	}
 	found, err := Find(dir, rec.ModelRef)
 	if err != nil || found.OutputPath != rec.OutputPath {
 		t.Fatalf("record not indexed: %+v err=%v", found, err)
+	}
+}
+
+func TestPullRejectsDigestMismatch(t *testing.T) {
+	wrong := strings.Repeat("ab", 32)
+	stubHF(t, lfsPathsInfo("m.gguf", wrong), "GGUFDATA")
+
+	dir := t.TempDir()
+	_, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"})
+	if err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("expected digest mismatch error, got %v", err)
+	}
+	assertNoModelArtifacts(t, dir)
+}
+
+func TestPullRejectsTamperedUpstreamDigestPrefix(t *testing.T) {
+	// An "sha256:"-prefixed oid must still verify against the same content.
+	sum := sha256.Sum256([]byte("GGUFDATA"))
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+	stubHF(t, lfsPathsInfo("m.gguf", digest), "GGUFDATA")
+
+	dir := t.TempDir()
+	if _, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"}); err != nil {
+		t.Fatalf("Pull with prefixed oid: %v", err)
+	}
+}
+
+func TestPullFailsClosedWithoutLFSDigest(t *testing.T) {
+	urls := stubHF(t, `[{"type":"file","path":"m.gguf","size":8}]`, "GGUFDATA")
+
+	dir := t.TempDir()
+	_, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"})
+	if err == nil || !strings.Contains(err.Error(), "no LFS sha256") {
+		t.Fatalf("expected missing-LFS error, got %v", err)
+	}
+	for _, u := range *urls {
+		if strings.HasPrefix(u, http.MethodGet+" ") {
+			t.Fatalf("download attempted despite missing upstream digest: %v", *urls)
+		}
+	}
+	assertNoModelArtifacts(t, dir)
+}
+
+func TestPullFailsClosedWhenFileUnknownUpstream(t *testing.T) {
+	stubHF(t, `[]`, "GGUFDATA")
+
+	dir := t.TempDir()
+	_, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"})
+	if err == nil || !strings.Contains(err.Error(), "has no file") {
+		t.Fatalf("expected unknown-file error, got %v", err)
+	}
+	assertNoModelArtifacts(t, dir)
+}
+
+func TestPullFailsClosedOnMalformedUpstreamDigest(t *testing.T) {
+	stubHF(t, lfsPathsInfo("m.gguf", "not-a-digest"), "GGUFDATA")
+
+	dir := t.TempDir()
+	_, err := Pull(context.Background(), PullOptions{StateDir: dir, ModelRef: "org/repo/m.gguf"})
+	if err == nil || !strings.Contains(err.Error(), "malformed LFS digest") {
+		t.Fatalf("expected malformed-digest error, got %v", err)
+	}
+	assertNoModelArtifacts(t, dir)
+}
+
+// assertNoModelArtifacts checks that a failed pull left no blob, no partial
+// download, and no index record behind.
+func assertNoModelArtifacts(t *testing.T, dir string) {
+	t.Helper()
+	list, err := List(dir)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("failed pull recorded models: %+v", list)
+	}
+	blobs, err := os.ReadDir(filepath.Join(dir, "models", "blobs"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("ReadDir blobs: %v", err)
+	}
+	for _, entry := range blobs {
+		t.Fatalf("failed pull left blob %q behind", entry.Name())
 	}
 }
 

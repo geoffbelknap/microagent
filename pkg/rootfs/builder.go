@@ -715,7 +715,7 @@ func applyTarEntry(root *os.Root, header *tar.Header, reader io.Reader) error {
 			if !canFallbackToSymlinkMarker(err) {
 				return err
 			}
-			if err := writeSymlinkMarker(filepath.Join(root.Name(), filepath.FromSlash(name)), linkTarget); err != nil {
+			if err := writeSymlinkMarkerInRoot(root, name, linkTarget); err != nil {
 				return err
 			}
 			return recordStageMode(root, name, 0o777)
@@ -751,6 +751,13 @@ func safeGuestRel(guestPath string, allowRoot bool) (string, error) {
 	if strings.ContainsRune(guestPath, 0) {
 		return "", fmt.Errorf("unsafe OCI layer path %q", guestPath)
 	}
+	// Layer paths are slash-separated; a backslash would be cleaned as a plain
+	// name character here but acts as a separator once the path reaches
+	// Windows filesystem APIs, so it could smuggle ".." components past this
+	// validation. Reject it outright.
+	if strings.ContainsRune(guestPath, '\\') {
+		return "", fmt.Errorf("unsafe OCI layer path %q", guestPath)
+	}
 	if path.IsAbs(guestPath) {
 		return "", fmt.Errorf("unsafe OCI layer path %q", guestPath)
 	}
@@ -769,6 +776,12 @@ func safeGuestRel(guestPath string, allowRoot bool) (string, error) {
 
 func safeSymlinkTarget(linkName, linkTarget string) (string, error) {
 	if linkTarget == "" || strings.ContainsRune(linkTarget, 0) {
+		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
+	}
+	// Same reasoning as safeGuestRel: the traversal checks below treat the
+	// target as slash-separated, so backslash separators would evade them on
+	// Windows hosts.
+	if strings.ContainsRune(linkTarget, '\\') {
 		return "", fmt.Errorf("unsafe OCI symlink target %q", linkTarget)
 	}
 	if path.IsAbs(linkTarget) {

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -123,10 +125,13 @@ type PullOptions struct {
 	Token    string
 }
 
-var httpGet = func(ctx context.Context, url, token string) (io.ReadCloser, int64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+var httpDo = func(ctx context.Context, method, url, contentType string, body io.Reader, token string) (io.ReadCloser, int64, error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, 0, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -137,16 +142,71 @@ var httpGet = func(ctx context.Context, url, token string) (io.ReadCloser, int64
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return nil, 0, fmt.Errorf("download %s: unexpected status %s", url, resp.Status)
+		return nil, 0, fmt.Errorf("%s %s: unexpected status %s", method, url, resp.Status)
 	}
 	return resp.Body, resp.ContentLength, nil
 }
 
+// hfPathInfo is the subset of the Hugging Face paths-info API response needed
+// to verify a download. For LFS-tracked files (all real GGUF weights), LFS.OID
+// is the upstream sha256 of the file content.
+type hfPathInfo struct {
+	Path string `json:"path"`
+	LFS  *struct {
+		OID  string `json:"oid"`
+		Size int64  `json:"size"`
+	} `json:"lfs"`
+}
+
+// fetchExpectedDigest returns the upstream sha256 (hex) that Hugging Face
+// records for the file. Pulls fail closed: any error here, including the file
+// not being LFS-tracked, aborts the pull rather than accepting an unverified
+// download.
+func fetchExpectedDigest(ctx context.Context, ref hfRef, token string) (string, error) {
+	payload, err := json.Marshal(map[string][]string{"paths": {ref.File}})
+	if err != nil {
+		return "", err
+	}
+	body, _, err := httpDo(ctx, http.MethodPost, ref.pathsInfoURL(), "application/json", bytes.NewReader(payload), token)
+	if err != nil {
+		return "", err
+	}
+	defer body.Close()
+	data, err := io.ReadAll(io.LimitReader(body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	var infos []hfPathInfo
+	if err := json.Unmarshal(data, &infos); err != nil {
+		return "", fmt.Errorf("parse paths-info response: %w", err)
+	}
+	for _, info := range infos {
+		if info.Path != ref.File {
+			continue
+		}
+		if info.LFS == nil || info.LFS.OID == "" {
+			return "", fmt.Errorf("hugging face reports no LFS sha256 for %s", ref.File)
+		}
+		digest := strings.ToLower(strings.TrimPrefix(info.LFS.OID, "sha256:"))
+		if len(digest) != sha256.Size*2 {
+			return "", fmt.Errorf("hugging face reports malformed LFS digest %q for %s", info.LFS.OID, ref.File)
+		}
+		for _, r := range digest {
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+				return "", fmt.Errorf("hugging face reports malformed LFS digest %q for %s", info.LFS.OID, ref.File)
+			}
+		}
+		return digest, nil
+	}
+	return "", fmt.Errorf("hugging face has no file %s in %s/%s at revision %s", ref.File, ref.Org, ref.Repo, ref.Rev)
+}
+
 func Pull(ctx context.Context, opts PullOptions) (Record, error) {
-	canonical, url, err := resolveHFURL(opts.ModelRef)
+	ref, err := parseHFRef(opts.ModelRef)
 	if err != nil {
 		return Record{}, err
 	}
+	canonical, url := ref.canonical(), ref.downloadURL()
 	if opts.StateDir == "" {
 		opts.StateDir = workspace.StateDir()
 	}
@@ -157,11 +217,15 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		}
 		token = os.Getenv(env)
 	}
+	expected, err := fetchExpectedDigest(ctx, ref, token)
+	if err != nil {
+		return Record{}, fmt.Errorf("resolve upstream digest for %s: %w", canonical, err)
+	}
 	outputPath := ModelPath(opts.StateDir, canonical)
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o700); err != nil {
 		return Record{}, err
 	}
-	body, _, err := httpGet(ctx, url, token)
+	body, _, err := httpDo(ctx, http.MethodGet, url, "", nil, token)
 	if err != nil {
 		return Record{}, err
 	}
@@ -182,6 +246,11 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		os.Remove(tmp)
 		return Record{}, closeErr
 	}
+	got := hex.EncodeToString(hash.Sum(nil))
+	if got != expected {
+		os.Remove(tmp)
+		return Record{}, fmt.Errorf("digest mismatch for %s: hugging face reports sha256:%s, downloaded sha256:%s", canonical, expected, got)
+	}
 	if err := os.Rename(tmp, outputPath); err != nil {
 		os.Remove(tmp)
 		return Record{}, err
@@ -189,7 +258,7 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 	record := Record{
 		ModelRef:    canonical,
 		ResolvedRef: url,
-		Digest:      "sha256:" + hex.EncodeToString(hash.Sum(nil)),
+		Digest:      "sha256:" + got,
 		OutputPath:  outputPath,
 		SizeBytes:   size,
 		LastUsedAt:  time.Now().UTC().Format(time.RFC3339),
@@ -207,20 +276,49 @@ func Resolve(ref string) (canonicalRef, downloadURL string, err error) {
 }
 
 func resolveHFURL(ref string) (canonical, downloadURL string, err error) {
+	parsed, err := parseHFRef(ref)
+	if err != nil {
+		return "", "", err
+	}
+	return parsed.canonical(), parsed.downloadURL(), nil
+}
+
+// hfRef is a parsed HuggingFace model file reference.
+type hfRef struct {
+	Org  string
+	Repo string
+	Rev  string
+	File string
+}
+
+func (r hfRef) canonical() string {
+	return fmt.Sprintf("hf.co/%s/%s@%s/%s", r.Org, r.Repo, r.Rev, r.File)
+}
+
+func (r hfRef) downloadURL() string {
+	return fmt.Sprintf("https://huggingface.co/%s/%s/resolve/%s/%s", r.Org, r.Repo, r.Rev, r.File)
+}
+
+func (r hfRef) pathsInfoURL() string {
+	return fmt.Sprintf("https://huggingface.co/api/models/%s/%s/paths-info/%s",
+		url.PathEscape(r.Org), url.PathEscape(r.Repo), url.PathEscape(r.Rev))
+}
+
+func parseHFRef(ref string) (hfRef, error) {
 	raw := strings.TrimSpace(ref)
 	if raw == "" {
-		return "", "", fmt.Errorf("model reference is required")
+		return hfRef{}, fmt.Errorf("model reference is required")
 	}
 	for _, p := range []string{"https://", "http://", "hf.co/", "huggingface.co/"} {
 		raw = strings.TrimPrefix(raw, p)
 	}
 	org, rest, ok := strings.Cut(raw, "/")
 	if !ok {
-		return "", "", fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
+		return hfRef{}, fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
 	}
 	repo, tail, ok := strings.Cut(rest, "/")
 	if !ok {
-		return "", "", fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
+		return hfRef{}, fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
 	}
 	rev := "main"
 	if r, after, hasRev := strings.Cut(repo, "@"); hasRev {
@@ -233,14 +331,12 @@ func resolveHFURL(ref string) (canonical, downloadURL string, err error) {
 		}
 	}
 	if !strings.HasSuffix(tail, ".gguf") {
-		return "", "", fmt.Errorf("model reference %q must point to a .gguf file", ref)
+		return hfRef{}, fmt.Errorf("model reference %q must point to a .gguf file", ref)
 	}
 	if org == "" || repo == "" {
-		return "", "", fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
+		return hfRef{}, fmt.Errorf("model reference %q must be <org>/<repo>/<file.gguf>", ref)
 	}
-	canonical = fmt.Sprintf("hf.co/%s/%s@%s/%s", org, repo, rev, tail)
-	downloadURL = fmt.Sprintf("https://huggingface.co/%s/%s/resolve/%s/%s", org, repo, rev, tail)
-	return canonical, downloadURL, nil
+	return hfRef{Org: org, Repo: repo, Rev: rev, File: tail}, nil
 }
 
 type PruneResult struct {
