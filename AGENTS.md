@@ -101,6 +101,8 @@ This repository owns the VM pieces:
   branch and update it automatically when possible.
 - After pushing changes to an existing PR branch, update the PR without waiting
   for another prompt.
+- Enable auto-merge on PRs by default when the repository supports it and the
+  user has not asked to leave the PR unmerged.
 
 ## Project boundary
 
