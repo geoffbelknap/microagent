@@ -3,30 +3,37 @@ name: Live Windows Hyper-V
 on:
   workflow_dispatch:
     inputs:
-      kernel-path:
-        description: Windows path to the Hyper-V Linux kernel Image
-        required: true
-        default: C:\Users\runneradmin\.microagent\kernels\windows-hyperv\amd64\Image
       image:
         description: OCI image used by smoke tests
         required: false
         default: docker.io/library/busybox:1.36
+  schedule:
+    # Nightly smoke against main (06:47 UTC), offset from live-linux-parity.
+    - cron: "47 6 * * *"
+  push:
+    branches:
+      - probe-windows-hyperv
+    # Always gate release candidates and releases.
+    tags:
+      - "v*"
 
 permissions:
   contents: read
 
+concurrency:
+  group: live-windows-hyperv-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   windows-hyperv-parity:
     name: Windows Hyper-V parity
-    runs-on:
-      - self-hosted
-      - windows
-      - x64
-      - hyperv
+    # GitHub-hosted Windows runners ship with the Hyper-V role active and the
+    # HCS services (vmms/vmcompute) running.
+    runs-on: windows-latest
     timeout-minutes: 45
     env:
-      MICROAGENT_WINDOWS_HYPERV_KERNEL: ${{ inputs.kernel-path }}
-      MICROAGENT_WINDOWS_HYPERV_IMAGE: ${{ inputs.image }}
+      MICROAGENT_WINDOWS_HYPERV_KERNEL: ${{ github.workspace }}\.build\kernel\Image
+      MICROAGENT_WINDOWS_HYPERV_IMAGE: ${{ inputs.image || 'docker.io/library/busybox:1.36' }}
       MICROAGENT_WINDOWS_HYPERV_GUESTINIT: ${{ github.workspace }}\.build\libexec\microagent-guestinit-amd64
       MICROAGENT_WINDOWS_HYPERV_STATE_DIR: ${{ runner.temp }}\microagent-windows-hyperv
     steps:
@@ -44,11 +51,16 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force .build\bin | Out-Null
           New-Item -ItemType Directory -Force .build\libexec | Out-Null
+          New-Item -ItemType Directory -Force .build\kernel | Out-Null
           go build -o .build\bin\microagent.exe ./cmd/microagent
           $env:GOOS = "linux"
           $env:GOARCH = "amd64"
           $env:CGO_ENABLED = "0"
           go build -o $env:MICROAGENT_WINDOWS_HYPERV_GUESTINIT ./cmd/microagent-guestinit
+
+      - name: Install guest kernel
+        shell: pwsh
+        run: .build\bin\microagent.exe kernel install --out $env:MICROAGENT_WINDOWS_HYPERV_KERNEL
 
       - name: Host doctor
         shell: pwsh
