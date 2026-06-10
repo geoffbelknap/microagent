@@ -3,14 +3,15 @@ package diagnostics
 import "github.com/geoffbelknap/microagent/pkg/vmkit"
 
 // DeriveNetworkReadiness fills the per-mode readiness fields on host from the
-// gathered facts. isolated always works; user works with passt; nat/bridged/named
-// need IPv4 forwarding and the supervisor holding CAP_NET_ADMIN.
+// gathered facts. isolated always works; user needs passt plus working
+// unprivileged user namespaces; nat/bridged/named need IPv4 forwarding and the
+// supervisor holding CAP_NET_ADMIN.
 func DeriveNetworkReadiness(host *vmkit.HostSupport) {
 	if host == nil {
 		return
 	}
 	host.IsolatedNetworkReady = true
-	host.UserNetworkReady = host.UserNetworkingAvailable
+	host.UserNetworkReady = host.UserNetworkingAvailable && host.UserNamespacesAvailable
 	host.PrivilegedNetworkReady = host.IPForwardEnabled && host.SupervisorNetAdminCapable
 }
 

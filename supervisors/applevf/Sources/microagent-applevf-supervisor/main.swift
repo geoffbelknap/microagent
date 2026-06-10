@@ -52,6 +52,8 @@ struct Config: Codable {
     var onDemandSecrets: [SecretRef]?
     var secretsAudit: Bool?
     var secretsControlPort: UInt32?
+    var modelGuestPort: UInt16?
+    var modelVsockPort: UInt32?
     var serialInput: Bool?
 }
 
@@ -2092,7 +2094,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
         }
         vmConfig.serialPorts = [serial]
     }
-    if !(config.vsockListeners ?? []).isEmpty || config.mediation?.enabled == true || !(config.network?.portForwards ?? []).isEmpty || config.shellPort != nil || config.execPort != nil || config.secretsPort != nil {
+    if !(config.vsockListeners ?? []).isEmpty || config.mediation?.enabled == true || !(config.network?.portForwards ?? []).isEmpty || config.shellPort != nil || config.execPort != nil || config.secretsPort != nil || config.modelVsockPort != nil {
         vmConfig.socketDevices = [VZVirtioSocketDeviceConfiguration()]
     }
     return vmConfig
@@ -2114,6 +2116,10 @@ func linuxKernelCommandLine(for config: Config) -> String {
     }
     if let secretsControlPort = config.secretsControlPort, secretsControlPort > 0 {
         args.append("microagent_secrets_ctl_port=\(secretsControlPort)")
+    }
+    if let modelGuestPort = config.modelGuestPort, modelGuestPort > 0,
+       let modelVsockPort = config.modelVsockPort, modelVsockPort > 0 {
+        args.append("microagent_model_fwd=\(modelGuestPort):\(modelVsockPort)")
     }
     switch normalizedNetworkMode(config.network) {
     case "user", "nat", "bridged":

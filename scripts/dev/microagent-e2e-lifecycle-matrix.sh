@@ -217,6 +217,8 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
   --timeout 10 >"$STATE_DIR/connect-running.txt"
 "$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
 "$CLI" logs "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-running.txt"
+"$CLI" --json events "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/events-running.json"
+"$CLI" --json stats "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/stats-running.json"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-halted.json"
 
@@ -294,6 +296,8 @@ create = read_json("create-spec.json")
 prepared = read_json("status-prepared.json")
 running = read_json("status-running.json")
 halted = read_json("status-halted.json")
+events_running = read_json("events-running.json")
+stats_running = read_json("stats-running.json")
 artifact = read_json("artifact-running.json")
 copy_to = read_json("cp-to-workspace.json")
 copy_from = read_json("cp-from-workspace.json")
@@ -345,6 +349,12 @@ if "INTERACTIVE_OK" not in read_text("connect-interactive.txt"):
     raise SystemExit(read_text("connect-interactive.txt"))
 if "microagent-init: starting" not in read_text("logs-running.txt"):
     raise SystemExit("logs missing guest init output")
+if events_running.get("workspace") != workspace or not events_running.get("events"):
+    raise SystemExit(events_running)
+if not any(event.get("state") == "running" for event in events_running.get("events", [])):
+    raise SystemExit(events_running)
+if stats_running.get("pid", 0) <= 0:
+    raise SystemExit(stats_running)
 if halted.get("event", {}).get("state") != "halted":
     raise SystemExit(halted)
 if artifact.get("artifact") != "report" or artifact.get("disk") != "rootfs":

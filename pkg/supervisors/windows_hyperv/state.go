@@ -99,7 +99,7 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 			return failRunWithCleanup(ctx, runtimeReq, adapter, handle, false, fmt.Sprintf("listener setup failed: %s", err), err)
 		}
 		if listeners != nil {
-			defer listeners.Close()
+			defer func() { _ = listeners.Close() }()
 		}
 	} else if hasDetachedRuntimeServices(req) {
 		if _, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateStarting, "starting windows-hyperv runtime listener helper", "", handle.ID, handle.RuntimeID); err != nil {
@@ -400,11 +400,11 @@ func writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req vmkit.Request
 		return vmkit.Event{}, fmt.Errorf("windows-hyperv request is missing identity or config")
 	}
 	dir := runtimeDir(req)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return vmkit.Event{}, err
 	}
 	serialPath := serialLogPath(req)
-	serialFile, err := os.OpenFile(serialPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	serialFile, err := os.OpenFile(serialPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return vmkit.Event{}, fmt.Errorf("create serial log: %w", err)
 	}
@@ -414,7 +414,7 @@ func writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req vmkit.Request
 	serialInput := ""
 	if req.Config.SerialInput {
 		serialInput = serialInputPath(req)
-		inputFile, err := os.OpenFile(serialInput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		inputFile, err := os.OpenFile(serialInput, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			return vmkit.Event{}, fmt.Errorf("create serial input marker: %w", err)
 		}
@@ -526,10 +526,10 @@ func startRuntimeListenerProcess(req vmkit.Request) (int, error) {
 		return 0, err
 	}
 	logPath := filepath.Join(runtimeDir(req), "hvsock-listener.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, err
 	}
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, err
 	}
@@ -570,7 +570,7 @@ func RunRuntimeListeners(ctx context.Context, opts Options) error {
 		return err
 	}
 	if listeners != nil {
-		defer listeners.Close()
+		defer func() { _ = listeners.Close() }()
 	}
 	waitCh := make(chan error, 1)
 	go func() {
@@ -669,7 +669,7 @@ func writeJSONFile(path string, value any) error {
 	}
 	data = append(data, '\n')
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -681,11 +681,13 @@ func appendJSONLine(path string, value any) error {
 		return err
 	}
 	data = append(data, '\n')
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(data)
-	return err
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }

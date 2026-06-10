@@ -4,7 +4,7 @@ description: Install microagent via Homebrew or build from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-10_
 
 ## Homebrew
 
@@ -19,14 +19,9 @@ Virtualization.framework supervisor. Go programs can import the same packages
 that back the CLI; start with the [library overview](/library/) if you are
 embedding microagent rather than using it from a shell.
 
-Release candidates and test builds are published separately:
-
-```bash
-brew install geoffbelknap/tap/microagent-rc
-```
-
-Use the stable formula by default. Use `microagent-rc` only when validating a
-candidate release or reproducing a pre-release issue.
+Only stable releases ship to Homebrew. Release candidates are validated with
+local builds (see "From source" below) and the tag-gated live CI suites, not
+a published formula.
 
 ## From source
 

@@ -11,8 +11,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 #     vm      - needs a microVM backend (skip-with-reason when absent)
 #     netpriv - needs privileged Linux networking (root/CAP_NET_ADMIN + ip_forward)
 SCENARIOS=(
+  "coverage-matrix:scripts/dev/microagent-e2e-coverage-matrix.sh:all:none"
   "contract:scripts/dev/runtime-contract-smoke.sh:all:none"
   "help-usage:scripts/dev/microagent-e2e-help-usage.sh:all:none"
+  "mcp-stdio:scripts/dev/microagent-e2e-mcp.sh:all:none"
   "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all:none"
   "text-output:scripts/dev/microagent-e2e-text-output.sh:all:none"
   "init:scripts/dev/microagent-e2e-init.sh:all:none"
@@ -27,6 +29,7 @@ SCENARIOS=(
   "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm"
   "health:scripts/dev/microagent-e2e-health.sh:all:vm"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
+  "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
   "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:linux:vm"
   "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm"
@@ -41,6 +44,79 @@ SCENARIOS=(
   "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin:vm"
 )
 
+# Each entry: scenario|coverage|backends|feature summary.
+#   coverage = portable | backend-neutral | backend-specific | host-specific
+#   backends = none | host-default | firecracker,apple-vf | firecracker | apple-vf
+SCENARIO_COVERAGE=(
+  "coverage-matrix|portable|none|E2E feature inventory and scenario metadata"
+  "contract|portable|none|runtime contract, synthetic state/result/artifacts"
+  "help-usage|portable|none|help, usage errors, unsupported container-style flags"
+  "mcp-stdio|portable|none|serve mcp, initialize, tools/list, ping, describe"
+  "registry-auth|portable|none|registry credentials and private OCI pull auth"
+  "text-output|portable|none|human output mode for stable public CLI surfaces"
+  "init|portable|none|init scaffold, providers, --force, generated spec validation"
+  "survive-reboot|host-specific|host-default|supervise --install/--uninstall boot units; no real reboot"
+  "public-surface|backend-neutral|firecracker,apple-vf|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifacts, perf, prune"
+  "lifecycle-deep|backend-neutral|firecracker,apple-vf|create/start/status/inspect/ps/connect/logs/events/stats/halt/quarantine/clone/cp/artifacts/images/prune/delete"
+  "networking-deep|backend-neutral|firecracker,apple-vf|network modes, publish, apply, quarantine, cached image/network paths"
+  "transport-deep|backend-neutral|firecracker,apple-vf|mediation and vsock transport contract"
+  "supervision-deep|backend-neutral|firecracker,apple-vf|restart supervision, signal, failure, cleanup"
+  "volumes|backend-neutral|firecracker,apple-vf|volume create/ls/inspect/rm, attach persistence, single attach"
+  "commit-images|backend-neutral|firecracker,apple-vf|commit stopped rootfs into local OCI image layout"
+  "secrets|backend-neutral|firecracker,apple-vf|secret check, materialized secrets, on-demand secrets, audit records"
+  "health|backend-neutral|firecracker,apple-vf|health.exec validation and supervise restart on unhealthy probe"
+  "exec-stream|backend-neutral|firecracker,apple-vf|structured exec streaming, non-zero exit propagation, buffered parity"
+  "model-serving|backend-neutral|firecracker,apple-vf|model pull/list/stop and run --model over backend vsock bridge"
+  "firecracker-lifecycle-host|backend-specific|firecracker|Firecracker lifecycle host mechanics"
+  "firecracker-networking-host|backend-specific|firecracker|Firecracker TAP, bridge, NAT, helper mechanics"
+  "firecracker-transport-host|backend-specific|firecracker|Firecracker /dev/vhost-vsock and helper mechanics"
+  "firecracker-supervision-host|backend-specific|firecracker|Firecracker helper PID cleanup mechanics"
+  "named-network|host-specific|firecracker|Linux privileged named-network bridge and DNS"
+  "applevf-boot|backend-specific|apple-vf|Apple VF boot smoke"
+  "applevf-direct-console|backend-specific|apple-vf|Apple VF direct supervisor console input"
+  "applevf-substrate|backend-specific|apple-vf|Apple VF lifecycle substrate smoke"
+  "applevf-workspace-connect|backend-specific|apple-vf|Apple VF connect/logs/ps smoke"
+  "applevf-network-mode|backend-specific|apple-vf|Apple VF user/nat/isolated/bridged network modes"
+  "applevf-publish|backend-specific|apple-vf|Apple VF TCP publish forwarding"
+  "applevf-vsock-diagnostic|backend-specific|apple-vf|Apple VF mediation and virtio-vsock diagnostics"
+)
+
+# Each entry: feature|classification|required backends|covering scenarios|notes.
+# The matrix is intentionally user-facing: it maps CLI/workspace surfaces to
+# practical E2E coverage and makes unsupported/backend-specific areas explicit.
+E2E_MATRIX=(
+  "help/version|portable|none|help-usage,text-output|No VM required"
+  "init|portable|none|init|Scaffold and generated spec validation"
+  "contract|portable|none|contract,public-surface|Runtime contract and synthetic compatibility checks"
+  "profiles|portable|none|public-surface,lifecycle-deep|Profile list and manifest use"
+  "host/doctor|portable|host-default|public-surface,lifecycle-deep|Host capability and diagnostics for selected backend"
+  "kernel install/verify|portable|host-default|public-surface,health,volumes|Backend-specific artifacts through a common CLI"
+  "rootfs build|portable|host-default|public-surface,lifecycle-deep|OCI rootfs build plus validation failures"
+  "run/create/start|backend-neutral|firecracker,apple-vf|public-surface,lifecycle-deep,health,volumes,model-serving|Core workspace boot paths"
+  "status/inspect/ps|backend-neutral|firecracker,apple-vf|public-surface,lifecycle-deep,applevf-workspace-connect|State/readiness/list surfaces"
+  "result/logs/artifacts|backend-neutral|firecracker,apple-vf|contract,public-surface,lifecycle-deep|Structured result, serial logs, declared artifacts"
+  "events/stats|backend-neutral|firecracker,apple-vf|lifecycle-deep|Lifecycle event history and resource sampling"
+  "connect|backend-neutral|firecracker,apple-vf|lifecycle-deep,applevf-workspace-connect|Interactive and send-mode console paths"
+  "exec|backend-neutral|firecracker,apple-vf|health,exec-stream,secrets,volumes|Structured exec and streaming exec"
+  "halt/quarantine/stop/kill/delete/rm|backend-neutral|firecracker,apple-vf|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup"
+  "clone/cp|backend-neutral|firecracker,apple-vf|lifecycle-deep|Stopped workspace copy and clone semantics"
+  "apply|backend-neutral|firecracker,apple-vf|networking-deep|Supported spec changes"
+  "network inspect/modes/publish|backend-neutral|firecracker,apple-vf|networking-deep,applevf-network-mode,applevf-publish|Portable modes plus backend publish mechanics"
+  "network create/ls/rm named|host-specific|firecracker|named-network|Privileged Linux named bridge; not Apple VF portable"
+  "volume create/ls/inspect/rm|backend-neutral|firecracker,apple-vf|volumes|Managed ext4 volume lifecycle and attach semantics"
+  "commit/images/prune|backend-neutral|firecracker,apple-vf|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/rm/prune, commit"
+  "registry auth|portable|none|registry-auth|Private registry credential discovery"
+  "secrets|backend-neutral|firecracker,apple-vf|secrets|Secret reference validation, materialized/on-demand delivery, audit"
+  "health|backend-neutral|firecracker,apple-vf|health|Exec probes and supervise restart"
+  "supervise|backend-neutral|firecracker,apple-vf|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
+  "snapshot/pause/resume|backend-specific|firecracker|firecracker-lifecycle-host|Memory snapshot and vCPU pause are Firecracker-only"
+  "model|backend-neutral|firecracker,apple-vf|model-serving|Model store and run --model vsock pairing"
+  "perf|backend-neutral|firecracker,apple-vf|public-surface|Boot/steady/footprint surfaces where host supports sampling"
+  "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
+  "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
+  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix|Contract boundary exists; practical E2E lane is not implemented"
+)
+
 usage() {
   cat <<'EOF'
 microagent-e2e.sh
@@ -50,11 +126,15 @@ Runs the full microagent end-to-end suite for the current host backend.
 Usage:
   scripts/dev/microagent-e2e.sh [--keep] [--image-cache-policy auto|refresh|require] [scenario...]
   scripts/dev/microagent-e2e.sh --list
+  scripts/dev/microagent-e2e.sh --matrix
 
 Scenarios:
+  coverage-matrix  Verifies the E2E feature matrix covers user-facing CLI and
+                    workspace surfaces and references known scenarios.
   contract          Runtime contract JSON and synthetic state/result/artifact
                     compatibility checks
   help-usage        CLI help output and invalid invocation usage errors
+  mcp-stdio         MCP stdio initialize/tools/list/tool-call smoke
   registry-auth     Standard registry credential discovery against a
                     local private OCI registry
   text-output       Human/text output mode for stable public CLI surfaces
@@ -84,6 +164,8 @@ Scenarios:
                      rejected) and probe success in the guest.
   exec-stream        Streaming structured exec (exec --stream) line delivery and
                      exit-status propagation.
+  model-serving      Local host model server paired into a workspace over the
+                     backend vsock bridge (Firecracker on Linux, Apple VF on macOS).
   survive-reboot     supervise --install/--uninstall boot-unit generation
                      (systemd user unit / launchd plist); no real reboot.
   named-network      Two workspaces on a managed named-network bridge: stable
@@ -144,6 +226,31 @@ Linux nat/bridged setup:
 Apple VF setup:
   scripts/dev/applevf-supervisor-build.sh
 EOF
+}
+
+scenario_meta() {
+  wanted="$(canonical_scenario "$1")"
+  for entry in "${SCENARIO_COVERAGE[@]}"; do
+    name="${entry%%|*}"
+    if [ "$name" = "$wanted" ]; then
+      rest="${entry#*|}"
+      coverage="${rest%%|*}"
+      rest="${rest#*|}"
+      backends="${rest%%|*}"
+      features="${rest#*|}"
+      case "$2" in
+        coverage) printf '%s\n' "$coverage" ;;
+        backends) printf '%s\n' "$backends" ;;
+        features) printf '%s\n' "$features" ;;
+      esac
+      return 0
+    fi
+  done
+  case "$2" in
+    coverage) printf '%s\n' unknown ;;
+    backends) printf '%s\n' unknown ;;
+    features) printf '%s\n' "missing scenario metadata" ;;
+  esac
 }
 
 # scenario_field <name> <index>: print field 2=script, 3=platform, 4=requirement.
@@ -211,13 +318,62 @@ scenario_supported() {
 }
 
 list_scenarios() {
-  printf '%-28s %-8s %s\n' "SCENARIO" "PLATFORM" "REQUIRES"
+  if [ "${MICROAGENT_E2E_LIST_TSV:-0}" = "1" ]; then
+    printf 'SCENARIO\tPLATFORM\tREQUIRES\tCOVERAGE\tBACKENDS\tFEATURES\n'
+    for entry in "${SCENARIOS[@]}"; do
+      name="${entry%%:*}"
+      rest="${entry#*:}"; rest="${rest#*:}"
+      platform="${rest%%:*}"
+      req="${rest#*:}"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$name" "$platform" "${req:-vm}" \
+        "$(scenario_meta "$name" coverage)" \
+        "$(scenario_meta "$name" backends)" \
+        "$(scenario_meta "$name" features)"
+    done
+    return 0
+  fi
+  printf '%-28s %-8s %-8s %-16s %-20s %s\n' "SCENARIO" "PLATFORM" "REQUIRES" "COVERAGE" "BACKENDS" "FEATURES"
   for entry in "${SCENARIOS[@]}"; do
     name="${entry%%:*}"
     rest="${entry#*:}"; rest="${rest#*:}"
     platform="${rest%%:*}"
     req="${rest#*:}"
-    printf '%-28s %-8s %s\n' "$name" "$platform" "${req:-vm}"
+    printf '%-28s %-8s %-8s %-16s %-20s %s\n' \
+      "$name" "$platform" "${req:-vm}" \
+      "$(scenario_meta "$name" coverage)" \
+      "$(scenario_meta "$name" backends)" \
+      "$(scenario_meta "$name" features)"
+  done
+}
+
+list_matrix() {
+  if [ "${MICROAGENT_E2E_MATRIX_TSV:-0}" = "1" ]; then
+    printf 'FEATURE\tCLASS\tREQUIRED_BACKENDS\tSCENARIOS\tNOTES\n'
+    for entry in "${E2E_MATRIX[@]}"; do
+      feature="${entry%%|*}"
+      rest="${entry#*|}"
+      class="${rest%%|*}"
+      rest="${rest#*|}"
+      backends="${rest%%|*}"
+      rest="${rest#*|}"
+      scenarios="${rest%%|*}"
+      notes="${rest#*|}"
+      printf '%s\t%s\t%s\t%s\t%s\n' "$feature" "$class" "$backends" "$scenarios" "$notes"
+    done
+    return 0
+  fi
+  printf '%-30s %-18s %-22s %-44s %s\n' "FEATURE" "CLASS" "REQUIRED_BACKENDS" "SCENARIOS" "NOTES"
+  for entry in "${E2E_MATRIX[@]}"; do
+    feature="${entry%%|*}"
+    rest="${entry#*|}"
+    class="${rest%%|*}"
+    rest="${rest#*|}"
+    backends="${rest%%|*}"
+    rest="${rest#*|}"
+    scenarios="${rest%%|*}"
+    notes="${rest#*|}"
+    printf '%-30s %-18s %-22s %-44s %s\n' "$feature" "$class" "$backends" "$scenarios" "$notes"
   done
 }
 
@@ -231,6 +387,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --list)
       list_scenarios
+      exit 0
+      ;;
+    --matrix)
+      list_matrix
       exit 0
       ;;
     --keep)
@@ -280,7 +440,9 @@ if [ -n "${MICROAGENT_E2E_IMAGE_CACHE_POLICY:-}" ]; then
 fi
 
 if [ "$keep" = "1" ]; then
+  export MICROAGENT_KEEP_MICROAGENT_E2E_COVERAGE_MATRIX=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_HELP_USAGE=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_MCP=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_REGISTRY_AUTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_TEXT_OUTPUT=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE=1

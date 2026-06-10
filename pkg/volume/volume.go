@@ -76,7 +76,7 @@ func ReadIndex(stateDir string) (Index, error) {
 
 // WriteIndex persists the registry.
 func WriteIndex(stateDir string, idx Index) error {
-	if err := os.MkdirAll(filepath.Dir(IndexPath(stateDir)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(IndexPath(stateDir)), 0o700); err != nil {
 		return err
 	}
 	sortRecords(idx.Volumes)
@@ -85,7 +85,7 @@ func WriteIndex(stateDir string, idx Index) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(IndexPath(stateDir), data, 0o644)
+	return os.WriteFile(IndexPath(stateDir), data, 0o600)
 }
 
 func sortRecords(records []Record) {
@@ -133,7 +133,7 @@ func Create(ctx context.Context, stateDir, name string, sizeMiB int64, mke2fsPat
 	}
 
 	disk := DiskPath(stateDir, name)
-	if err := os.MkdirAll(filepath.Dir(disk), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(disk), 0o700); err != nil {
 		return Record{}, err
 	}
 	if err := formatExt4(ctx, disk, sizeMiB, mke2fsPath); err != nil {
@@ -288,7 +288,7 @@ func mke2fsFormat(ctx context.Context, path string, sizeMiB int64, mke2fsPath st
 	}
 	defer os.RemoveAll(stage)
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("allocate volume image: %w", err)
 	}

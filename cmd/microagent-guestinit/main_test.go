@@ -317,3 +317,18 @@ func TestApplyKernelConfigOverridesSecretsPort(t *testing.T) {
 		t.Fatal("expected error for non-numeric secrets port")
 	}
 }
+
+func TestApplyKernelConfigModelFwd(t *testing.T) {
+	var cfg config
+	if err := applyKernelConfigOverridesFromCmdline(&cfg, "console=ttyS0 microagent_model_fwd=11434:62100 rw"); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if cfg.ModelGuestPort != 11434 || cfg.ModelVsockPort != 62100 {
+		t.Fatalf("got guest=%d vsock=%d", cfg.ModelGuestPort, cfg.ModelVsockPort)
+	}
+	// Malformed value is rejected.
+	var bad config
+	if err := applyKernelConfigOverridesFromCmdline(&bad, "microagent_model_fwd=notaport"); err == nil {
+		t.Fatal("expected error for malformed model_fwd")
+	}
+}

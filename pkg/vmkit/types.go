@@ -89,6 +89,12 @@ type Config struct {
 	GuestExecPort  uint16 `json:"guestExecPort,omitempty"`
 	SerialInput    bool   `json:"serialInput,omitempty"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	// ModelGuestPort/ModelVsockPort wire a paired host model server to the guest:
+	// the guest forwarder listens on TCP 127.0.0.1:ModelGuestPort and tunnels to
+	// host vsock ModelVsockPort, which the supervisor proxies to the model server.
+	// Both zero means no model is paired.
+	ModelGuestPort uint16 `json:"modelGuestPort,omitempty"`
+	ModelVsockPort uint32 `json:"modelVsockPort,omitempty"`
 }
 
 type Disk struct {

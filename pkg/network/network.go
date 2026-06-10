@@ -70,7 +70,7 @@ func ReadIndex(stateDir string) (Index, error) {
 
 // WriteIndex persists the registry.
 func WriteIndex(stateDir string, idx Index) error {
-	if err := os.MkdirAll(filepath.Dir(IndexPath(stateDir)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(IndexPath(stateDir)), 0o700); err != nil {
 		return err
 	}
 	sortRecords(idx.Networks)
@@ -79,7 +79,7 @@ func WriteIndex(stateDir string, idx Index) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(IndexPath(stateDir), data, 0o644)
+	return os.WriteFile(IndexPath(stateDir), data, 0o600)
 }
 
 func sortRecords(records []Record) {

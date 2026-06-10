@@ -655,10 +655,10 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		return Result{}, err
 	}
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
-	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err
 	}
-	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsName), rootfsPath, 0o644); err != nil {
+	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsName), rootfsPath, 0o600); err != nil {
 		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
 	}
 	if err := WriteManifest(opts); err != nil {
@@ -672,7 +672,7 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 }
 
 func copySnapshotInto(srcDir, dstDir string) error {
-	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+	if err := os.MkdirAll(dstDir, 0o700); err != nil {
 		return err
 	}
 	for _, name := range []string{vmkit.SnapshotVMStateName, vmkit.SnapshotMemoryName, vmkit.SnapshotRootfsName, vmkit.SnapshotManifestName} {
@@ -741,7 +741,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 }
 
 func WorkspaceRootfsFormat(backend string) string {
-	if backend == vmkit.BackendWindowsHyperV {
+	if vmkit.BackendCapabilities(backend).VHDRootfs {
 		return rootfs.FormatVHD
 	}
 	return rootfs.FormatExt4
@@ -854,7 +854,7 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 
 func WriteManifest(opts Options) error {
 	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
-	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
 		return err
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), Manifest{
@@ -1267,7 +1267,7 @@ func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.
 }
 
 func backendOwnsRuntimeState(backend string) bool {
-	return backend == vmkit.BackendFirecracker || backend == vmkit.BackendWindowsHyperV
+	return vmkit.BackendCapabilities(backend).OwnsRuntimeState
 }
 
 func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
@@ -1281,7 +1281,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		}
 		return Dispatch(dispatchCtx, opts, req)
 	}
-	if opts.Backend != vmkit.BackendAppleVF {
+	if !vmkit.BackendCapabilities(opts.Backend).DetachedHostSupervisor {
 		return Dispatch(context.Background(), opts, req)
 	}
 	if err := requireReadableFile(opts.KernelPath, "kernel"); err != nil {
@@ -1295,15 +1295,15 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	if err := os.MkdirAll(filepath.Join(opts.StateDir, opts.Name), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(opts.StateDir, opts.Name), 0o700); err != nil {
 		return vmkit.Response{}, err
 	}
 	supervisorLogPath := filepath.Join(opts.StateDir, opts.Name, "supervisor.log")
-	supervisorLog, err := os.OpenFile(supervisorLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	supervisorLog, err := os.OpenFile(supervisorLogPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	defer supervisorLog.Close()
+	defer func() { _ = supervisorLog.Close() }()
 	cmd := exec.Command(path)
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Stdout = supervisorLog
@@ -1342,12 +1342,10 @@ func requireReadableFile(path, name string) error {
 }
 
 func detachedSupervisorCommand(backend string) string {
-	switch backend {
-	case vmkit.BackendFirecracker, vmkit.BackendWindowsHyperV:
-		return "start"
-	default:
-		return "run"
+	if command := vmkit.BackendCapabilities(backend).DetachedStartCommand; command != "" {
+		return command
 	}
+	return "run"
 }
 
 func WriteProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {
@@ -1355,7 +1353,7 @@ func WriteProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
 	dir := filepath.Join(opts.StateDir, opts.Name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	event := vmkit.Event{
@@ -1557,7 +1555,7 @@ func ShellReadinessSignalWithMode(ctx context.Context, state RuntimeState, probe
 		}
 		return vmkit.ReadinessSignal{}, false
 	}
-	if state.Event.Identity.Backend != vmkit.BackendWindowsHyperV && state.Config.ShellPort != 0 {
+	if vmkit.BackendCapabilities(state.Event.Identity.Backend).ShellReadinessProbe && state.Config.ShellPort != 0 {
 		target, err := ConsoleTarget(state.Event.Identity.RuntimeID, state)
 		if err != nil {
 			return vmkit.ReadinessSignal{Ready: false, Error: err.Error()}, true
@@ -1745,7 +1743,7 @@ func writeJSONFile(path string, value any) error {
 	}
 	data = append(data, '\n')
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
@@ -1763,7 +1761,7 @@ func writeJSONFile(path string, value any) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(0o644); err != nil {
+	if err := tmp.Chmod(0o600); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -1782,7 +1780,7 @@ func FileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
@@ -1795,7 +1793,7 @@ func CopyFile(source, target string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
 	}

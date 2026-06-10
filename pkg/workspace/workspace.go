@@ -37,6 +37,13 @@ const (
 	DefaultTimeout             = 5 * time.Minute
 )
 
+// Model pairing transport defaults. The guest forwarder listens on
+// 127.0.0.1:DefaultModelGuestPort and tunnels to host vsock DefaultModelVsockPort.
+const (
+	DefaultModelGuestPort uint16 = 11434
+	DefaultModelVsockPort uint32 = 62100
+)
+
 // secretsListenerTarget marks the vsock listener that serves resolved secrets.
 // Must equal the firecracker supervisor's sentinel.
 const secretsListenerTarget = "secrets://serve"
@@ -80,6 +87,10 @@ type Options struct {
 	Disks           []Disk
 	Outputs         []Output
 	VsockListeners  []vmkit.VsockListener
+	// ModelTarget, when non-empty, is the host TCP address (host:port) of a paired
+	// model server. It is realized as a guest→host vsock channel and a guest
+	// forwarder. Orchestration (starting the runner) happens in the CLI layer.
+	ModelTarget     string
 	ProfileExplicit bool
 	KernelExplicit  bool
 	// FromSnapshot, when set, restores the workspace in place from this snapshot
@@ -648,7 +659,7 @@ func MountsForBackend(backend string, disks []Disk) []rootfs.Mount {
 }
 
 func BlockDeviceForBackend(backend string, index int) string {
-	if backend == vmkit.BackendWindowsHyperV {
+	if vmkit.BackendCapabilities(backend).SCSIBlockDevices {
 		return SCSIBlockDevice(index)
 	}
 	return VirtioBlockDevice(index)
@@ -806,6 +817,13 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 	if opts.Mediation != nil && opts.Mediation.Enabled {
 		listeners = append(listeners, vmkit.VsockListener{Port: opts.Mediation.Port, Target: opts.Mediation.Target})
 	}
+	var modelGuestPort uint16
+	var modelVsockPort uint32
+	if strings.TrimSpace(opts.ModelTarget) != "" {
+		modelGuestPort = DefaultModelGuestPort
+		modelVsockPort = DefaultModelVsockPort
+		listeners = append(listeners, vmkit.VsockListener{Port: DefaultModelVsockPort, Target: opts.ModelTarget})
+	}
 	secretRefs := secretRefsFromOptions(opts)
 	secretsPort := SecretsPort(opts)
 	if secretsPort != 0 {
@@ -850,6 +868,8 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			GuestExecPort:      opts.GuestExecPort,
 			SerialInput:        opts.SerialInput,
 			TimeoutSeconds:     int(opts.Timeout.Seconds()),
+			ModelGuestPort:     modelGuestPort,
+			ModelVsockPort:     modelVsockPort,
 		},
 	}
 }
@@ -930,18 +950,18 @@ func FirecrackerSupervisorPath(opts Options) string {
 func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
 	supervisor, err := Supervisor(opts)
 	if err != nil {
-		err = contextualDispatchError(opts, req, err.Error())
+		err = contextualDispatchError(opts, req, err)
 		return vmkit.Response{Backend: opts.Backend, Error: err.Error()}, err
 	}
 	resp, err := supervisor.Do(ctx, req)
 	if err == nil {
 		return resp, nil
 	}
-	detail := strings.TrimSpace(resp.Error)
-	if detail == "" {
-		detail = err.Error()
+	cause := err
+	if detail := strings.TrimSpace(resp.Error); detail != "" && detail != err.Error() {
+		cause = supervisorError{detail: detail, cause: err}
 	}
-	err = contextualDispatchError(opts, req, detail)
+	err = contextualDispatchError(opts, req, cause)
 	if resp.Backend == "" {
 		resp.Backend = opts.Backend
 	}
@@ -949,7 +969,17 @@ func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Respo
 	return resp, err
 }
 
-func contextualDispatchError(opts Options, req vmkit.Request, detail string) error {
+// supervisorError reports the supervisor's structured error detail as the
+// message while keeping the dispatch error reachable via errors.Is/As.
+type supervisorError struct {
+	detail string
+	cause  error
+}
+
+func (e supervisorError) Error() string { return e.detail }
+func (e supervisorError) Unwrap() error { return e.cause }
+
+func contextualDispatchError(opts Options, req vmkit.Request, cause error) error {
 	command := strings.TrimSpace(req.Command)
 	if command == "" {
 		command = "request"
@@ -987,7 +1017,7 @@ func contextualDispatchError(opts Options, req vmkit.Request, detail string) err
 	if supervisorPath != "" {
 		fields = append(fields, fmt.Sprintf("supervisor=%s", supervisorPath))
 	}
-	return fmt.Errorf("%s workspace %q failed (%s): %s", command, name, strings.Join(fields, " "), detail)
+	return fmt.Errorf("%s workspace %q failed (%s): %w", command, name, strings.Join(fields, " "), cause)
 }
 
 func ResultPath(stateDir, name string) string {
@@ -1070,7 +1100,10 @@ func ResetGuestConfigCommand(command []string, mode string, env map[string]strin
 		Hostname:     strings.TrimSpace(hostname),
 	})
 	if err != nil {
-		panic(err)
+		// Every field above is a plain value type, so Marshal cannot fail
+		// unless a future edit introduces an unmarshalable type. Fail loudly
+		// rather than emit a broken guest config.
+		panic(fmt.Sprintf("workspace: marshal guest run config: %v", err))
 	}
 	return "printf '%s\\n' " + ShellSingleQuote(string(data)) + " > /etc/microagent/run.json"
 }

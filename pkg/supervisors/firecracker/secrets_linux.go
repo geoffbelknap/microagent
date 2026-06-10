@@ -114,7 +114,7 @@ func (s *secretsServer) serve(listener net.Listener) {
 			return
 		}
 		go func(c net.Conn) {
-			defer c.Close()
+			defer func() { _ = c.Close() }()
 			s.handle(c)
 		}(conn)
 	}
@@ -189,7 +189,7 @@ func sendGuestControl(opts Options, ctlPort uint32, op string) error {
 	if err != nil {
 		return fmt.Errorf("connect guest control port %d: %w", ctlPort, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return secretxfer.SendControl(conn, reader, op)
 }
 

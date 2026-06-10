@@ -19,13 +19,6 @@ func contextWithOutputMode(ctx context.Context, mode outputMode) context.Context
 	return context.WithValue(ctx, outputModeContextKey{}, mode)
 }
 
-func outputModeFromContext(ctx context.Context) outputMode {
-	if mode, ok := ctx.Value(outputModeContextKey{}).(outputMode); ok && mode != "" {
-		return mode
-	}
-	return currentOutputMode()
-}
-
 func currentOutputMode() outputMode {
 	if globalOutputMode != "" {
 		return globalOutputMode

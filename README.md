@@ -12,7 +12,9 @@ The project is a Go library first. The `microagent` CLI is a thin shell over
 the exported packages, so anything the CLI can do, your Go program can do
 directly with typed options and typed results.
 
-Current stable release: `v0.1.45`.
+The current stable release is listed on the
+[releases page](https://github.com/geoffbelknap/microagent/releases); see
+[`CHANGELOG.md`](CHANGELOG.md) for what is in it.
 
 ## Install
 
@@ -23,13 +25,6 @@ brew install geoffbelknap/tap/microagent
 This installs `microagent` and `microagent-supervisor`, a symlink to the
 supervisor for your host. To build from source, see
 [`docs/getting-started/install.md`](docs/getting-started/install.md).
-
-Release candidates are published as a separate Homebrew formula so the stable
-formula remains the default:
-
-```bash
-brew install geoffbelknap/tap/microagent-rc
-```
 
 ## 30-second tour
 
@@ -80,6 +75,7 @@ Other useful surfaces:
 - `microagent exec <name> -- <argv...>` runs a structured command in a running workspace.
 - `microagent serve mcp` exposes the machine-readable MCP stdio endpoint.
 - `microagent rm <name>` is an alias for `delete`.
+- `microagent model pull/ls/rm/prune` downloads and manages local HuggingFace GGUF model files.
 - `microagent images pull/list/tag/rm/prune` manages reusable local rootfs baselines.
 - `microagent cp` and `microagent artifacts get` move files without entering a running VM.
 - `microagent perf` measures boot and runtime footprint.

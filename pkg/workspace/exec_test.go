@@ -72,7 +72,7 @@ func TestExecWithMetadataRetriesConnectionRefused(t *testing.T) {
 	execRetryJitter = func() time.Duration { return 0 }
 
 	opts := writeExecRuntimeState(t, vmkit.BackendFirecracker, vmkit.StateRunning, unusedTCPPort(t))
-	_, err, meta := ExecWithMetadata(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
+	_, meta, err := ExecWithMetadata(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
 	if err == nil {
 		t.Fatal("ExecWithMetadata err = nil, want retry exhaustion")
 	}

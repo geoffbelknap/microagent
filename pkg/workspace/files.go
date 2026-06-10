@@ -196,7 +196,7 @@ func Clone(stateDir, source, target string) (Result, error) {
 		Detail:     "cloned_from=" + source,
 		ObservedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	if err := os.MkdirAll(filepath.Join(stateDir, target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(stateDir, target), 0o700); err != nil {
 		_ = os.RemoveAll(targetWorkspaceDir)
 		return Result{}, err
 	}
@@ -290,6 +290,11 @@ func parseRemoteCopyEndpoint(raw string) (remoteCopyEndpoint, bool, error) {
 }
 
 func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, localTarget string) (CopyResult, error) {
+	// Re-validate here so every caller is covered, including artifact paths
+	// that come from a workspace manifest rather than a CLI endpoint.
+	if err := validateRemoteCopyPath(remote.Path); err != nil {
+		return CopyResult{}, err
+	}
 	if err := EnsureCloneable(stateDir, remote.Workspace); err != nil {
 		return CopyResult{}, err
 	}
@@ -322,7 +327,11 @@ func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, 
 			_ = os.Remove(tmpPath)
 		}
 	}()
-	if err := runDebugFS(debugfsPath, imagePath, false, "dump "+remote.Path+" "+tmpPath); err != nil {
+	dumpReq, err := debugfsRequest("dump", remote.Path, tmpPath)
+	if err != nil {
+		return CopyResult{}, err
+	}
+	if err := runDebugFS(debugfsPath, imagePath, false, dumpReq); err != nil {
 		return CopyResult{}, err
 	}
 	info, err := os.Stat(tmpPath)
@@ -345,6 +354,11 @@ func copyFromWorkspace(stateDir, debugfsPath string, remote remoteCopyEndpoint, 
 }
 
 func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCopyEndpoint) (CopyResult, error) {
+	// Re-validate here so every caller is covered, including paths that come
+	// from a workspace manifest rather than a CLI endpoint.
+	if err := validateRemoteCopyPath(remote.Path); err != nil {
+		return CopyResult{}, err
+	}
 	if err := EnsureCloneable(stateDir, remote.Workspace); err != nil {
 		return CopyResult{}, err
 	}
@@ -374,7 +388,11 @@ func copyToWorkspace(stateDir, debugfsPath, localSource string, remote remoteCop
 	if err := removeDebugFSFileIfExists(debugfsPath, imagePath, remote.Path); err != nil {
 		return CopyResult{}, err
 	}
-	if err := runDebugFS(debugfsPath, imagePath, true, "write "+localSource+" "+remote.Path); err != nil {
+	writeReq, err := debugfsRequest("write", localSource, remote.Path)
+	if err != nil {
+		return CopyResult{}, err
+	}
+	if err := runDebugFS(debugfsPath, imagePath, true, writeReq); err != nil {
 		return CopyResult{}, err
 	}
 	return CopyResult{
@@ -435,7 +453,11 @@ func ensureDebugFSParentDir(debugfsPath, imagePath, target string) error {
 	if parent == "." || parent == "/" {
 		return nil
 	}
-	output, err := runDebugFSOutput(debugfsPath, imagePath, false, "stat "+parent)
+	statReq, err := debugfsRequest("stat", parent)
+	if err != nil {
+		return err
+	}
+	output, err := runDebugFSOutput(debugfsPath, imagePath, false, statReq)
 	if err != nil {
 		return fmt.Errorf("workspace path parent %s does not exist in the image", parent)
 	}
@@ -446,7 +468,11 @@ func ensureDebugFSParentDir(debugfsPath, imagePath, target string) error {
 }
 
 func removeDebugFSFileIfExists(debugfsPath, imagePath, target string) error {
-	output, err := runDebugFSOutput(debugfsPath, imagePath, true, "rm "+target)
+	rmReq, err := debugfsRequest("rm", target)
+	if err != nil {
+		return err
+	}
+	output, err := runDebugFSOutput(debugfsPath, imagePath, true, rmReq)
 	if err == nil {
 		return nil
 	}
@@ -545,6 +571,43 @@ func runDebugFS(debugfsPath, imagePath string, write bool, command string) error
 	return err
 }
 
+// debugfsRequest builds a debugfs -R request string from an operation and its
+// arguments, validating and quoting each argument so that attacker-influenced
+// paths cannot inject additional tokens or directives into the request.
+func debugfsRequest(op string, args ...string) (string, error) {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, op)
+	for _, arg := range args {
+		quoted, err := quoteDebugFSArg(arg)
+		if err != nil {
+			return "", err
+		}
+		parts = append(parts, quoted)
+	}
+	return strings.Join(parts, " "), nil
+}
+
+// quoteDebugFSArg validates a single debugfs request argument and wraps it in
+// double quotes. debugfs parses -R requests with the ss-library tokenizer,
+// which splits on whitespace and supports double-quoted tokens but has no
+// escape mechanism, so embedded quotes and control characters are rejected
+// rather than escaped. Leading dashes are rejected so an argument can never be
+// parsed as a command option.
+func quoteDebugFSArg(arg string) (string, error) {
+	if arg == "" {
+		return "", fmt.Errorf("debugfs argument must not be empty")
+	}
+	if strings.HasPrefix(arg, "-") {
+		return "", fmt.Errorf("debugfs argument must not start with %q: %s", "-", arg)
+	}
+	for _, r := range arg {
+		if r == '"' || r < 0x20 || r == 0x7f {
+			return "", fmt.Errorf("debugfs argument contains unsupported character: %q", arg)
+		}
+	}
+	return `"` + arg + `"`, nil
+}
+
 func reconcileExt4Journal(imagePath string) error {
 	ext, err := hasExtSuperblock(imagePath)
 	if err != nil {
@@ -580,7 +643,7 @@ func hasExtSuperblock(imagePath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	magic := []byte{0, 0}
 	n, err := file.ReadAt(magic, 1080)
 	if err != nil {

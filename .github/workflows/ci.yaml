@@ -25,10 +25,21 @@ jobs:
           cache-dependency-path: go.mod
 
       - name: Test Go
-        run: go test ./...
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
 
-      - name: Vet Go
-        run: go vet ./...
+      - name: Report coverage
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: Upload coverage profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+      - name: Lint Go
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
 
       - name: Race test Go
         run: go test -race ./...
@@ -51,6 +62,14 @@ jobs:
 
       - name: Test Go
         run: go test ./...
+
+      - name: Cache Apple VF supervisor build
+        uses: actions/cache@v4
+        with:
+          path: supervisors/applevf/.build
+          key: applevf-${{ runner.os }}-${{ hashFiles('supervisors/applevf/**/*.swift', 'supervisors/applevf/Package.*') }}
+          restore-keys: |
+            applevf-${{ runner.os }}-
 
       - name: Build Apple VF supervisor
         run: swift build --package-path supervisors/applevf --disable-sandbox
@@ -96,6 +115,9 @@ jobs:
 
       - name: Shellcheck scripts
         run: find scripts -name '*.sh' -print0 | xargs -0 shellcheck
+
+      - name: Lint workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yaml .github/workflows/*.yml
 
   portable-microagent-e2e:
     name: Portable microagent E2E

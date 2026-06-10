@@ -258,6 +258,16 @@ func mcpTools() []map[string]any {
 		mcpTool("images.tag", "Tag a local image record.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("images.delete", "Delete a local image record, optionally deleting cached rootfs files.", []string{"image"}, map[string]any{"image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "delete_files": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
 		mcpTool("images.prune", "Prune stale local image records, optionally deleting cached rootfs files.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}, "delete_files": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
+		mcpTool("models.pull", "Pull a GGUF model from HuggingFace into the local store.", []string{"model"}, map[string]any{"model": map[string]any{"type": "string"}, "token": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.list", "List locally stored models.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.remove", "Remove a model from the local store.", []string{"model"}, map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.prune", "Prune local model records whose blobs are missing.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.serve", "Start or reuse a local host model server for a stored or pulled model.", []string{"model"},
+			map[string]any{"model": map[string]any{"type": "string"}, "dedicated": map[string]any{"type": "boolean"}, "token": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.stop", "Stop local host model server instances for a model.", []string{"model"},
+			map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.runners", "List running local model servers.", nil,
+			map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("profiles.list", "List resource profiles.", nil, nil),
 		mcpTool("host.inspect", "Report host capabilities for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
 		mcpTool("doctor.check", "Run host diagnostics for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
@@ -490,6 +500,8 @@ func mcpToolSideEffects(name string) []string {
 		return []string{"host_state"}
 	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
 		return []string{"host_state", "workspace_state"}
+	case "models.pull", "models.remove", "models.prune", "models.serve", "models.stop":
+		return []string{"host_state"}
 	default:
 		return nil
 	}
@@ -497,11 +509,11 @@ func mcpToolSideEffects(name string) []string {
 
 func mcpToolIdempotency(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "snapshot.delete":
+	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
-	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
-	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -522,6 +534,8 @@ func mcpToolPrincipalScope(name string) []string {
 		return []string{"images.read", "images.write"}
 	case "artifacts.list", "cp", "artifacts.get":
 		return []string{"workspace.files"}
+	case "models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners":
+		return []string{"models.read", "models.write"}
 	case "host.networking.setup", "kernel.install", "rootfs.build":
 		return []string{"host.write"}
 	case "host.inspect", "doctor.check", "contract.get", "kernel.verify", "profiles.list":
@@ -533,11 +547,11 @@ func mcpToolPrincipalScope(name string) []string {
 
 func mcpToolCostClass(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "kernel.install", "rootfs.build":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.serve", "kernel.install", "rootfs.build":
 		return "host_compute_and_storage"
 	case "host.networking.setup":
 		return "host_privileged"
-	case "cp", "artifacts.get":
+	case "cp", "artifacts.get", "models.remove", "models.prune", "models.stop":
 		return "host_io"
 	default:
 		return "metadata"
@@ -711,7 +725,7 @@ func runMCPWorkspaceExec(ctx context.Context, args map[string]any, start time.Ti
 	if stateDir == "" {
 		stateDir = defaultStateDir()
 	}
-	result, err, retryMeta := mcpWorkspaceExec(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
+	result, retryMeta, err := mcpWorkspaceExec(ctx, workspace.Options{Name: stringArg(args, "name"), StateDir: stateDir}, req)
 	envelope := map[string]any{
 		"result":              result,
 		"timing_ms":           time.Since(start).Milliseconds(),
@@ -946,7 +960,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 
 func mcpMutationTool(name string) bool {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return true
 	default:
 		return false
@@ -1295,6 +1309,45 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		cli = appendOptionalFlag(cli, "-stage-snapshot", stringArg(args, "stage_snapshot"))
 		return cli, nil
+	case "models.pull":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "model", "pull", stringArg(args, "model")}
+		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		return cli, nil
+	case "models.list":
+		return appendOptionalFlag([]string{"--mode=ax", "model", "ls"}, "-state-dir", stateDir), nil
+	case "models.remove":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "model", "rm", stringArg(args, "model")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		return cli, nil
+	case "models.prune":
+		return appendOptionalFlag([]string{"--mode=ax", "model", "prune"}, "-state-dir", stateDir), nil
+	case "models.serve":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "model", "serve", stringArg(args, "model")}
+		if boolArg(args, "dedicated") {
+			cli = append(cli, "-dedicated")
+		}
+		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		return cli, nil
+	case "models.stop":
+		if err := requireToolArgs(args, name, "model"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "model", "stop", stringArg(args, "model")}
+		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
+		return cli, nil
+	case "models.runners":
+		return appendOptionalFlag([]string{"--mode=ax", "model", "runners"}, "-state-dir", stateDir), nil
 	case "cp":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err

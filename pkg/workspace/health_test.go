@@ -72,7 +72,8 @@ func TestHealthApplicable(t *testing.T) {
 	}{
 		{"not declared", Options{Backend: vmkit.BackendFirecracker}, false},
 		{"exec on firecracker", Options{Backend: vmkit.BackendFirecracker, Health: Health{Exec: []string{"true"}}}, true},
-		{"exec on other backend", Options{Backend: "applevf", Health: Health{Exec: []string{"true"}}}, false},
+		{"exec on apple-vf", Options{Backend: vmkit.BackendAppleVF, Health: Health{Exec: []string{"true"}}}, true},
+		{"exec on backend without structured exec", Options{Backend: vmkit.BackendWindowsHyperV, Health: Health{Exec: []string{"true"}}}, false},
 		{"http on any backend", Options{Backend: "applevf", Health: Health{HTTPGet: "/x", Port: 80}}, true},
 	}
 	for _, tc := range cases {

@@ -5,6 +5,82 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.1.46 - 2026-06-10
+
+- Retired the `microagent-rc` Homebrew formula. Only stable releases ship to
+  the tap; release candidates remain git tags validated by local builds and
+  the tag-gated live CI suites. The tap-update workflow skips `-rc` tags.
+- Live Windows Hyper-V smokes now run in CI on GitHub-hosted runners
+  (nightly, on release tags, and on demand): hosted windows-latest runners
+  ship with the Hyper-V role active, so the parity smokes no longer depend on
+  a self-hosted runner. The workflow installs the default guest kernel via
+  `microagent kernel install`; its previous failures were a workflow-file
+  validation error, now caught statically by a new actionlint step in CI.
+- `doctor` now verifies that unprivileged user namespace creation actually
+  works by running a live `CLONE_NEWUSER` probe instead of trusting the
+  classic userns sysctls alone. On hosts where AppArmor blocks the clone
+  (stock Ubuntu 24.04 sets `kernel.apparmor_restrict_unprivileged_userns=1`),
+  `userNamespacesAvailable` and `userNetworkReady` are now reported `false`
+  with a remediation hint; previously doctor reported user networking ready
+  while pasta failed at runtime. `userNetworkReady` also now requires user
+  namespaces in addition to pasta.
+- Fixed Firecracker `user` networking on hosts with older pasta releases
+  (including the stock Ubuntu 24.04 package): pasta was invoked without a
+  `--` option terminator, so getopt-permuting versions tried to parse the
+  supervisor's `--request-json` flag as their own and aborted.
+- The live Linux parity workflow now runs on GitHub-hosted KVM runners —
+  nightly against main, on every release tag, and on demand — instead of
+  targeting a self-hosted runner label that was never registered (the suite
+  had never executed in CI).
+- Centralized backend differences in a declarative `vmkit.BackendCapabilities`
+  table (structured exec, live network apply, rootfs format, runtime-state
+  ownership, detached-start style, shell transport and probing, block-device
+  naming). The workspace layer now consults capabilities instead of branching
+  on backend constants; unknown backends get zero capabilities (fail closed).
+  No behavior change for existing backends.
+- Workspace dispatch errors now preserve the underlying error chain, so Go
+  library callers can use `errors.Is`/`errors.As` (for example to reach the
+  supervisor's `*exec.ExitError`). Error message text is unchanged.
+- CI now collects unit-test coverage on the Linux job (summary in the log, full
+  profile uploaded as an artifact) and caches the Apple VF supervisor Swift
+  build on the macOS job.
+- README links to the releases page instead of hardcoding the latest version.
+- **Security:** `model pull` now verifies downloads against the upstream
+  digest. The expected LFS sha256 for the file is fetched from the Hugging
+  Face paths-info API before the download, and the pull fails closed — on a
+  digest mismatch, on a file that is not LFS-tracked, or when the upstream
+  digest cannot be resolved — without writing a blob or an index record.
+- **Security:** debugfs requests (`cp`, `artifacts get`) are no longer built
+  by raw string concatenation. Every `-R` argument is validated (no quotes,
+  control characters, or option-like leading dashes) and double-quoted, and
+  remote workspace paths are validated in the copy layer itself so
+  manifest-derived artifact paths get the same checks as CLI endpoints. As a
+  side effect, local target directories containing spaces now work with
+  `cp`/`artifacts get`.
+- **Security:** OCI layer extraction now rejects entry names, hardlink
+  targets, and symlink targets containing backslashes, which the
+  slash-oriented traversal checks previously treated as plain name characters
+  but Windows filesystem APIs treat as path separators. The Windows symlink
+  marker fallback is also written through the `os.Root` sandbox instead of a
+  host-path join outside it.
+- **Breaking (Go library):** `workspace.ExecWithMetadata` now returns
+  `(ExecResult, ExecRetryMetadata, error)` with the error last, matching Go
+  convention. CLI and MCP behavior are unchanged.
+- Tightened host state-file permissions. Files written under the state dir
+  (workspace manifests, runtime/process state, events, network/volume/image/
+  model indexes, snapshot manifests, serial and supervisor logs, volume disks)
+  are now created `0600`, and new state directories `0700`, so workspace
+  topology and runtime configuration are no longer readable by other users on
+  the host. Existing files keep their modes; user-requested outputs (`cp`,
+  artifact exports, `init` scaffolds, kernel downloads) are unchanged.
+- Secret-access audit appends and Hyper-V event-log appends now report file
+  close errors instead of silently dropping a possibly unflushed record.
+- Adopted golangci-lint (`.golangci.yaml`, enforced in CI alongside the
+  existing race tests; `go vet` is included in the lint run). Added package
+  documentation for the exported Go packages and removed dead code left over
+  from the CLI-to-library refactor. New `make fmt`, `make lint`, and
+  `make test-race` targets.
+- Unified the pinned Go toolchain across all CI workflows (1.26.4).
 - Completed user-defined named networks: workspaces join a network with
   `create`/`run` `--network-name <name>`. Each member gets a stable IP from the
   network subnet (persisted in the registry, surviving stop/start), members

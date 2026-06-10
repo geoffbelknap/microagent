@@ -107,20 +107,20 @@ func isAllowedHVSockTarget(req vmkit.Request, target string) bool {
 }
 
 func copySerialPipe(pipePath, target string) {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return
 	}
-	file, err := os.OpenFile(target, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(target, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	timeout := 30 * time.Second
 	conn, err := winio.DialPipe(pipePath, &timeout)
 	if err != nil {
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_, _ = io.Copy(file, conn)
 }
 
@@ -142,19 +142,19 @@ func (s *hvSocketListenerSet) serve(listener net.Listener, target string, result
 }
 
 func (s *hvSocketListenerSet) acceptResult(conn net.Conn, target string) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	s.result <- writeHVSockResult(conn, target)
 }
 
 func handleHVSockConnection(conn net.Conn, target string) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if tcpTarget, ok := parseTCPAddr(target); ok {
 		remote, err := net.Dial("tcp", tcpTarget)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "connect windows-hyperv hvsocket target %s: %v\n", tcpTarget, err)
 			return
 		}
-		defer remote.Close()
+		defer func() { _ = remote.Close() }()
 		go func() {
 			_, _ = io.Copy(remote, conn)
 			closeWriteConn(remote)
@@ -180,7 +180,7 @@ func servePublishedPortForward(listener net.Listener, vmID guid.GUID, forward vm
 }
 
 func proxyTCPToHVSock(conn net.Conn, vmID guid.GUID, guestPort uint32) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	hvsock, err := dialHVSockPortHook(ctx, vmID, guestPort)
@@ -188,7 +188,7 @@ func proxyTCPToHVSock(conn net.Conn, vmID guid.GUID, guestPort uint32) {
 		fmt.Fprintf(os.Stderr, "connect windows-hyperv guest hvsocket port %d: %v\n", guestPort, err)
 		return
 	}
-	defer hvsock.Close()
+	defer func() { _ = hvsock.Close() }()
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(hvsock, conn)
@@ -213,11 +213,11 @@ func dialHVSockPort(ctx context.Context, vmID guid.GUID, guestPort uint32) (net.
 }
 
 func writeHVSockResult(conn net.Conn, target string) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return err
 	}
 	tmp := target + ".tmp"
-	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}

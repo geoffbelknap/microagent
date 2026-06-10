@@ -777,6 +777,7 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 			}
 			return nil, os.ErrNotExist
 		},
+		func() error { return nil },
 	)
 	if err != nil {
 		t.Fatalf("firecrackerDoctorResponse: %v", err)
@@ -817,6 +818,7 @@ func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 		func(string) string { return "" },
 		func(string) (string, error) { return "", os.ErrNotExist },
 		func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		func() error { return nil },
 	)
 	if err == nil {
 		t.Fatal("firecrackerDoctorResponse returned nil error")
@@ -2356,8 +2358,8 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 		},
 		{
 			name: "unknown top-level field",
-			spec: "name: bad\nnetwrok:\n  mode: user\n",
-			want: `unknown top-level field "netwrok"`,
+			spec: "name: bad\nnetwrok:\n  mode: user\n", //nolint:misspell // deliberate typo: exercises unknown-field rejection
+			want: `unknown top-level field "netwrok"`,   //nolint:misspell // deliberate typo: exercises unknown-field rejection
 		},
 	}
 	for _, tt := range tests {
@@ -4009,13 +4011,17 @@ goto args
 	script := `#!/usr/bin/env bash
 set -euo pipefail
 log="` + filepath.Join(dir, "debugfs.log") + `"
-printf '%s\n' "$*" | tr ' ' '|' >> "$log"
+# Strip the double quotes that the host adds around -R request arguments,
+# mirroring how real debugfs tokenizes quoted request words.
+printf '%s\n' "$*" | tr -d '"' | tr ' ' '|' >> "$log"
 args=("$@")
 for ((i=0; i<${#args[@]}; i++)); do
   if [[ "${args[$i]}" == "-R" ]]; then
     cmd="${args[$((i+1))]}"
     if [[ "$cmd" == dump\ * ]]; then
       target="${cmd##* }"
+      target="${target%\"}"
+      target="${target#\"}"
       printf fake-dump > "$target"
     fi
   fi
@@ -5150,54 +5156,11 @@ func runExternalOutput(ctx context.Context, exe string, args ...string) ([]byte,
 	return cmd.CombinedOutput()
 }
 
-func waitForExternalResult(t *testing.T, ctx context.Context, cliPath, stateDir, name string, timeout time.Duration) []byte {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var last []byte
-	for {
-		out, err := runExternalOutput(ctx, cliPath, "result", name, "--state-dir", stateDir)
-		last = out
-		if err == nil {
-			return out
-		}
-		if time.Now().After(deadline) {
-			logWindowsHyperVSmokeState(t, stateDir, name)
-			t.Fatalf("result not ready: %v\n%s", err, last)
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(time.Second):
-		}
-	}
-}
-
 func logWindowsHyperVSmokeState(t *testing.T, stateDir, name string) {
 	t.Helper()
 	for _, file := range []string{"serial.log", "hvsock-listener.log", "runtime.json"} {
 		if data, readErr := os.ReadFile(filepath.Join(stateDir, name, file)); readErr == nil {
 			t.Logf("%s:\n%s", file, data)
-		}
-	}
-}
-
-func waitForSerialContains(ctx context.Context, path, needle string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for {
-		data, err := os.ReadFile(path)
-		if err == nil && strings.Contains(string(data), needle) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			if err != nil {
-				return fmt.Errorf("serial log did not contain %q before timeout: %w", needle, err)
-			}
-			return fmt.Errorf("serial log did not contain %q before timeout: %s", needle, path)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
 		}
 	}
 }

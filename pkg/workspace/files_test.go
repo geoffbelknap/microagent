@@ -75,6 +75,88 @@ func TestCopyToWorkspaceWritesWhenRemoteParentExists(t *testing.T) {
 	}
 }
 
+func TestCopyFromWorkspaceQuotesDebugFSArguments(t *testing.T) {
+	dir := t.TempDir()
+	useFakeE2FSCK(t, dir)
+	rootfs := filepath.Join(dir, "workspaces", "demo", "rootfs.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeExtRootfs(t, rootfs)
+	// A local target directory containing a space exercises the quoting: the
+	// temp dump path lands inside it and must survive debugfs tokenization.
+	targetDir := filepath.Join(dir, "out dir")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "debugfs.log")
+	debugfs := writeFakeDebugFS(t, dir, logPath, "''")
+	if _, err := Copy(dir, debugfs, "demo:/workspace/out.json", filepath.Join(targetDir, "result.json")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(data)
+	if !strings.Contains(log, `-R dump "/workspace/out.json" "`) {
+		t.Fatalf("debugfs log missing quoted dump arguments:\n%s", log)
+	}
+	if !strings.Contains(log, `out dir/.microagent-cp-`) && !strings.Contains(log, `out dir\.microagent-cp-`) {
+		t.Fatalf("debugfs log missing quoted temp path inside spaced directory:\n%s", log)
+	}
+}
+
+func TestGetArtifactRejectsCraftedManifestPath(t *testing.T) {
+	dir := t.TempDir()
+	workspaceDir := filepath.Join(dir, "workspaces", "demo")
+	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A crafted egress path that would smuggle a second debugfs token.
+	manifest := `{"name":"demo","restart":"never","resources":{"memory_mib":256,"cpu_count":1},` +
+		`"artifacts":{"egress":[{"name":"report","path":"/etc/passwd /tmp/owned"}]}}`
+	if err := os.WriteFile(filepath.Join(workspaceDir, "workspace.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "debugfs.log")
+	debugfs := writeFakeDebugFS(t, dir, logPath, "''")
+	_, err := GetArtifact(dir, debugfs, "demo", "report", filepath.Join(dir, "report.json"))
+	if err == nil || !strings.Contains(err.Error(), "whitespace") {
+		t.Fatalf("expected whitespace rejection for crafted artifact path, got %v", err)
+	}
+	if _, statErr := os.Stat(logPath); !os.IsNotExist(statErr) {
+		t.Fatal("debugfs ran despite invalid artifact path")
+	}
+}
+
+func TestQuoteDebugFSArgRejectsInjection(t *testing.T) {
+	for _, bad := range []string{
+		"",
+		`/path/with"quote`,
+		"/path/with\nnewline",
+		"/path/with\rreturn",
+		"/path/with\x00nul",
+		"/path/with\ttab",
+		"-rf",
+	} {
+		if _, err := quoteDebugFSArg(bad); err == nil {
+			t.Fatalf("quoteDebugFSArg(%q) unexpectedly succeeded", bad)
+		}
+	}
+	got, err := quoteDebugFSArg("/path with space/file.json")
+	if err != nil || got != `"/path with space/file.json"` {
+		t.Fatalf("quoteDebugFSArg = %q, %v", got, err)
+	}
+	req, err := debugfsRequest("dump", "/a/b", "/tmp/out")
+	if err != nil || req != `dump "/a/b" "/tmp/out"` {
+		t.Fatalf("debugfsRequest = %q, %v", req, err)
+	}
+	if _, err := debugfsRequest("dump", "/a/b", "/tmp/out\nrm /etc"); err == nil {
+		t.Fatal("debugfsRequest accepted newline injection")
+	}
+}
+
 func TestRunDebugFSDetectsDiagnosticFailures(t *testing.T) {
 	dir := t.TempDir()
 	debugfs := writeFakeCommand(t, dir, "debugfs", "echo 'write: File not found by ext2_lookup'\n", "echo write: File not found by ext2_lookup\r\n")
@@ -124,10 +206,10 @@ func writeFakeDebugFS(t *testing.T, dir, logPath, statOutput string) string {
 	return writeFakeCommand(t, dir, "debugfs",
 		"printf '%s\\n' \"$*\" >> "+shellQuoteForTest(logPath)+"\n"+
 			"case \"$*\" in\n"+
-			"  *'stat /workspace'*) echo "+statOutput+" ;;\n"+
+			"  *'stat \"/workspace\"'*) echo "+statOutput+" ;;\n"+
 			"esac\n",
 		"@echo %*>> \""+logPath+"\"\r\n"+
-			"@echo %* | findstr /C:\"stat /workspace\" >NUL\r\n"+
+			"@echo %* | findstr /C:\"stat\" >NUL\r\n"+
 			"@if %ERRORLEVEL% EQU 0 echo "+strings.Trim(statOutput, "'")+" \r\n",
 	)
 }

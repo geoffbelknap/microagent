@@ -4,7 +4,7 @@ description: Common failure modes, what they mean, and how to fix them.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-10_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -156,7 +156,7 @@ For repeatable deployments, prefer digest-pinned image refs such as
 `user` mode needs three things:
 
 - `pasta` on `PATH` (from the `passt` package - `apt install passt` on Debian/Ubuntu, `dnf install passt` on Fedora; Homebrew installs it as a microagent dependency).
-- Unprivileged user namespaces enabled. Check `sysctl user.max_user_namespaces` (returns a non-zero count when enabled). Some distros also gate this via `kernel.unprivileged_userns_clone` - set both to `1` if either is `0`.
+- Unprivileged user namespaces enabled. Check `sysctl user.max_user_namespaces` (returns a non-zero count when enabled). Some distros also gate this via `kernel.unprivileged_userns_clone` - set both to `1` if either is `0`. On Ubuntu 23.10+ (including stock Ubuntu 24.04 and GitHub-hosted runners), AppArmor additionally blocks unprivileged user namespace creation even when those sysctls look permissive - `pasta` fails with `Couldn't write to /proc/self/uid_map: Operation not permitted`. Set `sysctl kernel.apparmor_restrict_unprivileged_userns=0` or install an AppArmor profile that grants the microagent binaries userns creation.
 - `/dev/net/tun` readable by the calling user.
 
 `microagent doctor` reports each of these - start there to find the missing piece.

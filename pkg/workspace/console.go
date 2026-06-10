@@ -86,7 +86,7 @@ func SendConsoleCommand(ctx context.Context, opts ConsoleOptions, command string
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return sendConsoleCommandOnConn(conn, opts, command, output)
 }
 
@@ -172,7 +172,7 @@ func ConsoleTarget(name string, state RuntimeState) (ShellTarget, error) {
 	if port == 0 {
 		port = uint32(ShellPortForName(name))
 	}
-	if state.Event.Identity.Backend == vmkit.BackendWindowsHyperV {
+	if vmkit.BackendCapabilities(state.Event.Identity.Backend).ShellNetwork == "hvsock" {
 		runtimeID := strings.TrimSpace(state.ComputeSystemRuntimeID)
 		if runtimeID == "" {
 			return ShellTarget{}, fmt.Errorf("windows-hyperv connect requires compute system runtime ID in runtime.json")

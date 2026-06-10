@@ -49,7 +49,13 @@ for ((i=0; i<${#args[@]}; i++)); do
   if [[ "${args[$i]}" == "-R" ]]; then
     command="${args[$((i+1))]}"
     if [[ "$command" == dump\ * ]]; then
-      target="${command##* }"
+      # Real debugfs parses -R requests with the ss library, which honors
+      # double-quoted tokens; accept both quoted and bare target paths.
+      if [[ "$command" =~ \"([^\"]*)\"[[:space:]]*$ ]]; then
+        target="${BASH_REMATCH[1]}"
+      else
+        target="${command##* }"
+      fi
       printf '{"artifact":"report","ok":true}\n' >"$target"
     fi
   fi

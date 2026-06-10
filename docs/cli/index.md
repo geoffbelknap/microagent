@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-09_
 
 | Command | Purpose |
 |---|---|
@@ -17,6 +17,7 @@ _Last updated: 2026-06-02_
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
 | [`artifacts`](/cli/artifacts/) | List and retrieve declared workspace artifacts |
 | [`network`](/cli/network/) | Inspect declared network intent and runtime network state |
+| [`model`](/cli/model/) | Download and manage local HuggingFace GGUF model files |
 | [`volume`](/cli/volume/) | Manage named volumes — VM-independent ext4 disks attached by name |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |

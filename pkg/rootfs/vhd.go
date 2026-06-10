@@ -103,6 +103,21 @@ func writeSymlinkMarker(path, target string) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// writeSymlinkMarkerInRoot writes a symlink marker through the os.Root
+// sandbox so the marker path gets the same traversal protection as every
+// other extracted layer entry.
+func writeSymlinkMarkerInRoot(root *os.Root, name, target string) error {
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write([]byte(symlinkMarkerPrefix + target)); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
 func readSymlinkMarker(path string) (string, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

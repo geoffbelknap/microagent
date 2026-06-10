@@ -19,7 +19,7 @@ STAMP_RE = re.compile(
 )
 
 
-def run(cmd: list[str]) -> str:
+def run(cmd: list[str], env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
         cmd,
         cwd=ROOT,
@@ -27,6 +27,7 @@ def run(cmd: list[str]) -> str:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
     return result.stdout.strip()
 
@@ -35,12 +36,23 @@ def docs_pages() -> list[Path]:
     return sorted(DOCS.rglob("*.md"))
 
 
+# Dates stamped while a file is dirty come from today(), which is UTC. Commit
+# dates must be read on the same UTC basis: %cs uses the commit's recorded
+# local offset, so a commit made in the evening US Pacific time reads back one
+# day earlier than the UTC stamp and --check falsely reports it as stale.
+UTC_DATE_ARGS = ["--date=format-local:%Y-%m-%d", "--format=%cd"]
+
+
+def run_utc(cmd: list[str]) -> str:
+    return run(cmd, env={**os.environ, "TZ": "UTC"})
+
+
 def git_date(path: Path) -> str:
     rel = str(path.relative_to(ROOT))
     for commit in git_history(rel):
         if commit_is_substantive(commit, rel):
-            return run(["git", "show", "-s", "--format=%cs", commit])
-    date = run(["git", "log", "-1", "--format=%cs", "--", rel])
+            return run_utc(["git", "show", "-s", *UTC_DATE_ARGS, commit])
+    date = run_utc(["git", "log", "-1", *UTC_DATE_ARGS, "--", rel])
     if date:
         return date
     return today()

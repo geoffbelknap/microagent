@@ -17,7 +17,7 @@ import (
 // the gap where supervise only restarts on exit, not on "alive but wedged".
 //
 // Declare exactly one probe form:
-//   - Exec: a command run in the guest (structured exec; Firecracker only).
+//   - Exec: a command run in the guest through a backend with structured exec.
 //     Healthy when it exits 0, like a docker HEALTHCHECK CMD.
 //   - HTTPGet + Port: a host-side GET to a published guest Port. Healthy on a
 //     non-error (<400) status.
@@ -174,16 +174,20 @@ func healthHTTPHostPort(opts Options, guestPort int) (uint16, error) {
 }
 
 // healthApplicable reports whether the declared probe can run against this
-// workspace's backend. Exec probes require the structured exec service, which
-// is Firecracker-only; HTTP probes are host-side and backend-neutral.
+// workspace's backend. Exec probes require the structured exec service; HTTP
+// probes are host-side and backend-neutral.
 func healthApplicable(opts Options) bool {
 	if !opts.Health.Declared() {
 		return false
 	}
-	if opts.Health.IsExec() && opts.Backend != vmkit.BackendFirecracker {
+	if opts.Health.IsExec() && !backendSupportsStructuredExec(opts.Backend) {
 		return false
 	}
 	return true
+}
+
+func backendSupportsStructuredExec(backend string) bool {
+	return vmkit.BackendCapabilities(backend).StructuredExec
 }
 
 // healthTracker holds the consecutive-failure state for one supervised run. It

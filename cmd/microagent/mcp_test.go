@@ -39,7 +39,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		t.Fatalf("tools/list result = %#v", responses[1]["result"])
 	}
 	tools, ok := result["tools"].([]any)
-	if !ok || len(tools) < 12 {
+	if !ok || len(tools) < 19 {
 		t.Fatalf("tools = %#v, want initial tool set", result["tools"])
 	}
 	names := map[string]bool{}
@@ -58,6 +58,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		"network.inspect", "network.create", "network.list", "network.delete",
 		"volume.create", "volume.list", "volume.inspect", "volume.delete",
 		"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune",
+		"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners",
 		"profiles.list", "host.inspect", "doctor.check", "host.networking.setup", "contract.get", "kernel.verify", "kernel.install", "rootfs.build",
 		"cp",
 	} {
@@ -443,9 +444,9 @@ func TestMCPWorkspaceExecReturnsStructuredResult(t *testing.T) {
 
 func TestMCPWorkspaceExecRetriesTCPReset(t *testing.T) {
 	attempts := 0
-	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error, workspace.ExecRetryMetadata) {
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, workspace.ExecRetryMetadata, error) {
 		attempts++
-		return successfulMCPExecResult("Linux demo\n"), nil, workspace.ExecRetryMetadata{Count: 1, WallClock: time.Millisecond}
+		return successfulMCPExecResult("Linux demo\n"), workspace.ExecRetryMetadata{Count: 1, WallClock: time.Millisecond}, nil
 	})
 	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
 		"name": "research",
@@ -468,9 +469,9 @@ func TestMCPWorkspaceExecRetriesTCPReset(t *testing.T) {
 
 func TestMCPWorkspaceExecRetriesConnectionRefused(t *testing.T) {
 	attempts := 0
-	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error, workspace.ExecRetryMetadata) {
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, workspace.ExecRetryMetadata, error) {
 		attempts++
-		return successfulMCPExecResult("ok\n"), nil, workspace.ExecRetryMetadata{Count: 1, WallClock: time.Millisecond}
+		return successfulMCPExecResult("ok\n"), workspace.ExecRetryMetadata{Count: 1, WallClock: time.Millisecond}, nil
 	})
 	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
 		"name": "research",
@@ -489,9 +490,9 @@ func TestMCPWorkspaceExecRetriesConnectionRefused(t *testing.T) {
 
 func TestMCPWorkspaceExecRetriesConnectionTimeout(t *testing.T) {
 	attempts := 0
-	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error, workspace.ExecRetryMetadata) {
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, workspace.ExecRetryMetadata, error) {
 		attempts++
-		return successfulMCPExecResult("ok\n"), nil, workspace.ExecRetryMetadata{Count: 1, WallClock: time.Millisecond}
+		return successfulMCPExecResult("ok\n"), workspace.ExecRetryMetadata{Count: 1, WallClock: time.Millisecond}, nil
 	})
 	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
 		"name": "research",
@@ -510,10 +511,10 @@ func TestMCPWorkspaceExecRetriesConnectionTimeout(t *testing.T) {
 
 func TestMCPWorkspaceExecRetryExhaustionReturnsStructuredError(t *testing.T) {
 	attempts := 0
-	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error, workspace.ExecRetryMetadata) {
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, workspace.ExecRetryMetadata, error) {
 		attempts++
 		err := workspace.ExecRetryExhaustedError{Retries: 3, WallClock: time.Millisecond, LastErr: execclient.UnreachableError{Addr: "127.0.0.1:45000", Err: syscall.ECONNREFUSED}}
-		return execprotocol.ExecResult{}, err, workspace.ExecRetryMetadata{Count: 3, WallClock: time.Millisecond, Exhausted: true}
+		return execprotocol.ExecResult{}, workspace.ExecRetryMetadata{Count: 3, WallClock: time.Millisecond, Exhausted: true}, err
 	})
 	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
 		"name": "research",
@@ -548,10 +549,10 @@ func TestMCPWorkspaceExecRetryExhaustionReturnsStructuredError(t *testing.T) {
 
 func TestMCPWorkspaceExecRetryExhaustionIncludesErrorEnvelopeMetadata(t *testing.T) {
 	attempts := 0
-	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error, workspace.ExecRetryMetadata) {
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, workspace.ExecRetryMetadata, error) {
 		attempts++
 		err := workspace.ExecRetryExhaustedError{Retries: 3, WallClock: time.Millisecond, LastErr: execclient.UnreachableError{Addr: "127.0.0.1:45000", Err: syscall.ECONNREFUSED}}
-		return execprotocol.ExecResult{}, err, workspace.ExecRetryMetadata{Count: 3, WallClock: time.Millisecond, Exhausted: true}
+		return execprotocol.ExecResult{}, workspace.ExecRetryMetadata{Count: 3, WallClock: time.Millisecond, Exhausted: true}, err
 	})
 	input := bytes.NewBuffer(encodeMCPTestMessage(map[string]any{
 		"jsonrpc": "2.0",
@@ -597,13 +598,13 @@ func TestMCPWorkspaceExecRetryExhaustionIncludesErrorEnvelopeMetadata(t *testing
 
 func TestMCPWorkspaceExecDoesNotRetryExecCompletedErrors(t *testing.T) {
 	attempts := 0
-	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error, workspace.ExecRetryMetadata) {
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, workspace.ExecRetryMetadata, error) {
 		attempts++
 		code := 127
 		result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
 		result.ExitCode = &code
 		result.Stderr = []byte("command not found\n")
-		return result, nil, workspace.ExecRetryMetadata{}
+		return result, workspace.ExecRetryMetadata{}, nil
 	})
 	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
 		"name": "research",
@@ -622,9 +623,9 @@ func TestMCPWorkspaceExecDoesNotRetryExecCompletedErrors(t *testing.T) {
 
 func TestMCPWorkspaceExecDoesNotRetryWorkspaceNotRunning(t *testing.T) {
 	attempts := 0
-	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error, workspace.ExecRetryMetadata) {
+	stubMCPWorkspaceExec(t, func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, workspace.ExecRetryMetadata, error) {
 		attempts++
-		return execprotocol.ExecResult{}, fmt.Errorf("workspace research is not running; structured exec is unavailable in state stopped"), workspace.ExecRetryMetadata{}
+		return execprotocol.ExecResult{}, workspace.ExecRetryMetadata{}, fmt.Errorf("workspace research is not running; structured exec is unavailable in state stopped")
 	})
 	envelope, err := runMCPTool(context.Background(), "workspace.exec", map[string]any{
 		"name": "research",
@@ -641,7 +642,7 @@ func TestMCPWorkspaceExecDoesNotRetryWorkspaceNotRunning(t *testing.T) {
 	}
 }
 
-func stubMCPWorkspaceExec(t *testing.T, fn func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, error, workspace.ExecRetryMetadata)) {
+func stubMCPWorkspaceExec(t *testing.T, fn func(context.Context, workspace.Options, execprotocol.ExecRequest) (execprotocol.ExecResult, workspace.ExecRetryMetadata, error)) {
 	t.Helper()
 	originalExec := mcpWorkspaceExec
 	mcpWorkspaceExec = fn
@@ -657,12 +658,6 @@ func successfulMCPExecResult(stdout string) execprotocol.ExecResult {
 	result.Stdout = []byte(stdout)
 	return result
 }
-
-type timeoutMCPExecError struct{}
-
-func (timeoutMCPExecError) Error() string   { return "dial tcp 127.0.0.1:45000: i/o timeout" }
-func (timeoutMCPExecError) Timeout() bool   { return true }
-func (timeoutMCPExecError) Temporary() bool { return true }
 
 func TestMCPStructuredErrorRetryableClassification(t *testing.T) {
 	tests := []struct {

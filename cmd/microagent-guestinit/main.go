@@ -42,6 +42,8 @@ type config struct {
 	SecretsPort        uint16        `json:"secretsPort,omitempty"`
 	SecretsAPI         bool          `json:"secretsApi,omitempty"`
 	SecretsControlPort uint16        `json:"secretsControlPort,omitempty"`
+	ModelGuestPort     uint16        `json:"modelGuestPort,omitempty"`
+	ModelVsockPort     uint32        `json:"modelVsockPort,omitempty"`
 	ConsoleShell       string        `json:"consoleShell,omitempty"`
 	Hostname           string        `json:"hostname,omitempty"`
 }
@@ -70,6 +72,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "exec-service" {
 		os.Exit(runExecService(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "model-forward-helper" {
+		os.Exit(runModelForwardHelper(os.Args[2:]))
 	}
 	code := run()
 	poweroff()
@@ -178,6 +183,11 @@ func run() int {
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		_ = sendResult(cfg.Port, res)
 		return code
+	}
+	if cfg.ModelGuestPort != 0 && cfg.ModelVsockPort != 0 {
+		if err := startModelForwarder(cfg.ModelGuestPort, cfg.ModelVsockPort); err != nil {
+			fmt.Fprintf(os.Stderr, "model forwarder: %v\n", err)
+		}
 	}
 	if err := startShellHelper(cfg.ShellPort, cfg.ConsoleShell, guestEnv(cfg.Env)); err != nil {
 		code = 127
@@ -355,30 +365,6 @@ func reapExitedChildren() {
 		}
 		return
 	}
-}
-
-func startInteractiveShell(env []string, shellPath string) error {
-	command, err := consoleShellCommand(shellPath)
-	if err != nil {
-		return err
-	}
-	log.Printf("microagent-init: starting console shell %v", command)
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Env = env
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start console shell: %w", err)
-	}
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			log.Printf("microagent-init: console shell exited: %v", err)
-			return
-		}
-		log.Println(consoleShellExitedMarker)
-	}()
-	return nil
 }
 
 func configureHostname(hostname string) error {
@@ -920,7 +906,7 @@ func runShellSession(fd int, shellPath string) {
 		_ = unix.Close(fd)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	command, err := consoleShellCommand(shellPath)
 	if err != nil {
 		fmt.Fprintf(file, "microagent-init: %v\n", err)
@@ -931,8 +917,8 @@ func runShellSession(fd int, shellPath string) {
 		fmt.Fprintf(file, "microagent-init: open shell pty: %v\n", err)
 		return
 	}
-	defer master.Close()
-	defer slave.Close()
+	defer func() { _ = master.Close() }()
+	defer func() { _ = slave.Close() }()
 	log.Printf("microagent-init: starting connect shell %v", command)
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = shellSessionEnv()
@@ -1075,6 +1061,57 @@ func runHostForwardHelper(args []string) int {
 	return 0
 }
 
+// startModelForwarder spawns a model-forward-helper subprocess that listens on
+// 127.0.0.1:guestPort and tunnels each accepted connection to the host model
+// server over host vsock vsockPort. Using a subprocess (rather than a goroutine)
+// ensures the forwarder survives modes where run() hands off via syscall.Exec
+// (e.g. "service" mode), which would kill any goroutines.
+func startModelForwarder(guestPort uint16, vsockPort uint32) error {
+	if err := bringUpLoopback(); err != nil {
+		return err
+	}
+	cmd := exec.Command(os.Args[0], "model-forward-helper", strconv.Itoa(int(guestPort)), strconv.Itoa(int(vsockPort)))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start model forward helper on guest port %d: %w", guestPort, err)
+	}
+	return nil
+}
+
+// runModelForwardHelper is the blocking accept loop run by the model-forward-helper
+// subprocess. It listens on 127.0.0.1:guestPort and proxies each connection to
+// the host vsock at vsockPort.
+func runModelForwardHelper(args []string) int {
+	if len(args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: microagent-init model-forward-helper <guestPort> <vsockPort>")
+		return 127
+	}
+	guestPort, err := parseUint16(args[0])
+	if err != nil || guestPort == 0 {
+		fmt.Fprintf(os.Stderr, "parse guest port: %v\n", err)
+		return 127
+	}
+	vsockPort64, err := strconv.ParseUint(strings.TrimSpace(args[1]), 10, 32)
+	if err != nil || vsockPort64 == 0 {
+		fmt.Fprintf(os.Stderr, "parse vsock port: %v\n", err)
+		return 127
+	}
+	vsockPort := uint32(vsockPort64)
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", guestPort))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listen model forwarder on 127.0.0.1:%d: %v\n", guestPort, err)
+		return 127
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return 0
+		}
+		go proxyTCPToHostVsock(conn, vsockPort)
+	}
+}
+
 func openHostForwardListener(forward hostForward) (int, error) {
 	if err := validateHostForward(forward); err != nil {
 		return -1, err
@@ -1149,6 +1186,22 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 			return fmt.Errorf("microagent_secrets_ctl_port must be a positive uint16")
 		}
 		cfg.SecretsControlPort = port
+	}
+	if raw := values["microagent_model_fwd"]; strings.TrimSpace(raw) != "" {
+		guestRaw, vsockRaw, ok := strings.Cut(raw, ":")
+		if !ok {
+			return fmt.Errorf("microagent_model_fwd must be guestPort:vsockPort")
+		}
+		gp, err := parseUint16(guestRaw)
+		if err != nil || gp == 0 {
+			return fmt.Errorf("microagent_model_fwd guest port must be a positive uint16")
+		}
+		vp, err := strconv.ParseUint(strings.TrimSpace(vsockRaw), 10, 32)
+		if err != nil || vp == 0 {
+			return fmt.Errorf("microagent_model_fwd vsock port must be a positive uint32")
+		}
+		cfg.ModelGuestPort = gp
+		cfg.ModelVsockPort = uint32(vp)
 	}
 	return nil
 }
@@ -1330,7 +1383,7 @@ func setInterfaceIPv4(name string, ip, mask net.IP) error {
 	if err != nil {
 		return fmt.Errorf("open control socket for %s: %w", name, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	ifr, err := unix.NewIfreq(name)
 	if err != nil {
 		return fmt.Errorf("prepare address request for %s: %w", name, err)
@@ -1359,7 +1412,7 @@ func setInterfaceUp(name string) error {
 	if err != nil {
 		return fmt.Errorf("open control socket for %s: %w", name, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	ifr, err := unix.NewIfreq(name)
 	if err != nil {
 		return fmt.Errorf("prepare flags request for %s: %w", name, err)
@@ -1411,7 +1464,7 @@ func sendNetlinkRequest(req []byte, seq uint32, action string) error {
 	if err != nil {
 		return fmt.Errorf("%s: open netlink socket: %w", action, err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	if err := unix.Bind(fd, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return fmt.Errorf("%s: bind netlink socket: %w", action, err)
 	}
@@ -1515,7 +1568,7 @@ func bringUpLoopback() error {
 	if err != nil {
 		return fmt.Errorf("open control socket for loopback: %w", err)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	ifr, err := unix.NewIfreq("lo")
 	if err != nil {
 		return fmt.Errorf("prepare loopback interface request: %w", err)
@@ -1559,7 +1612,7 @@ func serveTCPVsockBridge(listener net.Listener, port uint32) {
 }
 
 func proxyTCPToHostVsock(conn net.Conn, port uint32) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	fd, err := dialHostVsock(port, 10*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect vsock bridge port %d: %v\n", port, err)
@@ -1570,7 +1623,7 @@ func proxyTCPToHostVsock(conn net.Conn, port uint32) {
 		_ = unix.Close(fd)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	done := make(chan struct{}, 2)
 	go func() {
 		_, _ = io.Copy(file, conn)
@@ -1604,14 +1657,14 @@ func proxyHostVsockToGuestTCP(fd int, guestPort uint16) {
 		_ = unix.Close(fd)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	target, conn, err := dialGuestTCP(guestPort, 10*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "connect guest tcp port %d: %v\n", guestPort, err)
 		return
 	}
 	log.Printf("microagent-init: host forward connected guest tcp %s", target)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	done := make(chan struct{}, 2)
 	go func() {
 		if _, err := io.Copy(file, conn); err != nil {
@@ -1795,7 +1848,7 @@ func sendResult(port uint32, res result) error {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	defer unix.Close(fd)
+	defer func() { _ = unix.Close(fd) }()
 	data, err := json.Marshal(res)
 	if err != nil {
 		return err
