@@ -11,8 +11,6 @@ on:
     # Nightly smoke against main (06:47 UTC), offset from live-linux-parity.
     - cron: "47 6 * * *"
   push:
-    branches:
-      - probe-windows-hyperv
     # Always gate release candidates and releases.
     tags:
       - "v*"

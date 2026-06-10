@@ -5,6 +5,12 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Live Windows Hyper-V smokes now run in CI on GitHub-hosted runners
+  (nightly, on release tags, and on demand): hosted windows-latest runners
+  ship with the Hyper-V role active, so the parity smokes no longer depend on
+  a self-hosted runner. The workflow installs the default guest kernel via
+  `microagent kernel install`; its previous failures were a workflow-file
+  validation error, now caught statically by a new actionlint step in CI.
 - `doctor` now verifies that unprivileged user namespace creation actually
   works by running a live `CLONE_NEWUSER` probe instead of trusting the
   classic userns sysctls alone. On hosts where AppArmor blocks the clone
