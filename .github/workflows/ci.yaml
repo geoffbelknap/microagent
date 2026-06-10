@@ -27,8 +27,10 @@ jobs:
       - name: Test Go
         run: go test ./...
 
-      - name: Vet Go
-        run: go vet ./...
+      - name: Lint Go
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
 
       - name: Race test Go
         run: go test -race ./...

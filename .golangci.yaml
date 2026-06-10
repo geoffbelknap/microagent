@@ -1,0 +1,51 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # Standard set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - misspell
+    - unconvert
+    - nolintlint
+  settings:
+    staticcheck:
+      checks:
+        - all
+        # QF* are optional refactor suggestions, not correctness issues.
+        - -QF1001
+        - -QF1003
+        # Renaming the windows_hyperv package is not worth the churn.
+        - -ST1003
+        # Exported-identifier doc comments are tracked as follow-up work.
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+    errcheck:
+      exclude-functions:
+        # CLI/diagnostic output to stdio; failures are not actionable.
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        # Best-effort cleanup paths.
+        - (io.Closer).Close
+        - os.Remove
+        - os.RemoveAll
+  exclusions:
+    rules:
+      # Test helpers commonly ignore cleanup errors.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # Callers live in *_windows.go files that are not compiled on the
+      # lint host, so cross-platform unused detection false-positives here.
+      - path: pkg/supervisors/windows_hyperv/
+        linters:
+          - unused
+
+formatters:
+  enable:
+    - gofmt
