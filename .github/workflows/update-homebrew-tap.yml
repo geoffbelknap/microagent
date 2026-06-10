@@ -4,22 +4,68 @@ on:
   release:
     types:
       - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: microagent release tag, for example v0.1.46-rc.3
+        required: true
+
+permissions:
+  contents: read
 
 jobs:
-  dispatch:
+  update-formula:
     runs-on: ubuntu-latest
     steps:
-      - name: Notify homebrew tap
+      # Same Homebrew GitHub App as the agency repo. Fails loudly when the
+      # app credentials are missing — a silent skip here previously let
+      # releases ship without the tap ever updating.
+      - name: Generate Homebrew tap token
+        id: app-token
+        uses: actions/create-github-app-token@v3.1.1
+        with:
+          client-id: ${{ secrets.HOMEBREW_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+
+      - name: Checkout tap
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up git
+        run: |
+          git config user.name "microagent-release[bot]"
+          git config user.email "microagent-release[bot]@users.noreply.github.com"
+
+      - name: Bump formula
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "HOMEBREW_TAP_TOKEN is not configured; skipping homebrew tap update" >&2
-            exit 0
-          fi
-          gh api repos/geoffbelknap/homebrew-tap/dispatches \
-            --method POST \
-            --field event_type=microagent-release \
-            --raw-field client_payload="{\"tag\":\"${TAG}\"}"
+          case "$TAG" in
+            *-rc*) formula=microagent-rc.rb ;;
+            *)     formula=microagent.rb ;;
+          esac
+          version="${TAG#v}"
+          revision="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
+          python3 - "$formula" "$version" "$revision" <<'PY'
+          import re
+          import sys
+
+          formula, version, revision = sys.argv[1:]
+          with open(formula) as fh:
+              text = fh.read()
+          text, n_rev = re.subn(r'revision: "[0-9a-f]{40}"', f'revision: "{revision}"', text)
+          text, n_ver = re.subn(r'\n  version "[^"]+"', f'\n  version "{version}"', text)
+          if n_rev != 1 or n_ver != 1:
+              raise SystemExit(f"expected exactly one revision and one version in {formula}, got {n_rev}/{n_ver}")
+          with open(formula, "w") as fh:
+              fh.write(text)
+          PY
+          git add "$formula"
+          git commit -m "microagent: update ${formula%.rb} to ${TAG}"
+          git push
