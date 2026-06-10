@@ -187,12 +187,7 @@ func healthApplicable(opts Options) bool {
 }
 
 func backendSupportsStructuredExec(backend string) bool {
-	switch backend {
-	case vmkit.BackendFirecracker, vmkit.BackendAppleVF:
-		return true
-	default:
-		return false
-	}
+	return vmkit.BackendCapabilities(backend).StructuredExec
 }
 
 // healthTracker holds the consecutive-failure state for one supervised run. It

@@ -5,6 +5,12 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Centralized backend differences in a declarative `vmkit.BackendCapabilities`
+  table (structured exec, live network apply, rootfs format, runtime-state
+  ownership, detached-start style, shell transport and probing, block-device
+  naming). The workspace layer now consults capabilities instead of branching
+  on backend constants; unknown backends get zero capabilities (fail closed).
+  No behavior change for existing backends.
 - Workspace dispatch errors now preserve the underlying error chain, so Go
   library callers can use `errors.Is`/`errors.As` (for example to reach the
   supervisor's `*exec.ExitError`). Error message text is unchanged.

@@ -741,7 +741,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 }
 
 func WorkspaceRootfsFormat(backend string) string {
-	if backend == vmkit.BackendWindowsHyperV {
+	if vmkit.BackendCapabilities(backend).VHDRootfs {
 		return rootfs.FormatVHD
 	}
 	return rootfs.FormatExt4
@@ -1267,7 +1267,7 @@ func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.
 }
 
 func backendOwnsRuntimeState(backend string) bool {
-	return backend == vmkit.BackendFirecracker || backend == vmkit.BackendWindowsHyperV
+	return vmkit.BackendCapabilities(backend).OwnsRuntimeState
 }
 
 func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
@@ -1281,7 +1281,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		}
 		return Dispatch(dispatchCtx, opts, req)
 	}
-	if opts.Backend != vmkit.BackendAppleVF {
+	if !vmkit.BackendCapabilities(opts.Backend).DetachedHostSupervisor {
 		return Dispatch(context.Background(), opts, req)
 	}
 	if err := requireReadableFile(opts.KernelPath, "kernel"); err != nil {
@@ -1342,12 +1342,10 @@ func requireReadableFile(path, name string) error {
 }
 
 func detachedSupervisorCommand(backend string) string {
-	switch backend {
-	case vmkit.BackendFirecracker, vmkit.BackendWindowsHyperV:
-		return "start"
-	default:
-		return "run"
+	if command := vmkit.BackendCapabilities(backend).DetachedStartCommand; command != "" {
+		return command
 	}
+	return "run"
 }
 
 func WriteProcessState(opts Options, req vmkit.Request, state vmkit.VMState, pid int, errorText string) error {
@@ -1557,7 +1555,7 @@ func ShellReadinessSignalWithMode(ctx context.Context, state RuntimeState, probe
 		}
 		return vmkit.ReadinessSignal{}, false
 	}
-	if state.Event.Identity.Backend != vmkit.BackendWindowsHyperV && state.Config.ShellPort != 0 {
+	if vmkit.BackendCapabilities(state.Event.Identity.Backend).ShellReadinessProbe && state.Config.ShellPort != 0 {
 		target, err := ConsoleTarget(state.Event.Identity.RuntimeID, state)
 		if err != nil {
 			return vmkit.ReadinessSignal{Ready: false, Error: err.Error()}, true
