@@ -51,7 +51,7 @@ func (err cliExitError) Error() string {
 }
 
 func runStructuredExec(ctx context.Context, args []string, stdout *os.File, stderr io.Writer) error {
-	if len(args) == 0 || wantsHelp(args) {
+	if len(args) == 0 || execWantsHelp(args) {
 		printExecHelp(stdout)
 		return nil
 	}
@@ -205,6 +205,19 @@ func runStreamingExec(ctx context.Context, opts workspace.Options, req execproto
 		return cliExitError{Code: exitCode, Silent: true}
 	}
 	return nil
+}
+
+// execWantsHelp reports whether the CLI-side exec arguments ask for help.
+// Everything after the "--" separator is the guest command's argv and must
+// never trigger CLI help (exec ws -- psql -h x runs psql, it does not print
+// usage).
+func execWantsHelp(args []string) bool {
+	for i, arg := range args {
+		if arg == "--" {
+			return wantsHelp(args[:i])
+		}
+	}
+	return wantsHelp(args)
 }
 
 func splitExecArgs(args []string) ([]string, []string, error) {
