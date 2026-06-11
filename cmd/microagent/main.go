@@ -2826,6 +2826,23 @@ func runSupervise(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	// Re-pair the manifest's model before every supervised boot, like the
+	// start handler does for a single boot: a policy-driven restart must come
+	// back with a live runner and MICROAGENT_MODEL_URL working, not silently
+	// unpaired. The release func is ignored for the same reason as start —
+	// the holder is dropped by the next lifecycle verb.
+	opts.BeforeStart = func(ctx context.Context, wsOpts *workspaceOptions) error {
+		manifest, err := workspace.ReadManifest(opts.StateDir, opts.Name)
+		if err != nil || strings.TrimSpace(manifest.Model) == "" {
+			return nil
+		}
+		release, err := ensureModelPairing(ctx, wsOpts, manifest.Model, "")
+		if err != nil {
+			return err
+		}
+		_ = release
+		return nil
+	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	result, err := workspace.Supervise(ctx, opts)
@@ -2897,59 +2914,6 @@ func runSuperviseUnit(name, stateDir string, uninstall bool, stdout *os.File) er
 
 func superviseWorkspace(ctx context.Context, opts superviseOptions) (superviseResult, error) {
 	return workspace.Supervise(ctx, opts)
-}
-
-func superviseWorkspaceOptions(ctx context.Context, opts superviseOptions) (workspaceOptions, error) {
-	workspaceOpts := workspaceOptions{
-		Name:           opts.Name,
-		Backend:        opts.Backend,
-		Architecture:   opts.Architecture,
-		KernelPath:     opts.KernelPath,
-		KernelExplicit: opts.KernelExplicit,
-		StateDir:       opts.StateDir,
-		SupervisorPath: opts.SupervisorPath,
-		Profile:        defaultWorkspaceProfile,
-		RestartPolicy:  defaultRestartPolicy,
-		Network:        vmkit.NetworkConfig{Mode: defaultNetworkMode},
-		MemoryMiB:      defaultWorkspaceMemoryMiB,
-		CPUCount:       defaultWorkspaceCPUCount,
-		SizeMiB:        rootfs.DefaultSizeMiB,
-		ResultPort:     workspace.DefaultResultPort,
-		SerialInput:    backendSupportsConsoleInput(opts.Backend),
-	}
-	manifest, err := readWorkspaceManifest(opts.StateDir, opts.Name)
-	if err != nil {
-		return workspaceOptions{}, err
-	}
-	if manifest.Profile != "" {
-		workspaceOpts.Profile = manifest.Profile
-	}
-	workspaceOpts.RestartPolicy = normalizeRestartPolicy(manifest.Restart)
-	if manifest.Network.Mode != "" || manifest.Network.Interface != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" {
-		workspaceOpts.Network = networkConfigFromSpec(manifest.Network)
-	}
-	if manifest.Resources.MemoryMiB != 0 {
-		workspaceOpts.MemoryMiB = manifest.Resources.MemoryMiB
-	}
-	if manifest.Resources.CPUCount != 0 {
-		workspaceOpts.CPUCount = manifest.Resources.CPUCount
-	}
-	if manifest.Resources.SizeMiB != 0 {
-		workspaceOpts.SizeMiB = manifest.Resources.SizeMiB
-	}
-	workspaceOpts.Disks = manifest.Disks
-	workspaceOpts.Mediation = manifest.Mediation
-	if err := validateRestartPolicy(workspaceOpts.RestartPolicy); err != nil {
-		return workspaceOptions{}, err
-	}
-	rootfsPath := filepath.Join(opts.StateDir, "workspaces", opts.Name, "rootfs.ext4")
-	if _, err := os.Stat(rootfsPath); err != nil {
-		return workspaceOptions{}, err
-	}
-	if err := ensureWorkspaceKernel(ctx, &workspaceOpts); err != nil {
-		return workspaceOptions{}, err
-	}
-	return workspaceOpts, nil
 }
 
 func shouldRestartWorkspace(policy string, state vmkit.VMState) bool {
@@ -3505,10 +3469,6 @@ func normalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
 
 func networkSpecFromConfig(network vmkit.NetworkConfig) networkSpec {
 	return workspace.NetworkSpecFromConfig(network)
-}
-
-func networkConfigFromSpec(spec networkSpec) vmkit.NetworkConfig {
-	return workspace.NetworkConfigFromSpec(spec)
 }
 
 func workspaceArtifactsFromOptions(opts workspaceOptions) workspaceArtifacts {

@@ -3681,47 +3681,6 @@ func TestStatusReportsMediationReadiness(t *testing.T) {
 	}
 }
 
-func TestSuperviseWorkspaceOptionsUseManifestPolicy(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	rootfsPath := workspace.WorkspaceRootfsPath(dir, "research", vmkit.BackendAppleVF)
-	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	kernelPath := filepath.Join(dir, "Image")
-	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := writeWorkspaceManifest(workspaceOptions{
-		StateDir:      dir,
-		Name:          "research",
-		Profile:       "medium",
-		RestartPolicy: "on-failure",
-		MemoryMiB:     2048,
-		CPUCount:      2,
-		SizeMiB:       8192,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	opts, err := superviseWorkspaceOptions(t.Context(), superviseOptions{
-		StateDir:       dir,
-		Name:           "research",
-		Backend:        vmkit.BackendAppleVF,
-		Architecture:   "arm64",
-		KernelPath:     kernelPath,
-		KernelExplicit: true,
-		SupervisorPath: "/tmp/supervisor",
-	})
-	if err != nil {
-		t.Fatalf("superviseWorkspaceOptions: %v", err)
-	}
-	if opts.RestartPolicy != "on-failure" || opts.MemoryMiB != 2048 || opts.CPUCount != 2 {
-		t.Fatalf("opts = %#v", opts)
-	}
-}
-
 func TestSuperviseWorkspaceSkipsNeverPolicy(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {

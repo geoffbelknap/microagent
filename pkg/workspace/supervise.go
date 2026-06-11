@@ -19,6 +19,12 @@ type SuperviseOptions struct {
 	Name           string
 	Interval       time.Duration
 	MaxRestarts    int
+	// BeforeStart, when set, runs before every supervised boot — the initial
+	// start and each policy-driven restart. It lets the caller re-establish
+	// host-side pairings the boot depends on (the CLI re-pairs the manifest's
+	// model runner here) and mutate the boot options accordingly. An error is
+	// treated as a failed start and follows the restart policy.
+	BeforeStart func(ctx context.Context, opts *Options) error
 }
 
 type SuperviseResult struct {
@@ -40,7 +46,14 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 	}
 	result := SuperviseResult{Workspace: opts.Name, Policy: policy}
 	for {
-		startResult, err := Start(ctx, workspaceOpts)
+		var startResult Result
+		err := error(nil)
+		if opts.BeforeStart != nil {
+			err = opts.BeforeStart(ctx, &workspaceOpts)
+		}
+		if err == nil {
+			startResult, err = Start(ctx, workspaceOpts)
+		}
 		if err != nil {
 			result.FinalState = string(vmkit.StateFailed)
 			writeSuperviseStartFailure(workspaceOpts, err)
