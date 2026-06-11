@@ -113,7 +113,11 @@ required_features = {
     "snapshot/pause/resume": ["snapshot", "pause", "resume"],
     "model": ["model"],
     "perf": ["perf"],
-    "serve mcp": ["serve mcp"],
+    # serve mcp is intentionally not advertised in top-level help (see
+    # docs/cli/serve.md): it is an MCP client launch entry point, not an
+    # interactive command. The mcp-stdio/mcp-lifecycle scenarios cover it.
+    "serve mcp": [],
+    "serve mcp lifecycle": [],
     "AX/text output": [],
     "Windows Hyper-V": [],
 }
