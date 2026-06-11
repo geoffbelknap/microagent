@@ -94,7 +94,16 @@ func TestFirecrackerSupervisorPathFromExecutableResolvesLibexec(t *testing.T) {
 	if err := os.WriteFile(supervisor, []byte("supervisor"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := FirecrackerSupervisorPathFromExecutable(executable); got != supervisor {
+	got := FirecrackerSupervisorPathFromExecutable(executable)
+	gotReal, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReal, err := filepath.EvalSymlinks(supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotReal != wantReal {
 		t.Fatalf("FirecrackerSupervisorPathFromExecutable() = %q, want %q", got, supervisor)
 	}
 }
