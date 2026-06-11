@@ -153,8 +153,8 @@ been cut into a release yet.
   `retries` consecutive failures the wedged VM is force-killed and the restart
   policy (`on-failure`/`always`) restarts it. Closes the gap where supervise
   only restarted on exit, not on alive-but-wedged.
-- Added `microagent init <name>` to scaffold a starter agent project — a
-  `microagent.yaml` spec, a provider-specific `agent.py` (Anthropic, OpenAI, or
+- Added `microagent init <name>` to scaffold a starter agent body project — a
+  `microagent.yaml` spec, a provider-specific `body.py` (Anthropic, OpenAI, or
   Gemini via `--provider`), the shared `protocol.py`, and a runnable demo
   request. Fails closed on existing files unless `--force`. Backed by the new
   `pkg/scaffold` package.
