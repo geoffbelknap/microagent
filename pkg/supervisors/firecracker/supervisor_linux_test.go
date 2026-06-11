@@ -1671,6 +1671,81 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	}
 }
 
+func TestSnapshotCreateKeepsRuntimeConfigPorts(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := snapshotSourceRequest(t, dir)
+	req.Config.ShellPort = 24279
+	req.Config.ExecPort = 25279
+	req.Config.GuestShellPort = 22001
+	req.Config.GuestExecPort = 42001
+	req.Config.SecretsControlPort = 1028
+	req.Config.ModelGuestPort = 11434
+	req.Config.ModelVsockPort = 62100
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	withFakeVMController(t, &fakeVMController{})
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "snapshot",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+		Tag:      "snap-1",
+	})
+	if err != nil {
+		t.Fatalf("snapshot: resp=%+v err=%v", resp, err)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Config.ShellPort != 24279 || state.Config.ExecPort != 25279 {
+		t.Fatalf("snapshot dropped shell/exec ports from runtime config: %#v", state.Config)
+	}
+	if state.Config.GuestShellPort != 22001 || state.Config.GuestExecPort != 42001 {
+		t.Fatalf("snapshot dropped guest shell/exec ports: %#v", state.Config)
+	}
+	if state.Config.SecretsControlPort != 1028 {
+		t.Fatalf("snapshot dropped secrets control port: %#v", state.Config)
+	}
+	if state.Config.ModelGuestPort != 11434 || state.Config.ModelVsockPort != 62100 {
+		t.Fatalf("snapshot dropped model pairing ports: %#v", state.Config)
+	}
+}
+
+func TestPauseResumeKeepsRuntimeConfigPorts(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := pauseResumeRequest(dir)
+	req.Config.ShellPort = 24279
+	req.Config.ExecPort = 25279
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	withFakeVMController(t, &fakeVMController{})
+
+	for _, command := range []string{"pause", "resume"} {
+		resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+			Command:  command,
+			Identity: req.Identity,
+			Config:   &vmkit.Config{StateDir: dir},
+		})
+		if err != nil {
+			t.Fatalf("%s: resp=%+v err=%v", command, resp, err)
+		}
+		state, err := readRuntimeState(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Config.ShellPort != 24279 || state.Config.ExecPort != 25279 {
+			t.Fatalf("%s dropped shell/exec ports from runtime config: %#v", command, state.Config)
+		}
+	}
+}
+
 func TestSnapshotCreateInPlaceWhenAlreadyPaused(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
