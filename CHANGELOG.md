@@ -5,6 +5,10 @@ been cut into a release yet.
 
 ## Unreleased
 
+- Local builds now report the latest stable version plus the source SHA, for
+  example `0.1.46-8780315-dirty`, so they are easy to distinguish from stable
+  Homebrew builds.
+
 ## v0.1.46 - 2026-06-10
 
 - Retired the `microagent-rc` Homebrew formula. Only stable releases ship to

@@ -944,7 +944,30 @@ func FirecrackerSupervisorPath(opts Options) string {
 	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER_SUPERVISOR")); path != "" {
 		return path
 	}
+	if executable, err := os.Executable(); err == nil {
+		path := FirecrackerSupervisorPathFromExecutable(executable)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
 	return "microagent-firecracker-supervisor"
+}
+
+func FirecrackerSupervisorPathFromExecutable(executable string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	dir := filepath.Dir(executable)
+	candidates := []string{
+		filepath.Join(dir, "microagent-firecracker-supervisor"),
+		filepath.Join(filepath.Clean(filepath.Join(dir, "..", "libexec")), "microagent-firecracker-supervisor"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return candidates[0]
 }
 
 func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {

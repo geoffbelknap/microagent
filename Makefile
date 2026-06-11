@@ -1,6 +1,45 @@
 UNAME_S := $(shell uname -s)
+PREFIX ?= $(HOME)/.local
+INSTALL_KERNEL ?= 1
+DOWNLOAD_FIRECRACKER ?= 1
+FIRECRACKER_VERSION ?= v1.16.0
+FIRECRACKER_SHA256 ?=
+INSTALL_HOST_PACKAGES ?= 1
+CHECK ?= 1
+QUIET ?= 1
+ARCH ?=
+FIRECRACKER ?=
 
-.PHONY: fmt lint test-race test dev-build smoke smoke-contract smoke-rootfs smoke-microagent-e2e smoke-microagent-public-surface smoke-microagent-lifecycle-matrix smoke-microagent-networking smoke-microagent-mediation smoke-microagent-supervise smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
+INSTALL_ARGS := --prefix $(PREFIX)
+ifneq ($(ARCH),)
+INSTALL_ARGS += --arch $(ARCH)
+endif
+ifneq ($(FIRECRACKER),)
+INSTALL_ARGS += --firecracker $(FIRECRACKER)
+else ifeq ($(DOWNLOAD_FIRECRACKER),0)
+INSTALL_ARGS += --no-download-firecracker
+else
+INSTALL_ARGS += --download-firecracker --firecracker-version $(FIRECRACKER_VERSION)
+ifneq ($(FIRECRACKER_SHA256),)
+INSTALL_ARGS += --firecracker-sha256 $(FIRECRACKER_SHA256)
+endif
+endif
+ifneq ($(INSTALL_KERNEL),0)
+INSTALL_ARGS += --install-kernel
+endif
+ifneq ($(INSTALL_HOST_PACKAGES),0)
+INSTALL_ARGS += --install-host-packages
+else
+INSTALL_ARGS += --no-install-host-packages
+endif
+ifeq ($(CHECK),0)
+INSTALL_ARGS += --no-check
+endif
+ifeq ($(QUIET),1)
+INSTALL_ARGS += --quiet
+endif
+
+.PHONY: fmt lint test-race test dev dev-build install smoke smoke-contract smoke-rootfs smoke-microagent-e2e smoke-microagent-public-surface smoke-microagent-lifecycle-matrix smoke-microagent-networking smoke-microagent-mediation smoke-microagent-supervise smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
 
 fmt:
 	gofmt -w cmd pkg supervisors
@@ -19,6 +58,12 @@ endif
 
 dev-build:
 	scripts/dev/build-local.sh
+
+dev:
+	@scripts/dev/dev.sh
+
+install:
+	@scripts/install-from-source.sh $(INSTALL_ARGS)
 
 smoke: test
 ifeq ($(UNAME_S),Darwin)

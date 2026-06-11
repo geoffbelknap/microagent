@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"syscall"
@@ -68,6 +69,31 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	}
 }
 
+func TestMCPInitializeEchoesSupportedRequestedProtocolVersion(t *testing.T) {
+	input := bytes.NewBuffer(nil)
+	input.Write(encodeMCPTestMessage(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "initialize",
+		"params":  map[string]any{"protocolVersion": "2025-03-26"},
+	}))
+	var output bytes.Buffer
+	if err := serveMCP(context.Background(), input, &output); err != nil {
+		t.Fatalf("serveMCP: %v", err)
+	}
+	responses := decodeMCPTestResponses(t, output.Bytes())
+	if len(responses) != 1 {
+		t.Fatalf("responses = %d, want 1", len(responses))
+	}
+	result, ok := responses[0]["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("initialize result = %#v", responses[0]["result"])
+	}
+	if got := result["protocolVersion"]; got != "2025-03-26" {
+		t.Fatalf("protocolVersion = %#v, want 2025-03-26", got)
+	}
+}
+
 func TestRunServeMCPAllowsNonInteractiveStdio(t *testing.T) {
 	input := bytes.NewBuffer(nil)
 	input.Write(encodeMCPTestMessage(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "initialize"}))
@@ -81,6 +107,114 @@ func TestRunServeMCPAllowsNonInteractiveStdio(t *testing.T) {
 	}
 	if responses[0]["result"] == nil {
 		t.Fatalf("initialize response missing result: %#v", responses[0])
+	}
+}
+
+func TestMCPRawJSONStdioInitializeAndToolsList(t *testing.T) {
+	input := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+`)
+	var output bytes.Buffer
+	if err := serveMCP(context.Background(), input, &output); err != nil {
+		t.Fatalf("serveMCP: %v", err)
+	}
+	decoder := json.NewDecoder(&output)
+	var initResp map[string]any
+	if err := decoder.Decode(&initResp); err != nil {
+		t.Fatalf("decode initialize response: %v\n%s", err, output.String())
+	}
+	result, ok := initResp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("initialize result = %#v", initResp["result"])
+	}
+	if got := result["protocolVersion"]; got != "2025-06-18" {
+		t.Fatalf("protocolVersion = %#v, want 2025-06-18", got)
+	}
+	var toolsResp map[string]any
+	if err := decoder.Decode(&toolsResp); err != nil {
+		t.Fatalf("decode tools/list response: %v\n%s", err, output.String())
+	}
+	result, ok = toolsResp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/list result = %#v", toolsResp["result"])
+	}
+	tools, ok := result["tools"].([]any)
+	if !ok || len(tools) == 0 {
+		t.Fatalf("tools = %#v, want non-empty list", result["tools"])
+	}
+	if strings.Contains(output.String(), "Content-Length:") {
+		t.Fatalf("raw JSON response used Content-Length framing:\n%s", output.String())
+	}
+}
+
+func TestMCPToolSchemasDoNotEmitNullRequired(t *testing.T) {
+	for _, tool := range mcpTools() {
+		schema, ok := tool["inputSchema"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s inputSchema = %#v", tool["name"], tool["inputSchema"])
+		}
+		required, ok := schema["required"]
+		if !ok {
+			continue
+		}
+		if _, ok := required.([]string); !ok {
+			t.Fatalf("%s required = %#v, want string slice or omitted", tool["name"], required)
+		}
+	}
+}
+
+func TestPrintServeMCPHelpPointsToClientSetup(t *testing.T) {
+	var output bytes.Buffer
+	printServeMCPHelp(&output)
+	got := output.String()
+	for _, want := range []string{
+		"not an interactive",
+		"Codex: codex mcp add microagent -- microagent serve mcp",
+		"Claude Code: claude mcp add --transport stdio --scope user microagent -- microagent serve mcp",
+		`stdio server named "microagent"`,
+		"command: microagent",
+		`args: ["serve", "mcp"]`,
+		"docs/cli/serve.md#configure-mcp-clients",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestPrintServeHelpTreatsMCPAsClientIntegration(t *testing.T) {
+	readFile, writeFile, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readFile.Close()
+	printServeHelp(writeFile)
+	if err := writeFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := io.ReadAll(readFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "model               Serve a local HuggingFace GGUF model") {
+		t.Fatalf("serve help missing model command:\n%s", got)
+	}
+	if strings.Contains(got, "mcp                 ") {
+		t.Fatalf("serve help advertises mcp as a normal command:\n%s", got)
+	}
+	if !strings.Contains(got, "MCP clients can launch") {
+		t.Fatalf("serve help missing MCP integration note:\n%s", got)
+	}
+}
+
+func TestRunServeModelAliasesModelServe(t *testing.T) {
+	err := runServe(context.Background(), []string{"model"}, nil)
+	if err == nil {
+		t.Fatal("runServe model without ref succeeded, want usage error")
+	}
+	if !strings.Contains(err.Error(), "usage: microagent model serve <hf-ref>") {
+		t.Fatalf("runServe model error = %q", err)
 	}
 }
 

@@ -78,8 +78,9 @@ This repository owns the VM pieces:
 - Before fresh live runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to
   identify preserved stale state. Delete only after confirming the candidates
   are test-owned and safe.
-- Do not put transient test-run notes in `docs/`; anything in `docs/` becomes
-  part of the docs site. Use Notion or another tracking system for run notes.
+- Do not put internal docs or transient test-run notes in `docs/`; anything in
+  `docs/` becomes part of the public docs site. Keep internal docs outside the
+  public repository.
 - When command output, flags, runtime semantics, or operator workflows change,
   update README/docs and run `python3 scripts/dev/markdown-link-check.py` and
   `python3 scripts/dev/docs-last-updated.py --check` and

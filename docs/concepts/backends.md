@@ -4,7 +4,7 @@ description: One backend per host OS. Same lifecycle surface, different mechanic
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-10_
 
 microagent installs with one backend for the host OS: Firecracker on Linux,
 Apple VF on macOS, and experimental Windows Hyper-V on Windows. The CLI does
@@ -136,5 +136,5 @@ open-source ad-hoc builds should fail closed with the
 `com.apple.vm.networking` restriction named unless the supervisor is signed with
 Apple's restricted entitlement.
 
-Keep one-off run logs and investigation notes out of `docs/`; update the
-Notion task or another tracker with run evidence instead.
+Keep one-off run logs and investigation notes out of `docs/`; update an
+external tracker with run evidence instead.

@@ -76,6 +76,38 @@ func TestWindowsHyperVSupportsConsoleInput(t *testing.T) {
 	}
 }
 
+func TestFirecrackerSupervisorPathFromExecutableResolvesLibexec(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	libexec := filepath.Join(dir, "libexec")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(libexec, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(bin, "microagent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := filepath.Join(libexec, "microagent-firecracker-supervisor")
+	if err := os.WriteFile(supervisor, []byte("supervisor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got := FirecrackerSupervisorPathFromExecutable(executable)
+	gotReal, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReal, err := filepath.EvalSymlinks(supervisor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotReal != wantReal {
+		t.Fatalf("FirecrackerSupervisorPathFromExecutable() = %q, want %q", got, supervisor)
+	}
+}
+
 func TestShellPortCanBeExplicit(t *testing.T) {
 	opts := Options{Name: "agent-1", ShellPort: 25000}
 	if got := ShellPort(opts); got != 25000 {

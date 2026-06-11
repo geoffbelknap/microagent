@@ -1999,6 +1999,10 @@ func runModelPrune(args []string, stdout *os.File) error {
 }
 
 func runModelServe(args []string, stdout *os.File) error {
+	if wantsHelp(args) {
+		printModelServeHelp(stdout)
+		return nil
+	}
 	stateDir := defaultStateDir()
 	fs := flag.NewFlagSet("model serve", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -2044,6 +2048,19 @@ func runModelServe(args []string, stdout *os.File) error {
 	}
 	fmt.Fprintf(stdout, "Serving %s on %s:%d (pid %d)\n", runner.ModelRef, runner.Host, runner.Port, runner.PID)
 	return nil
+}
+
+func printModelServeHelp(stdout io.Writer) {
+	fmt.Fprint(stdout, `microagent model serve <hf-ref>
+microagent serve model <hf-ref>
+
+Start or reuse a pinned host llama-server process for a HuggingFace GGUF model.
+
+Options:
+  --dedicated          Start a dedicated runner instead of sharing one
+  --token <t>          HuggingFace token for auto-pull
+  --state-dir <dir>    State directory
+`)
 }
 
 func runModelStop(args []string, stdout *os.File) error {
@@ -6236,7 +6253,7 @@ Commands:
   images               List or prune local image records
   prune                Prune stale local records and optional image cache files
   perf                 Measure workspace performance
-  serve mcp            Serve the MCP stdio endpoint
+  serve model          Serve a local HuggingFace GGUF model
   halt                 Halt a workspace and preserve disk state
   quarantine           Sever host-side network and mediation
   pause                Pause a running workspace, freezing vCPUs with memory and disk preserved

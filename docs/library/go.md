@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-11_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -201,6 +201,10 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
 | `workspace.ReadManifest` / `workspace.WriteManifest` | Manage workspace manifests directly |
 
+Installers and embedding programs that need to mirror packaged resolution can
+use `workspace.FirecrackerSupervisorPathFromExecutable` to derive the Linux
+supervisor companion path from a `bin/microagent` executable.
+
 Console helpers return `workspace.WorkspaceNotFoundError` when the requested
 workspace has no runtime or event state. Use `errors.Is` to classify missing
 workspaces separately from stopped, halted, or quarantined workspaces.
@@ -332,7 +336,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent commit` / `microagent images push` | `commit.Commit` / `commit.Push` |
 | `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
-| `microagent model` | `model.Pull` / `model.List` / `model.Remove` / `model.Prune` |
+| `microagent model` | `model.Pull` / `model.List` / `model.Remove` / `model.Prune` / `modelrunner.Ensure` |
 | `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |
 | `microagent doctor` / `microagent host` | [`diagnostics.Check`](#diagnostics-api) |
@@ -344,6 +348,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent perf` / `microagent perf boot` / `microagent perf footprint` / `microagent perf steady` | `perf.Boot` / `Footprint` / `Steady` |
 | `microagent profiles` | `workspace.ProfileNames` / `workspace.LookupProfile` |
 | `microagent serve mcp` | CLI-only MCP stdio transport over the existing package APIs |
+| `microagent serve model` | Alias for `microagent model serve` / `modelrunner.Ensure` |
 | `microagent version` | CLI-only build metadata output |
 | `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |
 

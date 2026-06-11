@@ -421,10 +421,7 @@ func ResolveFirecrackerSupervisorPath(opts Options) (string, error) {
 }
 
 func DefaultFirecrackerSupervisorPathFromExecutable(executable string) string {
-	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
-		executable = resolved
-	}
-	return filepath.Join(filepath.Dir(executable), "microagent-firecracker-supervisor")
+	return workspace.FirecrackerSupervisorPathFromExecutable(executable)
 }
 
 func ResolveGuestInitPath(opts Options) (string, error) {

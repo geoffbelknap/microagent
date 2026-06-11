@@ -39,6 +39,7 @@ NESTED_HELP_COMMANDS = {
     "perf footprint",
     "perf steady",
     "serve mcp",
+    "serve model",
     "secret check",
 }
 PUBLIC_GO_PACKAGES = {

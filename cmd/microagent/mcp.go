@@ -25,6 +25,19 @@ var mcpIdempotencyCache sync.Map
 
 var mcpWorkspaceExec = workspace.ExecWithMetadata
 
+const mcpClientSetupMessage = `microagent serve mcp is launched by MCP clients over stdio; it is not an interactive shell command.
+
+Add it as a stdio MCP server in your client config. For example:
+  Codex: codex mcp add microagent -- microagent serve mcp
+  Claude Code: claude mcp add --transport stdio --scope user microagent -- microagent serve mcp
+
+For JSON-based clients, configure a stdio server named "microagent":
+  command: microagent
+  args: ["serve", "mcp"]
+
+Client-specific examples: docs/cli/serve.md#configure-mcp-clients
+`
+
 func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printServeHelp(stdout)
@@ -33,8 +46,10 @@ func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	switch args[0] {
 	case "mcp":
 		return runServeMCP(ctx, args[1:], os.Stdin, stdout)
+	case "model":
+		return runModelServe(args[1:], stdout)
 	default:
-		return fmt.Errorf("unknown serve command: %s", args[0])
+		return fmt.Errorf("unknown serve command: %s\n\nAvailable serve command: model\nMCP clients can launch: microagent serve mcp", args[0])
 	}
 }
 
@@ -47,7 +62,7 @@ func runServeMCP(ctx context.Context, args []string, stdin io.Reader, stdout io.
 		return fmt.Errorf("usage: microagent serve mcp")
 	}
 	if mcpStdioIsInteractive(stdin, stdout) {
-		return fmt.Errorf("microagent serve mcp uses MCP stdio and runs in the foreground under an MCP client; configure the client to launch this command instead of running it interactively")
+		return fmt.Errorf("%s", strings.TrimSpace(mcpClientSetupMessage))
 	}
 	globalOutputMode = outputModeAX
 	return serveMCP(ctx, stdin, stdout)
@@ -60,7 +75,7 @@ func mcpStdioIsInteractive(stdin io.Reader, stdout io.Writer) bool {
 }
 
 func serveMCP(ctx context.Context, stdin io.Reader, stdout io.Writer) error {
-	server := mcpStdioServer{in: bufio.NewReader(stdin), out: stdout}
+	server := &mcpStdioServer{in: bufio.NewReader(stdin), out: stdout}
 	for {
 		select {
 		case <-ctx.Done():
@@ -85,11 +100,34 @@ func serveMCP(ctx context.Context, stdin io.Reader, stdout io.Writer) error {
 }
 
 type mcpStdioServer struct {
-	in  *bufio.Reader
-	out io.Writer
+	in      *bufio.Reader
+	out     io.Writer
+	framing mcpStdioFraming
+	decoder *json.Decoder
 }
 
-func (s mcpStdioServer) readMessage() (json.RawMessage, error) {
+type mcpStdioFraming int
+
+const (
+	mcpStdioFramingUnknown mcpStdioFraming = iota
+	mcpStdioFramingHeader
+	mcpStdioFramingRawJSON
+)
+
+func (s *mcpStdioServer) readMessage() (json.RawMessage, error) {
+	if s.framing == mcpStdioFramingRawJSON {
+		return s.readRawJSONMessage()
+	}
+	first, err := s.in.Peek(1)
+	if err != nil {
+		return nil, err
+	}
+	if first[0] == '{' || first[0] == '[' {
+		s.framing = mcpStdioFramingRawJSON
+		s.decoder = json.NewDecoder(s.in)
+		return s.readRawJSONMessage()
+	}
+	s.framing = mcpStdioFramingHeader
 	var contentLength int
 	for {
 		line, err := s.in.ReadString('\n')
@@ -122,9 +160,24 @@ func (s mcpStdioServer) readMessage() (json.RawMessage, error) {
 	return json.RawMessage(msg), nil
 }
 
-func (s mcpStdioServer) writeMessage(value any) error {
+func (s *mcpStdioServer) readRawJSONMessage() (json.RawMessage, error) {
+	if s.decoder == nil {
+		s.decoder = json.NewDecoder(s.in)
+	}
+	var msg json.RawMessage
+	if err := s.decoder.Decode(&msg); err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+func (s *mcpStdioServer) writeMessage(value any) error {
 	data, err := json.Marshal(value)
 	if err != nil {
+		return err
+	}
+	if s.framing == mcpStdioFramingRawJSON {
+		_, err = fmt.Fprintf(s.out, "%s\n", data)
 		return err
 	}
 	_, err = fmt.Fprintf(s.out, "Content-Length: %d\r\n\r\n%s", len(data), data)
@@ -136,6 +189,10 @@ type mcpRequest struct {
 	ID      any             `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+type mcpInitializeParams struct {
+	ProtocolVersion string `json:"protocolVersion"`
 }
 
 type mcpResponse struct {
@@ -186,7 +243,7 @@ func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bo
 	}
 	switch req.Method {
 	case "initialize":
-		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpInitializeResult()}, true
+		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: mcpInitializeResult(req.Params)}, true
 	case "tools/list":
 		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": mcpTools()}}, true
 	case "tools/call":
@@ -200,9 +257,11 @@ func handleMCPMessage(ctx context.Context, msg json.RawMessage) (mcpResponse, bo
 	}
 }
 
-func mcpInitializeResult() map[string]any {
+var mcpSupportedProtocolVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
+
+func mcpInitializeResult(params json.RawMessage) map[string]any {
 	return map[string]any{
-		"protocolVersion": "2025-06-18",
+		"protocolVersion": mcpProtocolVersion(params),
 		"capabilities": map[string]any{
 			"tools": map[string]any{},
 		},
@@ -211,6 +270,22 @@ func mcpInitializeResult() map[string]any {
 			"version": version,
 		},
 	}
+}
+
+func mcpProtocolVersion(params json.RawMessage) string {
+	requested := ""
+	if len(params) > 0 {
+		var initParams mcpInitializeParams
+		if err := json.Unmarshal(params, &initParams); err == nil {
+			requested = initParams.ProtocolVersion
+		}
+	}
+	for _, supported := range mcpSupportedProtocolVersions {
+		if requested == supported {
+			return requested
+		}
+	}
+	return mcpSupportedProtocolVersions[0]
 }
 
 func mcpTools() []map[string]any {
@@ -289,15 +364,18 @@ func mcpTool(name, description string, required []string, properties map[string]
 		properties["idempotency_key"] = map[string]any{"type": "string"}
 	}
 	properties["principal"] = principalContextSchema()
+	inputSchema := map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"additionalProperties": true,
+	}
+	if len(required) > 0 {
+		inputSchema["required"] = required
+	}
 	return map[string]any{
 		"name":        name,
 		"description": description,
-		"inputSchema": map[string]any{
-			"type":                 "object",
-			"properties":           properties,
-			"required":             required,
-			"additionalProperties": true,
-		},
+		"inputSchema": inputSchema,
 	}
 }
 
@@ -1527,7 +1605,10 @@ func printServeHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent serve
 
 Commands:
-  mcp                 Serve the microagent MCP stdio endpoint
+  model               Serve a local HuggingFace GGUF model
+
+MCP clients can launch `+"`microagent serve mcp`"+` as a stdio server. See:
+docs/cli/serve.md#configure-mcp-clients
 `)
 }
 
@@ -1536,8 +1617,17 @@ func printServeMCPHelp(stdout io.Writer) {
 
 Serve the microagent MCP stdio endpoint.
 
-This command is a foreground stdio transport for MCP clients. Configure the
-client to launch it as the MCP server command; do not run it as a background
-daemon from an interactive shell.
+This command is launched by MCP clients over stdio. It is not an interactive
+shell command.
+
+Add it as a stdio MCP server in your client config. For example:
+  Codex: codex mcp add microagent -- microagent serve mcp
+  Claude Code: claude mcp add --transport stdio --scope user microagent -- microagent serve mcp
+
+For JSON-based clients, configure a stdio server named "microagent":
+  command: microagent
+  args: ["serve", "mcp"]
+
+Client-specific examples: docs/cli/serve.md#configure-mcp-clients
 `)
 }

@@ -4,7 +4,7 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-09_
+_Last updated: 2026-06-11_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]
@@ -12,6 +12,7 @@ microagent model ls [--state-dir <dir>]
 microagent model rm <ref> [--keep-files] [--state-dir <dir>]
 microagent model prune [--delete-files] [--state-dir <dir>]
 microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]
+microagent serve model <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]
 microagent model stop <hf-ref> [--state-dir <dir>]
 microagent model runners [--state-dir <dir>]
 ```
@@ -40,6 +41,8 @@ manage long-running `llama-server` processes on the host.
 `rm` is also available as `remove` and `delete`.
 
 `runners` is also available as `ps` (within the `model` subcommand).
+
+`microagent serve model ...` is an alias for `microagent model serve ...`.
 
 ## HuggingFace ref forms
 

@@ -4,20 +4,27 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-11_
 
 ```text
 microagent serve mcp
+microagent serve model <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]
 ```
 
-`serve` starts long-running machine-readable endpoints for agent clients. The
-current endpoint is `mcp`, which serves the MicroAgent MCP stdio transport from
-the main `microagent` binary.
+`serve` starts long-running local services from the main `microagent` binary.
+The user-facing command is `serve model`, which starts a host-local
+OpenAI-compatible GGUF model server.
 
-`microagent serve mcp` is a foreground stdio transport. Configure an MCP client
-to launch it as the server command; do not run it as a background daemon from an
-interactive shell. When started directly from a terminal, the command exits with
-an explanatory error instead of waiting for protocol frames on stdin.
+`microagent serve mcp` exists as an MCP client integration entry point. It is a
+foreground stdio transport that a client launches as a subprocess; it is not a
+normal interactive CLI command and is intentionally not advertised in top-level
+help. When started directly from a terminal, the command exits with setup
+guidance instead of waiting for protocol frames on stdin.
+
+`microagent serve model` is an alias for `microagent model serve`. It starts or
+reuses a pinned host `llama-server` process for a HuggingFace GGUF model ref,
+auto-pulling the model first if needed. See [`microagent model`](model.md) for
+model ref forms, runner flags, and cleanup commands.
 
 The MCP server automatically uses AX output mode. It exposes structured tools
 for workspace lifecycle, inspection, results, stats, logs, events, snapshots,
@@ -37,24 +44,28 @@ server, then verify the host backend there:
 microagent doctor
 ```
 
-For every stdio MCP client, configure the MicroAgent server as this local
-command:
+For every stdio MCP client, add MicroAgent as a local stdio MCP server:
 
 ```text
 command: microagent
 args: ["serve", "mcp"]
 ```
 
-If the client is a GUI app or a remote editor session that does not inherit your
-shell `PATH`, use the absolute path from `command -v microagent` as the
-`command` value. Do not configure `microagent serve mcp` as an HTTP/SSE server
-or background daemon; the MCP client must start it as a foreground stdio
-process.
+That snippet belongs in your MCP client's server configuration. If the client
+is a GUI app or a remote editor session that does not inherit your shell
+`PATH`, use the absolute path from `command -v microagent` as the `command`
+value. Do not configure `microagent serve mcp` as an HTTP/SSE server or
+background daemon; the MCP client must start it as a foreground stdio process.
 
 For long-running operations such as image pulls, rootfs builds, and VM
 lifecycle calls, raise the client's MCP tool timeout when the client supports
 one. MicroAgent tools use `~/.microagent/` by default; most tools also accept a
 `state_dir` argument when a caller needs an explicit state root.
+
+The examples below intentionally show the client configuration instead of a
+MicroAgent installer command. MCP clients store settings in different files,
+support different timeout fields, and may run locally, remotely, or inside an
+editor profile. The reliable installation contract is the stdio command above.
 
 ### Codex
 
@@ -93,6 +104,8 @@ project root:
 }
 ```
 
+For a project-shared server, use `--scope project` instead of `--scope user`.
+
 ### VS Code
 
 For a workspace configuration, create `.vscode/mcp.json`:
@@ -109,9 +122,37 @@ For a workspace configuration, create `.vscode/mcp.json`:
 }
 ```
 
+You can also add the user-profile server from a shell where `microagent` is on
+`PATH`:
+
+```bash
+code --add-mcp '{"name":"microagent","command":"microagent","args":["serve","mcp"]}'
+```
+
 If VS Code is connected to a remote machine and you want MicroAgent to run
 there, define the server in the remote workspace or remote user MCP
 configuration.
+
+### GitHub Copilot CLI
+
+Add MicroAgent to `~/.copilot/mcp-config.json`:
+
+```json
+{
+  "mcpServers": {
+    "microagent": {
+      "type": "local",
+      "command": "microagent",
+      "args": ["serve", "mcp"],
+      "env": {},
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+If your Copilot CLI session does not inherit the same `PATH` as your shell, use
+the absolute path from `command -v microagent` as the `command` value.
 
 ### Other MCP clients
 
@@ -134,7 +175,8 @@ the minimum shape is:
 
 | Command | Purpose |
 |---|---|
-| `mcp` | Serve the MicroAgent MCP stdio endpoint |
+| `mcp` | MCP client-launched stdio integration entry point |
+| `model` | Serve a local HuggingFace GGUF model |
 
 ## MCP tools
 
