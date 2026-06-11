@@ -1,13 +1,18 @@
 ---
 title: Boundaries
-description: What microagent owns, and what it deliberately leaves to the caller.
+description: Know what microagent owns and what your runtime must supply before you build on it.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
-`microagent` runs Linux workspaces inside microVMs. It stops at the VM
-boundary. The caller owns policy, identity, and intent.
+`microagent` runs Linux workspaces inside microVMs, and it stops at the VM
+boundary. Read this page before you design a runtime around it, so you know
+which problems are already solved and which ones your program must own.
+
+The split in one sentence: microagent supplies the substrate - kernel, rootfs
+conversion, VM lifecycle, state, and structured adapter surfaces - and your
+program supplies identity, policy, credentials, and intent.
 
 ## In this repo
 
@@ -35,9 +40,22 @@ boundary. The caller owns policy, identity, and intent.
 - Credentials and grants
 - Agent frameworks and user experience
 
-Your program supplies identity, bridge targets, policy, and intent. microagent
-supplies the kernel, rootfs conversion, VM state, VM commands, and structured
-adapter surfaces.
+## Identity, policy, and credentials stay outside
+
+microagent transports identity; it never mints or judges it. Every request
+carries an identity block that is recorded in state files and events (see
+[State and identity](/concepts/state-and-identity/)), but the meaning of a
+role, the decision to allow an action, and the authority behind it belong to
+your control plane.
+
+Tool mediation follows the same rule. The
+[mediation channel](/guides/agents-and-mediation/) gives the guest one
+declared path to your host control plane; your listener decides what each
+call may do. Secrets too: microagent [delivers them](/guides/secrets/)
+without persisting them, and your secret manager stays the source of truth.
+
+If a guide asks you to write a policy check, a host listener, or a credential
+fetch, that is the boundary working as designed - not a gap in the tool.
 
 ## Design rules
 

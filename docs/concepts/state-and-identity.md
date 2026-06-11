@@ -1,14 +1,17 @@
 ---
 title: State and identity
-description: Where workspace state lives and how identity flows through requests.
+description: Understand what status and lifecycle events report before you sequence work on them.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
-microagent reports VM state changes as JSON events. Every request carries
-an identity block; every response carries an event block describing the
-resulting state.
+Read this page to understand what microagent tells you about a workspace, and
+when you can act on it. Every request carries an identity block; every
+response carries a JSON event describing the resulting state; `status` adds
+[readiness signals](#readiness) so callers can sequence work without polling
+files or serial logs. [Keep a persistent workspace](/guides/persistent-workspaces/)
+walks the lifecycle these states describe from the operator's seat.
 
 ## Identity
 
@@ -75,8 +78,9 @@ hash checks for immutable runtime artifacts.
 
 ## Readiness
 
-Status responses include readiness signals so callers can sequence work without
-polling files or serial logs:
+Status responses include readiness signals - this is what
+[`microagent status`](/cli/status/) reports under `readiness` - so callers can
+sequence work without polling files or serial logs:
 
 - **`guestReady`** - the backend has concrete evidence that the guest reached
   a started runtime state. Backends do not have to treat a hypervisor process

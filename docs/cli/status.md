@@ -4,7 +4,7 @@ description: Show the current state of a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -115,4 +115,5 @@ the readiness, verification, and network blocks:
 ## Related
 
 - [`ps`](/cli/ps/) for a list view
-- [State and identity](/concepts/state-and-identity/)
+- [State and identity](/concepts/state-and-identity/), including the full
+  [readiness semantics](/concepts/state-and-identity/#readiness)

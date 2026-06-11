@@ -1,45 +1,48 @@
 ---
 title: Architecture
-description: How the Go library, CLI, and backend supervisors fit together.
+description: Understand how the CLI, Go library, and supervisors fit before embedding or extending microagent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
-`microagent` is a Go library with a CLI adapter. The library packages handle
-workspace lifecycle, rootfs builds, kernel management, image cache management,
-diagnostics, shared request/response types, structured exec, readiness, and
-backend supervisor dispatch. The CLI has human output for operators and
-[AX output](/concepts/glossary/) for agent clients. The MCP stdio endpoint is an adapter over the same
-package surface, not a second runtime. Each host OS uses one backend.
+There are three ways to drive microagent - the CLI, the Go library, and the
+MCP server - and all three sit on the same Go packages. The CLI is a thin
+adapter with human output and [AX output](/concepts/glossary/) for agent
+clients; the MCP stdio endpoint is another adapter over the same packages,
+not a second runtime. Each host OS uses one backend. This page maps which
+piece owns what, so you can pick an entry point and know where to dig in.
 
 ```text
-your orchestrator
+your orchestrator (shell, MCP client, or Go program)
   └─ microagent Go packages
-       ├─ workspace lifecycle, readiness, exec, artifacts, logs, network, supervision
-       ├─ rootfs, kernel, image cache, diagnostics
-       └─ vmkit supervisor dispatch
+       ├─ pkg/workspace ─ workspace lifecycle and exec
+       ├─ pkg/rootfs · pkg/kernel · pkg/imagecache · pkg/diagnostics
+       └─ pkg/vmkit ─ supervisor dispatch
             └─ backend supervisor
                  ├─ Firecracker supervisor (Linux, Go JSON exec)
                  ├─ Apple VF supervisor (macOS, Swift JSON exec)
                  └─ Windows Hyper-V supervisor (Windows, Go JSON exec, experimental)
 
-OCI image ──► pkg/rootfs ──► ext4 disk ──► VM
+OCI image ──► pkg/rootfs ──► ext4 disk ──► microVM
 ```
 
 ## Pieces
 
-`cmd/microagent` parses flags, calls the Go packages, and renders human UX
-output, JSON output, or AX output for agent clients. `microagent serve mcp`
-adds the stdio MCP adapter for workspace lifecycle, inspect/status, structured
-exec, images, copy/artifacts, cost estimation, and capability discovery.
+Each package exists to answer one question.
 
-`pkg/workspace` handles lifecycle, manifests, state, results, readiness,
-structured exec, artifacts, logs, network, file copy, clone, and optional
-supervision. The supporting packages are deliberately small: `pkg/kernel`
-manages default kernels, `pkg/imagecache` manages reusable rootfs baselines
-and backs the `images` CLI surface, `pkg/diagnostics` checks host support, `pkg/vmkit` defines the shared
-request/response shape, and `pkg/rootfs` turns OCI images into ext4 disks.
+`cmd/microagent` is the CLI: it parses flags, calls the packages, and renders
+human, JSON, or AX output. `microagent serve mcp` adds the stdio MCP adapter
+so MCP clients drive the same package surface as tools - see
+[Serve microagent over MCP](/guides/mcp-server/).
+
+`pkg/workspace` owns what a workspace *is* - its manifest, disks, identity,
+and results - and everything you do to a running one. The supporting packages
+stay deliberately small. `pkg/rootfs` turns an OCI image into a bootable ext4
+disk. `pkg/kernel` manages default kernels. `pkg/imagecache` keeps reusable
+rootfs baselines and backs the `images` CLI surface. `pkg/diagnostics` powers
+`microagent doctor`. `pkg/vmkit` defines the request/response shape every
+supervisor speaks.
 
 Linux callers can import `pkg/supervisors/firecracker` directly when they do
 not want a subprocess. The executable supervisors still matter:
@@ -62,9 +65,11 @@ and runs `--setup` / `--exec`.
 7. On `--keep`, the workspace stays. Otherwise the workspace API cleans up
    local state.
 
-Go callers can use the same package flow directly without invoking the CLI.
-See the [library overview](/library/) for the recommended entry points and
-the [Go library reference](/library/go/) for the exported package surface.
+[Run one-shot commands](/guides/one-shot-runs/) walks this flow from the
+operator's seat. Go callers can use the same package flow directly without
+invoking the CLI: see the [library overview](/library/) for the recommended
+entry points and the [Go library reference](/library/go/) for the exported
+package surface.
 
 ## Why supervisors are separate executables
 

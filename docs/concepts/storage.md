@@ -1,15 +1,18 @@
 ---
 title: Storage
-description: Rootfs, attached disks, tar bundles, and managed named volumes.
+description: Choose between the rootfs, attached disks, tar bundles, and named volumes.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
 A workspace sees block devices, never host directories. microagent does not
-expose host bind mounts — everything the guest reads or writes is an ext4 disk
-image or the rootfs. This keeps the host filesystem outside the workspace
-boundary by construction.
+expose host bind mounts - everything the guest reads or writes is an ext4
+disk image or the rootfs - which keeps the host filesystem outside the
+workspace boundary by construction. This page maps every way data gets into,
+out of, and between workspaces, and which to pick. For the hands-on
+walkthrough of these mechanisms, see
+[Use volumes and move data](/guides/volumes-and-data/).
 
 ## The rootfs
 
@@ -34,7 +37,7 @@ the spec's `disks`/`bundles`):
 A bare name (no path separator or extension) is a **named volume**; a path
 ending in `.tar`/`.tar.gz`/`.tgz` is a **bundle**; a path ending in
 `.ext4`/`.img` is a raw **disk image**. Host directories are rejected with
-guidance — package a directory as a tar for ingress, or use
+guidance - package a directory as a tar for ingress, or use
 [`cp`](/cli/cp/) against a stopped workspace.
 
 ## Named volumes
@@ -54,7 +57,7 @@ workspace holds it at a time, so two VMs never mount the same ext4 read-write. A
 holder that is no longer running is reclaimed automatically, and deleting a
 workspace releases the volumes it held; the data persists for the next attach.
 
-This is deliberately not the Docker volume model — there is no daemon, no volume
+This is deliberately not the Docker volume model - there is no daemon, no volume
 drivers, and no concurrent sharing between workspaces. It is a managed disk that
 maps cleanly onto microVM semantics.
 
@@ -66,7 +69,8 @@ natural handoff: write results to it in one workspace, attach it to another.
 
 ## See also
 
-- [`microagent volume`](/cli/volume/) — manage named volumes
-- [`microagent.yaml`](/cli/spec/) — declarative `disks` and `bundles`
-- [`microagent cp`](/cli/cp/) — stopped-workspace file transfer
-- [Boundaries](/concepts/boundaries/) — why host directories stay outside
+- [Use volumes and move data](/guides/volumes-and-data/) - the hands-on walkthrough
+- [`microagent volume`](/cli/volume/) - manage named volumes
+- [`microagent.yaml`](/cli/spec/) - declarative `disks` and `bundles`
+- [`microagent cp`](/cli/cp/) - stopped-workspace file transfer
+- [Boundaries](/concepts/boundaries/) - why host directories stay outside
