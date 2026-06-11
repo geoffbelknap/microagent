@@ -18,6 +18,7 @@ SCENARIOS=(
   "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all:none"
   "text-output:scripts/dev/microagent-e2e-text-output.sh:all:none"
   "init:scripts/dev/microagent-e2e-init.sh:all:none"
+  "mcp-lifecycle:scripts/dev/microagent-e2e-mcp-lifecycle.sh:all:vm"
   "survive-reboot:scripts/dev/microagent-e2e-survive-reboot.sh:all:vm"
   "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all:vm"
   "lifecycle-deep:scripts/dev/microagent-e2e-lifecycle.sh:all:vm"
@@ -52,6 +53,7 @@ SCENARIO_COVERAGE=(
   "contract|portable|none|runtime contract, synthetic state/result/artifacts"
   "help-usage|portable|none|help, usage errors, unsupported container-style flags"
   "mcp-stdio|portable|none|serve mcp, initialize, tools/list, ping, describe"
+  "mcp-lifecycle|backend-neutral|firecracker,apple-vf|serve mcp workspace create/start/exec/halt/delete with CLI parity"
   "registry-auth|portable|none|registry credentials and private OCI pull auth"
   "text-output|portable|none|human output mode for stable public CLI surfaces"
   "init|portable|none|init scaffold, providers, --force, generated spec validation"
@@ -113,6 +115,7 @@ E2E_MATRIX=(
   "model|backend-neutral|firecracker,apple-vf|model-serving|Model store and run --model vsock pairing"
   "perf|backend-neutral|firecracker,apple-vf|public-surface|Boot/steady/footprint surfaces where host supports sampling"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
+  "serve mcp lifecycle|backend-neutral|firecracker,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
   "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix|Contract boundary exists; practical E2E lane is not implemented"
 )
@@ -135,6 +138,8 @@ Scenarios:
                     compatibility checks
   help-usage        CLI help output and invalid invocation usage errors
   mcp-stdio         MCP stdio initialize/tools/list/tool-call smoke
+  mcp-lifecycle     Workspace create/start/exec/halt/delete driven through MCP
+                    tool calls against a real microVM, with CLI parity checks
   registry-auth     Standard registry credential discovery against a
                     local private OCI registry
   text-output       Human/text output mode for stable public CLI surfaces
