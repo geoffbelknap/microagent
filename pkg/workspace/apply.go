@@ -107,7 +107,7 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 	opts.ServiceCommand = manifest.Service
 	opts.ConsoleShell = manifest.ConsoleShell
 	opts.Hostname = manifest.Hostname
-	opts.Model = manifest.Model
+	opts.Model = strings.TrimSpace(manifest.Model)
 	opts.Mediation = manifest.Mediation
 	opts.Disks = manifest.Disks
 	if len(manifest.Secrets) > 0 {

@@ -1936,21 +1936,22 @@ func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
 
 func TestEnsureModelPairingNoModelIsNoOp(t *testing.T) {
 	opts := workspaceOptions{Name: "ws", StateDir: t.TempDir()}
-	canonical, release, err := ensureModelPairing(context.Background(), &opts, "", "")
+	release, err := ensureModelPairing(context.Background(), &opts, "", "")
 	if err != nil {
 		t.Fatalf("ensureModelPairing: %v", err)
 	}
-	if canonical != "" || release != nil {
-		t.Fatalf("no-op pairing returned canonical=%q release-non-nil=%t", canonical, release != nil)
+	if release == nil {
+		t.Fatal("no-op pairing must return a non-nil release func")
 	}
-	if opts.ModelTarget != "" || opts.Env != nil {
-		t.Fatalf("opts mutated without a model: target=%q env=%#v", opts.ModelTarget, opts.Env)
+	release()
+	if opts.Model != "" || opts.ModelTarget != "" || opts.Env != nil {
+		t.Fatalf("opts mutated without a model: model=%q target=%q env=%#v", opts.Model, opts.ModelTarget, opts.Env)
 	}
 }
 
 func TestEnsureModelPairingRejectsInvalidRef(t *testing.T) {
 	opts := workspaceOptions{Name: "ws", StateDir: t.TempDir()}
-	if _, _, err := ensureModelPairing(context.Background(), &opts, "not-a-ref", ""); err == nil {
+	if _, err := ensureModelPairing(context.Background(), &opts, "not-a-ref", ""); err == nil {
 		t.Fatal("ensureModelPairing accepted an invalid model ref")
 	}
 }

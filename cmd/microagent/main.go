@@ -666,14 +666,11 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	}
 
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
-	canonicalRef, releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
+	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
 	if err != nil {
 		return err
 	}
-	if releaseModel != nil {
-		defer releaseModel()
-	}
-	opts.Model = canonicalRef
+	defer releaseModel()
 
 	result, err := workspace.Run(ctx, opts)
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
@@ -684,13 +681,13 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 
 // ensureModelPairing resolves modelRefRaw, pulls the blob if it is missing from
 // the store, ensures a host model runner holding opts.Name, and wires
-// opts.ModelTarget plus the guest model env. It returns the canonical model ref
-// and a release func that drops the holder (both zero when modelRefRaw is
+// opts.Model (canonical ref), opts.ModelTarget, and the guest model env. It
+// returns a release func that drops the holder (a no-op when modelRefRaw is
 // empty). Callers that outlive the boot (start) ignore the release func; the
 // holder is then dropped by the next lifecycle verb.
-func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw, modelToken string) (string, func(), error) {
+func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw, modelToken string) (func(), error) {
 	if strings.TrimSpace(modelRefRaw) == "" {
-		return "", nil, nil
+		return func() {}, nil
 	}
 	if modelToken == "" {
 		if v := os.Getenv("HF_TOKEN"); v != "" {
@@ -701,19 +698,19 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 	}
 	canonical, _, err := model.Resolve(modelRefRaw)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	rec, err := model.Find(opts.StateDir, canonical)
 	if err != nil {
 		// Not in the store — auto-pull (one-shot convenience).
 		rec, err = model.Pull(ctx, model.PullOptions{StateDir: opts.StateDir, ModelRef: modelRefRaw, Token: modelToken})
 		if err != nil {
-			return "", nil, fmt.Errorf("pull model %s: %w", modelRefRaw, err)
+			return nil, fmt.Errorf("pull model %s: %w", modelRefRaw, err)
 		}
 	}
 	binPath, err := modelrunner.ResolveLlamaServerPath()
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	runner, err := modelrunner.Ensure(ctx, modelrunner.EnsureOptions{
 		StateDir:     opts.StateDir,
@@ -724,9 +721,10 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 		ReadyTimeout: 120 * time.Second,
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("start model runner: %w", err)
+		return nil, fmt.Errorf("start model runner: %w", err)
 	}
 	// Activate pairing on the workspace options.
+	opts.Model = rec.ModelRef
 	opts.ModelTarget = fmt.Sprintf("%s:%d", runner.Host, runner.Port)
 	if opts.Env == nil {
 		opts.Env = map[string]string{}
@@ -735,7 +733,7 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 	opts.Env["MICROAGENT_MODEL_URL"] = modelURL
 	opts.Env["OPENAI_BASE_URL"] = modelURL
 	stateDir, modelRef, holder := opts.StateDir, rec.ModelRef, opts.Name
-	return rec.ModelRef, func() { _ = modelrunner.Release(stateDir, modelRef, holder) }, nil
+	return func() { _ = modelrunner.Release(stateDir, modelRef, holder) }, nil
 }
 
 // pendingModelRelease captures the workspace's paired model ref now (delete
@@ -745,8 +743,11 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 // verb.
 func pendingModelRelease(stateDir, name string) func() {
 	manifest, err := workspace.ReadManifest(stateDir, name)
+	if err != nil {
+		return func() {}
+	}
 	modelRef := strings.TrimSpace(manifest.Model)
-	if err != nil || modelRef == "" {
+	if modelRef == "" {
 		return func() {}
 	}
 	return func() { _ = modelrunner.Release(stateDir, modelRef, name) }
@@ -2715,13 +2716,16 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	}
 	opts.VsockListeners = listeners
 	// Re-pair with the manifest's model for this boot (auto-pulls a missing
-	// blob, like run). Start is detached, so no release here: the holder is
-	// dropped by the next lifecycle verb (halt/stop/kill/delete). A manifest
-	// read error is tolerated; workspace.Start surfaces it properly.
+	// blob, like run). Start is detached, so the release func is intentionally
+	// ignored: the holder is dropped by the next lifecycle verb
+	// (halt/stop/kill/delete). A manifest read error is tolerated;
+	// workspace.Start surfaces it properly.
 	if manifest, err := workspace.ReadManifest(opts.StateDir, opts.Name); err == nil && strings.TrimSpace(manifest.Model) != "" {
-		if _, _, err := ensureModelPairing(ctx, &opts, manifest.Model, ""); err != nil {
+		release, err := ensureModelPairing(ctx, &opts, manifest.Model, "")
+		if err != nil {
 			return err
 		}
+		_ = release
 	}
 	result, err := workspace.Start(ctx, opts)
 	if err != nil && result.Workspace == "" {
@@ -2998,14 +3002,11 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	// in the manifest; every start re-pairs from it. The setup boot's holder is
 	// released when create returns (the workspace is left halted).
 	modelToken, _ := flagValue(args, "model-token")
-	canonicalRef, releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
+	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
 	if err != nil {
 		return err
 	}
-	if releaseModel != nil {
-		defer releaseModel()
-	}
-	opts.Model = canonicalRef
+	defer releaseModel()
 	result, err := workspace.Create(ctx, opts)
 	if err != nil && result.Workspace == "" {
 		return err

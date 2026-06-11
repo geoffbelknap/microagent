@@ -186,16 +186,32 @@ if [ -z "$CANONICAL" ]; then
 fi
 echo "microagent-e2e-model: start re-paired $WS with $CANONICAL"
 
+# exec_is_ready: read status JSON on stdin; exit 0 iff readiness.execReady.ready.
+exec_is_ready() {
+  python3 -c '
+import json, sys
+try:
+    doc = json.load(sys.stdin) or {}
+except ValueError:
+    sys.exit(1)
+ready = ((doc.get("readiness") or {}).get("execReady") or {}).get("ready")
+sys.exit(0 if ready is True else 1)
+'
+}
+
 # Wait for the guest exec service, then prove env + bridge from inside the guest.
 exec_ready=0
 for _ in $(seq 1 60); do
-  if "$CLI" --json status "$WS" "${CTRL_FLAGS[@]}" 2>/dev/null | grep -A2 '"execReady"' | grep -q '"ready": true'; then
+  if "$CLI" --json status "$WS" "${CTRL_FLAGS[@]}" 2>/dev/null | exec_is_ready; then
     exec_ready=1
     break
   fi
   sleep 1
 done
-[ "$exec_ready" -eq 1 ] || fail "workspace exec service did not become ready"
+if [ "$exec_ready" -ne 1 ]; then
+  "$CLI" --json status "$WS" "${CTRL_FLAGS[@]}" >&2 || true
+  fail "workspace exec service did not become ready"
+fi
 
 # shellcheck disable=SC2016
 WS_GUEST='echo "WS_MODEL_URL=$MICROAGENT_MODEL_URL"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/models"); case "$R" in *object*|*data*) echo "WS_MODELS: $R"; exit 0;; esac; sleep 1; done; echo "WS_FAIL: model unreachable from guest"; exit 1'
