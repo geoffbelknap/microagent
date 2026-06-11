@@ -102,8 +102,8 @@ OCI image so their init config is baked into the rootfs.
 
 For private registries, image pulls read standard registry credential
 configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
-including configured credential helpers. MicroAgent uses those credentials for
-pulls and does not write registry login state.
+including configured credential helpers. Pulls use those credentials;
+microagent does not write registry login state.
 
 ## Flags
 

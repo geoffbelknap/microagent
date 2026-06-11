@@ -10,7 +10,7 @@ _Last updated: 2026-06-11_
 [smallest useful Go program](/getting-started/library/first-program/). This
 page is the package reference.*
 
-## Common patterns
+## The common pattern
 
 Most programs want exactly this: boot a microVM from an OCI image, run a
 command inside it, read the output. `workspace.Run` does all of it in one
@@ -178,7 +178,7 @@ control named workspaces without parsing CLI flags.
 `workspace.DefaultOptions()` picks the host backend (Firecracker on Linux,
 Apple Virtualization.framework on macOS), guest architecture, default kernel
 path, and default state directory. You override only what your program needs.
-The [common patterns](#common-patterns) example at the top of this page shows
+The [common pattern](#the-common-pattern) example at the top of this page shows
 the canonical `DefaultOptions` + `Run` call.
 
 `Result.Result` is a `*GuestResult` with `Stdout`, `Stderr`, and `ExitCode`

@@ -76,7 +76,7 @@ The complete set:
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
-For private registries, MicroAgent reads standard registry credential
+For private registries, microagent reads standard registry credential
 configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
 including configured credential helpers. It does not store registry
 credentials.

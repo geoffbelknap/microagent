@@ -8,7 +8,7 @@ _Last updated: 2026-06-11_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
-Each symptom type has a tool that answers it fastest: host problems (missing KVM, binaries, permissions) are [`doctor`](/cli/doctor/)'s job; boot problems and anything the guest printed are in [`logs`](/cli/logs/); questions about what state a workspace is in belong to [`status`](/cli/status/); and when you need the history of how it got there, read [`events`](/cli/events/).
+Each symptom type has a tool that answers it fastest: host problems (missing KVM, binaries, permissions) are [`doctor`](/cli/doctor/)'s job; boot problems and anything the guest printed are in [`logs`](/cli/logs/). Questions about what state a workspace is in belong to [`status`](/cli/status/), and when you need the history of how it got there, read [`events`](/cli/events/).
 
 This page is indexed by symptom - search for whatever you're seeing.
 

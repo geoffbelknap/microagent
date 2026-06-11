@@ -6,11 +6,11 @@ description: Run the Linux backend - process model, state files, networking, sna
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-If you run microagent on Linux, this is your backend - read this page when you
-need to know what the supervisor does on the host: which files it writes, how
-each network mode works, and what pause/resume and snapshots do underneath.
-The Firecracker backend uses the same executable supervisor protocol as Apple
-VF. The supervisor is packaged as `microagent-firecracker-supervisor`.
+Read this page when you need to know what the Firecracker supervisor - the
+Linux backend - does on the host: which files it writes, how each network mode
+works, and what pause/resume and snapshots do underneath. The Firecracker
+backend uses the same executable supervisor protocol as Apple VF. The
+supervisor is packaged as `microagent-firecracker-supervisor`.
 
 For the shared command list and response shape, see
 [Supervisor protocol](/protocol/). This page covers the Linux host behavior and

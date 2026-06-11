@@ -26,8 +26,10 @@ rootfs builds, kernel management, image records, diagnostics, and performance
 measurement all live in library code. The CLI is useful for humans and
 scripts, but it is not a separate product surface - it calls the same packages
 your Go program can import. The MCP endpoint follows the same rule: it adapts
-the existing package APIs for agent clients and does not add orchestration,
-policy, planning, or LLM behavior.
+the existing package APIs for agent clients, and orchestration, policy,
+planning, and LLM behavior stay with the caller - see
+[Boundaries](/concepts/boundaries/) for where microagent's responsibilities
+end.
 
 ## Main packages
 

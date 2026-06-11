@@ -71,7 +71,7 @@ server, then verify the host backend there:
 microagent doctor
 ```
 
-For every stdio MCP client, add MicroAgent as a local stdio MCP server:
+For every stdio MCP client, add microagent as a local stdio MCP server:
 
 ```text
 command: microagent
@@ -86,11 +86,11 @@ background daemon; the MCP client must start it as a foreground stdio process.
 
 For long-running operations such as image pulls, rootfs builds, and VM
 lifecycle calls, raise the client's MCP tool timeout when the client supports
-one. MicroAgent tools use `~/.microagent/` by default; most tools also accept a
+one. The microagent tools use `~/.microagent/` by default; most tools also accept a
 `state_dir` argument when a caller needs an explicit state root.
 
 The examples below intentionally show the client configuration instead of a
-MicroAgent installer command. MCP clients store settings in different files,
+microagent installer command. MCP clients store settings in different files,
 support different timeout fields, and may run locally, remotely, or inside an
 editor profile. The reliable installation contract is the stdio command above.
 
@@ -156,13 +156,13 @@ You can also add the user-profile server from a shell where `microagent` is on
 code --add-mcp '{"name":"microagent","command":"microagent","args":["serve","mcp"]}'
 ```
 
-If VS Code is connected to a remote machine and you want MicroAgent to run
+If VS Code is connected to a remote machine and you want microagent to run
 there, define the server in the remote workspace or remote user MCP
 configuration.
 
 ### GitHub Copilot CLI
 
-Add MicroAgent to `~/.copilot/mcp-config.json`:
+Add microagent to `~/.copilot/mcp-config.json`:
 
 ```json
 {

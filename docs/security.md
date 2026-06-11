@@ -25,11 +25,10 @@ That means:
   your workspaces boot - protect it like a binary on `PATH`, and verify
   before boots you care about.
 - The rootfs is whatever OCI image the caller specified. Pin by digest in
-  production. `microagent rootfs build` rejects mutable tag references
-  unless you pass `--allow-mutable`. A tag like `ubuntu:24.04` can resolve
-  to different content tomorrow and microagent will boot whatever it
-  resolves to - only a digest pin makes the workspace contents reproducible
-  and attestable.
+  production - a tag can resolve to different content tomorrow, and only a
+  digest pin makes the workspace contents reproducible and attestable.
+  `microagent rootfs build` rejects mutable tag references unless you pass
+  `--allow-mutable`.
 - `microagent --json status <name>` reports verification hashes for the image,
   kernel, rootfs, and injected init. Treat `verification.ok: false` as a stop
   sign until you understand the divergence. Tamper detection is available

@@ -69,7 +69,7 @@ trimmed example:
 }
 ```
 
-Container-style `-v` is intentionally narrow. MicroAgent accepts tar archives
+Container-style `-v` is intentionally narrow. It accepts tar archives
 as bundles and ext4 disk images as attached disks:
 
 ```bash
