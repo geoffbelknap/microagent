@@ -6,9 +6,11 @@ description: See what each host OS supports before you pick where to run microag
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-Read this page to know what running microagent on your OS gets you. There is
-one backend per host: Firecracker on Linux, Apple VF on macOS, and
-experimental Hyper-V on Windows. The CLI does not fall back to a cross-host
+microagent installs with one backend per host OS: Firecracker on Linux,
+Apple Virtualization.framework on macOS, and experimental Hyper-V on Windows.
+This page is the cross-platform picture - what each backend supports and what
+it needs from the host - so you can decide which OS to deploy on and check
+whether yours has what it needs. The CLI does not fall back to a cross-host
 default - if a request names a backend that does not match the installed host
 OS, microagent fails before it builds a rootfs or talks to a supervisor.
 
@@ -41,10 +43,12 @@ covered in [Networking](/concepts/networking/).
 ## Apple VF (macOS)
 
 - Uses Apple Virtualization.framework via the Swift executable supervisor,
-  packaged as `microagent-applevf-supervisor`. Override with `--supervisor`
-  or `MICROAGENT_APPLEVF_SUPERVISOR`.
+  packaged as `microagent-applevf-supervisor`. The supervisor runs one
+  invocation per request - there is no resident daemon process on macOS.
+  Override with `--supervisor` or `MICROAGENT_APPLEVF_SUPERVISOR`.
 - Supports interactive `connect` and `connect --send`.
-- Supports `nat`, `isolated`, and TCP `--publish`. Native bridged networking
+- Supports `user`, `nat`, `isolated`, and TCP `--publish` (`user` and `nat`
+  both use Apple's native NAT attachment). Native bridged networking
   is implemented, but public builds fail closed because Apple gates it behind
   the restricted `com.apple.vm.networking` entitlement.
 - The default arm64 kernel lives at

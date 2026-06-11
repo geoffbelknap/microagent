@@ -42,9 +42,10 @@ A handful of terms come up often enough that it's worth pinning them down before
 
 ## Lifecycle vocabulary
 
-These five words are not synonyms.
+These six words are not synonyms.
 
 - **halt** - clean disk-preserving shutdown. The VM exits, the disk stays. `start` boots the same disk back up.
+- **pause** - memory-state suspend, not a shutdown. Freezes a running workspace's vCPUs while preserving memory and disk; `resume` thaws it back to running exactly where it left off. Firecracker only; `exec`, `connect`, and `stats` are rejected while paused. Unlike `halt`, nothing is discarded and nothing reboots.
 - **stop** - graceful shutdown signal (SIGTERM on Firecracker, equivalent on Apple VF). If the VM hasn't exited after five seconds, `stop` marks the workspace `failed` and returns an error; it never escalates on its own - following up with `kill` is your move.
 - **kill** - hard terminate (SIGKILL or equivalent). For when `stop` doesn't return.
 - **quarantine** - sever host-side network and mediation while preserving disk and event history. The VM may still be running. A forensic state, not a normal stopped state - you must halt, stop, or kill it before you can `start` it again.

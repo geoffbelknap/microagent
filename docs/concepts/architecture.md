@@ -6,12 +6,12 @@ description: Understand how the CLI, Go library, and supervisors fit before embe
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-Read this page to choose how to drive microagent - the CLI, the Go library,
-or the MCP server - and to know which piece owns what when you need to dig
-in. All three entry points sit on the same Go packages. The CLI is a thin
+There are three ways to drive microagent - the CLI, the Go library, and the
+MCP server - and all three sit on the same Go packages. The CLI is a thin
 adapter with human output and [AX output](/concepts/glossary/) for agent
 clients; the MCP stdio endpoint is another adapter over the same packages,
-not a second runtime. Each host OS uses one backend.
+not a second runtime. Each host OS uses one backend. This page maps which
+piece owns what, so you can pick an entry point and know where to dig in.
 
 ```text
 your orchestrator (shell, MCP client, or Go program)
