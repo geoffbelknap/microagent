@@ -581,6 +581,12 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		return eventResponse(req, vmkit.StateRunning, ""), nil
 	}
 	waitErr := waitForeground(ctx, cmd, serialLogPath(opts), opts.Timeout)
+	// In detached user-network mode the outer start records companion PIDs
+	// (port forwarder, vsock listener) in runtime.json after boot, and this
+	// in-namespace foreground supervisor is the only process that observes the
+	// VM exit. Reap those host-side companions before the final state write
+	// below discards the recorded PIDs.
+	terminateRecordedCompanions(opts)
 	inputCloseErr := error(nil)
 	if serialInput != nil {
 		inputCloseErr = serialInput.Close()
@@ -776,30 +782,7 @@ func ensureCanDelete(opts Options) error {
 		if state.Event.State == vmkit.StateStarting || state.Event.State == vmkit.StateRunning {
 			return fmt.Errorf("firecracker workspace %s is running; stop or kill it before delete", opts.Name)
 		}
-		if state.PortForwardPID != 0 {
-			active, err := processActive(state.PortForwardPID)
-			if err != nil {
-				return err
-			}
-			if active {
-				return fmt.Errorf("firecracker workspace %s port forwarder is running; stop or kill it before delete", opts.Name)
-			}
-		}
-		if state.VsockListenerPID != 0 {
-			active, err := processActive(state.VsockListenerPID)
-			if err != nil {
-				return err
-			}
-			if active {
-				return fmt.Errorf("firecracker workspace %s vsock listener is running; stop or kill it before delete", opts.Name)
-			}
-		}
-		if active, err := userNetworkProcessActive(opts); err != nil {
-			return err
-		} else if active {
-			return fmt.Errorf("firecracker workspace %s user network process is running; stop or kill it before delete", opts.Name)
-		}
-		return nil
+		return ensureWorkspaceProcessesStopped(opts, state)
 	}
 	active, err := processActive(state.PID)
 	if err != nil {
@@ -807,6 +790,32 @@ func ensureCanDelete(opts Options) error {
 	}
 	if active {
 		return fmt.Errorf("firecracker workspace %s is running; stop or kill it before delete", opts.Name)
+	}
+	return ensureWorkspaceProcessesStopped(opts, state)
+}
+
+// ensureWorkspaceProcessesStopped rejects delete while any recorded companion
+// or user-network process for the workspace is still running, regardless of
+// whether the VM process itself is gone (a guest that exits on its own leaves
+// the VM dead but can leave companions behind).
+func ensureWorkspaceProcessesStopped(opts Options, state runtimeState) error {
+	if state.PortForwardPID != 0 {
+		active, err := processActive(state.PortForwardPID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return fmt.Errorf("firecracker workspace %s port forwarder is running; stop or kill it before delete", opts.Name)
+		}
+	}
+	if state.VsockListenerPID != 0 {
+		active, err := processActive(state.VsockListenerPID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return fmt.Errorf("firecracker workspace %s vsock listener is running; stop or kill it before delete", opts.Name)
+		}
 	}
 	if active, err := userNetworkProcessActive(opts); err != nil {
 		return err
@@ -2056,8 +2065,50 @@ func RunVsockListener(ctx context.Context, opts Options) error {
 		return err
 	}
 	defer set.Close()
-	<-ctx.Done()
+	watchWorkspaceRuntime(ctx, opts)
 	return ctx.Err()
+}
+
+// watchWorkspaceRuntime blocks until the workspace runtime indicates the
+// companion process should exit. Companions are daemonized and survive their
+// parent, so this poll is what bounds their lifetime to the VM's: when the
+// guest exits on its own, no lifecycle verb runs to reap them (ASK tenet 8:
+// operations are bounded, not unlimited by default).
+func watchWorkspaceRuntime(ctx context.Context, opts Options) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if companionShouldExit(opts) {
+				return
+			}
+		}
+	}
+}
+
+// companionShouldExit reports whether a companion process (port forwarder or
+// vsock listener) has outlived its workspace: the runtime state is gone
+// (deleted), the workspace reached a terminal state, or the recorded VM
+// process is no longer running.
+func companionShouldExit(opts Options) bool {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return true
+	}
+	switch state.Event.State {
+	case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused:
+	default:
+		return true
+	}
+	if state.PID != 0 {
+		if active, err := processActive(state.PID); err == nil && !active {
+			return true
+		}
+	}
+	return false
 }
 
 func RunPortForwarder(ctx context.Context, opts Options) error {
@@ -2090,7 +2141,7 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 		listeners = append(listeners, listener)
 		go servePortForward(listener, vsockSocketPath(opts), uint32(forward.GuestPort))
 	}
-	<-ctx.Done()
+	watchWorkspaceRuntime(ctx, opts)
 	for _, listener := range listeners {
 		_ = listener.Close()
 	}
@@ -2886,6 +2937,22 @@ func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) err
 			return ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}
+	}
+}
+
+// terminateRecordedCompanions kills any companion processes recorded in the
+// workspace runtime state. Only the recorded companion PIDs are touched; the
+// VM process entry is left alone.
+func terminateRecordedCompanions(opts Options) {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		return
+	}
+	if state.PortForwardPID != 0 {
+		terminateAuxProcess(state.PortForwardPID)
+	}
+	if state.VsockListenerPID != 0 {
+		terminateAuxProcess(state.VsockListenerPID)
 	}
 }
 

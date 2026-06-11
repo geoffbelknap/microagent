@@ -1870,3 +1870,186 @@ func TestUserNetworkArgsStopOptionParsingBeforeCommand(t *testing.T) {
 		}
 	}
 }
+
+func deadProcessPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = cmd.Process.Wait()
+	return pid
+}
+
+func TestCompanionShouldExitConditions(t *testing.T) {
+	live := startSleepProcess(t)
+	dead := deadProcessPID(t)
+	cases := []struct {
+		name  string
+		state vmkit.VMState
+		pid   int
+		want  bool
+	}{
+		{"running with live vm", vmkit.StateRunning, live.Process.Pid, false},
+		{"paused with live vm", vmkit.StatePaused, live.Process.Pid, false},
+		{"starting without pid", vmkit.StateStarting, 0, false},
+		{"running with dead vm", vmkit.StateRunning, dead, true},
+		{"stopped", vmkit.StateStopped, 0, true},
+		{"halted", vmkit.StateHalted, 0, true},
+		{"failed", vmkit.StateFailed, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := Options{Name: "agent-1", StateDir: dir}
+			req := vmkit.Request{
+				Command:  "run",
+				Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+				Config:   &vmkit.Config{StateDir: dir},
+			}
+			if err := writeProcessState(opts, req, tc.state, tc.pid, ""); err != nil {
+				t.Fatal(err)
+			}
+			if got := companionShouldExit(opts); got != tc.want {
+				t.Fatalf("companionShouldExit(%s, pid=%d) = %v, want %v", tc.state, tc.pid, got, tc.want)
+			}
+		})
+	}
+	t.Run("missing runtime state", func(t *testing.T) {
+		opts := Options{Name: "agent-1", StateDir: t.TempDir()}
+		if !companionShouldExit(opts) {
+			t.Fatal("companionShouldExit = false for missing runtime state, want true")
+		}
+	})
+}
+
+func TestRunPortForwarderExitsWhenVMProcessDies(t *testing.T) {
+	dir := t.TempDir()
+	port := freeTCPPort(t)
+	opts := Options{Name: "agent-1", StateDir: dir}
+	vm := startSleepProcess(t)
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{StateDir: dir, ExecPort: port},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vm.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- RunPortForwarder(context.Background(), opts)
+	}()
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port)))
+	deadline := time.Now().Add(time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 20*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("exec port forwarder did not listen on %s: %v", addr, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := vm.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = vm.Process.Wait()
+	select {
+	case <-done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("RunPortForwarder did not exit after the VM process died")
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("exec port still in use after forwarder exit: %v", err)
+	}
+	_ = listener.Close()
+}
+
+func TestRunVsockListenerExitsWhenWorkspaceStateRemoved(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	vm := startSleepProcess(t)
+	resultPath := filepath.Join(dir, "agent-1", "result.json")
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config: &vmkit.Config{
+			StateDir:       dir,
+			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: resultPath}},
+		},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vm.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- RunVsockListener(context.Background(), opts)
+	}()
+	socketPath := firecrackerGuestVsockPath(opts, 1024)
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(socketPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("vsock listener socket %s did not appear", socketPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.Remove(filepath.Join(dir, "agent-1", "runtime.json")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("RunVsockListener did not exit after runtime state removal")
+	}
+}
+
+func TestForegroundExitTerminatesRecordedCompanions(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	forwarder := startSleepProcess(t)
+	vsockListener := startSleepProcess(t)
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, 0, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	terminateRecordedCompanions(opts)
+	if err := waitForProcessExit(context.Background(), forwarder.Process.Pid, 3*time.Second); err != nil {
+		t.Fatalf("port forwarder still active: %v", err)
+	}
+	if err := waitForProcessExit(context.Background(), vsockListener.Process.Pid, 3*time.Second); err != nil {
+		t.Fatalf("vsock listener still active: %v", err)
+	}
+}
+
+func TestEnsureCanDeleteRejectsDeadVMWithLiveCompanions(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	forwarder := startSleepProcess(t)
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, deadProcessPID(t), forwarder.Process.Pid, 0, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	err := ensureCanDelete(opts)
+	if err == nil || !strings.Contains(err.Error(), "port forwarder") {
+		t.Fatalf("ensureCanDelete error = %v, want port forwarder running error", err)
+	}
+}
