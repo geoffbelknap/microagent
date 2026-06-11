@@ -99,6 +99,19 @@ When `microagent.yaml` or `microagent.yml` exists in the current directory,
 `microagent create` reads it automatically. CLI flags override fields from the
 spec.
 
+Pair the workspace with a locally served model:
+
+```bash
+microagent create \
+  --name research \
+  --image docker.io/library/python:3.13-slim \
+  --model unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+```
+
+The ref is stored with the workspace, so every [`start`](/cli/start/) re-pairs
+it - the host model server is re-ensured and `OPENAI_BASE_URL` points the guest
+at it. See [`model`](/cli/model/) for serving and release semantics.
+
 Attach an existing ext4 disk:
 
 ```bash
@@ -185,6 +198,8 @@ Flags you'll actually use:
 - `--setup <command>` - bake first-boot prep into the workspace; repeatable
 - `--file <path>` - create from a declarative `microagent.yaml` spec
 - `-v SRC:DST[:ro|rw]` - attach a named volume, tar bundle, or ext4 disk
+- `--model <ref>` - pair the workspace with a locally served model; every
+  `start` re-pairs it
 - `--restart <policy>` - what [`supervise`](/cli/supervise/) does when it exits
 - `--dry-run` - validate the config without creating anything
 
@@ -228,6 +243,8 @@ The complete set:
 | `-p <mapping>` | Alias for `--publish` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
+| `--model <ref>` | Pair the workspace with a locally served HuggingFace GGUF model; the ref is persisted so every `start` re-pairs, and `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are injected into the guest. See [`model`](/cli/model/) |
+| `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |

@@ -23,7 +23,9 @@ host model server processes that serve them. Downloaded blobs are stored under
 to pull them. All subcommands read and write this index; no remote state is
 modified by the store commands. The server commands (`serve`, `stop`,
 `runners`) manage long-running `llama-server` processes on the host. Pair a
-workspace with a served model using `run`/`create` `--model <ref>`.
+workspace with a served model using [`run --model`](/cli/run/) for one-shots or
+[`create --model`](/cli/create/) for a persistent pairing that every
+[`start`](/cli/start/) re-establishes.
 
 ## Examples
 
@@ -108,8 +110,15 @@ store, `serve` pulls it automatically before starting the server (equivalent to
 running `model pull` first). The runner is started pinned, so it stays alive
 even when no workspace holds it.
 
+Workspaces hold runners. `run --model` holds one for the duration of the run.
+A workspace created with `create --model` re-pairs on every `start` and holds
+until `halt`, `stop`, `kill`, or `delete` releases it - a guest that exits on
+its own keeps its hold until the next lifecycle verb. An unpinned runner stops
+when its last holder releases; a pinned one (`model serve`) stays up.
+
 `stop` force-stops all model server processes for the given ref (ignores
 whether the runner is pinned) and removes their entries from the runner index.
+Use it to reclaim a runner whose workspace exited without a lifecycle verb.
 
 `runners` self-heals the registry: any listed process that is no longer alive
 is silently removed before the list is printed.
@@ -208,6 +217,7 @@ envelope.
 ## Related
 
 - [`serve`](/cli/serve/) - `serve model` is the same command
-- [`run`](/cli/run/) - pair a workspace with a served model via `--model`
+- [`run`](/cli/run/) - pair a one-shot run with a served model via `--model`
+- [`create`](/cli/create/) - pair a workspace persistently via `--model`
 - [`images`](/cli/images/) - the equivalent store for OCI images
 - [`secret`](/cli/secret/) - deliver tokens to guests without writing them to disk

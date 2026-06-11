@@ -208,9 +208,12 @@ microagent delete minimal-agent
 
 No API key, no cloud: [`microagent model`](/cli/model/) downloads a GGUF
 model and serves it on the host with `llama-server`, and
-[`run --model`](/cli/run/) bridges the guest to that server over vsock. The
-OpenAI example works unchanged because `--model` injects `OPENAI_BASE_URL`
-into the guest and the OpenAI SDK picks it up.
+[`create --model`](/cli/create/) pairs the workspace with it. The pairing is
+part of the workspace: every [`start`](/cli/start/) re-ensures the host
+server and bridges the guest to it over vsock, so the local flavor has the
+same lifecycle as the cloud runs above - follow-up request included. The
+OpenAI example works unchanged because pairing injects `OPENAI_BASE_URL` into
+the guest and the OpenAI SDK picks it up.
 
 Two honest caveats before you start:
 
@@ -218,91 +221,136 @@ Two honest caveats before you start:
   0.5B, 3B, and 7B (Q4_K_M) all failed this page's first request - broken
   scripts, fabricated output. The model below is the smallest we verified
   completing it end to end, and it needs a low sampling temperature to do it.
-- **Model pairing is run-scoped today.** `create`/`start` don't take
-  `--model`, so the local flavor is one request per `microagent run` - no
-  halt-and-resume walkthrough here.
+- **You need `llama-server` on the host.** Install it from
+  [llama.cpp](https://github.com/ggml-org/llama.cpp) and put it on your PATH,
+  or point `MICROAGENT_LLAMA_SERVER` at the binary.
 
-You'll need `llama-server` from [llama.cpp](https://github.com/ggml-org/llama.cpp)
-on your PATH (or pointed to by `MICROAGENT_LLAMA_SERVER`). Then pull the
-model - a 2.5 GB download:
+Pull the model - a 2.5 GB download (`create` and `start` auto-pull a missing
+blob, but pulling first makes the wait visible):
 
 ```bash
 microagent model pull unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 ```
 
-`run` has no spec-file step, so stage the agent source and the request as a
-tar bundle that `-v` can deliver. The three directories mirror the paths the
-spec-file flow bakes in - code in `/app`, operator files in `/agent`, the
-request in `/workspace`. The bundle mounts read-only at `/src`, so the
-`--setup` lines copy each piece into place:
-
-```bash
-mkdir -p local-agent/app local-agent/agent local-agent/workspace
-cp examples/minimal-agent-openai/agent.py examples/minimal-agent-openai/protocol.py local-agent/app/
-cp examples/minimal-agent-openai/demo/constraints.json examples/minimal-agent-openai/demo/system_prompt.md local-agent/agent/
-cp examples/minimal-agent-openai/demo/input-001.json local-agent/workspace/input.json
-tar -C local-agent -cf request.tar app agent workspace
-```
-
-Boot, pair, and run - one command:
+Create the workspace from the same spec file the cloud flavor uses, with a
+model ref and three env vars in place of the API key:
 
 ```bash
 export LLAMA_ARG_CTX_SIZE=32768   # cap the context; this model defaults to 262k, which won't fit in 16 GB RAM
 
-microagent run \
-  --image docker.io/library/python:3.13-slim \
+microagent create \
+  --file examples/minimal-agent-openai/microagent.yaml \
   --model unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
-  -e OPENAI_API_KEY=local -e OPENAI_MODEL=qwen3-4b-instruct-2507 -e OPENAI_TEMPERATURE=0.2 \
-  -v request.tar:/src:ro \
-  --setup "pip install --no-cache-dir 'pydantic>=2.0,<3' 'openai>=1.50'" \
-  --setup "mkdir -p /app /agent /workspace" \
-  --setup "cp /src/app/agent.py /src/app/protocol.py /app/; cp /src/agent/constraints.json /src/agent/system_prompt.md /agent/; cp /src/workspace/input.json /workspace/input.json" \
-  --output result=/workspace/result.json \
-  --timeout 900 --keep --name minimal-agent-local \
-  --exec "python /app/agent.py"
+  -e OPENAI_API_KEY=local -e OPENAI_MODEL=qwen3-4b-instruct-2507 -e OPENAI_TEMPERATURE=0.2
 ```
 
 A few notes on the flags:
 
-- `--model` starts (or reuses) a host `llama-server` for the ref and wires a
-  vsock bridge into the guest; the agent's OpenAI client talks to it at
-  `OPENAI_BASE_URL` with no in-VM network involved.
+- `--model` persists the pairing in the workspace record. Every `start`
+  re-ensures a host `llama-server` for the ref and wires a vsock bridge into
+  the guest; the agent's OpenAI client talks to it at `OPENAI_BASE_URL` with
+  no in-VM network involved.
 - `OPENAI_API_KEY=local` satisfies the SDK's non-empty-key requirement; the
   local server ignores it. The server also serves exactly one model, so
   `OPENAI_MODEL` is a label - any value works.
 - `OPENAI_TEMPERATURE=0.2` matters. At llama-server's default sampling
   temperature this model writes buggy scripts; at 0.2 it completed the
   request reliably in our runs.
-- `LLAMA_ARG_CTX_SIZE` is llama-server's own env config, inherited by the
-  runner microagent starts.
-- Run `microagent model serve <ref>` first if you want the model to stay
-  warm between runs instead of loading on each `run`.
+- `LLAMA_ARG_CTX_SIZE` is llama-server's own env config, inherited from
+  whichever `create` or `start` launches the server - keep it exported for
+  the whole walkthrough.
 
-On an 8-core CPU host the agent phase takes a few minutes - pip installs
-`rich`, the model loops through the same tool calls Claude made above, and
-the result lands in the same place. Pull it out and clean up:
+From here the flow is the cloud flow. Send the first request and start:
 
 ```bash
-microagent cp minimal-agent-local:/workspace/result.json ./result.json
-microagent delete minimal-agent-local --yes
+microagent cp examples/minimal-agent-openai/demo/input-001.json minimal-agent-openai:/workspace/input.json
+microagent start minimal-agent-openai
 ```
 
-This run's `content` field carried a real rendered table - same shape as the
-cloud run, and four of the five files match; the local model's script counted
-a libpython symlink twice, which is about par for a 4B model:
+While the agent runs, `microagent model runners` shows the pairing - the
+workspace holds the host server it's talking to:
+
+```json
+{
+  "runners": [
+    {
+      "model_ref": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF@main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+      "engine": "llama.cpp",
+      "host": "127.0.0.1",
+      "port": 34913,
+      "holders": ["minimal-agent-openai"]
+    }
+  ]
+}
+```
+
+On an 8-core CPU host the agent phase takes a couple of minutes - pip
+installs `rich`, the model loops through the same tool calls Claude made
+above, and the result lands in the same place. Poll
+`microagent --json status minimal-agent-openai` until it reports
+`"state": "stopped"`, then pull the result out:
+
+```bash
+microagent cp minimal-agent-openai:/workspace/result.json ./result.json
+```
+
+```json
+{
+  "request_id": "req-001",
+  "status": "completed",
+  "content": "I've successfully installed the 'rich' Python package and created a script to display the 5 largest files under `/usr`...",
+  "error": null,
+  "completed_at": "2026-06-11T20:08:18.427820Z",
+  "audit_ref": "audit://req-001"
+}
+```
+
+This run's `content` carried a real rendered table - same shape as the cloud
+run, and four of the five files match; the local model's script counted a
+libpython symlink twice, which is about par for a 4B model:
 
 ```text
                 Top 5 Largest Files in /usr
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
-┃ File Path                                ┃ Size (bytes) ┃
-┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
-│ /usr/lib/x86_64-linux-gnu/libcrypto.so.3 │ 6517312      │
-│ /usr/local/lib/libpython3.13.so          │ 5235704      │
-│ /usr/local/lib/libpython3.13.so.1.0      │ 5235704      │
-│ /usr/sbin/microagent-init                │ 4827558      │
-│ /usr/local/lib/python3.13/site-packages… │ 4750616      │
-└──────────────────────────────────────────┴──────────────┘
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Path                                     ┃ Size          ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ /usr/lib/x86_64-linux-gnu/libcrypto.so.3 │ 6517312 bytes │
+│ /usr/local/lib/libpython3.13.so.1.0      │ 5235704 bytes │
+│ /usr/local/lib/libpython3.13.so          │ 5235704 bytes │
+│ /usr/sbin/microagent-init                │ 4827558 bytes │
+│ /usr/local/lib/python3.13/site-packages… │ 4750616 bytes │
+└──────────────────────────────────────────┴───────────────┘
 ```
+
+The follow-up works exactly like the cloud one - halt, drop in the second
+request, start again. `halt` releases the workspace's hold on the model
+server; the next `start` re-pairs it automatically:
+
+```bash
+microagent halt minimal-agent-openai
+microagent cp examples/minimal-agent-openai/demo/input-002.json minimal-agent-openai:/workspace/input.json
+microagent start minimal-agent-openai
+microagent --json status minimal-agent-openai   # poll until "state": "stopped"
+microagent cp minimal-agent-openai:/workspace/result.json ./result-002.json
+```
+
+The `biggest.py` script from the first run is still on disk, and the local
+model extends it the same way Claude did: *"I modified the `biggest.py`
+script to include each file's last-modified date ... Added code to get the
+last modified time of each file using `os.path.getmtime()` ... Added a new
+'Last Modified' column to the table."*
+
+Clean up when you're done - `delete` removes the workspace and releases its
+model server hold:
+
+```bash
+microagent delete minimal-agent-openai
+```
+
+One release rule worth knowing: `halt`, `stop`, `kill`, and `delete` release
+the hold, but an agent that exits on its own - like each run above - keeps it
+until the next lifecycle verb. `microagent model stop <ref>` reclaims a
+runner immediately.
 
 ## What's next
 

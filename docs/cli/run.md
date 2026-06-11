@@ -169,7 +169,7 @@ The complete set:
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
-| `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model and inject `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` |
+| `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model and inject `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL`; with `--keep`, the ref persists and later `start`s re-pair. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |

@@ -29,6 +29,7 @@ files:
     mode: "0644"
 env:
   MICROAGENT_NAME: research
+model: unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 resources:
   memoryMiB: 2048
   cpuCount: 2
@@ -92,6 +93,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `files[].dst` | Absolute guest path to write |
 | `files[].mode` | Optional octal file mode string, such as `"0755"` |
 | `env` | Guest environment variables |
+| `model` | HuggingFace GGUF ref of a locally served model to pair the workspace with; every `start` re-pairs it, and a CLI `--model` flag overrides the field. See [`model`](/cli/model/) |
 | `resources.memoryMiB` | Memory override |
 | `resources.cpuCount` | CPU override |
 | `resources.sizeMiB` | Rootfs disk size override |
