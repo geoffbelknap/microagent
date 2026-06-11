@@ -1,22 +1,28 @@
 ---
-title: Connect two workspaces on a named network
-description: Put two microVMs on one named network so they reach and resolve each other by name.
+title: Connect workspaces on a named network
+description: Put an app and a database on one named network so they reach and resolve each other by name.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-11_
 
-This recipe wires two workspaces together on a [named network](/concepts/networking/#named-networks)
-so they share a subnet, reach each other directly, and resolve each other by
-name. The example is a classic split: an app workspace (`web`) talking to a
-database workspace (`db`).
+By the end of this guide two workspaces share a subnet, reach each other
+directly, and resolve each other by name - the classic split of an app
+workspace (`web`) talking to a database workspace (`db`). A named network is
+microagent's managed analog of a Docker user-defined network: declare it once,
+join workspaces by name.
 
-Named workspace attachment is currently implemented by the Firecracker/Linux
-backend and needs the same host setup as `nat` mode:
-`net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in the supervisor (run as root, or
-grant `cap_net_admin,cap_setpcap+ep`). The named-network registry commands can
-run on macOS, but Apple VF does not currently implement `network.mode=named`,
-so this recipe does not apply to Apple VF workspaces.
+Named-network attachment is currently implemented by the Firecracker/Linux
+backend and needs the same host setup as `nat` mode: `net.ipv4.ip_forward=1`
+and `CAP_NET_ADMIN` in the supervisor. Check and apply that once:
+
+```bash
+microagent host setup-networking --check
+sudo microagent host setup-networking
+```
+
+The registry commands below run anywhere; only booting members needs the
+privileged setup. Apple VF does not currently implement `network.mode=named`.
 
 ## 1. Create the network
 
@@ -24,76 +30,93 @@ so this recipe does not apply to Apple VF workspaces.
 microagent network create devnet --subnet 10.44.50.0/24
 ```
 
-This is just a registry record — no host devices are created until a member
-starts. Omit `--subnet` to auto-allocate a `/24` from `10.44.0.0/16`.
+```text
+Created network "devnet" (10.44.50.0/24, gateway 10.44.50.1)
+```
 
-## 2. Start the members
+This is a registry record - no host devices exist until a member starts. Omit
+`--subnet` to auto-allocate a `/24` from `10.44.0.0/16`.
+
+## 2. Join the members
+
+`--network-name` on `create` or `run` joins a workspace to the network:
 
 ```bash
 microagent create db  --image docker.io/library/postgres:16 \
   --network-name devnet --publish 127.0.0.1:5432:5432/tcp
 microagent create web --image docker.io/library/python:3.12 \
   --network-name devnet
+microagent start db
+microagent start web
 ```
 
-Each member is allocated a stable address from the subnet (`db` → `10.44.50.2`,
-`web` → `10.44.50.3`, since `.1` is the gateway). The first member to start
-brings up the shared bridge `mbr<hash>` with the gateway address; later members
-attach their TAP to it.
+Each member gets a stable address from the subnet (`db` → `10.44.50.2`,
+`web` → `10.44.50.3`; `.1` is the gateway), persisted in the registry so it
+survives stop and start. The first member to start brings up the shared
+managed bridge; later members attach to it. Outbound egress still works,
+routed through the gateway with NAT.
 
-Check membership:
+Check membership and runtime addresses:
 
 ```bash
 microagent network ls
-microagent --json network web        # runtime IP/subnet/gateway for this member
+microagent --json network web
 ```
 
-## 3. Reach the peer
+```text
+NAME                 SUBNET             GATEWAY         MEMBERS
+devnet               10.44.50.0/24      10.44.50.1      2
+```
 
-From `web`, reach `db` by name — `/etc/hosts` was populated at boot from the
-member set:
+## 3. Reach the peer by name
+
+`/etc/hosts` inside each member is populated at boot from the member set, so
+names just work:
 
 ```bash
 microagent exec web -- ping -c2 db
-microagent exec web -- sh -c 'nc -z db 5432 && echo db-reachable'
+microagent exec web -- sh -c "nc -z db 5432 && echo db-reachable"
 ```
 
-Point your app's connection string at `db` (e.g. `postgres://db:5432/...`) — the
-name resolves to the peer's stable address, which is stable across stop/start.
+```text
+db-reachable
+```
 
-## The boot-order nuance
+Point the app's connection string at `db` (for example
+`postgres://db:5432/...`) - the name resolves to the peer's stable address.
 
-`/etc/hosts` is a **boot-time snapshot**. A member knows the peers that existed
-when it booted, so start order matters for *name* resolution:
+## 4. Mind the boot order
 
-- If you start `db` first, then `web`, then `web` resolves `db` immediately, but
-  `db` won't have `web` until it restarts.
-- Reachability *by IP* is always available regardless of order (it's L2 over the
-  shared bridge).
+`/etc/hosts` is a boot-time snapshot: a member knows the peers that existed
+when it booted. Start `db` first and `web` resolves it immediately, but `db`
+won't have `web` in its hosts file until `db` restarts. Reachability *by IP*
+is always order-independent - it's one L2 segment.
 
 To refresh an earlier member after newcomers join, restart it:
 
 ```bash
-microagent stop db && microagent start db    # db now resolves web too
+microagent halt db
+microagent start db    # db now resolves web too
 ```
 
-For long-lived members that all need to resolve each other, start them, then do
-one restart pass — or have each service retry name resolution, which most
+For a set of long-lived members that all need each other's names, start them
+all, then do one restart pass - or let each service retry resolution, which
 database clients already do.
 
 ## Clean up
 
 ```bash
-microagent delete web --yes
-microagent delete db --yes          # frees both addresses
-microagent network rm devnet        # the shared bridge is already reaped
+microagent halt web && microagent delete web --yes
+microagent halt db && microagent delete db --yes
+microagent network rm devnet
 ```
 
-Deleting a workspace frees its address in the registry; the managed bridge is
-removed automatically once the last member stops. `network rm` fails closed if
-members remain — pass `--force` to override.
+Deleting a workspace frees its address; the managed bridge is reaped when the
+last member stops. `network rm` fails closed while members remain - `--force`
+overrides.
 
-## See also
+## What's next
 
-- [Networking → Named networks](/concepts/networking/#named-networks)
-- [`microagent network`](/cli/network/)
+- **All five network modes and the backend matrix** - [Networking](/concepts/networking/).
+- **The `network` command surface** - the [`network`](/cli/network/) reference.
+- **Publish a member's port to the host** - [run a service](/guides/run-a-service/).

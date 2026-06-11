@@ -4,7 +4,7 @@ A small agent body that runs inside a microVM, calls Claude with `bash`, `read_f
 
 The whole workspace is described in [`microagent.yaml`](microagent.yaml). One spec, one `microagent create`.
 
-For the walkthrough - create, deliver a request, run, halt-and-resume, retrieve files Claude wrote - see [`docs/recipes/simple-agent.md`](../../docs/recipes/simple-agent.md).
+For the walkthrough - create, deliver a request, run, halt-and-resume, retrieve files Claude wrote - see [`docs/guides/simple-agent.md`](../../docs/guides/simple-agent.md).
 
 ## Files
 
@@ -24,4 +24,4 @@ Sibling examples for the same body shape with different model providers:
 
 ## Run
 
-You'll need an Anthropic API key as `ANTHROPIC_API_KEY`. Follow [`docs/recipes/simple-agent.md`](../../docs/recipes/simple-agent.md).
+You'll need an Anthropic API key as `ANTHROPIC_API_KEY`. Follow [`docs/guides/simple-agent.md`](../../docs/guides/simple-agent.md).

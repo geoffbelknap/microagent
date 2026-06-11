@@ -36,6 +36,6 @@ plane, see [Boundaries](/concepts/boundaries/).
   networking, storage, state and identity, [glossary](/concepts/glossary/).
 - [CLI reference](/cli/): every subcommand.
 - [Protocol](/protocol/): shared supervisor protocol and backend notes.
-- [Recipes](/recipes/): end-to-end examples.
+- [Guides](/guides/): task-shaped walkthroughs, from one-shot runs to services and snapshots.
 - [Security](/security/): trust boundary and reporting.
 - [Troubleshooting](/troubleshooting/): common failure modes, indexed by symptom.

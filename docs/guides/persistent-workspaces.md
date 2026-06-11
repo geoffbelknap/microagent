@@ -1,100 +1,151 @@
 ---
-title: Named workspaces
-description: Create, start, connect to, and delete persistent workspaces.
+title: Keep a persistent workspace
+description: Create a named workspace and walk its create, start, halt, connect, delete lifecycle.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
-A workspace is a named, persistent VM record. Unlike `microagent run`, the
-disk and state stick around between starts, so you can stop and resume an
-agent's environment.
+By the end of this guide you have a named workspace whose disk and state
+survive between starts - the environment you set up today is still there
+tomorrow. A workspace is a named, persistent microVM record: unlike
+[`microagent run`](/guides/one-shot-runs/), nothing is thrown away until you
+say so.
 
-## Create
+## 1. Create it
 
 ```bash
-microagent create \
-  --name research \
+microagent create research \
   --image docker.io/library/ubuntu:24.04 \
-  --profile medium \
-  --setup "mkdir -p /workspace" \
-  --setup "echo ready > /workspace/status"
+  --profile medium
 ```
 
-`--profile` picks a named resource size (such as `medium`); it's the
-recommended way to size a workspace. To set resources directly, override with
-`--memory`, `--cpus`, and `--size-mib` instead of (or on top of) a profile.
+```text
+Workspace: research
+State: prepared
+Rootfs: /home/you/.microagent/workspaces/research/rootfs.ext4
+Profile: medium
+Resources: memory=2048MiB cpus=2 disk=8192MiB
+```
 
-The name can also be positional:
+The name can also go in `--name`. `--profile` picks a named resource size and
+is the recommended way to size a workspace; override single values with
+`--memory`, `--cpus`, or `--size-mib` when you need to. `create` builds the
+rootfs once and records the workspace in the state directory; if the default
+kernel is missing, it installs that first.
+
+`--setup` runs shell commands once before first start - useful for installing
+packages into the rootfs:
 
 ```bash
-microagent create research --image docker.io/library/ubuntu:24.04
+microagent create research \
+  --image docker.io/library/ubuntu:24.04 \
+  --setup "apt-get update && apt-get install -y ripgrep"
 ```
 
-`microagent` builds the rootfs once and records workspace metadata in the state
-directory. If the default kernel is missing, `create` installs it first.
-
-## Start
+## 2. Start it and do some work
 
 ```bash
 microagent start research
 ```
 
-## Connect
+Run commands with structured `exec`:
 
 ```bash
-microagent connect research
+microagent exec research -- sh -c "echo 'notes from run 1' > /root/notes.txt"
+microagent exec research -- /bin/cat /root/notes.txt
 ```
 
-For scripts, send one line and capture new console output:
+```text
+notes from run 1
+```
+
+Or open the serial console with `connect` - interactive, or scripted with
+`--send`:
 
 ```bash
-microagent connect research --send "cat /workspace/status"
+microagent connect research --send "uname -r"
+```
+
+```text
+# 6.1.155
 ```
 
 `connect` is supported by Apple VF, Firecracker, and experimental
-Windows-HyperV. Use [`logs`](/cli/logs/) to review captured serial output.
+Windows Hyper-V. Use [`logs`](/cli/logs/) to review captured serial output.
 
-## Inspect
+## 3. Inspect it
 
 ```bash
-microagent ps                       # list all workspaces
-microagent status --name research   # one workspace
-microagent logs research            # boot/serial output
+microagent ps                # all workspaces
+microagent status research   # one workspace
+microagent logs research     # boot/serial output
 ```
 
-## Stop and delete
-
-```bash
-microagent stop research
-microagent delete research
+```text
+NAME                     STATE        BACKEND      PROFILE      NETWORK    RESTART
+research                 running      firecracker  medium       user       never
 ```
 
-For Firecracker, `delete` refuses to remove state while the recorded VM
-process is still running. Use [`stop`](/cli/stop/) or [`kill`](/cli/kill/) first.
+`microagent --json status research` adds the structured readiness signals
+(`guestReady`, `execReady`, and friends) for scripts that need to sequence
+work.
 
-## Attach disks
+## 4. Halt it, start it again
 
-Attach an existing ext4 disk:
+`halt` is the clean disk-preserving shutdown. The microVM exits; the disk
+stays.
 
 ```bash
-microagent create \
-  --name research \
+microagent halt research
+microagent start research
+microagent exec research -- /bin/cat /root/notes.txt
+```
+
+```text
+notes from run 1
+```
+
+Everything you wrote, installed, or configured is still there. This
+halt-and-resume loop is the core of the workspace model: pay for setup once,
+boot back into it in seconds.
+
+The other lifecycle words are not synonyms for halt. `stop` sends the guest a
+graceful shutdown signal (SIGTERM on Firecracker), waits five seconds, and
+marks the workspace failed if the guest doesn't exit - it does not fall back
+to `kill` on its own; run [`kill`](/cli/kill/) yourself when a guest is stuck.
+See the [glossary](/concepts/glossary/) for the full halt / stop / kill /
+quarantine vocabulary.
+
+## 5. Attach extra storage
+
+The rootfs is the workspace's own disk. Attach more at create time - a named
+volume, an existing ext4 image, or a one-shot disk built from a tar bundle:
+
+```bash
+microagent create research \
   --image docker.io/library/ubuntu:24.04 \
-  --disk workspace=/tmp/workspace.ext4:/workspace:rw
-```
-
-Build a disk from a tar bundle and mount it read-only:
-
-```bash
-microagent create \
-  --name research \
-  --image docker.io/library/ubuntu:24.04 \
+  --volume data:/work \
   --bundle config=/tmp/config.tar:/config:ro
 ```
 
+[Volumes and data](/guides/volumes-and-data/) walks through all three forms
+and when to use which.
+
+## 6. Delete it
+
+```bash
+microagent halt research
+microagent delete research --yes
+```
+
+`delete` removes the workspace record and its disk. It refuses while the
+recorded VM process is still running - halt, stop, or kill first. Leave off
+`--yes` to get a confirmation prompt.
+
 ## What's next
 
-- **Run an actual agent in a persistent workspace** - see [run your first agent](/getting-started/cli/first-agent/).
-- **Describe a whole workspace in one file** - see the [`microagent.yaml`](/cli/spec/) spec reference.
-- **Drive workspaces from Go instead of the CLI** - start with the [library overview](/library/).
+- **Run an actual agent in a persistent workspace** - [run your first agent](/getting-started/cli/first-agent/).
+- **Run a long-lived service in one** - [run a service](/guides/run-a-service/).
+- **Describe the whole workspace in one file** - the [`microagent.yaml`](/cli/spec/) spec reference.
+- **Drive workspaces from Go instead of the CLI** - the [library overview](/library/).

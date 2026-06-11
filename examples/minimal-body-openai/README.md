@@ -15,7 +15,7 @@ OpenAI applies prompt caching automatically for prefixes ≥ 1024 tokens - no cl
 
 ## Run
 
-You'll need an OpenAI API key as `OPENAI_API_KEY`. The flow mirrors the [simple-agent recipe](../../docs/recipes/simple-agent.md), with two substitutions:
+You'll need an OpenAI API key as `OPENAI_API_KEY`. The flow mirrors the [simple-agent recipe](../../docs/guides/simple-agent.md), with two substitutions:
 
 ```bash
 microagent create \

@@ -131,7 +131,7 @@ Pick the path that matches what you're doing:
 | [Quickstart](docs/getting-started/quickstart.md) | Boot, run a command, tear down with `microagent run` |
 | [First agent](docs/getting-started/cli/first-agent.md) | An LLM body running inside a microVM (Anthropic / OpenAI / Gemini) |
 | [`microagent init`](docs/cli/init.md) | Scaffold a starter agent body in one command |
-| [Named workspaces](docs/getting-started/cli/named-workspaces.md) | Create, start, stop, resume |
+| [Persistent workspaces](docs/guides/persistent-workspaces.md) | Create, start, halt, connect, delete |
 | [CLI reference](docs/cli/index.md) | Every subcommand |
 
 | Embedding microagent from Go | |
@@ -144,7 +144,7 @@ Pick the path that matches what you're doing:
 | Reference and operations | |
 |---|---|
 | [Concepts](docs/concepts/architecture.md) | Architecture, backends, networking, state, [glossary](docs/concepts/glossary.md) |
-| [Recipes](docs/recipes/index.md) | End-to-end examples |
+| [Guides](docs/guides/index.md) | Task-shaped walkthroughs |
 | [Security](docs/security.md) | Trust boundary; see [`SECURITY.md`](SECURITY.md) for disclosure |
 | [Troubleshooting](docs/troubleshooting.md) | Common failure modes, indexed by symptom |
 
