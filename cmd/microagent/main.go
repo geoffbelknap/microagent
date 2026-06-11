@@ -647,17 +647,9 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 		printRunHelp(stdout)
 		return nil
 	}
-	// Pre-scan --model and --model-token before flag parsing so we can drive
-	// orchestration after opts are assembled but before the workspace lifecycle.
-	modelRefRaw, _ := flagValue(args, "model")
+	// Pre-scan --model-token before flag parsing: the token drives pull-time
+	// auth only and must never land in Options or any persisted state.
 	modelToken, _ := flagValue(args, "model-token")
-	if modelToken == "" {
-		if v := os.Getenv("HF_TOKEN"); v != "" {
-			modelToken = v
-		} else if v := os.Getenv("HUGGING_FACE_HUB_TOKEN"); v != "" {
-			modelToken = v
-		}
-	}
 
 	opts, err := parseWorkspaceOptions("run", args)
 	if err != nil {
@@ -674,56 +666,90 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	}
 
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
-	var modelHolder, modelCanonicalRef, modelStateDir string
-	if strings.TrimSpace(modelRefRaw) != "" {
-		canonical, _, err := model.Resolve(modelRefRaw)
-		if err != nil {
-			return err
-		}
-		rec, err := model.Find(opts.StateDir, canonical)
-		if err != nil {
-			// Not in the store — auto-pull (one-shot convenience).
-			rec, err = model.Pull(ctx, model.PullOptions{StateDir: opts.StateDir, ModelRef: modelRefRaw, Token: modelToken})
-			if err != nil {
-				return fmt.Errorf("pull model %s: %w", modelRefRaw, err)
-			}
-		}
-		binPath, err := modelrunner.ResolveLlamaServerPath()
-		if err != nil {
-			return err
-		}
-		runner, err := modelrunner.Ensure(ctx, modelrunner.EnsureOptions{
-			StateDir:     opts.StateDir,
-			ModelRef:     rec.ModelRef,
-			ModelPath:    rec.OutputPath,
-			Engine:       modelrunner.LlamaCPP{BinPath: binPath},
-			Holder:       opts.Name,
-			ReadyTimeout: 120 * time.Second,
-		})
-		if err != nil {
-			return fmt.Errorf("start model runner: %w", err)
-		}
-		// Activate pairing on the workspace options.
-		opts.ModelTarget = fmt.Sprintf("%s:%d", runner.Host, runner.Port)
-		if opts.Env == nil {
-			opts.Env = map[string]string{}
-		}
-		modelURL := fmt.Sprintf("http://127.0.0.1:%d/v1", workspace.DefaultModelGuestPort)
-		opts.Env["MICROAGENT_MODEL_URL"] = modelURL
-		opts.Env["OPENAI_BASE_URL"] = modelURL
-		modelHolder = opts.Name
-		modelCanonicalRef = rec.ModelRef
-		modelStateDir = opts.StateDir
+	canonicalRef, releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
+	if err != nil {
+		return err
 	}
-	if modelHolder != "" {
-		defer func() { _ = modelrunner.Release(modelStateDir, modelCanonicalRef, modelHolder) }()
+	if releaseModel != nil {
+		defer releaseModel()
 	}
+	opts.Model = canonicalRef
 
 	result, err := workspace.Run(ctx, opts)
 	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
 		return encodeErr
 	}
 	return err
+}
+
+// ensureModelPairing resolves modelRefRaw, pulls the blob if it is missing from
+// the store, ensures a host model runner holding opts.Name, and wires
+// opts.ModelTarget plus the guest model env. It returns the canonical model ref
+// and a release func that drops the holder (both zero when modelRefRaw is
+// empty). Callers that outlive the boot (start) ignore the release func; the
+// holder is then dropped by the next lifecycle verb.
+func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw, modelToken string) (string, func(), error) {
+	if strings.TrimSpace(modelRefRaw) == "" {
+		return "", nil, nil
+	}
+	if modelToken == "" {
+		if v := os.Getenv("HF_TOKEN"); v != "" {
+			modelToken = v
+		} else if v := os.Getenv("HUGGING_FACE_HUB_TOKEN"); v != "" {
+			modelToken = v
+		}
+	}
+	canonical, _, err := model.Resolve(modelRefRaw)
+	if err != nil {
+		return "", nil, err
+	}
+	rec, err := model.Find(opts.StateDir, canonical)
+	if err != nil {
+		// Not in the store — auto-pull (one-shot convenience).
+		rec, err = model.Pull(ctx, model.PullOptions{StateDir: opts.StateDir, ModelRef: modelRefRaw, Token: modelToken})
+		if err != nil {
+			return "", nil, fmt.Errorf("pull model %s: %w", modelRefRaw, err)
+		}
+	}
+	binPath, err := modelrunner.ResolveLlamaServerPath()
+	if err != nil {
+		return "", nil, err
+	}
+	runner, err := modelrunner.Ensure(ctx, modelrunner.EnsureOptions{
+		StateDir:     opts.StateDir,
+		ModelRef:     rec.ModelRef,
+		ModelPath:    rec.OutputPath,
+		Engine:       modelrunner.LlamaCPP{BinPath: binPath},
+		Holder:       opts.Name,
+		ReadyTimeout: 120 * time.Second,
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("start model runner: %w", err)
+	}
+	// Activate pairing on the workspace options.
+	opts.ModelTarget = fmt.Sprintf("%s:%d", runner.Host, runner.Port)
+	if opts.Env == nil {
+		opts.Env = map[string]string{}
+	}
+	modelURL := fmt.Sprintf("http://127.0.0.1:%d/v1", workspace.DefaultModelGuestPort)
+	opts.Env["MICROAGENT_MODEL_URL"] = modelURL
+	opts.Env["OPENAI_BASE_URL"] = modelURL
+	stateDir, modelRef, holder := opts.StateDir, rec.ModelRef, opts.Name
+	return rec.ModelRef, func() { _ = modelrunner.Release(stateDir, modelRef, holder) }, nil
+}
+
+// pendingModelRelease captures the workspace's paired model ref now (delete
+// removes the manifest) and returns a release func to invoke once the
+// lifecycle verb has succeeded. Best-effort throughout: a missing manifest or
+// runner makes the func a no-op, and a stale holder is reclaimed by the next
+// verb.
+func pendingModelRelease(stateDir, name string) func() {
+	manifest, err := workspace.ReadManifest(stateDir, name)
+	modelRef := strings.TrimSpace(manifest.Model)
+	if err != nil || modelRef == "" {
+		return func() {}
+	}
+	return func() { _ = modelrunner.Release(stateDir, modelRef, name) }
 }
 
 func runPS(args []string, stdout *os.File) error {
@@ -2347,12 +2373,24 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		}
 		return writeResultResponse(stdout, resp)
 	}
+	// Capture the paired model ref before the verb runs (delete removes the
+	// manifest); release the workspace's holder only after the verb succeeds.
+	var releaseModel func()
+	switch command {
+	case "halt", "stop", "kill", "delete":
+		releaseModel = pendingModelRelease(opts.StateDir, name)
+	default:
+		releaseModel = func() {}
+	}
 	if command == "delete" {
 		resp, err := runDeleteWorkspace(ctx, workspaceOpts, yes, force)
 		if err != nil {
 			if resp.Error == "" {
 				return err
 			}
+		}
+		if err == nil && resp.OK {
+			releaseModel()
 		}
 		if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
 			return encodeErr
@@ -2364,6 +2402,9 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		if resp.Error == "" {
 			return err
 		}
+	}
+	if err == nil && resp.OK {
+		releaseModel()
 	}
 	if encodeErr := writeResponse(stdout, resp); encodeErr != nil {
 		return encodeErr
@@ -2673,6 +2714,15 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		return err
 	}
 	opts.VsockListeners = listeners
+	// Re-pair with the manifest's model for this boot (auto-pulls a missing
+	// blob, like run). Start is detached, so no release here: the holder is
+	// dropped by the next lifecycle verb (halt/stop/kill/delete). A manifest
+	// read error is tolerated; workspace.Start surfaces it properly.
+	if manifest, err := workspace.ReadManifest(opts.StateDir, opts.Name); err == nil && strings.TrimSpace(manifest.Model) != "" {
+		if _, _, err := ensureModelPairing(ctx, &opts, manifest.Model, ""); err != nil {
+			return err
+		}
+	}
 	result, err := workspace.Start(ctx, opts)
 	if err != nil && result.Workspace == "" {
 		return err
@@ -2943,6 +2993,19 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 		}
 		return writeWorkspaceResult(stdout, result)
 	}
+	// Model orchestration: resolve, pull if needed, and pair the setup boot so
+	// the guest env is consistent across boots. The canonical ref is persisted
+	// in the manifest; every start re-pairs from it. The setup boot's holder is
+	// released when create returns (the workspace is left halted).
+	modelToken, _ := flagValue(args, "model-token")
+	canonicalRef, releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
+	if err != nil {
+		return err
+	}
+	if releaseModel != nil {
+		defer releaseModel()
+	}
+	opts.Model = canonicalRef
 	result, err := workspace.Create(ctx, opts)
 	if err != nil && result.Workspace == "" {
 		return err
@@ -6456,6 +6519,11 @@ Options:
   -result-port <port>   Vsock result port
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
+  -model <ref>          Pair with a locally-served model (HuggingFace GGUF ref);
+                         persisted so every start re-pairs; injects
+                         MICROAGENT_MODEL_URL and OPENAI_BASE_URL
+  -model-token <token>  HuggingFace token for model auto-pull
+                         (defaults to HF_TOKEN or HUGGING_FACE_HUB_TOKEN)
   -dry-run              Validate without writing state
   -json <path|->        Read request JSON from a file or stdin
 `)

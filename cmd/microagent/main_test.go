@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
+	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
@@ -1930,6 +1931,64 @@ func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
 	}
 	if opts.Model != "org/flag-repo/flag.gguf" {
 		t.Fatalf("create --model not parsed: %q", opts.Model)
+	}
+}
+
+func TestEnsureModelPairingNoModelIsNoOp(t *testing.T) {
+	opts := workspaceOptions{Name: "ws", StateDir: t.TempDir()}
+	canonical, release, err := ensureModelPairing(context.Background(), &opts, "", "")
+	if err != nil {
+		t.Fatalf("ensureModelPairing: %v", err)
+	}
+	if canonical != "" || release != nil {
+		t.Fatalf("no-op pairing returned canonical=%q release-non-nil=%t", canonical, release != nil)
+	}
+	if opts.ModelTarget != "" || opts.Env != nil {
+		t.Fatalf("opts mutated without a model: target=%q env=%#v", opts.ModelTarget, opts.Env)
+	}
+}
+
+func TestEnsureModelPairingRejectsInvalidRef(t *testing.T) {
+	opts := workspaceOptions{Name: "ws", StateDir: t.TempDir()}
+	if _, _, err := ensureModelPairing(context.Background(), &opts, "not-a-ref", ""); err == nil {
+		t.Fatal("ensureModelPairing accepted an invalid model ref")
+	}
+}
+
+func TestPendingModelRelease(t *testing.T) {
+	dir := t.TempDir()
+	// Missing manifest must yield a silent no-op.
+	pendingModelRelease(dir, "ghost")()
+
+	opts := workspace.DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.Model = "hf.co/org/repo@main/m.gguf"
+	if err := workspace.WriteManifest(opts); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	idx := modelrunner.Index{Runners: []modelrunner.Record{{
+		Key:      "hf.co/org/repo@main/m.gguf",
+		ModelRef: "hf.co/org/repo@main/m.gguf",
+		PID:      99999999, // dead PID: release stops it best-effort
+		Holders:  []string{"ws"},
+	}}}
+	if err := modelrunner.WriteIndex(dir, idx); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+	// The ref is captured at call time: removing the manifest afterwards (as
+	// delete does) must not stop the release.
+	release := pendingModelRelease(dir, "ws")
+	if err := os.RemoveAll(filepath.Join(dir, "workspaces", "ws")); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	after, err := modelrunner.ReadIndex(dir)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if len(after.Runners) != 0 {
+		t.Fatalf("runner not released: %+v", after.Runners)
 	}
 }
 
