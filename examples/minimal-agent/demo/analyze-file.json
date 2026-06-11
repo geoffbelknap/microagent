@@ -1,0 +1,15 @@
+{
+  "request_id": "req-analyze-file",
+  "principal": {
+    "name": "alice",
+    "kind": "user",
+    "verified": true,
+    "verified_by": "gateway-1",
+    "authorization_scope": ["agent_work"]
+  },
+  "content": "Read /workspace/sales-sample.csv. It is messy: mixed date formats, at least one duplicate row, missing values, and an outlier. Write and run a Python script that cleans it and writes a short findings report to /workspace/report.md.",
+  "content_kind": "text",
+  "constraints_version": 1,
+  "submitted_at": "2026-05-07T00:04:00Z",
+  "audit_ref": "audit://req-analyze-file"
+}

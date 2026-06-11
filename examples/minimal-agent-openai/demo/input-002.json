@@ -7,7 +7,7 @@
     "verified_by": "gateway-1",
     "authorization_scope": ["agent_work"]
   },
-  "content": "Read /workspace/hello.py and explain what it does, line by line.",
+  "content": "Read /workspace/biggest.py from your previous run. Modify it to also show each file's last-modified date, run it again, and summarize what changed.",
   "content_kind": "text",
   "constraints_version": 1,
   "submitted_at": "2026-05-07T00:02:00Z",

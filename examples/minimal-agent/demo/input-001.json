@@ -7,7 +7,7 @@
     "verified_by": "gateway-1",
     "authorization_scope": ["agent_work"]
   },
-  "content": "Create a Python script at /workspace/hello.py that prints 'hello from a microVM' on one line and the running Linux kernel version (use uname -r) on the next. Run it and show me the output.",
+  "content": "Install the Python package 'rich' with pip. Then write /workspace/biggest.py: a script that uses rich to print a table of the 5 largest files under /usr with their sizes. Run it and include the rendered table in your summary.",
   "content_kind": "text",
   "constraints_version": 1,
   "submitted_at": "2026-05-07T00:01:00Z",

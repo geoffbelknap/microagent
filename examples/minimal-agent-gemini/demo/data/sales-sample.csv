@@ -1,0 +1,32 @@
+date,region,product,units,amount
+2026-01-03,North,Widget,12,288.00
+2026-01-04,South,Gadget,5,140.50
+03/01/2026,East,Widget,8,192.00
+2026-01-05,West,Sprocket,20,460.00
+Jan 3 2026,North,Gadget,3,84.30
+2026-01-06,South,Widget,15,360.00
+07/01/2026,East,Sprocket,9,207.00
+2026-01-07,West,Gadget,11,309.10
+2026-01-08,North,Sprocket,6,138.00
+Jan 9 2026,South,Widget,14,336.00
+2026-01-09,East,Gadget,7,196.70
+10/01/2026,West,Widget,10,240.00
+2026-01-10,North,Gadget,4,112.40
+2026-01-11,South,Sprocket,13,299.00
+2026-01-11,South,Sprocket,13,299.00
+Jan 12 2026,East,Widget,16,384.00
+2026-01-12,West,Gadget,2,56.20
+13/01/2026,North,Widget,18,432.00
+2026-01-13,South,Gadget,9,252.90
+2026-01-14,East,Sprocket,,
+2026-01-14,West,Widget,21,504.00
+Jan 15 2026,North,Sprocket,8,184.00
+2026-01-15,South,Widget,12,288.00
+16/01/2026,East,Gadget,6,168.60
+2026-01-16,West,Sprocket,17,391.00
+2026-01-17,North,Widget,5,999999
+Jan 18 2026,South,Gadget,10,281.00
+2026-01-18,East,Widget,7,168.00
+19/01/2026,West,Gadget,13,365.30
+2026-01-19,North,Sprocket,11,253.00
+2026-01-20,South,Widget,9,216.00
