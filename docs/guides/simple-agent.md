@@ -75,7 +75,7 @@ The first request asks for something concrete:
 
 (Full file: [`examples/minimal-body/demo/input-001.json`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/demo/input-001.json).)
 
-The system prompt - already baked into the workspace by the spec - makes the agent take initiative:
+The system prompt (already baked into the workspace by the spec) makes the agent take initiative:
 
 ```text
 You are an agent running inside a Linux microVM. You have access to a workspace
@@ -97,7 +97,7 @@ microagent --json result minimal-body
 
 The body usually takes 5-10 seconds: the VM boots, the body emits `ready`, runs
 the structural checks, calls Claude, writes the result, and exits. `result`
-reads the result file as it stands, so run it after the body has finished -
+reads the result file as it stands, so run it after the body has finished.
 `microagent --json status minimal-body` includes the structured `result` once
 it's ready and reports `stopped` after the body exits. Claude's final summary
 appears in the `content` field. It should look something like:

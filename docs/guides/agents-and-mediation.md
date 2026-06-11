@@ -7,7 +7,7 @@ description: Declare the guest-to-host vsock contract, listen on the host, and l
 _Last updated: 2026-06-11_
 
 By the end of this guide your agent body talks to your host control plane over
-the mediation channel while it runs - a stream of requests in, results out,
+the mediation channel while it runs. Requests stream in, results stream out,
 no restart between them. This page is the home for everything mediation: the
 declaration syntax, the host listener, the body loop, and the failure
 semantics.
@@ -53,7 +53,7 @@ microagent create agent --image docker.io/library/python:3.12-alpine \
 
 `port` is the guest-side vsock port the body connects to; `target` is the
 host-side TCP address the supervisor forwards to. The CLI form declares the
-channel required and fail-closed - the right default. Pass
+channel required and fail-closed (the right default). Pass
 `--mediation-optional` only for development paths where the workspace may run
 without a host listener.
 
@@ -93,7 +93,7 @@ while True:
 
 One non-obvious line: microagent itself probes the target with a bounded TCP
 connect to compute `mediationReady`, so a listener must tolerate
-connect-and-close probes - that's the `if not line: continue`.
+connect-and-close probes (that's the `if not line: continue`).
 
 A production listener handles lifecycle signals, timeouts, reconnection, and
 concurrent bodies; the loop shape stays read a signal, dispatch when ready,
@@ -135,7 +135,7 @@ while True:
 
 What carries over from the file-based body unchanged: the `WorkRequest` /
 `WorkResult` shapes, and the model call inside `process()`. What changes: no
-more `/workspace/input.json` or result file, and the body is long-lived -
+more `/workspace/input.json` or result file, and the body is long-lived:
 it runs until the host closes the channel. Pick one framing rule (newline-
 delimited JSON is simplest, length-prefixed is sturdier) and document it.
 

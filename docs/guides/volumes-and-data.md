@@ -6,11 +6,11 @@ description: Persist data in named volumes, attach disks and bundles, and copy f
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-By the end of this guide you can keep data alive across workspaces with named
-volumes, attach existing disks and tar bundles, and copy individual files in
-and out with `cp`. microagent never exposes host directories to the guest -
-everything the guest reads or writes is a block device - so each of these is a
-deliberate, declared path for data.
+microagent never exposes host directories to the guest - everything the guest
+reads or writes is a block device - so data moves through deliberate, declared
+paths. This guide walks all of them: named volumes that outlive any workspace,
+existing disks and tar bundles attached directly, and single files copied in
+and out with `cp`.
 
 ## 1. Create a named volume
 
@@ -73,6 +73,8 @@ attach it directly:
   archive at start - the portable way to get a directory's contents in.
 
 ```bash
+mkdir -p ./config-dir
+echo 'bundled file' > ./config-dir/hello.txt
 tar -C ./config-dir -cf /tmp/config.tar .
 microagent run --bundle config=/tmp/config.tar:/config:ro \
   --image docker.io/library/alpine:3.20 --exec "cat /config/hello.txt"
@@ -92,6 +94,7 @@ disk. Host directory bind mounts are deliberately not one of them.
 workspace is not running - no boot required.
 
 ```bash
+echo 'config-v1' > ./app.conf
 microagent create scratch --image docker.io/library/alpine:3.20 -v data:/work
 microagent cp ./app.conf scratch:/etc/app.conf
 microagent start scratch

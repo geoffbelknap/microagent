@@ -6,9 +6,8 @@ description: Put an app and a database on one named network so they reach and re
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-By the end of this guide two workspaces share a subnet, reach each other
-directly, and resolve each other by name - the classic split of an app
-workspace (`web`) talking to a database workspace (`db`). A named network is
+Two workspaces, one subnet: an app called `web` that reaches a database
+called `db` by name. That's where this guide ends up. A named network is
 microagent's managed analog of a Docker user-defined network: declare it once,
 join workspaces by name.
 
@@ -81,6 +80,8 @@ microagent exec web -- sh -c "nc -z db 5432 && echo db-reachable"
 ```text
 db-reachable
 ```
+
+(The `ping` output is trimmed - shown is the second command's confirmation.)
 
 Point the app's connection string at `db` (for example
 `postgres://db:5432/...`) - the name resolves to the peer's stable address.

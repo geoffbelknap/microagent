@@ -6,10 +6,9 @@ description: Run Postgres in a workspace with a published port, a named volume, 
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-By the end of this guide you have Postgres 17 running in a microVM, reachable
-from the host on `127.0.0.1:5432`, with its data on a named volume that
-survives halt and restart. The same shape works for any long-running service
-image.
+This guide gets Postgres 17 running in a microVM, reachable from the host on
+`127.0.0.1:5432`, with its data on a named volume that survives halt and
+restart. The same shape works for any long-running service image.
 
 ## 1. Create a volume for the data
 
@@ -47,6 +46,9 @@ Five flags do the work:
   backend-neutral inbound path, no special network mode needed.
 - `--restart on-failure` records the restart policy, enforced when the
   workspace runs under [`supervise`](/cli/supervise/).
+
+A throwaway dev password in an env var is fine here; for real credentials,
+see [deliver secrets](/guides/secrets/).
 
 ## 3. Start it and wait for ready
 

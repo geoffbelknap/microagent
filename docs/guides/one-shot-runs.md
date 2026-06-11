@@ -31,6 +31,8 @@ Exit code: 0
 ```
 
 Leave the command off and microagent runs the image's Entrypoint/Cmd instead.
+Later output blocks on this page trim the workspace summary above and show
+only the command output.
 
 Use `--exec` when you want one shell command string rather than argv words:
 

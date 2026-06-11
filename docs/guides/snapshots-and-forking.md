@@ -6,10 +6,9 @@ description: Checkpoint a running workspace, restore it in place, or fork copies
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-By the end of this guide you can checkpoint a workspace - guest memory, device
-state, and disk together - roll it back to that exact point, and fork
-independent copies that resume from the same moment. Snapshots are
-Firecracker-only.
+A snapshot freezes a workspace - guest memory, device state, and disk - at
+one moment. This guide takes one, rolls back to it, and forks independent
+copies that resume from it. Snapshots are Firecracker-only.
 
 ## 1. Get a workspace into a state worth keeping
 
@@ -114,6 +113,8 @@ single tag.
 
 ## What's next
 
+- **The lifecycle of the workspaces you're snapshotting** - [keep a persistent workspace](/guides/persistent-workspaces/).
+- **Why mediation sessions reset on restore and fork** - [build agents on the mediation channel](/guides/agents-and-mediation/).
 - **Snapshot internals and flags** - the [`snapshot`](/cli/snapshot/) reference.
 - **Fork flags and the vsock mount-namespace detail** - the [`create`](/cli/create/) reference.
 - **Pause without a disk artifact** - [`pause`](/cli/pause/) / [`resume`](/cli/resume/).

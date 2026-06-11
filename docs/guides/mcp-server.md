@@ -6,10 +6,11 @@ description: Register microagent serve mcp in Claude Code or another MCP client 
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-By the end of this guide your coding agent can create, run, and inspect
-microVM workspaces through MCP tools instead of shelling out. `microagent
-serve mcp` is a stdio MCP server: the client launches it as a subprocess and
-speaks JSON-RPC over stdin/stdout - no daemon, no port.
+Give a coding agent microVM workspaces as tools. This guide registers
+`microagent serve mcp` in Claude Code (or any MCP client) so the agent
+creates, runs, and inspects workspaces without shelling out. The server is
+stdio: the client launches it as a subprocess and speaks JSON-RPC over
+stdin/stdout - no daemon, no port.
 
 ## 1. Check the host
 
@@ -57,11 +58,13 @@ just prints setup guidance and exits.
 
 ## 3. See what the agent gets
 
-The server exposes the full substrate surface - 57 structured tools covering
-workspace lifecycle (`workspace.create`, `workspace.exec`, `workspace.halt`,
-...), inspection (`workspace.inspect`, `workspace.logs`, `workspace.events`),
-snapshots, images, networks, volumes, copy and artifacts, host diagnostics,
-and cost estimation. The MCP server only exposes the substrate operations listed above; see [Boundaries](/concepts/boundaries/) for where microagent's responsibilities end.
+The server exposes the full substrate surface - more than fifty structured
+tools covering workspace lifecycle (`workspace.create`, `workspace.exec`,
+`workspace.halt`, ...), inspection (`workspace.inspect`, `workspace.logs`,
+`workspace.events`), snapshots, images, networks, volumes, copy and artifacts,
+host diagnostics, and cost estimation. Nothing above the substrate is exposed;
+see [Boundaries](/concepts/boundaries/) for where microagent's
+responsibilities end.
 
 Destructive tools take `preview: true` to report what would happen without
 doing it, and the riskiest host mutations (`kernel.install`, `rootfs.build`,
@@ -78,13 +81,15 @@ In Claude Code, after registering:
 
 The agent calls `workspace.create`, `workspace.start`, and `workspace.exec`
 and reads back structured results - exit code, base64 stdout/stderr, timing.
-You can verify the transport by hand the same way any MCP client does; an
-`initialize` handshake followed by `tools/call` of `microagent.ping` returns:
+You can verify the transport by hand: pipe a single `initialize` request into
+the server and it answers on stdout, then exits when stdin closes:
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' | microagent serve mcp
+```
 
 ```text
-server: {'name': 'microagent', 'version': '0.1.46'}
-tools: 57 exposed
-ping: {"content": [{"text": "pong", "type": "text"}]}
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"microagent","version":"0.1.46"}}}
 ```
 
 ## Clean up

@@ -43,6 +43,10 @@ microagent create research \
   --setup "apt-get update && apt-get install -y ripgrep"
 ```
 
+This `--setup` example (like the storage variant in step 5) is an alternative
+`create` form, not a step to stack on the first - a second `create research`
+fails while the workspace exists, so `delete` it or pick a new name first.
+
 ## 2. Start it and do some work
 
 ```bash

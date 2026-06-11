@@ -7,7 +7,7 @@ description: Get credentials into the guest without writing them to disk, plus o
 _Last updated: 2026-06-11_
 
 By the end of this guide your workload reads its credentials from
-`/run/secrets` - or fetches them on demand - and nothing secret ever touches
+`/run/secrets` - or fetches them on demand. Nothing secret ever touches
 the rootfs, the manifest, or a snapshot. microagent is a secret conduit, not a
 store: it passes operator-owned plaintext through (loudly warned) or resolves
 a reference from an external secret manager, holding the value only in host
@@ -20,8 +20,8 @@ semantics; this guide is the walkthrough.
 
 ## 1. Check that a reference resolves
 
-`secret check` resolves references and reports byte lengths - it never prints
-the value:
+`secret check` resolves references and reports byte lengths without ever
+printing the value:
 
 ```bash
 export API_TOKEN=tk-demo-0123456789abcdef0123456789abcdef
@@ -86,7 +86,7 @@ re-read at each start.
 ## 4. Fetch secrets on demand
 
 Some secrets shouldn't sit in a file at all. `--secret-on-demand` declares a
-reference that is never materialized - the host resolves it lazily, per fetch,
+reference that is never materialized. The host resolves it lazily, per fetch,
 so rotation and revocation at the backend take effect immediately:
 
 ```bash
@@ -113,8 +113,8 @@ is denied.
 
 ## 5. Read the audit log
 
-`--secrets-audit` (declared above) makes the host append one record per access
-- boot materialization and every on-demand fetch - to a per-workspace
+`--secrets-audit` (declared above) makes the host append one record per
+access (boot materialization and every on-demand fetch) to a per-workspace
 append-only log. Records carry the time, name, access type, and result, never
 the value:
 
