@@ -163,21 +163,15 @@ every remaining indexed record (i.e. all indexed blobs are deleted).
 
 ## Flags
 
-Most subcommands take only `--state-dir`; the flags that change behavior are
-`--token` (pull/serve), `--keep-files` (rm), `--delete-files` (prune), and
-`--dedicated` (serve).
+Most subcommands take only `--state-dir <dir>` (state directory, default
+`~/.microagent/`); the flags that change behavior are `--token` (pull/serve),
+`--keep-files` (rm), `--delete-files` (prune), and `--dedicated` (serve).
 
 ### Pull flags
 
 | Flag | Description |
 |---|---|
 | `--token <t>` | HuggingFace bearer token (falls back to `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`) |
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-
-### List flags
-
-| Flag | Description |
-|---|---|
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
 ### Remove flags
@@ -200,12 +194,6 @@ Most subcommands take only `--state-dir`; the flags that change behavior are
 |---|---|
 | `--dedicated` | Start a dedicated runner for this caller instead of reusing a shared one |
 | `--token <t>` | HuggingFace bearer token used if the model must be auto-pulled |
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-
-### Stop and runners flags
-
-| Flag | Description |
-|---|---|
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.

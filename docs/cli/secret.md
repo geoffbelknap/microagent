@@ -22,6 +22,15 @@ itself. References go on the command line; secret values do not.
 
 ## Examples
 
+Give a workspace an API key from your own environment:
+
+```bash
+microagent run IMAGE --secret API_KEY=env:MY_KEY
+```
+
+The guest reads the value from `/run/secrets/API_KEY`; see
+[Delivery to the guest](#delivery-to-the-guest) for how it gets there.
+
 Validate that a reference resolves:
 
 ```bash
@@ -116,7 +125,7 @@ microagent create --name app --secret API_KEY=env:CI_TOKEN --secrets-env-file /e
 - Backing credentials (`VAULT_TOKEN`, etc.) stay on the host; only resolved
   values cross vsock, which is a host-to-guest-only transport.
 
-`--secrets-stdin` and snapshot purge/rehydrate are future work.
+`--secrets-stdin` is future work.
 
 ## On-demand secrets and the audited tier
 

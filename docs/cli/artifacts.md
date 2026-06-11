@@ -38,7 +38,6 @@ lives somewhere unusual.
 |---|---|
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--debugfs <path>` | debugfs binary path for `artifacts get` |
-| `--json` | Global flag before `artifacts`; print structured JSON output |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 

@@ -1,6 +1,6 @@
 ---
 title: microagent network
-description: Inspect workspace network intent and runtime network state.
+description: Inspect workspace networking and manage named networks.
 ---
 
 <!-- docs-last-updated -->

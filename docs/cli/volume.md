@@ -53,8 +53,8 @@ resolves to a managed volume; a path ending in `.tar`/`.tar.gz`/`.tgz` is still
 treated as a bundle and `.ext4`/`.img` as a raw disk image.
 
 ```bash
-microagent run docker.io/library/python:3.12 --volume data:/work
-microagent create research --image docker.io/library/python:3.12 --volume data:/work
+microagent run --volume data:/work docker.io/library/alpine:3.21 touch /work/hello
+microagent create research --image docker.io/library/alpine:3.21 --volume data:/work
 ```
 
 A volume is **single-attach**: at most one running workspace holds it at a time,

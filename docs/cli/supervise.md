@@ -86,8 +86,17 @@ command.
 
 ## Flags
 
-You'll rarely need flags here beyond `--max-restarts` and the
-`--install`/`--uninstall` pair.
+Flags you'll actually use:
+
+- `--max-restarts <n>` - cap a crash-looping workspace instead of restarting it
+  forever (the default, `0`, is unlimited)
+- `--interval <seconds>` - trade exit-detection latency against polling overhead
+- `--install` - hand supervision to the OS init so it survives a host reboot
+- `--uninstall` - remove that boot unit when you retire the workspace
+- `--state-dir <dir>` - supervise a workspace recorded under a non-default
+  state directory
+
+The complete set:
 
 | Flag | Description |
 |---|---|

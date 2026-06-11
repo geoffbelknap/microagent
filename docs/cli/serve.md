@@ -28,8 +28,8 @@ for model ref forms, runner flags, and cleanup commands.
 
 The MCP server automatically uses AX output mode. It exposes structured tools
 for workspace lifecycle, inspection, results, stats, logs, events, snapshots,
-images, networks, volumes, copy/artifact access, host diagnostics, capability
-discovery, and cost estimation.
+images, networks, volumes, model store/serving, copy/artifact access, host
+diagnostics, capability discovery, and cost estimation.
 
 It is the full microagent MCP surface for the current release. It intentionally
 stops at substrate operations: it does not plan, call an LLM, interpret audit
@@ -243,6 +243,13 @@ the minimum shape is:
 | `images.tag` | Tag a local image record |
 | `images.delete` | Delete a local image record, with optional preview |
 | `images.prune` | Prune stale local image records, with optional preview |
+| `models.pull` | Pull a GGUF model from HuggingFace into the local store |
+| `models.list` | List locally stored models |
+| `models.remove` | Remove a model from the local store |
+| `models.prune` | Prune local model records whose blobs are missing |
+| `models.serve` | Start or reuse a local host model server for a stored or pulled model |
+| `models.stop` | Stop local host model server instances for a model |
+| `models.runners` | List running local model servers |
 | `profiles.list` | List resource profiles |
 | `host.inspect` | Report host capabilities |
 | `doctor.check` | Run host diagnostics |
@@ -252,6 +259,9 @@ the minimum shape is:
 | `kernel.install` | Install a kernel artifact after preview confirmation |
 | `rootfs.build` | Build a rootfs after preview confirmation |
 | `cp` | Copy files into or out of stopped workspace disks |
+
+The `models.*` tools mirror the [`model`](/cli/model/) subcommands - the same
+local store and host runner management over MCP.
 
 `connect`, streaming `logs`/`events`/`stats`, `supervise`, `perf`, `init`, and
 `secret check` remain CLI-only. They are interactive, streaming, benchmarking,

@@ -45,6 +45,20 @@ microagent create \
 
 ## `build` flags
 
+Flags you'll actually use:
+
+- `--image <ref>` and `--out <path>` - the required pair: what to build from and
+  where the ext4 image lands
+- `--size-mib <MiB>` - size the disk up front; an image that doesn't fit fails
+  the build
+- `--arch <arch>` - cross-build for a guest architecture other than the host's
+- `--allow-mutable` - accept a tag reference when you've decided digest pinning
+  isn't worth it for this build
+- `--keep-stage` - keep the unpacked stage directory to debug what actually went
+  into the image
+
+The complete set:
+
 | Flag | Description |
 |---|---|
 | `--image <ref>` | OCI image reference |

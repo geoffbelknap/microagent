@@ -62,6 +62,16 @@ records shown in the examples above.
 
 ### `boot` flags
 
+Flags you'll actually use:
+
+- `--iterations <n>` - one boot is noise; run several to get a usable min/avg/max
+- `--image <ref>` - pin the image (by digest) so runs are comparable over time
+- `--profile <name>` - measure the VM size you actually run, not the default
+- `--exec <command>` - move the finish line from "guest up" to "workload ready"
+- `--timeout <seconds>` - fail a hung iteration instead of stalling the whole run
+
+The complete set:
+
 | Flag | Description |
 |---|---|
 | `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |

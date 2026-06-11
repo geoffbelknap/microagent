@@ -103,7 +103,6 @@ detected one, `--arch` when you plan to run non-native guests.
 | `--backend <name>` | Backend override (`apple-vf`, `firecracker`, or `windows-hyperv`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
-| `--json` | Global flag before `host`; print structured JSON output |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
