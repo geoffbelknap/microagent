@@ -26,7 +26,8 @@ microagent doctor
 
 `doctor` confirms the host has the right backend (Firecracker on Linux, Apple
 Virtualization.framework on macOS) and reports whether the default kernel is
-in place. If something is missing, it tells you how to fix it.
+in place. If something is missing, it tells you how to fix it. Still stuck?
+See [Troubleshooting](/troubleshooting/).
 
 ## 3. Boot, run, tear down
 

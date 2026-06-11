@@ -58,11 +58,9 @@ microagent create \
   --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
 
-`create` takes no `--name` here: the workspace name comes from the `name:`
-field in the spec file.
-
-The spec sets the workspace name to `minimal-body` - that's what the rest of
-the commands refer to. First-time create takes a minute or two: microagent
+`create` takes no `--name` here: the spec's `name:` field sets the workspace
+name to `minimal-body`, and that's what the rest of the commands refer to.
+First-time create takes a minute or two: microagent
 pulls the base Python image, builds the rootfs, installs Pydantic and the
 Anthropic SDK, and copies the body source in. The API key is passed in as an
 env var so it stays out of the spec file.

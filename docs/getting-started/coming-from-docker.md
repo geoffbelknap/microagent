@@ -20,8 +20,8 @@ first, then covers what is intentionally different.
 | `docker ps` | `microagent ps` | Lists workspaces. |
 | `docker exec web CMD` | `microagent exec web -- CMD` | Structured result with exit code, stdout, and stderr. Note the `--` before the command. |
 | `docker exec -it web bash` | `microagent connect web` | Opens the workspace console. |
-| `docker stop web` | `microagent stop web` | Graceful shutdown signal; falls back to `kill` if it doesn't return. See [halt is not stop](#halt-is-not-stop). |
-| `docker rm web` | `microagent delete web` | `microagent rm` works as an alias. Refuses while the VM process is still running; halt or stop first. |
+| `docker stop web` | `microagent stop web` | Graceful shutdown signal. If the VM doesn't shut down cleanly, follow up with `microagent kill`. See [halt is not stop](#halt-is-not-stop). |
+| `docker rm web` | `microagent delete web` | `microagent rm` works as an alias. Prompts before deleting; if the workspace is running it offers to stop it first. `--force` kills and deletes. |
 | `docker cp app.py web:/srv/` | `microagent cp app.py web:/srv/` | Same shape, but works on a stopped workspace: files move through the disk image, not a running daemon. |
 | `docker logs web` | `microagent logs web` | Captured serial console output. `-f` follows. |
 | `docker images` | `microagent images` | Lists local image records. |
@@ -33,7 +33,7 @@ The familiar flags work where they map cleanly to microVM behavior: `-e`
 (guest environment variable), `-p` (publish a TCP port), `--name`, `--rm`,
 and a deliberately narrow `-v` that accepts named volumes, tar bundles, and
 ext4 disk images, not host directories. Unsupported features such as
-`--privileged`, pods, and host bind mounts fail with targeted guidance
+`--privileged`, namespace flags, and host bind mounts fail with targeted guidance
 instead of being silently translated.
 
 ## What's intentionally different
@@ -68,10 +68,15 @@ distinction matters for what you can do next:
 - **halt** - clean disk-preserving shutdown. The VM exits, the disk stays,
   and `start` boots the same disk back up.
 - **stop** - graceful shutdown signal (SIGTERM on Firecracker, the equivalent
-  on Apple VF). Falls back to `kill` if it doesn't return.
+  on Apple VF). If the VM doesn't shut down cleanly, follow up with
+  `microagent kill`.
 - **kill** - hard terminate, for when `stop` doesn't return.
 
-`delete` refuses while a VM process is still running; halt or stop first. The
+All three leave the disk in place. `halt` is the deliberate "park it and
+start it later" verb; `stop` and `kill` are for making a VM process go away.
+
+`delete` prompts before deleting; if the workspace is running it offers to
+stop it first. `--force` kills and deletes. The
 [glossary](/concepts/glossary/#lifecycle-vocabulary) has the full lifecycle
 vocabulary, including `quarantine`.
 
