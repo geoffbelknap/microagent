@@ -1,6 +1,6 @@
 ---
 title: Run one-shot commands
-description: Boot a microVM, run a command, and tear it down — with setup, env vars, and artifacts.
+description: Boot a microVM, run a command, and tear it down - with setup, env vars, and artifacts.
 ---
 
 <!-- docs-last-updated -->

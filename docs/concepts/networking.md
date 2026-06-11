@@ -32,9 +32,9 @@ three backends:
 | Firecracker | `user` runs Firecracker inside a `pasta` user namespace with a namespace-local TAP. `nat` creates a host-side TAP and installs nftables MASQUERADE rules. `bridged` attaches a transient TAP to an existing host Linux bridge. `isolated` and TCP `--publish` work. |
 | Windows Hyper-V | `user` and `nat` use the managed `microagent-nat` HNS NAT network. `isolated` starts without an external network adapter. TCP `--publish` works through Hyper-V socket bridging. `bridged` attaches to the named HNS network or Hyper-V switch. |
 
-Apple VF NAT is backend-managed by macOS: `user` and `nat` both map to `VZNATNetworkDeviceAttachment`, which runs in user space inside the framework with no privileges required. Microagent does not create a TAP, configure `pf`, or allocate a subnet of its own. By default it asks the kernel to do DHCP via `ip=dhcp`, and guest init writes `/etc/resolv.conf` from the kernel's DHCP nameserver data, so NAT works without an image-local DHCP client. When a spec declares `network.ip`, `network.gateway`, and optional `network.dns`, Apple VF passes those values to guest init for static IPv4 setup. Use the macOS NAT subnet, normally `192.168.64.0/24` with gateway `192.168.64.1`; Virtualization.framework still owns the attachment and does not expose an independently allocated runtime lease.
+Apple VF NAT is backend-managed by macOS: `user` and `nat` both map to `VZNATNetworkDeviceAttachment`, which runs in user space inside the framework with no privileges required, so microagent does not create a TAP, configure `pf`, or allocate a subnet of its own. By default it asks the kernel to do DHCP via `ip=dhcp`, and guest init writes `/etc/resolv.conf` from the kernel's DHCP nameserver data, so NAT works without an image-local DHCP client. When a spec declares `network.ip`, `network.gateway`, and optional `network.dns`, Apple VF passes those values to guest init for static IPv4 setup. Use the macOS NAT subnet, normally `192.168.64.0/24` with gateway `192.168.64.1`; Virtualization.framework still owns the attachment and does not expose an independently allocated runtime lease.
 
-Windows Hyper-V NAT is backend-managed through HNS/HCN. Microagent creates or
+Windows Hyper-V NAT is backend-managed through HNS/HCN: microagent creates or
 reuses a `microagent-nat` network, attaches an HNS endpoint to the HCS compute
 system, and records runtime network IDs and address details when Windows
 returns them.
@@ -54,7 +54,7 @@ Windows Hyper-V is covered in the quick matrix above and in
 | Capability | Firecracker on Linux | Apple VF on macOS |
 |---|---|---|
 | `user` | `pasta` user-mode networking in an unprivileged namespace. | Native `VZNATNetworkDeviceAttachment`; no sudo, TAP, `pf`, or bridge setup. |
-| `nat` | Microagent creates a TAP, assigns a `10.43.x.0/29` subnet, and installs nftables NAT rules. | macOS owns the native NAT attachment. Microagent can configure a static guest address inside Apple's NAT subnet, normally `192.168.64.0/24`. |
+| `nat` | Creates a TAP, assigns a `10.43.x.0/29` subnet, and installs nftables NAT rules. | macOS owns the native NAT attachment; microagent can configure a static guest address inside Apple's NAT subnet, normally `192.168.64.0/24`. |
 | Runtime lease reporting | Reports assigned runtime IP, subnet, gateway, DNS, and routes because microagent owns the allocation. | Reports declared static config and published ports. DHCP lease details stay macOS-managed because Virtualization.framework does not expose them. |
 | Bridged | Works with an existing Linux bridge and host network privileges. | Implemented in the supervisor, but normal open-source builds are blocked by Apple's restricted `com.apple.vm.networking` entitlement. |
 
@@ -160,7 +160,7 @@ network:
     - 0.0.0.0/0 via 192.168.64.1
 ```
 
-This is not a TAP-style backend allocation. Microagent passes the declared
+This is not a TAP-style backend allocation - microagent passes the declared
 address, gateway, and DNS values to guest init; macOS still provides the NAT
 attachment. Use static NAT when a test or workload needs a stable guest address
 inside the Apple VF NAT network.
@@ -236,7 +236,7 @@ What joining does, realized by the Firecracker supervisor at start:
 - **Shared bridge.** A managed Linux bridge (`mbr<hash>`) is created on demand
   with the gateway address; each member's TAP is enslaved to it, so members are
   on one L2 segment and reach each other directly. The bridge is reaped once the
-  last member stops — no orphan devices.
+  last member stops - no orphan devices.
 - **Name resolution.** `/etc/hosts` is injected at boot from the current member
   set via the kernel-cmdline → guest-init seam (`microagent_net_hosts`,
   parallel to DNS). Outbound egress goes through the gateway with NAT, exactly

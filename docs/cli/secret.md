@@ -7,8 +7,8 @@ description: Resolve and validate secret references without writing secrets to d
 _Last updated: 2026-06-11_
 
 ```text
-microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]
-microagent secret audit <workspace> [--state-dir <dir>]
+microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]   Validate secret references
+microagent secret audit <workspace> [--state-dir <dir>]                 Read a workspace's secret-access log
 ```
 
 microagent is a **secret conduit, not a store**. It never owns secrets at rest:

@@ -1,21 +1,21 @@
 ---
 title: Windows Hyper-V supervisor
-description: Experimental Windows host backend for Linux guests through HCS.
+description: Run Linux guests on Windows through HCS - no WSL, no QEMU. Experimental.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
-The `windows-hyperv` backend is the experimental Windows host backend for
-running Linux guests without WSL and without QEMU. It talks to Windows Host
-Compute Service (HCS) through `vmcompute.dll` and prepares Hyper-V utility
-VM-style compute systems from Microagent runtime requests.
+If you want Linux guests on a Windows host - without WSL and without QEMU -
+this page documents the experimental `windows-hyperv` backend. It talks to
+Windows Host Compute Service (HCS) through `vmcompute.dll` and prepares
+Hyper-V utility VM-style compute systems from microagent runtime requests.
 
 For the shared command list and response shape, see
 [Supervisor protocol](/protocol/). This page covers the Windows host behavior
 and current limitations.
 
-## Host Requirements
+## Host requirements
 
 `windows-hyperv` requires:
 
@@ -39,14 +39,14 @@ support, guest-init availability, and console capability.
 
 ## Storage
 
-Windows-HyperV consumes a VHD root disk because HCS VM configuration is
+Windows Hyper-V consumes a VHD root disk because HCS VM configuration is
 VHD-oriented. Workspace root disks live under:
 
 ```text
 <state-dir>/workspaces/<runtimeID>/rootfs.vhd
 ```
 
-The source contents still come from Microagent's OCI/rootfs flow. The Windows
+The source contents still come from microagent's OCI/rootfs flow. The Windows
 rootfs builder converts those contents into a fixed VHD with an ext4 payload.
 
 Bundled data disks are also built as fixed VHD ext4 images and attached to the
@@ -87,7 +87,7 @@ which is not a supervisor protocol command).
 
 ## Networking
 
-Windows-HyperV uses HNS/HCN networking for guest NIC attachment:
+Windows Hyper-V uses HNS/HCN networking for guest NIC attachment:
 
 | Mode | Behavior |
 |---|---|
@@ -135,7 +135,7 @@ that the compute system started, but it does not by itself mark guest or shell
 readiness true. If `result.json` exists, `inspect` also returns the
 backend-neutral `result` object and marks `readiness.resultReady.ready` true.
 
-## Current Limitations
+## Current limitations
 
 - No WSL dependency is used or required.
 - QEMU/WHPX is not used.

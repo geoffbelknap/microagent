@@ -1,13 +1,16 @@
 ---
 title: Firecracker supervisor
-description: Linux backend lifecycle through the executable Go supervisor.
+description: Run the Linux backend - process model, state files, networking, snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
-The Firecracker backend uses the same executable supervisor protocol as Apple
-VF. The supervisor is packaged as `microagent-firecracker-supervisor`.
+Read this page when you need to know what the Firecracker supervisor - the
+Linux backend - does on the host: which files it writes, how each network mode
+works, and what pause/resume and snapshots do underneath. The Firecracker
+backend uses the same executable supervisor protocol as Apple VF. The
+supervisor is packaged as `microagent-firecracker-supervisor`.
 
 For the shared command list and response shape, see
 [Supervisor protocol](/protocol/). This page covers the Linux host behavior and
@@ -17,7 +20,7 @@ The supervisor:
 
 - validates `vmkit.Request`
 - writes `firecracker.json`
-- starts `firecracker --api-sock ... --config-file ...` — the config file boots
+- starts `firecracker --api-sock ... --config-file ...` - the config file boots
   the VM and the API socket stays open so pause/resume and snapshot can control
   the running VM (a snapshot restore/fork instead launches with just the API
   socket and loads the snapshot over it)

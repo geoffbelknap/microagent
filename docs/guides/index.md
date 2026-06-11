@@ -1,6 +1,6 @@
 ---
 title: Guides
-description: Task-shaped walkthroughs — pick the thing you want to do and follow the steps.
+description: Task-shaped walkthroughs - pick the thing you want to do and follow the steps.
 ---
 
 <!-- docs-last-updated -->

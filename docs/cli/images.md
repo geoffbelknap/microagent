@@ -7,12 +7,12 @@ description: Pull, list, tag, push, and prune local image records.
 _Last updated: 2026-06-11_
 
 ```text
-microagent images pull <image> [--state-dir <dir>]
-microagent images list [--state-dir <dir>]
-microagent images push <image> [--state-dir <dir>]
-microagent images tag <source> <target> [--state-dir <dir>]
-microagent images rm <image> [--delete] [--yes] [--state-dir <dir>]
-microagent images prune [--delete] [--yes] [--state-dir <dir>]
+microagent images pull <image> [--state-dir <dir>]                    Pull and record an image
+microagent images list [--state-dir <dir>]                            List local image records
+microagent images push <image> [--state-dir <dir>]                    Push a committed image
+microagent images tag <source> <target> [--state-dir <dir>]           Tag an image record
+microagent images rm <image> [--delete] [--yes] [--state-dir <dir>]   Remove an image record
+microagent images prune [--delete] [--yes] [--state-dir <dir>]        Prune stale image records
 ```
 
 `images` reads the local image index. Successful workspace rootfs
@@ -102,8 +102,8 @@ OCI image so their init config is baked into the rootfs.
 
 For private registries, image pulls read standard registry credential
 configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
-including configured credential helpers. MicroAgent uses those credentials for
-pulls and does not write registry login state.
+including configured credential helpers. Pulls use those credentials;
+microagent does not write registry login state.
 
 ## Flags
 

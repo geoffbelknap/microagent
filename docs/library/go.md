@@ -10,6 +10,42 @@ _Last updated: 2026-06-11_
 [smallest useful Go program](/getting-started/library/first-program/). This
 page is the package reference.*
 
+## The common pattern
+
+Most programs want exactly this: boot a microVM from an OCI image, run a
+command inside it, read the output. `workspace.Run` does all of it in one
+call:
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/geoffbelknap/microagent/pkg/workspace"
+)
+
+func main() {
+	opts := workspace.DefaultOptions()
+	opts.Name = "demo-vm"
+	opts.ImageRef = "docker.io/library/ubuntu:24.04"
+	opts.ExecCommand = "uname -a"
+
+	result, err := workspace.Run(context.Background(), opts)
+	if err != nil {
+		panic(err)
+	}
+	if result.Result != nil {
+		fmt.Print(result.Result.Stdout)
+	}
+}
+```
+
+`DefaultOptions` picks the host backend, kernel, and state directory; you set
+only what your program cares about. The rest of this page covers the package
+surface behind this call and the lower-level APIs around it.
+
 ## Use it as a generic microVM toolkit
 
 The library doesn't require agent semantics. The same packages back the CLI's
@@ -142,32 +178,8 @@ control named workspaces without parsing CLI flags.
 `workspace.DefaultOptions()` picks the host backend (Firecracker on Linux,
 Apple Virtualization.framework on macOS), guest architecture, default kernel
 path, and default state directory. You override only what your program needs.
-
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/geoffbelknap/microagent/pkg/workspace"
-)
-
-func main() {
-	opts := workspace.DefaultOptions()
-	opts.Name = "demo-vm"
-	opts.ImageRef = "docker.io/library/ubuntu:24.04"
-	opts.ExecCommand = "uname -a"
-
-	result, err := workspace.Run(context.Background(), opts)
-	if err != nil {
-		panic(err)
-	}
-	if result.Result != nil {
-		fmt.Print(result.Result.Stdout)
-	}
-}
-```
+The [common pattern](#the-common-pattern) example at the top of this page shows
+the canonical `DefaultOptions` + `Run` call.
 
 `Result.Result` is a `*GuestResult` with `Stdout`, `Stderr`, and `ExitCode`
 captured from the guest. `Result.Response` carries the supervisor's structured
@@ -236,7 +248,7 @@ service end-to-end.
 streaming mode: the guest emits stdout/stderr chunk frames as the command runs
 (delivered to `onChunk`) followed by a terminal result frame. In stream mode the
 returned `ExecResult` carries status, exit code, timing, and truncation flags but
-not the output bytes — those arrive as chunks. The CLI exposes this as
+not the output bytes - those arrive as chunks. The CLI exposes this as
 `microagent exec --stream`.
 
 Mediation readiness uses `vmkit.MediationReadinessSignal(ctx, mediation, state,

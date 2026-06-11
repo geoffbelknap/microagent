@@ -7,7 +7,7 @@ description: Build an ext4 rootfs from an OCI image.
 _Last updated: 2026-06-11_
 
 ```text
-microagent rootfs build --image <ref> --out <path> [flags]
+microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
 ```
 
 `rootfs build` pulls an OCI image and writes an ext4 disk image. Use it when
@@ -76,7 +76,7 @@ The complete set:
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
-For private registries, MicroAgent reads standard registry credential
+For private registries, microagent reads standard registry credential
 configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
 including configured credential helpers. It does not store registry
 credentials.

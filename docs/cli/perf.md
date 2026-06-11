@@ -7,9 +7,9 @@ description: Measure workspace performance.
 _Last updated: 2026-06-11_
 
 ```text
-microagent perf boot [flags]
-microagent perf footprint <name> [flags]
-microagent perf steady <name> [flags]
+microagent perf boot [flags]               Measure boot time over iterations
+microagent perf footprint <name> [flags]   Report backend process memory
+microagent perf steady <name> [flags]      Sample steady-state memory over time
 ```
 
 `perf` runs repeatable local measurements and reports structured results.
