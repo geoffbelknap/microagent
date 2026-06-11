@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-11_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -14,6 +14,17 @@ microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
 watching it while the command is running. When the workspace reaches a terminal
 state, the persisted restart policy decides whether `supervise` starts it
 again.
+
+## Examples
+
+Create a workspace with a restart policy, then supervise it:
+
+```bash
+microagent create research --restart always
+microagent supervise research
+```
+
+Stop the foreground `supervise` process to stop restart supervision.
 
 ## Restart policies
 
@@ -28,7 +39,7 @@ The policy comes from `microagent create --restart ...` or `restart:` in
 
 ## Health checks
 
-By default `supervise` only restarts a workspace that exits — it cannot tell an
+By default `supervise` only restarts a workspace that exits - it cannot tell an
 alive-but-wedged guest from a healthy one. Declare a [`health`](/cli/spec/)
 probe in `microagent.yaml` to close that gap:
 
@@ -43,13 +54,12 @@ health:
 
 While the workspace runs, `supervise` probes it every `intervalSeconds` (after a
 `startPeriodSeconds` grace). After `retries` consecutive failures the workspace
-is force-killed and the restart policy restarts it — so health-based restart
+is force-killed and the restart policy restarts it - so health-based restart
 requires `on-failure` or `always`. Probe forms:
 
-- `exec` — a command run in the guest via structured exec when the selected
-  backend exposes `execReady`;
-  healthy on exit 0.
-- `httpGet` + `port` — a host-side GET against a published guest port; healthy
+- `exec` - a command run in the guest via structured exec when the selected
+  backend exposes `execReady`; healthy on exit 0.
+- `httpGet` + `port` - a host-side GET against a published guest port; healthy
   on a non-error status.
 
 An unhealthy probe surfaces as a `failed` state in the supervise result, so the
@@ -68,13 +78,25 @@ microagent supervise research --uninstall   # remove it
 
 `--install` writes a **systemd user unit** (`~/.config/systemd/user/microagent-supervise-<name>.service`)
 on Linux or a **launchd agent** (`~/Library/LaunchAgents/com.microagent.supervise.<name>.plist`)
-on macOS, then registers it for boot. The OS init — not microagent — supervises
+on macOS, then registers it for boot. The OS init - not microagent - supervises
 the workspace, so the no-daemon model is preserved. The workspace must already
 exist. If automatic registration can't run (for example, no active user init
 session), the unit file is still written and the CLI prints the manual enable
 command.
 
 ## Flags
+
+Flags you'll actually use:
+
+- `--max-restarts <n>` - cap a crash-looping workspace instead of restarting it
+  forever (the default, `0`, is unlimited)
+- `--interval <seconds>` - trade exit-detection latency against polling overhead
+- `--install` - hand supervision to the OS init so it survives a host reboot
+- `--uninstall` - remove that boot unit when you retire the workspace
+- `--state-dir <dir>` - supervise a workspace recorded under a non-default
+  state directory
+
+The complete set:
 
 | Flag | Description |
 |---|---|
@@ -90,17 +112,17 @@ command.
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
-## Example
+## Exit status
 
-```bash
-microagent create research --restart always
-microagent supervise research
-```
-
-Stop the foreground `supervise` process to stop restart supervision.
+`supervise` exits `0` when supervision ends cleanly - the workspace reaches a
+terminal state its policy does not restart from, or `--max-restarts` is
+reached; nonzero when the workspace cannot be found or a start fails. With
+`--install`/`--uninstall` it exits `0` when the unit is written or removed. In
+AX mode a failure is written as a structured error envelope.
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`start`](/cli/start/)
-- [`status`](/cli/status/)
+- [`create`](/cli/create/) - set the restart policy
+- [`start`](/cli/start/) - a single start without supervision
+- [Workspace spec](/cli/spec/) - declare `restart` and `health`
+- [`status`](/cli/status/) - check the supervised workspace

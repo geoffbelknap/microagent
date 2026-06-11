@@ -21,19 +21,46 @@ normal interactive CLI command and is intentionally not advertised in top-level
 help. When started directly from a terminal, the command exits with setup
 guidance instead of waiting for protocol frames on stdin.
 
-`microagent serve model` is an alias for `microagent model serve`. It starts or
-reuses a pinned host `llama-server` process for a HuggingFace GGUF model ref,
-auto-pulling the model first if needed. See [`microagent model`](model.md) for
-model ref forms, runner flags, and cleanup commands.
+`microagent serve model` is an alias for [`microagent model serve`](/cli/model/).
+It starts or reuses a pinned host `llama-server` process for a HuggingFace GGUF
+model ref, auto-pulling the model first if needed. See [`model`](/cli/model/)
+for model ref forms, runner flags, and cleanup commands.
 
 The MCP server automatically uses AX output mode. It exposes structured tools
 for workspace lifecycle, inspection, results, stats, logs, events, snapshots,
-images, networks, volumes, copy/artifact access, host diagnostics, capability
-discovery, and cost estimation.
+images, networks, volumes, model store/serving, copy/artifact access, host
+diagnostics, capability discovery, and cost estimation.
 
 It is the full microagent MCP surface for the current release. It intentionally
 stops at substrate operations: it does not plan, call an LLM, interpret audit
 meaning, broker credentials, or make policy decisions.
+
+## Examples
+
+Serve a model:
+
+```bash
+microagent serve model TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+```
+
+Probe the MCP transport without an MCP client:
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}' | microagent serve mcp
+```
+
+```text
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"microagent","version":"0.1.46"}}}
+```
+
+In normal use you never run `serve mcp` yourself - your MCP client launches it.
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `mcp` | MCP client-launched stdio integration entry point |
+| `model` | Serve a local HuggingFace GGUF model |
 
 ## Configure MCP clients
 
@@ -171,13 +198,6 @@ the minimum shape is:
 }
 ```
 
-## Commands
-
-| Command | Purpose |
-|---|---|
-| `mcp` | MCP client-launched stdio integration entry point |
-| `model` | Serve a local HuggingFace GGUF model |
-
 ## MCP tools
 
 | Tool | Purpose |
@@ -223,6 +243,13 @@ the minimum shape is:
 | `images.tag` | Tag a local image record |
 | `images.delete` | Delete a local image record, with optional preview |
 | `images.prune` | Prune stale local image records, with optional preview |
+| `models.pull` | Pull a GGUF model from HuggingFace into the local store |
+| `models.list` | List locally stored models |
+| `models.remove` | Remove a model from the local store |
+| `models.prune` | Prune local model records whose blobs are missing |
+| `models.serve` | Start or reuse a local host model server for a stored or pulled model |
+| `models.stop` | Stop local host model server instances for a model |
+| `models.runners` | List running local model servers |
 | `profiles.list` | List resource profiles |
 | `host.inspect` | Report host capabilities |
 | `doctor.check` | Run host diagnostics |
@@ -232,6 +259,9 @@ the minimum shape is:
 | `kernel.install` | Install a kernel artifact after preview confirmation |
 | `rootfs.build` | Build a rootfs after preview confirmation |
 | `cp` | Copy files into or out of stopped workspace disks |
+
+The `models.*` tools mirror the [`model`](/cli/model/) subcommands - the same
+local store and host runner management over MCP.
 
 `connect`, streaming `logs`/`events`/`stats`, `supervise`, `perf`, `init`, and
 `secret check` remain CLI-only. They are interactive, streaming, benchmarking,
@@ -275,13 +305,30 @@ When the bounded retry budget is exhausted, the JSON-RPC error `data` includes
 distinguish retry exhaustion from ordinary task failure. These retry semantics
 come from the shared workspace exec layer and match CLI AX exec behavior.
 
-## Example
+## Flags
 
-```bash
-microagent serve mcp
-```
+`serve mcp` takes no flags. `serve model` takes the same flags as
+[`model serve`](/cli/model/):
+
+| Flag | Description |
+|---|---|
+| `--dedicated` | Start a dedicated runner for this caller instead of reusing a shared one |
+| `--token <t>` | HuggingFace bearer token used if the model must be auto-pulled |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+
+## Exit status
+
+`serve model` exits `0` when the runner is started or reused; nonzero when no
+`llama-server` binary is found or the model cannot be pulled. `serve mcp` runs
+until its client closes stdin, then exits `0`; started from a terminal, it
+exits nonzero with setup guidance. In AX mode a failure is written as a
+structured error envelope.
 
 ## Related
 
+- [Use the MCP server](/guides/mcp-server/) - the client-setup walkthrough
+- [`model`](/cli/model/) - model store and runner management
 - [`contract`](/cli/contract/) - the backend-neutral runtime contract the MCP surface exposes
 - [Supervisor protocol](/protocol/) - the JSON shapes returned by the underlying commands

@@ -21,8 +21,69 @@ microagent model runners [--state-dir <dir>]
 host model server processes that serve them. Downloaded blobs are stored under
 `~/.microagent/models/` by default, indexed by the HuggingFace reference used
 to pull them. All subcommands read and write this index; no remote state is
-modified by the store commands. The server commands (`serve`, `stop`, `runners`)
-manage long-running `llama-server` processes on the host.
+modified by the store commands. The server commands (`serve`, `stop`,
+`runners`) manage long-running `llama-server` processes on the host. Pair a
+workspace with a served model using `run`/`create` `--model <ref>`.
+
+## Examples
+
+Download and manage stored models:
+
+```bash
+# Download a public model
+microagent model pull TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+
+# Download a gated model with an explicit token
+microagent model pull hf.co/meta-llama/Llama-2-7B/llama-2-7b.gguf --token hf_xxxxx
+
+# List stored models
+microagent model ls
+
+# Remove a model and delete its blob
+microagent model rm TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+
+# Remove records for missing blobs (safe; no files deleted)
+microagent model prune
+```
+
+Serve a model and manage the runners:
+
+```bash
+# Start a shared pinned model server (auto-pulls if not stored)
+microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+
+# Start a dedicated runner (exclusive to this caller)
+microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf --dedicated
+
+# List running model servers
+microagent model runners
+
+# Stop all runners for a model
+microagent model stop TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+```
+
+`model ls` prints one tab-separated row per recorded model (no header):
+
+```text
+hf.co/TheBloke/Llama-2-7B-GGUF@main/llama-2-7b.Q4_K_M.gguf	3825819648	sha256:abc...
+```
+
+With the global `--json` flag, records are returned under `models`:
+
+```json
+{
+  "models": [
+    {
+      "model_ref": "hf.co/TheBloke/Llama-2-7B-GGUF@main/llama-2-7b.Q4_K_M.gguf",
+      "resolved_ref": "https://huggingface.co/TheBloke/Llama-2-7B-GGUF/resolve/main/llama-2-7b.Q4_K_M.gguf",
+      "digest": "sha256:abc...",
+      "size_bytes": 3825819648,
+      "output_path": "/home/user/.microagent/models/blobs/a1b2c3d4e5f6a7b8c9d0e1f2.gguf",
+      "last_used_at": "2026-06-01T12:00:00Z"
+    }
+  ]
+}
+```
 
 ## Commands
 
@@ -36,13 +97,22 @@ manage long-running `llama-server` processes on the host.
 | `stop` | Force-stop all model server processes for a model ref |
 | `runners` | List currently running model server processes |
 
-`ls` is also available as `list`.
+`ls` is also available as `list`; `rm` as `remove` and `delete`; `runners` as
+`ps` (within the `model` subcommand). `microagent serve model ...` is an alias
+for `microagent model serve ...`.
 
-`rm` is also available as `remove` and `delete`.
+`serve` requires `llama-server` on PATH or set via the
+`MICROAGENT_LLAMA_SERVER` environment variable. If neither is present, the
+command exits with a clear error message. If the model is not yet in the local
+store, `serve` pulls it automatically before starting the server (equivalent to
+running `model pull` first). The runner is started pinned, so it stays alive
+even when no workspace holds it.
 
-`runners` is also available as `ps` (within the `model` subcommand).
+`stop` force-stops all model server processes for the given ref (ignores
+whether the runner is pinned) and removes their entries from the runner index.
 
-`microagent serve model ...` is an alias for `microagent model serve ...`.
+`runners` self-heals the registry: any listed process that is no longer alive
+is silently removed before the list is printed.
 
 ## HuggingFace ref forms
 
@@ -87,38 +157,38 @@ directory:
 ```
 
 `model rm` removes the index record and, unless `--keep-files` is set, deletes
-the corresponding blob. `model prune` removes index records whose blob files are
-missing from disk. With `--delete-files`, it also deletes the blob file of every
-remaining indexed record (i.e. all indexed blobs are deleted).
+the corresponding blob. `model prune` removes index records whose blob files
+are missing from disk. With `--delete-files`, it also deletes the blob file of
+every remaining indexed record (i.e. all indexed blobs are deleted).
 
-## Pull flags
+## Flags
+
+Most subcommands take only `--state-dir <dir>` (state directory, default
+`~/.microagent/`); the flags that change behavior are `--token` (pull/serve),
+`--keep-files` (rm), `--delete-files` (prune), and `--dedicated` (serve).
+
+### Pull flags
 
 | Flag | Description |
 |---|---|
 | `--token <t>` | HuggingFace bearer token (falls back to `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`) |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-## List flags
-
-| Flag | Description |
-|---|---|
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-
-## Remove flags
+### Remove flags
 
 | Flag | Description |
 |---|---|
 | `--keep-files` | Remove the index record but keep the blob file on disk |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-## Prune flags
+### Prune flags
 
 | Flag | Description |
 |---|---|
 | `--delete-files` | Also delete the blob files of all indexed models (not just orphaned/missing ones) |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-## Serve flags
+### Serve flags
 
 | Flag | Description |
 |---|---|
@@ -126,94 +196,18 @@ remaining indexed record (i.e. all indexed blobs are deleted).
 | `--token <t>` | HuggingFace bearer token used if the model must be auto-pulled |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-`serve` requires `llama-server` on PATH or set via the `MICROAGENT_LLAMA_SERVER`
-environment variable. If neither is present, the command exits with a clear error
-message rather than panicking.
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
-If the model is not yet in the local store, `serve` pulls it automatically before
-starting the server (equivalent to running `model pull` first). The runner is
-started with `--pinned`, so it stays alive even when no workspace holds it.
+## Exit status
 
-## Stop flags
-
-| Flag | Description |
-|---|---|
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-
-`stop` force-stops all model server processes for the given ref (ignores whether
-the runner is pinned) and removes their entries from the runner index.
-
-## Runners flags
-
-| Flag | Description |
-|---|---|
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-
-`runners` self-heals the registry: any listed process that is no longer alive is
-silently removed before the list is printed.
-
-## Examples
-
-```bash
-# Download a public model
-microagent model pull TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
-
-# Download a gated model with an explicit token
-microagent model pull hf.co/meta-llama/Llama-2-7B/llama-2-7b.gguf --token hf_xxxxx
-
-# Download using an environment variable for the token
-HF_TOKEN=hf_xxxxx microagent model pull TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
-
-# List stored models
-microagent model ls
-
-# Remove a model and delete its blob
-microagent model rm TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
-
-# Remove the index entry but leave the blob file on disk
-microagent model rm TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf --keep-files
-
-# Remove records for missing blobs (safe; no files deleted)
-microagent model prune
-
-# Remove records for missing blobs and also delete blob files of all indexed models
-microagent model prune --delete-files
-
-# Start a shared pinned model server (auto-pulls if not stored)
-microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
-
-# Start a dedicated runner (exclusive to this caller)
-microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf --dedicated
-
-# Stop all runners for a model
-microagent model stop TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
-
-# List running model servers
-microagent model runners
-```
-
-`model ls` prints one tab-separated row per recorded model (no header):
-
-```text
-hf.co/TheBloke/Llama-2-7B-GGUF@main/llama-2-7b.Q4_K_M.gguf	3825819648	sha256:abc...
-```
-
-With the global `--json` flag, records are returned under `models`:
-
-```json
-{
-  "models": [
-    {
-      "model_ref": "hf.co/TheBloke/Llama-2-7B-GGUF@main/llama-2-7b.Q4_K_M.gguf",
-      "digest": "sha256:abc...",
-      "size_bytes": 3825819648,
-      "output_path": "/home/user/.microagent/models/blobs/a1b2c3d4e5f6a7b8c9d0e1f2.gguf"
-    }
-  ]
-}
-```
+`model` subcommands exit `0` on success; nonzero when a ref cannot be parsed, a
+download or authentication fails, a record is not found, or `serve` cannot find
+a `llama-server` binary. In AX mode a failure is written as a structured error
+envelope.
 
 ## Related
 
-- [`images`](/cli/images/)
-- [`secret`](/cli/secret/)
+- [`serve`](/cli/serve/) - `serve model` is the same command
+- [`run`](/cli/run/) - pair a workspace with a served model via `--model`
+- [`images`](/cli/images/) - the equivalent store for OCI images
+- [`secret`](/cli/secret/) - deliver tokens to guests without writing them to disk

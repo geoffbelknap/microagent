@@ -4,15 +4,25 @@ description: List exact resource profiles.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-08_
+_Last updated: 2026-06-11_
 
 ```text
 microagent profiles
 ```
 
 `profiles` prints the built-in workspace resource profiles. Profiles are named
-shortcuts for memory, CPU count, and rootfs disk size. `create`, `run`, and
-`start` accept `--profile <name>`.
+shortcuts for memory, CPU count, and rootfs disk size; `create`, `run`, and
+`start` accept `--profile <name>`. Use it when you want the exact numbers
+behind a profile name.
+
+## Examples
+
+List the profiles, then size a workspace with one:
+
+```bash
+microagent profiles
+microagent create research --image docker.io/library/ubuntu:24.04 --profile medium
+```
 
 ## Profiles
 
@@ -23,15 +33,19 @@ shortcuts for memory, CPU count, and rootfs disk size. `create`, `run`, and
 | `medium` | 2048 | 2 | 8192 |
 | `large` | 4096 | 4 | 16384 |
 
-## Example
+## Flags
 
-```bash
-microagent profiles
-microagent create research --image docker.io/library/ubuntu:24.04 --profile medium
-```
+`profiles` takes no flags of its own.
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+
+## Exit status
+
+`profiles` exits `0` on success. In AX mode a failure is written as a
+structured error envelope.
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`run`](/cli/run/)
-- [`start`](/cli/start/)
+- [`create`](/cli/create/) - size a persistent workspace with `--profile`
+- [`run`](/cli/run/) - size a one-shot run with `--profile`
+- [`start`](/cli/start/) - resize on start with `--profile`

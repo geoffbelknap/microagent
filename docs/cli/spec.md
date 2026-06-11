@@ -4,10 +4,13 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-11_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
-control. It is consumed by [`microagent create`](/cli/create/).
+control. It is the declarative form of [`microagent create`](/cli/create/):
+each field corresponds to a `create` flag, and when both are given, CLI flags
+override matching spec fields. Use the file when the workspace definition
+should live in the repo; use flags for one-off overrides.
 
 ```yaml
 name: research
@@ -112,6 +115,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`profiles`](/cli/profiles/)
-- [`cp`](/cli/cp/)
+- [`create`](/cli/create/) - the command this file drives
+- [`apply`](/cli/apply/) - apply spec changes to an existing workspace
+- [`profiles`](/cli/profiles/) - the named resource profiles
+- [`supervise`](/cli/supervise/) - acts on `restart` and `health`
