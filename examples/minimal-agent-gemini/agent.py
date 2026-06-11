@@ -153,7 +153,11 @@ def process(req: WorkRequest) -> WorkResult:
 
         function_responses = []
         for fc in function_calls:
-            result = execute_tool(fc.name, dict(fc.args))
+            try:
+                result = execute_tool(fc.name, dict(fc.args))
+            except Exception as exc:
+                # Feed tool failures back to the model instead of crashing the loop.
+                result = f"tool error: {type(exc).__name__}: {exc}"
             function_responses.append(
                 types.Part(function_response=types.FunctionResponse(
                     name=fc.name,

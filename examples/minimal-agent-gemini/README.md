@@ -13,7 +13,7 @@ This example uses Google's newer `google-genai` SDK. The older
 | `microagent.yaml` | Workspace spec - image, deps (`google-genai`), entrypoint, source files, outputs. |
 | `protocol.py` | Pydantic v2 models for the agent protocol (identical to the Anthropic variant). |
 | `agent.py` | The agent - Gemini chat session with bash/read_file/write_file function declarations. |
-| `demo/` | Operator-side files (constraints, system prompt, two example requests). |
+| `demo/` | Operator-side files: constraints, system prompt, and a library of example requests (see [`demo/README.md`](demo/README.md)). |
 
 ## Run
 

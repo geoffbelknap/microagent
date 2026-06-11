@@ -88,6 +88,7 @@ var fileSpecs = []fileSpec{
 	{out: "demo/constraints.json", src: "templates/demo/constraints.json"},
 	{out: "demo/system_prompt.md", src: "templates/demo/system_prompt.md"},
 	{out: "demo/input-001.json", src: "templates/demo/input-001.json"},
+	{out: "demo/input-002.json", src: "templates/demo/input-002.json"},
 }
 
 type templateData struct {

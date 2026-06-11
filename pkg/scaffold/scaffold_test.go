@@ -50,6 +50,7 @@ func TestGenerateDefaultProvider(t *testing.T) {
 		"agent.py",
 		"demo/constraints.json",
 		"demo/input-001.json",
+		"demo/input-002.json",
 		"demo/system_prompt.md",
 		"microagent.yaml",
 		"protocol.py",

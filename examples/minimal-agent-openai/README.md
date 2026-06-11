@@ -1,6 +1,6 @@
 # minimal-agent-openai
 
-The OpenAI variant of [`minimal-agent`](../minimal-agent/). Same agent protocol, same `bash` / `read_file` / `write_file` tools, same `/workspace` boundary - only the model and SDK differ. Uses OpenAI's Chat Completions API with function calling (`gpt-4o-mini` by default; set the `OPENAI_MODEL` environment variable to use a different one).
+The OpenAI variant of [`minimal-agent`](../minimal-agent/). Same agent protocol, same `bash` / `read_file` / `write_file` tools, same `/workspace` boundary - only the model and SDK differ. Uses OpenAI's Chat Completions API with function calling (`gpt-4o-mini` by default; set the `OPENAI_MODEL` environment variable to use a different one). Because the SDK honors `OPENAI_BASE_URL`, the same agent also runs against local OpenAI-compatible servers - set `OPENAI_TEMPERATURE` to pin a low sampling temperature there (see [run your first agent](../../docs/getting-started/cli/first-agent.md)).
 
 OpenAI applies prompt caching automatically for prefixes ≥ 1024 tokens - no client-side configuration needed.
 
@@ -11,7 +11,7 @@ OpenAI applies prompt caching automatically for prefixes ≥ 1024 tokens - no cl
 | `microagent.yaml` | Workspace spec - image, deps (`openai` instead of `anthropic`), entrypoint, source files, outputs. |
 | `protocol.py` | Pydantic v2 models for the agent protocol (identical to the Anthropic variant). |
 | `agent.py` | The agent - OpenAI tool-use loop with bash/read_file/write_file, scoped to /workspace. |
-| `demo/` | Operator-side files (constraints, system prompt, two example requests). |
+| `demo/` | Operator-side files: constraints, system prompt, and a library of example requests (see [`demo/README.md`](demo/README.md)). |
 
 ## Run
 

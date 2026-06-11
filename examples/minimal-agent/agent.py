@@ -152,10 +152,15 @@ def process(req: WorkRequest) -> WorkResult:
         tool_results = []
         for block in msg.content:
             if block.type == "tool_use":
+                try:
+                    content = execute_tool(block.name, block.input)
+                except Exception as exc:
+                    # Feed tool failures back to the model instead of crashing the loop.
+                    content = f"tool error: {type(exc).__name__}: {exc}"
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": execute_tool(block.name, block.input),
+                    "content": content,
                 })
         messages.append({"role": "user", "content": tool_results})
 

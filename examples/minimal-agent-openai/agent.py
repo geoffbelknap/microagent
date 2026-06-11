@@ -36,6 +36,9 @@ from protocol import (
 
 AGENT_ID = "minimal-agent-openai-1"
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+# Optional sampling override; local models need a low temperature for
+# reliable tool calling. Unset means the server's default.
+TEMPERATURE = os.environ.get("OPENAI_TEMPERATURE")
 CONSTRAINTS_PATH = Path("/agent/constraints.json")
 SYSTEM_PROMPT_PATH = Path("/agent/system_prompt.md")
 INPUT_PATH = Path("/workspace/input.json")
@@ -147,12 +150,17 @@ def process(req: WorkRequest) -> WorkResult:
         {"role": "user", "content": req.content},
     ]
 
+    extra: dict = {}
+    if TEMPERATURE is not None:
+        extra["temperature"] = float(TEMPERATURE)
+
     while True:
         msg = client.chat.completions.create(
             model=MODEL,
             messages=messages,
             tools=TOOLS,
             max_tokens=max_tokens,
+            **extra,
         )
         choice = msg.choices[0]
         # Append the assistant turn as a dict so subsequent iterations
@@ -163,11 +171,16 @@ def process(req: WorkRequest) -> WorkResult:
             break
 
         for tc in choice.message.tool_calls:
-            args = json.loads(tc.function.arguments)
+            try:
+                args = json.loads(tc.function.arguments)
+                content = execute_tool(tc.function.name, args)
+            except Exception as exc:
+                # Feed tool failures back to the model instead of crashing the loop.
+                content = f"tool error: {type(exc).__name__}: {exc}"
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": execute_tool(tc.function.name, args),
+                "content": content,
             })
 
     final_text = choice.message.content or ""

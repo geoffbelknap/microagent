@@ -13,7 +13,7 @@ For the walkthrough - create, deliver a request, run, halt-and-resume, retrieve 
 | `microagent.yaml` | Workspace spec - image, deps, entrypoint, source files, output artifacts. |
 | `protocol.py` | Pydantic v2 models for the agent protocol (request, result, lifecycle signals). |
 | `agent.py` | The agent - Claude tool-use loop with bash/read_file/write_file, scoped to /workspace. |
-| `demo/` | Operator-side files (constraints, system prompt, two example requests). The first three are baked into the workspace by the spec; the request inputs are delivered per run. |
+| `demo/` | Operator-side files: constraints, system prompt, and a library of example requests (see [`demo/README.md`](demo/README.md)). Constraints and the system prompt are baked into the workspace by the spec; request inputs are delivered per run. |
 
 ## Other providers
 
