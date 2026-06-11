@@ -2758,26 +2758,21 @@ func appendEvent(path string, event eventFile) error {
 	return writeJSONFile(path, events)
 }
 
+// runtimeStateRequest rebuilds a request whose config is the recorded runtime
+// config, so state rewrites (stop, pause/resume, snapshot, apply) never drop
+// runtime fields the originating verb's sparse config does not carry. Only the
+// caller's StateDir is preserved; everything else comes from the state file —
+// a field-by-field copy here is exactly how shell/exec ports were once lost.
 func runtimeStateRequest(req vmkit.Request, state runtimeState) vmkit.Request {
 	if req.Identity == nil {
 		identity := state.Event.Identity
 		req.Identity = &identity
 	}
-	if req.Config == nil {
-		config := state.Config
-		req.Config = &config
-	} else {
-		req.Config.KernelPath = state.Config.KernelPath
-		req.Config.RootfsPath = state.Config.RootfsPath
-		req.Config.MemoryMiB = state.Config.MemoryMiB
-		req.Config.CPUCount = state.Config.CPUCount
-		req.Config.Disks = state.Config.Disks
-		req.Config.VsockListeners = state.Config.VsockListeners
-		req.Config.Mediation = state.Config.Mediation
-		req.Config.Network = state.Config.Network
-		req.Config.SerialInput = state.Config.SerialInput
-		req.Config.TimeoutSeconds = state.Config.TimeoutSeconds
+	config := state.Config
+	if req.Config != nil && strings.TrimSpace(req.Config.StateDir) != "" {
+		config.StateDir = req.Config.StateDir
 	}
+	req.Config = &config
 	return req
 }
 
