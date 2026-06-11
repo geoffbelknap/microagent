@@ -137,8 +137,8 @@ Firecracker host reports):
   its own pasta namespace); a `nat` fork is single-instance.
 
 Restoring or forking re-establishes host networking fresh: in-flight guest
-connections (outbound TCP, exec/shell/mediation vsock) reset and the guest body
-must reconnect.
+connections (outbound TCP, exec/shell/mediation vsock) reset and the guest
+process must reconnect.
 
 ## Quarantine
 

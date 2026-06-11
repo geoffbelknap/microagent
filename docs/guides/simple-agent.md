@@ -6,17 +6,17 @@ description: Boot a microVM, point it at Claude, watch it write and run files in
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-This guide builds a small agent in a Linux microVM. The body calls Claude with
+This guide builds a small agent in a Linux microVM. The agent calls Claude with
 `bash`, `read_file`, and `write_file` tools, so Claude can edit code, run
 commands, and inspect files inside `/workspace`. Halt the workspace, swap in a
 new prompt, start it back up, and Claude can read whatever it wrote on the
 previous run.
 
 New here? Start with [run your first agent](/getting-started/cli/first-agent/)
-for the quickstart version. This guide spends more time on the body, prompt
-caching, and the gaps between this demo and a production setup.
+for the quickstart version. This guide spends more time on the agent itself,
+prompt caching, and the gaps between this demo and a production setup.
 
-[`examples/minimal-body/microagent.yaml`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/microagent.yaml)
+[`examples/minimal-agent/microagent.yaml`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent/microagent.yaml)
 describes the workspace. One spec file, one `microagent create` call, no
 separate build step.
 
@@ -33,34 +33,34 @@ From the repo root:
 
 ```bash
 microagent create \
-  --file examples/minimal-body/microagent.yaml \
+  --file examples/minimal-agent/microagent.yaml \
   --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
 
-The spec sets the workspace name to `minimal-body`; the rest of these commands
+The spec sets the workspace name to `minimal-agent`; the rest of these commands
 use that name. The first create takes a minute or so because microagent pulls
 the OCI base image, builds the rootfs, and runs the `setup:` commands that
 install Pydantic and the Anthropic SDK.
 
 The spec file pulls a stock `python:3.13-slim` image, installs `pydantic` and
-`anthropic` via `setup`, copies the body source and operator files into the
+`anthropic` via `setup`, copies the agent source and operator files into the
 rootfs via `files:`, sets the entrypoint, and declares the result artifact. The
 CLI adds the API key as an env var, so host secrets stay out of the spec.
 
-The body's `process()` function sends the request to Claude with the three
+The agent's `process()` function sends the request to Claude with the three
 tools, runs tool calls inside `/workspace`, feeds results back, and loops until
 Claude returns a final answer. Prompt caching is on by default. The system
-prompt is stable across requests, so the body pays for it once and reads it
+prompt is stable across requests, so the agent pays for it once and reads it
 back at about 10x cheaper afterward.
 
-The full body source is in [`examples/minimal-body/body.py`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/body.py).
+The full agent source is in [`examples/minimal-agent/agent.py`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent/agent.py).
 
 ## Step 2 - deliver the request
 
 The spec covers everything that doesn't change between runs. The one thing that changes per run is the request itself, delivered with `microagent cp`:
 
 ```bash
-microagent cp examples/minimal-body/demo/input-001.json minimal-body:/workspace/input.json
+microagent cp examples/minimal-agent/demo/input-001.json minimal-agent:/workspace/input.json
 ```
 
 The first request asks for something concrete:
@@ -68,12 +68,12 @@ The first request asks for something concrete:
 ```json
 {
   "request_id": "req-001",
-  "content": "Create a Python script at /workspace/hello.py that prints 'hello from a microVM' on one line and the running Linux kernel version (use uname -r) on the next. Run it and show me the output.",
+  "content": "Install the Python package 'rich' with pip. Then write /workspace/biggest.py: a script that uses rich to print a table of the 5 largest files under /usr with their sizes. Run it and include the rendered table in your summary.",
   ...
 }
 ```
 
-(Full file: [`examples/minimal-body/demo/input-001.json`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/demo/input-001.json).)
+(Full file: [`examples/minimal-agent/demo/input-001.json`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent/demo/input-001.json).)
 
 The system prompt (already baked into the workspace by the spec) makes the agent take initiative:
 
@@ -90,25 +90,25 @@ the user can find the results.
 ## Step 3 - run and look at what happened
 
 ```bash
-microagent start minimal-body
-microagent --json status minimal-body   # poll until the result is ready
-microagent --json result minimal-body
+microagent start minimal-agent
+microagent --json status minimal-agent   # poll until the result is ready
+microagent --json result minimal-agent
 ```
 
-The body usually takes 5-10 seconds: the VM boots, the body emits `ready`, runs
-the structural checks, calls Claude, writes the result, and exits. `result`
-reads the result file as it stands, so run it after the body has finished.
-`microagent --json status minimal-body` includes the structured `result` once
-it's ready and reports `stopped` after the body exits. Claude's final summary
-appears in the `content` field. It should look something like:
-*"I created `/workspace/hello.py`, ran it with `python3`, and got `hello from a
-microVM` followed by the kernel version `6.1.x`."*
+The run takes half a minute or so: the VM boots, the agent emits `ready`, runs
+the structural checks, calls Claude through the tool loop, writes the result,
+and exits. `result` reads the result file as it stands, so run it after the
+agent has finished. `microagent --json status minimal-agent` includes the
+structured `result` once it's ready and reports `stopped` after the agent
+exits. Claude's final summary appears in the `content` field: a note that
+`rich` was installed, plus the rendered table of the five largest files
+under `/usr`.
 
-The file Claude wrote is still on the workspace's disk. Pull it out:
+The script Claude wrote is still on the workspace's disk. Pull it out:
 
 ```bash
-microagent cp minimal-body:/workspace/hello.py ./hello.py
-cat ./hello.py
+microagent cp minimal-agent:/workspace/biggest.py ./biggest.py
+cat ./biggest.py
 ```
 
 That is the script Claude wrote, retrieved from the microVM.
@@ -120,14 +120,15 @@ deliver a new request, and start it back up. Claude can read whatever it wrote
 on the previous run.
 
 ```bash
-microagent halt minimal-body
-microagent cp examples/minimal-body/demo/input-002.json minimal-body:/workspace/input.json
-microagent start minimal-body
-microagent --json result minimal-body
+microagent halt minimal-agent
+microagent cp examples/minimal-agent/demo/input-002.json minimal-agent:/workspace/input.json
+microagent start minimal-agent
+microagent --json result minimal-agent
 ```
 
-The second request asks Claude to read `/workspace/hello.py` and explain it.
-The file is still there from the first run. The system prompt and installed
+The second request asks Claude to read `/workspace/biggest.py` from the first
+run and extend it to show each file's last-modified date. The file is still
+there from the first run. The system prompt and installed
 deps are still there too. Anthropic's prompt cache is still warm, so the second
 request reads the system prompt back at about 10x cheaper than the first paid
 for it.
@@ -137,20 +138,20 @@ for it.
 ## Step 5 - clean up
 
 ```bash
-microagent halt minimal-body
-microagent delete minimal-body
+microagent halt minimal-agent
+microagent delete minimal-agent
 ```
 
 `delete` removes the workspace record and disk. (For Firecracker, `delete` refuses while the VM is still running; halt or stop first.)
 
 ## Try it with another provider
 
-The body shape does not depend on which model it talks to. Sibling examples run
+The agent's shape does not depend on which model it talks to. Sibling examples run
 the same flow against OpenAI and Gemini with the same protocol, tools,
 workspace, and walkthrough. Each variant has its own `microagent.yaml` and README:
 
-- [`examples/minimal-body-openai/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-openai) - OpenAI Chat Completions with function calling.
-- [`examples/minimal-body-gemini/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-gemini) - Google Gemini with function calling.
+- [`examples/minimal-agent-openai/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent-openai) - OpenAI Chat Completions with function calling.
+- [`examples/minimal-agent-gemini/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent-gemini) - Google Gemini with function calling.
 
 Swap the spec path and the API-key env var; everything else stays the same.
 
@@ -159,11 +160,11 @@ Swap the spec path and the API-key env var; everything else stays the same.
 This guide runs the agent against one request per restart and uses an env-var API key. Two production-shape gaps:
 
 - **One request per restart.** A real deployment streams `WorkRequest`/`WorkResult` over the mediation channel instead of `microagent cp` - see [build agents on the mediation channel](/guides/agents-and-mediation/).
-- **The body holds the key.** Passing `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GEMINI_API_KEY`) as an env var means the body reaches the model directly. The production shape routes the call through a host-side proxy that holds the key, audits requests, and forwards them. See [agency](https://github.com/geoffbelknap/agency) for an implementation.
+- **The agent holds the key.** Passing `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GEMINI_API_KEY`) as an env var means the agent reaches the model directly. The production shape routes the call through a host-side proxy that holds the key, audits requests, and forwards them. See [agency](https://github.com/geoffbelknap/agency) for an implementation.
 
 ## What to read next
 
 - [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
 - [Glossary](/concepts/glossary/) - workspace, mediation, halt vs quarantine, etc.
 - [State and identity](/concepts/state-and-identity/) - how lifecycle events are emitted and what `microagent --json status` reports.
-- [`examples/minimal-body/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body) - the body source.
+- [`examples/minimal-agent/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent) - the agent source.

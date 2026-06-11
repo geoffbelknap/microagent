@@ -74,7 +74,7 @@ contract so clients share one vocabulary; availability is per host.
 
 **Connection-reset contract:** restoring or forking a snapshot re-establishes
 host networking fresh, so in-flight guest connections - outbound TCP and live
-vsock sessions (exec/shell/mediation) - do not survive. The guest body must
+vsock sessions (exec/shell/mediation) - do not survive. The guest process must
 reconnect. Bridged networking is unsupported for snapshot/fork.
 
 ## Contract command

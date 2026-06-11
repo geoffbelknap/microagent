@@ -152,7 +152,7 @@ Scenarios:
   transport-deep     Backend-neutral mediation/vsock transport feature contract.
   supervision-deep   Backend-neutral restart supervision, signal, failure, and
                      cleanup feature contract.
-  init               Agent-body scaffold (no VM): generated files, providers,
+  init               Agent scaffold (no VM): generated files, providers,
                      --force, and that the generated spec validates.
   volumes            Named-volume registry, ext4 backing, attach-by-name
                      persistence across runs, and single-attach enforcement.

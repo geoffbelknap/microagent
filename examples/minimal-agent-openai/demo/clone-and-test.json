@@ -1,0 +1,15 @@
+{
+  "request_id": "req-clone-and-test",
+  "principal": {
+    "name": "alice",
+    "kind": "user",
+    "verified": true,
+    "verified_by": "gateway-1",
+    "authorization_scope": ["agent_work"]
+  },
+  "content": "Clone https://github.com/hukkin/tomli, install its dependencies, run its test suite with pytest, and report how many tests passed.",
+  "content_kind": "text",
+  "constraints_version": 1,
+  "submitted_at": "2026-05-07T00:03:00Z",
+  "audit_ref": "audit://req-clone-and-test"
+}

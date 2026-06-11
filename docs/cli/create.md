@@ -256,7 +256,7 @@ each fork runs Firecracker in a private mount namespace that maps the fork's own
 directory over the source's, and the fork takes its own host-side service ports
 while bridging them to the guest's snapshot ports. This is Firecracker-only; the
 snapshot kernel must match and bridged networking is unsupported. In-flight guest
-connections do not survive the fork - the guest body must reconnect.
+connections do not survive the fork - the guest process must reconnect.
 
 For forks with networking, use `user` mode (pasta): every fork resumes with the
 snapshot's recorded guest IP, and user-mode gives each fork its own network

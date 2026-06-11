@@ -1,0 +1,18 @@
+name: minimal-agent
+image: docker.io/library/python:3.13-slim
+setup:
+  - pip install --no-cache-dir 'pydantic>=2.0,<3' 'anthropic>=0.40'
+  - mkdir -p /app /agent /workspace
+entrypoint: python /app/agent.py
+files:
+  - src: ./agent.py
+    dst: /app/agent.py
+  - src: ./protocol.py
+    dst: /app/protocol.py
+  - src: ./demo/constraints.json
+    dst: /agent/constraints.json
+  - src: ./demo/system_prompt.md
+    dst: /agent/system_prompt.md
+outputs:
+  - name: result
+    path: /workspace/result.json

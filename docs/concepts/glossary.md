@@ -23,6 +23,7 @@ A handful of terms come up often enough that it's worth pinning them down before
 - **rootfs** - the ext4 disk image the guest boots from. Built from an OCI image.
 - **kernel** - the Linux kernel image the microVM boots. Backend-specific; the default is downloaded on first use.
 - **workspace** - a named, persistent microVM. Disk, identity, and event history all stick around between starts. The thing you create, halt, and restart. See [Keep a persistent workspace](/guides/persistent-workspaces/).
+- **agent** - the program you run inside a workspace. microagent doesn't define it or impose a framework; in these docs it means a small LLM loop with tools (see [run your first agent](/getting-started/cli/first-agent/)).
 - **snapshot** - a point-in-time checkpoint of a running workspace's memory and disk. Restore it in place, or fork independent copies from it. See [Snapshot and fork workspaces](/guides/snapshots-and-forking/).
 
 ## Storage and networking

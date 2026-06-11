@@ -1,6 +1,6 @@
 # {{.Name}}
 
-An agent body scaffolded by `microagent init` ({{.Provider}}). It reads a
+An agent scaffolded by `microagent init` ({{.Provider}}). It reads a
 `WorkRequest` from `/workspace/input.json`, runs an agentic loop with `bash`,
 `read_file`, and `write_file` tools that execute inside the microVM's
 `/workspace`, and writes a `WorkResult` to `/workspace/result.json`. Lifecycle
@@ -11,7 +11,7 @@ signals stream to stderr as JSON lines.
 | Path | Role |
 |---|---|
 | `microagent.yaml` | Workspace spec: image, setup, entrypoint, files, outputs. |
-| `body.py` | The agent body — the loop you edit. |
+| `agent.py` | The agent — the loop you edit. |
 | `protocol.py` | Request/reply wire shapes (shaped by the ASK framework). Stable; rarely edited. |
 | `demo/constraints.json` | Operator-owned constraint envelope, baked in at `/agent/constraints.json`. |
 | `demo/system_prompt.md` | System prompt, baked in at `/agent/system_prompt.md`. |
@@ -36,10 +36,10 @@ microagent --json result {{.Name}}
 ```
 
 The workspace persists between starts — halt it, deliver a new request with
-`microagent cp`, and start it again; the body can read whatever it wrote before.
+`microagent cp`, and start it again; the agent can read whatever it wrote before.
 
 ## Edit it
 
-Start with `body.py` — swap the model, add tools, or change `process()`. Keep
+Start with `agent.py` — swap the model, add tools, or change `process()`. Keep
 the `WorkResult` shape from `protocol.py` so the structured `result` output and
 downstream mediation stay stable.

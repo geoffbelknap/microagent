@@ -2269,11 +2269,11 @@ outputs:
   - name: report
     path: /workspace/report.json
 files:
-  - src: ./body.py
-    dst: /app/body.py
+  - src: ./agent.py
+    dst: /app/agent.py
     mode: "0755"
 `
-	if err := os.WriteFile(filepath.Join(dir, "body.py"), []byte("print('ok')\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "agent.py"), []byte("print('ok')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "setup.sh"), []byte("#!/bin/sh\napt-get update\n"), 0o755); err != nil {
@@ -2313,14 +2313,14 @@ files:
 	if len(opts.Outputs) != 1 || opts.Outputs[0].Name != "report" || opts.Outputs[0].Path != "/workspace/report.json" {
 		t.Fatalf("outputs = %#v", opts.Outputs)
 	}
-	if len(opts.Files) != 1 || opts.Files[0].SourcePath != filepath.Join(dir, "body.py") || opts.Files[0].Path != "/app/body.py" || opts.Files[0].Mode != "0755" {
+	if len(opts.Files) != 1 || opts.Files[0].SourcePath != filepath.Join(dir, "agent.py") || opts.Files[0].Path != "/app/agent.py" || opts.Files[0].Mode != "0755" {
 		t.Fatalf("files = %#v", opts.Files)
 	}
 }
 
 func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 	dir := t.TempDir()
-	srcPath := filepath.Join(dir, "body.py")
+	srcPath := filepath.Join(dir, "agent.py")
 	if err := os.WriteFile(srcPath, []byte("print('ok')\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2331,17 +2331,17 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 	}{
 		{
 			name: "missing source",
-			spec: "name: bad\nfiles:\n  - src: ./missing.py\n    dst: /app/body.py\n",
+			spec: "name: bad\nfiles:\n  - src: ./missing.py\n    dst: /app/agent.py\n",
 			want: "file src",
 		},
 		{
 			name: "relative dst",
-			spec: "name: bad\nfiles:\n  - src: ./body.py\n    dst: app/body.py\n",
+			spec: "name: bad\nfiles:\n  - src: ./agent.py\n    dst: app/agent.py\n",
 			want: "file dst must be absolute",
 		},
 		{
 			name: "duplicate dst",
-			spec: "name: bad\nfiles:\n  - src: ./body.py\n    dst: /app/body.py\n  - src: ./body.py\n    dst: /app/body.py\n",
+			spec: "name: bad\nfiles:\n  - src: ./agent.py\n    dst: /app/agent.py\n  - src: ./agent.py\n    dst: /app/agent.py\n",
 			want: "duplicate file dst",
 		},
 		{
@@ -2351,7 +2351,7 @@ func TestParseWorkspaceOptionsRejectsInvalidSpecFiles(t *testing.T) {
 		},
 		{
 			name: "ambiguous setup entry",
-			spec: "name: bad\nsetup:\n  - run: echo ok\n    file: ./body.py\n",
+			spec: "name: bad\nsetup:\n  - run: echo ok\n    file: ./agent.py\n",
 			want: "cannot use both run and file",
 		},
 		{

@@ -92,8 +92,8 @@ namespace and are single-instance.
   refuse a different kernel.
 - **Connections reset.** Host networking is re-established fresh on restore
   and fork, so in-flight TCP and vsock sessions (exec, shell,
-  [mediation](/guides/agents-and-mediation/)) do not survive - the guest body
-  is expected to reconnect. Bridged networking is unsupported for snapshot and
+  [mediation](/guides/agents-and-mediation/)) do not survive - the guest
+  process is expected to reconnect. Bridged networking is unsupported for snapshot and
   fork.
 - **Secrets are scrubbed.** Workspaces with delivered secrets get `/run/secrets`
   purged before the memory file is written and rehydrated on resume, restore,

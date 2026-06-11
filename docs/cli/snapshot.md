@@ -77,7 +77,7 @@ Snapshots are restored with [`start --from-snapshot`](/cli/start/)
 (resume-in-place) and forked with [`create --from-snapshot`](/cli/create/). On
 restore the host networking is re-established fresh, so in-flight guest
 connections - outbound TCP and live vsock sessions (exec/shell/mediation) - do
-not survive; the guest body is expected to reconnect. Halt the source before
+not survive; the guest process is expected to reconnect. Halt the source before
 restoring, and treat the window between a running-state snapshot and the next
 restore as one where sessions need re-establishing. Bridged networking is not
 supported for snapshot or fork.

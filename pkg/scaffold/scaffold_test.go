@@ -47,9 +47,10 @@ func TestGenerateDefaultProvider(t *testing.T) {
 	}
 	wantFiles := []string{
 		"README.md",
-		"body.py",
+		"agent.py",
 		"demo/constraints.json",
 		"demo/input-001.json",
+		"demo/input-002.json",
 		"demo/system_prompt.md",
 		"microagent.yaml",
 		"protocol.py",
@@ -70,30 +71,30 @@ func TestGenerateDefaultProvider(t *testing.T) {
 	if !strings.Contains(yaml, "anthropic>=0.40") {
 		t.Errorf("microagent.yaml missing anthropic SDK spec: %s", yaml)
 	}
-	// The mediation wiring is templated in (commented) so the body's protocol
+	// The mediation wiring is templated in (commented) so the agent's protocol
 	// side has a documented host-channel counterpart to uncomment.
 	if !strings.Contains(yaml, "# mediation:") {
 		t.Errorf("microagent.yaml missing mediation template block: %s", yaml)
 	}
 
-	body := readFile(t, dir, "body.py")
-	if !strings.Contains(body, `AGENT_ID = "triage-1"`) {
-		t.Errorf("body.py AGENT_ID not templated: %s", firstLines(body, 40))
+	agent := readFile(t, dir, "agent.py")
+	if !strings.Contains(agent, `AGENT_ID = "triage-1"`) {
+		t.Errorf("agent.py AGENT_ID not templated: %s", firstLines(agent, 40))
 	}
-	if strings.Contains(body, "{{") {
-		t.Errorf("body.py still contains an unrendered template directive")
+	if strings.Contains(agent, "{{") {
+		t.Errorf("agent.py still contains an unrendered template directive")
 	}
-	if !strings.Contains(body, "from anthropic import Anthropic") {
-		t.Errorf("anthropic body.py missing SDK import")
+	if !strings.Contains(agent, "from anthropic import Anthropic") {
+		t.Errorf("anthropic agent.py missing SDK import")
 	}
 }
 
 func TestGenerateProviderVariants(t *testing.T) {
 	cases := []struct {
-		provider  Provider
-		sdk       string
-		apiKey    string
-		bodyMatch string
+		provider   Provider
+		sdk        string
+		apiKey     string
+		agentMatch string
 	}{
 		{ProviderAnthropic, "anthropic>=0.40", "ANTHROPIC_API_KEY", "from anthropic import Anthropic"},
 		{ProviderOpenAI, "openai>=1.50", "OPENAI_API_KEY", "from openai import OpenAI"},
@@ -113,12 +114,12 @@ func TestGenerateProviderVariants(t *testing.T) {
 			if !strings.Contains(yaml, tc.sdk) {
 				t.Errorf("microagent.yaml missing SDK %q", tc.sdk)
 			}
-			body := readFile(t, dir, "body.py")
-			if !strings.Contains(body, tc.bodyMatch) {
-				t.Errorf("body.py missing %q", tc.bodyMatch)
+			agent := readFile(t, dir, "agent.py")
+			if !strings.Contains(agent, tc.agentMatch) {
+				t.Errorf("agent.py missing %q", tc.agentMatch)
 			}
-			if strings.Contains(body, "{{") {
-				t.Errorf("body.py contains unrendered template directive")
+			if strings.Contains(agent, "{{") {
+				t.Errorf("agent.py contains unrendered template directive")
 			}
 			readme := readFile(t, dir, "README.md")
 			if !strings.Contains(readme, tc.apiKey) {
@@ -156,8 +157,8 @@ func TestGenerateFailsClosedOnExisting(t *testing.T) {
 	if got := readFile(t, dir, "protocol.py"); got != "custom" {
 		t.Errorf("protocol.py was modified: %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "body.py")); !os.IsNotExist(err) {
-		t.Errorf("body.py should not have been written on fail-closed: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "agent.py")); !os.IsNotExist(err) {
+		t.Errorf("agent.py should not have been written on fail-closed: %v", err)
 	}
 
 	// Force overwrites.

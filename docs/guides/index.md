@@ -33,5 +33,5 @@ reference](/cli/); for the ideas behind the commands, see
 
 ## Build an agent
 
-- [Build a simple agent](/guides/simple-agent/) - a one-shot agent body that takes a request, calls Claude under operator-supplied constraints, and writes a result.
-- [Build agents on the mediation channel](/guides/agents-and-mediation/) - the guest-to-host vsock contract: declare it, listen on the host, loop in the body.
+- [Build a simple agent](/guides/simple-agent/) - a one-shot agent that takes a request, calls Claude under operator-supplied constraints, and writes a result.
+- [Build agents on the mediation channel](/guides/agents-and-mediation/) - the guest-to-host vsock contract: declare it, listen on the host, loop in the agent.

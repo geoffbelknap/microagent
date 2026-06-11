@@ -86,7 +86,7 @@ given backend implements, and what each one does, is backend-specific - see the
 [Windows Hyper-V](/protocol/windows-hyperv/) pages. Bridged backends may require
 `config.network.interface`. Port
 forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
-`config.mediation` declares the Body-to-host control-plane channel. Required
+`config.mediation` declares the agent-to-host control-plane channel. Required
 mediation must set `failClosed: true`; if the channel is unavailable or broken,
 consumers should treat it as closed by default.
 
@@ -229,7 +229,7 @@ mediation reports target failures with `error`.
 
 `mediation` reports the declared guest-to-host vsock channel separately from
 ordinary networking and logs. It is the control-plane path between the guest
-body and the host process handling work.
+process and the host process handling work.
 
 When the guest result channel has completed, status responses may include
 `result`. The result is structured separately from serial logs and carries

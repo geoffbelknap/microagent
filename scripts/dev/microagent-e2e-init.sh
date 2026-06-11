@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
-# init scaffolds a starter agent body. Pure filesystem output — no VM required.
+# init scaffolds a starter agent. Pure filesystem output — no VM required.
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-init.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 cleanup() {
@@ -27,16 +27,16 @@ assert_file() { [ -f "$1" ] || e2e_fail "expected generated file: $1"; }
 
 e2e_step "init default (anthropic) project"
 "$CLI" init demo --dir "$STATE_DIR/demo" >"$STATE_DIR/init.json" 2>&1 || { cat "$STATE_DIR/init.json"; e2e_fail "init"; }
-for f in microagent.yaml body.py protocol.py README.md demo/input-001.json demo/system_prompt.md demo/constraints.json; do
+for f in microagent.yaml agent.py protocol.py README.md demo/input-001.json demo/system_prompt.md demo/constraints.json; do
   assert_file "$STATE_DIR/demo/$f"
 done
-grep -q "anthropic" "$STATE_DIR/demo/body.py" || e2e_fail "anthropic body missing provider wiring"
+grep -q "anthropic" "$STATE_DIR/demo/agent.py" || e2e_fail "anthropic agent missing provider wiring"
 
-e2e_step "provider variants produce provider-specific bodies"
+e2e_step "provider variants produce provider-specific agents"
 "$CLI" init op --provider openai --dir "$STATE_DIR/op" >/dev/null 2>&1 || e2e_fail "init openai"
 "$CLI" init gm --provider gemini --dir "$STATE_DIR/gm" >/dev/null 2>&1 || e2e_fail "init gemini"
-grep -qi "openai" "$STATE_DIR/op/body.py" || e2e_fail "openai body missing provider wiring"
-grep -qi "gemini\|generativelanguage\|google" "$STATE_DIR/gm/body.py" || e2e_fail "gemini body missing provider wiring"
+grep -qi "openai" "$STATE_DIR/op/agent.py" || e2e_fail "openai agent missing provider wiring"
+grep -qi "gemini\|generativelanguage\|google" "$STATE_DIR/gm/agent.py" || e2e_fail "gemini agent missing provider wiring"
 
 e2e_step "invalid provider is rejected"
 if "$CLI" init bad --provider nope --dir "$STATE_DIR/bad" >/dev/null 2>&1; then
