@@ -189,6 +189,12 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 	provenance.BuilderPhase = "write-init"
 	progress.emit("write-init", "writing guest init", 0, 0, 0, 0)
 	command := buildCommand(req, imageConfig)
+	if req.ResetFinalConfig {
+		command, err = appendGuestConfigReset(command, req, imageConfig)
+		if err != nil {
+			return provenance, err
+		}
+	}
 	if err := writeInit(stageDir, req.InitPath, command, req.Mode, buildGuestEnv(req.Env, imageConfig), req.InitBinaryPath, req.ResultPort, req.ShellPort, req.ExecPort, req.Mounts, req.HostForwards, req.ConsoleShell, req.Hostname); err != nil {
 		return provenance, err
 	}
@@ -229,6 +235,38 @@ func buildCommand(req BuildRequest, imageConfig ocispec.Image) []string {
 		command = append(command, imageConfig.Config.Cmd...)
 	}
 	return command
+}
+
+// appendGuestConfigReset appends a line to the setup script that rewrites
+// /etc/microagent/run.json for later boots. The env written is the same
+// image-config + request merge as the initial guest config, so a setup boot
+// does not strip image env (PATH and friends) from the workspace.
+func appendGuestConfigReset(command []string, req BuildRequest, imageConfig ocispec.Image) ([]string, error) {
+	if len(command) != 3 || command[0] != "/bin/sh" || command[1] != "-lc" {
+		return nil, fmt.Errorf("guest config reset requires a /bin/sh -lc script command, got %q", command)
+	}
+	final := req.FinalCommand
+	if final == nil {
+		final = []string{}
+	}
+	data, err := json.Marshal(guestRunConfig{
+		Command:      final,
+		Mode:         strings.TrimSpace(req.FinalMode),
+		Env:          envList(buildGuestEnv(req.Env, imageConfig)),
+		Port:         req.ResultPort,
+		ShellPort:    req.ShellPort,
+		ExecPort:     req.ExecPort,
+		Mounts:       req.Mounts,
+		HostForwards: req.HostForwards,
+		ConsoleShell: strings.TrimSpace(req.ConsoleShell),
+		Hostname:     strings.TrimSpace(req.Hostname),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal guest run config reset: %w", err)
+	}
+	out := append([]string{}, command...)
+	out[2] += "\nprintf '%s\\n' " + shellQuote(string(data)) + " > /etc/microagent/run.json"
+	return out, nil
 }
 
 func buildGuestEnv(reqEnv map[string]string, imageConfig ocispec.Image) map[string]string {

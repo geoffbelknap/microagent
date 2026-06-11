@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -1072,19 +1071,28 @@ func Command(opts Options) string {
 	if execCommand != "" {
 		lines = append(lines, execCommand)
 	}
-	if opts.PrepareForStart {
-		finalCommand := ShellCommand(opts.Entrypoint)
-		finalMode := ""
-		if strings.TrimSpace(opts.ServiceCommand) != "" {
-			finalCommand = ShellCommand(opts.ServiceCommand)
-			finalMode = "managed-service"
-		}
-		lines = append(lines, ResetGuestConfigCommand(finalCommand, finalMode, opts.Env, opts.ResultPort, ShellPort(opts), ExecPort(opts), MountsForBackend(opts.Backend, opts.Disks), RootfsPortForwards(opts.Network.PortForwards), opts.ConsoleShell, opts.Hostname))
-	}
 	if len(lines) == 0 {
 		return ""
 	}
 	return "set -eu\n" + strings.Join(lines, "\n")
+}
+
+// FinalCommandAndMode reports the boot command and mode later starts should
+// use after a setup/exec boot, and whether the rootfs build must append a
+// guest-config reset for them. Only the combined setup/exec script path of
+// BuildCommandAndPort needs the reset; the rootfs builder composes it so the
+// rewritten guest env keeps the image env merge.
+func FinalCommandAndMode(opts Options) ([]string, string, bool) {
+	if !opts.PrepareForStart || !HasGuestCommand(opts) {
+		return nil, "", false
+	}
+	if strings.TrimSpace(opts.ServiceCommand) != "" {
+		if !HasSetupCommand(opts) && strings.TrimSpace(opts.ExecCommand) == "" {
+			return nil, "", false
+		}
+		return ShellCommand(opts.ServiceCommand), "managed-service", true
+	}
+	return ShellCommand(opts.Entrypoint), "", true
 }
 
 func BuildCommandAndPort(opts Options) ([]string, uint32) {
@@ -1099,42 +1107,6 @@ func BuildCommandAndPort(opts Options) ([]string, uint32) {
 		return command, opts.ResultPort
 	}
 	return ShellCommand(Command(opts)), opts.ResultPort
-}
-
-func ResetGuestConfigCommand(command []string, mode string, env map[string]string, port uint32, shellPort, execPort uint16, mounts []rootfs.Mount, forwards []rootfs.PortForward, consoleShell, hostname string) string {
-	if command == nil {
-		command = []string{}
-	}
-	data, err := json.Marshal(struct {
-		Command      []string             `json:"command"`
-		Mode         string               `json:"mode,omitempty"`
-		Env          []string             `json:"env,omitempty"`
-		Port         uint32               `json:"port"`
-		ShellPort    uint16               `json:"shellPort,omitempty"`
-		ExecPort     uint16               `json:"execPort,omitempty"`
-		Mounts       []rootfs.Mount       `json:"mounts,omitempty"`
-		HostForwards []rootfs.PortForward `json:"hostForwards,omitempty"`
-		ConsoleShell string               `json:"consoleShell,omitempty"`
-		Hostname     string               `json:"hostname,omitempty"`
-	}{
-		Command:      command,
-		Mode:         strings.TrimSpace(mode),
-		Env:          envList(env),
-		Port:         port,
-		ShellPort:    shellPort,
-		ExecPort:     execPort,
-		Mounts:       mounts,
-		HostForwards: forwards,
-		ConsoleShell: strings.TrimSpace(consoleShell),
-		Hostname:     strings.TrimSpace(hostname),
-	})
-	if err != nil {
-		// Every field above is a plain value type, so Marshal cannot fail
-		// unless a future edit introduces an unmarshalable type. Fail loudly
-		// rather than emit a broken guest config.
-		panic(fmt.Sprintf("workspace: marshal guest run config: %v", err))
-	}
-	return "printf '%s\\n' " + ShellSingleQuote(string(data)) + " > /etc/microagent/run.json"
 }
 
 func HasGuestCommand(opts Options) bool {
@@ -1170,40 +1142,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func envList(env map[string]string) []string {
-	if len(env) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		if validEnvName(key) {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, key+"="+env[key])
-	}
-	return out
-}
-
-func validEnvName(name string) bool {
-	if name == "" {
-		return false
-	}
-	for i, r := range name {
-		if i == 0 {
-			if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
-				return false
-			}
-			continue
-		}
-		if r != '_' && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
-			return false
-		}
-	}
-	return true
 }
