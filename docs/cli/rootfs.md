@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]
@@ -12,37 +12,17 @@ microagent rootfs build --image <ref> --out <path> [flags]
 
 `rootfs build` pulls an OCI image and writes an ext4 disk image. Use it when
 you want to prepare a rootfs ahead of time or hand it to a workspace via
-`--rootfs`.
-
-## Subcommands
-
-- `build` - build a rootfs from an OCI image
-
-## `build` flags
-
-| Flag | Description |
-|---|---|
-| `--image <ref>` | OCI image reference |
-| `--out <path>` | Output rootfs path |
-| `--os <os>` | Target OS (default `linux`) |
-| `--arch <arch>` | Target architecture (`amd64`, `arm64`) |
-| `--size-mib <MiB>` | Disk size |
-| `--mke2fs <path>` | mke2fs binary path |
-| `--exec <command>` | Shell command to run as guest init |
-| `--init <path>` | Guest init path to inject |
-| `--state-dir <dir>` | Builder state directory |
-| `--keep-stage` | Keep the temporary unpacked stage directory |
-| `--stage-snapshot <path>` | Copy the unpacked stage directory to this path before ext4 creation |
-| `--allow-mutable` | Allow tag references (image without a digest) |
+`create --rootfs`; the normal `run`/`create` paths build the same rootfs for
+you.
 
 By default, `rootfs build` only accepts images pinned by digest. Pass
-`--allow-mutable` to accept tag references.
+`--allow-mutable` to accept tag references - [`run`](/cli/run/) and
+[`create`](/cli/create/) accept both; this is the stricter path. See
+[security](/security/) for the rationale.
 
-For private registries, MicroAgent reads standard registry credential
-configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
-including configured credential helpers. It does not store registry credentials.
+## Examples
 
-## Example
+Build a rootfs from a digest-pinned image:
 
 ```bash
 microagent rootfs build \
@@ -63,6 +43,39 @@ microagent create \
   --state-dir /tmp/microagent
 ```
 
+## `build` flags
+
+| Flag | Description |
+|---|---|
+| `--image <ref>` | OCI image reference |
+| `--out <path>` | Output rootfs path |
+| `--os <os>` | Target OS (default `linux`) |
+| `--arch <arch>` | Target architecture (`amd64`, `arm64`) |
+| `--size-mib <MiB>` | Disk size |
+| `--mke2fs <path>` | mke2fs binary path |
+| `--exec <command>` | Shell command to run as guest init |
+| `--init <path>` | Guest init path to inject |
+| `--state-dir <dir>` | Builder state directory |
+| `--keep-stage` | Keep the temporary unpacked stage directory |
+| `--stage-snapshot <path>` | Copy the unpacked stage directory to this path before ext4 creation |
+| `--allow-mutable` | Allow tag references (image without a digest) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+
+For private registries, MicroAgent reads standard registry credential
+configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
+including configured credential helpers. It does not store registry
+credentials.
+
+## Exit status
+
+`rootfs build` exits `0` when the rootfs is written; nonzero when the image
+cannot be pulled, the reference is a mutable tag without `--allow-mutable`, or
+the ext4 image cannot be created. In AX mode a failure is written as a
+structured error envelope.
+
 ## Related
 
-- [`create`](/cli/create/), [`run`](/cli/run/)
+- [`create`](/cli/create/) - consume the rootfs with `--rootfs`
+- [`run`](/cli/run/) - the one-shot path that builds this for you
+- [`images`](/cli/images/) - reusable cached rootfs baselines

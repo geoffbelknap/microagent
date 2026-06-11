@@ -4,10 +4,11 @@ description: Resolve and validate secret references without writing secrets to d
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
 ```text
 microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]
+microagent secret audit <workspace> [--state-dir <dir>]
 ```
 
 microagent is a **secret conduit, not a store**. It never owns secrets at rest:
@@ -16,40 +17,12 @@ reference from an external secret manager, holding the value only in host
 process memory. There is no encrypted store, keyring, or `secret set/ls/rm`.
 
 A secret is declared as `NAME=<scheme>:<ref>`, where the scheme selects the
-source and the reference names *where* the value lives — never the value
+source and the reference names *where* the value lives - never the value
 itself. References go on the command line; secret values do not.
 
-## Schemes
-
-| Scheme | Reference | Source |
-|---|---|---|
-| `env` | `env:VAR` | The CLI process's own environment variable `VAR` (plaintext, warned) |
-| `file` | `file:PATH` | The file's raw contents (plaintext, warned) |
-| `dotenv` | `dotenv:PATH#KEY` | `KEY` from a dotenv file (plaintext, warned) |
-| `vault` | `vault:<mount>/data/<path>#<field>` | HashiCorp Vault KV v2 (secure) |
-
-The three plaintext schemes read the operator's own files on the host and emit a
-`not encrypted at rest, not for production` warning on every resolve. The
-`vault` scheme reads a KV v2 secret read-only using `VAULT_ADDR` and
-`VAULT_TOKEN`; auth, sealed, and not-found conditions surface as clear errors.
-
-Unknown schemes, references missing a scheme, and values that resolve empty all
-**fail closed** with an error — never a silent empty secret.
-
-## `secret check`
-
-`check` validates that one or more references resolve. For each entry it reports
-`ok`, the source scheme, the resolved value's **byte length**, and any plaintext
-warning. It **never prints the secret value**. If any entry fails to resolve,
-the command exits non-zero so scripts can gate on it.
-
-## Output
-
-Place the global `--json` flag before the subcommand for a JSON array; see
-[global flags](/cli/#global-flags). `--mode ax` (or piping to a non-terminal)
-also produces JSON.
-
 ## Examples
+
+Validate that a reference resolves:
 
 ```bash
 export API_TOKEN=...           # operator's own environment
@@ -59,6 +32,8 @@ microagent secret check API=env:API_TOKEN
 ```text
 API	ok	source=env	bytes=40	warning: secret scheme "env" is plaintext: not encrypted at rest, not for production
 ```
+
+Check a Vault reference with machine output:
 
 ```bash
 export VAULT_ADDR=https://vault.internal:8200
@@ -77,6 +52,47 @@ microagent --json secret check DB=vault:secret/data/app#db_password
 ]
 ```
 
+## Schemes
+
+| Scheme | Reference | Source |
+|---|---|---|
+| `env` | `env:VAR` | The CLI process's own environment variable `VAR` (plaintext, warned) |
+| `file` | `file:PATH` | The file's raw contents (plaintext, warned) |
+| `dotenv` | `dotenv:PATH#KEY` | `KEY` from a dotenv file (plaintext, warned) |
+| `vault` | `vault:<mount>/data/<path>#<field>` | HashiCorp Vault KV v2 (secure) |
+
+The three plaintext schemes read the operator's own files on the host and emit a
+`not encrypted at rest, not for production` warning on every resolve. The
+`vault` scheme reads a KV v2 secret read-only using `VAULT_ADDR` and
+`VAULT_TOKEN`; auth, sealed, and not-found conditions surface as clear errors.
+
+Unknown schemes, references missing a scheme, and values that resolve empty all
+**fail closed** with an error - never a silent empty secret.
+
+## `check`
+
+`check` validates that one or more references resolve. For each entry it reports
+`ok`, the source scheme, the resolved value's **byte length**, and any plaintext
+warning. It **never prints the secret value**. If any entry fails to resolve,
+the command exits nonzero so scripts can gate on it.
+
+`secret check` is the host-side resolution layer; it never delivers to a guest.
+The delivery described below is built on the same resolver.
+
+## `audit`
+
+`audit` prints the per-workspace secret-access log written when a workspace was
+created with `--secrets-audit`:
+
+```bash
+microagent secret audit app
+microagent --json secret audit app
+```
+
+Records carry `at`, `name`, `access` (`materialize`/`on-demand`), and `result`
+(`ok`/`denied`/`error`) - never the value. Audit granularity is per-workspace
+plus secret name (the vsock channel is anonymous). There is no guest CLI.
+
 ## Delivery to the guest
 
 Declare secrets on `run`, `create`, or `start`:
@@ -87,7 +103,7 @@ microagent create --name app --secret API_KEY=env:CI_TOKEN --secrets-env-file /e
 ```
 
 - `--secret NAME=<scheme>:<ref>` (repeatable) and `--secrets-env-file PATH` are
-  stored in the workspace manifest as **references and paths — never values** —
+  stored in the workspace manifest as **references and paths - never values** -
   and are **re-resolved on every start/resume**. `NAME` must be a safe
   identifier (the shape of an environment-variable name).
 - At start the host resolves every reference (failing closed: an unresolved
@@ -96,9 +112,9 @@ microagent create --name app --secret API_KEY=env:CI_TOKEN --secrets-env-file /e
 - The guest mounts a **tmpfs at `/run/secrets`** (`0700`) and writes one file
   per secret (`/run/secrets/<NAME>`, mode `0400`, value verbatim). Values never
   touch the rootfs, the manifest, or any disk snapshot. If delivery fails the
-  guest aborts boot — a workload never runs without its declared secrets.
+  guest aborts boot - a workload never runs without its declared secrets.
 - Backing credentials (`VAULT_TOKEN`, etc.) stay on the host; only resolved
-  values cross vsock, which is a host↔guest-only transport.
+  values cross vsock, which is a host-to-guest-only transport.
 
 `--secrets-stdin` and snapshot purge/rehydrate are future work.
 
@@ -128,20 +144,10 @@ microagent create --name app \
   ```
 
   On failure the line is `{"ok":false,"error":"..."}`. The value lives only in
-  the workload's memory — never on the rootfs, the tmpfs, or any disk snapshot.
+  the workload's memory - never on the rootfs, the tmpfs, or any disk snapshot.
 - `--secrets-audit` (workspace-level) turns on the audited tier: the host appends
   one record per access (boot materialization and every on-demand fetch) to a
-  per-workspace append-only log. Records carry `at`, `name`, `access`
-  (`materialize`/`on-demand`), and `result` (`ok`/`denied`/`error`) — **never the
-  value**. Read them with:
-
-  ```bash
-  microagent secret audit app
-  microagent --json secret audit app
-  ```
-
-Audit granularity is per-workspace + secret name (the vsock channel is
-anonymous). There is no guest CLI.
+  per-workspace append-only log. Read it with [`secret audit`](#audit).
 
 ## Snapshots: purge and rehydrate
 
@@ -150,12 +156,12 @@ the memory image (and travel into every restore and fork). When a workspace with
 materialized secrets is snapshotted, microagent automatically:
 
 - **Purges** `/run/secrets` while the VM is still running, just before snapshot
-  create's internal pause — each file is overwritten with zeros (scrubbing the
+  create's internal pause - each file is overwritten with zeros (scrubbing the
   captured RAM) and removed. **Fail-closed:** if the guest can't confirm the
   purge, snapshot create is **aborted** and no memory file is written, so a
   snapshot of a secrets-bearing workspace never contains un-purged plaintext.
 - **Rehydrates** the source after it resumes, and rehydrates the guest after a
-  `--from-snapshot` restore or fork — re-fetching the bundle and rewriting the
+  `--from-snapshot` restore or fork - re-fetching the bundle and rewriting the
   files (references are re-resolved, so a fork gets its own resolved secrets).
 
 This is automatic when secrets are declared; there are no flags. Plain `pause` /
@@ -164,15 +170,29 @@ This is automatic when secrets are declared; there are no flags. Plain `pause` /
 
 **Boundary:** only the tmpfs microagent owns is scrubbed. An on-demand value a
 workload copied into its own memory is captured in the snapshot and cannot be
-scrubbed — on-demand minimizes residency but does not guarantee zero.
+scrubbed - on-demand minimizes residency but does not guarantee zero.
 
-## Scope
+## Flags
 
-`secret check` itself is the host-side resolution layer (it never delivers to a
-guest). The delivery described above is built on the same resolver.
+`check` takes no flags of its own; `audit` takes only `--state-dir`.
+
+| Flag | Description |
+|---|---|
+| `--state-dir <dir>` | State directory holding the workspace audit log (`audit` only, default `~/.microagent/`) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+`--mode ax` (or piping to a non-terminal) also produces JSON.
+
+## Exit status
+
+`secret check` exits `0` when every reference resolves; nonzero when any entry
+fails to resolve. `secret audit` exits `0` when the workspace is found; nonzero
+when it cannot be found or the log cannot be read. In AX mode a failure is
+written as a structured error envelope.
 
 ## Related
 
-- [`run`](/cli/run/)
-- [`create`](/cli/create/)
-- [security](/security/)
+- [`run`](/cli/run/) - declare secrets on a one-shot run
+- [`create`](/cli/create/) - declare secrets on a persistent workspace
+- [Deliver secrets](/guides/secrets/) - the delivery walkthrough
+- [security](/security/) - the trust boundary this design follows

@@ -4,29 +4,39 @@ description: Print the backend-neutral agent runtime contract.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-05-12_
+_Last updated: 2026-06-11_
 
 ```text
 microagent [--json] contract
 ```
 
-`contract` reports backend-neutral runtime semantics: lifecycle commands,
+`contract` prints the backend-neutral runtime contract: lifecycle commands,
 states, readiness signals, result fields, artifact channels, mediation fields,
 and verification. Stable backends implement the full surface; experimental
 backends may support a smaller command set while preserving the same response
-shapes for supported commands.
+shapes for the commands they support. Use it when you're building an agent
+runtime or host integration and need a machine-readable statement of what the
+substrate guarantees.
 
-The JSON output is intended for agent-runtime builders and host integrations
-that need a machine-readable contract.
-
-## Example
+## Examples
 
 ```bash
 microagent --json contract
 ```
 
+## Flags
+
+`contract` takes no flags of its own.
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+
+## Exit status
+
+`contract` exits `0` on success. In AX mode a failure is written as a
+structured error envelope.
+
 ## Related
 
-- [Runtime contract](/protocol/runtime-contract/)
-- [Supervisor protocol](/protocol/)
-- [Backends](/concepts/backends/)
+- [Runtime contract](/protocol/runtime-contract/) - the contract, explained
+- [Supervisor protocol](/protocol/) - the JSON shapes underneath
+- [Backends](/concepts/backends/) - which backends implement which surface

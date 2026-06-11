@@ -4,14 +4,20 @@ description: Sever host-side workspace effects while preserving forensic state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent quarantine <name> [--state-dir <dir>]
 ```
 
-`quarantine` records the workspace state as `quarantined` and preserves disk
-state, identity, runtime state files, serial logs, and `events.json`.
+`quarantine` severs a workspace's host-side network and mediation while
+preserving disk state, identity, runtime state files, serial logs, and
+`events.json`, and records the state as `quarantined`. It is the containment
+verb, not a shutdown: [`halt`](/cli/halt/) parks a healthy workspace and
+[`stop`](/cli/stop/) signals the VM to exit, but `quarantine` leaves the VM
+process where it is and cuts its ability to affect anything outside the
+boundary. A quarantined workspace is a forensic state - you must halt, stop,
+or kill it before you can `start` it again.
 
 On Firecracker, quarantine does not signal the VM process. It terminates
 host-side port-forwarding, removes transient network devices, and unlinks the
@@ -24,7 +30,20 @@ host-side vsock listeners including mediation, closes published TCP listeners,
 and removes the serial input FIFO. The VM process remains alive, and the
 recorded runtime PID is preserved in state.
 
+## Examples
+
+Quarantine a workspace, inspect it, then take it down:
+
+```bash
+microagent quarantine research
+microagent status research
+microagent kill research
+```
+
 ## Flags
+
+You'll rarely need flags here - `--state-dir` only when the workspace lives
+outside the default `~/.microagent/`.
 
 | Flag | Description |
 |---|---|
@@ -38,16 +57,15 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`quarantine` exits nonzero when the workspace cannot be found or when the
-backend cannot sever its host-side effects. In AX mode a failure is written as a
-structured error envelope.
-
-## Example
-
-```bash
-microagent quarantine research
-```
+`quarantine` exits `0` when the host-side effects are severed and the state is
+recorded; nonzero when the workspace cannot be found or the backend cannot
+sever its host-side effects. In AX mode a failure is written as a structured
+error envelope.
 
 ## Related
 
-- [`status`](/cli/status/), [`halt`](/cli/halt/), [`stop`](/cli/stop/), [`kill`](/cli/kill/)
+- [`halt`](/cli/halt/) - park a healthy workspace instead
+- [`stop`](/cli/stop/) - signal the VM to shut down
+- [`kill`](/cli/kill/) - force-terminate a quarantined VM
+- [`status`](/cli/status/) - confirm the `quarantined` state
+- [State and identity](/concepts/state-and-identity/) - where `quarantined` sits in the lifecycle

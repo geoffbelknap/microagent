@@ -4,33 +4,22 @@ description: Show the structured result for a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent result <name> [--state-dir <dir>]
 ```
 
-`result` reads the guest result channel for one workspace. It returns the
-completion payload separately from serial logs.
+`result` reads the guest result channel for one workspace and returns the
+completion payload - start/completion timestamps, exit code, stdout, stderr,
+and failure error when the guest reported one - separately from serial logs.
+It answers what the guest command produced; use [`status`](/cli/status/) for
+the workspace's current state and readiness, and [`events`](/cli/events/) for
+the lifecycle history that led there.
 
-With the global `--json` flag, the response includes `result` with identity, backend, result
-path, start/completion timestamps, exit code, stdout, stderr, and failure
-error when the guest reported one.
+## Examples
 
-## Flags
-
-| Flag | Description |
-|---|---|
-| `--name <name>` | Workspace name (also accepted as positional) |
-| `--id <id>` | Workspace ID alias for `--name` |
-| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
-| `--backend <name>` | Backend identity override |
-| `--supervisor <path>` | Override the installed host backend supervisor path |
-| `--json` | Global flag before `result`; print structured JSON output |
-
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
-
-## Example
+Read the result:
 
 ```bash
 microagent --json result research
@@ -53,6 +42,30 @@ When a result is ready, the response carries it under `result`:
 }
 ```
 
+## Flags
+
+You'll rarely need flags here - the global `--json` before the subcommand is
+the one that matters.
+
+| Flag | Description |
+|---|---|
+| `--name <name>` | Workspace name (also accepted as positional) |
+| `--id <id>` | Workspace ID alias for `--name` |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+| `--backend <name>` | Backend identity override |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
+| `--json` | Global flag before `result`; print structured JSON output |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
+## Exit status
+
+`result` exits `0` when the workspace is found and the result channel is read;
+nonzero when the workspace cannot be found or no result has been delivered. In
+AX mode a failure is written as a structured error envelope.
+
 ## Related
 
-- [`status`](/cli/status/), [`logs`](/cli/logs/)
+- [`status`](/cli/status/) - current state; includes `result` when ready
+- [`events`](/cli/events/) - the lifecycle history
+- [`logs`](/cli/logs/) - the serial console output

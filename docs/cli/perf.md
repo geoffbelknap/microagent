@@ -4,7 +4,7 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent perf boot [flags]
@@ -12,48 +12,11 @@ microagent perf footprint <name> [flags]
 microagent perf steady <name> [flags]
 ```
 
-`perf` runs repeatable local measurements and reports structured results. The
+`perf` runs repeatable local measurements and reports structured results.
 `boot` creates disposable workspaces, waits for a guest command to complete,
 and reports per-iteration duration plus min/avg/max. `footprint` reports the
 host resident set size for the recorded backend process of a running workspace.
 `steady` samples that RSS over time for steady-state overhead reporting.
-
-## Commands
-
-| Command | Purpose |
-|---|---|
-| `boot` | Measure disposable workspace boot time |
-| `footprint` | Report host process RSS for a running workspace |
-| `steady` | Sample host process RSS over time |
-
-## `boot` Flags
-
-| Flag | Description |
-|---|---|
-| `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |
-| `--exec <command>` | Guest command used to mark boot completion. Defaults to `true` |
-| `--iterations <n>` | Number of boot measurements. Defaults to 1 |
-| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-| `--timeout <seconds>` | Per-iteration timeout |
-| `--mke2fs <path>` | mke2fs binary path |
-| `--supervisor <path>` | Override the installed host backend supervisor path |
-
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`. Use `--json` (before `perf`) for the structured measurement records consumed in the examples below.
-
-## `footprint` Flags
-
-| Flag | Description |
-|---|---|
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-
-## `steady` Flags
-
-| Flag | Description |
-|---|---|
-| `--duration <seconds>` | Sampling duration. Defaults to 10 |
-| `--interval <seconds>` | Sampling interval. Defaults to 1 |
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
 ## Examples
 
@@ -84,8 +47,58 @@ Sample steady-state RSS for one minute:
 microagent --json perf steady research --duration 60 --interval 5
 ```
 
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `boot` | Measure disposable workspace boot time |
+| `footprint` | Report host process RSS for a running workspace |
+| `steady` | Sample host process RSS over time |
+
+## Flags
+
+Use the global `--json` flag (before `perf`) for the structured measurement
+records shown in the examples above.
+
+### `boot` flags
+
+| Flag | Description |
+|---|---|
+| `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |
+| `--exec <command>` | Guest command used to mark boot completion. Defaults to `true` |
+| `--iterations <n>` | Number of boot measurements. Defaults to 1 |
+| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+| `--timeout <seconds>` | Per-iteration timeout |
+| `--mke2fs <path>` | mke2fs binary path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
+
+### `footprint` flags
+
+| Flag | Description |
+|---|---|
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+
+### `steady` flags
+
+| Flag | Description |
+|---|---|
+| `--duration <seconds>` | Sampling duration. Defaults to 10 |
+| `--interval <seconds>` | Sampling interval. Defaults to 1 |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
+
+## Exit status
+
+`perf` exits `0` when every measurement completes; nonzero when a boot
+iteration fails or times out, or when `footprint`/`steady` cannot find a
+running workspace process to sample. In AX mode a failure is written as a
+structured error envelope.
+
 ## Related
 
 - [`run`](/cli/run/) - the one-shot path `perf boot` measures
+- [`stats`](/cli/stats/) - live resource usage for one workspace
 - [`host`](/cli/host/) - host backend capabilities that affect boot time
 - [`status`](/cli/status/) - inspect a running workspace before `footprint`/`steady`

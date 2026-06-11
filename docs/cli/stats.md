@@ -4,7 +4,7 @@ description: Show or stream resource usage for a running workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent stats <name> [--follow] [--state-dir <dir>]
@@ -22,16 +22,9 @@ is not supported with JSON/AX output.
 
 The workspace must be running; `stats` on a stopped workspace is an error.
 
-## Flags
+## Examples
 
-| Flag | Description |
-|---|---|
-| `--follow`, `-f` | Stream samples until the workspace stops or you interrupt |
-| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
-
-See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
-
-## Example
+Take one sample:
 
 ```bash
 microagent stats research
@@ -40,6 +33,8 @@ microagent stats research
 ```text
 pid=48213  cpu=4.5%  mem=256.0 MiB  io_read=12.0 MiB  io_write=3.5 MiB
 ```
+
+Get the structured sample:
 
 ```bash
 microagent --json stats research
@@ -56,7 +51,25 @@ microagent --json stats research
 }
 ```
 
+## Flags
+
+You'll rarely need flags here - `--follow` when you want a live stream instead
+of one sample.
+
+| Flag | Description |
+|---|---|
+| `--follow`, `-f` | Stream samples until the workspace stops or you interrupt |
+| `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+
+## Exit status
+
+`stats` exits `0` when a sample is taken; nonzero when the workspace cannot be
+found or is not running. In AX mode a failure is written as a structured error
+envelope.
+
 ## Related
 
-- [`perf`](/cli/perf/) for boot and footprint benchmarking
-- [`status`](/cli/status/) for state and readiness
+- [`perf`](/cli/perf/) - boot and footprint benchmarking
+- [`status`](/cli/status/) - state and readiness
