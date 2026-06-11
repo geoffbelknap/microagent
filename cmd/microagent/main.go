@@ -3471,10 +3471,6 @@ func networkSpecFromConfig(network vmkit.NetworkConfig) networkSpec {
 	return workspace.NetworkSpecFromConfig(network)
 }
 
-func networkConfigFromSpec(spec networkSpec) vmkit.NetworkConfig {
-	return workspace.NetworkConfigFromSpec(spec)
-}
-
 func workspaceArtifactsFromOptions(opts workspaceOptions) workspaceArtifacts {
 	return workspace.ArtifactsFromOptions(opts)
 }
