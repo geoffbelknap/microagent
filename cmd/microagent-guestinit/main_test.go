@@ -54,6 +54,48 @@ func TestMountGuestFilesystemsRejectsMountFailure(t *testing.T) {
 	}
 }
 
+func TestEnsureGuestFDSymlinksCreatesStandardLinks(t *testing.T) {
+	oldSymlink := symlinkGuestDevice
+	t.Cleanup(func() { symlinkGuestDevice = oldSymlink })
+	var calls []guestFDSymlink
+	symlinkGuestDevice = func(target, path string) error {
+		calls = append(calls, guestFDSymlink{Target: target, Path: path})
+		return nil
+	}
+	if err := ensureGuestFDSymlinks(); err != nil {
+		t.Fatalf("ensureGuestFDSymlinks: %v", err)
+	}
+	if !reflect.DeepEqual(calls, guestFDSymlinks) {
+		t.Fatalf("symlink calls = %#v, want %#v", calls, guestFDSymlinks)
+	}
+}
+
+func TestEnsureGuestFDSymlinksAllowsExisting(t *testing.T) {
+	oldSymlink := symlinkGuestDevice
+	t.Cleanup(func() { symlinkGuestDevice = oldSymlink })
+	symlinkGuestDevice = func(string, string) error {
+		return os.ErrExist
+	}
+	if err := ensureGuestFDSymlinks(); err != nil {
+		t.Fatalf("ensureGuestFDSymlinks: %v", err)
+	}
+}
+
+func TestEnsureGuestFDSymlinksRejectsFailure(t *testing.T) {
+	oldSymlink := symlinkGuestDevice
+	t.Cleanup(func() { symlinkGuestDevice = oldSymlink })
+	symlinkGuestDevice = func(string, string) error {
+		return syscall.EPERM
+	}
+	err := ensureGuestFDSymlinks()
+	if err == nil {
+		t.Fatal("ensureGuestFDSymlinks error = nil")
+	}
+	if !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("ensureGuestFDSymlinks err = %v", err)
+	}
+}
+
 func TestParseTCPVsockBridges(t *testing.T) {
 	got, err := parseTCPVsockBridges("3128=3128,127.0.0.1:8081=8081")
 	if err != nil {

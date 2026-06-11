@@ -4,7 +4,7 @@ description: Declarative workspace network intent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-11_
 
 Every workspace declares its network intent. Five modes:
 
@@ -244,30 +244,11 @@ Host requirements match `nat`: `net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in
 the supervisor (run as root, or grant `cap_net_admin,cap_setpcap+ep`).
 `network rm` fails closed while members exist; pass `--force` to override. See
 [`network`](/cli/network/) for the full command surface and
-[Connect two workspaces](/recipes/connected-workspaces/) for a worked example.
+[Connect workspaces on a named network](/guides/networking/) for a worked example.
 
 ## Mediation channel
 
-Mediation is a separate guest-to-host vsock contract for the guest's calls into the host control plane - distinct from ordinary networking. Declare it with:
-
-```bash
-microagent create research --mediation 2048=127.0.0.1:9900
-```
-
-By default the channel is required and fail-closed: if the host listener isn't reachable, the workspace refuses to start. The same shape goes in `microagent.yaml`:
-
-```yaml
-mediation:
-  enabled: true
-  required: true
-  port: 2048
-  target: 127.0.0.1:9900
-  failClosed: true
-```
-
-Use `--mediation-optional` only for development paths where the workspace may boot without the host-side mediator.
-
-For the architecture and a worked pattern, see [Wire up the mediation channel](/recipes/mediation-channel/).
+Mediation is a separate guest-to-host vsock contract for the guest's calls into the host control plane - distinct from ordinary networking, and required and fail-closed by default. Declaration syntax, the host listener pattern, and the failure semantics all live in [build agents on the mediation channel](/guides/agents-and-mediation/).
 
 ## What's visible
 

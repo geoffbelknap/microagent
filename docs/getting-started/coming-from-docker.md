@@ -83,5 +83,5 @@ vocabulary, including `quarantine`.
 ## What's next
 
 - [Quickstart](/getting-started/quickstart/) - boot your first microVM.
-- [Named workspaces](/getting-started/cli/named-workspaces/) - the create, start, halt, delete loop in practice.
+- [Persistent workspaces](/guides/persistent-workspaces/) - the create, start, halt, delete loop in practice.
 - [`microagent run`](/cli/run/) - every flag on the one-shot path.

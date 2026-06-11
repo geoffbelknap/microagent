@@ -1,6 +1,6 @@
 # Demo files
 
-The operator-supplied files for the [simple-agent recipe](../../../docs/recipes/simple-agent.md). They live here so the recipe can `microagent cp` them into a workspace by repo path, instead of asking you to retype JSON into your terminal.
+The operator-supplied files for the [simple-agent recipe](../../../docs/guides/simple-agent.md). They live here so the recipe can `microagent cp` them into a workspace by repo path, instead of asking you to retype JSON into your terminal.
 
 | File | What it is |
 |---|---|

@@ -4,16 +4,16 @@ description: Boot a microVM, point it at Claude, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
-This recipe builds a small agent in a Linux microVM. The body calls Claude with
+This guide builds a small agent in a Linux microVM. The body calls Claude with
 `bash`, `read_file`, and `write_file` tools, so Claude can edit code, run
 commands, and inspect files inside `/workspace`. Halt the workspace, swap in a
 new prompt, start it back up, and Claude can read whatever it wrote on the
 previous run.
 
 New here? Start with [run your first agent](/getting-started/cli/first-agent/)
-for the quickstart version. This recipe spends more time on the body, prompt
+for the quickstart version. This guide spends more time on the body, prompt
 caching, and the gaps between this demo and a production setup.
 
 [`examples/minimal-body/microagent.yaml`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/microagent.yaml)
@@ -75,7 +75,7 @@ The first request asks for something concrete:
 
 (Full file: [`examples/minimal-body/demo/input-001.json`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body/demo/input-001.json).)
 
-The system prompt - already baked into the workspace by the spec - makes the agent take initiative:
+The system prompt (already baked into the workspace by the spec) makes the agent take initiative:
 
 ```text
 You are an agent running inside a Linux microVM. You have access to a workspace
@@ -97,7 +97,7 @@ microagent --json result minimal-body
 
 The body usually takes 5-10 seconds: the VM boots, the body emits `ready`, runs
 the structural checks, calls Claude, writes the result, and exits. `result`
-reads the result file as it stands, so run it after the body has finished -
+reads the result file as it stands, so run it after the body has finished.
 `microagent --json status minimal-body` includes the structured `result` once
 it's ready and reports `stopped` after the body exits. Claude's final summary
 appears in the `content` field. It should look something like:
@@ -147,7 +147,7 @@ microagent delete minimal-body
 
 The body shape does not depend on which model it talks to. Sibling examples run
 the same flow against OpenAI and Gemini with the same protocol, tools,
-workspace, and recipe. Each variant has its own `microagent.yaml` and README:
+workspace, and walkthrough. Each variant has its own `microagent.yaml` and README:
 
 - [`examples/minimal-body-openai/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-openai) - OpenAI Chat Completions with function calling.
 - [`examples/minimal-body-gemini/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-gemini) - Google Gemini with function calling.
@@ -156,10 +156,10 @@ Swap the spec path and the API-key env var; everything else stays the same.
 
 ## What this isn't yet
 
-This recipe runs the agent against one request per restart and uses an env-var API key. Two production-shape gaps:
+This guide runs the agent against one request per restart and uses an env-var API key. Two production-shape gaps:
 
-- **Mediation-channel transport.** The agent receives one request at a time via `microagent cp`. A real deployment carries `WorkRequest` and `WorkResult` over the mediation channel - a guest-to-host vsock contract - so the body sees a stream of requests without restarting between them.
-- **Mediation-routed egress.** Passing `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GEMINI_API_KEY`) as an env var means the body holds the key and reaches the model directly. The production shape routes the call through a host-side proxy that holds the key, audits requests, and forwards them. See [agency](https://github.com/geoffbelknap/agency) for an implementation.
+- **One request per restart.** A real deployment streams `WorkRequest`/`WorkResult` over the mediation channel instead of `microagent cp` - see [build agents on the mediation channel](/guides/agents-and-mediation/).
+- **The body holds the key.** Passing `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GEMINI_API_KEY`) as an env var means the body reaches the model directly. The production shape routes the call through a host-side proxy that holds the key, audits requests, and forwards them. See [agency](https://github.com/geoffbelknap/agency) for an implementation.
 
 ## What to read next
 

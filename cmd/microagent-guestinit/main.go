@@ -496,6 +496,33 @@ func ensureGuestDevices() error {
 	if err := ensureGuestCharDevice("/dev/null", 1, 3, 0o666); err != nil {
 		return err
 	}
+	return ensureGuestFDSymlinks()
+}
+
+type guestFDSymlink struct {
+	Target string
+	Path   string
+}
+
+// guestFDSymlinks are the standard file-descriptor symlinks Linux userspace
+// expects under /dev. devtmpfs does not create them; the init process does.
+// Without /dev/fd, bash process substitution (used by stock entrypoints such
+// as the official postgres image) fails with "could not open file /dev/fd/N".
+var guestFDSymlinks = []guestFDSymlink{
+	{Target: "/proc/self/fd", Path: "/dev/fd"},
+	{Target: "/proc/self/fd/0", Path: "/dev/stdin"},
+	{Target: "/proc/self/fd/1", Path: "/dev/stdout"},
+	{Target: "/proc/self/fd/2", Path: "/dev/stderr"},
+}
+
+var symlinkGuestDevice = os.Symlink
+
+func ensureGuestFDSymlinks() error {
+	for _, link := range guestFDSymlinks {
+		if err := symlinkGuestDevice(link.Target, link.Path); err != nil && !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("create %s: %w", link.Path, err)
+		}
+	}
 	return nil
 }
 

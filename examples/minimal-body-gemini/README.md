@@ -17,7 +17,7 @@ This example uses Google's newer `google-genai` SDK. The older
 
 ## Run
 
-You'll need a Gemini API key as `GEMINI_API_KEY` (get one at [aistudio.google.com](https://aistudio.google.com)). The flow mirrors the [simple-agent recipe](../../docs/recipes/simple-agent.md), with two substitutions:
+You'll need a Gemini API key as `GEMINI_API_KEY` (get one at [aistudio.google.com](https://aistudio.google.com)). The flow mirrors the [simple-agent recipe](../../docs/guides/simple-agent.md), with two substitutions:
 
 ```bash
 microagent create \

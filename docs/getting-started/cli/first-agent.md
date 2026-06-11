@@ -142,7 +142,7 @@ microagent delete minimal-body
 
 ## What's next
 
-- [Build a simple agent](/recipes/simple-agent/) - the same flow with more
+- [Build a simple agent](/guides/simple-agent/) - the same flow with more
   on the body's structure, prompt caching, and the production-shape gaps
   (mediation channel, host-side proxy for keys).
 - [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
