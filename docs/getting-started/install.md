@@ -1,10 +1,14 @@
 ---
 title: Install
-description: Install microagent via Homebrew or build from source.
+description: Install microagent with Homebrew or build it from source.
 ---
 
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
+
+Install the `microagent` CLI, then verify the host can boot microVMs with
+`microagent doctor`. Homebrew is the fast path on Linux and macOS; build from
+source when you need a specific checkout.
 
 ## Homebrew
 
@@ -12,18 +16,17 @@ _Last updated: 2026-06-11_
 brew install geoffbelknap/tap/microagent
 ```
 
-This installs the current stable `microagent` CLI on Linux and macOS. It also installs
-`microagent-supervisor` as a host-specific symlink. On Linux, that symlink
-targets the Firecracker supervisor; on macOS, it targets the Apple
-Virtualization.framework supervisor. Go programs can import the same packages
-that back the CLI; start with the [library overview](/library/) if you are
-embedding microagent rather than using it from a shell.
+This installs the current stable `microagent` CLI plus `microagent-supervisor`
+as a host-specific symlink: Firecracker supervisor on Linux, Apple
+Virtualization.framework supervisor on macOS. Go programs can import the same
+packages that back the CLI; start with the [library overview](/library/) if
+you are embedding microagent rather than using it from a shell.
 
 Only stable releases ship to Homebrew. Release candidates are validated with
-local builds (see "From source" below) and the tag-gated live CI suites, not
-a published formula.
+local builds (see "From source" below) and the tag-gated live CI suites, not a
+published formula.
 
-## From Source
+## From source
 
 You need Go 1.26 or later. On macOS you also need a Swift toolchain to build
 the supervisor.
@@ -39,10 +42,10 @@ microagent doctor
 ```
 
 By default, `make install` installs under `$HOME/.local`. Use
-`PREFIX=/usr/local` if you want a system-style install. That may require running
-the script with privileges. The installer writes the packaged layout that
-microagent's resolvers expect: `bin/microagent`, supervisor symlinks in `bin/`,
-and companion artifacts under `libexec/`.
+`PREFIX=/usr/local` for a system-style install; that may require running the
+script with privileges. The installer writes the packaged layout that
+microagent's resolvers expect: `bin/microagent`, supervisor symlinks in
+`bin/`, and companion artifacts under `libexec/`.
 
 On Linux, `make install` also downloads the pinned upstream Firecracker VMM
 release, verifies the archive SHA-256, and installs it as
@@ -57,9 +60,9 @@ package manager:
 - macOS: `e2fsprogs` through Homebrew when `mke2fs` is missing.
 
 After installing packages, the source installer validates that `pasta` and
-`mke2fs` are executable on Linux. If `passt` installs successfully but does not
-put `pasta` on `PATH`, the install fails at that step instead of leaving the
-problem for a later workspace start.
+`mke2fs` are executable on Linux. If `passt` installs successfully but does
+not put `pasta` on `PATH`, the install fails at that step instead of leaving
+the problem for a later workspace start.
 
 Package installation may prompt for `sudo`. To skip package-manager changes:
 
@@ -68,8 +71,8 @@ make install INSTALL_HOST_PACKAGES=0
 ```
 
 `make install` prints a compact install summary by default. Package-manager
-and download details are written to a temporary log when quiet mode is enabled;
-the installer prints that log path if a command fails. Set
+and download details are written to a temporary log when quiet mode is
+enabled; the installer prints that log path if a command fails. Set
 `MICROAGENT_INSTALL_LOG=/path/to/install.log` to choose the log location, or
 use `QUIET=0` to stream command output directly.
 
@@ -87,8 +90,8 @@ make install DOWNLOAD_FIRECRACKER=0
 
 By default, `make install` installs microagent's default kernel into
 `PREFIX/libexec/kernels/<backend>/<arch>/Image`, so the install behaves like a
-packaged install. Use `INSTALL_KERNEL=0` to skip that step; the first workspace
-create/run can still install the default writable kernel under
+packaged install. Use `INSTALL_KERNEL=0` to skip that step; the first
+workspace create or run can still install the default writable kernel under
 `~/.microagent/kernels/...`.
 
 Some host capabilities cannot be installed by a source checkout. Linux still
@@ -97,7 +100,7 @@ namespaces for `pasta`. The final `microagent doctor` run reports those gaps
 with concrete remediation. For packaging or staged installs, `CHECK=0` skips
 that final check and `ARCH=<arch>` selects the guest architecture.
 
-## Developer Build
+## Developer build
 
 For a local build that stays inside the checkout:
 
@@ -110,10 +113,11 @@ make dev
 
 `make dev` writes a self-contained development build under `.build/dev/`, then
 runs `.build/dev/microagent doctor` so missing host prerequisites are visible.
-If the host is not ready and the command is running in an interactive terminal,
-it offers to run `make install` in quiet bootstrap mode, reusing the dev-linked
-Host VMM when one is present. In CI or other non-interactive shells, it prints
-that command and exits with the doctor failure.
+If the host is not ready and the command is running in an interactive
+terminal, it offers to run `make install` in quiet bootstrap mode, reusing the
+dev-linked Host VMM when one is present. In CI or other non-interactive
+shells, it prints that command and exits with the doctor failure.
+
 The CLI reports a development version based on the current release line, such
 as `0.1.46-8780315` or `0.1.46-8780315-dirty`, so it is obvious you are not
 running the latest stable Homebrew build. The script derives the `0.1.46`
@@ -125,9 +129,9 @@ When an installed Firecracker VMM is available, the dev build links it under
 way as a packaged install.
 
 The script prints the absolute CLI path and a shell `PATH` export you can use
-for interactive development. MCP clients do not inherit changes made inside the
-build script, so configure them either with that absolute CLI path or restart
-the client from a shell where `.build/dev` is already on `PATH`.
+for interactive development. MCP clients do not inherit changes made inside
+the build script, so configure them either with that absolute CLI path or
+restart the client from a shell where `.build/dev` is already on `PATH`.
 
 If you build by hand instead, set the CLI version explicitly:
 
@@ -156,5 +160,5 @@ visibility is honest.
 
 ## Next
 
-- **Try it from the CLI** - [run your first microVM](/getting-started/cli/first-microvm/), then [run your first agent](/getting-started/cli/first-agent/), then [named workspaces](/getting-started/cli/named-workspaces/) for stop/resume.
-- **Embed it from Go** - start with the [library overview](/library/), then [run microagent from a Go program](/getting-started/library/first-program/).
+Boot your first microVM: the [quickstart](/getting-started/quickstart/) takes
+it from here.

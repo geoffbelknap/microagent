@@ -4,15 +4,16 @@ description: Boot a microVM, point it at an LLM, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
-This walks through running an agent - a body that calls an LLM with `bash`,
-`read_file`, and `write_file` tools - inside a microVM. The example ships in
-three flavors: Anthropic Claude, OpenAI, and Google Gemini. The flow is
-identical; only the example folder and the API key env var change.
+Run an agent inside a microVM: a small body that calls an LLM with `bash`,
+`read_file`, and `write_file` tools, does real work in its own workspace, and
+reports a structured result. The example ships in three flavors: Anthropic
+Claude, OpenAI, and Google Gemini. The flow is identical; only the example
+folder and the API key env var change.
 
-*If you just want to see microagent boot a VM and run a command, start with
-[run your first microVM](/getting-started/cli/first-microvm/).*
+*If you just want to see microagent boot a microVM and run a command, start
+with the [quickstart](/getting-started/quickstart/).*
 
 ## Before you start
 
@@ -42,8 +43,8 @@ identical; only the example folder and the API key env var change.
 
    The generated project uses the workspace name you pass (`my-agent` above)
    instead of `minimal-body`, and its `body.py`, `protocol.py`, and demo
-   request are identical to the example. Adjust the commands below to your name
-   and run from the generated directory (use `--file microagent.yaml`).
+   request are identical to the example. Adjust the commands below to your
+   name and run from the generated directory (use `--file microagent.yaml`).
 
 The rest of this page uses the **Anthropic** example. To follow along with
 OpenAI or Gemini instead, swap `minimal-body` for `minimal-body-openai` or
@@ -57,11 +58,9 @@ microagent create \
   --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
 
-`create` takes no `--name` here: the workspace name comes from the `name:`
-field in the spec file.
-
-The spec sets the workspace name to `minimal-body` - that's what the rest of
-the commands refer to. First-time create takes a minute or two: microagent
+`create` takes no `--name` here: the spec's `name:` field sets the workspace
+name to `minimal-body`, and that's what the rest of the commands refer to.
+First-time create takes a minute or two: microagent
 pulls the base Python image, builds the rootfs, installs Pydantic and the
 Anthropic SDK, and copies the body source in. The API key is passed in as an
 env var so it stays out of the spec file.
