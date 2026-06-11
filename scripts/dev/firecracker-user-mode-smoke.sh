@@ -127,4 +127,63 @@ if result["network"]["mode"] != "user":
     raise SystemExit(result["network"])
 PY
 
+# Regression: companion processes (vsock listener, port forwarder) must not
+# outlive a guest that exits on its own, and the published port must be
+# released without any explicit lifecycle verb.
+SELF_EXIT_STATE="$STATE_DIR/self-exit"
+PUBLISH_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+
+"$CLI" create self-exit \
+  --backend firecracker \
+  --image "$IMAGE" \
+  --arch amd64 \
+  --entrypoint "sleep 5" \
+  --publish "$PUBLISH_PORT:8099" \
+  --network user \
+  --kernel "$kernel_path" \
+  --guest-init "$GUEST_INIT" \
+  --size-mib 128 \
+  --state-dir "$SELF_EXIT_STATE" >"$STATE_DIR/self-exit-create.json"
+
+"$CLI" start self-exit --state-dir "$SELF_EXIT_STATE" >"$STATE_DIR/self-exit-start.json"
+
+deadline="$((SECONDS + 90))"
+while true; do
+  "$CLI" status self-exit --state-dir "$SELF_EXIT_STATE" >"$STATE_DIR/self-exit-status.json" || true
+  state="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("event") or {}).get("state",""))' "$STATE_DIR/self-exit-status.json")"
+  if [ "$state" = "stopped" ] || [ "$state" = "failed" ]; then
+    break
+  fi
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "self-exit workspace did not stop on its own (state=$state)" >&2
+    cat "$STATE_DIR/self-exit-status.json" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+# Companions poll the runtime state every 2s; give them a grace window.
+deadline="$((SECONDS + 15))"
+while pgrep -f -- "--state-dir $SELF_EXIT_STATE" >/dev/null 2>&1; do
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo "companion processes survived guest self-exit:" >&2
+    pgrep -af -- "--state-dir $SELF_EXIT_STATE" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+if ! python3 -c 'import socket,sys; s=socket.socket(); s.bind(("127.0.0.1",int(sys.argv[1]))); s.close()' "$PUBLISH_PORT"; then
+  echo "published port $PUBLISH_PORT still bound after guest self-exit" >&2
+  exit 1
+fi
+
+"$CLI" delete self-exit --yes --state-dir "$SELF_EXIT_STATE" >"$STATE_DIR/self-exit-delete.json"
+
+if pgrep -f -- "--state-dir $SELF_EXIT_STATE" >/dev/null 2>&1; then
+  echo "companion processes survived delete:" >&2
+  pgrep -af -- "--state-dir $SELF_EXIT_STATE" >&2
+  exit 1
+fi
+
 echo "firecracker user network smoke passed"
