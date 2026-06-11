@@ -1,6 +1,6 @@
 # minimal-agent-openai
 
-The OpenAI variant of [`minimal-agent`](../minimal-agent/). Same agent protocol, same `bash` / `read_file` / `write_file` tools, same `/workspace` boundary - only the model and SDK differ. Uses OpenAI's Chat Completions API with function calling (`gpt-4o-mini` by default; swap the model string in `agent.py` to use a different one).
+The OpenAI variant of [`minimal-agent`](../minimal-agent/). Same agent protocol, same `bash` / `read_file` / `write_file` tools, same `/workspace` boundary - only the model and SDK differ. Uses OpenAI's Chat Completions API with function calling (`gpt-4o-mini` by default; set the `OPENAI_MODEL` environment variable to use a different one).
 
 OpenAI applies prompt caching automatically for prefixes ≥ 1024 tokens - no client-side configuration needed.
 

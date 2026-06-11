@@ -35,6 +35,7 @@ from protocol import (
 )
 
 AGENT_ID = "minimal-agent-openai-1"
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 CONSTRAINTS_PATH = Path("/agent/constraints.json")
 SYSTEM_PROMPT_PATH = Path("/agent/system_prompt.md")
 INPUT_PATH = Path("/workspace/input.json")
@@ -148,7 +149,7 @@ def process(req: WorkRequest) -> WorkResult:
 
     while True:
         msg = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=MODEL,
             messages=messages,
             tools=TOOLS,
             max_tokens=max_tokens,
