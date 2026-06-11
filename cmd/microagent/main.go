@@ -1154,15 +1154,15 @@ Options:
 func printInitHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent init
 
-Scaffold a starter agent body: a microagent.yaml spec, a provider-specific
-body, the shared body protocol, and a runnable demo request. The generated
+Scaffold a starter agent: a microagent.yaml spec, a provider-specific
+agent, the shared agent protocol, and a runnable demo request. The generated
 project is consumed by the normal create/cp/start flow.
 
 Usage:
   microagent init <name> [options]
 
 Options:
-  --provider <name>     Body provider: anthropic (default), openai, or gemini
+  --provider <name>     Model provider: anthropic (default), openai, or gemini
   --dir <path>          Target directory (defaults to ./<name>)
   --force               Overwrite existing files
 `)
@@ -6228,7 +6228,7 @@ func printHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent
 
 Commands:
-  init                 Scaffold a starter agent body project
+  init                 Scaffold a starter agent project
   run                  Run a command
   create               Create a workspace
   apply                Apply supported workspace spec changes

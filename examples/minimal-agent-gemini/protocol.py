@@ -1,6 +1,6 @@
-"""Body protocol — request/reply wire shapes for an agent body in a microVM.
+"""Agent protocol — request/reply wire shapes for an agent in a microVM.
 
-This module is the working draft of a protocol for agent bodies that run
+This module is the working draft of a protocol for agents that run
 inside microagent microVMs. It's a "primitive" — built from experience,
 small on purpose, and meant to mature here before it earns its way into a
 stable contract somewhere else.
@@ -13,11 +13,11 @@ itself lives outside the agent boundary; the protocol just makes it visible.
 
 ASK's three-layer cognitive model:
 
-* **Constraints**: operator-owned, external, atomic. Body acknowledges a
+* **Constraints**: operator-owned, external, atomic. The agent acknowledges a
   version, then operates under it. Models: ``Constraints``, ``ConstraintAck``.
-* **Identity**: the body's accumulated self. Versioned and hashed; mutations
+* **Identity**: the agent's accumulated self. Versioned and hashed; mutations
   are write-mediated and auditable. Model: ``IdentityRevision``.
-* **Session**: body-internal, ephemeral. Not on the wire by design.
+* **Session**: agent-internal, ephemeral. Not on the wire by design.
 
 Transport is unspecified. JSON over a workspace file, JSON over the mediation
 vsock, HTTP — pick one. Pydantic v2 serializes cleanly to JSON; that's the
@@ -53,13 +53,13 @@ class _Frozen(BaseModel):
 
 
 class Principal(_Frozen):
-    """Who is asking. Verified by upstream before reaching the body.
+    """Who is asking. Verified by upstream before reaching the agent.
 
-    A body that receives a request with ``verified=False`` must refuse it (T23).
-    The body never sets ``verified`` for itself — it consumes the value set by
+    An agent that receives a request with ``verified=False`` must refuse it (T23).
+    The agent never sets ``verified`` for itself — it consumes the value set by
     the verifier on the other side of mediation.
 
-    ``authorization_scope`` is the upper bound on what the body may do for
+    ``authorization_scope`` is the upper bound on what the agent may do for
     this principal (T7). Narrower is fine; broader is a violation.
     """
 
@@ -73,7 +73,7 @@ class Principal(_Frozen):
 class WorkBounds(_Frozen):
     """Operation limits for a single request (T8).
 
-    Bounds override any body defaults. A body must enforce them or refuse.
+    Bounds override any agent defaults. An agent must enforce them or refuse.
     Unbounded operations are not the default.
     """
 
@@ -84,14 +84,14 @@ class WorkBounds(_Frozen):
 
 
 class WorkRequest(_Frozen):
-    """A unit of work for the body.
+    """A unit of work for the agent.
 
-    ``content`` is data, not instructions (T24). The body's job is to process
-    it under the operator's constraints. The only entity that gives the body
+    ``content`` is data, not instructions (T24). The agent's job is to process
+    it under the operator's constraints. The only entity that gives the agent
     instructions is the operator, via constraints — never the prompt content.
 
-    If ``constraints_version`` doesn't match the version the body is currently
-    operating under, the body must emit
+    If ``constraints_version`` doesn't match the version the agent is currently
+    operating under, the agent must emit
     ``LifecycleSignal(signal=constraints_outdated)`` and refuse the request (T9).
     """
 
@@ -108,7 +108,7 @@ class WorkRequest(_Frozen):
 class WorkStatus(str, Enum):
     """Outcome of a ``WorkRequest``.
 
-    ``denied`` and ``yielded`` are first-class outcomes, not failures. A body
+    ``denied`` and ``yielded`` are first-class outcomes, not failures. An agent
     that always returns ``completed`` is suspicious.
     """
 
@@ -119,10 +119,10 @@ class WorkStatus(str, Enum):
 
 
 class WorkResult(_Frozen):
-    """The body's response to a ``WorkRequest``.
+    """The agent's response to a ``WorkRequest``.
 
     ``audit_ref`` points at the actions log written by mediation (T2). The
-    body does not write logs; it consumes the reference so the operator can
+    agent does not write logs; it consumes the reference so the operator can
     stitch request, actions, and result together.
     """
 
@@ -135,10 +135,10 @@ class WorkResult(_Frozen):
 
 
 class LifecycleSignalKind(str, Enum):
-    """Body-emitted lifecycle signals.
+    """Agent-emitted lifecycle signals.
 
-    Five of these are body-emitted; ``quarantined`` is emitted by the host on
-    the body's behalf as a record, since a quarantined body has no way to send.
+    Five of these are agent-emitted; ``quarantined`` is emitted by the host on
+    the agent's behalf as a record, since a quarantined agent has no way to send.
     """
 
     ready = "ready"
@@ -150,7 +150,7 @@ class LifecycleSignalKind(str, Enum):
 
 
 class LifecycleSignal(_Frozen):
-    """A lifecycle event the body emits (or the host records on its behalf)."""
+    """A lifecycle event the agent emits (or the host records on its behalf)."""
 
     signal: LifecycleSignalKind
     agent_id: str
@@ -175,9 +175,9 @@ class Constraints(_Frozen):
 
 
 class ConstraintAck(_Frozen):
-    """Body acknowledges a constraint version (T9).
+    """The agent acknowledges a constraint version (T9).
 
-    A body must emit ``ConstraintAck`` after loading new constraints and
+    An agent must emit ``ConstraintAck`` after loading new constraints and
     before processing any ``WorkRequest`` whose ``constraints_version``
     matches. No ack, no work.
     """
@@ -189,11 +189,11 @@ class ConstraintAck(_Frozen):
 
 
 class IdentityRevision(_Frozen):
-    """Body's accumulated identity state (T25).
+    """The agent's accumulated identity state (T25).
 
-    Identity is read by the body from local workspace state. Mutations go
+    Identity is read by the agent from local workspace state. Mutations go
     through mediation, which writes the mutation record and bumps the
-    version. The body cannot self-elevate (T17).
+    version. The agent cannot self-elevate (T17).
     """
 
     agent_id: str

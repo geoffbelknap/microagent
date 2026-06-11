@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal body that calls Claude with workspace tools.
+"""Minimal agent that calls Claude with workspace tools.
 
 Reads a ``WorkRequest`` from /workspace/input.json, runs an agentic loop with
 Claude — bash, read_file, write_file — all executing inside the microVM's
@@ -7,7 +7,7 @@ Claude — bash, read_file, write_file — all executing inside the microVM's
 signals stream to stderr as JSON lines.
 
 Prompt caching is on by default. The system prompt is stable across every
-request under one constraint version, so the body pays for it once and reads
+request under one constraint version, so the agent pays for it once and reads
 it back at ~10× cheaper afterward.
 """
 
@@ -31,7 +31,7 @@ from protocol import (
     WorkStatus,
 )
 
-AGENT_ID = "minimal-body-1"
+AGENT_ID = "minimal-agent-1"
 CONSTRAINTS_PATH = Path("/agent/constraints.json")
 SYSTEM_PROMPT_PATH = Path("/agent/system_prompt.md")
 INPUT_PATH = Path("/workspace/input.json")

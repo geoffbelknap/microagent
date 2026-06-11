@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Minimal body that calls Google Gemini with workspace tools.
+"""Minimal agent that calls Google Gemini with workspace tools.
 
-Sibling of ``examples/minimal-body``. Same body protocol shapes, same tool
+Sibling of ``examples/minimal-agent``. Same agent protocol shapes, same tool
 set, same /workspace boundary — only the model and SDK differ.
 
 Reads a ``WorkRequest`` from /workspace/input.json, runs an agentic loop with
@@ -36,7 +36,7 @@ from protocol import (
     WorkStatus,
 )
 
-AGENT_ID = "minimal-body-gemini-1"
+AGENT_ID = "minimal-agent-gemini-1"
 CONSTRAINTS_PATH = Path("/agent/constraints.json")
 SYSTEM_PROMPT_PATH = Path("/agent/system_prompt.md")
 INPUT_PATH = Path("/workspace/input.json")

@@ -3,10 +3,10 @@ image: docker.io/library/python:3.13-slim
 setup:
   - pip install --no-cache-dir 'pydantic>=2.0,<3' '{{.SDKSpec}}'
   - mkdir -p /app /agent /workspace
-entrypoint: python /app/body.py
+entrypoint: python /app/agent.py
 files:
-  - src: ./body.py
-    dst: /app/body.py
+  - src: ./agent.py
+    dst: /app/agent.py
   - src: ./protocol.py
     dst: /app/protocol.py
   - src: ./demo/constraints.json
@@ -17,7 +17,7 @@ outputs:
   - name: result
     path: /workspace/result.json
 # Mediation: the guest-to-host vsock channel an enforcer/orchestrator uses to
-# govern this body. The body already speaks the protocol side — it loads the
+# govern this agent. The agent already speaks the protocol side — it loads the
 # constraint envelope and emits lifecycle signals (ready, accepting, completed,
 # mediation_broken). Uncomment and point `target` at your enforcer to require
 # the channel; `failClosed` treats a broken required channel as denied.

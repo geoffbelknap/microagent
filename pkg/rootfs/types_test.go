@@ -113,13 +113,13 @@ func TestValidateRequestRejectsUnknownFormat(t *testing.T) {
 
 func TestValidateFilesRejectsDuplicateDestination(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "body.py")
+	src := filepath.Join(dir, "agent.py")
 	if err := os.WriteFile(src, []byte("ok"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	err := ValidateFiles([]File{
-		{SourcePath: src, Path: "/app/body.py"},
-		{SourcePath: src, Path: "/app/body.py"},
+		{SourcePath: src, Path: "/app/agent.py"},
+		{SourcePath: src, Path: "/app/agent.py"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "duplicate file dst") {
 		t.Fatalf("err = %v, want duplicate destination", err)
@@ -128,7 +128,7 @@ func TestValidateFilesRejectsDuplicateDestination(t *testing.T) {
 
 func TestValidateFilesRejectsDirectorySource(t *testing.T) {
 	dir := t.TempDir()
-	err := ValidateFiles([]File{{SourcePath: dir, Path: "/app/body.py"}})
+	err := ValidateFiles([]File{{SourcePath: dir, Path: "/app/agent.py"}})
 	if err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("err = %v, want regular file validation", err)
 	}
@@ -136,11 +136,11 @@ func TestValidateFilesRejectsDirectorySource(t *testing.T) {
 
 func TestValidateFilesRejectsInvalidMode(t *testing.T) {
 	dir := t.TempDir()
-	src := filepath.Join(dir, "body.py")
+	src := filepath.Join(dir, "agent.py")
 	if err := os.WriteFile(src, []byte("ok"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := ValidateFiles([]File{{SourcePath: src, Path: "/app/body.py", Mode: "8888"}})
+	err := ValidateFiles([]File{{SourcePath: src, Path: "/app/agent.py", Mode: "8888"}})
 	if err == nil || !strings.Contains(err.Error(), "invalid syntax") {
 		t.Fatalf("err = %v, want invalid mode", err)
 	}

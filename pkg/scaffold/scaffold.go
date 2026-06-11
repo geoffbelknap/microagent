@@ -1,7 +1,7 @@
-// Package scaffold generates a starter agent body project: a microagent.yaml
-// spec, a provider-specific body, the shared body protocol, and a demo request.
+// Package scaffold generates a starter agent project: a microagent.yaml
+// spec, a provider-specific agent, the shared agent protocol, and a demo request.
 // It is the library behind `microagent init` — the on-ramp that turns the
-// minimal-body example into a one-command starting point.
+// minimal-agent example into a one-command starting point.
 //
 // scaffold owns file generation only. It does not build, create, or run the
 // workspace; the generated project is consumed by the normal create/cp/start
@@ -24,7 +24,7 @@ import (
 //go:embed templates
 var templates embed.FS
 
-// Provider selects the model-provider variant of the generated body.
+// Provider selects the model-provider variant of the generated agent.
 type Provider string
 
 const (
@@ -39,7 +39,7 @@ const DefaultProvider = ProviderAnthropic
 type providerInfo struct {
 	Label     string // human-facing name, e.g. "Anthropic"
 	SDKSpec   string // pip requirement specifier installed by the spec's setup step
-	APIKeyEnv string // environment variable the body reads its key from
+	APIKeyEnv string // environment variable the agent reads its key from
 }
 
 var providers = map[Provider]providerInfo{
@@ -59,7 +59,7 @@ type Options struct {
 	Name string
 	// Dir is the target directory. Defaults to ./<Name> when empty.
 	Dir string
-	// Provider selects the body variant. Defaults to DefaultProvider when empty.
+	// Provider selects the agent variant. Defaults to DefaultProvider when empty.
 	Provider Provider
 	// Force overwrites existing files instead of failing.
 	Force bool
@@ -82,7 +82,7 @@ type fileSpec struct {
 
 var fileSpecs = []fileSpec{
 	{out: "microagent.yaml", src: "templates/microagent.yaml.tmpl", template: true},
-	{out: "body.py", src: "templates/body/%s.py.tmpl", template: true},
+	{out: "agent.py", src: "templates/agent/%s.py.tmpl", template: true},
 	{out: "protocol.py", src: "templates/protocol.py"},
 	{out: "README.md", src: "templates/README.md.tmpl", template: true},
 	{out: "demo/constraints.json", src: "templates/demo/constraints.json"},
