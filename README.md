@@ -23,7 +23,17 @@ brew install geoffbelknap/tap/microagent
 ```
 
 This installs `microagent` and `microagent-supervisor`, a symlink to the
-supervisor for your host. To build from source, see
+supervisor for your host. To build and install from source:
+
+```bash
+make install
+```
+
+Use `make dev` for a checkout-local development build plus a host readiness
+check. On Linux, `make install` downloads the pinned Firecracker VMM into the
+install prefix and installs host packages such as `passt` when possible. It
+prints a compact summary by default; use `QUIET=0` for full package-manager and
+download output. For details, see
 [`docs/getting-started/install.md`](docs/getting-started/install.md).
 
 ## 30-second tour
@@ -73,9 +83,9 @@ Other useful surfaces:
 
 - `microagent inspect <name>` prints structured status.
 - `microagent exec <name> -- <argv...>` runs a structured command in a running workspace.
-- `microagent serve mcp` exposes the machine-readable MCP stdio endpoint.
+- MCP clients launch `microagent serve mcp` as the machine-readable stdio endpoint.
 - `microagent rm <name>` is an alias for `delete`.
-- `microagent model pull/ls/rm/prune` downloads and manages local HuggingFace GGUF model files.
+- `microagent model pull/ls/rm/prune/serve` downloads, manages, and serves local HuggingFace GGUF model files; `microagent serve model` is the same model-server entry point.
 - `microagent images pull/list/tag/rm/prune` manages reusable local rootfs baselines.
 - `microagent cp` and `microagent artifacts get` move files without entering a running VM.
 - `microagent perf` measures boot and runtime footprint.
@@ -84,7 +94,8 @@ For agent clients, AX mode and the MCP endpoint provide structured tool
 responses for lifecycle, status/inspect, exec, images, copy/artifacts, cost
 estimation, idempotency, and capability discovery. Coding tools should launch
 the local stdio server with `microagent serve mcp`; see
-[`microagent serve`](docs/cli/serve.md) for client configuration snippets.
+[`microagent serve`](docs/cli/serve.md) for Codex, Claude Code, VS Code, and
+GitHub Copilot CLI configuration snippets.
 
 ## What it owns
 

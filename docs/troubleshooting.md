@@ -4,7 +4,7 @@ description: Common failure modes, what they mean, and how to fix them.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-11_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -29,7 +29,11 @@ Your user can see `/dev/kvm` but can't open it. Same `kvm` group fix as above. V
 
 ### `firecracker` binary not found (Linux)
 
-Install Firecracker from [its releases](https://github.com/firecracker-microvm/firecracker/releases) and put it on `PATH`. Alternatively:
+Homebrew and `make install` install the pinned upstream Firecracker VMM under
+the microagent prefix as `libexec/firecracker`. If `doctor` cannot find it,
+reinstall microagent or install Firecracker from
+[its releases](https://github.com/firecracker-microvm/firecracker/releases) and
+put it on `PATH`. Alternatively:
 
 - Install under `<prefix>/libexec/firecracker` (Homebrew puts it there automatically).
 - Set `MICROAGENT_FIRECRACKER=/path/to/firecracker` in your environment.
