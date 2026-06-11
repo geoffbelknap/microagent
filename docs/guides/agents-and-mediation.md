@@ -1,19 +1,19 @@
 ---
 title: Build agents on the mediation channel
-description: Declare the guest-to-host vsock contract, listen on the host, and loop requests in the body.
+description: Declare the guest-to-host vsock contract, listen on the host, and loop requests in the agent.
 ---
 
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-By the end of this guide your agent body talks to your host control plane over
+By the end of this guide your agent talks to your host control plane over
 the mediation channel while it runs. Requests stream in, results stream out,
 no restart between them. This page is the home for everything mediation: the
-declaration syntax, the host listener, the body loop, and the failure
+declaration syntax, the host listener, the agent loop, and the failure
 semantics.
 
 The mediation channel is a guest-to-host vsock contract, separate from
-ordinary networking. The body connects to a vsock port inside the guest, the
+ordinary networking. The agent connects to a vsock port inside the guest, the
 host listens at a TCP target, and the supervisor proxies bytes between them.
 The [simple-agent guide](/guides/simple-agent/) ships work in with
 `microagent cp` and reads results with `microagent --json result` - one
@@ -23,8 +23,8 @@ enough.
 | Layer | File-based (simple-agent) | Mediation |
 |---|---|---|
 | Request delivery | `cp` a file per run | Host sends `WorkRequest` over the channel |
-| Result delivery | `--json result` reads an artifact | Body sends `WorkResult` back |
-| Body lifecycle | One request per restart | One process, many requests |
+| Result delivery | `--json result` reads an artifact | Agent sends `WorkResult` back |
+| Agent lifecycle | One request per restart | One process, many requests |
 | Host's job | Run `microagent` commands | Run a listener that speaks the protocol |
 
 The protocol shapes - `WorkRequest`, `WorkResult`, `LifecycleSignal`,
@@ -51,7 +51,7 @@ microagent create agent --image docker.io/library/python:3.12-alpine \
   --mediation 2048=127.0.0.1:9900
 ```
 
-`port` is the guest-side vsock port the body connects to; `target` is the
+`port` is the guest-side vsock port the agent connects to; `target` is the
 host-side TCP address the supervisor forwards to. The CLI form declares the
 channel required and fail-closed (the right default). Pass
 `--mediation-optional` only for development paths where the workspace may run
@@ -64,7 +64,7 @@ you choose) and dispatches your control plane's work. A minimal one that
 serves a single request:
 
 ```python
-# listener.py - accept one body, send one request, read the result
+# listener.py - accept one agent, send one request, read the result
 import json, socket
 
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -77,7 +77,7 @@ while True:
     line = reader.readline()
     if not line:
         continue                            # readiness probe: connect-and-close
-    break                                   # the body connected
+    break                                   # the agent connected
 
 signal = json.loads(line)                   # {"signal": "ready"}
 request = {"request_id": "req-001", "principal": "operator", "content": "ping"}
@@ -96,17 +96,17 @@ connect to compute `mediationReady`, so a listener must tolerate
 connect-and-close probes (that's the `if not line: continue`).
 
 A production listener handles lifecycle signals, timeouts, reconnection, and
-concurrent bodies; the loop shape stays read a signal, dispatch when ready,
+concurrent agents; the loop shape stays read a signal, dispatch when ready,
 read the result, repeat.
 
-## 3. Connect from the body
+## 3. Connect from the agent
 
-Inside the guest, the body opens the vsock port and loops. CID 2 is the
+Inside the guest, the agent opens the vsock port and loops. CID 2 is the
 conventional host address; AF_VSOCK needs a Linux guest, which every
 microagent workspace is.
 
 ```python
-# body.py - runs inside the guest
+# agent.py - runs inside the guest
 import json, socket
 
 CID_HOST, VSOCK_PORT = 2, 2048
@@ -119,7 +119,7 @@ def send(msg):
 
 def process(req):
     # Your model loop goes here. This stub just answers ping with pong.
-    print("body: got request", req["request_id"], flush=True)
+    print("agent: got request", req["request_id"], flush=True)
     return {"request_id": req["request_id"], "ok": True, "content": "pong"}
 
 send({"signal": "ready"})
@@ -133,9 +133,9 @@ while True:
     send({"signal": "completed", "request_id": req["request_id"]})
 ```
 
-What carries over from the file-based body unchanged: the `WorkRequest` /
+What carries over from the file-based agent unchanged: the `WorkRequest` /
 `WorkResult` shapes, and the model call inside `process()`. What changes: no
-more `/workspace/input.json` or result file, and the body is long-lived:
+more `/workspace/input.json` or result file, and the agent is long-lived:
 it runs until the host closes the channel. Pick one framing rule (newline-
 delimited JSON is simplest, length-prefixed is sturdier) and document it.
 
@@ -144,16 +144,16 @@ Run the pair end to end:
 ```bash
 python3 listener.py &
 microagent start agent
-microagent exec agent --stdin ./body.py -- sh -c "cat > /tmp/body.py && python3 /tmp/body.py"
+microagent exec agent --stdin ./agent.py -- sh -c "cat > /tmp/agent.py && python3 /tmp/agent.py"
 ```
 
 ```text
-body: got request req-001
+agent: got request req-001
 signal: accepting
 result: {'request_id': 'req-001', 'ok': True, 'content': 'pong'}
 ```
 
-(In a real deployment the body is the workspace's entrypoint, not an `exec` -
+(In a real deployment the agent is the workspace's entrypoint, not an `exec` -
 this is the wiring check.)
 
 ## 4. Understand the failure semantics
@@ -170,12 +170,12 @@ reports it. Start the workspace without a listener and `--json status` shows:
 ```
 
 Gate on `mediationReady` before dispatching work. While the target is
-unreachable the body's vsock connection cannot carry traffic - the channel is
+unreachable the agent's vsock connection cannot carry traffic - the channel is
 severed, not silently degraded. If the channel breaks with a request in
-flight, the body can't deliver its result; treat in-flight requests as
+flight, the agent can't deliver its result; treat in-flight requests as
 needing retry, with `request_id` as the deduplication key.
 
-The body emits `LifecycleSignal` messages (`ready`, `accepting`, `completed`,
+The agent emits `LifecycleSignal` messages (`ready`, `accepting`, `completed`,
 `mediation_broken`, `constraints_outdated`, `quarantined`) on the same
 channel. Hosts tell signals from results by shape: signals carry a `signal`
 field, requests carry `request_id` and `principal`.
@@ -193,6 +193,6 @@ microagent delete agent --yes
 ## What's next
 
 - **Egress for credentials** - mediation carries requests, not API keys. Route model calls through a host-side proxy that holds the key; see [agency](https://github.com/geoffbelknap/agency) for an implementation.
-- **The body this replaces** - [build a simple agent](/guides/simple-agent/).
+- **The file-based flow this replaces** - [build a simple agent](/guides/simple-agent/).
 - **Where mediation sits in the network model** - [Networking](/concepts/networking/).
 - **Snapshot interplay** - mediation sessions reset on restore and fork; see [snapshots and forking](/guides/snapshots-and-forking/).

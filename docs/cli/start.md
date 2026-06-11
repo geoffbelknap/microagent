@@ -82,7 +82,7 @@ load is rejected on kernel skew). Bridged networking is not supported for
 restore; use user, nat, or isolated.
 
 In-flight guest connections do not survive a restore - outbound TCP and live
-vsock sessions (exec/shell/mediation) are reset and the guest body must
+vsock sessions (exec/shell/mediation) are reset and the guest process must
 reconnect. Stop the workspace before restoring it in place.
 
 `quarantined` is intentionally distinct: host-side network, mediation, and

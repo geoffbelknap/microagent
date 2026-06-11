@@ -1,16 +1,16 @@
 ---
 title: Run your first agent
-description: Boot a microVM, point it at an LLM, watch it write and run files in its own workspace.
+description: "Run an LLM agent in a microVM: send requests, read results, resume it, or use a local model."
 ---
 
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-Run an agent inside a microVM: a small body that calls an LLM with `bash`,
-`read_file`, and `write_file` tools, does real work in its own workspace, and
-reports a structured result. The example ships in three flavors: Anthropic
-Claude, OpenAI, and Google Gemini. The flow is identical; only the example
-folder and the API key env var change.
+Run an [agent](/concepts/glossary/) inside a microVM: a small program that
+calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
+in its own workspace, and reports a structured result. The example ships in
+three flavors: Anthropic Claude, OpenAI, and Google Gemini. The flow is
+identical; only the example folder and the API key env var change.
 
 *If you just want to see microagent boot a microVM and run a command, start
 with the [quickstart](/getting-started/quickstart/).*
@@ -22,9 +22,9 @@ with the [quickstart](/getting-started/quickstart/).*
 
    | Provider | Example folder | API key env var | Sign up |
    |---|---|---|---|
-   | Anthropic Claude | [`examples/minimal-body`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body) | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
-   | OpenAI | [`examples/minimal-body-openai`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-openai) | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
-   | Google Gemini | [`examples/minimal-body-gemini`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-body-gemini) | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
+   | Anthropic Claude | [`examples/minimal-agent`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent) | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+   | OpenAI | [`examples/minimal-agent-openai`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent-openai) | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
+   | Google Gemini | [`examples/minimal-agent-gemini`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent-gemini) | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
 
 3. Clone the microagent repo to get the example sources:
 
@@ -42,77 +42,97 @@ with the [quickstart](/getting-started/quickstart/).*
    ```
 
    The generated project uses the workspace name you pass (`my-agent` above)
-   instead of `minimal-body`, and its `body.py`, `protocol.py`, and demo
-   request are identical to the example. Adjust the commands below to your
-   name and run from the generated directory (use `--file microagent.yaml`).
+   instead of `minimal-agent`, and its `agent.py`, `protocol.py`, and the two
+   walkthrough requests are identical to the example. Adjust the commands
+   below to your name and run from the generated directory (use
+   `--file microagent.yaml`). The [more requests to try](#more-requests-to-try)
+   live in the example folder only.
 
 The rest of this page uses the **Anthropic** example. To follow along with
-OpenAI or Gemini instead, swap `minimal-body` for `minimal-body-openai` or
-`minimal-body-gemini` in every command, and use the matching API key env var.
+OpenAI or Gemini instead, swap `minimal-agent` for `minimal-agent-openai` or
+`minimal-agent-gemini` in every command, and use the matching API key env var.
 
 ## Create the workspace
 
 ```bash
 microagent create \
-  --file examples/minimal-body/microagent.yaml \
+  --file examples/minimal-agent/microagent.yaml \
   --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
 
 `create` takes no `--name` here: the spec's `name:` field sets the workspace
-name to `minimal-body`, and that's what the rest of the commands refer to.
+name to `minimal-agent`, and that's what the rest of the commands refer to.
 First-time create takes a minute or two: microagent
 pulls the base Python image, builds the rootfs, installs Pydantic and the
-Anthropic SDK, and copies the body source in. The API key is passed in as an
+Anthropic SDK, and copies the agent source in. The API key is passed in as an
 env var so it stays out of the spec file.
 
 ## Send a request
 
-The body reads requests from `/workspace/input.json`. Drop the first one in
+The agent reads requests from `/workspace/input.json`. Drop the first one in
 with `microagent cp`:
 
 ```bash
-microagent cp examples/minimal-body/demo/input-001.json minimal-body:/workspace/input.json
+microagent cp examples/minimal-agent/demo/input-001.json minimal-agent:/workspace/input.json
 ```
 
-The request asks for a concrete task - write a Python script, run it, show
-the output.
+The request asks for a concrete task: install the `rich` package with pip,
+write a script that renders a table of the 5 largest files under `/usr`, run
+it, and include the rendered table in the summary.
 
 ## Run it
 
 ```bash
-microagent start minimal-body
-microagent --json result minimal-body
+microagent start minimal-agent
+microagent --json result minimal-agent
 ```
 
-The body boots, calls the LLM with `bash` / `read_file` / `write_file`
+The agent boots, calls the LLM with `bash` / `read_file` / `write_file`
 tools, runs the tool calls inside `/workspace`, and writes a `WorkResult` to
 `/workspace/result.json` (declared as the `result` output artifact in the
-spec). That file carries the LLM's summary in a top-level `content` field:
+spec). The run takes half a minute or so. The result file carries the LLM's
+summary in a top-level `content` field:
 
 ```json
 {
   "request_id": "req-001",
   "status": "completed",
-  "content": "I created /workspace/hello.py, ran it with python3, and got 'hello from a microVM' followed by the running kernel version.",
+  "content": "Done! Here's a summary of what I accomplished:\n\n1. **Installed `rich`** via pip (version 15.0.0, along with its dependencies)...",
   "error": null,
-  "completed_at": "2026-06-01T00:01:07.482190+00:00",
+  "completed_at": "2026-06-11T17:52:32.281678Z",
   "audit_ref": "audit://req-001"
 }
 ```
 
 The `content` string is the LLM's wording, so it varies run to run; the other
-fields (`request_id`, `status`, `audit_ref`) echo the request. `microagent
---json result` reads this file and reports the run's exit code in its
-`result.exitCode` field - a clean exit is `0`.
+fields (`request_id`, `status`, `audit_ref`) echo the request. This run's
+`content` ended with the table the agent rendered inside the VM:
 
-The file the LLM wrote is still on the workspace's disk. Pull it out:
-
-```bash
-microagent cp minimal-body:/workspace/hello.py ./hello.py
-cat ./hello.py
+```text
+                           5 Largest Files Under /usr
+┏━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Rank ┃     Size ┃ Path                                                       ┃
+┡━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│    1 │ 6.22 MiB │ /usr/lib/x86_64-linux-gnu/libcrypto.so.3                   │
+│    2 │ 4.99 MiB │ /usr/local/lib/libpython3.13.so.1.0                        │
+│    3 │ 4.60 MiB │ /usr/sbin/microagent-init                                  │
+│    4 │ 4.53 MiB │ /usr/local/lib/python3.13/site-packages/pydantic_core/_pyd │
+│      │          │ antic_core.cpython-313-x86_64-linux-gnu.so                 │
+│    5 │ 3.75 MiB │ /usr/bin/perl5.40.1                                        │
+└──────┴──────────┴────────────────────────────────────────────────────────────┘
 ```
 
-The `/workspace/hello.py` path is the one the request in `input-001.json`
+`microagent --json result` reads the result file and reports the run's exit
+code in its `result.exitCode` field - a clean exit is `0`.
+
+The script the LLM wrote is still on the workspace's disk. Pull it out:
+
+```bash
+microagent cp minimal-agent:/workspace/biggest.py ./biggest.py
+cat ./biggest.py
+```
+
+The `/workspace/biggest.py` path is the one the request in `input-001.json`
 asked for - microagent doesn't dictate it.
 
 ## Halt, ask a follow-up, resume
@@ -122,28 +142,154 @@ drop in a new request, start again. The LLM can read whatever it wrote on the
 previous run.
 
 ```bash
-microagent halt minimal-body
-microagent cp examples/minimal-body/demo/input-002.json minimal-body:/workspace/input.json
-microagent start minimal-body
-microagent --json result minimal-body
+microagent halt minimal-agent
+microagent cp examples/minimal-agent/demo/input-002.json minimal-agent:/workspace/input.json
+microagent start minimal-agent
+microagent --json result minimal-agent
 ```
 
-The second request asks the LLM to read `/workspace/hello.py` and explain it.
-The file is still there from the first run.
+The second request asks the LLM to read `/workspace/biggest.py` from the
+first run, extend it to show each file's last-modified date, and run it
+again. The script is still there, so the result summarizes a diff against
+work it did in a previous boot: *"Added a new `Last Modified` column (yellow,
+no-wrap) to the rich `Table` ... The same 5 largest files under `/usr` were
+found (same ranking and sizes as before)."*
+
+## More requests to try
+
+The demo folder has three more requests. Each runs the same way: halt, `cp`
+the request to `/workspace/input.json`, start, read the result.
+
+| Request | What it asks |
+|---|---|
+| `demo/clone-and-test.json` | Fetch [hukkin/tomli](https://github.com/hukkin/tomli) from GitHub, install it, run its pytest suite, and report the pass count. The image ships without `git` - watch the agent notice and route around it |
+| `demo/analyze-file.json` | Clean a messy CSV (mixed date formats, a duplicate row, a missing value, a `999999` outlier) and write a findings report |
+| `demo/hello.json` | Write and run a two-line script - the smallest possible smoke test |
+
+`analyze-file.json` reads `/workspace/sales-sample.csv`, so copy the data in
+with the request, and pull the report out after the run:
+
+```bash
+microagent halt minimal-agent
+microagent cp examples/minimal-agent/demo/data/sales-sample.csv minimal-agent:/workspace/sales-sample.csv
+microagent cp examples/minimal-agent/demo/analyze-file.json minimal-agent:/workspace/input.json
+microagent start minimal-agent
+microagent cp minimal-agent:/workspace/report.md ./report.md
+```
+
+The report from this run identified all four planted problems: the three
+date formats, the duplicate row, the row with missing values, and the
+`999999.00` outlier.
 
 ## Clean up
 
 ```bash
-microagent halt minimal-body
-microagent delete minimal-body
+microagent halt minimal-agent
+microagent delete minimal-agent
 ```
 
 `delete` removes the workspace record and its disk.
 
+## Run it on a local model
+
+No API key, no cloud: [`microagent model`](/cli/model/) downloads a GGUF
+model and serves it on the host with `llama-server`, and
+[`run --model`](/cli/run/) bridges the guest to that server over vsock. The
+OpenAI example works unchanged because `--model` injects `OPENAI_BASE_URL`
+into the guest and the OpenAI SDK picks it up.
+
+Two honest caveats before you start:
+
+- **Small models are not gpt-4o-mini.** In our testing, Qwen2.5-Instruct at
+  0.5B, 3B, and 7B (Q4_K_M) all failed this page's first request - broken
+  scripts, fabricated output. The model below is the smallest we verified
+  completing it end to end, and it needs a low sampling temperature to do it.
+- **Model pairing is run-scoped today.** `create`/`start` don't take
+  `--model`, so the local flavor is one request per `microagent run` - no
+  halt-and-resume walkthrough here.
+
+You'll need `llama-server` from [llama.cpp](https://github.com/ggml-org/llama.cpp)
+on your PATH (or pointed to by `MICROAGENT_LLAMA_SERVER`). Then pull the
+model - a 2.5 GB download:
+
+```bash
+microagent model pull unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+```
+
+`run` has no spec-file step, so stage the agent source and the request as a
+tar bundle that `-v` can deliver:
+
+```bash
+mkdir -p local-agent/app local-agent/agent local-agent/workspace
+cp examples/minimal-agent-openai/agent.py examples/minimal-agent-openai/protocol.py local-agent/app/
+cp examples/minimal-agent-openai/demo/constraints.json examples/minimal-agent-openai/demo/system_prompt.md local-agent/agent/
+cp examples/minimal-agent-openai/demo/input-001.json local-agent/workspace/input.json
+tar -C local-agent -cf request.tar app agent workspace
+```
+
+Boot, pair, and run - one command:
+
+```bash
+export LLAMA_ARG_CTX_SIZE=32768   # cap the context; this model defaults to 262k, which won't fit in 16 GB RAM
+
+microagent run \
+  --image docker.io/library/python:3.13-slim \
+  --model unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
+  -e OPENAI_API_KEY=local -e OPENAI_MODEL=qwen3-4b-instruct-2507 -e OPENAI_TEMPERATURE=0.2 \
+  -v request.tar:/src:ro \
+  --setup "pip install --no-cache-dir 'pydantic>=2.0,<3' 'openai>=1.50'" \
+  --setup "mkdir -p /app /agent /workspace" \
+  --setup "cp /src/app/agent.py /src/app/protocol.py /app/; cp /src/agent/constraints.json /src/agent/system_prompt.md /agent/; cp /src/workspace/input.json /workspace/input.json" \
+  --output result=/workspace/result.json \
+  --timeout 900 --keep --name minimal-agent-local \
+  --exec "python /app/agent.py"
+```
+
+A few notes on the flags:
+
+- `--model` starts (or reuses) a host `llama-server` for the ref and wires a
+  vsock bridge into the guest; the agent's OpenAI client talks to it at
+  `OPENAI_BASE_URL` with no in-VM network involved.
+- `OPENAI_API_KEY=local` satisfies the SDK's non-empty-key requirement; the
+  local server ignores it. The server also serves exactly one model, so
+  `OPENAI_MODEL` is a label - any value works.
+- `OPENAI_TEMPERATURE=0.2` matters. At llama-server's default sampling
+  temperature this model writes buggy scripts; at 0.2 it completed the
+  request reliably in our runs.
+- `LLAMA_ARG_CTX_SIZE` is llama-server's own env config, inherited by the
+  runner microagent starts.
+- Run `microagent model serve <ref>` first if you want the model to stay
+  warm between runs instead of loading on each `run`.
+
+On an 8-core CPU host the agent phase takes a few minutes - pip installs
+`rich`, the model loops through the same tool calls Claude made above, and
+the result lands in the same place. Pull it out and clean up:
+
+```bash
+microagent cp minimal-agent-local:/workspace/result.json ./result.json
+microagent delete minimal-agent-local --yes
+```
+
+This run's `content` field carried a real rendered table - same shape as the
+cloud run, same five files:
+
+```text
+                Top 5 Largest Files in /usr
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ File Path                                ┃ Size (bytes) ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ /usr/lib/x86_64-linux-gnu/libcrypto.so.3 │ 6517312      │
+│ /usr/local/lib/libpython3.13.so          │ 5235704      │
+│ /usr/local/lib/libpython3.13.so.1.0      │ 5235704      │
+│ /usr/sbin/microagent-init                │ 4827558      │
+│ /usr/local/lib/python3.13/site-packages… │ 4750616      │
+└──────────────────────────────────────────┴──────────────┘
+```
+
 ## What's next
 
 - [Build a simple agent](/guides/simple-agent/) - the same flow with more
-  on the body's structure, prompt caching, and the production-shape gaps
+  on the agent's structure, prompt caching, and the production-shape gaps
   (mediation channel, host-side proxy for keys).
 - [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
 - [State and identity](/concepts/state-and-identity/) - what `microagent --json status` reports and how lifecycle events are emitted.

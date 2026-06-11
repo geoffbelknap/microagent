@@ -24,8 +24,8 @@ setup:
   - mkdir -p /workspace
   - echo ready > /workspace/status
 files:
-  - src: ./body.py
-    dst: /app/body.py
+  - src: ./agent.py
+    dst: /app/agent.py
     mode: "0644"
 env:
   MICROAGENT_NAME: research
@@ -98,7 +98,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `mediation` | Guest-to-host vsock mediation channel contract |
 | `mediation.enabled` | Enables the mediation declaration |
 | `mediation.required` | Requires the channel for workspace startup |
-| `mediation.port` | Guest vsock port used by the Body |
+| `mediation.port` | Guest vsock port used by the agent |
 | `mediation.target` | Host address and port for the enforcer/orchestrator |
 | `mediation.failClosed` | Treats a required channel break as closed by default |
 | `health` | Liveness probe; an unhealthy workspace is restarted by [`supervise`](/cli/supervise/) under the restart policy |
