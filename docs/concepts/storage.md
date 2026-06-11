@@ -1,15 +1,18 @@
 ---
 title: Storage
-description: Rootfs, attached disks, tar bundles, and managed named volumes.
+description: Choose between the rootfs, attached disks, tar bundles, and named volumes.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
-A workspace sees block devices, never host directories. microagent does not
-expose host bind mounts — everything the guest reads or writes is an ext4 disk
-image or the rootfs. This keeps the host filesystem outside the workspace
-boundary by construction.
+Read this page to choose how data gets into, out of, and between workspaces.
+The ground rule shaping every option below: a workspace sees block devices,
+never host directories. microagent does not expose host bind mounts —
+everything the guest reads or writes is an ext4 disk image or the rootfs.
+That keeps the host filesystem outside the workspace boundary by
+construction. For the hands-on walkthrough of these mechanisms, see
+[Use volumes and move data](/guides/volumes-and-data/).
 
 ## The rootfs
 
@@ -66,6 +69,7 @@ natural handoff: write results to it in one workspace, attach it to another.
 
 ## See also
 
+- [Use volumes and move data](/guides/volumes-and-data/) — the hands-on walkthrough
 - [`microagent volume`](/cli/volume/) — manage named volumes
 - [`microagent.yaml`](/cli/spec/) — declarative `disks` and `bundles`
 - [`microagent cp`](/cli/cp/) — stopped-workspace file transfer

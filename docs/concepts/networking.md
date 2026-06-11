@@ -1,10 +1,17 @@
 ---
 title: Networking
-description: Declarative workspace network intent.
+description: Choose a network mode and see what each one does under the hood on each backend.
 ---
 
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
+
+This is the internals page for workspace networking: read it to choose a
+network mode and to understand what each mode actually does on each backend.
+For the task-shaped walkthroughs, see
+[Connect workspaces on a named network](/guides/networking/); the guest-to-host
+mediation channel has its own guide at
+[Build agents on the mediation channel](/guides/agents-and-mediation/).
 
 Every workspace declares its network intent. Five modes:
 

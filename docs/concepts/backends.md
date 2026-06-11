@@ -1,32 +1,34 @@
 ---
 title: Backends
-description: One backend per host OS. Same lifecycle surface, different mechanics.
+description: See what each host OS supports before you pick where to run microagent.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-11_
 
-microagent installs with one backend for the host OS: Firecracker on Linux,
-Apple VF on macOS, and experimental Windows Hyper-V on Windows. The CLI does
-not fall back to a cross-host default. If a request names a backend that does
-not match the installed host OS, microagent fails before it builds a rootfs or
-talks to a supervisor.
+Read this page to know what running microagent on your OS gets you. There is
+one backend per host: Firecracker on Linux, Apple VF on macOS, and
+experimental Hyper-V on Windows. The CLI does not fall back to a cross-host
+default - if a request names a backend that does not match the installed host
+OS, microagent fails before it builds a rootfs or talks to a supervisor.
 
-| Backend | Host OS | Supervisor | `connect` | Process model |
-|---|---|---|---|---|
-| `firecracker` | Linux | Go executable supervisor (`microagent-firecracker-supervisor`) | supported | Supervisor records VM PID; `quarantine` preserves it, `stop` sends SIGTERM, `kill` sends SIGKILL |
-| `apple-vf` | macOS | Swift executable supervisor (`microagent-applevf-supervisor`) | supported | One supervisor invocation per request |
-| `windows-hyperv` | Windows | Experimental Go supervisor boundary for Linux guests through HCS / Hyper-V | supported through Hyper-V sockets | HCS compute systems are created through `vmcompute.dll`; lifecycle state records HCS compute IDs |
+| Backend | Host OS | Maturity | Networking modes | Requirements | Notes |
+|---|---|---|---|---|---|
+| `firecracker` | Linux | Production | `user`, `nat`, `isolated`, `bridged`, `named`, TCP `--publish` | `/dev/kvm`, `firecracker` binary | Full feature surface; importable as a Go package |
+| `apple-vf` | macOS (Apple silicon) | Production | `user`, `nat`, `isolated`, TCP `--publish`; `bridged` entitlement-gated | Virtualization.framework, Swift supervisor binary | NAT is macOS-managed; no `named` networks yet |
+| `windows-hyperv` | Windows | Experimental | `user`/`nat` (HNS NAT), `isolated`, `bridged`, TCP `--publish` | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
 
-Backends expose the same backend-neutral request and response structures, but
-the host mechanics differ. Firecracker and Apple VF share the same executable
-supervisor-shaped request/response boundary. Windows Hyper-V uses the same
-`vmkit` protocol inside the Go supervisor boundary.
+All three expose the same backend-neutral request and response structures, the
+same lifecycle verbs, and interactive [`connect`](/cli/connect/) - the
+mechanics under each verb differ per host. Firecracker and Apple VF share the
+executable supervisor boundary; Windows Hyper-V speaks the same `vmkit`
+protocol inside a Go supervisor boundary. Networking internals per backend are
+covered in [Networking](/concepts/networking/).
 
 ## Firecracker (Linux)
 
 - Uses `microagent-firecracker-supervisor` around the Firecracker process.
-- Override the supervisor with `--supervisor` or
+  Override the supervisor with `--supervisor` or
   `MICROAGENT_FIRECRACKER_SUPERVISOR`.
 - Requires `/dev/kvm` and the `firecracker` binary on `PATH` (or under
   `<prefix>/libexec/firecracker`, or `MICROAGENT_FIRECRACKER`).
@@ -38,23 +40,22 @@ supervisor-shaped request/response boundary. Windows Hyper-V uses the same
 
 ## Apple VF (macOS)
 
-- Uses Apple Virtualization.framework via the Swift executable supervisor.
+- Uses Apple Virtualization.framework via the Swift executable supervisor,
+  packaged as `microagent-applevf-supervisor`. Override with `--supervisor`
+  or `MICROAGENT_APPLEVF_SUPERVISOR`.
 - Supports interactive `connect` and `connect --send`.
 - Supports `nat`, `isolated`, and TCP `--publish`. Native bridged networking
   is implemented, but public builds fail closed because Apple gates it behind
   the restricted `com.apple.vm.networking` entitlement.
-- The supervisor is packaged as `microagent-applevf-supervisor`. Override with
-  `--supervisor` or `MICROAGENT_APPLEVF_SUPERVISOR`.
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
 
 ## Windows Hyper-V (experimental)
 
 - Targets Linux microVM-style workspaces on Windows without WSL or QEMU.
-- Uses the backend name `windows-hyperv`.
-- Uses Host Compute Service through `vmcompute.dll`.
-- Consumes VHD root disks at
-  `~/.microagent/workspaces/<name>/rootfs.vhd`.
+- Uses the backend name `windows-hyperv` and Host Compute Service through
+  `vmcompute.dll`; lifecycle state records HCS compute IDs.
+- Consumes VHD root disks at `~/.microagent/workspaces/<name>/rootfs.vhd`.
 - Supports `host`, `check`, `prepare`, `run`, `start`, `inspect`, `connect`,
   `halt`, `quarantine`, `stop`, `kill`, and `delete` experimentally.
 - Supports HNS NAT networking and published TCP ports through Hyper-V socket
@@ -64,11 +65,11 @@ supervisor-shaped request/response boundary. Windows Hyper-V uses the same
 - See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
   details and current limitations.
 
-## Selecting a host
+## Checking your host
 
 `microagent doctor` reports the active backend, backend-specific host support,
 virtualization availability, guest-init availability, and the default kernel
-status.
+status. Run it before anything else on a new machine.
 
 ## Backend validation (for contributors)
 
@@ -117,24 +118,24 @@ On Linux, the same runner is the live full-suite parity gate in
 `x64`, and `kvm`, with KVM, `/dev/vhost-vsock`, `/dev/net/tun`, Firecracker,
 and the network setup from `scripts/dev/microagent-e2e-linux-network-setup.sh`.
 
-Those feature scenarios are backend-agnostic: the scenario names describe the
+The feature scenarios are backend-agnostic: the scenario names describe the
 shared CLI/runtime contract, while the host or
 `MICROAGENT_E2E_BACKEND=applevf` selects the Apple VF execution lane. Add the
 targeted `applevf-*` scenarios when you need narrower diagnostics for boot,
 direct console, substrate, workspace connect, network mode, TCP publish, or
 vsock forwarding. Use `--keep` or `MICROAGENT_E2E_KEEP=1` only when you need to
-preserve state directories for debugging; otherwise successful scenarios clean
-up their own temporary state. If the local Docker config names a missing
-credential helper, set `DOCKER_CONFIG` to an empty temporary directory for
-public-image validation rather than editing host login state.
+preserve state directories for debugging; successful scenarios clean up their
+own temporary state. If the local Docker config names a missing credential
+helper, set `DOCKER_CONFIG` to an empty temporary directory for public-image
+validation rather than editing host login state.
 
 The Apple VF lane should cover portable CLI behavior, lifecycle/substrate,
 connect/logs/ps, NAT/user/isolated/publish networking, mediation and generic
 virtio-vsock behavior, supervision, quarantine cleanup, results, artifacts,
 attached disks, and text/JSON output. Bridged mode is entitlement-gated:
 open-source ad-hoc builds should fail closed with the
-`com.apple.vm.networking` restriction named unless the supervisor is signed with
-Apple's restricted entitlement.
+`com.apple.vm.networking` restriction named unless the supervisor is signed
+with Apple's restricted entitlement.
 
 Keep one-off run logs and investigation notes out of `docs/`; update an
 external tracker with run evidence instead.
