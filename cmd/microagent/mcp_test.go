@@ -225,6 +225,11 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		want []string
 	}{
 		{
+			name: "workspace.create",
+			args: map[string]any{"name": "demo", "image": "docker.io/library/python:3.13-slim", "model": "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "model_token": "hf_test", "dry_run": true},
+			want: []string{"--mode=ax", "create", "demo", "-image", "docker.io/library/python:3.13-slim", "-model", "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "-model-token", "hf_test", "-dry-run"},
+		},
+		{
 			name: "workspace.logs",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
 			want: []string{"--mode=ax", "logs", "demo", "-state-dir", "/tmp/state"},
