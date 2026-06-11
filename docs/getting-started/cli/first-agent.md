@@ -294,6 +294,9 @@ above, and the result lands in the same place. Poll
 microagent cp minimal-agent-openai:/workspace/result.json ./result.json
 ```
 
+(`microagent --json result minimal-agent-openai` works here too, exactly like
+the cloud flow - the spec declares the same `result` output artifact.)
+
 ```json
 {
   "request_id": "req-001",
