@@ -4355,6 +4355,29 @@ func TestWorkspaceCommandAllowsMultiCommandExec(t *testing.T) {
 	}
 }
 
+func TestExecWantsHelpIgnoresGuestArgvAfterSeparator(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"guest -h after separator", []string{"ws", "--", "psql", "-h", "x"}, false},
+		{"guest --help after separator", []string{"ws", "--", "wget", "--help"}, false},
+		{"guest literal help after separator", []string{"ws", "--", "help"}, false},
+		{"cli --help", []string{"--help"}, true},
+		{"cli -h before separator", []string{"ws", "-h"}, true},
+		{"cli help word", []string{"help"}, true},
+		{"cli --help with guest argv", []string{"ws", "--help", "--", "ls"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := execWantsHelp(tc.args); got != tc.want {
+				t.Fatalf("execWantsHelp(%q) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWorkspaceCommandLeavesGuestConfigResetToRootfsBuilder(t *testing.T) {
 	opts := workspaceOptions{
 		Entrypoint:      "/app/entrypoint.sh",
