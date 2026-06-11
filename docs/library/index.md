@@ -4,7 +4,7 @@ description: Embed microagent from Go instead of shelling out to the CLI.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 `microagent` is a Go library with a CLI adapter. If you are building an
 agent runtime, scheduler, local developer tool, or backend service, use the Go
@@ -21,15 +21,13 @@ packages directly instead of spawning `microagent`.
 
 ## What the library owns
 
-The Go packages expose workspace lifecycle, rootfs builds from OCI images,
-kernel installation and verification, reusable image records, backend
-diagnostics, network configuration, artifacts, logs, structured results,
-structured exec, readiness, runtime state, and supervisor dispatch.
-
-The CLI is useful for humans and scripts, but it is not a separate product
-surface. It calls the same packages that your Go program can import. The MCP
-endpoint follows the same rule: it adapts the existing package APIs for agent
-clients and does not add orchestration, policy, planning, or LLM behavior.
+Everything the CLI can do to a microVM, the packages do first: lifecycle,
+rootfs builds, kernel management, image records, diagnostics, and performance
+measurement all live in library code. The CLI is useful for humans and
+scripts, but it is not a separate product surface - it calls the same packages
+your Go program can import. The MCP endpoint follows the same rule: it adapts
+the existing package APIs for agent clients and does not add orchestration,
+policy, planning, or LLM behavior.
 
 ## Main packages
 

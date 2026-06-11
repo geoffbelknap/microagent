@@ -236,7 +236,7 @@ What joining does, realized by the Firecracker supervisor at start:
 - **Shared bridge.** A managed Linux bridge (`mbr<hash>`) is created on demand
   with the gateway address; each member's TAP is enslaved to it, so members are
   on one L2 segment and reach each other directly. The bridge is reaped once the
-  last member stops — no orphan devices.
+  last member stops - no orphan devices.
 - **Name resolution.** `/etc/hosts` is injected at boot from the current member
   set via the kernel-cmdline → guest-init seam (`microagent_net_hosts`,
   parallel to DNS). Outbound egress goes through the gateway with NAT, exactly

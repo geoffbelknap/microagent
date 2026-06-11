@@ -7,14 +7,14 @@ description: Download and manage local HuggingFace GGUF model files.
 _Last updated: 2026-06-11_
 
 ```text
-microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]
-microagent model ls [--state-dir <dir>]
-microagent model rm <ref> [--keep-files] [--state-dir <dir>]
-microagent model prune [--delete-files] [--state-dir <dir>]
-microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]
-microagent serve model <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]
-microagent model stop <hf-ref> [--state-dir <dir>]
-microagent model runners [--state-dir <dir>]
+microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
+microagent model ls [--state-dir <dir>]                                           List stored models
+microagent model rm <ref> [--keep-files] [--state-dir <dir>]                      Remove a model and its blob
+microagent model prune [--delete-files] [--state-dir <dir>]                       Drop records for missing blobs
+microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Serve a model on the host
+microagent serve model <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Alias for model serve
+microagent model stop <hf-ref> [--state-dir <dir>]                                Stop a model's runners
+microagent model runners [--state-dir <dir>]                                      List running model servers
 ```
 
 `model` manages a local content-addressed store of GGUF model files and the

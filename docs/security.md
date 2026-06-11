@@ -1,10 +1,10 @@
 ---
 title: Security
-description: Trust boundary and reporting issues.
+description: Know what microagent verifies, what it treats as your input, and how to report.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ## Trust boundary
 
@@ -21,15 +21,27 @@ That means:
 
 - The kernel that boots is whoever installed `~/.microagent/kernels/...`.
   Verify with [`microagent kernel verify`](/cli/kernel/) when this matters.
+  In practice, anyone who can write to that directory decides what kernel
+  your workspaces boot - protect it like a binary on `PATH`, and verify
+  before boots you care about.
 - The rootfs is whatever OCI image the caller specified. Pin by digest in
   production. `microagent rootfs build` rejects mutable tag references
-  unless you pass `--allow-mutable`.
+  unless you pass `--allow-mutable`. A tag like `ubuntu:24.04` can resolve
+  to different content tomorrow and microagent will boot whatever it
+  resolves to - only a digest pin makes the workspace contents reproducible
+  and attestable.
 - `microagent --json status <name>` reports verification hashes for the image,
   kernel, rootfs, and injected init. Treat `verification.ok: false` as a stop
-  sign until you understand the divergence.
+  sign until you understand the divergence. Tamper detection is available
+  before every `start`, but it only protects you if your automation actually
+  checks it - wire the check into any pipeline that boots workspaces
+  unattended.
 - The backend supervisor is whichever binary is on PATH (or pointed to by
   `--supervisor`, `MICROAGENT_APPLEVF_SUPERVISOR`, or
   `MICROAGENT_FIRECRACKER_SUPERVISOR`). Use signed builds in production.
+  The supervisor runs with your privileges on the host side of every VM
+  boundary - an attacker who can swap that binary owns every workspace, so
+  pin its path and verify its provenance.
 
 ## Reporting
 

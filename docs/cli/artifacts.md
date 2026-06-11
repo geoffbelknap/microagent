@@ -7,8 +7,8 @@ description: List and retrieve declared workspace artifacts.
 _Last updated: 2026-06-11_
 
 ```text
-microagent artifacts <name> [--state-dir <dir>]
-microagent artifacts get <name> <artifact> <target> [--state-dir <dir>] [--debugfs <path>]
+microagent artifacts <name> [--state-dir <dir>]                                              List declared artifacts
+microagent artifacts get <name> <artifact> <target> [--state-dir <dir>] [--debugfs <path>]   Retrieve one output artifact
 ```
 
 `artifacts` reports the input bundles and output paths declared in the

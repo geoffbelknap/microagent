@@ -7,8 +7,8 @@ description: Install or verify a custom kernel.
 _Last updated: 2026-06-11_
 
 ```text
-microagent kernel install [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]
-microagent kernel verify  --path <path> --sha256 <sum>
+microagent kernel install [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]   Install a kernel
+microagent kernel verify  --path <path> --sha256 <sum>                                    Verify a kernel checksum
 ```
 
 `kernel` manages the guest kernel the microVMs boot. Most users can stick with

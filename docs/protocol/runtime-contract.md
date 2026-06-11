@@ -1,14 +1,15 @@
 ---
 title: Runtime contract
-description: Backend-neutral agent runtime semantics shared by microagent backends.
+description: Depend on one set of runtime semantics across Firecracker, Apple VF, and Hyper-V.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
-`microagent --json contract` is the JSON source for the shared runtime
-contract. Agent-runtime builders can depend on one set of semantics across
-Firecracker, Apple VF, and experimental Windows Hyper-V support.
+If you are building an agent runtime on top of microagent, this page defines
+the semantics you can rely on across every backend - Firecracker, Apple VF,
+and experimental Windows Hyper-V. `microagent --json contract` is the JSON
+source for the shared runtime contract.
 
 ## Scope
 
@@ -72,8 +73,8 @@ console input). The `paused` state and the commands stay in the backend-neutral
 contract so clients share one vocabulary; availability is per host.
 
 **Connection-reset contract:** restoring or forking a snapshot re-establishes
-host networking fresh, so in-flight guest connections — outbound TCP and live
-vsock sessions (exec/shell/mediation) — do not survive. The guest body must
+host networking fresh, so in-flight guest connections - outbound TCP and live
+vsock sessions (exec/shell/mediation) - do not survive. The guest body must
 reconnect. Bridged networking is unsupported for snapshot/fork.
 
 ## Contract command

@@ -7,8 +7,8 @@ description: Report host backend capabilities.
 _Last updated: 2026-06-11_
 
 ```text
-microagent host [--arch <arch>] [--supervisor <path>]
-microagent host setup-networking [--check | --revert]
+microagent host [--arch <arch>] [--supervisor <path>]   Report host backend capabilities
+microagent host setup-networking [--check | --revert]   Prepare privileged network modes (Linux)
 ```
 
 `host` reports what `microagent` can see on the current machine: backend,

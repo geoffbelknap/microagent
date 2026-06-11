@@ -1,14 +1,15 @@
 ---
 title: Apple VF supervisor protocol
-description: One JSON request in, one JSON response out.
+description: Drive the macOS backend executable - one JSON request in, one response out.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
-microagent uses the supervisor concept for backend lifecycle work. The
-Apple VF supervisor is packaged as a standalone executable,
-`microagent-applevf-supervisor`, so non-Swift callers can cross the
+If you run microagent on macOS, or you want to drive Virtualization.framework
+from a language that isn't Swift, this page documents the executable that
+makes it possible. The Apple VF supervisor is packaged as a standalone
+executable, `microagent-applevf-supervisor`, so any caller can cross the
 Virtualization.framework boundary through a narrow JSON protocol.
 
 `microagent-applevf-supervisor` reads one JSON request from stdin, writes one
@@ -54,18 +55,9 @@ Apple VF process boundary.
 
 ### Commands
 
-- `host`
-- `check`
-- `prepare`
-- `run`
-- `start`
-- `console`
-- `inspect`
-- `halt`
-- `quarantine`
-- `stop`
-- `kill`
-- `delete`
+Apple VF implements the full shared command set: `host`, `check`, `prepare`,
+`run`, `start`, `console`, `inspect`, `halt`, `quarantine`, `stop`, `kill`,
+and `delete`.
 
 `host` does not require `identity` or `config`. `inspect`, `halt`,
 `quarantine`, `stop`, `kill`, and `delete` require `identity` and
@@ -102,10 +94,10 @@ devices:
 
 `nat` is the default. It uses Virtualization.framework's native NAT service,
 not a TAP device, host bridge, or host firewall rule set managed by
-Microagent. On supported macOS versions, Apple VF supplies the guest with a
+microagent. On supported macOS versions, Apple VF supplies the guest with a
 DHCP lease, default route, and DNS service through that native attachment. The
 guest kernel config used with Apple VF must support kernel DHCP autoconfig
-because Microagent starts `/sbin/microagent-init` directly and should not rely
+because microagent starts `/sbin/microagent-init` directly and should not rely
 on image-local DHCP clients such as `dhclient` or `udhcpc`. Guest init writes
 `/etc/resolv.conf` from the kernel DHCP nameserver data so slim images can
 resolve DNS without extra packages.

@@ -1,15 +1,17 @@
 ---
 title: Supervisor protocol
-description: The JSON request and response format used by backend supervisors.
+description: Speak the JSON protocol backend supervisors implement - requests, responses, fields.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
-Backend supervisors speak a small JSON protocol: one request in, one response
-out. A request names a lifecycle command such as `prepare`, `start`, or `stop`.
-The response reports whether it worked and, when the command changes VM state,
-includes a lifecycle event.
+If you are implementing a supervisor, calling one directly, or debugging what
+a backend returned, this page is the protocol reference. Backend supervisors
+speak a small JSON protocol: one request in, one response out. A request names
+a lifecycle command such as `prepare`, `start`, or `stop`. The response
+reports whether it worked and, when the command changes VM state, includes a
+lifecycle event.
 
 Firecracker, Apple VF, and Windows Hyper-V use the same backend-neutral
 protocol:

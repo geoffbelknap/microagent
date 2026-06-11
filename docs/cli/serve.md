@@ -7,8 +7,8 @@ description: Serve machine-readable agent endpoints.
 _Last updated: 2026-06-11_
 
 ```text
-microagent serve mcp
-microagent serve model <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]
+microagent serve mcp                                                              Stdio MCP transport for agent clients
+microagent serve model <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Serve a local GGUF model
 ```
 
 `serve` starts long-running local services from the main `microagent` binary.
