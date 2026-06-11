@@ -6,7 +6,7 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 <!-- docs-last-updated -->
 _Last updated: 2026-06-11_
 
-Run an [agent](/concepts/glossary/) inside a microVM: a small program that
+Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
 in its own workspace, and reports a structured result. The example ships in
 three flavors: Anthropic Claude, OpenAI, and Google Gemini. The flow is
@@ -84,14 +84,21 @@ it, and include the rendered table in the summary.
 
 ```bash
 microagent start minimal-agent
-microagent --json result minimal-agent
 ```
 
 The agent boots, calls the LLM with `bash` / `read_file` / `write_file`
 tools, runs the tool calls inside `/workspace`, and writes a `WorkResult` to
 `/workspace/result.json` (declared as the `result` output artifact in the
-spec). The run takes half a minute or so. The result file carries the LLM's
-summary in a top-level `content` field:
+spec; `microagent --json result` surfaces it inside its `result` envelope).
+`start` returns once the VM boots, not when the agent finishes - poll
+`microagent --json status minimal-agent` until it reports `"state": "stopped"`
+(half a minute or so), then read the result:
+
+```bash
+microagent --json result minimal-agent
+```
+
+The file looks like:
 
 ```json
 {
@@ -122,6 +129,11 @@ fields (`request_id`, `status`, `audit_ref`) echo the request. This run's
 └──────┴──────────┴────────────────────────────────────────────────────────────┘
 ```
 
+That `pip install` went into the VM's own system Python, and the scan walked
+the VM's own `/usr` - this is the agent's machine to mutate, and `delete`
+throws the whole thing away. (It even found its own init:
+`/usr/sbin/microagent-init`, row 3.)
+
 `microagent --json result` reads the result file and reports the run's exit
 code in its `result.exitCode` field - a clean exit is `0`.
 
@@ -145,6 +157,7 @@ previous run.
 microagent halt minimal-agent
 microagent cp examples/minimal-agent/demo/input-002.json minimal-agent:/workspace/input.json
 microagent start minimal-agent
+microagent --json status minimal-agent   # poll until "state": "stopped"
 microagent --json result minimal-agent
 ```
 
@@ -174,6 +187,7 @@ microagent halt minimal-agent
 microagent cp examples/minimal-agent/demo/data/sales-sample.csv minimal-agent:/workspace/sales-sample.csv
 microagent cp examples/minimal-agent/demo/analyze-file.json minimal-agent:/workspace/input.json
 microagent start minimal-agent
+microagent --json status minimal-agent   # poll until "state": "stopped"
 microagent cp minimal-agent:/workspace/report.md ./report.md
 ```
 
@@ -200,7 +214,7 @@ into the guest and the OpenAI SDK picks it up.
 
 Two honest caveats before you start:
 
-- **Small models are not gpt-4o-mini.** In our testing, Qwen2.5-Instruct at
+- **Small models are not the hosted models above.** In our testing, Qwen2.5-Instruct at
   0.5B, 3B, and 7B (Q4_K_M) all failed this page's first request - broken
   scripts, fabricated output. The model below is the smallest we verified
   completing it end to end, and it needs a low sampling temperature to do it.
@@ -217,7 +231,10 @@ microagent model pull unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507
 ```
 
 `run` has no spec-file step, so stage the agent source and the request as a
-tar bundle that `-v` can deliver:
+tar bundle that `-v` can deliver. The three directories mirror the paths the
+spec-file flow bakes in - code in `/app`, operator files in `/agent`, the
+request in `/workspace`. The bundle mounts read-only at `/src`, so the
+`--setup` lines copy each piece into place:
 
 ```bash
 mkdir -p local-agent/app local-agent/agent local-agent/workspace
@@ -271,7 +288,8 @@ microagent delete minimal-agent-local --yes
 ```
 
 This run's `content` field carried a real rendered table - same shape as the
-cloud run, same five files:
+cloud run, and four of the five files match; the local model's script counted
+a libpython symlink twice, which is about par for a 4B model:
 
 ```text
                 Top 5 Largest Files in /usr
