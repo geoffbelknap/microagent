@@ -1902,6 +1902,37 @@ func TestParseWorkspaceOptionsForRun(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "microagent.yaml")
+	if err := os.WriteFile(specPath, []byte("name: demo\nimage: docker.io/library/ubuntu:24.04\nmodel: org/spec-repo/spec.gguf\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, err := parseWorkspaceOptions("create", []string{"--file", specPath})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Model != "org/spec-repo/spec.gguf" {
+		t.Fatalf("spec model not applied: %q", opts.Model)
+	}
+
+	opts, err = parseWorkspaceOptions("create", []string{"--file", specPath, "--model", "org/flag-repo/flag.gguf"})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Model != "org/flag-repo/flag.gguf" {
+		t.Fatalf("--model flag should win over spec: %q", opts.Model)
+	}
+
+	opts, err = parseWorkspaceOptions("create", []string{"demo", "--model", "org/flag-repo/flag.gguf"})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Model != "org/flag-repo/flag.gguf" {
+		t.Fatalf("create --model not parsed: %q", opts.Model)
+	}
+}
+
 func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",

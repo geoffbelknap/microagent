@@ -3092,11 +3092,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	rm := false
 	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
-	// --model and --model-token are consumed by runWorkspace before this call;
-	// register them here so the flagset accepts them without error and shows
-	// them in --help output.
-	var absorbedModelRef, absorbedModelToken string
-	fs.StringVar(&absorbedModelRef, "model", "", "Pair this run with a locally-served model (HuggingFace GGUF ref); injects MICROAGENT_MODEL_URL/OPENAI_BASE_URL")
+	// --model-token is consumed by callers via flagValue pre-scan (it must never
+	// land in Options); register it so the flagset accepts it and shows it in
+	// --help output.
+	var absorbedModelToken string
+	fs.StringVar(&opts.Model, "model", opts.Model, "Pair this workspace with a locally-served model (HuggingFace GGUF ref); injects MICROAGENT_MODEL_URL/OPENAI_BASE_URL")
 	fs.StringVar(&absorbedModelToken, "model-token", "", "HuggingFace token for model auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
 	if err := rejectUnsupportedContainerCompatibilityFlags(args); err != nil {
 		return workspaceOptions{}, err

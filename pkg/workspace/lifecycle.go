@@ -866,6 +866,7 @@ func WriteManifest(opts Options) error {
 		Service:         strings.TrimSpace(opts.ServiceCommand),
 		ConsoleShell:    strings.TrimSpace(opts.ConsoleShell),
 		Hostname:        strings.TrimSpace(opts.Hostname),
+		Model:           strings.TrimSpace(opts.Model),
 		Mediation:       opts.Mediation,
 		Health:          healthManifest(opts.Health),
 		Disks:           opts.Disks,
@@ -1215,6 +1216,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 	if strings.TrimSpace(manifest.Hostname) != "" {
 		opts.Hostname = strings.TrimSpace(manifest.Hostname)
 	}
+	opts.Model = strings.TrimSpace(manifest.Model)
 	if manifest.Resources.MemoryMiB != 0 {
 		opts.MemoryMiB = manifest.Resources.MemoryMiB
 	}

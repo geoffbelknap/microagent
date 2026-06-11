@@ -90,7 +90,11 @@ type Options struct {
 	// ModelTarget, when non-empty, is the host TCP address (host:port) of a paired
 	// model server. It is realized as a guest→host vsock channel and a guest
 	// forwarder. Orchestration (starting the runner) happens in the CLI layer.
-	ModelTarget     string
+	ModelTarget string
+	// Model is the canonical model ref this workspace is paired with. It is
+	// persisted in the manifest so every start re-pairs; the pull-time token is
+	// never persisted.
+	Model           string
 	ProfileExplicit bool
 	KernelExplicit  bool
 	// FromSnapshot, when set, restores the workspace in place from this snapshot
@@ -117,6 +121,7 @@ type Spec struct {
 	Service    string                `json:"service_command,omitempty" yaml:"service"`
 	Shell      string                `yaml:"shell"`
 	Hostname   string                `yaml:"hostname"`
+	Model      string                `yaml:"model"`
 	Setup      SetupSteps            `yaml:"setup"`
 	SetupFiles []string              `yaml:"setupFiles"`
 	Env        map[string]string     `yaml:"env"`
@@ -233,6 +238,7 @@ type Manifest struct {
 	Service         string                     `json:"service_command,omitempty"`
 	ConsoleShell    string                     `json:"shell,omitempty"`
 	Hostname        string                     `json:"hostname,omitempty"`
+	Model           string                     `json:"model,omitempty"`
 	Mediation       *vmkit.MediationConfig     `json:"mediation,omitempty"`
 	Health          *Health                    `json:"health,omitempty"`
 	Disks           []Disk                     `json:"disks,omitempty"`
