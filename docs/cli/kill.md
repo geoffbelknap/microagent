@@ -1,10 +1,10 @@
 ---
 title: microagent kill
-description: Force-stop a workspace.
+description: Force-terminate a workspace that won't stop.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent kill <name> [--state-dir <dir>]
@@ -12,9 +12,23 @@ microagent kill <name> [--state-dir <dir>]
 
 `kill` is the hard variant of [`stop`](/cli/stop/). On Firecracker it sends
 SIGKILL to the recorded VM process; on Apple VF it asks the supervisor to
-terminate the VM immediately. Use it when `stop` doesn't return.
+terminate the VM immediately. Use it when `stop` doesn't return - `stop` never
+escalates on its own. For a clean shutdown of a healthy workspace you intend to
+start again, use [`halt`](/cli/halt/) instead; the disk state survives `kill`
+too, but nothing inside the guest gets a chance to flush or exit cleanly.
+
+## Examples
+
+Force-terminate a workspace:
+
+```bash
+microagent kill research
+```
 
 ## Flags
+
+You'll rarely need flags here - `--state-dir` only when the workspace lives
+outside the default `~/.microagent/`.
 
 | Flag | Description |
 |---|---|
@@ -26,12 +40,12 @@ terminate the VM immediately. Use it when `stop` doesn't return.
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
-## Example
+## Exit status
 
-```bash
-microagent kill research
-```
+`kill` exits `0` on success; nonzero when the workspace cannot be found or the
+VM process cannot be terminated. In AX mode a failure is written as a
+structured error envelope.
 
 ## Related
 
-- [`stop`](/cli/stop/), [`delete`](/cli/delete/)
+- [`stop`](/cli/stop/), [`halt`](/cli/halt/), [`delete`](/cli/delete/)

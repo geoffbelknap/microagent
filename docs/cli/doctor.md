@@ -1,20 +1,42 @@
 ---
 title: microagent doctor
-description: Check that the host can run microagent.
+description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-10_
+_Last updated: 2026-06-11_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
 ```
 
-`doctor` reports host support for the installed host backend and the default kernel
-status. Run it first when something isn't working.
-
-Use [`host`](/cli/host/) when you want the same information as an inspectable
+`doctor` reports host support for the installed host backend and the default
+kernel status. Run it first when something isn't working. Use
+[`host`](/cli/host/) when you want the same information as an inspectable
 capability report rather than a health check.
+
+## Examples
+
+Check the host:
+
+```bash
+microagent doctor
+microagent --json doctor
+```
+
+Text output is a short health summary:
+
+```text
+Backend: firecracker
+Status: ok
+Host: amd64, supervisor=/usr/local/lib/microagent/firecracker-supervisor, supervisor available, virtualization supported, KVM available, vsock available
+Console: available (interactive)
+Kernel: installed (/home/user/.microagent/kernels/firecracker/amd64/vmlinux)
+```
+
+`doctor` shares the structured shape with [`host`](/cli/host/): `microagent
+--json doctor` returns the same `vmkit.Response` with `ok`, `backend`, `host`,
+and `kernel` populated. `ok` is `false` when any required check fails.
 
 ## What it checks
 
@@ -42,6 +64,9 @@ Administrators group.
 
 ## Flags
 
+You'll rarely need flags here - `--backend` to probe a backend other than the
+detected one, `--arch` when you plan to run non-native guests.
+
 | Flag | Description |
 |---|---|
 | `--backend <name>` | Backend override (`apple-vf`, `firecracker`, or `windows-hyperv`) |
@@ -51,26 +76,11 @@ Administrators group.
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
-## Example
+## Exit status
 
-```bash
-microagent doctor
-microagent --json doctor
-```
-
-Text output is a short health summary:
-
-```text
-Backend: firecracker
-Status: ok
-Host: amd64, supervisor=/usr/local/lib/microagent/firecracker-supervisor, supervisor available, virtualization supported, KVM available, vsock available
-Console: available (interactive)
-Kernel: installed (/home/user/.microagent/kernels/firecracker/amd64/vmlinux)
-```
-
-`doctor` shares the structured shape with [`host`](/cli/host/): `microagent
---json doctor` returns the same `vmkit.Response` with `ok`, `backend`, `host`,
-and `kernel` populated. `ok` is `false` when any required check fails.
+`doctor` exits `0` when every required check passes; nonzero when any required
+check fails. The printed summary still includes the full check detail either
+way.
 
 ## Related
 

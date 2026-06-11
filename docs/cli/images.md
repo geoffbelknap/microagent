@@ -1,10 +1,10 @@
 ---
 title: microagent images
-description: List or prune local image records.
+description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
 ```text
 microagent images pull <image> [--state-dir <dir>]
@@ -18,6 +18,55 @@ microagent images prune [--delete] [--yes] [--state-dir <dir>]
 `images` reads the local image index. Successful workspace rootfs
 builds and `images pull` record the source image reference, resolved digest,
 platform, rootfs path, size, and last-used time.
+
+## Examples
+
+Pull an image once, then reuse it for clean workspaces:
+
+```bash
+microagent images pull docker.io/library/ubuntu:24.04
+microagent images list
+microagent create research --image docker.io/library/ubuntu:24.04
+```
+
+Tag and remove local records:
+
+```bash
+microagent images tag sha256:abc local/ubuntu:baseline
+microagent images rm local/ubuntu:baseline
+```
+
+Prune stale records, or also delete reusable rootfs baselines:
+
+```bash
+microagent --json images prune
+microagent --json images prune --delete --yes
+```
+
+`images list` prints one row per recorded image:
+
+```text
+IMAGE                                            DIGEST                       PLATFORM         SIZE       LAST USED
+docker.io/library/ubuntu:24.04                   sha256:abc...                linux/amd64      268435456  2026-06-01T12:00:00Z
+```
+
+With the global `--json` flag, the records are returned under `images`:
+
+```json
+{
+  "images": [
+    {
+      "image_ref": "docker.io/library/ubuntu:24.04",
+      "resolved_ref": "docker.io/library/ubuntu@sha256:abc...",
+      "digest": "sha256:abc...",
+      "platform": { "os": "linux", "architecture": "amd64" },
+      "output_path": "/home/user/.microagent/images/sha256-abc.../rootfs.ext4",
+      "size_bytes": 268435456,
+      "last_used_at": "2026-06-01T12:00:00Z"
+    }
+  ]
+}
+```
 
 ## Commands
 
@@ -53,7 +102,16 @@ configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
 including configured credential helpers. MicroAgent uses those credentials for
 pulls and does not write registry login state.
 
-## Pull flags
+## Flags
+
+Flags you'll actually use:
+
+- `--delete` (`rm`/`prune`) - actually delete rootfs baselines, not just records
+- `--yes` / `-y` (`rm`/`prune`) - skip the confirmation prompt in scripts
+- `--arch <arch>` (`pull`) - pull for a non-default guest architecture
+- `--size-mib <MiB>` (`pull`) - size the built rootfs
+
+### Pull flags
 
 | Flag | Description |
 |---|---|
@@ -62,56 +120,25 @@ pulls and does not write registry login state.
 | `--mke2fs <path>` | mke2fs binary path |
 | `--guest-init <path>` | Guest init binary path |
 
-## Prune flags
+### Prune flags
 
 | Flag | Description |
 |---|---|
 | `--delete` | Delete reusable image-store rootfs files and their records |
 | `--yes`, `-y` | Confirm deletion without prompting |
 
-## Remove flags
+### Remove flags
 
 | Flag | Description |
 |---|---|
 | `--delete` | Delete the reusable image-store rootfs when no kept record still uses it |
 | `--yes`, `-y` | Confirm deletion without prompting |
 
-## Examples
+## Exit status
 
-```bash
-microagent images pull docker.io/library/ubuntu:24.04
-microagent images list
-microagent images tag sha256:abc local/ubuntu:baseline
-microagent images rm local/ubuntu:baseline
-microagent create research --image local/ubuntu:baseline
-microagent --json images prune
-microagent --json images prune --delete --yes
-```
-
-`images list` prints one row per recorded image:
-
-```text
-IMAGE                                            DIGEST                       PLATFORM         SIZE       LAST USED
-docker.io/library/ubuntu:24.04                   sha256:abc...                linux/amd64      268435456  2026-06-01T12:00:00Z
-```
-
-With the global `--json` flag, the records are returned under `images`:
-
-```json
-{
-  "images": [
-    {
-      "image_ref": "docker.io/library/ubuntu:24.04",
-      "resolved_ref": "docker.io/library/ubuntu@sha256:abc...",
-      "digest": "sha256:abc...",
-      "platform": { "os": "linux", "architecture": "amd64" },
-      "output_path": "/home/user/.microagent/images/sha256-abc.../rootfs.ext4",
-      "size_bytes": 268435456,
-      "last_used_at": "2026-06-01T12:00:00Z"
-    }
-  ]
-}
-```
+`images` subcommands exit `0` on success; nonzero when an image reference
+cannot be resolved, a pull or push fails, or a deletion needs confirmation that
+non-interactive input cannot provide.
 
 ## Related
 

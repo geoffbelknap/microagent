@@ -4,7 +4,7 @@ description: Copy a stopped workspace into a new workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent clone <source> <target> [--state-dir <dir>]
@@ -12,9 +12,22 @@ microagent clone <source> <target> [--state-dir <dir>]
 
 `clone` copies a prepared or stopped workspace into a new workspace record. The
 target gets its own rootfs and workspace-owned disks. Runtime process state is
-not copied.
+not copied - for a running-state fork, see
+[`create --from-snapshot`](/cli/create/#fork-from-a-snapshot).
+
+## Examples
+
+Keep a template workspace and clone working copies from it:
+
+```bash
+microagent clone template research
+microagent start research
+```
 
 ## Flags
+
+You'll rarely need flags here - `--state-dir` only when the workspaces live
+outside the default `~/.microagent/`.
 
 | Flag | Description |
 |---|---|
@@ -31,12 +44,10 @@ not copied.
   workspace directory.
 - External disk paths are left unchanged.
 
-## Example
+## Exit status
 
-```bash
-microagent clone template research
-microagent start research
-```
+`clone` exits `0` on success; nonzero when the source is missing or running,
+the target already exists, or the copy fails.
 
 ## Related
 

@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -19,8 +19,17 @@ Today it supports:
 - network intent changes while the workspace is stopped
 - live Firecracker port-forward host bind changes when the workspace is running
 
-For a running Firecracker workspace, `apply` can live-reload this kind of
-change:
+## Examples
+
+Apply an updated spec to its workspace:
+
+```bash
+microagent apply --file ./homebridge.yaml
+```
+
+If the workspace is running and only the Firecracker host bind changed,
+`apply` restarts the host-side port-forwarder and leaves the VM running. For a
+running Firecracker workspace, `apply` can live-reload this kind of change:
 
 ```yaml
 network:
@@ -38,6 +47,8 @@ resources, files, setup, image, or service command still require `stop`/`start`
 or recreating the workspace.
 
 ## Flags
+
+You'll rarely need flags beyond `--file`, which names the spec to apply.
 
 | Flag | Description |
 |---|---|
@@ -58,11 +69,12 @@ host or guest ports - `apply` errors and tells you to stop and start the
 workspace to apply it; nothing is written. When the spec matches the current
 manifest, `apply` reports the workspace state with no applied changes.
 
-## Example
+## Exit status
 
-```bash
-microagent apply --file ./homebridge.yaml
-```
+`apply` exits `0` when the changes are applied (or the spec already matches the
+manifest); nonzero when the workspace cannot be found, the spec is invalid, or
+the requested change is unsupported while the workspace is running.
 
-If the workspace is running and only the Firecracker host bind changed,
-`apply` restarts the host-side port-forwarder and leaves the VM running.
+## Related
+
+- [`create`](/cli/create/), [`spec`](/cli/spec/), [`status`](/cli/status/)

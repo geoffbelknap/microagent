@@ -4,7 +4,26 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-09_
+_Last updated: 2026-06-11_
+
+## Which command do I want?
+
+| I want to... | Use |
+|---|---|
+| Run something once and throw it away | [`run`](/cli/run/) |
+| Keep a workspace around between boots | [`create`](/cli/create/), then [`start`](/cli/start/) |
+| Get a shell inside a workspace | [`connect`](/cli/connect/) |
+| Run a command inside and get its exit code | [`exec`](/cli/exec/) |
+| Copy files in or out | [`cp`](/cli/cp/) |
+| See what's running | [`ps`](/cli/ps/) |
+| Dig into one workspace | [`status`](/cli/status/) |
+| Park it / shut it down / force it | [`halt`](/cli/halt/) / [`stop`](/cli/stop/) / [`kill`](/cli/kill/) |
+| Freeze it in place, memory and all | [`pause`](/cli/pause/) / [`resume`](/cli/resume/) |
+| Checkpoint or fork it | [`snapshot`](/cli/snapshot/), [`clone`](/cli/clone/) |
+| Get rid of it | [`delete`](/cli/delete/) |
+| Figure out why nothing boots | [`doctor`](/cli/doctor/) |
+
+## All commands
 
 | Command | Purpose |
 |---|---|
@@ -27,10 +46,8 @@ _Last updated: 2026-06-09_
 | [`resume`](/cli/resume/) | Thaw a paused workspace back to running |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
-| [`delete`](/cli/delete/) | Remove a workspace and its state |
-| [`rm`](/cli/delete/) | Alias for `delete` |
-| [`status`](/cli/status/) | Show workspace state |
-| [`inspect`](/cli/status/) | Alias for `status` with JSON output |
+| [`delete`](/cli/delete/) | Remove a workspace and its state (alias: `rm`) |
+| [`status`](/cli/status/) | Show workspace state (alias: `inspect`, with JSON output) |
 | [`result`](/cli/result/) | Show structured workspace result |
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |

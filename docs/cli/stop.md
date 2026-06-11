@@ -1,19 +1,41 @@
 ---
 title: microagent stop
-description: Shut a workspace down gracefully.
+description: Signal a workspace to shut down gracefully.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent stop <name> [--state-dir <dir>]
 ```
 
 `stop` requests a graceful shutdown. On Firecracker this sends SIGTERM to the
-recorded VM process; on Apple VF it asks the supervisor to stop the VM.
+recorded VM process; on Apple VF it asks the supervisor to stop the VM. If the
+VM hasn't exited after five seconds, `stop` marks the workspace `failed` and
+returns an error - it never escalates on its own, so following up with
+[`kill`](/cli/kill/) is your move. When you're parking a healthy workspace to
+start again later, prefer [`halt`](/cli/halt/), which records the clean
+`halted` state.
+
+## Examples
+
+Stop a workspace:
+
+```bash
+microagent stop research
+```
+
+If the VM doesn't shut down within the deadline, force it:
+
+```bash
+microagent kill research
+```
 
 ## Flags
+
+You'll rarely need flags here - `--state-dir` only when the workspace lives
+outside the default `~/.microagent/`.
 
 | Flag | Description |
 |---|---|
@@ -25,14 +47,13 @@ recorded VM process; on Apple VF it asks the supervisor to stop the VM.
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
-## Example
+## Exit status
 
-```bash
-microagent stop research
-```
-
-If the VM doesn't shut down cleanly, follow up with [`kill`](/cli/kill/).
+`stop` exits `0` on success; nonzero when the workspace cannot be found or when
+the VM does not exit within the five-second deadline (the workspace is then
+marked `failed`). In AX mode a failure is written as a structured error
+envelope.
 
 ## Related
 
-- [`kill`](/cli/kill/), [`delete`](/cli/delete/), [`status`](/cli/status/)
+- [`halt`](/cli/halt/), [`kill`](/cli/kill/), [`delete`](/cli/delete/), [`status`](/cli/status/)

@@ -1,10 +1,10 @@
 ---
 title: microagent run
-description: Boot a VM from an OCI image, run a command, and tear down.
+description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-08_
+_Last updated: 2026-06-11_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -12,15 +12,126 @@ microagent run [flags] <image> [command arg...]
 ```
 
 `run` is the one-shot path. It fetches the image, builds a rootfs, boots the
-VM, runs `--setup` then `--exec`, prints the result, and removes scratch state
-(unless `--keep` is set).
+microVM, runs `--setup` then `--exec`, prints the result, and removes scratch
+state (unless `--keep` is set). Use [`create`](/cli/create/) instead when you
+want the workspace to survive - `run` is for disposable work, `create` for a
+named workspace you'll `start`, `connect` to, and come back to.
 
 The positional form is useful when you already think in image-plus-command
 terms. If no command is provided, microagent runs the image's Entrypoint/Cmd.
 Use `--exec` when you want one shell command string instead of an argv-style
 command.
 
+## Examples
+
+Run a single command and throw the VM away:
+
+```bash
+microagent run docker.io/library/ubuntu:24.04 uname -a
+```
+
+Run the image's default command:
+
+```bash
+microagent run docker.io/library/busybox:1.36
+```
+
+Use container-style aliases:
+
+```bash
+microagent run \
+  -e FOO=bar \
+  -p 127.0.0.1:8080:80 \
+  --rm \
+  docker.io/library/ubuntu:24.04 \
+  printenv FOO
+```
+
+With `--json` before the subcommand, `run` prints the structured result. A
+trimmed example:
+
+```json
+{
+  "workspace": "run-1730000000000000000",
+  "state_dir": "/home/user/.microagent",
+  "restart": "never",
+  "resources": { "memory_mib": 512, "cpu_count": 2, "size_mib": 4096 },
+  "rootfs_path": "/home/user/.microagent/workspaces/run-.../rootfs.ext4",
+  "kernel_path": "/home/user/.microagent/kernels/firecracker/amd64/vmlinux",
+  "final_state": "stopped",
+  "result": {
+    "started_at": "2026-06-01T12:00:00Z",
+    "exited_at": "2026-06-01T12:00:01Z",
+    "exit_code": 0,
+    "stdout": "Linux 6.1.0 ...\n"
+  },
+  "response": { "ok": true, "backend": "firecracker" }
+}
+```
+
+Container-style `-v` is intentionally narrow. MicroAgent accepts tar archives
+as bundles and ext4 disk images as attached disks:
+
+```bash
+microagent run \
+  -v /tmp/config.tar:/config:ro \
+  -v /tmp/workspace.ext4:/workspace:rw \
+  docker.io/library/ubuntu:24.04 \
+  ls /config /workspace
+```
+
+Attach a [named volume](/cli/volume/) by name with `-v data:/work` for
+persistent, VM-independent storage. Host directory bind mounts are not exposed:
+package a directory as a tar archive for ingress, attach an ext4 disk, use
+`microagent cp` with a stopped workspace, and declare `--output` paths for
+egress.
+
+Unsupported container-engine features such as compose projects, pods,
+privileged mode, namespace flags, devices, and host bind mounts fail with
+targeted guidance instead of being silently translated into microVM behavior.
+
+Run with a named resource profile:
+
+```bash
+microagent run \
+  --image docker.io/library/ubuntu:24.04 \
+  --profile medium \
+  --exec "apt-get update"
+```
+
+Run setup commands first:
+
+```bash
+microagent run \
+  --image docker.io/library/busybox:1.36 \
+  --setup "mkdir -p /workspace" \
+  --setup "echo ready > /workspace/status" \
+  --exec "cat /workspace/status"
+```
+
+Use a custom kernel:
+
+```bash
+microagent run \
+  --image docker.io/library/ubuntu:24.04 \
+  --exec "uname -a" \
+  --kernel /tmp/Image
+```
+
 ## Flags
+
+Flags you'll actually use:
+
+- `--exec <command>` - one shell command string, when argv form is awkward
+- `--setup <command>` - prepare the guest before `--exec`; repeatable
+- `-e KEY=VALUE` - set guest environment variables
+- `-p [host:]hostPort:guestPort` - forward a TCP port to the guest
+- `-v SRC:DST[:ro|rw]` - attach a named volume, tar bundle, or ext4 disk
+- `--profile <name>` - size the VM (`tiny`, `small`, `medium`, `large`)
+- `--keep` - keep the workspace state around after the command exits
+- `--timeout <seconds>` - kill the run if it outlives the deadline
+
+The complete set:
 
 | Flag | Description |
 |---|---|
@@ -72,6 +183,10 @@ command.
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
+## Image references
+
+`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path - it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
+
 ## Exit status
 
 `run` exits nonzero when the workspace fails to build or boot, or when the
@@ -79,106 +194,6 @@ one-shot run cannot complete. The guest command's own exit code is *not*
 propagated to the CLI exit status; it is reported in the result instead - in the
 text output as `Exit code:` and in JSON under `result.exit_code`. Use
 [`exec`](/cli/exec/) when you need the guest exit code to drive the shell.
-
-## Image references
-
-`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags. Both are allowed here. For repeatable runs in CI or production, pin by digest. [`microagent rootfs build`](/cli/rootfs/) is the stricter path - it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
-
-## Examples
-
-Run a single command:
-
-```bash
-microagent run docker.io/library/ubuntu:24.04 uname -a
-```
-
-With `--json` before the subcommand, `run` prints the structured result. A
-trimmed example:
-
-```json
-{
-  "workspace": "run-1730000000000000000",
-  "state_dir": "/home/user/.microagent",
-  "restart": "never",
-  "resources": { "memory_mib": 512, "cpu_count": 2, "size_mib": 4096 },
-  "rootfs_path": "/home/user/.microagent/workspaces/run-.../rootfs.ext4",
-  "kernel_path": "/home/user/.microagent/kernels/firecracker/amd64/vmlinux",
-  "final_state": "stopped",
-  "result": {
-    "started_at": "2026-06-01T12:00:00Z",
-    "exited_at": "2026-06-01T12:00:01Z",
-    "exit_code": 0,
-    "stdout": "Linux 6.1.0 ...\n"
-  },
-  "response": { "ok": true, "backend": "firecracker" }
-}
-```
-
-Run the image's default command:
-
-```bash
-microagent run docker.io/library/busybox:1.36
-```
-
-Use container-style aliases:
-
-```bash
-microagent run \
-  -e FOO=bar \
-  -p 127.0.0.1:8080:80 \
-  --rm \
-  docker.io/library/ubuntu:24.04 \
-  printenv FOO
-```
-
-Container-style `-v` is intentionally narrow. MicroAgent accepts tar archives
-as bundles and ext4 disk images as attached disks:
-
-```bash
-microagent run \
-  -v /tmp/config.tar:/config:ro \
-  -v /tmp/workspace.ext4:/workspace:rw \
-  docker.io/library/ubuntu:24.04 \
-  ls /config /workspace
-```
-
-Attach a [named volume](/cli/volume/) by name with `-v data:/work` for
-persistent, VM-independent storage. Host directory bind mounts are not exposed:
-package a directory as a tar archive for ingress, attach an ext4 disk, use
-`microagent cp` with a stopped workspace, and declare `--output` paths for
-egress.
-
-Unsupported container-engine features such as compose projects, pods,
-privileged mode, namespace flags, devices, and host bind mounts fail with
-targeted guidance instead of being silently translated into microVM behavior.
-
-Run with a named resource profile:
-
-```bash
-microagent run \
-  --image docker.io/library/ubuntu:24.04 \
-  --profile medium \
-  --exec "apt-get update"
-```
-
-Run setup commands first:
-
-```bash
-microagent run \
-  --image docker.io/library/busybox:1.36 \
-  --setup "mkdir -p /workspace" \
-  --setup "echo ready > /workspace/status" \
-  --exec "cat /workspace/status"
-```
-
-Use a custom kernel:
-
-```bash
-microagent run \
-  --image docker.io/library/ubuntu:24.04 \
-  --exec "uname -a" \
-  --kernel /tmp/Image
-```
 
 ## Related
 
