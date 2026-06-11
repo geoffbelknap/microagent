@@ -8,6 +8,10 @@
 # Phase 1-3 stack: the model store, the host llama.cpp runner, the workspace
 # vsock transport, the guest forwarder, and the `run --model` orchestration.
 #
+# Then exercises persistent workspace pairing: `create --model` persists the
+# canonical ref in the manifest, every `start` re-pairs (runner up, holder
+# added, env + bridge live in the guest), and halt/delete release the holder.
+#
 # This is a host probe: it requires a real microVM backend plus a llama.cpp
 # `llama-server` binary, so it must run OUTSIDE sandboxed CI. It skips cleanly
 # when prerequisites are absent.
@@ -67,6 +71,9 @@ case "$BACKEND" in
       skip "/dev/kvm not available"
     fi
     RUN_FLAGS=(--backend firecracker "${RUN_FLAGS[@]}")
+    CREATE_FLAGS=(--backend firecracker)
+    START_FLAGS=(--backend firecracker)
+    CTRL_FLAGS=(--backend firecracker)
     ;;
   applevf)
     case "$(uname -s):$(uname -m)" in
@@ -86,6 +93,9 @@ case "$BACKEND" in
     [ -r "$KERNEL" ] || skip "Apple VF kernel not readable at $KERNEL"
     [ -x "$GUEST_INIT" ] || skip "guest init not executable at $GUEST_INIT (run scripts/dev/build-local.sh)"
     RUN_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL" --guest-init "$GUEST_INIT" "${RUN_FLAGS[@]}")
+    CREATE_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL" --guest-init "$GUEST_INIT")
+    START_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL")
+    CTRL_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR")
     ;;
   *)
     skip "unsupported host/backend for model E2E: os=$(uname -s) arch=$(uname -m) backend=$BACKEND"
@@ -126,4 +136,101 @@ if ! printf '%s' "$OUT" | grep -q 'E2E_RESPONSE'; then
 fi
 
 echo "PASS microagent-e2e-model: guest reached the locally-served model over vsock"
+
+# --- Workspace pairing scenario ----------------------------------------------
+# create --model persists the canonical ref; every start re-pairs (runner up,
+# workspace registered as holder, env + vsock bridge live in the guest);
+# halt releases the holder; a second start re-pairs; delete releases for good.
+
+WS="model-pair-e2e"
+
+ws_cleanup() {
+  "$CLI" kill "$WS" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
+  "$CLI" delete "$WS" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
+  "$CLI" model stop "$MODEL_REF" >/dev/null 2>&1 || true
+}
+trap ws_cleanup EXIT
+
+# holders_of <workspace>: print the model_ref of every runner holding <workspace>.
+holders_of() {
+  "$CLI" --json model runners 2>/dev/null | python3 -c '
+import json, sys
+ws = sys.argv[1]
+idx = json.load(sys.stdin) or {}
+for r in idx.get("runners") or []:
+    if ws in (r.get("holders") or []):
+        print(r.get("model_ref", ""))
+' "$1"
+}
+
+# Stale state from an earlier aborted run must not fail create.
+"$CLI" delete "$WS" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
+
+echo "microagent-e2e-model: workspace pairing scenario (workspace=$WS)"
+
+if ! "$CLI" create "$WS" --image "$IMAGE" --model "$MODEL_REF" "${CREATE_FLAGS[@]}" >/dev/null 2>&1; then
+  fail "create --model failed"
+fi
+# create leaves the workspace halted: its setup-boot holder must be gone.
+if [ -n "$(holders_of "$WS")" ]; then
+  fail "create left a runner holder for $WS"
+fi
+
+if ! "$CLI" start "$WS" "${START_FLAGS[@]}" >/dev/null 2>&1; then
+  fail "start of paired workspace failed"
+fi
+CANONICAL="$(holders_of "$WS")"
+if [ -z "$CANONICAL" ]; then
+  "$CLI" --json model runners >&2 || true
+  fail "start did not register $WS as a model runner holder"
+fi
+echo "microagent-e2e-model: start re-paired $WS with $CANONICAL"
+
+# Wait for the guest exec service, then prove env + bridge from inside the guest.
+exec_ready=0
+for _ in $(seq 1 60); do
+  if "$CLI" --json status "$WS" "${CTRL_FLAGS[@]}" 2>/dev/null | grep -A2 '"execReady"' | grep -q '"ready": true'; then
+    exec_ready=1
+    break
+  fi
+  sleep 1
+done
+[ "$exec_ready" -eq 1 ] || fail "workspace exec service did not become ready"
+
+# shellcheck disable=SC2016
+WS_GUEST='echo "WS_MODEL_URL=$MICROAGENT_MODEL_URL"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/models"); case "$R" in *object*|*data*) echo "WS_MODELS: $R"; exit 0;; esac; sleep 1; done; echo "WS_FAIL: model unreachable from guest"; exit 1'
+WS_OUT="$("$CLI" exec "$WS" -- sh -c "$WS_GUEST" 2>&1)"
+if ! printf '%s' "$WS_OUT" | grep -q 'WS_MODELS'; then
+  echo "$WS_OUT" >&2
+  fail "paired workspace could not reach the model over the vsock bridge"
+fi
+
+if ! "$CLI" halt "$WS" "${CTRL_FLAGS[@]}" >/dev/null 2>&1; then
+  fail "halt of paired workspace failed"
+fi
+if [ -n "$(holders_of "$WS")" ]; then
+  fail "halt did not release the model runner holder for $WS"
+fi
+echo "microagent-e2e-model: halt released the holder for $WS"
+
+if ! "$CLI" start "$WS" "${START_FLAGS[@]}" >/dev/null 2>&1; then
+  fail "second start of paired workspace failed"
+fi
+if [ -z "$(holders_of "$WS")" ]; then
+  "$CLI" --json model runners >&2 || true
+  fail "second start did not re-pair $WS"
+fi
+echo "microagent-e2e-model: second start re-paired $WS"
+
+if ! "$CLI" delete "$WS" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1; then
+  fail "delete of paired workspace failed"
+fi
+if [ -n "$(holders_of "$WS")" ]; then
+  fail "delete did not release the model runner holder for $WS"
+fi
+if "$CLI" --json model runners 2>/dev/null | grep -q "$CANONICAL"; then
+  fail "runner for $CANONICAL still alive after delete released the last holder"
+fi
+
+echo "PASS microagent-e2e-model: workspace pairing (create/start/halt/restart/delete) verified"
 exit 0
