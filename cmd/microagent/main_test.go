@@ -123,6 +123,9 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 	}{
 		{"snapshot tag", []string{"agent-1", "--tag", "base", "--state-dir", "/s"}, "-tag", "base"},
 		{"from-snapshot", []string{"agent-1", "--from-snapshot", "base", "--state-dir", "/s"}, "-from-snapshot", "base"},
+		{"secret", []string{"app", "--secret", "API=env:TOKEN"}, "-secret", "API=env:TOKEN"},
+		{"secrets-env-file", []string{"app", "--image", "img", "--secrets-env-file", "/tmp/app.env"}, "-secrets-env-file", "/tmp/app.env"},
+		{"secret-on-demand", []string{"app", "--secret-on-demand", "DB=env:DB"}, "-secret-on-demand", "DB=env:DB"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)

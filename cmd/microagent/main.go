@@ -5798,6 +5798,9 @@ func reorderFlagArgs(args []string) []string {
 		"-e":                 true,
 		"-model":             true,
 		"-model-token":       true,
+		"-secret":            true,
+		"-secrets-env-file":  true,
+		"-secret-on-demand":  true,
 	}
 	var flags []string
 	var positional []string
@@ -5833,7 +5836,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
 		return true
 	default:
 		return false
