@@ -218,7 +218,7 @@ gateway, DNS, and route that were assigned to the guest.
 error: mediation channel required but unreachable
 ```
 
-The workspace declared a mediation channel as required (the default) but the host listener isn't reachable. The body refuses to start.
+The workspace declared a mediation channel as required (the default) but the host listener isn't reachable. The workspace starts, but readiness reports a `mediationReady` error and the channel is severed until a listener connects — no traffic can flow until then.
 
 Fixes:
 

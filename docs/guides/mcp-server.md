@@ -61,8 +61,7 @@ The server exposes the full substrate surface - 57 structured tools covering
 workspace lifecycle (`workspace.create`, `workspace.exec`, `workspace.halt`,
 ...), inspection (`workspace.inspect`, `workspace.logs`, `workspace.events`),
 snapshots, images, networks, volumes, copy and artifacts, host diagnostics,
-and cost estimation. It stops at substrate operations: it does not plan, call
-an LLM, broker credentials, or make policy decisions.
+and cost estimation. The MCP server only exposes the substrate operations listed above; see [Boundaries](/concepts/boundaries/) for where microagent's responsibilities end.
 
 Destructive tools take `preview: true` to report what would happen without
 doing it, and the riskiest host mutations (`kernel.install`, `rootfs.build`,
