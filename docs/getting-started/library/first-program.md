@@ -4,9 +4,9 @@ description: Boot a microVM, run a command, and tear it down - in a few lines of
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
-*If you'd rather drive microagent from the command line, see [run your first microVM](/getting-started/cli/first-microvm/) instead.*
+*If you'd rather drive microagent from the command line, see the [quickstart](/getting-started/quickstart/) instead.*
 
 The project is a Go library; the CLI is a thin shell over it. This page
 shows the smallest useful program: it boots a Linux microVM, runs a command
