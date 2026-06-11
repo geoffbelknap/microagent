@@ -89,6 +89,16 @@ reconnect. Stop the workspace before restoring it in place.
 side-effect paths were severed while the runtime may still exist. Run `halt`,
 `stop`, or `kill` first, then `start` from the preserved disk state.
 
+## Paired models
+
+A workspace created with [`create --model`](/cli/create/) stores the model ref,
+and every `start` re-pairs it: the host model runner is re-ensured (a missing
+blob is auto-pulled), the workspace is registered as a holder, and the vsock
+bridge plus `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are wired into the
+guest. `halt`, `stop`, `kill`, and `delete` release the hold; a guest that
+exits on its own keeps it until the next lifecycle verb, and
+[`model stop`](/cli/model/) reclaims it immediately.
+
 ## Exit status
 
 `start` exits `0` when the workspace boots; nonzero when it cannot be found,

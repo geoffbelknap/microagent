@@ -525,6 +525,24 @@ outputs:
 	}
 }
 
+func TestApplySpecParsesModelRef(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "microagent.yaml")
+	if err := os.WriteFile(specPath, []byte(`
+name: demo
+image: docker.io/library/ubuntu:24.04
+model: Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := DefaultOptions()
+	if err := ApplySpecFile(&opts, specPath, SpecApplyOptions{}); err != nil {
+		t.Fatalf("ApplySpecFile: %v", err)
+	}
+	if opts.Model != "Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf" {
+		t.Fatalf("spec model not applied: %q", opts.Model)
+	}
+}
+
 func TestReadSpecReportsUnknownField(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "microagent.yaml")
 	if err := os.WriteFile(specPath, []byte("resources:\n  network: user\n"), 0o644); err != nil {

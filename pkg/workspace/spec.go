@@ -99,6 +99,9 @@ func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions)
 	if strings.TrimSpace(spec.Hostname) != "" {
 		opts.Hostname = strings.TrimSpace(spec.Hostname)
 	}
+	if strings.TrimSpace(spec.Model) != "" {
+		opts.Model = strings.TrimSpace(spec.Model)
+	}
 	if len(spec.Setup) != 0 || len(spec.SetupFiles) != 0 {
 		setupCommands, err := SetupCommandsFromSpec(spec.Setup, spec.SetupFiles, baseDir)
 		if err != nil {

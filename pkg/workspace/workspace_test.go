@@ -439,3 +439,53 @@ func TestRequestNoModelTarget(t *testing.T) {
 		t.Fatalf("model ports should be zero when unpaired")
 	}
 }
+
+func TestManifestPersistsModelRef(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.Model = "Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if manifest.Model != opts.Model {
+		t.Fatalf("model ref not persisted: %q", manifest.Model)
+	}
+	restored := OptionsFromManifest(opts, manifest)
+	if restored.Model != opts.Model {
+		t.Fatalf("OptionsFromManifest lost model ref: %q", restored.Model)
+	}
+
+	bare := DefaultOptions()
+	bare.Name = "ws2"
+	bare.StateDir = dir
+	if err := WriteManifest(bare); err != nil {
+		t.Fatalf("write bare manifest: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "workspaces", "ws2", "workspace.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "\"model\"") {
+		t.Fatalf("unpaired manifest should omit model: %s", raw)
+	}
+}
+
+func TestApplyManifestRestoresModelRef(t *testing.T) {
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = t.TempDir()
+	applyManifest(&opts, Manifest{Model: "org/repo/model.gguf"})
+	if opts.Model != "org/repo/model.gguf" {
+		t.Fatalf("applyManifest did not restore model ref: %q", opts.Model)
+	}
+	applyManifest(&opts, Manifest{})
+	if opts.Model != "" {
+		t.Fatalf("applyManifest should clear model when manifest has none: %q", opts.Model)
+	}
+}
