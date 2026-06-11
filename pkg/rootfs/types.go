@@ -60,6 +60,14 @@ type BuildRequest struct {
 	KeepStage      bool              `json:"keep_stage,omitempty"`
 	StageSnapshot  string            `json:"stage_snapshot,omitempty"`
 	Progress       ProgressFunc      `json:"-"`
+	// ResetFinalConfig appends a line to the Command shell script that
+	// rewrites /etc/microagent/run.json so later boots run FinalCommand in
+	// FinalMode. The builder composes the rewritten env from the image config
+	// and Env — the same merge as the initial guest config — so a setup boot
+	// never strips image env (PATH and friends) from the workspace.
+	ResetFinalConfig bool     `json:"reset_final_config,omitempty"`
+	FinalCommand     []string `json:"final_command,omitempty"`
+	FinalMode        string   `json:"final_mode,omitempty"`
 }
 
 type File struct {

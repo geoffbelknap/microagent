@@ -147,6 +147,74 @@ func TestBuildGuestEnvIncludesImageEnvAndRequestOverrides(t *testing.T) {
 	}
 }
 
+func TestAppendGuestConfigResetKeepsImageEnv(t *testing.T) {
+	image := ocispec.Image{}
+	image.Config.Env = []string{
+		"PATH=/usr/local/bin:/usr/bin",
+		"IMAGE_ONLY=present",
+	}
+	req := BuildRequest{
+		Env:          map[string]string{"OPERATOR": "set"},
+		ResultPort:   1024,
+		ShellPort:    24279,
+		ExecPort:     25279,
+		ConsoleShell: "/bin/bash",
+		Hostname:     "research-vm",
+		Mounts:       []Mount{{Device: "vdb", Mountpoint: "/config", Mode: "ro"}},
+		HostForwards: []PortForward{{Protocol: "tcp", HostPort: 8080, GuestPort: 80}},
+		FinalCommand: []string{"/bin/sh", "-lc", "/app/entrypoint.sh"},
+	}
+	command := []string{"/bin/sh", "-lc", "set -eu\necho setup"}
+
+	got, err := appendGuestConfigReset(command, req, image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0] != "/bin/sh" || got[1] != "-lc" {
+		t.Fatalf("command = %#v", got)
+	}
+	if !strings.HasPrefix(got[2], "set -eu\necho setup\nprintf '%s\\n' '") ||
+		!strings.HasSuffix(got[2], "' > /etc/microagent/run.json") {
+		t.Fatalf("script = %q", got[2])
+	}
+	for _, want := range []string{
+		`"command":["/bin/sh","-lc","/app/entrypoint.sh"]`,
+		`"PATH=/usr/local/bin:/usr/bin"`,
+		`"IMAGE_ONLY=present"`,
+		`"OPERATOR=set"`,
+		`"port":1024`,
+		`"shellPort":24279`,
+		`"execPort":25279`,
+		`"mountpoint":"/config"`,
+		`"hostPort":8080`,
+		`"consoleShell":"/bin/bash"`,
+		`"hostname":"research-vm"`,
+	} {
+		if !strings.Contains(got[2], want) {
+			t.Fatalf("script missing %q: %q", want, got[2])
+		}
+	}
+	if strings.Contains(command[2], "run.json") {
+		t.Fatalf("input command mutated: %q", command[2])
+	}
+}
+
+func TestAppendGuestConfigResetAllowsEmptyFinalCommand(t *testing.T) {
+	got, err := appendGuestConfigReset([]string{"/bin/sh", "-lc", "echo setup"}, BuildRequest{ResultPort: 1024}, ocispec.Image{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got[2], `"command":[]`) {
+		t.Fatalf("script = %q", got[2])
+	}
+}
+
+func TestAppendGuestConfigResetRejectsNonShellCommand(t *testing.T) {
+	if _, err := appendGuestConfigReset([]string{"/entrypoint"}, BuildRequest{}, ocispec.Image{}); err == nil {
+		t.Fatal("expected error for non-shell command")
+	}
+}
+
 func TestSplitRegistryReferenceNormalizesDefaultRegistryRefs(t *testing.T) {
 	tests := []struct {
 		name          string

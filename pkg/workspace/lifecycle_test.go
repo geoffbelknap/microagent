@@ -468,6 +468,28 @@ func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 	}
 }
 
+func TestBuildRootfsRequestCarriesFinalConfigForSetupCreates(t *testing.T) {
+	req := buildRootfsRequest(Options{
+		Name:            "research",
+		StateDir:        "/tmp/microagent",
+		ImageRef:        "docker.io/library/ubuntu:24.04",
+		Architecture:    "arm64",
+		SetupCommands:   []string{"echo setup"},
+		Entrypoint:      "/app/entrypoint.sh",
+		PrepareForStart: true,
+	}, "/tmp/microagent/workspaces/research/rootfs.ext4")
+
+	if !req.ResetFinalConfig {
+		t.Fatal("setup creates must request a guest config reset from the builder")
+	}
+	if strings.Join(req.FinalCommand, " ") != "/bin/sh -lc /app/entrypoint.sh" || req.FinalMode != "" {
+		t.Fatalf("final = %#v mode %q", req.FinalCommand, req.FinalMode)
+	}
+	if strings.Contains(strings.Join(req.Command, " "), "/etc/microagent/run.json") {
+		t.Fatalf("setup script should not embed guest config reset: %#v", req.Command)
+	}
+}
+
 func TestApplySpecFilePopulatesWorkspaceOptions(t *testing.T) {
 	dir := t.TempDir()
 	setupPath := filepath.Join(dir, "setup.sh")
@@ -845,8 +867,14 @@ func TestBuildRootfsRequestRunsSetupBeforeManagedService(t *testing.T) {
 		t.Fatalf("ResultPort = %d, want 1024", req.ResultPort)
 	}
 	joined := strings.Join(req.Command, " ")
-	if !strings.Contains(joined, "echo setup") || !strings.Contains(joined, `"mode":"managed-service"`) {
+	if !strings.Contains(joined, "echo setup") {
 		t.Fatalf("Command = %#v", req.Command)
+	}
+	if !req.ResetFinalConfig || req.FinalMode != "managed-service" {
+		t.Fatalf("final reset = %v mode %q, want managed-service reset", req.ResetFinalConfig, req.FinalMode)
+	}
+	if !strings.Contains(strings.Join(req.FinalCommand, " "), "/usr/local/bin/microagent-homebridge") {
+		t.Fatalf("FinalCommand = %#v", req.FinalCommand)
 	}
 }
 
