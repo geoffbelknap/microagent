@@ -46,10 +46,12 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`resume` exits nonzero when the workspace cannot be found, is not paused, or
-when the backend cannot thaw the VM. In AX mode a failure is written as a
-structured error envelope.
+`resume` exits `0` when the VM is running again; nonzero when the workspace
+cannot be found, is not paused, or when the backend cannot thaw the VM. In AX
+mode a failure is written as a structured error envelope.
 
 ## Related
 
-- [`pause`](/cli/pause/), [`status`](/cli/status/), [`start`](/cli/start/)
+- [`pause`](/cli/pause/) - freeze the workspace first
+- [`status`](/cli/status/) - confirm it is `running` again
+- [`start`](/cli/start/) - boot halted or stopped workspaces from disk

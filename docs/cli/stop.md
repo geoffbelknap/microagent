@@ -13,8 +13,8 @@ microagent stop <name> [--state-dir <dir>]
 `stop` requests a graceful shutdown. On Firecracker this sends SIGTERM to the
 recorded VM process; on Apple VF it asks the supervisor to stop the VM. If the
 VM hasn't exited after five seconds, `stop` marks the workspace `failed` and
-returns an error - it never escalates on its own, so following up with
-[`kill`](/cli/kill/) is your move. When you're parking a healthy workspace to
+returns an error - it never escalates on its own; follow up with
+[`kill`](/cli/kill/) yourself. When you're parking a healthy workspace to
 start again later, prefer [`halt`](/cli/halt/), which records the clean
 `halted` state.
 
@@ -56,4 +56,7 @@ envelope.
 
 ## Related
 
-- [`halt`](/cli/halt/), [`kill`](/cli/kill/), [`delete`](/cli/delete/), [`status`](/cli/status/)
+- [`halt`](/cli/halt/) - park a healthy workspace cleanly
+- [`kill`](/cli/kill/) - force-terminate when `stop` can't
+- [`delete`](/cli/delete/) - remove the workspace entirely
+- [`status`](/cli/status/) - confirm the resulting state

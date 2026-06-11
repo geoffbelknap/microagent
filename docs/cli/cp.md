@@ -71,10 +71,10 @@ You'll rarely need flags here - `--debugfs` only when `debugfs` is not on
 
 `cp` exits `0` on success; nonzero when the workspace is running, an endpoint
 is invalid, the source file is missing or not a regular file, or the `debugfs`
-copy fails.
+copy fails. In AX mode a failure is written as a structured error envelope.
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`clone`](/cli/clone/)
-- [`logs`](/cli/logs/)
+- [`create`](/cli/create/) - attach disks and bundles at create time
+- [`clone`](/cli/clone/) - copy the whole workspace instead
+- [`logs`](/cli/logs/) - read serial output without copying files

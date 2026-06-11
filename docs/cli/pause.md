@@ -53,10 +53,13 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`pause` exits nonzero when the workspace cannot be found, is not running, or
-when the backend cannot freeze the VM. In AX mode a failure is written as a
-structured error envelope.
+`pause` exits `0` when the VM is frozen; nonzero when the workspace cannot be
+found, is not running, or when the backend cannot freeze the VM. In AX mode a
+failure is written as a structured error envelope.
 
 ## Related
 
-- [`resume`](/cli/resume/), [`status`](/cli/status/), [`halt`](/cli/halt/), [`stop`](/cli/stop/)
+- [`resume`](/cli/resume/) - thaw the paused workspace
+- [`status`](/cli/status/) - confirm the `paused` state
+- [`halt`](/cli/halt/) - disk-preserving shutdown instead
+- [`stop`](/cli/stop/) - graceful shutdown

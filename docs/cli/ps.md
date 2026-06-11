@@ -65,8 +65,9 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 ## Exit status
 
 `ps` exits `0` on success, including when no workspaces exist - a missing or
-empty state directory lists zero rows rather than failing.
+empty state directory lists zero rows rather than failing. In AX mode a
+failure is written as a structured error envelope.
 
 ## Related
 
-- [`status`](/cli/status/) for a single workspace
+- [`status`](/cli/status/) - the deep view of a single workspace

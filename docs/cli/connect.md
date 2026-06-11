@@ -21,7 +21,7 @@ the workspace. Typing `exit` closes the current guest shell and returns from
 `poweroff`.
 
 `connect` is supported by Apple VF, Firecracker, and experimental
-Windows-HyperV. Windows-HyperV uses Hyper-V sockets rather than WSL or QEMU.
+Windows Hyper-V. Windows Hyper-V uses Hyper-V sockets rather than WSL or QEMU.
 [`logs`](/cli/logs/) remains available for captured serial output.
 
 ## Examples
@@ -80,12 +80,15 @@ must report that the shell target is reachable.
 
 ## Exit status
 
-`connect` exits nonzero when the backend console endpoint or guest shell is not
-ready, or - with `--send` - when the command does not report completion before
-the deadline. On a `--send` timeout the error includes any partial output that
-was captured. In AX mode these surface as structured error envelopes (a console
-read timeout is reported as a `transient` error with `partial_output`).
+`connect` exits `0` when the session or `--send` exchange completes; nonzero
+when the backend console endpoint or guest shell is not ready, or - with
+`--send` - when the command does not report completion before the deadline. On a
+`--send` timeout the error includes any partial output that was captured. In AX
+mode these surface as structured error envelopes (a console read timeout is
+reported as a `transient` error with `partial_output`).
 
 ## Related
 
-- [`exec`](/cli/exec/), [`logs`](/cli/logs/), [`status`](/cli/status/)
+- [`exec`](/cli/exec/) - typed results for scripts and agents
+- [`logs`](/cli/logs/) - the captured serial output
+- [`status`](/cli/status/) - check `shellReady` before connecting

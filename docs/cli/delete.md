@@ -72,12 +72,15 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`delete` exits nonzero when the workspace cannot be found or removed, or when a
-running workspace cannot be stopped or killed before deletion. A non-interactive
-run without `--yes` that would require confirmation also fails rather than
-prompting blindly. In AX mode a failure is written as a structured error
-envelope (a missing workspace maps to `not_found`).
+`delete` exits `0` when the workspace and its artifacts are removed; nonzero
+when the workspace cannot be found or removed, or when a running workspace
+cannot be stopped or killed before deletion. A non-interactive run without
+`--yes` that would require confirmation also fails rather than prompting
+blindly. In AX mode a failure is written as a structured error envelope (a
+missing workspace maps to `not_found`).
 
 ## Related
 
-- [`stop`](/cli/stop/), [`kill`](/cli/kill/), [`ps`](/cli/ps/)
+- [`stop`](/cli/stop/) - shut down without removing state
+- [`kill`](/cli/kill/) - force-terminate first when needed
+- [`ps`](/cli/ps/) - see what's left

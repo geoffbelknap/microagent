@@ -83,6 +83,9 @@ By default, `prune` updates only the image index by removing records whose
 rootfs path no longer exists. With `--delete`, it also deletes reusable rootfs
 baselines under the local image store and removes every record pointing to
 those files after confirmation. It does not delete workspace-owned rootfs files.
+Top-level [`microagent prune`](/cli/prune/) runs this same image-record cleanup
+(its baseline-deletion flag is spelled `--images` instead of `--delete`), so
+either command works for this job.
 
 `tag` resolves `<source>` against the recorded image reference, resolved
 reference, or digest. It creates another index record pointing at the same
@@ -138,9 +141,11 @@ Flags you'll actually use:
 
 `images` subcommands exit `0` on success; nonzero when an image reference
 cannot be resolved, a pull or push fails, or a deletion needs confirmation that
-non-interactive input cannot provide.
+non-interactive input cannot provide. In AX mode a failure is written as a
+structured error envelope.
 
 ## Related
 
-- [`create`](/cli/create/)
-- [`rootfs`](/cli/rootfs/)
+- [`create`](/cli/create/) - build a workspace from a pulled image
+- [`rootfs`](/cli/rootfs/) - the lower-level rootfs build path
+- [`prune`](/cli/prune/) - the top-level alias for this cleanup

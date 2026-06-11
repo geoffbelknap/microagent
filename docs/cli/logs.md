@@ -59,8 +59,8 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 `logs` exits `0` after printing the buffer (or when a `--follow` stream ends
 normally); nonzero when the workspace cannot be found or the serial log cannot
-be read.
+be read. In AX mode a failure is written as a structured error envelope.
 
 ## Related
 
-- [`connect`](/cli/connect/) for an interactive console
+- [`connect`](/cli/connect/) - an interactive console instead of captured output

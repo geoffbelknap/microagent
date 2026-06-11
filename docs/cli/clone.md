@@ -47,8 +47,11 @@ outside the default `~/.microagent/`.
 ## Exit status
 
 `clone` exits `0` on success; nonzero when the source is missing or running,
-the target already exists, or the copy fails.
+the target already exists, or the copy fails. In AX mode a failure is written
+as a structured error envelope.
 
 ## Related
 
-- [`create`](/cli/create/), [`start`](/cli/start/), [`ps`](/cli/ps/)
+- [`create`](/cli/create/) - build a workspace from an image
+- [`start`](/cli/start/) - boot the clone
+- [`ps`](/cli/ps/) - list source and target side by side

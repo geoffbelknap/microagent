@@ -89,7 +89,7 @@ long-running command's output appears live instead of all at once. The exec
 protocol carries a sequence of chunk frames followed by a terminal result frame
 that holds the status, exit code, timing, and truncation flags (the streamed
 result does not re-send the output bytes). The per-stream output limits still
-apply — output past the limit is dropped and the truncation flag is set.
+apply - output past the limit is dropped and the truncation flag is set.
 
 `--stream` is a UX-mode convenience for incremental terminal output. AX mode
 always emits one structured exec envelope and ignores `--stream`, since
@@ -113,5 +113,5 @@ reported.
 
 ## Related
 
-- [`connect`](/cli/connect/) for the interactive console
-- [`status`](/cli/status/) for `execReady`
+- [`connect`](/cli/connect/) - the interactive console path
+- [`status`](/cli/status/) - check `execReady` first

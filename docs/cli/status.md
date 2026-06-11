@@ -134,6 +134,6 @@ missing workspace is written as a structured `not_found` error envelope.
 
 ## Related
 
-- [`ps`](/cli/ps/) for a list view
-- [State and identity](/concepts/state-and-identity/), including the full
-  [readiness semantics](/concepts/state-and-identity/#readiness)
+- [`ps`](/cli/ps/) - the list view across all workspaces
+- [State and identity](/concepts/state-and-identity/) - the state model behind these fields
+- [Readiness semantics](/concepts/state-and-identity/#readiness) - what each readiness signal means

@@ -81,7 +81,7 @@ Firecracker-only and the snapshot's kernel must match the workspace kernel (the
 load is rejected on kernel skew). Bridged networking is not supported for
 restore; use user, nat, or isolated.
 
-In-flight guest connections do not survive a restore — outbound TCP and live
+In-flight guest connections do not survive a restore - outbound TCP and live
 vsock sessions (exec/shell/mediation) are reset and the guest body must
 reconnect. Stop the workspace before restoring it in place.
 
@@ -91,12 +91,15 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 
 ## Exit status
 
-`start` exits nonzero when the workspace cannot be found or fails to boot, and
-when it is started from an invalid state - it rejects workspaces that are
-already `starting` or `running`, and refuses `quarantined` workspaces until they
-are halted, stopped, or killed first. In AX mode these surface as structured
-error envelopes (an invalid-state start maps to `conflict`).
+`start` exits `0` when the workspace boots; nonzero when it cannot be found,
+fails to boot, or is started from an invalid state - it rejects workspaces that
+are already `starting` or `running`, and refuses `quarantined` workspaces until
+they are halted, stopped, or killed first. In AX mode these surface as
+structured error envelopes (an invalid-state start maps to `conflict`).
 
 ## Related
 
-- [`create`](/cli/create/), [`stop`](/cli/stop/), [`status`](/cli/status/), [`snapshot`](/cli/snapshot/)
+- [`create`](/cli/create/) - create the workspace first
+- [`stop`](/cli/stop/) - shut it down again
+- [`status`](/cli/status/) - check state and readiness
+- [`snapshot`](/cli/snapshot/) - manage the tags `--from-snapshot` restores

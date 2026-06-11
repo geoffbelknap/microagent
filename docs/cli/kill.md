@@ -48,4 +48,6 @@ structured error envelope.
 
 ## Related
 
-- [`stop`](/cli/stop/), [`halt`](/cli/halt/), [`delete`](/cli/delete/)
+- [`stop`](/cli/stop/) - the graceful variant
+- [`halt`](/cli/halt/) - park a healthy workspace cleanly
+- [`delete`](/cli/delete/) - remove the workspace afterwards

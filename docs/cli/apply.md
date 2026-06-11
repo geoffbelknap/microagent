@@ -73,8 +73,11 @@ manifest, `apply` reports the workspace state with no applied changes.
 
 `apply` exits `0` when the changes are applied (or the spec already matches the
 manifest); nonzero when the workspace cannot be found, the spec is invalid, or
-the requested change is unsupported while the workspace is running.
+the requested change is unsupported while the workspace is running. In AX mode
+a failure is written as a structured error envelope.
 
 ## Related
 
-- [`create`](/cli/create/), [`spec`](/cli/spec/), [`status`](/cli/status/)
+- [`create`](/cli/create/) - create the workspace the spec describes
+- [`spec`](/cli/spec/) - the full workspace spec format
+- [`status`](/cli/status/) - confirm the applied state

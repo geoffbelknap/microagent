@@ -80,10 +80,11 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 `doctor` exits `0` when every required check passes; nonzero when any required
 check fails. The printed summary still includes the full check detail either
-way.
+way. In AX mode a failure is additionally written as a structured error
+envelope.
 
 ## Related
 
-- [Backends](/concepts/backends/)
-- [`host`](/cli/host/)
-- [`kernel install`](/cli/kernel/)
+- [Backends](/concepts/backends/) - what each backend requires
+- [`host`](/cli/host/) - the same data as a capability report
+- [`kernel install`](/cli/kernel/) - install the default kernel

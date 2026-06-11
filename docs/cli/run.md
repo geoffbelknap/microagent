@@ -128,7 +128,7 @@ Flags you'll actually use:
 - `-p [host:]hostPort:guestPort` - forward a TCP port to the guest
 - `-v SRC:DST[:ro|rw]` - attach a named volume, tar bundle, or ext4 disk
 - `--profile <name>` - size the VM (`tiny`, `small`, `medium`, `large`)
-- `--keep` - keep the workspace state around after the command exits
+- `--keep` - keep state after the run so you can inspect the disk or `connect` to it
 - `--timeout <seconds>` - kill the run if it outlives the deadline
 
 The complete set:
@@ -189,11 +189,13 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`run` exits nonzero when the workspace fails to build or boot, or when the
-one-shot run cannot complete. The guest command's own exit code is *not*
-propagated to the CLI exit status; it is reported in the result instead - in the
-text output as `Exit code:` and in JSON under `result.exit_code`. Use
-[`exec`](/cli/exec/) when you need the guest exit code to drive the shell.
+`run` exits `0` when the one-shot run completes; nonzero when the workspace
+fails to build or boot, or when the run cannot complete. The guest command's own
+exit code is *not* propagated to the CLI exit status; it is reported in the
+result instead - in the text output as `Exit code:` and in JSON under
+`result.exit_code`. Use [`exec`](/cli/exec/) when you need the guest exit code
+to drive the shell. In AX mode a failure is written as a structured error
+envelope.
 
 ## Related
 

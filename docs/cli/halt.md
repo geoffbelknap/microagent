@@ -52,4 +52,7 @@ envelope.
 
 ## Related
 
-- [`start`](/cli/start/), [`stop`](/cli/stop/), [`kill`](/cli/kill/), [`status`](/cli/status/)
+- [`start`](/cli/start/) - boot the halted workspace again
+- [`stop`](/cli/stop/) - signal a misbehaving VM instead
+- [`kill`](/cli/kill/) - force-terminate when nothing returns
+- [`status`](/cli/status/) - confirm the `halted` state

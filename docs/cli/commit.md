@@ -19,7 +19,7 @@ The image is written to a local OCI image layout under
 The rootfs is extracted unprivileged with `debugfs`, so the workspace must be
 stopped (committing a running or paused workspace is refused to avoid reading a
 live disk). File contents, modes, and symlinks are preserved; because extraction
-is unprivileged, original file **ownership is not preserved** — committed layers
+is unprivileged, original file **ownership is not preserved** - committed layers
 record the current user. The committed image's architecture defaults to the
 guest architecture.
 
@@ -64,10 +64,11 @@ pulls.
 
 `commit` exits `0` on success; nonzero when the workspace cannot be found, is
 running or paused, the rootfs extraction fails, or - with `--push` - the
-registry push fails.
+registry push fails. In AX mode a failure is written as a structured error
+envelope.
 
 ## Related
 
-- [`images`](/cli/images/) — `images push` and the local image records
-- [`create`](/cli/create/) — realize an OCI image into a workspace
-- [`clone`](/cli/clone/)
+- [`images`](/cli/images/) - `images push` and the local image records
+- [`create`](/cli/create/) - realize an OCI image into a workspace
+- [`clone`](/cli/clone/) - copy a workspace without making an image
