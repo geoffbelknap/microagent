@@ -1,10 +1,10 @@
 ---
 title: microagent start
-description: Boot a previously created workspace.
+description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -16,27 +16,45 @@ exist in the state directory (default `~/.microagent/`).
 
 Start is disk-state resume, not memory resume. It boots from the persisted
 workspace disk after `prepared`, `halted`, `stopped`, or `failed`. It rejects
-workspaces that are already `starting` or `running`.
+workspaces that are already `starting` or `running`. To thaw a `paused`
+workspace, use [`resume`](/cli/resume/) instead.
 
-## Resume in place from a snapshot
+## Examples
 
-`start <name> --from-snapshot <tag>` restores the workspace in place from a
-[snapshot](/cli/snapshot/) instead of booting fresh: it rolls the workspace
-rootfs back to the snapshot's copy and loads the snapshot's memory and device
-state, so the guest resumes exactly where it was checkpointed. This is
-Firecracker-only and the snapshot's kernel must match the workspace kernel (the
-load is rejected on kernel skew). Bridged networking is not supported for
-restore; use user, nat, or isolated.
+Boot a created or halted workspace:
 
-In-flight guest connections do not survive a restore — outbound TCP and live
-vsock sessions (exec/shell/mediation) are reset and the guest body must
-reconnect. Stop the workspace before restoring it in place.
+```bash
+microagent start research
+```
 
-`quarantined` is intentionally distinct: host-side network, mediation, and
-side-effect paths were severed while the runtime may still exist. Run `halt`,
-`stop`, or `kill` first, then `start` from the preserved disk state.
+`start` reuses the resource config stored by `create`. Pass `--profile`,
+`--memory`, or `--cpus` only when you want a one-start override:
+
+```bash
+microagent start research --profile large
+```
+
+Resume in place from a snapshot:
+
+```bash
+microagent start research --from-snapshot pre-upgrade
+```
+
+After it's running, open a console with [`connect`](/cli/connect/) on Apple
+VF, Firecracker, or Windows Hyper-V, or read serial output with
+[`logs`](/cli/logs/).
 
 ## Flags
+
+Flags you'll actually use:
+
+- `--from-snapshot <tag>` - restore memory and disk from a snapshot instead of
+  booting fresh
+- `--profile <name>` / `--memory <MiB>` / `--cpus <n>` - one-start resource
+  overrides; the stored config is the default
+- `--state-dir <dir>` - only when the workspace lives outside `~/.microagent/`
+
+The complete set:
 
 | Flag | Description |
 |---|---|
@@ -53,27 +71,35 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
+## Resume in place from a snapshot
+
+`start <name> --from-snapshot <tag>` restores the workspace in place from a
+[snapshot](/cli/snapshot/) instead of booting fresh: it rolls the workspace
+rootfs back to the snapshot's copy and loads the snapshot's memory and device
+state, so the guest resumes exactly where it was checkpointed. This is
+Firecracker-only and the snapshot's kernel must match the workspace kernel (the
+load is rejected on kernel skew). Bridged networking is not supported for
+restore; use user, nat, or isolated.
+
+In-flight guest connections do not survive a restore - outbound TCP and live
+vsock sessions (exec/shell/mediation) are reset and the guest body must
+reconnect. Stop the workspace before restoring it in place.
+
+`quarantined` is intentionally distinct: host-side network, mediation, and
+side-effect paths were severed while the runtime may still exist. Run `halt`,
+`stop`, or `kill` first, then `start` from the preserved disk state.
+
 ## Exit status
 
-`start` exits nonzero when the workspace cannot be found or fails to boot, and
-when it is started from an invalid state - it rejects workspaces that are
-already `starting` or `running`, and refuses `quarantined` workspaces until they
-are halted, stopped, or killed first. In AX mode these surface as structured
-error envelopes (an invalid-state start maps to `conflict`).
-
-## Example
-
-```bash
-microagent start research
-```
-
-`start` reuses the resource config stored by `create`. Pass `--profile`,
-`--memory`, or `--cpus` only when you want a one-start override.
-
-After it's running, open a console with [`connect`](/cli/connect/) on Apple
-VF, Firecracker, or Windows Hyper-V, or read serial output with
-[`logs`](/cli/logs/).
+`start` exits `0` when the workspace boots; nonzero when it cannot be found,
+fails to boot, or is started from an invalid state - it rejects workspaces that
+are already `starting` or `running`, and refuses `quarantined` workspaces until
+they are halted, stopped, or killed first. In AX mode these surface as
+structured error envelopes (an invalid-state start maps to `conflict`).
 
 ## Related
 
-- [`create`](/cli/create/), [`stop`](/cli/stop/), [`status`](/cli/status/), [`snapshot`](/cli/snapshot/)
+- [`create`](/cli/create/) - create the workspace first
+- [`stop`](/cli/stop/) - shut it down again
+- [`status`](/cli/status/) - check state and readiness
+- [`snapshot`](/cli/snapshot/) - manage the tags `--from-snapshot` restores

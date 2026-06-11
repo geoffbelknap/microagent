@@ -1,10 +1,10 @@
 ---
 title: microagent exec
-description: Run a structured command in a running workspace.
+description: Run a command in a running workspace and get typed results back.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-08_
+_Last updated: 2026-06-11_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -12,9 +12,11 @@ microagent --mode=ax exec <workspace> [flags] -- <argv...>
 ```
 
 `exec` runs one command through the structured exec service in a running
-workspace. It does not use the interactive console path. Command arguments after
-`--` are passed as argv directly; use `sh -lc` explicitly when you want shell
-syntax.
+workspace and gives you typed stdout, stderr, and an exit code - it does not
+use the interactive console path. Use [`connect`](/cli/connect/) when you want
+a human shell session; use `exec` when a script or agent needs the result.
+Command arguments after `--` are passed as argv directly; use `sh -lc`
+explicitly when you want shell syntax.
 
 A command issued immediately after [`start`](/cli/start/) waits briefly for the
 in-guest exec service to become ready (the post-start window where the host
@@ -33,23 +35,38 @@ the structured `ExecResult`. A nonzero command exit is still a successful tool
 call and is reported in `result.exit_code`; the CLI exits nonzero only when the
 exec request itself cannot complete.
 
-## Streaming
+## Examples
 
-By default `exec` buffers output and returns one final result. With `--stream`,
-the guest delivers stdout and stderr incrementally as the command runs, so a
-long-running command's output appears live instead of all at once. The exec
-protocol carries a sequence of chunk frames followed by a terminal result frame
-that holds the status, exit code, timing, and truncation flags (the streamed
-result does not re-send the output bytes). The per-stream output limits still
-apply — output past the limit is dropped and the truncation flag is set.
+Run a command and use its exit code:
 
-`--stream` is a UX-mode convenience for incremental terminal output. AX mode
-always emits one structured exec envelope and ignores `--stream`, since
-interleaving raw bytes with the JSON envelope would not be machine-parseable.
-The streaming transport is also available to Go callers via
-`workspace.ExecStream`.
+```bash
+microagent exec research -- uname -a
+microagent exec research -- sh -lc 'echo out; echo err >&2'
+```
+
+Get the structured envelope for agents:
+
+```bash
+microagent --mode=ax exec research -- sh -c 'exit 7'
+```
+
+Feed the command stdin from a file:
+
+```bash
+microagent exec research --stdin input.txt -- cat
+```
 
 ## Flags
+
+Flags you'll actually use:
+
+- `-e KEY=VALUE` - set environment variables for the command
+- `--cwd <path>` - run somewhere other than the guest's default directory
+- `--timeout <duration>` - bound a command that might hang (`30s`, `5m`)
+- `--stream` - watch a long command's output live instead of buffered
+- `--stdin <path>` or `-` - feed the command input from a file or CLI stdin
+
+The complete set:
 
 | Flag | Description |
 |---|---|
@@ -63,6 +80,22 @@ The streaming transport is also available to Go callers via
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
+
+## Streaming
+
+By default `exec` buffers output and returns one final result. With `--stream`,
+the guest delivers stdout and stderr incrementally as the command runs, so a
+long-running command's output appears live instead of all at once. The exec
+protocol carries a sequence of chunk frames followed by a terminal result frame
+that holds the status, exit code, timing, and truncation flags (the streamed
+result does not re-send the output bytes). The per-stream output limits still
+apply - output past the limit is dropped and the truncation flag is set.
+
+`--stream` is a UX-mode convenience for incremental terminal output. AX mode
+always emits one structured exec envelope and ignores `--stream`, since
+interleaving raw bytes with the JSON envelope would not be machine-parseable.
+The streaming transport is also available to Go callers via
+`workspace.ExecStream`.
 
 ## Exit status
 
@@ -78,16 +111,7 @@ with the same retry metadata fields. Transient exec transport failures are
 retried by the shared workspace exec layer before the final result or error is
 reported.
 
-## Examples
-
-```bash
-microagent exec research -- uname -a
-microagent exec research -- sh -lc 'echo out; echo err >&2'
-microagent --mode=ax exec research -- sh -c 'exit 7'
-microagent exec research --stdin input.txt -- cat
-```
-
 ## Related
 
-- [`connect`](/cli/connect/) for the interactive console
-- [`status`](/cli/status/) for `execReady`
+- [`connect`](/cli/connect/) - the interactive console path
+- [`status`](/cli/status/) - check `execReady` first

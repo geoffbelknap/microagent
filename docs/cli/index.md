@@ -4,7 +4,28 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-09_
+_Last updated: 2026-06-11_
+
+## Which command do I want?
+
+| I want to... | Use |
+|---|---|
+| Run something once and throw it away | [`run`](/cli/run/) |
+| Keep a workspace around between boots | [`create`](/cli/create/), then [`start`](/cli/start/) |
+| Get a shell inside a workspace | [`connect`](/cli/connect/) |
+| Run a command inside and get its exit code | [`exec`](/cli/exec/) |
+| Copy files in or out | [`cp`](/cli/cp/) |
+| See what's running | [`ps`](/cli/ps/) |
+| Dig into one workspace | [`status`](/cli/status/) |
+| See what the VM printed at boot | [`logs`](/cli/logs/) |
+| Get the structured result of a run | [`result`](/cli/result/) |
+| Park it / shut it down / force it | [`halt`](/cli/halt/) / [`stop`](/cli/stop/) / [`kill`](/cli/kill/) |
+| Freeze it in place, memory and all | [`pause`](/cli/pause/) / [`resume`](/cli/resume/) |
+| Checkpoint or fork it | [`snapshot`](/cli/snapshot/), [`clone`](/cli/clone/) |
+| Get rid of it | [`delete`](/cli/delete/) |
+| Figure out why nothing boots | [`doctor`](/cli/doctor/) |
+
+## All commands
 
 | Command | Purpose |
 |---|---|
@@ -18,7 +39,7 @@ _Last updated: 2026-06-09_
 | [`artifacts`](/cli/artifacts/) | List and retrieve declared workspace artifacts |
 | [`network`](/cli/network/) | Inspect declared network intent and runtime network state |
 | [`model`](/cli/model/) | Download and manage local HuggingFace GGUF model files |
-| [`volume`](/cli/volume/) | Manage named volumes — VM-independent ext4 disks attached by name |
+| [`volume`](/cli/volume/) | Manage named volumes - VM-independent ext4 disks attached by name |
 | [`start`](/cli/start/) | Boot a stopped workspace |
 | [`supervise`](/cli/supervise/) | Start and restart a workspace according to policy |
 | [`halt`](/cli/halt/) | Clean disk-preserving shutdown |
@@ -27,10 +48,8 @@ _Last updated: 2026-06-09_
 | [`resume`](/cli/resume/) | Thaw a paused workspace back to running |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
-| [`delete`](/cli/delete/) | Remove a workspace and its state |
-| [`rm`](/cli/delete/) | Alias for `delete` |
-| [`status`](/cli/status/) | Show workspace state |
-| [`inspect`](/cli/status/) | Alias for `status` with JSON output |
+| [`delete`](/cli/delete/) | Remove a workspace and its state (alias: `rm`) |
+| [`status`](/cli/status/) | Show workspace state (alias: `inspect`, with JSON output) |
 | [`result`](/cli/result/) | Show structured workspace result |
 | [`ps`](/cli/ps/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
@@ -60,7 +79,7 @@ cleanly onto a microVM, common aliases are available: `-e` for `--env`, `-p` for
 `--publish`, `-v`/`--volume` for [named volumes](/cli/volume/), tar bundles, and
 ext4 disk images, `--name`, and `--rm`.
 
-Some Docker-style inputs do not map to a microVM boundary — privileged mode,
+Some Docker-style inputs do not map to a microVM boundary - privileged mode,
 namespace flags, devices, and host directory bind mounts. When `microagent run`
 recognizes one of these, it returns targeted guidance rather than silently
 changing its meaning.

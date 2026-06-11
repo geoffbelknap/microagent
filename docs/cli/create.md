@@ -1,114 +1,39 @@
 ---
 title: microagent create
-description: Create a named, persistent workspace from an OCI image.
+description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
 ```text
-microagent create [--name <name>] --image <ref> [flags]
-microagent create <name> --image <ref> [flags]
+microagent create [--name <name>] [--image <ref>] [flags]
+microagent create <name> [--image <ref>] [flags]
 microagent create <name> --from-snapshot <workspace>:<tag> [flags]
 ```
 
 `create` builds a workspace and records it under `--state-dir`. Unlike
 [`run`](/cli/run/), the state survives - you can `start`, `stop`, `connect`,
-and `delete` it later. If the default kernel is missing, `create` installs it
-first.
-
-## Fork from a snapshot
-
-`create <name> --from-snapshot <workspace>:<tag>` forks a new workspace from an
-existing workspace's [snapshot](/cli/snapshot/) instead of building from an
-image. The fork gets a fresh identity and a private copy of the snapshot's
-rootfs, then resumes from the snapshot's memory and device state.
-
-A Firecracker snapshot binds its vsock socket to the source workspace's path, so
-each fork runs Firecracker in a private mount namespace that maps the fork's own
-directory over the source's, and the fork takes its own host-side service ports
-while bridging them to the guest's snapshot ports. This is Firecracker-only; the
-snapshot kernel must match and bridged networking is unsupported. In-flight guest
-connections do not survive the fork — the guest body must reconnect.
-
-For forks with networking, use `user` mode (pasta): every fork resumes with the
-snapshot's recorded guest IP, and user-mode gives each fork its own network
-namespace, so any number of forks run concurrently without colliding. `nat`
-forks run in the shared host network namespace and inherit `nat`'s
-`CAP_NET_ADMIN` requirement, so a `nat` fork is single-instance — concurrent
-forks of a networked workspace should use `user` mode.
-
-## Flags
-
-| Flag | Description |
-|---|---|
-| `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim |
-| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image (Firecracker) |
-| `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
-| `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
-| `--setup <command>` | Shell command to run before first start. Repeatable |
-| `--setup-file <path>` | Shell script file to run before first start. Repeatable |
-| `--service-command <cmd>` | Long-running shell command to run as the VM service |
-| `--image-command` | Run the image Entrypoint/Cmd when creating a prepared workspace |
-| `--entrypoint <command>` | Command to run on start |
-| `--shell <path>` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
-| `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
-| `--env KEY=VALUE` | Guest environment variable. Repeatable |
-| `-e KEY=VALUE` | Alias for `--env` |
-| `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME` over vsock, re-resolved each start. Repeatable. See [`secret`](/cli/secret/) |
-| `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret (plaintext, re-read each start) |
-| `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable. See [`secret`](/cli/secret/) |
-| `--secrets-audit` | Append every secret access to the workspace audit log (`microagent secret audit`) |
-| `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
-| `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
-| `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
-| `--output n=/guest/path` | Declare an output artifact path |
-| `--backend <name>` | Backend identity override |
-| `--kernel <path>` | Custom kernel path |
-| `--rootfs <path>` | Use an existing ext4 rootfs instead of building one from `--image`. Enables the lower-level identity flags `--id` and `--role` (see [Examples](#examples)) |
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-| `--guest-init <path>` | Guest init path |
-| `--arch <arch>` | Guest architecture |
-| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
-| `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, `bridged`, or `named` |
-| `--network-interface <if>` | Host interface identifier or display name for bridged mode |
-| `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
-| `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
-| `-p <mapping>` | Alias for `--publish` |
-| `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
-| `--mediation-optional` | Allow startup when mediation is unavailable |
-| `--memory <MiB>` | Memory in MiB (default 512) |
-| `--cpus <n>` | CPU count |
-| `--size-mib <MiB>` | Rootfs disk size |
-| `--result-port <port>` | Vsock result port |
-| `--mke2fs <path>` | mke2fs binary path |
-| `--supervisor <path>` | Override the installed host backend supervisor path |
-| `--dry-run` | Validate config without creating |
-| `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
-
-See [global flags](/cli/#global-flags) for `--text`/`--output`/`--mode`/`--supervisor` and the global `--json` output flag (distinct from the `--json` request-input flag above).
-
-## Image references
-
-`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags (`docker.io/library/ubuntu:24.04`). Both are allowed here - `create` records the resolved digest in the workspace verification record so `microagent --json status` can flag drift later. Pin by digest if you want reproducible workspaces.
-
-[`microagent rootfs build`](/cli/rootfs/) is stricter: it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
+and `delete` it later. Use `run` for disposable one-shot work; use `create`
+when you'll come back to the same disk. If the default kernel is missing,
+`create` installs it first.
 
 ## Examples
 
-Create a workspace:
+Create a workspace, then boot it:
 
 ```bash
 microagent create \
   --name research \
   --image docker.io/library/ubuntu:24.04 \
   --profile medium
+microagent start research
 ```
 
-Profiles expand to exact memory/CPU/disk configs and are stored with the workspace. See [`profiles`](/cli/profiles/) for the values.
-
-Use `--memory`, `--cpus`, or `--size-mib` with a profile to override a single value while keeping the profile name in the workspace record.
+Profiles expand to exact memory/CPU/disk configs and are stored with the
+workspace. See [`profiles`](/cli/profiles/) for the values. Use `--memory`,
+`--cpus`, or `--size-mib` with a profile to override a single value while
+keeping the profile name in the workspace record.
 
 With setup commands:
 
@@ -173,13 +98,6 @@ microagent create --file microagent.yaml
 When `microagent.yaml` or `microagent.yml` exists in the current directory,
 `microagent create` reads it automatically. CLI flags override fields from the
 spec.
-
-Restart policies are enforced by [`supervise`](/cli/supervise/).
-
-On Apple VF, `bridged` also requires a supervisor signed with Apple's
-restricted `com.apple.vm.networking` entitlement. Open-source builds cannot
-self-sign that entitlement, and `sudo` does not bypass the check. Local ad-hoc
-supervisors fail closed with a clear error.
 
 Attach an existing ext4 disk:
 
@@ -257,8 +175,112 @@ subcommand:
 microagent --json create research --image docker.io/library/ubuntu:24.04
 ```
 
+## Flags
+
+Flags you'll actually use:
+
+- `--name <name>` - the name everything else refers to; positional works too
+- `--image <ref>` - the OCI image the workspace boots from
+- `--profile <name>` - size the VM (`tiny`, `small`, `medium`, `large`)
+- `--setup <command>` - bake first-boot prep into the workspace; repeatable
+- `--file <path>` - create from a declarative `microagent.yaml` spec
+- `-v SRC:DST[:ro|rw]` - attach a named volume, tar bundle, or ext4 disk
+- `--restart <policy>` - what [`supervise`](/cli/supervise/) does when it exits
+- `--dry-run` - validate the config without creating anything
+
+The complete set:
+
+| Flag | Description |
+|---|---|
+| `--image <ref>` | OCI image reference. When omitted on the image path, defaults to Python 3.13 slim (digest-pinned for `arm64`/`amd64`, the `python:3.13-slim` tag for other architectures); the `--rootfs` and `--from-snapshot` paths take no image |
+| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image (Firecracker) |
+| `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
+| `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
+| `--setup <command>` | Shell command to run before first start. Repeatable |
+| `--setup-file <path>` | Shell script file to run before first start. Repeatable |
+| `--service-command <cmd>` | Long-running shell command to run as the VM service |
+| `--image-command` | Run the image Entrypoint/Cmd when creating a prepared workspace |
+| `--entrypoint <command>` | Command to run on start |
+| `--shell <path>` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
+| `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
+| `--env KEY=VALUE` | Guest environment variable. Repeatable |
+| `-e KEY=VALUE` | Alias for `--env` |
+| `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME` over vsock, re-resolved each start. Repeatable. See [`secret`](/cli/secret/) |
+| `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret (plaintext, re-read each start) |
+| `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable. See [`secret`](/cli/secret/) |
+| `--secrets-audit` | Append every secret access to the workspace audit log (`microagent secret audit`) |
+| `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
+| `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
+| `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
+| `--output n=/guest/path` | Declare an output artifact path |
+| `--backend <name>` | Backend identity override |
+| `--kernel <path>` | Custom kernel path |
+| `--rootfs <path>` | Use an existing ext4 rootfs instead of building one from `--image`. Enables the lower-level identity flags `--id` and `--role` (see [Examples](#examples)) |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+| `--guest-init <path>` | Guest init path |
+| `--arch <arch>` | Guest architecture |
+| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
+| `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always`. Enforced by [`supervise`](/cli/supervise/) |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, `bridged`, or `named`. See the Apple VF `bridged` note below |
+| `--network-interface <if>` | Host interface identifier or display name for bridged mode |
+| `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
+| `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
+| `-p <mapping>` | Alias for `--publish` |
+| `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
+| `--mediation-optional` | Allow startup when mediation is unavailable |
+| `--memory <MiB>` | Memory in MiB (default 512) |
+| `--cpus <n>` | CPU count |
+| `--size-mib <MiB>` | Rootfs disk size |
+| `--result-port <port>` | Vsock result port |
+| `--mke2fs <path>` | mke2fs binary path |
+| `--supervisor <path>` | Override the installed host backend supervisor path |
+| `--dry-run` | Validate config without creating |
+| `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
+
+On Apple VF, `--network bridged` also requires a supervisor signed with Apple's
+restricted `com.apple.vm.networking` entitlement. Open-source builds cannot
+self-sign that entitlement, and `sudo` does not bypass the check. Local ad-hoc
+supervisors fail closed with a clear error.
+
+See [global flags](/cli/#global-flags) for `--text`/`--output`/`--mode`/`--supervisor` and the global `--json` output flag (distinct from the `--json` request-input flag above).
+
+## Fork from a snapshot
+
+`create <name> --from-snapshot <workspace>:<tag>` forks a new workspace from an
+existing workspace's [snapshot](/cli/snapshot/) instead of building from an
+image. The fork gets a fresh identity and a private copy of the snapshot's
+rootfs, then resumes from the snapshot's memory and device state.
+
+A Firecracker snapshot binds its vsock socket to the source workspace's path, so
+each fork runs Firecracker in a private mount namespace that maps the fork's own
+directory over the source's, and the fork takes its own host-side service ports
+while bridging them to the guest's snapshot ports. This is Firecracker-only; the
+snapshot kernel must match and bridged networking is unsupported. In-flight guest
+connections do not survive the fork - the guest body must reconnect.
+
+For forks with networking, use `user` mode (pasta): every fork resumes with the
+snapshot's recorded guest IP, and user-mode gives each fork its own network
+namespace, so any number of forks run concurrently without colliding. `nat`
+forks run in the shared host network namespace and inherit `nat`'s
+`CAP_NET_ADMIN` requirement, so a `nat` fork is single-instance - concurrent
+forks of a networked workspace should use `user` mode.
+
+## Image references
+
+`--image` accepts both digest-pinned references (`docker.io/library/ubuntu@sha256:…`) and mutable tags (`docker.io/library/ubuntu:24.04`). Both are allowed here - `create` records the resolved digest in the workspace verification record so `microagent --json status` can flag drift later. Pin by digest if you want reproducible workspaces.
+
+[`microagent rootfs build`](/cli/rootfs/) is stricter: it rejects mutable tags unless you pass `--allow-mutable`. See [security](/security/) for the rationale.
+
+## Exit status
+
+`create` exits `0` on success (including a successful `--dry-run` validation);
+nonzero when validation fails, the image cannot be fetched, or the rootfs build
+fails. In AX mode a failure is written as a structured error envelope.
+
 ## Related
 
-- [`start`](/cli/start/), [`stop`](/cli/stop/), [`delete`](/cli/delete/)
-- [State and identity](/concepts/state-and-identity/)
-- [Supervisor protocol](/protocol/)
+- [`start`](/cli/start/) - boot the workspace you created
+- [`stop`](/cli/stop/) - shut it down again
+- [`delete`](/cli/delete/) - remove it and its state
+- [State and identity](/concepts/state-and-identity/) - what the workspace record holds
+- [Supervisor protocol](/protocol/) - the request/response shapes underneath

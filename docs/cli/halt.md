@@ -1,24 +1,38 @@
 ---
 title: microagent halt
-description: Cleanly stop a workspace while preserving disk state.
+description: Shut a workspace down cleanly so you can start it again later.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent halt <name> [--state-dir <dir>]
 ```
 
-`halt` requests a clean shutdown and records the terminal state as `halted`.
-The VM process exits, but the workspace rootfs, attached disks, identity, and
-event timeline remain under `--state-dir` so a later `microagent start <name>`
-boots the same disk state.
+`halt` is the normal way to park a workspace: it requests a clean shutdown and
+records the terminal state as `halted`. The VM process exits, but the rootfs,
+attached disks, identity, and event timeline remain under `--state-dir`, so a
+later `microagent start <name>` boots the same disk state. Reach for
+[`stop`](/cli/stop/) when you want to signal a misbehaving VM rather than park
+a healthy one, and [`kill`](/cli/kill/) only when `stop` doesn't return.
 
-This is not memory pause/resume. A restarted workspace boots again from the
-preserved disk.
+This is not memory pause/resume - a halted workspace boots again from the
+preserved disk. For memory-state suspend, see [`pause`](/cli/pause/).
+
+## Examples
+
+Park a workspace, then pick it back up later:
+
+```bash
+microagent halt research
+microagent start research
+```
 
 ## Flags
+
+You'll rarely need flags here - `--state-dir` only when the workspace lives
+outside the default `~/.microagent/`.
 
 | Flag | Description |
 |---|---|
@@ -30,13 +44,15 @@ preserved disk.
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
-## Example
+## Exit status
 
-```bash
-microagent halt research
-microagent start research
-```
+`halt` exits `0` on success; nonzero when the workspace cannot be found or the
+clean shutdown fails. In AX mode a failure is written as a structured error
+envelope.
 
 ## Related
 
-- [`start`](/cli/start/), [`stop`](/cli/stop/), [`kill`](/cli/kill/), [`status`](/cli/status/)
+- [`start`](/cli/start/) - boot the halted workspace again
+- [`stop`](/cli/stop/) - signal a misbehaving VM instead
+- [`kill`](/cli/kill/) - force-terminate when nothing returns
+- [`status`](/cli/status/) - confirm the `halted` state

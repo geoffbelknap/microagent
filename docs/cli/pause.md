@@ -1,10 +1,10 @@
 ---
 title: microagent pause
-description: Freeze a running workspace's vCPUs while preserving memory and disk state.
+description: Freeze a running workspace in place, memory and all.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-01_
+_Last updated: 2026-06-11_
 
 ```text
 microagent pause <name> [--state-dir <dir>]
@@ -27,7 +27,19 @@ it first.
 `pause` requires the workspace to be running. It is Firecracker-only; Apple VF
 and Windows Hyper-V do not support pause/resume.
 
+## Examples
+
+Freeze a workspace, then thaw it:
+
+```bash
+microagent pause research
+microagent resume research
+```
+
 ## Flags
+
+You'll rarely need flags here - `--state-dir` only when the workspace lives
+outside the default `~/.microagent/`.
 
 | Flag | Description |
 |---|---|
@@ -41,17 +53,13 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`pause` exits nonzero when the workspace cannot be found, is not running, or
-when the backend cannot freeze the VM. In AX mode a failure is written as a
-structured error envelope.
-
-## Example
-
-```bash
-microagent pause research
-microagent resume research
-```
+`pause` exits `0` when the VM is frozen; nonzero when the workspace cannot be
+found, is not running, or when the backend cannot freeze the VM. In AX mode a
+failure is written as a structured error envelope.
 
 ## Related
 
-- [`resume`](/cli/resume/), [`status`](/cli/status/), [`halt`](/cli/halt/), [`stop`](/cli/stop/)
+- [`resume`](/cli/resume/) - thaw the paused workspace
+- [`status`](/cli/status/) - confirm the `paused` state
+- [`halt`](/cli/halt/) - disk-preserving shutdown instead
+- [`stop`](/cli/stop/) - graceful shutdown

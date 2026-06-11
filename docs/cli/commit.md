@@ -1,10 +1,10 @@
 ---
 title: microagent commit
-description: Snapshot a stopped workspace's rootfs back into an OCI image.
+description: Turn a stopped workspace's rootfs into an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-11_
 
 ```text
 microagent commit <workspace> <image-ref> [options]
@@ -19,11 +19,34 @@ The image is written to a local OCI image layout under
 The rootfs is extracted unprivileged with `debugfs`, so the workspace must be
 stopped (committing a running or paused workspace is refused to avoid reading a
 live disk). File contents, modes, and symlinks are preserved; because extraction
-is unprivileged, original file **ownership is not preserved** — committed layers
+is unprivileged, original file **ownership is not preserved** - committed layers
 record the current user. The committed image's architecture defaults to the
 guest architecture.
 
-## Options
+## Examples
+
+Halt, commit, and push:
+
+```bash
+microagent halt research
+microagent commit research registry.example.com/team/research:v1
+microagent images push registry.example.com/team/research:v1
+```
+
+Or commit and push in one step:
+
+```bash
+microagent commit research registry.example.com/team/research:v1 --push
+```
+
+## Flags
+
+Flags you'll actually use:
+
+- `--push` - push to the registry in the same step
+- `--arch <arch>` - only when the image should target a non-guest architecture
+
+The complete set:
 
 | Flag | Description |
 |---|---|
@@ -37,19 +60,15 @@ Registry credentials come from the standard Docker config
 (`$DOCKER_CONFIG/config.json` or `~/.docker/config.json`), the same as image
 pulls.
 
-## Example
+## Exit status
 
-```bash
-microagent halt research
-microagent commit research registry.example.com/team/research:v1
-microagent images push registry.example.com/team/research:v1
-
-# Or commit and push in one step:
-microagent commit research registry.example.com/team/research:v1 --push
-```
+`commit` exits `0` on success; nonzero when the workspace cannot be found, is
+running or paused, the rootfs extraction fails, or - with `--push` - the
+registry push fails. In AX mode a failure is written as a structured error
+envelope.
 
 ## Related
 
-- [`images`](/cli/images/) — `images push` and the local image records
-- [`create`](/cli/create/) — realize an OCI image into a workspace
-- [`clone`](/cli/clone/)
+- [`images`](/cli/images/) - `images push` and the local image records
+- [`create`](/cli/create/) - realize an OCI image into a workspace
+- [`clone`](/cli/clone/) - copy a workspace without making an image
