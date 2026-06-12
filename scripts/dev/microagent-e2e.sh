@@ -62,10 +62,10 @@ SCENARIO_COVERAGE=(
   "text-output|portable|none|human output mode for stable public CLI surfaces"
   "init|portable|none|init scaffold, providers, --force, generated spec validation"
   "survive-reboot|host-specific|host-default|supervise --install/--uninstall boot units; no real reboot"
-  "public-surface|backend-neutral|firecracker,apple-vf|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifacts, perf, prune"
+  "public-surface|backend-neutral|firecracker,apple-vf,windows-hyperv|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifacts, perf, prune"
   "lifecycle-deep|backend-neutral|firecracker,apple-vf|create/start/status/inspect/ps/connect/logs/events/stats/halt/quarantine/clone/cp/artifacts/images/prune/delete"
   "networking-deep|backend-neutral|firecracker,apple-vf|network modes, publish, apply, quarantine, cached image/network paths"
-  "transport-deep|backend-neutral|firecracker,apple-vf|mediation and vsock transport contract"
+  "transport-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|mediation and vsock transport contract"
   "supervision-deep|backend-neutral|firecracker,apple-vf|restart supervision, signal, failure, cleanup"
   "volumes|backend-neutral|firecracker,apple-vf|volume create/ls/inspect/rm, attach persistence, single attach"
   "commit-images|backend-neutral|firecracker,apple-vf|commit stopped rootfs into local OCI image layout"
@@ -125,7 +125,7 @@ E2E_MATRIX=(
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|firecracker,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
-  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host|Portable scenarios and windows-hyperv-*-host probes run under Git Bash; backend-neutral feature lane still in progress"
+  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host|Portable scenarios, public-surface, transport-deep, and windows-hyperv-*-host probes run under Git Bash; remaining feature scenarios join as VHD volumes and guest-mediated copy land"
 )
 
 usage() {
