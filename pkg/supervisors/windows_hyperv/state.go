@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
 const clearVsockListenerPID = -1
@@ -41,6 +45,11 @@ type runtimeState struct {
 var startRuntimeListenersHook = startRuntimeListeners
 var startRuntimeListenerProcessHook = startRuntimeListenerProcess
 var terminateRuntimeListenerProcessHook = terminateRuntimeListenerProcess
+var waitForExecBridgeHook = waitForExecBridge
+
+// execBridgeWaitTimeout bounds how long a detached start waits for the
+// listener helper's exec bridge to accept before failing closed.
+var execBridgeWaitTimeout = 3 * time.Second
 
 func (s Supervisor) run(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
 	return s.startComputeSystem(ctx, req, true)
@@ -62,6 +71,7 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 	if err := validateNetwork(req); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network validation failed: %s", err), err)
 	}
+	ensureBindableManagementPorts(req.Config)
 	adapter := s.runtimeAdapter()
 	spec := computeSystemSpec{
 		Name:     req.Identity.RuntimeID,
@@ -108,6 +118,10 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 		listenerPID, err = startRuntimeListenerProcessHook(req)
 		if err != nil {
 			return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("listener helper failed: %s", err), err)
+		}
+		if err := waitForExecBridgeHook(ctx, req); err != nil {
+			terminateRuntimeListenerProcessHook(listenerPID)
+			return failRunWithCleanup(ctx, req, adapter, handle, false, fmt.Sprintf("exec bridge failed: %s", err), err)
 		}
 	}
 	if err := adapter.Start(ctx, handle.ID); err != nil {
@@ -158,19 +172,10 @@ func inspect(req vmkit.Request) (vmkit.Response, error) {
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
-	resp := vmkit.Response{OK: state.Event.State != vmkit.StateFailed, Backend: vmkit.BackendWindowsHyperV, Event: &event, Readiness: &state.Readiness}
+	readiness := runtimeReadinessForState(state)
+	resp := vmkit.Response{OK: state.Event.State != vmkit.StateFailed, Backend: vmkit.BackendWindowsHyperV, Event: &event, Readiness: &readiness}
 	if result, resultErr := readRuntimeResult(req, event.Identity); resultErr == nil {
 		resp.Result = &result
-		now := time.Now().UTC()
-		if resp.Readiness == nil {
-			resp.Readiness = &vmkit.RuntimeReadiness{}
-		}
-		resp.Readiness.ResultReady = vmkit.ReadinessSignal{Ready: true, ObservedAt: &now, Detail: "result.json present"}
-	} else if !os.IsNotExist(resultErr) {
-		if resp.Readiness == nil {
-			resp.Readiness = &vmkit.RuntimeReadiness{}
-		}
-		resp.Readiness.ResultReady = vmkit.ReadinessSignal{Error: resultErr.Error()}
 	}
 	if state.Error != "" {
 		resp.Error = state.Error
@@ -445,13 +450,6 @@ func writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req vmkit.Request
 	if state == vmkit.StateStarting || state == vmkit.StateRunning {
 		startedAt = now.Format(time.RFC3339)
 	}
-	readiness := vmkit.RuntimeReadiness{}
-	if state == vmkit.StateRunning {
-		readiness.GuestReady = vmkit.ReadinessSignal{ObservedAt: &now, Detail: "windows-hyperv compute system started; guest readiness not signaled"}
-		if req.Config.SerialInput {
-			readiness.ShellReady = vmkit.ReadinessSignal{ObservedAt: &now, Detail: "windows-hyperv shell socket configured; shell readiness not signaled"}
-		}
-	}
 	if computeSystemID == "" {
 		if previous, err := readRuntimeState(req); err == nil {
 			computeSystemID = previous.ComputeSystemID
@@ -491,13 +489,173 @@ func writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req vmkit.Request
 		SerialInputPath:        serialInput,
 		StartedAt:              startedAt,
 		UpdatedAt:              now.Format(time.RFC3339),
-		Readiness:              readiness,
 		Error:                  errorText,
 	}
+	runtime.Readiness = runtimeReadinessForState(runtime)
 	if err := writeJSONFile(filepath.Join(dir, "runtime.json"), runtime); err != nil {
 		return vmkit.Event{}, err
 	}
 	return event, nil
+}
+
+// runtimeReadinessForState reports readiness from the channels themselves:
+// guest readiness from the recorded runtime state, shell readiness from an
+// hv_sock dial of the guest shell service, exec readiness from a structured
+// exec round-trip, and result readiness from result.json. It mirrors the
+// Firecracker supervisor's readiness semantics so status output is
+// backend-neutral.
+func runtimeReadinessForState(state runtimeState) vmkit.RuntimeReadiness {
+	readiness := vmkit.RuntimeReadiness{}
+	if state.StartedAt != "" || state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateHalted || state.Event.State == vmkit.StateStopped || state.Event.State == vmkit.StateQuarantined {
+		readiness.GuestReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: firstEventTime(state.StartedAt, state.Event.ObservedAt),
+			Detail:     "workspace reached runtime state " + string(state.Event.State),
+		}
+	}
+	if state.Event.State == vmkit.StateRunning && state.SerialInputPath != "" {
+		if signal, ok := shellReadinessFromRuntimeState(state); ok {
+			readiness.ShellReady = signal
+		}
+	}
+	if signal, ok := execReadinessFromRuntimeState(state); ok {
+		readiness.ExecReady = signal
+	}
+	resultFile := filepath.Join(state.Config.StateDir, state.Event.Identity.RuntimeID, "result.json")
+	if info, err := os.Stat(resultFile); err == nil {
+		modTime := info.ModTime().UTC()
+		readiness.ResultReady = vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: &modTime,
+			Detail:     "guest result is available",
+		}
+	} else if !os.IsNotExist(err) {
+		readiness.ResultReady = vmkit.ReadinessSignal{Error: err.Error()}
+	}
+	return readiness
+}
+
+// shellReadinessFromRuntimeState probes the guest shell service over hv_sock.
+// With no shell port configured, the serial input marker is the only console
+// channel and its presence is the readiness signal.
+func shellReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, bool) {
+	if _, err := os.Stat(state.SerialInputPath); err != nil {
+		if !os.IsNotExist(err) {
+			return vmkit.ReadinessSignal{Error: err.Error()}, true
+		}
+		return vmkit.ReadinessSignal{}, false
+	}
+	if port := guestShellPort(state.Config); port != 0 {
+		observedAt := time.Now().UTC()
+		elapsed, err := shellHVSockProbeHook(context.Background(), state, 150*time.Millisecond)
+		if err != nil {
+			return vmkit.ReadinessSignal{
+				Ready:      false,
+				ObservedAt: &observedAt,
+				Detail:     fmt.Sprintf("shell target unreachable at hvsock:%s:%d after %s: %v", state.ComputeSystemRuntimeID, port, elapsed.Round(time.Millisecond), err),
+			}, true
+		}
+		return vmkit.ReadinessSignal{
+			Ready:      true,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("shell target reachable at hvsock:%s:%d in %s", state.ComputeSystemRuntimeID, port, elapsed.Round(time.Millisecond)),
+		}, true
+	}
+	observedAt := time.Now().UTC()
+	if info, err := os.Stat(state.SerialInputPath); err == nil {
+		modTime := info.ModTime().UTC()
+		observedAt = modTime
+	}
+	return vmkit.ReadinessSignal{
+		Ready:      true,
+		ObservedAt: &observedAt,
+		Detail:     "console input is available",
+	}, true
+}
+
+// execReadinessFromRuntimeState round-trips a probe command through the host
+// exec bridge so readiness reports the structured exec channel actually
+// answering, not just the compute system starting.
+func execReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, bool) {
+	if state.Event.State != vmkit.StateRunning {
+		return vmkit.ReadinessSignal{}, false
+	}
+	observedAt := time.Now().UTC()
+	if state.Config.ExecPort == 0 {
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     "structured exec port is not configured",
+		}, true
+	}
+	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(state.Config.ExecPort)))
+	req := execprotocol.NewExecRequest([]string{"true"})
+	req.TimeoutMS = 2000
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	start := time.Now()
+	result, err := execclient.New(target).Exec(ctx, req)
+	cancel()
+	elapsed := time.Since(start)
+	if err != nil {
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("exec service unreachable at %s after %s: %v", target, elapsed.Round(time.Millisecond), err),
+		}, true
+	}
+	if result.Error != nil {
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("exec service returned %s: %s", result.Error.Code, result.Error.Message),
+			Error:      result.Error.Error(),
+		}, true
+	}
+	if result.Status != execprotocol.ExecStatusExited || result.ExitCode == nil || *result.ExitCode != 0 {
+		exit := "nil"
+		if result.ExitCode != nil {
+			exit = strconv.Itoa(*result.ExitCode)
+		}
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     fmt.Sprintf("exec probe command failed unexpectedly: status=%s exit_code=%s", result.Status, exit),
+		}, true
+	}
+	return vmkit.ReadinessSignal{
+		Ready:      true,
+		ObservedAt: &observedAt,
+		Detail:     fmt.Sprintf("exec service round-trip ready at %s in %s", target, elapsed.Round(time.Millisecond)),
+	}, true
+}
+
+// guestShellPort and guestExecPort return the in-guest vsock service port for
+// the shell and exec services. They differ from the host bind ports only when
+// the request records explicit guest ports.
+func guestShellPort(config vmkit.Config) uint16 {
+	if config.GuestShellPort != 0 {
+		return config.GuestShellPort
+	}
+	return config.ShellPort
+}
+
+func guestExecPort(config vmkit.Config) uint16 {
+	if config.GuestExecPort != 0 {
+		return config.GuestExecPort
+	}
+	return config.ExecPort
+}
+
+func firstEventTime(values ...string) *time.Time {
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+			return &parsed
+		}
+	}
+	return nil
 }
 
 func hasDetachedRuntimeListeners(req vmkit.Request) bool {
@@ -513,7 +671,90 @@ func hasDetachedRuntimeListeners(req vmkit.Request) bool {
 }
 
 func hasDetachedRuntimeServices(req vmkit.Request) bool {
-	return hasDetachedRuntimeListeners(req) || hasPortForwards(req.Config)
+	return hasDetachedRuntimeListeners(req) || hasPortForwards(req.Config) || hasExecBridge(req.Config)
+}
+
+// ensureBindableManagementPorts moves the host bind for the structured exec
+// bridge off any unbindable port — most notably one transiently held by an
+// ephemeral outbound connection, since the default exec port range overlaps
+// the Windows dynamic TCP range — onto a free port, preserving the original
+// as the guest vsock port so the bridge and the guest's own listener still
+// agree. User port-forwards are intentionally left untouched: those ports are
+// operator intent and a conflict there should surface, not be silently
+// reassigned.
+func ensureBindableManagementPorts(config *vmkit.Config) {
+	if config == nil || config.ExecPort == 0 {
+		return
+	}
+	if port, changed := bindableHostPort(config.ExecPort); changed {
+		if config.GuestExecPort == 0 {
+			config.GuestExecPort = config.ExecPort
+		}
+		config.ExecPort = port
+	}
+}
+
+// bindableHostPort returns a host port that can actually be bound on
+// 127.0.0.1. If the preferred port binds it is returned unchanged; otherwise
+// an OS-assigned free port is returned. The bool reports whether the port
+// changed.
+func bindableHostPort(preferred uint16) (uint16, bool) {
+	if preferred == 0 {
+		return 0, false
+	}
+	if l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(preferred)))); err == nil {
+		_ = l.Close()
+		return preferred, false
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		// Could not secure any port; leave the preferred port in place and let
+		// the listener surface the original bind error.
+		return preferred, false
+	}
+	port := uint16(l.Addr().(*net.TCPAddr).Port)
+	_ = l.Close()
+	return port, true
+}
+
+// waitForExecBridge confirms the detached listener helper's exec bridge is
+// accepting on the host before the workspace is reported running, so a helper
+// that died on startup (for example, a port bind failure) fails the start
+// instead of leaving structured exec silently dead.
+func waitForExecBridge(ctx context.Context, req vmkit.Request) error {
+	if !hasExecBridge(req.Config) {
+		return nil
+	}
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(req.Config.ExecPort)))
+	deadline := time.Now().Add(execBridgeWaitTimeout)
+	var lastErr error
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 250*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !time.Now().Before(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	detail := fmt.Sprintf("structured exec bridge did not accept on %s within %s: %v", addr, execBridgeWaitTimeout, lastErr)
+	if log, err := os.ReadFile(filepath.Join(runtimeDir(req), "hvsock-listener.log")); err == nil {
+		if trimmed := strings.TrimSpace(string(log)); trimmed != "" {
+			lines := strings.Split(trimmed, "\n")
+			detail = fmt.Sprintf("%s; helper log: %s", detail, strings.TrimSpace(lines[len(lines)-1]))
+		}
+	}
+	return fmt.Errorf("%s", detail)
+}
+
+func hasExecBridge(config *vmkit.Config) bool {
+	return config != nil && config.ExecPort != 0
 }
 
 func hasPortForwards(config *vmkit.Config) bool {

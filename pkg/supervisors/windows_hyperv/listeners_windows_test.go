@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -114,6 +115,135 @@ func TestHandleHVSockConnectionProxiesTCP(t *testing.T) {
 	case <-serverDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("tcp target did not finish")
+	}
+}
+
+func TestStartRuntimeListenersServesExecBridge(t *testing.T) {
+	oldDial := dialHVSockPortHook
+	t.Cleanup(func() { dialHVSockPortHook = oldDial })
+	guestHostConn, guestVMConn := net.Pipe()
+	dialed := make(chan uint32, 1)
+	dialHVSockPortHook = func(ctx context.Context, vmID guid.GUID, port uint32) (net.Conn, error) {
+		dialed <- port
+		return guestHostConn, nil
+	}
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve exec port: %v", err)
+	}
+	execPort := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RuntimeID: "agent-1"},
+		Config: &vmkit.Config{
+			StateDir: t.TempDir(),
+			ExecPort: execPort,
+		},
+	}
+	handle := computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}
+	set, err := startRuntimeListeners(context.Background(), handle, req)
+	if err != nil {
+		t.Fatalf("startRuntimeListeners: %v", err)
+	}
+	if set == nil {
+		t.Fatal("startRuntimeListeners returned no listener set for an exec bridge")
+	}
+	t.Cleanup(func() { _ = set.Close() })
+
+	guestDone := make(chan struct{})
+	go func() {
+		defer close(guestDone)
+		defer guestVMConn.Close()
+		buf := make([]byte, 4)
+		if _, err := io.ReadFull(guestVMConn, buf); err != nil {
+			return
+		}
+		_, _ = guestVMConn.Write([]byte("pong"))
+	}()
+
+	client, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(execPort))))
+	if err != nil {
+		t.Fatalf("dial exec bridge: %v", err)
+	}
+	defer client.Close()
+	if _, err := client.Write([]byte("ping")); err != nil {
+		t.Fatalf("write exec payload: %v", err)
+	}
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(client, buf); err != nil {
+		t.Fatalf("read exec response: %v", err)
+	}
+	if string(buf) != "pong" {
+		t.Fatalf("exec response = %q", buf)
+	}
+	select {
+	case port := <-dialed:
+		if port != uint32(execPort) {
+			t.Fatalf("dialed guest exec hvsock port = %d, want %d", port, execPort)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exec bridge did not dial the guest")
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("close client: %v", err)
+	}
+	select {
+	case <-guestDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("guest hvsock side did not finish")
+	}
+}
+
+func TestStartRuntimeListenersExecBridgeDialsGuestExecPort(t *testing.T) {
+	oldDial := dialHVSockPortHook
+	t.Cleanup(func() { dialHVSockPortHook = oldDial })
+	dialed := make(chan uint32, 1)
+	dialHVSockPortHook = func(ctx context.Context, vmID guid.GUID, port uint32) (net.Conn, error) {
+		dialed <- port
+		host, vm := net.Pipe()
+		_ = vm.Close()
+		return host, nil
+	}
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve exec port: %v", err)
+	}
+	execPort := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RuntimeID: "agent-1"},
+		Config: &vmkit.Config{
+			StateDir:      t.TempDir(),
+			ExecPort:      execPort,
+			GuestExecPort: 42001,
+		},
+	}
+	handle := computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}
+	set, err := startRuntimeListeners(context.Background(), handle, req)
+	if err != nil {
+		t.Fatalf("startRuntimeListeners: %v", err)
+	}
+	if set == nil {
+		t.Fatal("startRuntimeListeners returned no listener set for an exec bridge")
+	}
+	t.Cleanup(func() { _ = set.Close() })
+
+	client, err := net.Dial("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(execPort))))
+	if err != nil {
+		t.Fatalf("dial exec bridge: %v", err)
+	}
+	defer client.Close()
+	select {
+	case port := <-dialed:
+		if port != 42001 {
+			t.Fatalf("dialed guest exec hvsock port = %d, want guest exec port 42001", port)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("exec bridge did not dial the guest")
 	}
 }
 

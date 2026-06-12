@@ -4,7 +4,7 @@ description: Run Linux guests on Windows through HCS - no WSL, no QEMU. Experime
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-12_
 
 If you want Linux guests on a Windows host - without WSL and without QEMU -
 this page documents the experimental `windows-hyperv` backend. It talks to
@@ -110,6 +110,27 @@ Bridged mode fails closed unless `network.interface` names an existing HNS
 network or Hyper-V switch. Endpoint cleanup runs when foreground `run`
 completes and during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
 
+## Structured exec
+
+`microagent exec` (buffered and `--stream`) works against running
+`windows-hyperv` workspaces. The supervisor binds a host TCP listener on
+`127.0.0.1:<execPort>` and bridges each accepted connection to the guest's
+structured exec service over Hyper-V sockets - the same bridge mechanic as
+published TCP ports. The exec port is recorded in `runtime.json`, so the
+workspace layer dials it exactly like the other backends.
+
+If the configured exec port cannot be bound on the host - the default exec
+port range overlaps the Windows dynamic TCP range, so an ephemeral outbound
+connection can transiently hold it - the supervisor moves the host bind to a
+free port and keeps the original port as the guest's Hyper-V socket service,
+so the bridge and the guest's own listener still agree.
+
+Detached `start` fails closed when the listener helper's exec bridge does not
+accept on the host, instead of reporting a running workspace whose exec
+channel is silently dead. The helper's lifetime is bounded by the workspace:
+it is torn down during `quarantine`, `halt`, `stop`, `kill`, and `delete`, and
+it exits when the guest stops on its own.
+
 ## State
 
 The supervisor writes backend runtime files under:
@@ -130,16 +151,20 @@ Important files include:
 | `result.json` | structured guest result when delivered |
 | `hvsock-listener.log` | detached Hyper-V socket listener helper log |
 
-`inspect` returns the latest event and readiness state. HCS `running` records
-that the compute system started, but it does not by itself mark guest or shell
-readiness true. If `result.json` exists, `inspect` also returns the
-backend-neutral `result` object and marks `readiness.resultReady.ready` true.
+`inspect` returns the latest event and readiness computed from the channels
+themselves: `guestReady` reflects the recorded runtime state, `shellReady`
+reflects a Hyper-V socket dial of the guest shell service, and `execReady`
+reflects a structured exec round-trip through the host exec bridge. If
+`result.json` exists, `inspect` also returns the backend-neutral `result`
+object and marks `readiness.resultReady.ready` true.
 
 ## Current limitations
 
 - No WSL dependency is used or required.
 - QEMU/WHPX is not used.
 - `microagent connect` and `connect --send` use Hyper-V sockets.
+- `microagent exec` (buffered and `--stream`) uses the host exec bridge over
+  Hyper-V sockets.
 - Mediation and guest-to-host TCP listener targets use Hyper-V socket listener
   helpers.
 - Direct supervisor `console` is not implemented; use `microagent connect`.

@@ -30,7 +30,7 @@ type hvSocketListenerSet struct {
 }
 
 func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
-	if req.Config == nil || (len(req.Config.VsockListeners) == 0 && !hasPortForwards(req.Config)) {
+	if req.Config == nil || (len(req.Config.VsockListeners) == 0 && !hasPortForwards(req.Config) && !hasExecBridge(req.Config)) {
 		return nil, nil
 	}
 	for _, listener := range req.Config.VsockListeners {
@@ -80,6 +80,17 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 			started++
 			go servePublishedPortForward(l, vmID, forward)
 		}
+	}
+	if hasExecBridge(req.Config) {
+		addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(req.Config.ExecPort)))
+		l, err := net.Listen("tcp", addr)
+		if err != nil {
+			_ = set.Close()
+			return nil, fmt.Errorf("listen windows-hyperv structured exec %s: %w", addr, err)
+		}
+		set.listeners = append(set.listeners, l)
+		started++
+		go serveTCPToHVSockForward(l, vmID, uint32(guestExecPort(*req.Config)), "structured exec")
 	}
 	if started == 0 {
 		return nil, nil
@@ -169,13 +180,17 @@ func handleHVSockConnection(conn net.Conn, target string) {
 }
 
 func servePublishedPortForward(listener net.Listener, vmID guid.GUID, forward vmkit.PortForward) {
+	serveTCPToHVSockForward(listener, vmID, uint32(forward.HostPort), "published tcp")
+}
+
+func serveTCPToHVSockForward(listener net.Listener, vmID guid.GUID, guestPort uint32, label string) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "accept windows-hyperv published tcp connection: %v\n", err)
+			fmt.Fprintf(os.Stderr, "accept windows-hyperv %s connection: %v\n", label, err)
 			return
 		}
-		go proxyTCPToHVSock(conn, vmID, uint32(forward.HostPort))
+		go proxyTCPToHVSock(conn, vmID, guestPort)
 	}
 }
 
@@ -210,6 +225,54 @@ func dialHVSockPort(ctx context.Context, vmID guid.GUID, guestPort uint32) (net.
 		VMID:      vmID,
 		ServiceID: winio.VsockServiceID(guestPort),
 	})
+}
+
+// shellHVSockProbeHook lets tests substitute a deterministic shell probe.
+var shellHVSockProbeHook = probeShellHVSock
+
+// probeShellHVSock dials the guest shell service over hv_sock and reports how
+// long the dial took. A successful dial means the guest shell channel accepts.
+// The hv_sock transport can hold a connect attempt far past context
+// cancellation while the guest is still booting, so the dial runs in its own
+// goroutine and the probe returns at the timeout regardless.
+func probeShellHVSock(ctx context.Context, state runtimeState, timeout time.Duration) (time.Duration, error) {
+	runtimeID := strings.TrimSpace(state.ComputeSystemRuntimeID)
+	if runtimeID == "" {
+		return 0, fmt.Errorf("windows-hyperv shell probe requires compute system runtime ID in runtime state")
+	}
+	vmID, err := guid.FromString(runtimeID)
+	if err != nil {
+		return 0, fmt.Errorf("parse HCS runtime ID %q: %w", runtimeID, err)
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	start := time.Now()
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+	resultCh := make(chan dialResult, 1)
+	go func() {
+		conn, err := dialHVSockPortHook(dialCtx, vmID, uint32(guestShellPort(state.Config)))
+		resultCh <- dialResult{conn: conn, err: err}
+	}()
+	select {
+	case result := <-resultCh:
+		elapsed := time.Since(start)
+		if result.err != nil {
+			return elapsed, result.err
+		}
+		_ = result.conn.Close()
+		return elapsed, nil
+	case <-dialCtx.Done():
+		// Reap the dial if it ever completes so the connection does not leak.
+		go func() {
+			if result := <-resultCh; result.err == nil {
+				_ = result.conn.Close()
+			}
+		}()
+		return time.Since(start), fmt.Errorf("dial timed out after %s: %w", timeout, dialCtx.Err())
+	}
 }
 
 func writeHVSockResult(conn net.Conn, target string) error {

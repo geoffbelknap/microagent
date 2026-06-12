@@ -5160,6 +5160,115 @@ func TestWindowsHyperVMediationSmoke(t *testing.T) {
 	}
 }
 
+func TestWindowsHyperVExecSmoke(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V exec smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
+	if imageRef == "" {
+		imageRef = "docker.io/library/busybox:1.36"
+	}
+	dir := t.TempDir()
+	workspaceName := fmt.Sprintf("whv-exec-%d", time.Now().UnixNano()%1000000000)
+	cliPath := filepath.Join(dir, "microagent.exe")
+	guestInitPath := filepath.Join(dir, "microagent-guestinit")
+	// The detached start spawns the runtime listener helper from the running
+	// executable, so the smoke must drive the real CLI binary end to end.
+	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
+	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	// Structured exec rides hv_sock, not the guest NIC; isolated networking
+	// keeps the smoke independent of host HNS state and privileges.
+	workspaceOpts := workspace.Options{
+		Name:            workspaceName,
+		Backend:         vmkit.BackendWindowsHyperV,
+		Architecture:    "amd64",
+		StateDir:        dir,
+		KernelPath:      kernelPath,
+		GuestInitPath:   guestInitPath,
+		ImageRef:        imageRef,
+		ServiceCommand:  "sleep 120",
+		PrepareForStart: true,
+		MemoryMiB:       512,
+		CPUCount:        2,
+		Network:         vmkit.NetworkConfig{Mode: "isolated"},
+	}
+	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
+		t.Fatalf("BuildRootfs: %v", err)
+	}
+	if err := workspace.WriteManifest(workspaceOpts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", workspaceName, "--state-dir", dir)
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", workspaceName, "--state-dir", dir, "--yes")
+	})
+	runExternal(t, ctx, cliPath, "start", workspaceName, "--state-dir", dir, "--kernel", kernelPath)
+	waitForWorkspaceState(t, dir, workspaceName, vmkit.StateRunning, 30*time.Second)
+
+	// Buffered exec round-trips both output streams and a zero exit.
+	out := runExternal(t, ctx, cliPath, "exec", workspaceName, "--state-dir", dir, "--", "sh", "-c", "echo EXEC_SMOKE_STDOUT; echo EXEC_SMOKE_STDERR >&2")
+	if !strings.Contains(string(out), "EXEC_SMOKE_STDOUT") || !strings.Contains(string(out), "EXEC_SMOKE_STDERR") {
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatalf("exec output = %q", out)
+	}
+
+	// Streamed exec delivers all stdout lines in order.
+	streamOut := runExternal(t, ctx, cliPath, "exec", workspaceName, "--state-dir", dir, "--stream", "--", "sh", "-c", "for i in 1 2 3 4 5; do echo line-$i; done")
+	lines := []string{}
+	for _, line := range strings.Split(string(streamOut), "\n") {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "line-") {
+			lines = append(lines, trimmed)
+		}
+	}
+	if strings.Join(lines, " ") != "line-1 line-2 line-3 line-4 line-5" {
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatalf("streamed lines = %v, want line-1..line-5 in order", lines)
+	}
+
+	// A non-zero guest exit propagates as the CLI exit code.
+	_, err := runExternalOutput(ctx, cliPath, "exec", workspaceName, "--state-dir", dir, "--", "sh", "-c", "exit 7")
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 7 {
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatalf("non-zero exec err = %v, want exit code 7", err)
+	}
+
+	// Readiness reports the exec and shell channels answering, not just HCS start.
+	statusOut := runExternal(t, ctx, cliPath, "status", workspaceName, "--state-dir", dir)
+	var status struct {
+		Readiness struct {
+			ShellReady struct {
+				Ready bool `json:"ready"`
+			} `json:"shellReady"`
+			ExecReady struct {
+				Ready  bool   `json:"ready"`
+				Detail string `json:"detail"`
+			} `json:"execReady"`
+		} `json:"readiness"`
+	}
+	if err := json.Unmarshal(statusOut, &status); err != nil {
+		t.Fatalf("parse status: %v\n%s", err, statusOut)
+	}
+	if !status.Readiness.ExecReady.Ready || !strings.Contains(status.Readiness.ExecReady.Detail, "round-trip ready") {
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatalf("exec readiness = %+v, want channel-signaled ready", status.Readiness.ExecReady)
+	}
+	if !status.Readiness.ShellReady.Ready {
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatalf("shell readiness = %+v, want hv_sock probe ready", status.Readiness.ShellReady)
+	}
+}
+
 func buildCmd(t *testing.T, workdir, output, pkg, goos, goarch string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

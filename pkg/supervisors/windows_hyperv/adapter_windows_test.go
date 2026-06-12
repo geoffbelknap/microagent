@@ -249,6 +249,58 @@ func TestBuildComputeSystemDocumentAddsHvSocketServiceForShellPort(t *testing.T)
 	}
 }
 
+func TestBuildComputeSystemDocumentAddsHvSocketServiceForExecPort(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			ExecPort:   25279,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc computeSystemDocument
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	serviceID := winio.VsockServiceID(25279).String()
+	service, ok := doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable[serviceID]
+	if !ok {
+		t.Fatalf("exec service %s missing from %#v", serviceID, doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable)
+	}
+	if service.ConnectSecurityDescriptor != "D:P(A;;FA;;;WD)" {
+		t.Fatalf("exec service connect security descriptor = %q", service.ConnectSecurityDescriptor)
+	}
+}
+
+func TestBuildComputeSystemDocumentExecServiceUsesGuestExecPort(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath:    "C:\\microagent\\Image",
+			RootfsPath:    "C:\\microagent\\rootfs.vhd",
+			ExecPort:      25279,
+			GuestExecPort: 42001,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc computeSystemDocument
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	table := doc.VirtualMachine.Devices.HvSocket.HvSocketConfig.ServiceTable
+	if serviceID := winio.VsockServiceID(42001).String(); table[serviceID].ConnectSecurityDescriptor == "" {
+		t.Fatalf("guest exec service %s missing from %#v", serviceID, table)
+	}
+	if serviceID := winio.VsockServiceID(25279).String(); table[serviceID].ConnectSecurityDescriptor != "" {
+		t.Fatalf("host exec port %s should not be registered when a guest exec port is set", serviceID)
+	}
+}
+
 func TestBuildComputeSystemDocumentAddsHvSocketServicesForPortForwards(t *testing.T) {
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",

@@ -81,6 +81,12 @@ jobs:
           MICROAGENT_WINDOWS_HYPERV_SMOKE: "1"
         run: go test ./cmd/microagent -run TestWindowsHyperVConnectSmoke -count=1 -timeout 6m -v
 
+      - name: Windows-HyperV structured exec smoke
+        shell: pwsh
+        env:
+          MICROAGENT_WINDOWS_HYPERV_SMOKE: "1"
+        run: go test ./cmd/microagent -run TestWindowsHyperVExecSmoke -count=1 -timeout 8m -v
+
       - name: Windows-HyperV mediation smoke
         shell: pwsh
         env:

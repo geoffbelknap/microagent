@@ -5,6 +5,29 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv structured exec over Hyper-V sockets
+
+- `microagent exec` (buffered and `--stream`) now works against running
+  `windows-hyperv` workspaces: the supervisor bridges the host
+  `127.0.0.1:<execPort>` TCP listener to the guest's structured exec service
+  over Hyper-V sockets, the same mechanic as `connect` and published ports.
+  `Capabilities.StructuredExec` is now true for `windows-hyperv`, which also
+  enables `health.exec` probes.
+- windows-hyperv readiness now reports channel truth instead of "HCS compute
+  system started": `shellReady` comes from a bounded Hyper-V socket dial of
+  the guest shell service (`Capabilities.ShellReadinessProbe` flipped true),
+  `execReady` from a structured exec round-trip, and `guestReady` from the
+  recorded runtime state, matching Firecracker semantics.
+- The supervisor moves the host exec bind off unbindable ports (the default
+  exec range overlaps the Windows dynamic TCP range, so ephemeral outbound
+  connections can transiently hold one) onto a free port while preserving the
+  guest's Hyper-V socket service port, and detached `start` fails closed when
+  the listener helper's exec bridge never accepts instead of reporting a
+  running workspace with a silently dead exec channel.
+- New gated live smoke `TestWindowsHyperVExecSmoke` (buffered exec, `--stream`
+  ordering, non-zero exit propagation, channel-signaled readiness) wired into
+  the `live-windows-hyperv` workflow.
+
 ## v0.8.0 - 2026-06-12
 
 This release moves microagent from the 0.1.x line to 0.8.x. The jump reflects
