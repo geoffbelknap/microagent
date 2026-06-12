@@ -5,6 +5,29 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Windows lane in the unified E2E runner
+
+- `scripts/dev/microagent-e2e.sh` now runs under Git Bash on a Windows host
+  with the windows-hyperv backend: Windows host detection and HCS preflight
+  in `e2e-lib.sh`, `MINGW`/`MSYS`/`CYGWIN` hosts map to the windows-hyperv
+  lane in every backend-neutral scenario (un-ported scenarios self-skip with
+  the lane named), and the portable scenarios — coverage-matrix, contract,
+  help-usage, mcp-stdio, registry-auth, text-output, init — all pass on
+  Windows.
+- New `windows-hyperv-*-host` probe scenarios (lifecycle, connect, exec,
+  transport) wrap the gated Go smokes per the host-probe convention, and the
+  E2E feature matrix records windows-hyperv coverage for run/create/start,
+  connect, and exec. The live-windows-hyperv workflow runs the lane.
+- `perf footprint`/`perf steady` RSS sampling was POSIX-only (`ps -o rss=`);
+  Windows now reads the process working set via `K32GetProcessMemoryInfo`.
+- `run -v` parses volume specs from the right, so a Windows drive-letter
+  source (`C:\data:/workspace:rw`) is rejected with the intended host-bind
+  message instead of a spec parse error.
+- The remaining Windows-hostile unit tests pass on a Windows host: debugfs
+  fake-shim log normalization handles cmd quoting, the missing-rootfs status
+  check accepts the Windows error text, and the registry-auth rootfs E2E
+  builds the host-native format (VHD needs no mke2fs).
+
 ### windows-hyperv structured exec over Hyper-V sockets
 
 - `microagent exec` (buffered and `--stream`) now works against running

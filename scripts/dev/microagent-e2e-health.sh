@@ -19,6 +19,9 @@ default_backend() {
     Darwin:arm64)
       printf '%s\n' applevf
       ;;
+    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
+      printf '%s\n' windows-hyperv
+      ;;
     *)
       printf '%s\n' unsupported
       ;;

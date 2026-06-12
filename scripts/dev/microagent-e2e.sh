@@ -36,6 +36,10 @@ SCENARIOS=(
   "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm"
   "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:linux:vm"
   "named-network:scripts/dev/microagent-e2e-named-network.sh:linux:netpriv"
+  "windows-hyperv-lifecycle-host:scripts/dev/microagent-e2e-windows-hyperv-lifecycle-host.sh:windows:vm"
+  "windows-hyperv-connect-host:scripts/dev/microagent-e2e-windows-hyperv-connect-host.sh:windows:vm"
+  "windows-hyperv-exec-host:scripts/dev/microagent-e2e-windows-hyperv-exec-host.sh:windows:vm"
+  "windows-hyperv-transport-host:scripts/dev/microagent-e2e-windows-hyperv-transport-host.sh:windows:vm"
   "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin:vm"
   "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin:vm"
   "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin:vm"
@@ -74,6 +78,10 @@ SCENARIO_COVERAGE=(
   "firecracker-transport-host|backend-specific|firecracker|Firecracker /dev/vhost-vsock and helper mechanics"
   "firecracker-supervision-host|backend-specific|firecracker|Firecracker helper PID cleanup mechanics"
   "named-network|host-specific|firecracker|Linux privileged named-network bridge and DNS"
+  "windows-hyperv-lifecycle-host|backend-specific|windows-hyperv|Hyper-V boot, structured result delivery over hv_sock"
+  "windows-hyperv-connect-host|backend-specific|windows-hyperv|Hyper-V socket shell connect and readiness"
+  "windows-hyperv-exec-host|backend-specific|windows-hyperv|Structured exec bridge: buffered, stream, exit codes, readiness"
+  "windows-hyperv-transport-host|backend-specific|windows-hyperv|Mediation channel over Hyper-V socket listener helpers"
   "applevf-boot|backend-specific|apple-vf|Apple VF boot smoke"
   "applevf-direct-console|backend-specific|apple-vf|Apple VF direct supervisor console input"
   "applevf-substrate|backend-specific|apple-vf|Apple VF lifecycle substrate smoke"
@@ -94,12 +102,12 @@ E2E_MATRIX=(
   "host/doctor|portable|host-default|public-surface,lifecycle-deep|Host capability and diagnostics for selected backend"
   "kernel install/verify|portable|host-default|public-surface,health,volumes|Backend-specific artifacts through a common CLI"
   "rootfs build|portable|host-default|public-surface,lifecycle-deep|OCI rootfs build plus validation failures"
-  "run/create/start|backend-neutral|firecracker,apple-vf|public-surface,lifecycle-deep,health,volumes,model-serving|Core workspace boot paths"
+  "run/create/start|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,health,volumes,model-serving,windows-hyperv-lifecycle-host|Core workspace boot paths"
   "status/inspect/ps|backend-neutral|firecracker,apple-vf|public-surface,lifecycle-deep,applevf-workspace-connect|State/readiness/list surfaces"
   "result/logs/artifacts|backend-neutral|firecracker,apple-vf|contract,public-surface,lifecycle-deep|Structured result, serial logs, declared artifacts"
   "events/stats|backend-neutral|firecracker,apple-vf|lifecycle-deep|Lifecycle event history and resource sampling"
-  "connect|backend-neutral|firecracker,apple-vf|lifecycle-deep,applevf-workspace-connect|Interactive and send-mode console paths"
-  "exec|backend-neutral|firecracker,apple-vf|health,exec-stream,secrets,volumes|Structured exec and streaming exec"
+  "connect|backend-neutral|firecracker,apple-vf,windows-hyperv|lifecycle-deep,applevf-workspace-connect,windows-hyperv-connect-host|Interactive and send-mode console paths"
+  "exec|backend-neutral|firecracker,apple-vf,windows-hyperv|health,exec-stream,secrets,volumes,windows-hyperv-exec-host|Structured exec and streaming exec"
   "halt/quarantine/stop/kill/delete/rm|backend-neutral|firecracker,apple-vf|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup"
   "clone/cp|backend-neutral|firecracker,apple-vf|lifecycle-deep|Stopped workspace copy and clone semantics"
   "apply|backend-neutral|firecracker,apple-vf|networking-deep|Supported spec changes"
@@ -117,7 +125,7 @@ E2E_MATRIX=(
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|firecracker,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
-  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix|Contract boundary exists; practical E2E lane is not implemented"
+  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host|Portable scenarios and windows-hyperv-*-host probes run under Git Bash; backend-neutral feature lane still in progress"
 )
 
 usage() {
@@ -210,8 +218,9 @@ Environment:
     E2E image cache use for scenarios that support it.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
     for compatibility with older validation commands.
-  MICROAGENT_E2E_BACKEND=firecracker|applevf selects the backend lane for
-    backend-agnostic feature scenarios.
+  MICROAGENT_E2E_BACKEND=firecracker|applevf|windows-hyperv selects the backend
+    lane for backend-agnostic feature scenarios. Windows runs use Git Bash with
+    the windows-hyperv backend (Hyper-V role + HCS services).
   MICROAGENT_E2E_ALLOW_NETPRIV=1 opts the privileged networking lane in when you
     hold CAP_NET_ADMIN without uid 0 (file caps / capability-granting sandbox).
   MICROAGENT_E2E_HEARTBEAT=<seconds> sets the "still running" heartbeat interval
@@ -315,6 +324,9 @@ scenario_supported() {
       ;;
     darwin)
       [ "$(uname -s)" = "Darwin" ]
+      ;;
+    windows)
+      e2e_is_windows
       ;;
     *)
       return 1
@@ -497,7 +509,7 @@ have_vm=no; e2e_have_vm && have_vm=yes
 have_netpriv=no; e2e_have_netpriv && have_netpriv=yes
 is_wsl=no; e2e_is_wsl && is_wsl=yes
 printf 'microagent E2E preflight: os=%s arch=%s wsl=%s vm=%s netpriv=%s\n' \
-  "$(uname -s)" "$(uname -m)" "$is_wsl" "$have_vm" "$have_netpriv"
+  "$(e2e_friendly_os)" "$(uname -m)" "$is_wsl" "$have_vm" "$have_netpriv"
 if [ "$have_vm" = "no" ]; then
   printf '  (no microVM backend: vm/netpriv scenarios will SKIP. Run microagent doctor for details.)\n'
 fi

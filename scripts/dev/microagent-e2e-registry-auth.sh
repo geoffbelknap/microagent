@@ -17,7 +17,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for required in go mke2fs; do
+# Windows builds VHD rootfs natively, so mke2fs is only an ext4-lane need.
+required_tools="go mke2fs"
+if e2e_is_windows; then
+  required_tools="go"
+fi
+for required in $required_tools; do
   if ! command -v "$required" >/dev/null 2>&1; then
     e2e_skip "$required is required for microagent registry-auth E2E"
   fi

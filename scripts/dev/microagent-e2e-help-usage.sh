@@ -111,7 +111,9 @@ expect_failure_contains run-missing-image "run requires --image" "$CLI" run --na
 expect_failure_contains run-exec-positional-conflict "both --exec and positional command" "$CLI" run --image example.com/acme/image:latest --exec true echo --state-dir "$STATE_DIR"
 expect_failure_contains run-rm-keep-conflict "both --rm and --keep" "$CLI" run --rm --keep example.com/acme/image:latest true --state-dir "$STATE_DIR"
 mkdir -p "$STATE_DIR/host-bind"
-expect_failure_contains run-volume-bind-reject "does not expose host bind mounts" "$CLI" run -v "$STATE_DIR/host-bind:/workspace:rw" example.com/acme/image:latest true --state-dir "$STATE_DIR"
+# Volume specs are parsed by the CLI itself; pass the host part in native
+# form so Git Bash does not mangle the colon-separated spec on Windows.
+expect_failure_contains run-volume-bind-reject "does not expose host bind mounts" "$CLI" run -v "$(e2e_host_path "$STATE_DIR/host-bind"):/workspace:rw" example.com/acme/image:latest true --state-dir "$STATE_DIR"
 expect_failure_contains exec-missing-separator "usage: microagent exec" "$CLI" exec example.com/acme/image:latest true
 expect_failure_contains inspect-usage "usage: microagent status" "$CLI" inspect --state-dir "$STATE_DIR"
 expect_failure_contains compose-unsupported "compose-style multi-workspace projects are not supported" "$CLI" compose up

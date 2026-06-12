@@ -343,7 +343,8 @@ func TestStatusRunningWorkspaceStillChecksCurrentRootfs(t *testing.T) {
 	if resp.Verification == nil || resp.Verification.Rootfs == nil || resp.Verification.Rootfs.Error == "" {
 		t.Fatalf("rootfs verification = %#v, want current rootfs error for running workspace", resp.Verification)
 	}
-	if !strings.Contains(resp.Verification.Rootfs.Error, "no such file") {
+	// POSIX reports "no such file"; Windows reports "cannot find the file".
+	if !strings.Contains(resp.Verification.Rootfs.Error, "no such file") && !strings.Contains(resp.Verification.Rootfs.Error, "cannot find the file") {
 		t.Fatalf("rootfs error = %q", resp.Verification.Rootfs.Error)
 	}
 }

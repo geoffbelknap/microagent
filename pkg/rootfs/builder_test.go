@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -357,9 +358,20 @@ func TestBuilderPullsFromPrivateRegistryUsingCredentialConfig(t *testing.T) {
 	if os.Getenv("MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E") != "1" {
 		t.Skip("set MICROAGENT_ROOTFS_REGISTRY_AUTH_E2E=1 to run private registry rootfs E2E")
 	}
-	mke2fsPath, err := exec.LookPath("mke2fs")
-	if err != nil {
-		t.Fatalf("mke2fs is required for private registry rootfs E2E: %v", err)
+	// The credential contract under test is format-agnostic; use the host's
+	// native rootfs format so Windows (VHD, no mke2fs) can run the same E2E.
+	format := FormatExt4
+	output := "rootfs.ext4"
+	mke2fsPath := ""
+	if runtime.GOOS == "windows" {
+		format = FormatVHD
+		output = "rootfs.vhd"
+	} else {
+		path, err := exec.LookPath("mke2fs")
+		if err != nil {
+			t.Fatalf("mke2fs is required for private registry rootfs E2E: %v", err)
+		}
+		mke2fsPath = path
 	}
 
 	registry := newPrivateRegistryFixture(t)
@@ -370,7 +382,8 @@ func TestBuilderPullsFromPrivateRegistryUsingCredentialConfig(t *testing.T) {
 	provenance, err := NewBuilder().Build(context.Background(), BuildRequest{
 		ImageRef:     registry.ref,
 		Platform:     Platform{OS: "linux", Architecture: "amd64"},
-		OutputPath:   filepath.Join(dir, "rootfs.ext4"),
+		OutputPath:   filepath.Join(dir, output),
+		Format:       format,
 		StateDir:     filepath.Join(dir, "state"),
 		Mke2fsPath:   mke2fsPath,
 		SizeMiB:      64,
@@ -379,7 +392,7 @@ func TestBuilderPullsFromPrivateRegistryUsingCredentialConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "rootfs.ext4")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, output)); err != nil {
 		t.Fatalf("rootfs output: %v", err)
 	}
 	wantResolved := registry.host + "/microagent/private@" + registry.manifestDigest.String()

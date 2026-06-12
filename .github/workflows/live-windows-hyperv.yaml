@@ -92,3 +92,14 @@ jobs:
         env:
           MICROAGENT_WINDOWS_HYPERV_MEDIATION_SMOKE: "1"
         run: go test ./cmd/microagent -run TestWindowsHyperVMediationSmoke -count=1 -timeout 8m -v
+
+      - name: Windows E2E lane (Git Bash)
+        # The unified runner under Git Bash: portable scenarios plus the
+        # windows-hyperv host probes. Hosted Windows runners ship Git Bash.
+        shell: bash
+        run: >-
+          scripts/dev/microagent-e2e.sh
+          coverage-matrix contract help-usage mcp-stdio registry-auth
+          text-output init
+          windows-hyperv-lifecycle-host windows-hyperv-connect-host
+          windows-hyperv-exec-host windows-hyperv-transport-host

@@ -124,6 +124,13 @@ On Linux, the same runner is the live full-suite parity gate in
 `x64`, and `kvm`, with KVM, `/dev/vhost-vsock`, `/dev/net/tun`, Firecracker,
 and the network setup from `scripts/dev/microagent-e2e-linux-network-setup.sh`.
 
+On Windows, the same runner works under Git Bash with the windows-hyperv
+backend (Hyper-V role active, HCS services running): the portable scenarios
+plus the `windows-hyperv-*-host` probes — which wrap the gated Go smokes for
+boot/result, connect, structured exec, and mediation — run in the
+`live-windows-hyperv` workflow. Backend-neutral feature scenarios that have
+not joined the Windows lane yet self-skip with the lane named.
+
 The feature scenarios are backend-agnostic: the scenario names describe the
 shared CLI/runtime contract, while the host or
 `MICROAGENT_E2E_BACKEND=applevf` selects the Apple VF execution lane. Add the
