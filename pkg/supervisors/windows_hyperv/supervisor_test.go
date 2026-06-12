@@ -1519,3 +1519,57 @@ func TestDetachedStartWaitsForAcceptingExecBridge(t *testing.T) {
 		t.Fatalf("start resp=%#v err=%v", resp, err)
 	}
 }
+
+func TestRunMovesHeldExecPortAfterCreateAndRecordsIt(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv run path is windows-only")
+	}
+	oldListeners := startRuntimeListenersHook
+	t.Cleanup(func() { startRuntimeListenersHook = oldListeners })
+	var listenerExecPort, listenerGuestExecPort uint16
+	startRuntimeListenersHook = func(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
+		listenerExecPort = req.Config.ExecPort
+		listenerGuestExecPort = req.Config.GuestExecPort
+		return nil, nil
+	}
+
+	holder, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("hold exec port: %v", err)
+	}
+	defer holder.Close()
+	held := uint16(holder.Addr().(*net.TCPAddr).Port)
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			ExecPort:   held,
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK {
+		t.Fatalf("run resp=%#v err=%v", resp, err)
+	}
+	if listenerExecPort == held || listenerExecPort == 0 {
+		t.Fatalf("listener exec port = %d, want moved off held port %d", listenerExecPort, held)
+	}
+	if listenerGuestExecPort != held {
+		t.Fatalf("listener guest exec port = %d, want preserved original %d", listenerGuestExecPort, held)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Config.ExecPort != listenerExecPort || state.Config.GuestExecPort != held {
+		t.Fatalf("runtime config ports = %d/%d, want %d/%d", state.Config.ExecPort, state.Config.GuestExecPort, listenerExecPort, held)
+	}
+}
