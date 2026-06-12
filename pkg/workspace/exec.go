@@ -131,11 +131,21 @@ func IsRetryableExecTransient(err error) bool {
 }
 
 func isExecConnectionRefused(err error) bool {
-	return errors.Is(err, syscall.ECONNREFUSED) || strings.Contains(strings.ToLower(err.Error()), "connection refused")
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	// Windows reports WSAECONNREFUSED as "actively refused it".
+	return strings.Contains(text, "connection refused") || strings.Contains(text, "actively refused")
 }
 
 func isExecConnectionReset(err error) bool {
-	return errors.Is(err, syscall.ECONNRESET) || strings.Contains(strings.ToLower(err.Error()), "connection reset by peer")
+	if errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	text := strings.ToLower(err.Error())
+	// Windows reports WSAECONNRESET as "forcibly closed by the remote host".
+	return strings.Contains(text, "connection reset by peer") || strings.Contains(text, "forcibly closed by the remote host")
 }
 
 func isExecConnectionTimeout(err error) bool {
