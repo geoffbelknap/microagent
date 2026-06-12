@@ -71,7 +71,6 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 	if err := validateNetwork(req); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network validation failed: %s", err), err)
 	}
-	ensureBindableManagementPorts(req.Config)
 	adapter := s.runtimeAdapter()
 	spec := computeSystemSpec{
 		Name:     req.Identity.RuntimeID,
@@ -101,6 +100,14 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 	handle.NetworkID = network.NetworkID
 	handle.NetworkEndpointID = network.NetworkEndpointID
 	handle.RuntimeNetwork = network.RuntimeNetwork
+	// Hyper-V reserves dynamic TCP port ranges while the compute system and
+	// its network are created, so the host exec bind is only chosen here,
+	// after Create. The guest's hv_sock service keeps the original port (the
+	// HCS service table and the guest run config were already built from it),
+	// so a moved host bind stays coherent with the guest's own listener.
+	ensureBindableManagementPorts(req.Config)
+	spec.Config.ExecPort = req.Config.ExecPort
+	spec.Config.GuestExecPort = req.Config.GuestExecPort
 	listenerPID := 0
 	var listeners runtimeListenerSet
 	if foreground {

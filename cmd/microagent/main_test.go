@@ -5023,7 +5023,7 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
 	// Shell readiness is probed over hv_sock, so allow the guest shell
 	// helper a bounded window to come up after the compute system starts.
-	readyDeadline := time.Now().Add(30 * time.Second)
+	readyDeadline := time.Now().Add(45 * time.Second)
 	for {
 		status, err := workspace.Status(workspace.Options{
 			Name:     "windows-hyperv-connect",
@@ -5228,6 +5228,28 @@ func TestWindowsHyperVExecSmoke(t *testing.T) {
 	})
 	runExternal(t, ctx, cliPath, "start", workspaceName, "--state-dir", dir, "--kernel", kernelPath)
 	waitForWorkspaceState(t, dir, workspaceName, vmkit.StateRunning, 30*time.Second)
+	// Exec readiness is a structured exec round-trip through the bridge, so
+	// allow the guest exec service a bounded window to come up after the
+	// compute system starts before asserting command behavior.
+	execReadyDeadline := time.Now().Add(45 * time.Second)
+	for {
+		status, err := workspace.Status(workspace.Options{
+			Name:     workspaceName,
+			Backend:  vmkit.BackendWindowsHyperV,
+			StateDir: dir,
+		})
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if status.Readiness != nil && status.Readiness.ExecReady.Ready {
+			break
+		}
+		if time.Now().After(execReadyDeadline) {
+			logWindowsHyperVSmokeState(t, dir, workspaceName)
+			t.Fatalf("exec readiness = %#v", status.Readiness)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	// Buffered exec round-trips both output streams and a zero exit.
 	out := runExternal(t, ctx, cliPath, "exec", workspaceName, "--state-dir", dir, "--", "sh", "-c", "echo EXEC_SMOKE_STDOUT; echo EXEC_SMOKE_STDERR >&2")
