@@ -215,6 +215,21 @@ func (c vmcomputeClient) ProbeComputeSystem(ctx context.Context, id string) erro
 	})
 }
 
+// GetComputeSystemStatistics returns the raw Statistics properties JSON
+// for a compute system.
+func (c vmcomputeClient) GetComputeSystemStatistics(ctx context.Context, id string) (string, error) {
+	var properties string
+	err := c.withComputeSystem(ctx, id, "statistics", 0, func(handle uintptr) (string, error) {
+		props, result, err := c.vmcomputeAPI().GetComputeSystemProperties(ctx, handle, `{"PropertyTypes":["Statistics","Memory"]}`)
+		if err != nil {
+			return result, err
+		}
+		properties = props
+		return result, nil
+	})
+	return properties, err
+}
+
 func (c vmcomputeClient) terminateComputeSystem(ctx context.Context, id, operation string) error {
 	return c.withComputeSystem(ctx, id, operation, 0, func(handle uintptr) (string, error) {
 		return c.vmcomputeAPI().TerminateComputeSystem(ctx, handle, "")

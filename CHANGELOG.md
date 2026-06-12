@@ -5,6 +5,19 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv events/stats
+
+- `stats` works for windows-hyperv workspaces: there is no host guest PID
+  (HCS owns the VM worker process), so the sample reads HCS properties —
+  CPU percent from two `Statistics.Processor.TotalRuntime100ns` samples over
+  a short interval, memory from the VM `Memory` property's page counts
+  (LinuxKernelDirect VMs report zeros in `Statistics.Memory`), storage
+  counters as reported.
+- `events` works for windows-hyperv workspaces: the supervisor maintained
+  the history as JSON lines while the events CLI reads the backend-neutral
+  JSON-array shape; events.json is now a capped, atomically rewritten array
+  with the same semantics as the Firecracker supervisor.
+
 ### windows-hyperv lifecycle: honest liveness, supervise, clone, boot units
 
 - `inspect`/`status` now reconcile a vanished compute system: a guest that

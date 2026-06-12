@@ -70,6 +70,7 @@ type hcsClient interface {
 	DeleteComputeSystem(ctx context.Context, id string) error
 	WaitComputeSystem(ctx context.Context, id string) error
 	ProbeComputeSystem(ctx context.Context, id string) error
+	GetComputeSystemStatistics(ctx context.Context, id string) (string, error)
 }
 
 func (s Supervisor) runtimeAdapter() runtimeAdapter {
