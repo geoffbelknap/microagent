@@ -8,7 +8,18 @@ import (
 	"testing"
 )
 
+// forceDebugFSCopyPath pins Copy/GetArtifact to the debugfs branch so the
+// debugfs-path tests stay meaningful on hosts whose backend uses
+// guest-mediated copy (Windows).
+func forceDebugFSCopyPath(t *testing.T) {
+	t.Helper()
+	prev := guestMediatedCopyEnabled
+	guestMediatedCopyEnabled = func() bool { return false }
+	t.Cleanup(func() { guestMediatedCopyEnabled = prev })
+}
+
 func TestCopyToWorkspaceRequiresRemoteParentDir(t *testing.T) {
+	forceDebugFSCopyPath(t)
 	dir := t.TempDir()
 	useFakeE2FSCK(t, dir)
 	rootfs := filepath.Join(dir, "workspaces", "demo", "rootfs.ext4")
@@ -22,7 +33,7 @@ func TestCopyToWorkspaceRequiresRemoteParentDir(t *testing.T) {
 	}
 	logPath := filepath.Join(dir, "debugfs.log")
 	debugfs := writeFakeDebugFS(t, dir, logPath, "'/workspace: File not found'")
-	if _, err := Copy(dir, debugfs, source, "demo:/workspace/input.json"); err == nil {
+	if _, err := Copy(t.Context(), dir, debugfs, source, "demo:/workspace/input.json"); err == nil {
 		t.Fatal("expected missing parent directory error")
 	}
 	data, err := os.ReadFile(logPath)
@@ -39,6 +50,7 @@ func TestCopyToWorkspaceRequiresRemoteParentDir(t *testing.T) {
 }
 
 func TestCopyToWorkspaceWritesWhenRemoteParentExists(t *testing.T) {
+	forceDebugFSCopyPath(t)
 	dir := t.TempDir()
 	e2fsckLog := useFakeE2FSCK(t, dir)
 	rootfs := filepath.Join(dir, "workspaces", "demo", "rootfs.ext4")
@@ -52,7 +64,7 @@ func TestCopyToWorkspaceWritesWhenRemoteParentExists(t *testing.T) {
 	}
 	logPath := filepath.Join(dir, "debugfs.log")
 	debugfs := writeFakeDebugFS(t, dir, logPath, "'Inode: 12   Type: directory    Mode:  0755'")
-	if _, err := Copy(dir, debugfs, source, "demo:/workspace/input.json"); err != nil {
+	if _, err := Copy(t.Context(), dir, debugfs, source, "demo:/workspace/input.json"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(logPath)
@@ -76,6 +88,7 @@ func TestCopyToWorkspaceWritesWhenRemoteParentExists(t *testing.T) {
 }
 
 func TestCopyFromWorkspaceQuotesDebugFSArguments(t *testing.T) {
+	forceDebugFSCopyPath(t)
 	dir := t.TempDir()
 	useFakeE2FSCK(t, dir)
 	rootfs := filepath.Join(dir, "workspaces", "demo", "rootfs.ext4")
@@ -91,7 +104,7 @@ func TestCopyFromWorkspaceQuotesDebugFSArguments(t *testing.T) {
 	}
 	logPath := filepath.Join(dir, "debugfs.log")
 	debugfs := writeFakeDebugFS(t, dir, logPath, "''")
-	if _, err := Copy(dir, debugfs, "demo:/workspace/out.json", filepath.Join(targetDir, "result.json")); err != nil {
+	if _, err := Copy(t.Context(), dir, debugfs, "demo:/workspace/out.json", filepath.Join(targetDir, "result.json")); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(logPath)
@@ -110,6 +123,7 @@ func TestCopyFromWorkspaceQuotesDebugFSArguments(t *testing.T) {
 }
 
 func TestGetArtifactRejectsCraftedManifestPath(t *testing.T) {
+	forceDebugFSCopyPath(t)
 	dir := t.TempDir()
 	workspaceDir := filepath.Join(dir, "workspaces", "demo")
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
@@ -123,12 +137,24 @@ func TestGetArtifactRejectsCraftedManifestPath(t *testing.T) {
 	}
 	logPath := filepath.Join(dir, "debugfs.log")
 	debugfs := writeFakeDebugFS(t, dir, logPath, "''")
-	_, err := GetArtifact(dir, debugfs, "demo", "report", filepath.Join(dir, "report.json"))
+	_, err := GetArtifact(t.Context(), dir, debugfs, "demo", "report", filepath.Join(dir, "report.json"))
 	if err == nil || !strings.Contains(err.Error(), "whitespace") {
 		t.Fatalf("expected whitespace rejection for crafted artifact path, got %v", err)
 	}
 	if _, statErr := os.Stat(logPath); !os.IsNotExist(statErr) {
 		t.Fatal("debugfs ran despite invalid artifact path")
+	}
+}
+
+func TestParseRemoteCopyEndpointDisambiguatesDrivePaths(t *testing.T) {
+	for _, local := range []string{`C:\Users\geoff\out`, "C:/Users/geoff/out", `d:\data`, "x:/tmp"} {
+		if _, remote, err := parseRemoteCopyEndpoint(local); err != nil || remote {
+			t.Fatalf("parseRemoteCopyEndpoint(%q) = remote=%v err=%v, want local path", local, remote, err)
+		}
+	}
+	endpoint, remote, err := parseRemoteCopyEndpoint("demo:/etc/conf")
+	if err != nil || !remote || endpoint.Workspace != "demo" || endpoint.Path != "/etc/conf" {
+		t.Fatalf("parseRemoteCopyEndpoint(demo:/etc/conf) = %+v remote=%v err=%v", endpoint, remote, err)
 	}
 }
 

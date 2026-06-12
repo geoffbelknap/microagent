@@ -5,6 +5,29 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv guest-mediated cp/artifacts/commit (P6)
+
+- `cp`, `artifacts get`, and `commit` work on windows-hyperv. The host has
+  no ext4 tooling for VHD rootfs images, so file operations ride the
+  guest's structured exec channel instead (Open Decision #1 resolved as
+  guest-mediated copy): a stopped workspace gets a transient maintenance
+  boot — guest init serves only the shell and exec channels, runs no
+  service command, materializes no secrets — the operation streams file
+  content in exec-sized chunks, and the workspace halts again. `commit`
+  tars the filesystem inside the guest (kernel-managed trees excluded)
+  and assembles the OCI layer from that stream directly, so symlinks and
+  hard links survive without staging through a host filesystem that
+  cannot represent them unprivileged.
+- `cp` endpoint parsing treats Windows drive-absolute paths (`C:\dir`,
+  `C:/dir`) as local paths instead of a workspace named after the drive
+  letter — `microagent cp ws:/file C:/out` now works from any Windows
+  shell.
+- The lifecycle-deep lane covers guest-mediated cp out/in (the injected
+  file shows up in a clone), artifact extraction, and stopped-state
+  restoration after maintenance boots; the secrets lane uses the shared
+  cp step on every backend; the commit-images scenario gains a
+  windows-hyperv arm and joins the live workflow.
+
 ### windows-hyperv guest networking (hv_netvsc kernel)
 
 - The packaged windows-hyperv kernel is now `kernels-6.12.22-r2`, which

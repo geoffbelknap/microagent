@@ -9,13 +9,10 @@ set -euo pipefail
 # exec'd, quarantine semantics, artifacts list, images list, prune, and
 # delete cleanup.
 #
-# Deferred segments (do not fake): `cp` and artifact extraction
-# (`artifacts get`) read guest ext4 out of the VHD, which has no Windows
-# host story yet — see the windows-hyperv plan Open Decision #1
-# (guest-mediated copy via structured exec is recommended but undecided).
-# `commit` is gated on the same decision. mke2fs-based segments (standalone
-# rootfs build, images pull) stay on the ext4 lanes; mke2fs is never
-# required on Windows.
+# cp and artifact extraction ride the guest exec channel (Open Decision #1
+# resolved: guest-mediated copy with a transient maintenance boot for
+# stopped workspaces). mke2fs-based segments (standalone rootfs build,
+# images pull) stay on the ext4 lanes; mke2fs is never required on Windows.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
@@ -217,8 +214,6 @@ grep -q "microagent-init: starting" "$STATE_DIR/logs-running.txt"
 e2e_step "artifacts list shows the declared output"
 "$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
 grep -q '"report"' "$STATE_DIR/artifacts-running.json"
-# artifacts get / cp extract guest ext4 from the VHD; deferred on Windows
-# pending the guest-mediated copy decision (plan Open Decision #1).
 
 e2e_step "events history is the backend-neutral JSON array"
 "$CLI" --json events "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/events-running.json"
@@ -276,8 +271,25 @@ wait_for_ready "$WORKSPACE" "$STATE_DIR/status-restarted.json"
 "$CLI" exec "$WORKSPACE" --state-dir "$STATE_DIR" -- sh -c "cat /persist.txt" >"$STATE_DIR/exec-after-restart.out"
 grep -q "persisted" "$STATE_DIR/exec-after-restart.out"
 
+e2e_step "guest-mediated cp and artifact extraction on the stopped workspace"
+# Open Decision #1 resolved: cp/artifacts get ride the guest exec channel
+# via a transient maintenance boot. Local endpoints use Windows-form paths
+# (drive-absolute paths disambiguate from workspace endpoints).
+"$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-for-copy.json"
+mkdir -p "$STATE_DIR/cp-out"
+"$CLI" cp "$WORKSPACE:/persist.txt" "$(e2e_host_path "$STATE_DIR/cp-out")" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-from.json"
+grep -q "persisted" "$STATE_DIR/cp-out/persist.txt"
+printf "host-injected" >"$STATE_DIR/host-copy.txt"
+"$CLI" cp "$(e2e_host_path "$STATE_DIR/host-copy.txt")" "$WORKSPACE:/host-copy.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-to.json"
+test "$(json_get "$STATE_DIR/cp-to.json" direction)" = "to-workspace"
+mkdir -p "$STATE_DIR/artifacts-out"
+"$CLI" artifacts get "$WORKSPACE" report "$(e2e_host_path "$STATE_DIR/artifacts-out")" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-get.json"
+grep -q '"ok":true' "$STATE_DIR/artifacts-out/report.json"
+# The maintenance boots must leave the workspace stopped.
+"$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-after-copy.json"
+test "$(json_get "$STATE_DIR/status-after-copy.json" event.state)" = "halted"
+
 e2e_step "clone a stopped workspace, boot it, and exec the clone"
-"$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-for-clone.json"
 "$CLI" clone "$WORKSPACE" "$CLONE" --state-dir "$STATE_DIR" >"$STATE_DIR/clone.json"
 test "$(json_get "$STATE_DIR/clone.json" workspace)" = "$CLONE"
 test "$(json_get "$STATE_DIR/clone.json" response.event.state)" = "prepared"
@@ -286,8 +298,9 @@ test -e "$STATE_DIR/workspaces/$CLONE/rootfs.vhd"
 grep -q "$CLONE" "$STATE_DIR/ps-cloned.json"
 "$CLI" start "$CLONE" --state-dir "$STATE_DIR" >"$STATE_DIR/clone-start.json"
 wait_for_ready "$CLONE" "$STATE_DIR/clone-status-running.json"
-"$CLI" exec "$CLONE" --state-dir "$STATE_DIR" -- sh -c "cat /persist.txt" >"$STATE_DIR/clone-exec.out"
+"$CLI" exec "$CLONE" --state-dir "$STATE_DIR" -- sh -c "cat /persist.txt; cat /host-copy.txt" >"$STATE_DIR/clone-exec.out"
 grep -q "persisted" "$STATE_DIR/clone-exec.out"
+grep -q "host-injected" "$STATE_DIR/clone-exec.out"
 "$CLI" stop "$CLONE" --state-dir "$STATE_DIR" >"$STATE_DIR/clone-stop.json"
 test "$(json_get "$STATE_DIR/clone-stop.json" event.state)" = "stopped"
 

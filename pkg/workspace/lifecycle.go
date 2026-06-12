@@ -298,7 +298,7 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
-	if opts.ResultPort == 0 {
+	if opts.ResultPort == 0 && !opts.MaintenanceBoot {
 		opts.ResultPort = DefaultResultPort
 	}
 	if err := EnsureCanStart(opts.StateDir, opts.Name); err != nil {
@@ -311,7 +311,12 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	applyManifest(&opts, manifest)
+	if !opts.MaintenanceBoot {
+		// A maintenance boot deliberately deviates from the manifest: no
+		// secrets, no model pairing, no forwards, isolated networking. The
+		// caller supplies the complete minimal options.
+		applyManifest(&opts, manifest)
+	}
 	if opts.ProfileExplicit {
 		opts.Profile = requestedProfile
 		if err := ApplyProfile(&opts, opts.SpecMemory, opts.SpecCPU, true); err != nil {

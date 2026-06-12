@@ -47,6 +47,11 @@ type config struct {
 	ModelVsockPort     uint32        `json:"modelVsockPort,omitempty"`
 	ConsoleShell       string        `json:"consoleShell,omitempty"`
 	Hostname           string        `json:"hostname,omitempty"`
+	// Maintenance is set from the kernel cmdline (microagent_maintenance=1),
+	// never from the baked run config: the host asks for a boot that serves
+	// only the shell and exec channels so it can perform file operations
+	// against an otherwise-stopped workspace.
+	Maintenance bool `json:"-"`
 }
 
 type mount struct {
@@ -120,20 +125,23 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
-	if cfg.SecretsPort != 0 {
+	// A maintenance boot serves file operations only: secrets stay
+	// unmaterialized (nothing should read them, and the host did not start
+	// a secrets listener for this boot).
+	if cfg.SecretsPort != 0 && !cfg.Maintenance {
 		if err := fetchAndWriteSecrets(cfg.SecretsPort); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 127
 		}
 	}
-	if cfg.SecretsAPI && cfg.SecretsPort != 0 {
+	if cfg.SecretsAPI && cfg.SecretsPort != 0 && !cfg.Maintenance {
 		if err := serveSecretsAPI(secretsAPISock, cfg.SecretsPort); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 127
 		}
 		cfg.Env = append(cfg.Env, "MICROAGENT_SECRETS_SOCK="+secretsAPISock)
 	}
-	if cfg.SecretsControlPort != 0 && cfg.SecretsPort != 0 {
+	if cfg.SecretsControlPort != 0 && cfg.SecretsPort != 0 && !cfg.Maintenance {
 		if err := serveSecretsControl(cfg.SecretsControlPort, cfg.SecretsPort); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 127
@@ -220,6 +228,13 @@ func run() int {
 	}
 	if err := startStructuredExecService(cfg.ExecPort, guestEnv(cfg.Env)); err != nil {
 		log.Printf("microagent-init: structured exec service failed to start on vsock port %d: %v", cfg.ExecPort, err)
+	}
+	if cfg.Maintenance {
+		// Hold the boot for the host's file operations; the run config's
+		// command never runs. The host halts the workspace when it is done
+		// (the power-signal handler performs the actual power-off).
+		log.Println("microagent-init: maintenance boot: serving shell/exec only; no service command")
+		select {}
 	}
 	if cfg.Mode == "service" && len(cfg.Command) > 0 {
 		if err := attachConsole(); err != nil {
@@ -1226,6 +1241,9 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 	}
 	if values["microagent_secrets_api"] == "1" {
 		cfg.SecretsAPI = true
+	}
+	if values["microagent_maintenance"] == "1" {
+		cfg.Maintenance = true
 	}
 	if raw := values["microagent_secrets_ctl_port"]; strings.TrimSpace(raw) != "" {
 		port, err := parseUint16(raw)

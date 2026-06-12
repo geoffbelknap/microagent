@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -107,7 +108,7 @@ func Network(stateDir, name string) (NetworkStatus, error) {
 	return result, nil
 }
 
-func Copy(stateDir, debugfsPath, source, target string) (CopyResult, error) {
+func Copy(ctx context.Context, stateDir, debugfsPath, source, target string) (CopyResult, error) {
 	sourceRemote, sourceIsRemote, err := parseRemoteCopyEndpoint(source)
 	if err != nil {
 		return CopyResult{}, err
@@ -119,13 +120,19 @@ func Copy(stateDir, debugfsPath, source, target string) (CopyResult, error) {
 	if sourceIsRemote == targetIsRemote {
 		return CopyResult{}, fmt.Errorf("exactly one cp endpoint must be workspace:path")
 	}
+	if guestMediatedCopyEnabled() {
+		if sourceIsRemote {
+			return copyFromWorkspaceGuest(ctx, stateDir, sourceRemote, target)
+		}
+		return copyToWorkspaceGuest(ctx, stateDir, source, targetRemote)
+	}
 	if sourceIsRemote {
 		return copyFromWorkspace(stateDir, debugfsPath, sourceRemote, target)
 	}
 	return copyToWorkspace(stateDir, debugfsPath, source, targetRemote)
 }
 
-func GetArtifact(stateDir, debugfsPath, name, artifactName, target string) (CopyResult, error) {
+func GetArtifact(ctx context.Context, stateDir, debugfsPath, name, artifactName, target string) (CopyResult, error) {
 	if err := ValidateName(name); err != nil {
 		return CopyResult{}, err
 	}
@@ -138,7 +145,12 @@ func GetArtifact(stateDir, debugfsPath, name, artifactName, target string) (Copy
 		return CopyResult{}, err
 	}
 	remote := outputRemoteEndpoint(name, output, manifest.Disks)
-	result, err := copyFromWorkspace(stateDir, debugfsPath, remote, target)
+	var result CopyResult
+	if guestMediatedCopyEnabled() {
+		result, err = copyFromWorkspaceGuest(ctx, stateDir, remote, target)
+	} else {
+		result, err = copyFromWorkspace(stateDir, debugfsPath, remote, target)
+	}
 	if err != nil {
 		return CopyResult{}, err
 	}
@@ -253,6 +265,12 @@ func EnsureCloneable(stateDir, name string) error {
 }
 
 func parseRemoteCopyEndpoint(raw string) (remoteCopyEndpoint, bool, error) {
+	// A Windows drive-absolute path (C:\dir or C:/dir) is a local path,
+	// not a workspace endpoint — the same disambiguation rule container
+	// CLIs use. Single-letter workspace names lose this collision.
+	if len(raw) >= 3 && isASCIILetter(raw[0]) && raw[1] == ':' && (raw[2] == '/' || raw[2] == '\\') {
+		return remoteCopyEndpoint{}, false, nil
+	}
 	parts := strings.SplitN(raw, ":", 3)
 	if len(parts) < 2 {
 		return remoteCopyEndpoint{}, false, nil
@@ -539,6 +557,10 @@ func validateRemoteCopyPath(path string) error {
 		return fmt.Errorf("workspace path must not contain whitespace")
 	}
 	return nil
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 func validateDiskName(name string) error {

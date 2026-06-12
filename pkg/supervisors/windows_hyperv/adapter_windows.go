@@ -320,6 +320,9 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	if spec.Config.ModelGuestPort != 0 && spec.Config.ModelVsockPort != 0 {
 		kernelCmdLine += fmt.Sprintf(" microagent_model_fwd=%d:%d", spec.Config.ModelGuestPort, spec.Config.ModelVsockPort)
 	}
+	if spec.Config.MaintenanceBoot {
+		kernelCmdLine += " microagent_maintenance=1"
+	}
 	// The HNS endpoint assigned the guest its address, but the synthetic
 	// NIC (hv_netvsc) comes up unconfigured: tell the guest its static
 	// config the same way the Firecracker boot args do. Requires the

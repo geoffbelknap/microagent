@@ -157,10 +157,10 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return runCommit(ctx, args[1:], stdout)
 	}
 	if args[0] == "cp" {
-		return runCP(args[1:], stdout)
+		return runCP(ctx, args[1:], stdout)
 	}
 	if args[0] == "artifacts" {
-		return runArtifacts(args[1:], stdout)
+		return runArtifacts(ctx, args[1:], stdout)
 	}
 	if args[0] == "ps" {
 		return runPS(args[1:], stdout)
@@ -797,7 +797,7 @@ func runClone(args []string, stdout *os.File) error {
 	return writeWorkspaceResult(stdout, result)
 }
 
-func runCP(args []string, stdout *os.File) error {
+func runCP(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	debugfsPath := defaultDebugFSPath()
 	fs := flag.NewFlagSet("cp", flag.ContinueOnError)
@@ -810,16 +810,16 @@ func runCP(args []string, stdout *os.File) error {
 	if fs.NArg() != 2 {
 		return fmt.Errorf("usage: microagent cp <source> <target> [--state-dir <dir>]")
 	}
-	result, err := workspace.Copy(opts.StateDir, debugfsPath, fs.Arg(0), fs.Arg(1))
+	result, err := workspace.Copy(ctx, opts.StateDir, debugfsPath, fs.Arg(0), fs.Arg(1))
 	if err != nil {
 		return err
 	}
 	return writeCopyResult(stdout, result)
 }
 
-func runArtifacts(args []string, stdout *os.File) error {
+func runArtifacts(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) > 0 && args[0] == "get" {
-		return runArtifactGet(args[1:], stdout)
+		return runArtifactGet(ctx, args[1:], stdout)
 	}
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	fs := flag.NewFlagSet("artifacts", flag.ContinueOnError)
@@ -843,7 +843,7 @@ func runArtifacts(args []string, stdout *os.File) error {
 	return writeArtifactsResult(stdout, result)
 }
 
-func runArtifactGet(args []string, stdout *os.File) error {
+func runArtifactGet(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	debugfsPath := defaultDebugFSPath()
 	fs := flag.NewFlagSet("artifacts get", flag.ContinueOnError)
@@ -860,7 +860,7 @@ func runArtifactGet(args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	result, err := workspace.GetArtifact(opts.StateDir, debugfsPath, name, fs.Arg(1), fs.Arg(2))
+	result, err := workspace.GetArtifact(ctx, opts.StateDir, debugfsPath, name, fs.Arg(1), fs.Arg(2))
 	if err != nil {
 		return err
 	}

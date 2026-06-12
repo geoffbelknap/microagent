@@ -41,23 +41,33 @@ type Image struct {
 type Options struct {
 	// Dir is the staged root filesystem tree to pack as one layer.
 	Dir string
+	// LayerTar, when set, is a pre-built layer tar used verbatim instead of
+	// packing Dir — for callers that already hold the filesystem as a tar
+	// stream (guest-mediated commit) and must not round-trip it through a
+	// host filesystem that cannot represent symlinks unprivileged.
+	LayerTar []byte
 	// Architecture is the OCI architecture (e.g. "amd64", "arm64").
 	Architecture string
 	// CreatedAt stamps the config; caller supplies it for determinism.
 	CreatedAt time.Time
 }
 
-// Assemble packs Dir into a one-layer OCI image and returns its blobs.
+// Assemble packs Dir (or the pre-built LayerTar) into a one-layer OCI image
+// and returns its blobs.
 func Assemble(opts Options) (Image, error) {
-	if opts.Dir == "" {
-		return Image{}, fmt.Errorf("dir is required")
+	if (opts.Dir == "") == (len(opts.LayerTar) == 0) {
+		return Image{}, fmt.Errorf("exactly one of dir or layer tar is required")
 	}
 	if opts.Architecture == "" {
 		return Image{}, fmt.Errorf("architecture is required")
 	}
-	tarBytes, err := buildTar(opts.Dir)
-	if err != nil {
-		return Image{}, err
+	tarBytes := opts.LayerTar
+	if opts.Dir != "" {
+		var err error
+		tarBytes, err = buildTar(opts.Dir)
+		if err != nil {
+			return Image{}, err
+		}
 	}
 	diffID := digest.FromBytes(tarBytes)
 

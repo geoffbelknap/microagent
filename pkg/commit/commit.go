@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/ociimage"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/oci"
@@ -53,6 +54,11 @@ type Result struct {
 // extractRootfs dumps an ext4 image's filesystem tree into destDir. It is a
 // package variable so tests can substitute a fixture extractor.
 var extractRootfs = debugfsExtract
+
+// guestLayerTar produces the layer tar via a guest maintenance boot on
+// backends without host ext4 tooling. It is a package variable so tests can
+// substitute a fixture.
+var guestLayerTar = workspace.GuestRootfsLayerTar
 
 // LayoutPath is where committed images are stored as an OCI image layout.
 func LayoutPath(stateDir string) string {
@@ -99,16 +105,28 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("workspace rootfs not found: %w", err)
 	}
 
-	staging, err := os.MkdirTemp("", "microagent-commit-")
-	if err != nil {
-		return Result{}, err
-	}
-	defer os.RemoveAll(staging)
-	if err := extractRootfs(opts.DebugFSPath, rootfsPath, staging); err != nil {
-		return Result{}, fmt.Errorf("extract rootfs: %w", err)
+	assemble := ociimage.Options{Architecture: opts.Architecture, CreatedAt: opts.CreatedAt}
+	if vmkit.BackendCapabilities(opts.Backend).GuestMediatedCopy {
+		// No host ext4 tooling for this disk format: a transient guest
+		// maintenance boot produces the layer tar directly.
+		layer, err := guestLayerTar(ctx, opts.StateDir, opts.Workspace)
+		if err != nil {
+			return Result{}, fmt.Errorf("extract rootfs (guest-mediated): %w", err)
+		}
+		assemble.LayerTar = layer
+	} else {
+		staging, err := os.MkdirTemp("", "microagent-commit-")
+		if err != nil {
+			return Result{}, err
+		}
+		defer os.RemoveAll(staging)
+		if err := extractRootfs(opts.DebugFSPath, rootfsPath, staging); err != nil {
+			return Result{}, fmt.Errorf("extract rootfs: %w", err)
+		}
+		assemble.Dir = staging
 	}
 
-	img, err := ociimage.Assemble(ociimage.Options{Dir: staging, Architecture: opts.Architecture, CreatedAt: opts.CreatedAt})
+	img, err := ociimage.Assemble(assemble)
 	if err != nil {
 		return Result{}, err
 	}
