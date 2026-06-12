@@ -137,6 +137,63 @@ func TestBuildComputeSystemDocumentEmitsSecretsAndModelCmdline(t *testing.T) {
 	}
 }
 
+func TestBuildComputeSystemDocumentEmitsGuestNetworkCmdline(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Network: &vmkit.NetworkConfig{
+				Mode:    "user",
+				IP:      "192.168.127.5/24",
+				Gateway: "192.168.127.1",
+				DNS:     []string{"192.168.127.1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		VirtualMachine struct {
+			Chipset struct {
+				LinuxKernelDirect struct {
+					KernelCmdLine string `json:"KernelCmdLine"`
+				} `json:"LinuxKernelDirect"`
+			} `json:"Chipset"`
+		} `json:"VirtualMachine"`
+	}
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	cmdline := doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelCmdLine
+	for _, want := range []string{
+		"microagent_net_if=eth0",
+		"microagent_net_ip=192.168.127.5/24",
+		"microagent_net_gw=192.168.127.1",
+		"microagent_net_dns=192.168.127.1",
+	} {
+		if !strings.Contains(cmdline, want) {
+			t.Fatalf("kernel cmdline %q missing %q", cmdline, want)
+		}
+	}
+
+	isolated, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Network:    &vmkit.NetworkConfig{Mode: "isolated"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(isolated), "microagent_net_if") {
+		t.Fatalf("isolated cmdline must not carry guest network config: %s", isolated)
+	}
+}
+
 func TestBuildComputeSystemDocumentAttachesConfiguredDisks(t *testing.T) {
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",
