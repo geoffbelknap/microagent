@@ -479,7 +479,7 @@ func writeRuntimeTransitionWithComputeIDsNetworkAndListenerPID(req vmkit.Request
 	if err := writeJSONFile(filepath.Join(dir, "event.json"), fileEvent); err != nil {
 		return vmkit.Event{}, err
 	}
-	if err := appendJSONLine(filepath.Join(dir, "events.json"), fileEvent); err != nil {
+	if err := appendEvent(filepath.Join(dir, "events.json"), fileEvent); err != nil {
 		return vmkit.Event{}, err
 	}
 	startedAt := ""
@@ -955,19 +955,24 @@ func writeJSONFile(path string, value any) error {
 	return os.Rename(tmp, path)
 }
 
-func appendJSONLine(path string, value any) error {
-	data, err := json.Marshal(value)
-	if err != nil {
+// appendEvent maintains events.json as a JSON array of EventFile, capped and
+// atomically rewritten on each transition — the backend-neutral history shape
+// the events CLI reads (same semantics as the Firecracker supervisor).
+func appendEvent(path string, event eventFile) error {
+	const maxEvents = 1024
+	var events []eventFile
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	data = append(data, '\n')
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
+	if err == nil && len(strings.TrimSpace(string(data))) != 0 {
+		if err := json.Unmarshal(data, &events); err != nil {
+			return err
+		}
 	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
+	events = append(events, event)
+	if len(events) > maxEvents {
+		events = events[len(events)-maxEvents:]
 	}
-	return f.Close()
+	return writeJSONFile(path, events)
 }

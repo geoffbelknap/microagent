@@ -173,12 +173,10 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stateDir, "agent-1", "serial.in")); err != nil {
 		t.Fatalf("serial.in: %v", err)
 	}
-	eventsData, err := os.ReadFile(filepath.Join(stateDir, "agent-1", "events.json"))
-	if err != nil {
-		t.Fatalf("events.json: %v", err)
-	}
-	if got := strings.Count(string(eventsData), "\n"); got != 2 {
-		t.Fatalf("events.json lines = %d, want starting and running events: %q", got, eventsData)
+	var history []eventFile
+	readJSON(t, filepath.Join(stateDir, "agent-1", "events.json"), &history)
+	if len(history) != 2 || history[0].State != vmkit.StateStarting || history[1].State != vmkit.StateRunning {
+		t.Fatalf("events.json history = %#v, want starting and running events", history)
 	}
 }
 
