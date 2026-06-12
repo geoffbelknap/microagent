@@ -215,6 +215,21 @@ func (c vmcomputeClient) ProbeComputeSystem(ctx context.Context, id string) erro
 	})
 }
 
+// DescribeComputeSystem returns the base HCS properties document for a
+// compute system (its State in particular) for teardown diagnostics.
+func (c vmcomputeClient) DescribeComputeSystem(ctx context.Context, id string) (string, error) {
+	var properties string
+	err := c.withComputeSystem(ctx, id, "describe", 0, func(handle uintptr) (string, error) {
+		props, result, err := c.vmcomputeAPI().GetComputeSystemProperties(ctx, handle, "{}")
+		if err != nil {
+			return result, err
+		}
+		properties = props
+		return result, nil
+	})
+	return properties, err
+}
+
 // GetComputeSystemStatistics returns the raw Statistics properties JSON
 // for a compute system.
 func (c vmcomputeClient) GetComputeSystemStatistics(ctx context.Context, id string) (string, error) {

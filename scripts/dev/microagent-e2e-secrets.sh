@@ -191,31 +191,16 @@ GO
 GOOS=linux GOARCH="$GUEST_ARCH" CGO_ENABLED=0 go build -buildvcs=false -o "$STATE_DIR/secret-probe" "$STATE_DIR/secret-probe.go"
 
 e2e_step "create workspace with materialized and on-demand secrets"
-PROBE_FLAGS=()
-if [ "$BACKEND" = "windows-hyperv" ]; then
-  # Bake the guest probe into the rootfs at build time: `cp` into a stopped
-  # VHD needs guest-ext4 reads the Windows host does not have yet (plan Open
-  # Decision #1). The ext4 lanes keep their post-create debugfs copy below.
-  cat >"$STATE_DIR/probe-spec.yaml" <<YAML
-name: $WS
-image: $IMAGE
-files:
-  - src: $(e2e_host_path "$STATE_DIR/secret-probe")
-    dst: /secret-probe
-    mode: "0755"
-YAML
-  PROBE_FLAGS=(--file "$STATE_DIR/probe-spec.yaml")
-fi
 MICROAGENT_E2E_SECRET_MATERIALIZED="$MATERIALIZED_VALUE" MICROAGENT_E2E_SECRET_ON_DEMAND="$ON_DEMAND_VALUE" \
   "$CLI" create --name "$WS" --image "$IMAGE" --network isolated --service-command "chmod +x /secret-probe && /secret-probe API DB > /secret-output 2>&1; sleep 120" \
   --secret API=env:MICROAGENT_E2E_SECRET_MATERIALIZED --secret-on-demand DB=env:MICROAGENT_E2E_SECRET_ON_DEMAND --secrets-audit \
-  ${PROBE_FLAGS[@]+"${PROBE_FLAGS[@]}"} \
   "${CREATE_FLAGS[@]}" >"$STATE_DIR/create.json" 2>&1 || { cat "$STATE_DIR/create.json"; e2e_fail "create workspace with secrets"; }
 
-if [ "$BACKEND" != "windows-hyperv" ]; then
-  e2e_step "copy guest secret probe into the stopped rootfs"
-  "$CLI" cp "$STATE_DIR/secret-probe" "$WS:/secret-probe" --state-dir "$STATE_DIR" >/dev/null 2>&1 || e2e_fail "copy secret probe"
-fi
+e2e_step "copy guest secret probe into the stopped rootfs"
+# Backend-neutral: debugfs writes on the ext4 lanes, guest-mediated copy
+# (maintenance boot over exec) on windows-hyperv. The local endpoint uses
+# the host-native path form so Windows drive paths parse as local.
+"$CLI" cp "$(e2e_host_path "$STATE_DIR/secret-probe")" "$WS:/secret-probe" --state-dir "$STATE_DIR" >/dev/null 2>&1 || e2e_fail "copy secret probe"
 
 e2e_step "start workspace and wait for exec readiness"
 MICROAGENT_E2E_SECRET_MATERIALIZED="$MATERIALIZED_VALUE" MICROAGENT_E2E_SECRET_ON_DEMAND="$ON_DEMAND_VALUE" \

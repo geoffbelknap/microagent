@@ -561,6 +561,10 @@ func (f *fakeHCSClient) GetComputeSystemStatistics(ctx context.Context, id strin
 	return "{}", nil
 }
 
+func (f *fakeHCSClient) DescribeComputeSystem(ctx context.Context, id string) (string, error) {
+	return "{}", nil
+}
+
 func (f *fakeHCSClient) ProbeComputeSystem(ctx context.Context, id string) error {
 	return nil
 }

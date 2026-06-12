@@ -229,23 +229,33 @@ PY
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status.json"
 "$CLI" result "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result.json"
 "$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts.json"
-mkdir -p "$STATE_DIR/out"
-"$CLI" artifacts get "$WORKSPACE" report "$STATE_DIR/out" --state-dir "$STATE_DIR" --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-get.json"
 
-python3 - "$STATE_DIR" "$WORKSPACE" <<'PY'
+# Guest-mediated copy backends (windows-hyperv) extract artifacts through a
+# real maintenance boot of the workspace, which this fabricated workspace
+# cannot take. The debugfs shim only exercises the extraction plumbing where
+# debugfs is the product's extraction path; live guest-mediated extraction
+# is covered by the lifecycle-deep scenario.
+ARTIFACT_GET=1
+if e2e_is_windows; then
+  ARTIFACT_GET=0
+fi
+if [ "$ARTIFACT_GET" = "1" ]; then
+  mkdir -p "$STATE_DIR/out"
+  "$CLI" artifacts get "$WORKSPACE" report "$STATE_DIR/out" --state-dir "$STATE_DIR" --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-get.json"
+fi
+
+python3 - "$STATE_DIR" "$WORKSPACE" "$ARTIFACT_GET" <<'PY'
 import json
 import os
 import sys
 
-state_dir, workspace = sys.argv[1:]
+state_dir, workspace, artifact_get_enabled = sys.argv[1:]
 with open(os.path.join(state_dir, "status.json"), "r", encoding="utf-8") as f:
     status = json.load(f)
 with open(os.path.join(state_dir, "result.json"), "r", encoding="utf-8") as f:
     result = json.load(f)
 with open(os.path.join(state_dir, "artifacts.json"), "r", encoding="utf-8") as f:
     artifacts = json.load(f)
-with open(os.path.join(state_dir, "artifact-get.json"), "r", encoding="utf-8") as f:
-    artifact_get = json.load(f)
 
 assert status["event"]["state"] == "halted"
 assert status["verification"]["ok"] is True
@@ -257,11 +267,14 @@ assert result["result"]["identity"]["runtimeID"] == workspace
 assert result["result"]["exitCode"] == 0
 assert artifacts["artifacts"]["ingress"][0]["name"] == "config"
 assert artifacts["artifacts"]["egress"][0]["name"] == "report"
-assert artifact_get["artifact"] == "report"
-assert artifact_get["disk"] == "workspace"
-with open(os.path.join(state_dir, "out", "report.json"), "r", encoding="utf-8") as f:
-    body = json.load(f)
-assert body["artifact"] == "report"
+if artifact_get_enabled == "1":
+    with open(os.path.join(state_dir, "artifact-get.json"), "r", encoding="utf-8") as f:
+        artifact_get = json.load(f)
+    assert artifact_get["artifact"] == "report"
+    assert artifact_get["disk"] == "workspace"
+    with open(os.path.join(state_dir, "out", "report.json"), "r", encoding="utf-8") as f:
+        body = json.load(f)
+    assert body["artifact"] == "report"
 PY
 
 echo "runtime contract smoke passed"

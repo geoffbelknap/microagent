@@ -40,6 +40,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				ShellNetwork:         "hvsock",
 				ShellReadinessProbe:  true,
 				SCSIBlockDevices:     true,
+				GuestMediatedCopy:    true,
 			},
 		},
 	}

@@ -8,8 +8,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # image layout (the reverse of OCI->rootfs). Registry push is not exercised here
 # (no registry dependency); the assemble + local-store path is.
 e2e_require_vm
-e2e_require_cmd debugfs "debugfs (e2fsprogs) is required for unprivileged rootfs extraction"
-e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
+if ! e2e_is_windows; then
+  # The ext4 lanes extract with debugfs; windows-hyperv commits through a
+  # guest maintenance boot over the exec channel instead.
+  e2e_require_cmd debugfs "debugfs (e2fsprogs) is required for unprivileged rootfs extraction"
+  e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
+fi
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -38,9 +42,17 @@ REF="local/microagent-e2e:committed"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    if [ -n "$SUPERVISOR" ]; then
+      "$CLI" kill "$WS" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+    else
+      "$CLI" kill "$WS" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    fi
     if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_COMMIT:-0}" != "1" ]; then
-      "$CLI" delete "$WS" --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      if [ -n "$SUPERVISOR" ]; then
+        "$CLI" delete "$WS" --force --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >/dev/null 2>&1 || true
+      else
+        "$CLI" delete "$WS" --force --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      fi
     fi
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
@@ -96,12 +108,34 @@ case "$BACKEND" in
     GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
     CREATE_FLAGS=(--backend apple-vf --kernel "$KERNEL" --guest-init "$GUEST_INIT" --size-mib 128 --result-port 0)
     ;;
+  windows-hyperv)
+    e2e_is_windows || e2e_skip "windows-hyperv commit-images E2E requires a Windows host"
+    e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
+    CLI="$STATE_DIR/microagent.exe"
+    GUEST_INIT="$STATE_DIR/microagent-guestinit"
+    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox:1.36}"
+    go build -buildvcs=false -o "$CLI" ./cmd/microagent
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
+    KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
+    if [ ! -r "$KERNEL" ]; then
+      "$CLI" kernel install || e2e_skip "windows-hyperv kernel install failed"
+    fi
+    # 512 MiB: the busybox VHD build needs the headroom; no supervisor
+    # binary exists on this backend.
+    CREATE_FLAGS=(--size-mib 512)
+    ;;
   *)
     e2e_skip "commit-images E2E does not support backend lane: $BACKEND"
     ;;
 esac
 
-run_cli() { "$CLI" "$@" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR"; }
+run_cli() {
+  if [ -n "$SUPERVISOR" ]; then
+    "$CLI" "$@" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR"
+  else
+    "$CLI" "$@" --state-dir "$STATE_DIR"
+  fi
+}
 # exec and commit operate without a supervisor handle.
 exec_ws() { ws="$1"; shift; "$CLI" exec "$ws" --state-dir "$STATE_DIR" "$@"; }
 commit_ws() { "$CLI" commit "$@" --state-dir "$STATE_DIR"; }

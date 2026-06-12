@@ -71,6 +71,9 @@ type hcsClient interface {
 	WaitComputeSystem(ctx context.Context, id string) error
 	ProbeComputeSystem(ctx context.Context, id string) error
 	GetComputeSystemStatistics(ctx context.Context, id string) (string, error)
+	// DescribeComputeSystem returns the base HCS properties document for a
+	// compute system (its State in particular) for teardown diagnostics.
+	DescribeComputeSystem(ctx context.Context, id string) (string, error)
 }
 
 func (s Supervisor) runtimeAdapter() runtimeAdapter {

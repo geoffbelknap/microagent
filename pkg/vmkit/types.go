@@ -95,6 +95,11 @@ type Config struct {
 	// Both zero means no model is paired.
 	ModelGuestPort uint16 `json:"modelGuestPort,omitempty"`
 	ModelVsockPort uint32 `json:"modelVsockPort,omitempty"`
+	// MaintenanceBoot asks the guest init to serve only the shell and exec
+	// channels — no service command, no secrets — so the host can perform
+	// guest-mediated file operations against an otherwise-stopped
+	// workspace and halt it again.
+	MaintenanceBoot bool `json:"maintenanceBoot,omitempty"`
 }
 
 type Disk struct {

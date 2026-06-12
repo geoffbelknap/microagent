@@ -106,6 +106,10 @@ type Options struct {
 	DryRun          bool
 	PrepareForStart bool
 	SerialInput     bool
+	// MaintenanceBoot boots the guest with only the shell and exec
+	// channels (no service command, no secrets) for guest-mediated file
+	// operations against an otherwise-stopped workspace.
+	MaintenanceBoot bool
 	Verification    *vmkit.RuntimeVerification
 	Progress        rootfs.ProgressFunc
 	UseImageCommand bool
@@ -872,6 +876,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			GuestShellPort:     opts.GuestShellPort,
 			GuestExecPort:      opts.GuestExecPort,
 			SerialInput:        opts.SerialInput,
+			MaintenanceBoot:    opts.MaintenanceBoot,
 			TimeoutSeconds:     int(opts.Timeout.Seconds()),
 			ModelGuestPort:     modelGuestPort,
 			ModelVsockPort:     modelVsockPort,

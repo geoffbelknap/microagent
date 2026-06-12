@@ -138,6 +138,12 @@ func (a defaultAdapter) Delete(ctx context.Context, id string) error {
 	return a.hcsClient().DeleteComputeSystem(ctx, id)
 }
 
+// DescribeComputeSystem reports the raw HCS properties of a compute system
+// for teardown diagnostics.
+func (a defaultAdapter) DescribeComputeSystem(ctx context.Context, id string) (string, error) {
+	return a.hcsClient().DescribeComputeSystem(ctx, id)
+}
+
 func (a defaultAdapter) Exists(ctx context.Context, id string) (bool, error) {
 	err := a.hcsClient().ProbeComputeSystem(ctx, id)
 	if err == nil {
@@ -319,6 +325,9 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	// Firecracker-only. The host never dials the guest control port here.
 	if spec.Config.ModelGuestPort != 0 && spec.Config.ModelVsockPort != 0 {
 		kernelCmdLine += fmt.Sprintf(" microagent_model_fwd=%d:%d", spec.Config.ModelGuestPort, spec.Config.ModelVsockPort)
+	}
+	if spec.Config.MaintenanceBoot {
+		kernelCmdLine += " microagent_maintenance=1"
 	}
 	// The HNS endpoint assigned the guest its address, but the synthetic
 	// NIC (hv_netvsc) comes up unconfigured: tell the guest its static

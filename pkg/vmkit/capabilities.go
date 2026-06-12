@@ -33,6 +33,12 @@ type Capabilities struct {
 	// SCSIBlockDevices reports whether guest disks enumerate as SCSI
 	// devices (/dev/sdX) instead of virtio (/dev/vdX).
 	SCSIBlockDevices bool
+	// GuestMediatedCopy reports that the host cannot read the workspace
+	// filesystem directly (no ext4 tooling for the disk format) and copy,
+	// artifact extraction, and commit ride the guest's structured exec
+	// channel instead, using a transient maintenance boot for stopped
+	// workspaces.
+	GuestMediatedCopy bool
 }
 
 // BackendCapabilities returns the capability table entry for a backend.
@@ -67,6 +73,7 @@ func BackendCapabilities(backend string) Capabilities {
 			ShellNetwork:         "hvsock",
 			ShellReadinessProbe:  true,
 			SCSIBlockDevices:     true,
+			GuestMediatedCopy:    true,
 		}
 	default:
 		return Capabilities{}

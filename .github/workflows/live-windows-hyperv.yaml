@@ -103,7 +103,7 @@ jobs:
           scripts/dev/microagent-e2e.sh
           coverage-matrix contract help-usage mcp-stdio registry-auth
           text-output init public-surface lifecycle-deep networking-deep
-          transport-deep secrets
+          transport-deep secrets commit-images
           windows-hyperv-lifecycle-host windows-hyperv-connect-host
           windows-hyperv-exec-host windows-hyperv-transport-host
           windows-hyperv-model-host

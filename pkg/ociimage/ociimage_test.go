@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -28,6 +29,12 @@ func stageTree(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if err := os.Symlink("/etc/hostname", filepath.Join(dir, "link")); err != nil {
+		if runtime.GOOS == "windows" {
+			// Symlink creation needs a privilege (or Developer Mode) on
+			// Windows; the staged-tree tests are about tar assembly, not
+			// host symlink rights.
+			t.Skipf("symlink creation is not permitted on this host: %v", err)
+		}
 		t.Fatal(err)
 	}
 	return dir
