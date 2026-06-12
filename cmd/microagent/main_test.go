@@ -3538,6 +3538,12 @@ func TestArtifactGetMapsOutputUnderAttachedDiskMount(t *testing.T) {
 }
 
 func TestRunArtifactGetCommand(t *testing.T) {
+	if vmkit.BackendCapabilities(workspace.HostBackend()).GuestMediatedCopy {
+		// This test exercises the debugfs CLI plumbing with a fake binary;
+		// on guest-mediated hosts the copy rides a real maintenance boot,
+		// covered by the workspace guest-copy tests and the live lanes.
+		t.Skip("host backend uses guest-mediated copy")
+	}
 	outputFormat = "json"
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
@@ -3993,6 +3999,12 @@ func TestCopyWorkspaceFileRejectsTwoRemoteEndpoints(t *testing.T) {
 }
 
 func TestRunCPCommand(t *testing.T) {
+	if vmkit.BackendCapabilities(workspace.HostBackend()).GuestMediatedCopy {
+		// This test exercises the debugfs CLI plumbing with a fake binary;
+		// on guest-mediated hosts the copy rides a real maintenance boot,
+		// covered by the workspace guest-copy tests and the live lanes.
+		t.Skip("host backend uses guest-mediated copy")
+	}
 	outputFormat = ""
 	t.Cleanup(func() { outputFormat = "" })
 	dir := t.TempDir()
