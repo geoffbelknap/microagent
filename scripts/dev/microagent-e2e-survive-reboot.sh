@@ -135,14 +135,15 @@ case "$(uname -s)" in
       grep -q "<Arguments>supervise $WS" "$UNIT" && grep -q "<LogonTrigger>" "$UNIT"
     }
     # On Windows the boot unit is a Scheduled Task XML registered with
-    # `schtasks /Create`. Registration needs an elevated token: this shell is
-    # NOT elevated and hosted CI runners typically are not either, so the
-    # `/Create` step returns "Access is denied" and the install reports
-    # enabled=false. That is the honest, fail-open contract — the XML is still
-    # written and the enable/disable commands are surfaced for manual use. We
-    # therefore assert the unit XML shape plus the schtasks enable command
-    # rather than a successful registration round-trip. If a future elevated
-    # runner registers the task, enabled=true is also accepted.
+    # `schtasks /Create`, which needs an elevated token. Both outcomes are
+    # valid and both are asserted honestly:
+    #   - elevated host (hosted CI runners run elevated): registration
+    #     succeeds, enabled=true, and no manual command is needed — the
+    #     uninstall below proves the /Delete round-trip.
+    #   - unelevated host (this dev shell): `/Create` returns "Access is
+    #     denied", enabled=false, and the install must surface the manual
+    #     `schtasks /Create /TN <label> /XML <file> /F` command alongside the
+    #     written unit file (fail-open contract).
     assert_install_json() {
       python3 - "$STATE_DIR/install.json" "$UNIT" <<'PY'
 import json
@@ -153,14 +154,20 @@ with open(sys.argv[1], "r", encoding="utf-8") as handle:
 label = "microagent-supervise-reboot-survivor"
 if data.get("installed") != label:
     raise SystemExit(f"install label = {data.get('installed')!r}, want {label!r}")
+enabled = data.get("enabled")
+if enabled is True:
+    # Elevated host: the registration round-trip succeeded; no manual
+    # command is expected in the JSON.
+    raise SystemExit(0)
+if enabled is not False:
+    raise SystemExit(f"unexpected enabled value: {enabled!r}")
+# Unelevated host: the denied registration must surface the manual command.
 enable = data.get("enable_command", "")
 for token in ("schtasks", "/Create", "/TN", label, "/XML", "/F"):
     if token not in enable:
         raise SystemExit(f"enable_command missing {token!r}: {enable!r}")
-# Either registration succeeded (elevated) or it was denied (unelevated);
-# both are valid. A denied install must still report the manual command.
-if data.get("enabled") not in (True, False):
-    raise SystemExit(f"unexpected enabled value: {data.get('enabled')!r}")
+if not data.get("enable_error"):
+    raise SystemExit(f"enabled=false without enable_error: {data!r}")
 PY
     }
     ;;
