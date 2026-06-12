@@ -340,6 +340,7 @@ func TestTerminalWindowsHyperVControlToleratesMissingComputeSystem(t *testing.T)
 			adapter := &fakeAdapter{
 				shutdownErr: fmt.Errorf("windows-hyperv HCS shutdown open: A virtual machine or container with the specified identifier does not exist."),
 				killErr:     fmt.Errorf("windows-hyperv HCS kill open: A virtual machine or container with the specified identifier does not exist."),
+				gone:        true,
 			}
 			controlReq := req
 			controlReq.Command = tt.command
@@ -348,6 +349,71 @@ func TestTerminalWindowsHyperVControlToleratesMissingComputeSystem(t *testing.T)
 				t.Fatalf("%s resp=%#v err=%v", tt.command, resp, err)
 			}
 		})
+	}
+}
+
+func writeRunningStateForControl(t *testing.T) (vmkit.Request, string) {
+	t.Helper()
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateRunning, "running", "", "fake", "11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	return req, stateDir
+}
+
+func shortenTeardownWindows(t *testing.T) {
+	t.Helper()
+	oldGrace, oldTimeout, oldPoll := computeSystemShutdownGrace, computeSystemTeardownTimeout, computeSystemTeardownPollInterval
+	computeSystemShutdownGrace, computeSystemTeardownTimeout, computeSystemTeardownPollInterval = 100*time.Millisecond, 200*time.Millisecond, 10*time.Millisecond
+	t.Cleanup(func() {
+		computeSystemShutdownGrace, computeSystemTeardownTimeout, computeSystemTeardownPollInterval = oldGrace, oldTimeout, oldPoll
+	})
+}
+
+func TestHaltEscalatesToTerminateWhenGuestIgnoresShutdown(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	shortenTeardownWindows(t)
+	req, _ := writeRunningStateForControl(t)
+	adapter := &fakeAdapter{shutdownIgnored: true}
+	controlReq := req
+	controlReq.Command = "halt"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), controlReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateHalted {
+		t.Fatalf("halt resp=%#v err=%v", resp, err)
+	}
+	if adapter.shutdowns != 1 || adapter.kills != 1 {
+		t.Fatalf("shutdowns=%d kills=%d, want graceful attempt then terminate escalation", adapter.shutdowns, adapter.kills)
+	}
+}
+
+func TestHaltFailsClosedWhenComputeSystemNeverUnregisters(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	shortenTeardownWindows(t)
+	req, _ := writeRunningStateForControl(t)
+	adapter := &fakeAdapter{neverGone: true}
+	controlReq := req
+	controlReq.Command = "halt"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), controlReq)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "still registered") {
+		t.Fatalf("halt resp=%#v err=%v, want still-registered failure", resp, err)
 	}
 }
 
@@ -1090,7 +1156,11 @@ type fakeAdapter struct {
 	startErr    error
 	deleteErr   error
 	gone        bool
-	existsErr   error
+	neverGone   bool
+	// shutdownIgnored models a guest with no shutdown integration: the HCS
+	// shutdown call succeeds but the compute system stays registered.
+	shutdownIgnored bool
+	existsErr       error
 }
 
 func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
@@ -1141,6 +1211,13 @@ func (f *fakeAdapter) Shutdown(ctx context.Context, id string) error {
 	if f.shutdownErr != nil {
 		return f.shutdownErr
 	}
+	// A successful teardown unregisters the compute system (the real HCS
+	// does this asynchronously; the fake does it instantly unless the test
+	// models a system that never disappears or a guest that ignores the
+	// shutdown request).
+	if !f.neverGone && !f.shutdownIgnored {
+		f.gone = true
+	}
 	return nil
 }
 
@@ -1150,6 +1227,9 @@ func (f *fakeAdapter) Kill(ctx context.Context, id string) error {
 	if f.killErr != nil {
 		return f.killErr
 	}
+	if !f.neverGone {
+		f.gone = true
+	}
 	return nil
 }
 
@@ -1158,6 +1238,9 @@ func (f *fakeAdapter) Delete(ctx context.Context, id string) error {
 	f.deleteID = id
 	if f.deleteErr != nil {
 		return f.deleteErr
+	}
+	if !f.neverGone {
+		f.gone = true
 	}
 	return nil
 }

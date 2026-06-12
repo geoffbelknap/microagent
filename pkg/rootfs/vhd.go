@@ -19,12 +19,18 @@ type stageModeRecord struct {
 	Mode int64  `json:"mode"`
 }
 
-func writeStageTar(stageDir string, tw *tar.Writer) error {
+// writeStageTar streams the stage tree to tw and returns an estimate of the
+// data bytes the resulting filesystem will hold (file sizes rounded up to
+// 4 KiB blocks). Hard-linked stage files are emitted as tar hard links so
+// images that link heavily (busybox applets) do not explode into copies.
+func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
 	modes, err := readStageModes(stageDir)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return filepath.WalkDir(stageDir, func(hostPath string, entry os.DirEntry, err error) error {
+	var contentBytes int64
+	hardLinks := map[string]string{}
+	walkErr := filepath.WalkDir(stageDir, func(hostPath string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -68,6 +74,18 @@ func writeStageTar(stageDir string, tw *tar.Writer) error {
 				}
 				return tw.WriteHeader(header)
 			}
+			if id, linked := stageHardLinkID(hostPath, info); linked {
+				if first, seen := hardLinks[id]; seen {
+					return tw.WriteHeader(&tar.Header{
+						Name:     name,
+						Typeflag: tar.TypeLink,
+						Linkname: first,
+						Mode:     int64(info.Mode().Perm()),
+						ModTime:  info.ModTime(),
+					})
+				}
+				hardLinks[id] = name
+			}
 		}
 		header, err := tar.FileInfoHeader(info, link)
 		if err != nil {
@@ -86,6 +104,7 @@ func writeStageTar(stageDir string, tw *tar.Writer) error {
 		if !info.Mode().IsRegular() {
 			return nil
 		}
+		contentBytes += (header.Size + 4095) &^ 4095
 		in, err := os.Open(hostPath)
 		if err != nil {
 			return err
@@ -96,6 +115,7 @@ func writeStageTar(stageDir string, tw *tar.Writer) error {
 		}
 		return in.Close()
 	})
+	return contentBytes, walkErr
 }
 
 func writeSymlinkMarker(path, target string) error {

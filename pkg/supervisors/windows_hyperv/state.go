@@ -19,6 +19,82 @@ import (
 
 const clearVsockListenerPID = -1
 
+// HCS shutdown/terminate calls return once the operation is initiated, not
+// when the compute system is unregistered. Terminal controls wait for the
+// system to actually disappear so an immediate restart cannot collide with
+// the old registration ("identifier already exists"). Variables so tests
+// can shorten the bounds.
+var (
+	computeSystemShutdownGrace        = 15 * time.Second
+	computeSystemTeardownTimeout      = 30 * time.Second
+	computeSystemTeardownPollInterval = 200 * time.Millisecond
+)
+
+// waitForComputeSystemGone polls the HCS Exists probe until the compute
+// system is unregistered or the timeout elapses.
+func (s Supervisor) waitForComputeSystemGone(ctx context.Context, id string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		exists, err := s.runtimeAdapter().Exists(ctx, id)
+		if err == nil && !exists {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("compute system %s teardown probe: %w", id, err)
+			}
+			return fmt.Errorf("compute system %s is still registered after teardown", id)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(computeSystemTeardownPollInterval):
+		}
+	}
+}
+
+// teardownComputeSystem brings a compute system fully out of HCS
+// registration. graceful first asks the guest to power off and gives it a
+// bounded grace window — guests that ignore the request (no shutdown
+// integration, init without power-signal handling) are then terminated,
+// like every container runtime's stop semantics. A system that survives
+// terminate fails the control instead of recording a terminal state the
+// host does not match.
+func (s Supervisor) teardownComputeSystem(ctx context.Context, id string, graceful bool) error {
+	if graceful {
+		err := s.runtimeAdapter().Shutdown(ctx, id)
+		if err != nil && isMissingComputeSystem(err) {
+			return nil
+		}
+		if err == nil {
+			if waitErr := s.waitForComputeSystemGone(ctx, id, computeSystemShutdownGrace); waitErr == nil {
+				return nil
+			}
+		} else if !isHCSShutdownUnsupported(err) {
+			return err
+		}
+	}
+	if err := s.runtimeAdapter().Kill(ctx, id); err != nil {
+		if isMissingComputeSystem(err) {
+			return nil
+		}
+		return err
+	}
+	return s.waitForComputeSystemGone(ctx, id, computeSystemTeardownTimeout)
+}
+
+// isHCSShutdownUnsupported reports HCS errors that mean the compute system
+// cannot take a guest shutdown request (no integration components running);
+// the caller escalates to terminate instead of failing.
+func isHCSShutdownUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "not supported") || strings.Contains(text, "0x80070032") ||
+		strings.Contains(text, "integration services") || strings.Contains(text, "0xc0370110")
+}
+
 type eventFile struct {
 	Identity   vmkit.Identity `json:"identity"`
 	State      vmkit.VMState  `json:"state"`
@@ -219,13 +295,8 @@ func (s Supervisor) stop(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if state.ComputeSystemID == "" {
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateStopped, "windows-hyperv compute system stopped")
 	}
-	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
-		// A compute system that is already gone (the guest exited on its own,
-		// or a previous control already tore it down) means the goal of this
-		// control is achieved; only a real HCS error fails the transition.
-		if !isMissingComputeSystem(err) {
-			return failRun(req, vmkit.StateFailed, fmt.Sprintf("stop failed: %s", err), err)
-		}
+	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, true); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("stop failed: %s", err), err)
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
@@ -246,13 +317,8 @@ func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if state.ComputeSystemID == "" {
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateHalted, "windows-hyperv compute system halted")
 	}
-	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
-		// A compute system that is already gone (the guest exited on its own,
-		// or a previous control already tore it down) means the goal of this
-		// control is achieved; only a real HCS error fails the transition.
-		if !isMissingComputeSystem(err) {
-			return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
-		}
+	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, true); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
@@ -292,13 +358,8 @@ func (s Supervisor) kill(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if state.ComputeSystemID == "" {
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateStopped, "windows-hyperv compute system killed")
 	}
-	if err := s.runtimeAdapter().Kill(ctx, state.ComputeSystemID); err != nil {
-		// A compute system that is already gone (the guest exited on its own,
-		// or a previous control already tore it down) means the goal of this
-		// control is achieved; only a real HCS error fails the transition.
-		if !isMissingComputeSystem(err) {
-			return failRun(req, vmkit.StateFailed, fmt.Sprintf("kill failed: %s", err), err)
-		}
+	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, false); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("kill failed: %s", err), err)
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
@@ -321,6 +382,8 @@ func (s Supervisor) delete(ctx context.Context, req vmkit.Request) (vmkit.Respon
 			if !isMissingComputeSystem(err) {
 				return failRun(req, vmkit.StateFailed, fmt.Sprintf("delete failed: %s", err), err)
 			}
+		} else if err := s.waitForComputeSystemGone(ctx, state.ComputeSystemID, computeSystemTeardownTimeout); err != nil {
+			return failRun(req, vmkit.StateFailed, fmt.Sprintf("delete failed: %s", err), err)
 		}
 		if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
 			return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)

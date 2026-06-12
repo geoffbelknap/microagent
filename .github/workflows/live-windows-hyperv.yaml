@@ -28,7 +28,9 @@ jobs:
     # GitHub-hosted Windows runners ship with the Hyper-V role active and the
     # HCS services (vmms/vmcompute) running.
     runs-on: windows-latest
-    timeout-minutes: 45
+    # lifecycle-deep adds several full VHD boots to the lane; headroom over
+    # the observed runtime keeps slow hosted runners from flaking the job.
+    timeout-minutes: 60
     env:
       MICROAGENT_WINDOWS_HYPERV_IMAGE: ${{ inputs.image || 'docker.io/library/busybox:1.36' }}
       MICROAGENT_WINDOWS_HYPERV_GUESTINIT: ${{ github.workspace }}\.build\libexec\microagent-guestinit-amd64
@@ -100,6 +102,6 @@ jobs:
         run: >-
           scripts/dev/microagent-e2e.sh
           coverage-matrix contract help-usage mcp-stdio registry-auth
-          text-output init public-surface transport-deep
+          text-output init public-surface lifecycle-deep transport-deep
           windows-hyperv-lifecycle-host windows-hyperv-connect-host
           windows-hyperv-exec-host windows-hyperv-transport-host

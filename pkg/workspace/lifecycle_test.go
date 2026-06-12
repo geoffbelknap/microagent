@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -305,6 +306,32 @@ func TestStatusNonLiveStatesUseFastReadinessAndRecordedRootfs(t *testing.T) {
 				t.Fatalf("result readiness = %#v, want fast unavailable detail", resp.Readiness.ResultReady)
 			}
 		})
+	}
+}
+
+func TestStatusMissingWorkspaceReturnsNotFound(t *testing.T) {
+	_, err := Status(Options{Name: "no-such-workspace", StateDir: t.TempDir(), Backend: HostBackend()})
+	var notFound WorkspaceNotFoundError
+	if !errors.As(err, &notFound) || notFound.Name != "no-such-workspace" {
+		t.Fatalf("Status err = %v, want WorkspaceNotFoundError", err)
+	}
+}
+
+func TestStatusMalformedRuntimeStateIsNotNotFound(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent", "runtime.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Status(Options{Name: "agent", StateDir: dir, Backend: HostBackend()})
+	if err == nil {
+		t.Fatal("Status err = nil, want malformed-state error")
+	}
+	var notFound WorkspaceNotFoundError
+	if errors.As(err, &notFound) {
+		t.Fatalf("Status err = %v, want corrupt state surfaced, not WorkspaceNotFoundError", err)
 	}
 }
 

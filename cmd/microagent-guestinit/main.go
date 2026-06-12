@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -87,6 +88,25 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
+	// The VHD rootfs builder reserves guest-writable space as a zero-filled
+	// file because tar2ext4 sizes filesystems to their content with no free
+	// blocks; deleting it on first boot releases that space to the guest.
+	// Absent on ext4-lane backends and on every boot after the first.
+	if err := os.Remove("/.microagent-reserved-space"); err != nil && !os.IsNotExist(err) {
+		log.Printf("microagent-init: remove reserved-space file: %v", err)
+	}
+	// As PID 1, honor the init power-signal protocol: the kernel's
+	// orderly_poweroff helper (busybox poweroff/halt/reboot) signals init
+	// rather than calling reboot(2) itself. Without this, host-initiated
+	// graceful shutdown (Hyper-V shutdown integration, ACPI-less microVMs)
+	// is silently ignored and the guest keeps running.
+	go func() {
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, unix.SIGUSR1, unix.SIGUSR2, unix.SIGTERM)
+		sig := <-signals
+		log.Printf("microagent-init: received %s; powering off", sig)
+		poweroff()
+	}()
 	if err := ensureGuestDevices(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
