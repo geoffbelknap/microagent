@@ -5,6 +5,19 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv survive-reboot E2E (P6)
+
+- The `survive-reboot` E2E scenario gains a windows-hyperv arm and joins the
+  live workflow. It proves `supervise --install`/`--uninstall` generate and
+  remove the boot unit. On Windows the boot unit is a Scheduled Task XML and
+  registration via `schtasks /Create` requires an elevated token, which neither
+  this dev shell nor hosted CI runners hold; the scenario therefore asserts the
+  unit XML shape plus the `schtasks /Create /TN <label> /XML <file> /F` enable
+  command and accepts the honest `enabled=false` gating (an elevated runner that
+  registers the task and reports `enabled=true` is also accepted). The install
+  step now reads structured `--json` output to assert the enable-command
+  contract.
+
 ### windows-hyperv exec-stream and health E2E (P6)
 
 - The `exec-stream` and `health` E2E scenarios gain a windows-hyperv arm and
