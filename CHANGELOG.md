@@ -5,9 +5,98 @@ been cut into a release yet.
 
 ## Unreleased
 
-- Local builds now report the latest stable version plus the source SHA, for
-  example `0.1.46-8780315-dirty`, so they are easy to distinguish from stable
-  Homebrew builds.
+## v0.8.0 - 2026-06-12
+
+This release moves microagent from the 0.1.x line to 0.8.x. The jump reflects
+where the project actually is: 0.8.x is the mature pre-1.0 development line,
+and 0.9.x is reserved for stabilization and 1.0 readiness. The version jump
+itself changes no behavior. Minor releases may still include breaking changes
+before 1.0; they are called out explicitly below.
+
+### Workspace model pairing
+
+- Workspaces can now be paired with a local model at creation: `create
+  --model` (or `model:` in a workspace spec) resolves the model, pulls it if
+  missing, ensures a host-side runner, and bakes
+  `MICROAGENT_MODEL_URL`/`OPENAI_BASE_URL` into the guest env so the pairing
+  survives across boots. The canonical model ref is persisted in the spec,
+  manifest, and workspace options.
+- `start` re-pairs from the manifest on every boot, auto-pulling a missing
+  blob the way `run` does. `halt`/`stop`/`kill`/`delete` release the
+  workspace's runner holder on success.
+- `supervise` re-pairs the manifest model before every supervised boot,
+  including policy restarts — previously a policy-driven restart of a paired
+  workspace came back without a model runner and a dead
+  `MICROAGENT_MODEL_URL`.
+- Model pairing is exposed on the MCP `workspace.create` tool.
+
+### Fixes
+
+- Companion processes (vsock listener, port forwarder) no longer leak when a
+  detached user-network workspace's guest exits on its own. The foreground
+  exit path reaps recorded companion PIDs before the final state write,
+  companions bound their own lifetime to the workspace state, and `delete` is
+  refused while recorded companions are still alive even when the VM process
+  entry is a dead PID. Previously the companions and the published port
+  binding leaked forever.
+- Snapshotting a running workspace (and pause/resume) no longer drops runtime
+  config fields from `runtime.json`. State rewrites previously copied a
+  hand-picked field list that predated shell/exec ports, secrets wiring, and
+  model pairing, so exec and shell failed after a snapshot until the next
+  halt/start. The request config is now rebuilt from the recorded state
+  wholesale.
+- `create --setup` no longer loses the OCI image env on later boots. The
+  setup boot's guest-config reset previously carried operator env only, so
+  setup-created workspaces lost the image `PATH` and exec failed with
+  exit 127. The reset is now composed in the rootfs builder with the same
+  merged image + request env as the initial guest config.
+- `exec` no longer scans the guest command's argv after the `--` separator
+  for help flags: `exec ws -- psql -h x` runs `psql` in the guest instead of
+  printing the microagent exec usage. Only CLI-side arguments trigger help.
+- The guest now gets the standard `/dev/fd` -> `/proc/self/fd` symlink plus
+  `/dev/stdin`, `/dev/stdout`, and `/dev/stderr`. Stock entrypoints using
+  bash process substitution worked incorrectly before — the official postgres
+  image died in `initdb` with "could not open file /dev/fd/63".
+- `create <name> --secret/--secrets-env-file/--secret-on-demand <value>`
+  argument reordering: the flag reorder tables now know these flags take
+  values (and that `--secrets-audit` is boolean), so flag-after-name
+  invocations no longer fail with "unexpected create argument".
+
+### CLI and install
+
+- `serve mcp` launched from an interactive terminal now prints MCP client
+  setup guidance instead of waiting silently for stdio frames.
+  **Breaking:** `serve mcp` is deliberately no longer listed in CLI help —
+  it is launched by MCP clients, not typed interactively. The command itself
+  is unchanged.
+- Local builds made with `scripts/dev/build-local.sh` now report the latest
+  stable version plus the source SHA, for example `0.8.0-8780315-dirty`, so
+  they are easy to distinguish from stable Homebrew builds.
+- Source installs are friendlier: the Makefile and install docs cover the
+  full from-source flow, and `microagent version` distinguishes dev builds.
+
+### Library
+
+- **Breaking:** `workspace.ResetGuestConfigCommand` is removed; rootfs
+  `BuildRequest` gains `ResetFinalConfig`/`FinalCommand`/`FinalMode` and the
+  workspace layer reports the final command and mode via the new
+  `FinalCommandAndMode` helper.
+- `SuperviseOptions.BeforeStart` is invoked before every supervised boot
+  (initial and each policy restart); a hook error is treated as a failed
+  start and follows the restart policy.
+
+### Docs and examples
+
+- The docs site was rewritten end to end: new quickstart and "coming from
+  Docker" getting-started pages, decision-first concept pages, a CLI
+  reference covering every command, six new task guides, and a first-agent
+  tutorial that follows the real start/status/result flow.
+  **Breaking:** the `recipes/` docs section moved to `guides/`, so old
+  recipe URLs no longer resolve.
+- **Breaking:** the examples were renamed from "body" to "agent" terminology:
+  `examples/minimal-body*` -> `examples/minimal-agent*`, `body.py` ->
+  `agent.py`. The OpenAI example now reads `OPENAI_MODEL` and relies on the
+  SDK's base-url env.
 
 ## v0.1.46 - 2026-06-10
 
