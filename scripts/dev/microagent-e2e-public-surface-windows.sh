@@ -20,6 +20,7 @@ done
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-public-surface-whv.XXXXXX")"
 CLI="$STATE_DIR/microagent.exe"
 WORKSPACE="public-surface-whv"
+PERF_WORKSPACE="public-perf-whv"
 KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_PUBLIC_SURFACE:-0}"
 IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f}"
 KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
@@ -27,8 +28,10 @@ KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    "$CLI" kill "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-    "$CLI" delete "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    for workspace in "$WORKSPACE" "$PERF_WORKSPACE"; do
+      "$CLI" kill "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$workspace" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+    done
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   if [ "$status" -eq 0 ] && [ "$KEEP_VAR" != "1" ]; then
@@ -128,6 +131,76 @@ e2e_step "images and prune surfaces"
 "$CLI" images list --state-dir "$STATE_DIR" >"$STATE_DIR/images.json"
 json_get "$STATE_DIR/images.json" images >/dev/null
 "$CLI" prune --state-dir "$STATE_DIR" >"$STATE_DIR/prune.json"
+
+e2e_step "perf footprint and steady sample HCS statistics on a running workspace"
+"$CLI" create "$PERF_WORKSPACE" --image "$IMAGE" --network isolated --size-mib 512 \
+  --service-command "sleep 300" --guest-init "$GUEST_INIT" --state-dir "$STATE_DIR" >"$STATE_DIR/create-perf.json"
+"$CLI" start "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/start-perf.json"
+perf_ready_deadline="$((SECONDS + 60))"
+while true; do
+  if "$CLI" --json status "$PERF_WORKSPACE" --state-dir "$STATE_DIR" 2>/dev/null \
+    | python3 -c 'import json,sys; s=json.load(sys.stdin); r=s.get("readiness") or {}; sys.exit(0 if (s.get("event") or {}).get("state")=="running" and (r.get("execReady") or {}).get("ready") else 1)'; then
+    break
+  fi
+  if [ "$SECONDS" -ge "$perf_ready_deadline" ]; then
+    echo "perf workspace never became running+ready" >&2
+    exit 1
+  fi
+  sleep 1
+done
+# windows-hyperv has no host guest PID; footprint/steady read HCS statistics.
+"$CLI" --json perf footprint "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/perf-footprint.json"
+python3 - "$STATE_DIR/perf-footprint.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+if d.get("rss_kib", 0) <= 0 or d.get("state") != "running" or d.get("backend") != "windows-hyperv":
+    raise SystemExit(f"footprint unexpected: {d}")
+PY
+"$CLI" --json perf steady "$PERF_WORKSPACE" --state-dir "$STATE_DIR" --duration 1 --interval 1 >"$STATE_DIR/perf-steady.json"
+python3 - "$STATE_DIR/perf-steady.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+if d.get("summary", {}).get("count", 0) < 1 or d.get("summary", {}).get("min_kib", 0) <= 0:
+    raise SystemExit(f"steady unexpected: {d}")
+PY
+"$CLI" kill "$PERF_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/kill-perf.json"
+"$CLI" delete "$PERF_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-perf.json"
+
+e2e_step "perf boot validation failures and isolated measured boots"
+expect_failure perf-boot-zero-iterations "iterations must be positive" \
+  "$CLI" --json perf boot --image "$IMAGE" --profile tiny --network isolated \
+  --state-dir "$STATE_DIR/perf-zero-iterations" --exec "true" --iterations 0 --timeout 90
+expect_failure perf-boot-zero-timeout "timeout must be positive" \
+  "$CLI" --json perf boot --image "$IMAGE" --profile tiny --network isolated \
+  --state-dir "$STATE_DIR/perf-zero-timeout" --exec "true" --iterations 1 --timeout 0
+"$CLI" --json perf boot --image "$IMAGE" --profile definitely-not-a-profile --network isolated \
+  --state-dir "$STATE_DIR/perf-invalid-profile" --exec "true" --iterations 1 --timeout 90 >"$STATE_DIR/perf-invalid-profile.json"
+python3 - "$STATE_DIR/perf-invalid-profile.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+if d.get("summary", {}).get("count") != 1 or d.get("iterations", [])[0].get("ok") is not False:
+    raise SystemExit(f"invalid-profile boot unexpected: {d}")
+if "unknown resource profile" not in d.get("iterations", [])[0].get("error", ""):
+    raise SystemExit(f"invalid-profile error unexpected: {d}")
+PY
+# Two real isolated boots: the tiny profile's 512 MiB rootfs covers the
+# busybox VHD build; isolated needs no HNS elevation on this host or CI.
+"$CLI" --json perf boot --image "$IMAGE" --profile tiny --network isolated \
+  --state-dir "$STATE_DIR" --exec "printf PERF_BOOT_OK" --iterations 2 --timeout 240 >"$STATE_DIR/perf-boot.json"
+python3 - "$STATE_DIR/perf-boot.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+summary = d.get("summary", {})
+iterations = d.get("iterations", [])
+if d.get("benchmark") != "boot" or summary.get("count") != 2 or len(iterations) != 2:
+    raise SystemExit(f"perf boot shape unexpected: {d}")
+if not all(item.get("ok") is True for item in iterations):
+    raise SystemExit(f"perf boot iteration failed: {d}")
+if not all(item.get("duration_ms", 0) > 0 for item in iterations):
+    raise SystemExit(f"perf boot durations unexpected: {d}")
+if summary.get("min_ms", 0) <= 0 or summary.get("avg_ms", 0) <= 0 or summary.get("max_ms", 0) < summary.get("min_ms", 0):
+    raise SystemExit(f"perf boot summary unexpected: {d}")
+PY
 
 e2e_step "delete cleans workspace state"
 "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null

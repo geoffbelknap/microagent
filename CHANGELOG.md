@@ -5,6 +5,29 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv mcp-lifecycle and perf parity (P6)
+
+- `perf footprint` and `perf steady` work against windows-hyperv workspaces.
+  The backend has no host guest PID (HCS owns the VM worker process), so the
+  memory sample comes from the HCS statistics properties that already back
+  `stats`, converted to the report's KiB unit; the report's `pid` stays 0.
+- `perf boot` gains `--network <mode>` (`perf.BootOptions.NetworkMode`) so
+  measured boots can run isolated; user/nat HNS setup needs elevation on
+  Windows hosts and a boot benchmark should not. Empty keeps the backend
+  default, so existing invocations are unchanged.
+- The MCP `workspace.create` tool gains an optional `network` argument
+  (mapped to `create --network`), letting MCP agents create isolated
+  workspaces on hosts without HNS elevation.
+- The `mcp-lifecycle` E2E scenario gains a windows-hyperv arm and joins the
+  live workflow: the full create/start/exec/halt/delete lifecycle driven
+  through MCP tool calls against a real VHD microVM with CLI parity
+  assertions. The windows arm passes host-native path forms into the python
+  driver (it spawns the CLI directly, outside Git Bash arg conversion) and
+  pins `network: isolated`.
+- The windows-hyperv public-surface scenario now exercises the perf
+  surfaces: footprint/steady against a running workspace (HCS statistics)
+  and `perf boot` validation failures plus two real isolated measured boots.
+
 ### windows-hyperv supervision parity: failed-state classification (P6)
 
 - A windows-hyperv guest that exits on its own with a non-zero result is now

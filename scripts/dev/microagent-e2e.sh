@@ -58,7 +58,7 @@ SCENARIO_COVERAGE=(
   "contract|portable|none|runtime contract, synthetic state/result/artifacts"
   "help-usage|portable|none|help, usage errors, unsupported container-style flags"
   "mcp-stdio|portable|none|serve mcp, initialize, tools/list, ping, describe"
-  "mcp-lifecycle|backend-neutral|firecracker,apple-vf|serve mcp workspace create/start/exec/halt/delete with CLI parity"
+  "mcp-lifecycle|backend-neutral|firecracker,apple-vf,windows-hyperv|serve mcp workspace create/start/exec/halt/delete with CLI parity"
   "registry-auth|portable|none|registry credentials and private OCI pull auth"
   "text-output|portable|none|human output mode for stable public CLI surfaces"
   "init|portable|none|init scaffold, providers, --force, generated spec validation"
@@ -123,11 +123,11 @@ E2E_MATRIX=(
   "supervise|backend-neutral|firecracker,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
   "snapshot/pause/resume|backend-specific|firecracker|firecracker-lifecycle-host|Memory snapshot and vCPU pause are Firecracker-only"
   "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving|Model store and run --model vsock pairing"
-  "perf|backend-neutral|firecracker,apple-vf|public-surface|Boot/steady/footprint surfaces where host supports sampling"
+  "perf|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
-  "serve mcp lifecycle|backend-neutral|firecracker,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
+  "serve mcp lifecycle|backend-neutral|firecracker,apple-vf,windows-hyperv|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
-  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,volumes,exec-stream,health,supervision-deep,survive-reboot,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host,windows-hyperv-model-host|Portable scenarios, public-surface, lifecycle-deep, networking-deep (HNS segments need elevation), transport-deep, secrets, commit-images, volumes, exec-stream, health, supervision-deep, survive-reboot (boot-unit generation; schtasks registration needs elevation), model-serving (env-gated), and windows-hyperv-*-host probes run under Git Bash"
+  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,mcp-lifecycle,volumes,exec-stream,health,supervision-deep,survive-reboot,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host,windows-hyperv-model-host|Portable scenarios, public-surface, lifecycle-deep, networking-deep (HNS segments need elevation), transport-deep, secrets, commit-images, volumes, exec-stream, health, supervision-deep, survive-reboot (boot-unit generation; schtasks registration needs elevation), mcp-lifecycle, perf (via public-surface), model-serving (env-gated), and windows-hyperv-*-host probes run under Git Bash"
 )
 
 usage() {
