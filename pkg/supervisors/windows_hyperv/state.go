@@ -744,6 +744,9 @@ func waitForExecBridge(ctx context.Context, req vmkit.Request) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	detail := fmt.Sprintf("structured exec bridge did not accept on %s within %s: %v", addr, execBridgeWaitTimeout, lastErr)
+	if executable, err := os.Executable(); err == nil {
+		detail = fmt.Sprintf("%s (the runtime listener helper runs %q --windows-hyperv-listener; detached starts must run from a microagent CLI binary)", detail, executable)
+	}
 	if log, err := os.ReadFile(filepath.Join(runtimeDir(req), "hvsock-listener.log")); err == nil {
 		if trimmed := strings.TrimSpace(string(log)); trimmed != "" {
 			lines := strings.Split(trimmed, "\n")

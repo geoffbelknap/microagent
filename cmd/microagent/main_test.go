@@ -4984,8 +4984,12 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("state dir: %s", stateDir)
+	// The detached start spawns the runtime listener helper (exec bridge)
+	// from the running executable, so start must go through the real CLI.
+	cliPath := filepath.Join(t.TempDir(), "microagent.exe")
+	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	workspaceOpts := workspace.Options{
 		Name:            "windows-hyperv-connect",
@@ -5009,24 +5013,34 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 	if err := workspace.WriteManifest(workspaceOpts); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
-	if _, err := workspace.Start(ctx, workspaceOpts); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
 	t.Cleanup(func() {
-		_, _ = workspace.Control(context.Background(), workspaceOpts, "stop")
-		_, _ = workspace.Control(context.Background(), workspaceOpts, "delete")
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", "windows-hyperv-connect", "--state-dir", stateDir)
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", "windows-hyperv-connect", "--state-dir", stateDir, "--yes")
 	})
+	runExternal(t, ctx, cliPath, "start", "windows-hyperv-connect", "--state-dir", stateDir, "--kernel", kernelPath)
 	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
-	status, err := workspace.Status(workspace.Options{
-		Name:     "windows-hyperv-connect",
-		Backend:  vmkit.BackendWindowsHyperV,
-		StateDir: stateDir,
-	})
-	if err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	if status.Readiness == nil || !status.Readiness.ShellReady.Ready {
-		t.Fatalf("shell readiness = %#v", status.Readiness)
+	// Shell readiness is probed over hv_sock, so allow the guest shell
+	// helper a bounded window to come up after the compute system starts.
+	readyDeadline := time.Now().Add(30 * time.Second)
+	for {
+		status, err := workspace.Status(workspace.Options{
+			Name:     "windows-hyperv-connect",
+			Backend:  vmkit.BackendWindowsHyperV,
+			StateDir: stateDir,
+		})
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if status.Readiness != nil && status.Readiness.ShellReady.Ready {
+			break
+		}
+		if time.Now().After(readyDeadline) {
+			logWindowsHyperVSmokeState(t, stateDir, "windows-hyperv-connect")
+			t.Fatalf("shell readiness = %#v", status.Readiness)
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	stdoutPath := filepath.Join(stateDir, "connect.out")
