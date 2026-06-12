@@ -14,6 +14,9 @@ case "$(uname -s)" in
   Linux)
     HOST_BACKEND="firecracker"
     ;;
+  MINGW*|MSYS*|CYGWIN*)
+    HOST_BACKEND="windows-hyperv"
+    ;;
   *)
     echo "runtime contract smoke requires macOS or Linux" >&2
     exit 1
@@ -62,6 +65,14 @@ for ((i=0; i<${#args[@]}; i++)); do
 done
 SH
 chmod +x "$DEBUGFS"
+if e2e_is_windows; then
+  # The CLI execs debugfs itself; Windows CreateProcess cannot run an
+  # extensionless bash script, so wrap the shim in a .bat trampoline.
+  mv "$DEBUGFS" "$DEBUGFS.sh"
+  printf '@bash "%s" %%*
+' "$(e2e_host_path "$DEBUGFS.sh")" >"$DEBUGFS.bat"
+  DEBUGFS="$DEBUGFS.bat"
+fi
 
 "$CLI" --json contract >"$STATE_DIR/contract.json"
 

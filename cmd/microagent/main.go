@@ -6073,15 +6073,27 @@ func parseWorkspaceVolumes(values []string) ([]workspaceDisk, error) {
 
 func parseWorkspaceVolume(raw string) (workspaceDisk, error) {
 	parts := strings.Split(raw, ":")
-	if len(parts) < 2 || len(parts) > 3 {
+	if len(parts) < 2 {
 		return workspaceDisk{}, fmt.Errorf("volume must be SRC:DST[:ro|rw]")
 	}
-	sourcePath := strings.TrimSpace(parts[0])
-	mountpoint := strings.TrimSpace(parts[1])
+	// Parse from the right: an optional ro|rw mode, then the guest mountpoint.
+	// The source may contain its own colon (a Windows drive-letter path such
+	// as C:\data), so everything left of the destination is the source.
 	mode := "rw"
-	if len(parts) == 3 {
-		mode = strings.TrimSpace(parts[2])
+	last := strings.TrimSpace(parts[len(parts)-1])
+	switch {
+	case last == "ro" || last == "rw":
+		mode = last
+		parts = parts[:len(parts)-1]
+	case len(parts) >= 3 && !strings.HasPrefix(last, "/") && strings.HasPrefix(strings.TrimSpace(parts[len(parts)-2]), "/"):
+		// SRC:/dst:<something> where <something> is not a guest path.
+		return workspaceDisk{}, fmt.Errorf("volume mode must be ro or rw")
 	}
+	if len(parts) < 2 {
+		return workspaceDisk{}, fmt.Errorf("volume must be SRC:DST[:ro|rw]")
+	}
+	mountpoint := strings.TrimSpace(parts[len(parts)-1])
+	sourcePath := strings.TrimSpace(strings.Join(parts[:len(parts)-1], ":"))
 	if sourcePath == "" {
 		return workspaceDisk{}, fmt.Errorf("volume source path is required")
 	}

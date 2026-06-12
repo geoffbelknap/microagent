@@ -3,7 +3,6 @@ package perf
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -187,11 +186,7 @@ func ProcessRSSKiB(pid int) (int64, error) {
 	if pid <= 0 {
 		return 0, fmt.Errorf("pid must be positive")
 	}
-	output, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return 0, fmt.Errorf("inspect pid %d rss: %w", pid, err)
-	}
-	return ParseRSSKiB(output)
+	return processRSSKiB(pid)
 }
 
 func ParseRSSKiB(output []byte) (int64, error) {

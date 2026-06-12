@@ -210,8 +210,9 @@ Environment:
     E2E image cache use for scenarios that support it.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
     for compatibility with older validation commands.
-  MICROAGENT_E2E_BACKEND=firecracker|applevf selects the backend lane for
-    backend-agnostic feature scenarios.
+  MICROAGENT_E2E_BACKEND=firecracker|applevf|windows-hyperv selects the backend
+    lane for backend-agnostic feature scenarios. Windows runs use Git Bash with
+    the windows-hyperv backend (Hyper-V role + HCS services).
   MICROAGENT_E2E_ALLOW_NETPRIV=1 opts the privileged networking lane in when you
     hold CAP_NET_ADMIN without uid 0 (file caps / capability-granting sandbox).
   MICROAGENT_E2E_HEARTBEAT=<seconds> sets the "still running" heartbeat interval
@@ -315,6 +316,9 @@ scenario_supported() {
       ;;
     darwin)
       [ "$(uname -s)" = "Darwin" ]
+      ;;
+    windows)
+      e2e_is_windows
       ;;
     *)
       return 1
@@ -497,7 +501,7 @@ have_vm=no; e2e_have_vm && have_vm=yes
 have_netpriv=no; e2e_have_netpriv && have_netpriv=yes
 is_wsl=no; e2e_is_wsl && is_wsl=yes
 printf 'microagent E2E preflight: os=%s arch=%s wsl=%s vm=%s netpriv=%s\n' \
-  "$(uname -s)" "$(uname -m)" "$is_wsl" "$have_vm" "$have_netpriv"
+  "$(e2e_friendly_os)" "$(uname -m)" "$is_wsl" "$have_vm" "$have_netpriv"
 if [ "$have_vm" = "no" ]; then
   printf '  (no microVM backend: vm/netpriv scenarios will SKIP. Run microagent doctor for details.)\n'
 fi

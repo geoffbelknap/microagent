@@ -15,6 +15,9 @@ case "$(uname -s)" in
   Linux)
     HOST_BACKEND="firecracker"
     ;;
+  MINGW*|MSYS*|CYGWIN*)
+    HOST_BACKEND="windows-hyperv"
+    ;;
   *)
     e2e_skip "unsupported host OS for microagent text output E2E: $(uname -s)"
     ;;
@@ -86,6 +89,12 @@ printf 'kernel' >"$kernel_path"
 printf 'rootfs' >"$rootfs_path"
 mkdir -p "$STATE_DIR/$WORKSPACE" "$STATE_DIR/workspaces/$WORKSPACE" "$STATE_DIR/images"
 
+# Paths embedded in seeded JSON must be host-native so the CLI can stat
+# them (Git Bash /tmp paths are invisible to the Windows CLI).
+json_state_dir="$(e2e_host_path "$STATE_DIR")"
+json_kernel_path="$(e2e_host_path "$kernel_path")"
+json_rootfs_path="$(e2e_host_path "$rootfs_path")"
+
 cat >"$STATE_DIR/workspaces/$WORKSPACE/workspace.json" <<JSON
 {
   "name": "$WORKSPACE",
@@ -113,7 +122,7 @@ cat >"$STATE_DIR/workspaces/$WORKSPACE/workspace.json" <<JSON
     "ingress": [
       {
         "name": "data",
-        "path": "$STATE_DIR/data.ext4",
+        "path": "$json_state_dir/data.ext4",
         "mountpoint": "/data",
         "mode": "rw"
       }
@@ -156,9 +165,9 @@ cat >"$STATE_DIR/$WORKSPACE/runtime.json" <<JSON
     "observedAt": "$now"
   },
   "config": {
-    "kernelPath": "$kernel_path",
-    "rootfsPath": "$rootfs_path",
-    "stateDir": "$STATE_DIR",
+    "kernelPath": "$json_kernel_path",
+    "rootfsPath": "$json_rootfs_path",
+    "stateDir": "$json_state_dir",
     "memoryMiB": 512,
     "cpuCount": 2,
     "network": {
@@ -175,8 +184,8 @@ cat >"$STATE_DIR/$WORKSPACE/runtime.json" <<JSON
       "routes": ["default"]
     }
   },
-  "pid": $$,
-  "serialLogPath": "$STATE_DIR/$WORKSPACE/serial.log",
+  "pid": $(e2e_host_pid),
+  "serialLogPath": "$json_state_dir/$WORKSPACE/serial.log",
   "startedAt": "$now",
   "updatedAt": "$now",
   "readiness": {
@@ -209,7 +218,7 @@ cat >"$STATE_DIR/images/index.json" <<JSON
         "os": "linux",
         "architecture": "$GUEST_ARCH"
       },
-      "output_path": "$rootfs_path",
+      "output_path": "$json_rootfs_path",
       "size_bytes": 6,
       "last_used_at": "$now"
     },
@@ -221,7 +230,7 @@ cat >"$STATE_DIR/images/index.json" <<JSON
         "os": "linux",
         "architecture": "$GUEST_ARCH"
       },
-      "output_path": "$rootfs_path",
+      "output_path": "$json_rootfs_path",
       "size_bytes": 6,
       "last_used_at": "$now"
     },
@@ -233,7 +242,7 @@ cat >"$STATE_DIR/images/index.json" <<JSON
         "os": "linux",
         "architecture": "$GUEST_ARCH"
       },
-      "output_path": "$rootfs_path",
+      "output_path": "$json_rootfs_path",
       "size_bytes": 6,
       "last_used_at": "$now"
     }
