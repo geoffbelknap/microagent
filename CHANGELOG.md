@@ -5,6 +5,20 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv exec-stream and health E2E (P6)
+
+- The `exec-stream` and `health` E2E scenarios gain a windows-hyperv arm and
+  join the live workflow. Both boot a real isolated VHD microVM: `exec-stream`
+  proves `exec --stream` line delivery, non-zero exit propagation, and
+  streamed/buffered parity; `health` proves health-spec validation, the
+  declared exec probe succeeding in the booted guest, and the host-side
+  `supervise` restart loop firing once on an unhealthy probe and exiting
+  `failed`. The supervise loop, process model, and signal handling needed no
+  Windows-specific changes — the existing host-side Go path works as-is.
+- The health probe's leading-slash guest command (`/bin/true`) is guarded
+  with `MSYS2_ARG_CONV_EXCL` so Git Bash does not rewrite it into a Windows
+  path before it reaches the CLI; the guard is inert off Windows.
+
 ### windows-hyperv VHD-wrapped named volumes (P6)
 
 - `microagent volume create/ls/inspect/rm` and `--volume name:/mountpoint`
