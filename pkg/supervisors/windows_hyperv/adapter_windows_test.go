@@ -137,7 +137,11 @@ func TestBuildComputeSystemDocumentEmitsSecretsAndModelCmdline(t *testing.T) {
 	}
 }
 
-func TestBuildComputeSystemDocumentEmitsGuestNetworkCmdline(t *testing.T) {
+func TestBuildComputeSystemDocumentOmitsGuestNetworkCmdline(t *testing.T) {
+	// The packaged windows-hyperv kernel has no hv_netvsc, so emitting
+	// microagent_net_* would make every user/nat boot fail closed on a
+	// missing interface. This pins the omission until the kernel artifact
+	// ships the driver.
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",
 		Config: vmkit.Config{
@@ -154,43 +158,8 @@ func TestBuildComputeSystemDocumentEmitsGuestNetworkCmdline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var doc struct {
-		VirtualMachine struct {
-			Chipset struct {
-				LinuxKernelDirect struct {
-					KernelCmdLine string `json:"KernelCmdLine"`
-				} `json:"LinuxKernelDirect"`
-			} `json:"Chipset"`
-		} `json:"VirtualMachine"`
-	}
-	if err := json.Unmarshal(document, &doc); err != nil {
-		t.Fatal(err)
-	}
-	cmdline := doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelCmdLine
-	for _, want := range []string{
-		"microagent_net_if=eth0",
-		"microagent_net_ip=192.168.127.5/24",
-		"microagent_net_gw=192.168.127.1",
-		"microagent_net_dns=192.168.127.1",
-	} {
-		if !strings.Contains(cmdline, want) {
-			t.Fatalf("kernel cmdline %q missing %q", cmdline, want)
-		}
-	}
-
-	isolated, err := buildComputeSystemDocument(computeSystemSpec{
-		Name: "agent-1",
-		Config: vmkit.Config{
-			KernelPath: "C:\\microagent\\Image",
-			RootfsPath: "C:\\microagent\\rootfs.vhd",
-			Network:    &vmkit.NetworkConfig{Mode: "isolated"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(isolated), "microagent_net_if") {
-		t.Fatalf("isolated cmdline must not carry guest network config: %s", isolated)
+	if strings.Contains(string(document), "microagent_net_if") {
+		t.Fatalf("cmdline must not carry guest network config while the kernel lacks hv_netvsc: %s", document)
 	}
 }
 

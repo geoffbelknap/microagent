@@ -320,22 +320,13 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	if spec.Config.ModelGuestPort != 0 && spec.Config.ModelVsockPort != 0 {
 		kernelCmdLine += fmt.Sprintf(" microagent_model_fwd=%d:%d", spec.Config.ModelGuestPort, spec.Config.ModelVsockPort)
 	}
-	// The HNS endpoint assigned the guest its address, but the synthetic
-	// NIC comes up unconfigured: tell the guest its static config the same
-	// way the Firecracker boot args do.
-	if network := spec.Config.Network; network != nil &&
-		(network.Mode == "user" || network.Mode == "nat" || network.Mode == "bridged") &&
-		network.IP != "" && network.Gateway != "" {
-		kernelCmdLine += " microagent_net_if=eth0"
-		kernelCmdLine += " microagent_net_ip=" + network.IP
-		kernelCmdLine += " microagent_net_gw=" + network.Gateway
-		if len(network.DNS) != 0 {
-			kernelCmdLine += " microagent_net_dns=" + strings.Join(network.DNS, ",")
-		}
-		if len(network.Hosts) != 0 {
-			kernelCmdLine += " microagent_net_hosts=" + strings.Join(network.Hosts, ",")
-		}
-	}
+	// Guest-side network config (microagent_net_*) is intentionally NOT
+	// emitted yet: the packaged windows-hyperv kernel lacks CONFIG_HYPERV_NET
+	// (hv_netvsc), so no guest netdev exists for the HNS endpoint and a
+	// configured-but-missing interface fails the boot closed. The HNS
+	// endpoint address is still recorded host-side for inspection. Wire the
+	// cmdline emission (mirroring firecrackerBootArgs) when the kernel
+	// artifact ships the driver.
 	comPorts := map[string]comPort(nil)
 	if hasResultListener(spec) {
 		kernelCmdLine += " 8250_core.nr_uarts=1 8250_core.skip_txen_test=1 console=ttyS0,115200"

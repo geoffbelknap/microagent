@@ -17,13 +17,14 @@ been cut into a release yet.
   `LiveNetworkApply` is flipped for the backend, and the non-support
   error for other backends names the backend instead of hard-coding the
   supported list.
-- The guest now receives its network configuration on windows-hyperv: HNS
-  assigned the endpoint an address, but the synthetic NIC came up
-  unconfigured because the kernel cmdline never carried the
-  `microagent_net_*` parameters the guest init reads (the same omission
-  class as the P4 secrets/model parameters). user/nat/bridged guests now
-  boot with the endpoint's address (CIDR from the HNS prefix length),
-  gateway, and DNS applied.
+- windows-hyperv `network inspect` reports the HNS endpoint address in
+  CIDR form (prefix length from the endpoint, network subnet fallback),
+  matching the Firecracker report shape. Known limitation surfaced by the
+  lane and documented in code: the packaged windows-hyperv kernel lacks
+  `CONFIG_HYPERV_NET` (hv_netvsc), so user/nat guests see no NIC for
+  their HNS endpoint — publish and the model/secrets/exec bridges are
+  unaffected (they ride hv_sock), and guest-side IP configuration is
+  wired up the moment the kernel artifact ships the driver.
 - The `networking-deep` scenario runs on the windows-hyperv lane: network
   mode and publish validation, isolated-mode semantics (no NIC, working
   loopback), the network inspect surface, and the live-apply guard rails
