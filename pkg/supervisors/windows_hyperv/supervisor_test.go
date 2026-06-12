@@ -1091,6 +1091,8 @@ type fakeAdapter struct {
 	waitID      string
 	startErr    error
 	deleteErr   error
+	gone        bool
+	existsErr   error
 }
 
 func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
@@ -1160,6 +1162,13 @@ func (f *fakeAdapter) Delete(ctx context.Context, id string) error {
 		return f.deleteErr
 	}
 	return nil
+}
+
+func (f *fakeAdapter) Exists(ctx context.Context, id string) (bool, error) {
+	if f.existsErr != nil {
+		return false, f.existsErr
+	}
+	return !f.gone, nil
 }
 
 func (f *fakeAdapter) Wait(ctx context.Context, id string) error {
@@ -1233,6 +1242,10 @@ func (failingAdapter) Kill(ctx context.Context, id string) error {
 
 func (failingAdapter) Delete(ctx context.Context, id string) error {
 	return fmt.Errorf("delete unavailable")
+}
+
+func (failingAdapter) Exists(ctx context.Context, id string) (bool, error) {
+	return false, fmt.Errorf("exists unavailable")
 }
 
 func (failingAdapter) Wait(ctx context.Context, id string) error {
@@ -1571,5 +1584,75 @@ func TestRunMovesHeldExecPortAfterCreateAndRecordsIt(t *testing.T) {
 	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
 	if state.Config.ExecPort != listenerExecPort || state.Config.GuestExecPort != held {
 		t.Fatalf("runtime config ports = %d/%d, want %d/%d", state.Config.ExecPort, state.Config.GuestExecPort, listenerExecPort, held)
+	}
+}
+
+func TestInspectMarksVanishedComputeSystemStopped(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv inspect path is windows-only")
+	}
+	oldTerminate := terminateRuntimeListenerProcessHook
+	t.Cleanup(func() { terminateRuntimeListenerProcessHook = oldTerminate })
+	terminated := 0
+	terminateRuntimeListenerProcessHook = func(pid int) { terminated++ }
+
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "inspect",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:/microagent/Image",
+			RootfsPath: "C:/microagent/rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateRunning, "serial=x", "", "fake", "11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	adapter := &fakeAdapter{gone: true}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateStopped {
+		t.Fatalf("inspect resp=%#v err=%v, want reconciled stopped", resp, err)
+	}
+	if !strings.Contains(resp.Event.Detail, "compute system exited") {
+		t.Fatalf("detail = %q", resp.Event.Detail)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Event.State != vmkit.StateStopped {
+		t.Fatalf("persisted state = %s, want stopped", state.Event.State)
+	}
+}
+
+func TestInspectKeepsRunningStateWhenComputeSystemAlive(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv inspect path is windows-only")
+	}
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "inspect",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:/microagent/Image",
+			RootfsPath: "C:/microagent/rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateRunning, "serial=x", "", "fake", "11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	resp, err := (Supervisor{adapter: &fakeAdapter{}}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("inspect resp=%#v err=%v, want running preserved", resp, err)
 	}
 }

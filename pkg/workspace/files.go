@@ -212,7 +212,7 @@ func Clone(stateDir, source, target string) (Result, error) {
 		Restart:    firstNonEmpty(manifest.Restart, DefaultRestartPolicy),
 		Resources:  manifest.Resources,
 		Network:    manifest.Network,
-		RootfsPath: filepath.Join(targetWorkspaceDir, "rootfs.ext4"),
+		RootfsPath: filepath.Join(targetWorkspaceDir, WorkspaceRootfsFilename(event.Identity.Backend)),
 		Disks:      manifest.Disks,
 		Response: vmkit.Response{
 			OK:      true,

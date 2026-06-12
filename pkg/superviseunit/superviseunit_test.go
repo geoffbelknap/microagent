@@ -15,7 +15,7 @@ func TestBuildSystemd(t *testing.T) {
 	if unit.Label != "microagent-supervise-research.service" {
 		t.Fatalf("label = %q", unit.Label)
 	}
-	if unit.Path != "/home/u/.config/systemd/user/microagent-supervise-research.service" {
+	if unit.Path != filepath.Join("/home/u", ".config", "systemd", "user", "microagent-supervise-research.service") {
 		t.Fatalf("path = %q", unit.Path)
 	}
 	if !strings.Contains(unit.Content, "ExecStart=/usr/bin/microagent supervise research --state-dir /sd") {
@@ -37,7 +37,7 @@ func TestBuildLaunchd(t *testing.T) {
 	if unit.Label != "com.microagent.supervise.svc" {
 		t.Fatalf("label = %q", unit.Label)
 	}
-	if unit.Path != "/Users/u/Library/LaunchAgents/com.microagent.supervise.svc.plist" {
+	if unit.Path != filepath.Join("/Users/u", "Library", "LaunchAgents", "com.microagent.supervise.svc.plist") {
 		t.Fatalf("path = %q", unit.Path)
 	}
 	for _, want := range []string{"<string>/opt/microagent</string>", "<string>supervise</string>", "<string>svc</string>", "<key>RunAtLoad</key>"} {
@@ -61,8 +61,37 @@ func TestBuildRejectsBadInput(t *testing.T) {
 	if _, err := Build(Options{Name: "a", Home: "/h", GOOS: "linux"}); err == nil {
 		t.Error("empty exec path should error")
 	}
-	if _, err := Build(Options{Name: "a", ExecPath: "/x", Home: "/h", GOOS: "windows"}); err == nil {
+	if _, err := Build(Options{Name: "a", ExecPath: "/x", Home: "/h", GOOS: "plan9"}); err == nil {
 		t.Error("unsupported GOOS should error")
+	}
+}
+
+func TestBuildScheduledTask(t *testing.T) {
+	unit, err := Build(Options{Name: "research", ExecPath: `C:\mb\microagent.exe`, StateDir: `C:\state`, Home: `C:\Users\u`, GOOS: "windows"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if unit.Label != "microagent-supervise-research" {
+		t.Fatalf("label = %q", unit.Label)
+	}
+	if unit.Path != filepath.Join(`C:\Users\u`, ".microagent", "tasks", "microagent-supervise-research.xml") {
+		t.Fatalf("path = %q", unit.Path)
+	}
+	for _, want := range []string{
+		`<Command>C:\mb\microagent.exe</Command>`,
+		`<Arguments>supervise research --state-dir C:\state</Arguments>`,
+		"<LogonTrigger>",
+		"<RestartOnFailure>",
+	} {
+		if !strings.Contains(unit.Content, want) {
+			t.Fatalf("task xml missing %q: %s", want, unit.Content)
+		}
+	}
+	if strings.Join(unit.EnableArgs, " ") != "schtasks /Create /TN microagent-supervise-research /XML "+unit.Path+" /F" {
+		t.Fatalf("enable args = %v", unit.EnableArgs)
+	}
+	if strings.Join(unit.DisableArgs, " ") != "schtasks /Delete /TN microagent-supervise-research /F" {
+		t.Fatalf("disable args = %v", unit.DisableArgs)
 	}
 }
 

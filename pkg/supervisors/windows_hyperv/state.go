@@ -170,10 +170,30 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
 }
 
-func inspect(req vmkit.Request) (vmkit.Response, error) {
+func (s Supervisor) inspect(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
 	state, err := readRuntimeState(req)
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	// A guest that exits on its own takes its compute system with it, but
+	// nothing rewrites runtime.json at that moment. Reconcile here so inspect
+	// (and the supervise restart loop polling it) reports the truth instead
+	// of a stale running state. A probe error leaves the recorded state
+	// untouched: only a definite "gone" marks the workspace stopped.
+	if (state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateStarting) && state.ComputeSystemID != "" {
+		if exists, existsErr := s.runtimeAdapter().Exists(ctx, state.ComputeSystemID); existsErr == nil && !exists {
+			terminateRuntimeListenerProcessHook(state.VsockListenerPID)
+			if cleanupErr := s.runtimeAdapter().CleanupNetwork(ctx, state); cleanupErr != nil {
+				return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", cleanupErr), cleanupErr)
+			}
+			if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system exited", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID); err != nil {
+				return vmkit.Response{}, err
+			}
+			state, err = readRuntimeState(req)
+			if err != nil {
+				return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+			}
+		}
 	}
 	event, err := eventFromFile(state.Event)
 	if err != nil {
@@ -200,7 +220,10 @@ func (s Supervisor) stop(ctx context.Context, req vmkit.Request) (vmkit.Response
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateStopped, "windows-hyperv compute system stopped")
 	}
 	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
-		if !isTerminalState(state.Event.State) || !isMissingComputeSystem(err) {
+		// A compute system that is already gone (the guest exited on its own,
+		// or a previous control already tore it down) means the goal of this
+		// control is achieved; only a real HCS error fails the transition.
+		if !isMissingComputeSystem(err) {
 			return failRun(req, vmkit.StateFailed, fmt.Sprintf("stop failed: %s", err), err)
 		}
 	}
@@ -224,7 +247,10 @@ func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateHalted, "windows-hyperv compute system halted")
 	}
 	if err := s.runtimeAdapter().Shutdown(ctx, state.ComputeSystemID); err != nil {
-		if !isTerminalState(state.Event.State) || !isMissingComputeSystem(err) {
+		// A compute system that is already gone (the guest exited on its own,
+		// or a previous control already tore it down) means the goal of this
+		// control is achieved; only a real HCS error fails the transition.
+		if !isMissingComputeSystem(err) {
 			return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
 		}
 	}
@@ -267,7 +293,10 @@ func (s Supervisor) kill(ctx context.Context, req vmkit.Request) (vmkit.Response
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateStopped, "windows-hyperv compute system killed")
 	}
 	if err := s.runtimeAdapter().Kill(ctx, state.ComputeSystemID); err != nil {
-		if !isTerminalState(state.Event.State) || !isMissingComputeSystem(err) {
+		// A compute system that is already gone (the guest exited on its own,
+		// or a previous control already tore it down) means the goal of this
+		// control is achieved; only a real HCS error fails the transition.
+		if !isMissingComputeSystem(err) {
 			return failRun(req, vmkit.StateFailed, fmt.Sprintf("kill failed: %s", err), err)
 		}
 	}

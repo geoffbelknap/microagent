@@ -207,6 +207,14 @@ func (c vmcomputeClient) WaitComputeSystem(ctx context.Context, id string) error
 	})
 }
 
+// ProbeComputeSystem opens and closes the compute system, reporting the
+// missing-system error when HCS no longer knows it.
+func (c vmcomputeClient) ProbeComputeSystem(ctx context.Context, id string) error {
+	return c.withComputeSystem(ctx, id, "probe", 0, func(handle uintptr) (string, error) {
+		return "", nil
+	})
+}
+
 func (c vmcomputeClient) terminateComputeSystem(ctx context.Context, id, operation string) error {
 	return c.withComputeSystem(ctx, id, operation, 0, func(handle uintptr) (string, error) {
 		return c.vmcomputeAPI().TerminateComputeSystem(ctx, handle, "")

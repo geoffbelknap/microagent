@@ -71,6 +71,10 @@ func (defaultAdapter) Wait(ctx context.Context, id string) error {
 	return errUnsupportedHost()
 }
 
+func (defaultAdapter) Exists(ctx context.Context, id string) (bool, error) {
+	return false, errUnsupportedHost()
+}
+
 func errUnsupportedHost() error {
 	return fmt.Errorf("windows-hyperv supervisor is only supported on windows")
 }

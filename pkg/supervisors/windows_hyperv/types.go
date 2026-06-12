@@ -27,6 +27,10 @@ type runtimeAdapter interface {
 	Kill(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	Wait(ctx context.Context, id string) error
+	// Exists reports whether the compute system is still registered with HCS.
+	// A guest that exits on its own takes its compute system with it, so this
+	// is the liveness probe behind honest inspect state.
+	Exists(ctx context.Context, id string) (bool, error)
 }
 
 type computeSystemSpec struct {
@@ -65,6 +69,7 @@ type hcsClient interface {
 	KillComputeSystem(ctx context.Context, id string) error
 	DeleteComputeSystem(ctx context.Context, id string) error
 	WaitComputeSystem(ctx context.Context, id string) error
+	ProbeComputeSystem(ctx context.Context, id string) error
 }
 
 func (s Supervisor) runtimeAdapter() runtimeAdapter {

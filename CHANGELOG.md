@@ -5,6 +5,27 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv lifecycle: honest liveness, supervise, clone, boot units
+
+- `inspect`/`status` now reconcile a vanished compute system: a guest that
+  exits on its own marks the workspace `stopped` (listener helper reaped,
+  network endpoint cleaned) instead of reporting a stale `running` state.
+  This makes the `supervise` restart loop work on windows-hyperv: restart
+  policies observe real terminal states (live-verified: 3 supervised boots,
+  3 clean stop transitions, exit at max-restarts).
+- `stop`/`halt`/`kill` are idempotent when the compute system is already
+  gone: the control's goal is achieved, so the transition records normally
+  instead of a spurious `failed` event.
+- `clone` works for stopped windows-hyperv workspaces: the VHD copies with
+  the manifest rewrite, and the kernel cmdline now tells the guest its
+  runtime shell/exec vsock ports (guestinit's kernel-config override wins
+  over the source's baked ports), so a cloned workspace boots, connects,
+  and execs on its own ports.
+- `supervise --install` writes a Windows Scheduled Task (logon trigger,
+  restart-on-failure) where Linux/macOS emit systemd/launchd units, with the
+  same graceful degradation when registration needs an elevated shell; the
+  survive-reboot E2E scenario runs on the windows-hyperv lane.
+
 ### Windows lane in the unified E2E runner
 
 - `scripts/dev/microagent-e2e.sh` now runs under Git Bash on a Windows host

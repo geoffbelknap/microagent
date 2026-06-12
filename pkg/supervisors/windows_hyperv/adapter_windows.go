@@ -137,6 +137,17 @@ func (a defaultAdapter) Delete(ctx context.Context, id string) error {
 	return a.hcsClient().DeleteComputeSystem(ctx, id)
 }
 
+func (a defaultAdapter) Exists(ctx context.Context, id string) (bool, error) {
+	err := a.hcsClient().ProbeComputeSystem(ctx, id)
+	if err == nil {
+		return true, nil
+	}
+	if isMissingComputeSystem(err) {
+		return false, nil
+	}
+	return false, err
+}
+
 func (a defaultAdapter) Wait(ctx context.Context, id string) error {
 	return a.hcsClient().WaitComputeSystem(ctx, id)
 }
@@ -286,6 +297,16 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 		}
 	}
 	kernelCmdLine := "root=/dev/sda rw rootwait init=/sbin/microagent-init initcall_blacklist=virtio_vsock_init pci=off"
+	// The guest listens on its own vsock ports, which differ from the ports
+	// baked into the rootfs run config for a cloned workspace (the copy keeps
+	// the source's baked ports). Tell the guest its runtime ports the same way
+	// the Firecracker boot args do; guestinit's kernel-config override wins.
+	if port := guestShellPort(spec.Config); port != 0 {
+		kernelCmdLine += fmt.Sprintf(" microagent_shell_port=%d", port)
+	}
+	if port := guestExecPort(spec.Config); port != 0 {
+		kernelCmdLine += fmt.Sprintf(" microagent_exec_port=%d", port)
+	}
 	comPorts := map[string]comPort(nil)
 	if hasResultListener(spec) {
 		kernelCmdLine += " 8250_core.nr_uarts=1 8250_core.skip_txen_test=1 console=ttyS0,115200"
