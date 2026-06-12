@@ -27,6 +27,11 @@ been cut into a release yet.
   restoration after maintenance boots; the secrets lane uses the shared
   cp step on every backend; the commit-images scenario gains a
   windows-hyperv arm and joins the live workflow.
+- The windows-hyperv post-terminate teardown wait grew from 30s to 60s:
+  loaded hosted CI runners have been observed to take longer than 30s to
+  unregister a NAT-attached compute system after Terminate, failing halt
+  even though teardown was proceeding normally. The wait still fails
+  closed if the compute system never unregisters.
 
 ### windows-hyperv guest networking (hv_netvsc kernel)
 

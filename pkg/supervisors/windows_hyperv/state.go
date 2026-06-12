@@ -23,10 +23,12 @@ const clearVsockListenerPID = -1
 // when the compute system is unregistered. Terminal controls wait for the
 // system to actually disappear so an immediate restart cannot collide with
 // the old registration ("identifier already exists"). Variables so tests
-// can shorten the bounds.
+// can shorten the bounds. The post-terminate bound is sized for loaded
+// hosted CI runners, where HCS has been observed to take well over 30s to
+// unregister a NAT-attached compute system after Terminate.
 var (
 	computeSystemShutdownGrace        = 15 * time.Second
-	computeSystemTeardownTimeout      = 30 * time.Second
+	computeSystemTeardownTimeout      = 60 * time.Second
 	computeSystemTeardownPollInterval = 200 * time.Millisecond
 )
 
