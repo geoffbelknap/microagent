@@ -2168,7 +2168,7 @@ func runVolumeCreate(ctx context.Context, args []string, stdout *os.File) error 
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: microagent volume create <name> [--size-mib <n>] [--state-dir <dir>]")
 	}
-	record, err := volume.Create(ctx, stateDir, fs.Arg(0), sizeMiB, defaultMke2fsPath())
+	record, err := volume.Create(ctx, stateDir, hostBackend(), fs.Arg(0), sizeMiB, defaultMke2fsPath())
 	if err != nil {
 		return err
 	}
@@ -2259,7 +2259,7 @@ func runVolumeInspect(args []string, stdout *os.File) error {
 	fmt.Fprintf(stdout, "Size:     %d MiB\n", record.SizeMiB)
 	fmt.Fprintf(stdout, "Created:  %s\n", record.CreatedAt)
 	fmt.Fprintf(stdout, "Attached: %s\n", attached)
-	fmt.Fprintf(stdout, "Path:     %s\n", volume.DiskPath(stateDir, record.Name))
+	fmt.Fprintf(stdout, "Path:     %s\n", volume.DiskPath(stateDir, hostBackend(), record.Name))
 	return nil
 }
 

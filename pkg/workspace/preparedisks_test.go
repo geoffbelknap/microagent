@@ -21,7 +21,7 @@ func TestPrepareDisksResolvesManagedVolume(t *testing.T) {
 	if err := volume.WriteIndex(stateDir, volume.Index{Volumes: []volume.Record{{Name: "data", SizeMiB: 32}}}); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
-	if err := os.WriteFile(volume.DiskPath(stateDir, "data"), []byte{}, 0o644); err != nil {
+	if err := os.WriteFile(volume.DiskPath(stateDir, "", "data"), []byte{}, 0o644); err != nil {
 		t.Fatalf("seed backing file: %v", err)
 	}
 

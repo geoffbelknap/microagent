@@ -5,6 +5,29 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv VHD-wrapped named volumes (P6)
+
+- `microagent volume create/ls/inspect/rm` and `--volume name:/mountpoint`
+  attach work on windows-hyperv. The host has no `mke2fs` for the VHD disk
+  format, so volume creation builds the backing image in-process: an empty
+  ext4 filesystem wrapped in a VHD footer (`volumes/<name>.vhd`), mirroring
+  the VHD rootfs builder. The read-only feature flag tar2ext4 stamps in is
+  cleared and a zero-filled reserved-space file pads the filesystem toward
+  the requested size so the guest gets writable capacity.
+- `microagent-guestinit` now deletes the reserved-space file at each rw
+  disk mountpoint on first mount (previously only the rootfs root), so
+  VHD-wrapped named volumes expose their full capacity to the guest. The
+  removal is tolerated-absent, so ext4-lane backends and subsequent boots
+  are unaffected.
+- New exported `rootfs.BuildEmptyVolume(ctx, outputPath, sizeBytes)` builds
+  the empty VHD-wrapped ext4 image; `volume.Create`, `volume.Path`, and
+  `volume.DiskPath` now take a backend so the backing-file shape follows the
+  backend's capabilities (bare `.ext4` on firecracker/apple-vf, `.vhd` on
+  windows-hyperv).
+- The volumes E2E scenario gains a windows-hyperv arm and joins the live
+  workflow; it boots isolated microVMs to prove attach-by-name persistence
+  across separate runs and single-attach enforcement.
+
 ### windows-hyperv guest-mediated cp/artifacts/commit (P6)
 
 - `cp`, `artifacts get`, and `commit` work on windows-hyperv. The host has
