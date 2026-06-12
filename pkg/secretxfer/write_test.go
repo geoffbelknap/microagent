@@ -3,6 +3,7 @@ package secretxfer
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -41,16 +42,21 @@ func TestWriteSecretsCreatesFiles(t *testing.T) {
 	if string(data2) != "p@ss\n" {
 		t.Fatalf("DB_PASS = %q, want verbatim", data2)
 	}
-	info, err := os.Stat(filepath.Join(root, "API_KEY"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o400 {
-		t.Fatalf("mode = %v, want 0400", info.Mode().Perm())
-	}
-	dirInfo, _ := os.Stat(root)
-	if dirInfo.Mode().Perm() != 0o700 {
-		t.Fatalf("dir mode = %v, want 0700", dirInfo.Mode().Perm())
+	// POSIX permission bits do not survive on Windows hosts (os.Chmod only
+	// honors the write bit there); WriteSecrets runs in the guest tmpfs in
+	// production, so the mode assertions are POSIX-only.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(root, "API_KEY"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o400 {
+			t.Fatalf("mode = %v, want 0400", info.Mode().Perm())
+		}
+		dirInfo, _ := os.Stat(root)
+		if dirInfo.Mode().Perm() != 0o700 {
+			t.Fatalf("dir mode = %v, want 0700", dirInfo.Mode().Perm())
+		}
 	}
 }
 

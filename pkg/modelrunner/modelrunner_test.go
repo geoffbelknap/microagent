@@ -82,7 +82,7 @@ func TestWaitHealthyTimesOut(t *testing.T) {
 func TestSpawnAndStopRealProcess(t *testing.T) {
 	// Spawn a real, harmless long-lived process to exercise spawn/alive/stop.
 	logPath := filepath.Join(t.TempDir(), "proc.log")
-	pid, err := spawnProcess([]string{"sleep", "30"}, logPath)
+	pid, err := spawnProcess(longRunningArgv(), logPath)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
@@ -98,6 +98,6 @@ func TestSpawnAndStopRealProcess(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if processAlive(pid) {
-		t.Fatalf("process %d still alive after SIGTERM", pid)
+		t.Fatalf("process %d still alive after stop", pid)
 	}
 }

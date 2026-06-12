@@ -2,14 +2,25 @@ package modelrunner
 
 import (
 	"context"
+	"runtime"
 	"testing"
 	"time"
 )
 
+// longRunningArgv is a portable stand-in for a model server process: it must
+// outlive the test and exist on a bare host ("sleep" is not on a Windows
+// PATH outside Git Bash; ping with a count waits about a second per echo).
+func longRunningArgv() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"ping", "-n", "60", "127.0.0.1"}
+	}
+	return []string{"sleep", "30"}
+}
+
 type fakeEngine struct{}
 
 func (fakeEngine) Name() string                     { return "fake" }
-func (fakeEngine) Argv(_, _ string, _ int) []string { return []string{"sleep", "30"} }
+func (fakeEngine) Argv(_, _ string, _ int) []string { return longRunningArgv() }
 func (fakeEngine) HealthPath() string               { return "/health" }
 
 func withHealthyProbe(t *testing.T) {

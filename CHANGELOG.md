@@ -5,6 +5,36 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv secrets + model serving over hv_sock (P4)
+
+- Secret delivery works on windows-hyperv: the runtime listener helper
+  serves the resolved secrets bundle (and the on-demand secret API) on an
+  hv_sock listener the guest dials at boot, with the same fail-closed
+  resolution and audit records as Firecracker. The shared server moved to
+  `pkg/secretxfer` (`ResolveBundle`/`Server`); the Firecracker supervisor
+  delegates to it unchanged. The `secrets` E2E scenario runs on the
+  windows-hyperv lane (the guest probe is baked in at build time instead of
+  debugfs-copied) and in the live workflow.
+- Model serving works on windows-hyperv: `create`/`start`/`run --model`
+  pair the workspace through the same hv_sock bridge as published ports,
+  and `llama-server.exe` resolves next to the binary on Windows installs.
+  The `model-serving` E2E scenario gains a windows-hyperv arm (env-gated by
+  `MICROAGENT_LLAMA_SERVER`, exactly like Linux), and a new
+  `windows-hyperv-model-host` probe live-verifies the full pairing path —
+  runner spawn, holder registry, guest `MICROAGENT_MODEL_URL` round trip —
+  with a stand-in engine, so CI covers everything but llama.cpp itself.
+- The windows-hyperv kernel cmdline now carries the secrets and model
+  parameters (`microagent_secrets_port`, `microagent_secrets_api`,
+  `microagent_model_fwd`) the guest init reads; they were silently dropped
+  before, so the guest never fetched secrets or started the model
+  forwarder. The snapshot-only secrets control port stays Firecracker-only.
+- Model runner liveness checks work on Windows: `Signal(0)` always errors
+  there, so every live runner self-healed out of the registry; the probe
+  now asks the kernel for the process exit code.
+- The guest brings up loopback even with no NIC (isolated network):
+  guest-local services — the model forward helper, workload servers probed
+  over exec — need 127.0.0.1 regardless of host networking.
+
 ### windows-hyperv writable rootfs (for real this time)
 
 The guest can now write to its root filesystem. Three compounding causes,

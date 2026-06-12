@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -47,10 +48,17 @@ func ResolveLlamaServerPath() (string, error) {
 	}
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
-		for _, c := range []string{
+		candidates := []string{
 			filepath.Join(dir, "..", "libexec", "llama-server"),
 			filepath.Join(dir, "llama-server"),
-		} {
+		}
+		if runtime.GOOS == "windows" {
+			candidates = append(candidates,
+				filepath.Join(dir, "..", "libexec", "llama-server.exe"),
+				filepath.Join(dir, "llama-server.exe"),
+			)
+		}
+		for _, c := range candidates {
 			if info, statErr := os.Stat(c); statErr == nil && !info.IsDir() {
 				return c, nil
 			}

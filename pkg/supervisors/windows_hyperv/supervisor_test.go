@@ -878,7 +878,7 @@ func TestRunCommandFailsClosedForUnsupportedWindowsHyperVVsockTarget(t *testing.
 		},
 	}
 	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
-	if err == nil || resp.OK || !strings.Contains(resp.Error, "target must be host:port or the workspace result path") {
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "target must be host:port, the secrets service, or the workspace result path") {
 		t.Fatalf("run resp=%#v err=%v", resp, err)
 	}
 	if adapter.starts != 0 {
