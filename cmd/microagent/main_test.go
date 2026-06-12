@@ -5426,15 +5426,22 @@ func TestWindowsHyperVModelBridgeSmoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	env := append(os.Environ(), "MICROAGENT_LLAMA_SERVER="+enginePath)
-	runCLI := func(args ...string) ([]byte, error) {
-		cmd := exec.CommandContext(ctx, cliPath, args...)
+	runCLIWith := func(cmdCtx context.Context, args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(cmdCtx, cliPath, args...)
 		cmd.Env = env
 		return cmd.CombinedOutput()
 	}
+	runCLI := func(args ...string) ([]byte, error) { return runCLIWith(ctx, args...) }
 	t.Cleanup(func() {
-		_, _ = runCLI("kill", workspaceName, "--state-dir", dir)
-		_, _ = runCLI("delete", workspaceName, "--force", "--yes", "--state-dir", dir)
-		_, _ = runCLI("model", "stop", canonicalRef, "--state-dir", dir)
+		// The test function's deferred cancel() runs BEFORE t.Cleanup
+		// callbacks, so the test ctx is already canceled here; using it
+		// would no-op every teardown command and leak a running compute
+		// system (this exact bug orphaned six VMs).
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cleanupCancel()
+		_, _ = runCLIWith(cleanupCtx, "kill", workspaceName, "--state-dir", dir)
+		_, _ = runCLIWith(cleanupCtx, "delete", workspaceName, "--force", "--yes", "--state-dir", dir)
+		_, _ = runCLIWith(cleanupCtx, "model", "stop", canonicalRef, "--state-dir", dir)
 	})
 
 	if out, err := runCLI("create", "--name", workspaceName, "--image", imageRef,
@@ -6429,10 +6436,10 @@ func TestDefaultKernelManifestHasWindowsHyperVAMD64(t *testing.T) {
 	if !ok {
 		t.Fatal("missing windows-hyperv amd64 kernel")
 	}
-	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-windows-hyperv-amd64" {
+	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.12.22-r2/microagent-kernel-6.12.22-windows-hyperv-amd64" {
 		t.Fatalf("url = %q", kernel.URL)
 	}
-	if kernel.SHA256 != "8623b349a95fa536891e0d292d198396504aad8308c7619083994f7553707a92" {
+	if kernel.SHA256 != "2a30b65ccd2095d5e22d2bbb611ec56a99bebc4c1fe9f4a533f2c5615b3cd684" {
 		t.Fatalf("sha256 = %q", kernel.SHA256)
 	}
 }

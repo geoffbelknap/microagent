@@ -73,8 +73,8 @@ var Defaults = []ManifestEntry{
 	{
 		Backend:      vmkit.BackendWindowsHyperV,
 		Architecture: "amd64",
-		URL:          "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.12.22-r1/microagent-kernel-6.12.22-windows-hyperv-amd64",
-		SHA256:       "8623b349a95fa536891e0d292d198396504aad8308c7619083994f7553707a92",
+		URL:          "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.12.22-r2/microagent-kernel-6.12.22-windows-hyperv-amd64",
+		SHA256:       "2a30b65ccd2095d5e22d2bbb611ec56a99bebc4c1fe9f4a533f2c5615b3cd684",
 	},
 }
 
@@ -253,7 +253,10 @@ func install(ctx context.Context, opts InstallOptions) error {
 		return err
 	}
 	if err := os.Rename(tmpPath, opts.OutputPath); err != nil {
-		return err
+		// Windows refuses to replace a file another process holds open
+		// without FILE_SHARE_DELETE — most likely a running VM booted from
+		// this kernel. Name the likely cause instead of the bare rename.
+		return fmt.Errorf("replace kernel at %s: %w (a running VM may still hold the existing kernel open; stop microagent workspaces and retry)", opts.OutputPath, err)
 	}
 	cleanup = false
 	return nil

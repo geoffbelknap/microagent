@@ -5,6 +5,27 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv guest networking (hv_netvsc kernel)
+
+- The packaged windows-hyperv kernel is now `kernels-6.12.22-r2`, which
+  adds `CONFIG_HYPERV_NET` (hv_netvsc): guests finally get a netdev for
+  their HNS endpoint. The kernel cmdline carries the endpoint's static
+  configuration (`microagent_net_*`, same as the Firecracker boot args),
+  so user/nat/bridged guests boot with an addressed `eth0`, a default
+  route, and DNS applied. The networking-deep elevated segment asserts
+  the in-guest NIC and route.
+- Lifecycle controls on workspaces created before the JSON-array event
+  history migrate the legacy JSON-lines `events.json` on first touch
+  instead of failing the control and leaving the workspace
+  uncontrollable.
+- `kernel install` names the likely cause when it cannot replace an
+  existing kernel on Windows (a running VM holding the file open)
+  instead of surfacing a bare rename error.
+- The windows-hyperv model bridge smoke's teardown ran on the test's
+  already-canceled context, silently no-opping every cleanup command and
+  leaking running compute systems on failure; it now tears down on its
+  own context.
+
 ### windows-hyperv networking-deep + HNS live apply (P5)
 
 - `apply` live-reloads host bind changes for existing port forwards on a
