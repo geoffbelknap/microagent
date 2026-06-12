@@ -417,6 +417,65 @@ func TestHaltFailsClosedWhenComputeSystemNeverUnregisters(t *testing.T) {
 	}
 }
 
+func writeRunningStateWithEndpointForControl(t *testing.T) (vmkit.Request, string) {
+	t.Helper()
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDsNetwork(req, vmkit.StateRunning, "running", "", "fake", "11111111-1111-1111-1111-111111111111", "network-1", "endpoint-1"); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	return req, stateDir
+}
+
+func TestHaltReleasesEndpointWhenRegistrationIsPinned(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	shortenTeardownWindows(t)
+	req, _ := writeRunningStateWithEndpointForControl(t)
+	// Terminate alone never unregisters this system; deleting the HNS
+	// endpoint does — the behavior hosted runners exhibit for NAT-attached
+	// compute systems.
+	adapter := &fakeAdapter{shutdownIgnored: true, neverGone: true, goneAfterCleanup: true}
+	controlReq := req
+	controlReq.Command = "halt"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), controlReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateHalted {
+		t.Fatalf("halt resp=%#v err=%v", resp, err)
+	}
+	if adapter.kills != 1 || adapter.cleanups == 0 {
+		t.Fatalf("kills=%d cleanups=%d, want terminate then endpoint release before the unregistration wait", adapter.kills, adapter.cleanups)
+	}
+}
+
+func TestTeardownTimeoutReportsHCSState(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	shortenTeardownWindows(t)
+	req, _ := writeRunningStateForControl(t)
+	adapter := &fakeAdapter{neverGone: true, describeProps: `{"State":"Running"}`}
+	controlReq := req
+	controlReq.Command = "halt"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), controlReq)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "HCS state: Running") {
+		t.Fatalf("halt resp=%#v err=%v, want still-registered failure with the HCS state detail", resp, err)
+	}
+}
+
 func TestAppendEventMigratesLegacyJSONLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.json")
 	legacy := `{"identity":{"runtimeID":"agent-1","backend":"windows-hyperv"},"state":"prepared","observedAt":"2026-05-12T16:01:52Z"}
@@ -1329,7 +1388,12 @@ type fakeAdapter struct {
 	// shutdownIgnored models a guest with no shutdown integration: the HCS
 	// shutdown call succeeds but the compute system stays registered.
 	shutdownIgnored bool
-	existsErr       error
+	// goneAfterCleanup models a registration pinned by the HNS endpoint:
+	// terminate alone does not unregister the system, deleting the endpoint
+	// does.
+	goneAfterCleanup bool
+	describeProps    string
+	existsErr        error
 }
 
 func (f *fakeAdapter) Host(ctx context.Context) (vmkit.HostSupport, error) {
@@ -1352,8 +1416,15 @@ func (f *fakeAdapter) PrepareNetwork(ctx context.Context, spec computeSystemSpec
 func (f *fakeAdapter) CleanupNetwork(ctx context.Context, state runtimeState) error {
 	if state.NetworkEndpointID != "" {
 		f.cleanups++
+		if f.goneAfterCleanup {
+			f.gone = true
+		}
 	}
 	return nil
+}
+
+func (f *fakeAdapter) DescribeComputeSystem(ctx context.Context, id string) (string, error) {
+	return f.describeProps, nil
 }
 
 func (f *fakeAdapter) Create(ctx context.Context, spec computeSystemSpec) (computeSystemHandle, error) {

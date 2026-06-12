@@ -39,6 +39,14 @@ var listenerExitTimeout = 10 * time.Second
 // waitForProcessExitHook lets tests substitute a deterministic exit wait.
 var waitForProcessExitHook = waitForProcessExit
 
+// computeSystemDescriber is the optional adapter diagnostic used when a
+// compute system survives teardown: the raw HCS State distinguishes a
+// terminate that never landed from a registration pinned by open handles
+// or attachments.
+type computeSystemDescriber interface {
+	DescribeComputeSystem(ctx context.Context, id string) (string, error)
+}
+
 // waitForComputeSystemGone polls the HCS Exists probe until the compute
 // system is unregistered or the timeout elapses.
 func (s Supervisor) waitForComputeSystemGone(ctx context.Context, id string, timeout time.Duration) error {
@@ -52,6 +60,13 @@ func (s Supervisor) waitForComputeSystemGone(ctx context.Context, id string, tim
 			if err != nil {
 				return fmt.Errorf("compute system %s teardown probe: %w", id, err)
 			}
+			if describer, ok := s.runtimeAdapter().(computeSystemDescriber); ok {
+				if props, describeErr := describer.DescribeComputeSystem(ctx, id); describeErr == nil {
+					if detail := computeSystemStateDetail(props); detail != "" {
+						return fmt.Errorf("compute system %s is still registered after teardown (HCS state: %s)", id, detail)
+					}
+				}
+			}
 			return fmt.Errorf("compute system %s is still registered after teardown", id)
 		}
 		select {
@@ -62,6 +77,24 @@ func (s Supervisor) waitForComputeSystemGone(ctx context.Context, id string, tim
 	}
 }
 
+// computeSystemStateDetail extracts the State field from an HCS properties
+// document; a document without one is reported raw (bounded) so the
+// teardown diagnostic never hides what HCS said.
+func computeSystemStateDetail(properties string) string {
+	var doc struct {
+		State string `json:"State"`
+	}
+	if err := json.Unmarshal([]byte(properties), &doc); err == nil && doc.State != "" {
+		return doc.State
+	}
+	const maxRawDetail = 512
+	trimmed := strings.TrimSpace(properties)
+	if len(trimmed) > maxRawDetail {
+		trimmed = trimmed[:maxRawDetail] + "..."
+	}
+	return trimmed
+}
+
 // teardownComputeSystem brings a compute system fully out of HCS
 // registration. graceful first asks the guest to power off and gives it a
 // bounded grace window — guests that ignore the request (no shutdown
@@ -69,7 +102,13 @@ func (s Supervisor) waitForComputeSystemGone(ctx context.Context, id string, tim
 // like every container runtime's stop semantics. A system that survives
 // terminate fails the control instead of recording a terminal state the
 // host does not match.
-func (s Supervisor) teardownComputeSystem(ctx context.Context, id string, graceful bool) error {
+//
+// releaseAttachments runs once terminate has been issued, before the
+// unregistration wait: HCS has been observed (hosted CI runners) to keep a
+// terminated compute system registered while its HNS endpoint is still
+// attached, so terminal controls release network attachments first rather
+// than waiting out a registration that cannot clear.
+func (s Supervisor) teardownComputeSystem(ctx context.Context, id string, graceful bool, releaseAttachments func()) error {
 	if graceful {
 		err := s.runtimeAdapter().Shutdown(ctx, id)
 		if err != nil && isMissingComputeSystem(err) {
@@ -88,6 +127,9 @@ func (s Supervisor) teardownComputeSystem(ctx context.Context, id string, gracef
 			return nil
 		}
 		return err
+	}
+	if releaseAttachments != nil {
+		releaseAttachments()
 	}
 	return s.waitForComputeSystemGone(ctx, id, computeSystemTeardownTimeout)
 }
@@ -300,11 +342,11 @@ func (s Supervisor) stop(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
-	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
+	stopRuntimeListenerForTeardown(state.VsockListenerPID)
 	if state.ComputeSystemID == "" {
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateStopped, "windows-hyperv compute system stopped")
 	}
-	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, true); err != nil {
+	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, true, s.releaseNetworkAttachments(ctx, state)); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("stop failed: %s", err), err)
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
@@ -322,11 +364,11 @@ func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
-	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
+	stopRuntimeListenerForTeardown(state.VsockListenerPID)
 	if state.ComputeSystemID == "" {
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateHalted, "windows-hyperv compute system halted")
 	}
-	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, true); err != nil {
+	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, true, s.releaseNetworkAttachments(ctx, state)); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("halt failed: %s", err), err)
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
@@ -461,11 +503,11 @@ func (s Supervisor) kill(ctx context.Context, req vmkit.Request) (vmkit.Response
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
-	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
+	stopRuntimeListenerForTeardown(state.VsockListenerPID)
 	if state.ComputeSystemID == "" {
 		return s.transitionWithoutComputeSystem(ctx, req, state, vmkit.StateStopped, "windows-hyperv compute system killed")
 	}
-	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, false); err != nil {
+	if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, false, s.releaseNetworkAttachments(ctx, state)); err != nil {
 		return failRun(req, vmkit.StateFailed, fmt.Sprintf("kill failed: %s", err), err)
 	}
 	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
@@ -483,17 +525,24 @@ func (s Supervisor) delete(ctx context.Context, req vmkit.Request) (vmkit.Respon
 	if err != nil {
 		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
 	}
-	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
+	stopRuntimeListenerForTeardown(state.VsockListenerPID)
 	if state.ComputeSystemID != "" {
+		deleted := true
 		if err := s.runtimeAdapter().Delete(ctx, state.ComputeSystemID); err != nil {
 			if !isMissingComputeSystem(err) {
 				return failRun(req, vmkit.StateFailed, fmt.Sprintf("delete failed: %s", err), err)
 			}
-		} else if err := s.waitForComputeSystemGone(ctx, state.ComputeSystemID, computeSystemTeardownTimeout); err != nil {
-			return failRun(req, vmkit.StateFailed, fmt.Sprintf("delete failed: %s", err), err)
+			deleted = false
 		}
+		// Release the HNS endpoint before waiting out unregistration: an
+		// attached endpoint can pin a deleted compute system in the registry.
 		if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
 			return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", err), err)
+		}
+		if deleted {
+			if err := s.waitForComputeSystemGone(ctx, state.ComputeSystemID, computeSystemTeardownTimeout); err != nil {
+				return failRun(req, vmkit.StateFailed, fmt.Sprintf("delete failed: %s", err), err)
+			}
 		}
 	}
 	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system deleted", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
@@ -504,6 +553,33 @@ func (s Supervisor) delete(ctx context.Context, req vmkit.Request) (vmkit.Respon
 		return vmkit.Response{}, err
 	}
 	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
+}
+
+// stopRuntimeListenerForTeardown terminates the runtime listener helper and
+// gives it a bounded window to actually exit. The helper holds an open HCS
+// handle on the compute system (its exit Wait), and an open handle keeps a
+// terminated system registered — tearing down before the helper is gone
+// turns the unregistration wait into a race against process cleanup. The
+// wait is best-effort: a helper that cannot be confirmed gone must not veto
+// the teardown, which fails closed on unregistration itself.
+func stopRuntimeListenerForTeardown(pid int) {
+	terminateRuntimeListenerProcessHook(pid)
+	if pid > 0 {
+		_ = waitForProcessExitHook(pid, listenerExitTimeout)
+	}
+}
+
+// releaseNetworkAttachments builds the teardown callback that deletes the
+// workspace's HNS endpoint once terminate has been issued. Best-effort by
+// design: the terminal controls re-run CleanupNetwork (idempotent) after
+// teardown and fail closed there.
+func (s Supervisor) releaseNetworkAttachments(ctx context.Context, state runtimeState) func() {
+	if strings.TrimSpace(state.NetworkEndpointID) == "" {
+		return nil
+	}
+	return func() {
+		_ = s.runtimeAdapter().CleanupNetwork(ctx, state)
+	}
 }
 
 func isMissingComputeSystem(err error) bool {

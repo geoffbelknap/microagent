@@ -138,6 +138,12 @@ func (a defaultAdapter) Delete(ctx context.Context, id string) error {
 	return a.hcsClient().DeleteComputeSystem(ctx, id)
 }
 
+// DescribeComputeSystem reports the raw HCS properties of a compute system
+// for teardown diagnostics.
+func (a defaultAdapter) DescribeComputeSystem(ctx context.Context, id string) (string, error) {
+	return a.hcsClient().DescribeComputeSystem(ctx, id)
+}
+
 func (a defaultAdapter) Exists(ctx context.Context, id string) (bool, error) {
 	err := a.hcsClient().ProbeComputeSystem(ctx, id)
 	if err == nil {
