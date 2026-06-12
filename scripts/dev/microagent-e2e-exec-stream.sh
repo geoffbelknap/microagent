@@ -8,7 +8,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # incremental chunks followed by a result frame. We assert all streamed lines
 # arrive and the command's exit status is honored.
 e2e_require_vm
-e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
+# mke2fs is an ext4-lane prerequisite; the windows-hyperv VHD builder needs none.
+if ! e2e_is_windows; then
+  e2e_require_cmd mke2fs "mke2fs is required to build the workspace rootfs"
+fi
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -108,6 +111,27 @@ case "$BACKEND" in
     create_workspace() {
       run_cli create --name "$WS" --image "$IMAGE" --backend apple-vf --network isolated --service-command "sleep 600" \
         --kernel "$KERNEL" --guest-init "$GUEST_INIT" --size-mib 128 --result-port 0 >"$STATE_DIR/create.json" 2>&1
+    }
+    ;;
+  windows-hyperv)
+    e2e_is_windows || e2e_skip "windows-hyperv exec-stream E2E requires a Windows host"
+    e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
+    # The windows-hyperv supervisor runs in-process; no --supervisor flag and no
+    # mke2fs. The CLI must be the .exe so os.Executable-based helpers resolve.
+    CLI="$STATE_DIR/microagent.exe"
+    GUEST_INIT="$STATE_DIR/microagent-guestinit"
+    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox:1.36}"
+    go build -buildvcs=false -o "$CLI" ./cmd/microagent
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
+    KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
+    if [ ! -r "$KERNEL" ]; then
+      "$CLI" kernel install || e2e_skip "windows-hyperv kernel install failed"
+    fi
+    run_cli() { "$CLI" "$@" --state-dir "$STATE_DIR"; }
+    create_workspace() {
+      # 512 MiB rootfs: the busybox VHD build needs the headroom.
+      run_cli create --name "$WS" --image "$IMAGE" --network isolated --service-command "sleep 600" \
+        --guest-init "$GUEST_INIT" --size-mib 512 >"$STATE_DIR/create.json" 2>&1
     }
     ;;
   *)
