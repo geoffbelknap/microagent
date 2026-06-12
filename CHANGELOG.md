@@ -18,6 +18,12 @@ been cut into a release yet.
   transport) wrap the gated Go smokes per the host-probe convention, and the
   E2E feature matrix records windows-hyperv coverage for run/create/start,
   connect, and exec. The live-windows-hyperv workflow runs the lane.
+- `public-surface` and `transport-deep` join the windows-hyperv lane:
+  public-surface dispatches to a VHD-native Windows arm (CLI surface checks
+  plus a real boot/run/result cycle over hv_sock; ext4/debugfs segments stay
+  deferred until VHD volumes and guest-mediated copy land), and
+  transport-deep rides the mediation smoke as its Windows transport
+  contract.
 - `perf footprint`/`perf steady` RSS sampling was POSIX-only (`ps -o rss=`);
   Windows now reads the process working set via `K32GetProcessMemoryInfo`.
 - `run -v` parses volume specs from the right, so a Windows drive-letter

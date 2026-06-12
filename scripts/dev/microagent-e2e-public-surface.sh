@@ -3,6 +3,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
+# The windows-hyperv arm lives in its own script: the POSIX body below is
+# ext4/debugfs-shaped, while Windows is VHD-native.
+if e2e_is_windows; then
+  exec "$ROOT/scripts/dev/microagent-e2e-public-surface-windows.sh"
+fi
+
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-public-surface.XXXXXX")"
 CLI="$STATE_DIR/microagent"
 SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"

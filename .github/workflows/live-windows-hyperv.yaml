@@ -100,6 +100,6 @@ jobs:
         run: >-
           scripts/dev/microagent-e2e.sh
           coverage-matrix contract help-usage mcp-stdio registry-auth
-          text-output init
+          text-output init public-surface transport-deep
           windows-hyperv-lifecycle-host windows-hyperv-connect-host
           windows-hyperv-exec-host windows-hyperv-transport-host
