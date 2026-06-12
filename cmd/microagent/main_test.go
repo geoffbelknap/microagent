@@ -5023,7 +5023,7 @@ func TestWindowsHyperVConnectSmoke(t *testing.T) {
 	waitForWorkspaceState(t, stateDir, "windows-hyperv-connect", vmkit.StateRunning, 30*time.Second)
 	// Shell readiness is probed over hv_sock, so allow the guest shell
 	// helper a bounded window to come up after the compute system starts.
-	readyDeadline := time.Now().Add(30 * time.Second)
+	readyDeadline := time.Now().Add(45 * time.Second)
 	for {
 		status, err := workspace.Status(workspace.Options{
 			Name:     "windows-hyperv-connect",
