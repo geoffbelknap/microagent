@@ -5,6 +5,34 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv networking-deep + HNS live apply (P5)
+
+- `apply` live-reloads host bind changes for existing port forwards on a
+  running windows-hyperv workspace: the runtime listener helper restarts
+  with the updated network config (in-flight forwarded connections and
+  exec sessions drop, exactly like the Firecracker port-forwarder
+  restart), the exec bridge is confirmed back before the apply reports
+  success, and the replacement helper waits for the old one to release
+  its binds so the rebind cannot race into address-in-use.
+  `LiveNetworkApply` is flipped for the backend, and the non-support
+  error for other backends names the backend instead of hard-coding the
+  supported list.
+- windows-hyperv `network inspect` reports the HNS endpoint address in
+  CIDR form (prefix length from the endpoint, network subnet fallback),
+  matching the Firecracker report shape. Known limitation surfaced by the
+  lane and documented in code: the packaged windows-hyperv kernel lacks
+  `CONFIG_HYPERV_NET` (hv_netvsc), so user/nat guests see no NIC for
+  their HNS endpoint — publish and the model/secrets/exec bridges are
+  unaffected (they ride hv_sock), and guest-side IP configuration is
+  wired up the moment the kernel artifact ships the driver.
+- The `networking-deep` scenario runs on the windows-hyperv lane: network
+  mode and publish validation, isolated-mode semantics (no NIC, working
+  loopback), the network inspect surface, and the live-apply guard rails
+  run everywhere; the HNS segments — user-mode boot with published
+  ports, the live host-bind apply round trip, and published-listener
+  teardown on halt — need an elevated shell (HNS NAT creation) and run
+  on the elevated CI runner, logged as deferred on non-elevated hosts.
+
 ### windows-hyperv secrets + model serving over hv_sock (P4)
 
 - Secret delivery works on windows-hyperv: the runtime listener helper

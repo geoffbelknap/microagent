@@ -151,6 +151,14 @@ e2e_have_hcs() {
   sc query vmms 2>/dev/null | grep -q 'RUNNING'
 }
 
+# e2e_is_windows_elevated: the shell runs elevated (admin). HNS NAT network
+# creation (user/nat modes) needs elevation; Hyper-V Administrators alone is
+# enough for isolated boots but not for HNS.
+e2e_is_windows_elevated() {
+  e2e_is_windows || return 1
+  net session >/dev/null 2>&1
+}
+
 # e2e_have_vm: can this host boot a microVM via the native backend?
 e2e_have_vm() {
   case "$(uname -s)" in

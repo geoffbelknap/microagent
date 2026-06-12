@@ -137,6 +137,32 @@ func TestBuildComputeSystemDocumentEmitsSecretsAndModelCmdline(t *testing.T) {
 	}
 }
 
+func TestBuildComputeSystemDocumentOmitsGuestNetworkCmdline(t *testing.T) {
+	// The packaged windows-hyperv kernel has no hv_netvsc, so emitting
+	// microagent_net_* would make every user/nat boot fail closed on a
+	// missing interface. This pins the omission until the kernel artifact
+	// ships the driver.
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Network: &vmkit.NetworkConfig{
+				Mode:    "user",
+				IP:      "192.168.127.5/24",
+				Gateway: "192.168.127.1",
+				DNS:     []string{"192.168.127.1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(document), "microagent_net_if") {
+		t.Fatalf("cmdline must not carry guest network config while the kernel lacks hv_netvsc: %s", document)
+	}
+}
+
 func TestBuildComputeSystemDocumentAttachesConfiguredDisks(t *testing.T) {
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",

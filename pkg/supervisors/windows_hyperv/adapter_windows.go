@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -319,6 +320,13 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	if spec.Config.ModelGuestPort != 0 && spec.Config.ModelVsockPort != 0 {
 		kernelCmdLine += fmt.Sprintf(" microagent_model_fwd=%d:%d", spec.Config.ModelGuestPort, spec.Config.ModelVsockPort)
 	}
+	// Guest-side network config (microagent_net_*) is intentionally NOT
+	// emitted yet: the packaged windows-hyperv kernel lacks CONFIG_HYPERV_NET
+	// (hv_netvsc), so no guest netdev exists for the HNS endpoint and a
+	// configured-but-missing interface fails the boot closed. The HNS
+	// endpoint address is still recorded host-side for inspection. Wire the
+	// cmdline emission (mirroring firecrackerBootArgs) when the kernel
+	// artifact ships the driver.
 	comPorts := map[string]comPort(nil)
 	if hasResultListener(spec) {
 		kernelCmdLine += " 8250_core.nr_uarts=1 8250_core.skip_txen_test=1 console=ttyS0,115200"
@@ -452,7 +460,7 @@ func createNetworkEndpoint(network *hcn.HostComputeNetwork, runtimeID string, ru
 	if err != nil {
 		return networkAttachment{}, fmt.Errorf("create HNS endpoint %q: %w", name, err)
 	}
-	runtimeNetwork.IP = firstEndpointIP(created)
+	runtimeNetwork.IP = firstEndpointIP(created, network)
 	if runtimeNetwork.Subnet == "" {
 		runtimeNetwork.Subnet = firstSubnet(network)
 	}
@@ -478,11 +486,31 @@ func createNetworkEndpoint(network *hcn.HostComputeNetwork, runtimeID string, ru
 	}, nil
 }
 
-func firstEndpointIP(endpoint *hcn.HostComputeEndpoint) string {
+// firstEndpointIP returns the endpoint's first IPv4 address in CIDR form —
+// the shape the guest's static network config expects (and the same shape
+// the Firecracker backend records). The prefix length comes from the
+// endpoint, falling back to the network subnet.
+func firstEndpointIP(endpoint *hcn.HostComputeEndpoint, network *hcn.HostComputeNetwork) string {
 	if endpoint == nil || len(endpoint.IpConfigurations) == 0 {
 		return ""
 	}
-	return endpoint.IpConfigurations[0].IpAddress
+	config := endpoint.IpConfigurations[0]
+	if config.IpAddress == "" {
+		return ""
+	}
+	if strings.Contains(config.IpAddress, "/") {
+		return config.IpAddress
+	}
+	prefix := int(config.PrefixLength)
+	if prefix == 0 {
+		if _, subnet, err := net.ParseCIDR(firstSubnet(network)); err == nil {
+			prefix, _ = subnet.Mask.Size()
+		}
+	}
+	if prefix == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s/%d", config.IpAddress, prefix)
 }
 
 func firstSubnet(network *hcn.HostComputeNetwork) string {
