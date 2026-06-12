@@ -67,7 +67,7 @@ SCENARIO_COVERAGE=(
   "lifecycle-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|create/start/status/inspect/ps/connect/logs/events/stats/halt/quarantine/clone/cp/artifacts/images/prune/delete"
   "networking-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|network modes, publish, apply, quarantine, cached image/network paths"
   "transport-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|mediation and vsock transport contract"
-  "supervision-deep|backend-neutral|firecracker,apple-vf|restart supervision, signal, failure, cleanup"
+  "supervision-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|restart supervision, signal, failure, cleanup"
   "volumes|backend-neutral|firecracker,apple-vf,windows-hyperv|volume create/ls/inspect/rm, attach persistence, single attach"
   "commit-images|backend-neutral|firecracker,apple-vf,windows-hyperv|commit stopped rootfs into local OCI image layout"
   "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secret check, materialized secrets, on-demand secrets, audit records"
@@ -127,7 +127,7 @@ E2E_MATRIX=(
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|firecracker,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
-  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,volumes,exec-stream,health,survive-reboot,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host,windows-hyperv-model-host|Portable scenarios, public-surface, lifecycle-deep, networking-deep (HNS segments need elevation), transport-deep, secrets, commit-images, volumes, exec-stream, health, survive-reboot (boot-unit generation; schtasks registration needs elevation), model-serving (env-gated), and windows-hyperv-*-host probes run under Git Bash"
+  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,volumes,exec-stream,health,supervision-deep,survive-reboot,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host,windows-hyperv-model-host|Portable scenarios, public-surface, lifecycle-deep, networking-deep (HNS segments need elevation), transport-deep, secrets, commit-images, volumes, exec-stream, health, supervision-deep, survive-reboot (boot-unit generation; schtasks registration needs elevation), model-serving (env-gated), and windows-hyperv-*-host probes run under Git Bash"
 )
 
 usage() {

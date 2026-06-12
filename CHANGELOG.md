@@ -5,6 +5,30 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv supervision parity: failed-state classification (P6)
+
+- A windows-hyperv guest that exits on its own with a non-zero result is now
+  reconciled to `failed` instead of `stopped`, so `supervise` with the
+  `on-failure` policy restarts it — mirroring the firecracker inspect
+  reconcile. The classification reads the guest's delivered result (with the
+  same bounded 2s wait firecracker uses for a still-flushing result file);
+  a missing result or exit code 0 remains a clean `stopped`, preserving
+  poweroff/always semantics.
+- `readRuntimeResult` now parses the on-disk result file with the guest's
+  snake_case schema (the runtime listener writes the raw guest bytes). It
+  previously unmarshaled the camelCase vmkit form, silently reporting
+  `exitCode: 0` and empty stdout in inspect/status responses regardless of
+  the real guest exit.
+- The `supervision-deep` E2E scenario gains a windows-hyperv arm
+  (`microagent-e2e-supervision-windows.sh`) and joins the live workflow:
+  `never` is not restarted; `always` restarts a guest poweroff to the
+  restart cap and ends `stopped`; killing only the supervise loop leaves the
+  workspace running (HCS owns the VM, not the loop) and a manual stop is not
+  policy-restarted; an `on-failure` guest exiting 42 is restarted to the cap,
+  ends `failed`, and the result carries the guest exit code and stdout. The
+  host-PID cancel assertion from the POSIX arms is expressed as
+  workspace-state truth because windows-hyperv has no host runtime PID.
+
 ### windows-hyperv survive-reboot E2E (P6)
 
 - The `survive-reboot` E2E scenario gains a windows-hyperv arm and joins the
