@@ -1365,6 +1365,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	fs.IntVar(&timeoutSeconds, "timeout", timeoutSeconds, "Per-iteration timeout in seconds")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
+	fs.StringVar(&opts.NetworkMode, "network", opts.NetworkMode, "Network mode for measured boots (user, nat, isolated, bridged); empty uses the backend default")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -6371,6 +6372,7 @@ Boot options:
   -timeout <seconds>    Per-iteration timeout
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
+  -network <mode>       Network mode for measured boots; empty uses the backend default
 
 Footprint options:
   -state-dir <dir>      State directory

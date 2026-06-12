@@ -20,9 +20,14 @@ type BootOptions struct {
 	Architecture   string
 	Mke2fsPath     string
 	SupervisorPath string
-	Iterations     int
-	Timeout        time.Duration
-	Host           *vmkit.HostSupport
+	// NetworkMode selects the workspace network mode for each measured boot
+	// (user, nat, isolated, bridged). Empty means the backend default. An
+	// isolated boot needs no host network privileges, which matters on
+	// windows-hyperv where user/nat HNS setup requires elevation.
+	NetworkMode string
+	Iterations  int
+	Timeout     time.Duration
+	Host        *vmkit.HostSupport
 }
 
 type BootReport struct {
@@ -128,6 +133,22 @@ func Footprint(stateDir, name string) (FootprintReport, error) {
 	if err != nil {
 		return FootprintReport{}, err
 	}
+	// windows-hyperv has no host guest PID (HCS owns the VM worker process);
+	// its memory footprint comes from the HCS statistics properties that
+	// already back `stats`.
+	if state.Event.Identity.Backend == vmkit.BackendWindowsHyperV {
+		rssKiB, err := sampleWindowsHyperVRSSKiB(stateDir, name)
+		if err != nil {
+			return FootprintReport{}, err
+		}
+		return FootprintReport{
+			Benchmark: "footprint",
+			Workspace: name,
+			Backend:   state.Event.Identity.Backend,
+			RSSKiB:    rssKiB,
+			State:     string(state.Event.State),
+		}, nil
+	}
 	if state.PID <= 0 {
 		return FootprintReport{}, fmt.Errorf("workspace %s does not have a running process pid", name)
 	}
@@ -162,10 +183,29 @@ func Steady(ctx context.Context, stateDir, name string, duration, interval time.
 	if err != nil {
 		return SteadyReport{}, err
 	}
+	// windows-hyperv samples HCS statistics instead of a host process RSS;
+	// see Footprint.
+	var samples []RSSSample
+	if state.Event.Identity.Backend == vmkit.BackendWindowsHyperV {
+		samples, err = sampleRSS(ctx, func() (int64, error) { return sampleWindowsHyperVRSSKiB(stateDir, name) }, duration, interval)
+		if err != nil {
+			return SteadyReport{}, err
+		}
+		return SteadyReport{
+			Benchmark:       "steady",
+			Workspace:       name,
+			Backend:         state.Event.Identity.Backend,
+			State:           string(state.Event.State),
+			DurationSeconds: int(duration.Seconds()),
+			IntervalSeconds: int(interval.Seconds()),
+			Samples:         samples,
+			Summary:         SummarizeRSSSamples(samples),
+		}, nil
+	}
 	if state.PID <= 0 {
 		return SteadyReport{}, fmt.Errorf("workspace %s does not have a running process pid", name)
 	}
-	samples, err := SampleProcessRSS(ctx, state.PID, duration, interval)
+	samples, err = SampleProcessRSS(ctx, state.PID, duration, interval)
 	if err != nil {
 		return SteadyReport{}, err
 	}
@@ -206,6 +246,21 @@ func ParseRSSKiB(output []byte) (int64, error) {
 }
 
 func SampleProcessRSS(ctx context.Context, pid int, duration, interval time.Duration) ([]RSSSample, error) {
+	return sampleRSS(ctx, func() (int64, error) { return ProcessRSSKiB(pid) }, duration, interval)
+}
+
+// sampleWindowsHyperVRSSKiB reads the workspace's memory footprint from the
+// HCS statistics sample that backs `stats`, converted to the KiB unit the
+// perf reports use. It fails on hosts without the HCS API.
+func sampleWindowsHyperVRSSKiB(stateDir, name string) (int64, error) {
+	stats, err := workspace.SampleStats(stateDir, name)
+	if err != nil {
+		return 0, err
+	}
+	return int64(stats.MemoryBytes / 1024), nil
+}
+
+func sampleRSS(ctx context.Context, sample func() (int64, error), duration, interval time.Duration) ([]RSSSample, error) {
 	if duration <= 0 {
 		return nil, fmt.Errorf("duration must be positive")
 	}
@@ -215,7 +270,7 @@ func SampleProcessRSS(ctx context.Context, pid int, duration, interval time.Dura
 	deadline := time.Now().Add(duration)
 	samples := []RSSSample{}
 	for {
-		rssKiB, err := ProcessRSSKiB(pid)
+		rssKiB, err := sample()
 		if err != nil {
 			return nil, err
 		}
@@ -298,6 +353,9 @@ func runBootWorkspace(ctx context.Context, opts BootOptions, name string) error 
 	}
 	if strings.TrimSpace(opts.SupervisorPath) != "" {
 		workspaceOpts.SupervisorPath = opts.SupervisorPath
+	}
+	if mode := strings.TrimSpace(opts.NetworkMode); mode != "" {
+		workspaceOpts.Network = vmkit.NetworkConfig{Mode: mode}
 	}
 	_, err := workspace.Run(ctx, workspaceOpts)
 	return err

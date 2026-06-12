@@ -296,6 +296,7 @@ func mcpTools() []map[string]any {
 			"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "exec": map[string]any{"type": "string"},
 			"state_dir": map[string]any{"type": "string"}, "profile": map[string]any{"type": "string"}, "dry_run": map[string]any{"type": "boolean"},
 			"model": map[string]any{"type": "string"}, "model_token": map[string]any{"type": "string"},
+			"network": map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated", "bridged"}},
 		}),
 		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.exec", "Run a structured command in a running workspace.", []string{"name"}, workspaceExecInputSchema()),
@@ -1095,6 +1096,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-image", stringArg(args, "image"))
 		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
 		cli = appendOptionalFlag(cli, "-profile", stringArg(args, "profile"))
+		cli = appendOptionalFlag(cli, "-network", stringArg(args, "network"))
 		cli = appendOptionalFlag(cli, "-model", stringArg(args, "model"))
 		cli = appendOptionalFlag(cli, "-model-token", stringArg(args, "model_token"))
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
