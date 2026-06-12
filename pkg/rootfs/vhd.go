@@ -14,52 +14,6 @@ import (
 const symlinkMarkerPrefix = "microagent-symlink\x00"
 const stageMetadataName = ".microagent-rootfs-metadata.jsonl"
 
-// reservedSpaceName is a zero-filled file appended to rootfs image tars so
-// the tar2ext4-built filesystem carries guest-writable capacity (tar2ext4
-// sizes filesystems to their content with no free blocks). The guest init
-// deletes it on first boot, releasing the blocks. The name must match the
-// removal in cmd/microagent-guestinit.
-const reservedSpaceName = ".microagent-reserved-space"
-
-// vhdMetadataAllowanceBytes is headroom left for ext4 metadata (inode
-// tables, bitmaps, group descriptors) when sizing the reserved-space file;
-// actual metadata for workspace-scale images is well under this.
-const vhdMetadataAllowanceBytes = 8 * 1024 * 1024
-
-// writeImageTar streams the stage tree as a tar archive. When
-// targetSizeBytes is positive, it appends a zero-filled reserved-space
-// entry that pads the resulting filesystem toward targetSizeBytes so the
-// guest has writable capacity once the entry is deleted at first boot.
-// Fails closed when the content plus metadata cannot fit the target size.
-func writeImageTar(stageDir string, tw *tar.Writer, targetSizeBytes int64) error {
-	contentBytes, err := writeStageTar(stageDir, tw)
-	if err != nil {
-		return err
-	}
-	if targetSizeBytes <= 0 {
-		return nil
-	}
-	reserve := targetSizeBytes - contentBytes - vhdMetadataAllowanceBytes
-	if reserve <= 0 {
-		return fmt.Errorf("rootfs size %d MiB cannot hold the image content (%d MiB plus filesystem metadata); increase the rootfs size",
-			targetSizeBytes/(1024*1024), contentBytes/(1024*1024))
-	}
-	if err := tw.WriteHeader(&tar.Header{Name: reservedSpaceName, Mode: 0o600, Size: reserve}); err != nil {
-		return err
-	}
-	_, err = io.CopyN(tw, zeroReader{}, reserve)
-	return err
-}
-
-type zeroReader struct{}
-
-func (zeroReader) Read(p []byte) (int, error) {
-	for i := range p {
-		p[i] = 0
-	}
-	return len(p), nil
-}
-
 type stageModeRecord struct {
 	Path string `json:"path"`
 	Mode int64  `json:"mode"`
