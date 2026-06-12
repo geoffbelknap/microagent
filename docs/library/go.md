@@ -170,6 +170,15 @@ func main() {
 }
 ```
 
+`rootfs.BuildEmptyVolume(ctx, outputPath, sizeBytes)` writes an empty ext4
+filesystem wrapped in a VHD footer, sized to `sizeBytes`. It backs named volumes
+on VHD-lane backends (windows-hyperv), whose hosts have no `mke2fs`: the image is
+built in-process and the guest gets writable capacity once `microagent-guestinit`
+releases the reserved-space padding at the mountpoint on first mount. It fails
+closed on non-VHD hosts. The `pkg/volume` package calls it automatically when the
+backend's capabilities select the VHD disk format, so most callers manage volumes
+through `volume.Create` rather than calling this directly.
+
 ## Workspace API
 
 Use `pkg/workspace` when your program wants to create, run, start, inspect, and

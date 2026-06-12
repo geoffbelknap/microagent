@@ -603,6 +603,18 @@ func mountDisks(mounts []mount) error {
 		if err := mountDiskFilesystem(mount.Device, mount.Mountpoint, "ext4", flags, data); err != nil {
 			return fmt.Errorf("mount %s at %s: %w", mount.Device, mount.Mountpoint, err)
 		}
+		// VHD-lane backends build writable disks (rootfs and named volumes
+		// alike) by padding the tar2ext4 filesystem with a zero-filled
+		// reserved-space file, since tar2ext4 sizes a filesystem to its
+		// content with no free blocks. Deleting it on first mount releases
+		// that capacity to the guest. Absent on ext4-lane backends, on
+		// read-only mounts, and on every boot after the first — all tolerated.
+		if mount.Mode == "rw" {
+			reserved := filepath.Join(mount.Mountpoint, ".microagent-reserved-space")
+			if err := os.Remove(reserved); err != nil && !os.IsNotExist(err) {
+				log.Printf("microagent-init: remove reserved-space file at %s: %v", mount.Mountpoint, err)
+			}
+		}
 	}
 	return nil
 }

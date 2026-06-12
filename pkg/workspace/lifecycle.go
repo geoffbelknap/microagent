@@ -824,7 +824,7 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 	seenMountpoints := map[string]bool{}
 	for _, disk := range opts.Disks {
 		if disk.ManagedVolume {
-			path, err := volume.Path(opts.StateDir, disk.Name)
+			path, err := volume.Path(opts.StateDir, opts.Backend, disk.Name)
 			if err != nil {
 				return nil, err
 			}

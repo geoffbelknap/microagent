@@ -481,6 +481,30 @@ func buildBundleImage(ctx context.Context, req BundleRequest, stageDir, tmpDir s
 	}
 }
 
+// BuildEmptyVolume writes an empty ext4 filesystem wrapped in a VHD footer to
+// outputPath, sized to sizeBytes. It exists for the VHD-lane backends
+// (windows-hyperv) whose hosts have no mke2fs: an empty stage tree converts to
+// an empty ext4, and the reserved-space file pads it toward sizeBytes so the
+// guest gets writable capacity once microagent-guestinit deletes that file at
+// the mountpoint on first mount. The read-only feature flag tar2ext4 stamps in
+// is cleared so the guest can mount the volume rw. Fails closed on non-VHD
+// hosts, where buildVHDImage is unavailable.
+func BuildEmptyVolume(ctx context.Context, outputPath string, sizeBytes int64) error {
+	stageDir, err := os.MkdirTemp("", "microagent-volume-stage-")
+	if err != nil {
+		return fmt.Errorf("stage empty volume: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(stageDir) }()
+
+	tmpDir, err := os.MkdirTemp("", "microagent-volume-build-")
+	if err != nil {
+		return fmt.Errorf("stage volume build: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "volume.vhd"), outputPath, sizeBytes, true)
+}
+
 func buildExt4Image(ctx context.Context, mke2fsPath, stageDir, tmpImage, outputPath string, sizeBytes int64, label string) error {
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)

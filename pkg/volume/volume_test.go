@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // fakeFormat replaces the mke2fs-backed formatter with one that just writes a
@@ -16,6 +18,85 @@ func fakeFormat(t *testing.T) {
 		return os.WriteFile(path, make([]byte, 0), 0o644)
 	}
 	t.Cleanup(func() { formatExt4 = prev })
+}
+
+// fakeVHDFormat replaces the in-process VHD builder with a stub that writes a
+// placeholder file, so VHD-lane tests do not depend on tar2ext4/host platform.
+// It returns a recorder reporting which formatter ran.
+func fakeVHDFormat(t *testing.T) *struct{ vhdCalled, ext4Called bool } {
+	t.Helper()
+	rec := &struct{ vhdCalled, ext4Called bool }{}
+	prevVHD := formatVHD
+	prevExt4 := formatExt4
+	formatVHD = func(_ context.Context, path string, _ int64) error {
+		rec.vhdCalled = true
+		return os.WriteFile(path, make([]byte, 0), 0o644)
+	}
+	formatExt4 = func(_ context.Context, path string, _ int64, _ string) error {
+		rec.ext4Called = true
+		return os.WriteFile(path, make([]byte, 0), 0o644)
+	}
+	t.Cleanup(func() {
+		formatVHD = prevVHD
+		formatExt4 = prevExt4
+	})
+	return rec
+}
+
+// TestCreateVHDBackendUsesVHDBuilder asserts that a VHD-lane backend
+// (windows-hyperv) builds its backing image in-process with a .vhd extension
+// and never invokes mke2fs.
+func TestCreateVHDBackendUsesVHDBuilder(t *testing.T) {
+	rec := fakeVHDFormat(t)
+	dir := t.TempDir()
+	backend := vmkit.BackendWindowsHyperV
+
+	r, err := Create(context.Background(), dir, backend, "data", 0, "")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !rec.vhdCalled {
+		t.Error("expected the VHD builder to run on a VHD-lane backend")
+	}
+	if rec.ext4Called {
+		t.Error("mke2fs formatter must not run on a VHD-lane backend")
+	}
+	want := DiskPath(dir, backend, r.Name)
+	if filepath.Ext(want) != ".vhd" {
+		t.Errorf("DiskPath = %q, want a .vhd backing file", want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("expected backing disk at %q: %v", want, err)
+	}
+	// Path must resolve to the same VHD image for this backend.
+	got, err := Path(dir, backend, "data")
+	if err != nil {
+		t.Fatalf("path: %v", err)
+	}
+	if got != want {
+		t.Errorf("Path = %q, want %q", got, want)
+	}
+}
+
+// TestRemoveDropsBackingFileRegardlessOfExtension guards that Remove cleans up
+// the VHD backing file (not just the historical .ext4 shape).
+func TestRemoveDropsBackingFileRegardlessOfExtension(t *testing.T) {
+	fakeVHDFormat(t)
+	dir := t.TempDir()
+	backend := vmkit.BackendWindowsHyperV
+	if _, err := Create(context.Background(), dir, backend, "data", 0, ""); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	disk := DiskPath(dir, backend, "data")
+	if _, err := os.Stat(disk); err != nil {
+		t.Fatalf("expected backing file: %v", err)
+	}
+	if err := Remove(dir, "data", false, nil); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, err := os.Stat(disk); !os.IsNotExist(err) {
+		t.Errorf("expected VHD backing file removed, stat err: %v", err)
+	}
 }
 
 func TestValidName(t *testing.T) {
@@ -37,7 +118,7 @@ func TestCreateListGet(t *testing.T) {
 	fakeFormat(t)
 	dir := t.TempDir()
 
-	rec, err := Create(context.Background(), dir, "data", 0, "")
+	rec, err := Create(context.Background(), dir, "", "data", 0, "")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -47,11 +128,11 @@ func TestCreateListGet(t *testing.T) {
 	if rec.CreatedAt == "" {
 		t.Error("expected CreatedAt to be set")
 	}
-	if _, err := os.Stat(DiskPath(dir, "data")); err != nil {
+	if _, err := os.Stat(DiskPath(dir, "", "data")); err != nil {
 		t.Errorf("expected backing disk to exist: %v", err)
 	}
 
-	if _, err := Create(context.Background(), dir, "cache", 256, ""); err != nil {
+	if _, err := Create(context.Background(), dir, "", "cache", 256, ""); err != nil {
 		t.Fatalf("create cache: %v", err)
 	}
 	list, err := List(dir)
@@ -74,16 +155,16 @@ func TestCreateListGet(t *testing.T) {
 func TestCreateRejectsDuplicateAndBadSize(t *testing.T) {
 	fakeFormat(t)
 	dir := t.TempDir()
-	if _, err := Create(context.Background(), dir, "data", 0, ""); err != nil {
+	if _, err := Create(context.Background(), dir, "", "data", 0, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := Create(context.Background(), dir, "data", 0, ""); err == nil {
+	if _, err := Create(context.Background(), dir, "", "data", 0, ""); err == nil {
 		t.Error("expected duplicate name to fail")
 	}
-	if _, err := Create(context.Background(), dir, "toobig", maxSizeMiB+1, ""); err == nil {
+	if _, err := Create(context.Background(), dir, "", "toobig", maxSizeMiB+1, ""); err == nil {
 		t.Error("expected oversize volume to fail")
 	}
-	if _, err := Create(context.Background(), dir, "BadName", 0, ""); err == nil {
+	if _, err := Create(context.Background(), dir, "", "BadName", 0, ""); err == nil {
 		t.Error("expected invalid name to fail")
 	}
 }
@@ -91,17 +172,17 @@ func TestCreateRejectsDuplicateAndBadSize(t *testing.T) {
 func TestPathResolution(t *testing.T) {
 	fakeFormat(t)
 	dir := t.TempDir()
-	if _, err := Create(context.Background(), dir, "data", 0, ""); err != nil {
+	if _, err := Create(context.Background(), dir, "", "data", 0, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	p, err := Path(dir, "data")
+	p, err := Path(dir, "", "data")
 	if err != nil {
 		t.Fatalf("path: %v", err)
 	}
-	if p != DiskPath(dir, "data") {
-		t.Errorf("expected %q, got %q", DiskPath(dir, "data"), p)
+	if p != DiskPath(dir, "", "data") {
+		t.Errorf("expected %q, got %q", DiskPath(dir, "", "data"), p)
 	}
-	if _, err := Path(dir, "missing"); err == nil {
+	if _, err := Path(dir, "", "missing"); err == nil {
 		t.Error("expected unknown volume to fail")
 	}
 }
@@ -109,7 +190,7 @@ func TestPathResolution(t *testing.T) {
 func TestAttachEnforcesSingleAttach(t *testing.T) {
 	fakeFormat(t)
 	dir := t.TempDir()
-	if _, err := Create(context.Background(), dir, "data", 0, ""); err != nil {
+	if _, err := Create(context.Background(), dir, "", "data", 0, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -143,7 +224,7 @@ func TestDetachAndDetachAll(t *testing.T) {
 	fakeFormat(t)
 	dir := t.TempDir()
 	for _, n := range []string{"a", "b"} {
-		if _, err := Create(context.Background(), dir, n, 0, ""); err != nil {
+		if _, err := Create(context.Background(), dir, "", n, 0, ""); err != nil {
 			t.Fatalf("create %s: %v", n, err)
 		}
 		if _, err := Attach(dir, n, "ws1", nil); err != nil {
@@ -179,7 +260,7 @@ func TestDetachAndDetachAll(t *testing.T) {
 func TestRemove(t *testing.T) {
 	fakeFormat(t)
 	dir := t.TempDir()
-	if _, err := Create(context.Background(), dir, "data", 0, ""); err != nil {
+	if _, err := Create(context.Background(), dir, "", "data", 0, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if _, err := Attach(dir, "data", "ws1", nil); err != nil {
@@ -194,7 +275,7 @@ func TestRemove(t *testing.T) {
 	if err := Remove(dir, "data", false, func(string) bool { return false }); err != nil {
 		t.Fatalf("remove stale-held volume: %v", err)
 	}
-	if _, err := os.Stat(DiskPath(dir, "data")); !os.IsNotExist(err) {
+	if _, err := os.Stat(DiskPath(dir, "", "data")); !os.IsNotExist(err) {
 		t.Errorf("expected backing disk removed, stat err: %v", err)
 	}
 	if _, err := Get(dir, "data"); err == nil {
@@ -208,7 +289,7 @@ func TestRemove(t *testing.T) {
 func TestForceRemoveInUse(t *testing.T) {
 	fakeFormat(t)
 	dir := t.TempDir()
-	if _, err := Create(context.Background(), dir, "data", 0, ""); err != nil {
+	if _, err := Create(context.Background(), dir, "", "data", 0, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if _, err := Attach(dir, "data", "ws1", nil); err != nil {
@@ -224,7 +305,7 @@ func TestIndexPathLayout(t *testing.T) {
 	if got, want := IndexPath(dir), filepath.Join(dir, "volumes", "index.json"); got != want {
 		t.Errorf("IndexPath = %q, want %q", got, want)
 	}
-	if got, want := DiskPath(dir, "data"), filepath.Join(dir, "volumes", "data.ext4"); got != want {
+	if got, want := DiskPath(dir, "", "data"), filepath.Join(dir, "volumes", "data.ext4"); got != want {
 		t.Errorf("DiskPath = %q, want %q", got, want)
 	}
 }

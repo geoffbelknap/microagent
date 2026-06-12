@@ -68,7 +68,7 @@ SCENARIO_COVERAGE=(
   "networking-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|network modes, publish, apply, quarantine, cached image/network paths"
   "transport-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|mediation and vsock transport contract"
   "supervision-deep|backend-neutral|firecracker,apple-vf|restart supervision, signal, failure, cleanup"
-  "volumes|backend-neutral|firecracker,apple-vf|volume create/ls/inspect/rm, attach persistence, single attach"
+  "volumes|backend-neutral|firecracker,apple-vf,windows-hyperv|volume create/ls/inspect/rm, attach persistence, single attach"
   "commit-images|backend-neutral|firecracker,apple-vf,windows-hyperv|commit stopped rootfs into local OCI image layout"
   "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secret check, materialized secrets, on-demand secrets, audit records"
   "health|backend-neutral|firecracker,apple-vf|health.exec validation and supervise restart on unhealthy probe"
@@ -115,7 +115,7 @@ E2E_MATRIX=(
   "apply|backend-neutral|firecracker,apple-vf,windows-hyperv|networking-deep|Supported spec changes"
   "network inspect/modes/publish|backend-neutral|firecracker,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|Portable modes plus backend publish mechanics; windows-hyperv HNS segments need an elevated host"
   "network create/ls/rm named|host-specific|firecracker|named-network|Privileged Linux named bridge; not Apple VF portable"
-  "volume create/ls/inspect/rm|backend-neutral|firecracker,apple-vf|volumes|Managed ext4 volume lifecycle and attach semantics"
+  "volume create/ls/inspect/rm|backend-neutral|firecracker,apple-vf,windows-hyperv|volumes|Managed volume lifecycle and attach semantics (ext4, or VHD-wrapped ext4 on windows-hyperv)"
   "commit/images/prune|backend-neutral|firecracker,apple-vf,windows-hyperv|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/rm/prune, commit"
   "registry auth|portable|none|registry-auth|Private registry credential discovery"
   "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
@@ -127,7 +127,7 @@ E2E_MATRIX=(
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|firecracker,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
-  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host,windows-hyperv-model-host|Portable scenarios, public-surface, lifecycle-deep, networking-deep (HNS segments need elevation), transport-deep, secrets, commit-images, model-serving (env-gated), and windows-hyperv-*-host probes run under Git Bash; volumes joins when VHD-wrapped named volumes land"
+  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,volumes,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host,windows-hyperv-model-host|Portable scenarios, public-surface, lifecycle-deep, networking-deep (HNS segments need elevation), transport-deep, secrets, commit-images, volumes, model-serving (env-gated), and windows-hyperv-*-host probes run under Git Bash"
 )
 
 usage() {
