@@ -307,6 +307,18 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	if port := guestExecPort(spec.Config); port != 0 {
 		kernelCmdLine += fmt.Sprintf(" microagent_exec_port=%d", port)
 	}
+	if spec.Config.SecretsPort != 0 {
+		kernelCmdLine += fmt.Sprintf(" microagent_secrets_port=%d", spec.Config.SecretsPort)
+	}
+	if len(spec.Config.OnDemandSecrets) != 0 {
+		kernelCmdLine += " microagent_secrets_api=1"
+	}
+	// microagent_secrets_ctl_port is intentionally not emitted: the control
+	// listener exists for snapshot purge/rehydrate, and snapshots are
+	// Firecracker-only. The host never dials the guest control port here.
+	if spec.Config.ModelGuestPort != 0 && spec.Config.ModelVsockPort != 0 {
+		kernelCmdLine += fmt.Sprintf(" microagent_model_fwd=%d:%d", spec.Config.ModelGuestPort, spec.Config.ModelVsockPort)
+	}
 	comPorts := map[string]comPort(nil)
 	if hasResultListener(spec) {
 		kernelCmdLine += " 8250_core.nr_uarts=1 8250_core.skip_txen_test=1 console=ttyS0,115200"

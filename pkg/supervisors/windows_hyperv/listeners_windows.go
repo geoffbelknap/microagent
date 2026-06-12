@@ -16,6 +16,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/Microsoft/go-winio/pkg/guid"
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -35,7 +36,7 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 	}
 	for _, listener := range req.Config.VsockListeners {
 		if !isAllowedHVSockTarget(req, listener.Target) {
-			return nil, fmt.Errorf("windows-hyperv vsock listener %d target must be host:port or the workspace result path", listener.Port)
+			return nil, fmt.Errorf("windows-hyperv vsock listener %d target must be host:port, the secrets service, or the workspace result path", listener.Port)
 		}
 	}
 	vmID, err := guid.FromString(handle.RuntimeID)
@@ -49,6 +50,18 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 	go copySerialPipe(serialPipePath(req.Identity.RuntimeID), serialLogPath(req))
 	started := 0
 	for _, listener := range req.Config.VsockListeners {
+		// Resolve the secrets bundle before the listener (and the boot)
+		// exists: an unresolvable reference fails the start, never a guest
+		// waiting on a half-served bundle.
+		var secrets *secretxfer.Server
+		if listener.Target == secretxfer.ServerTarget {
+			bundle, err := secretxfer.ResolveBundle(ctx, req.Config)
+			if err != nil {
+				_ = set.Close()
+				return nil, fmt.Errorf("resolve secrets: %w", err)
+			}
+			secrets = secretxfer.NewServer(req.Identity.RuntimeID, req.Config.StateDir, bundle, secretxfer.OnDemandRefs(req.Config), req.Config.SecretsAudit)
+		}
 		l, err := winio.ListenHvsock(&winio.HvsockAddr{
 			VMID:      vmID,
 			ServiceID: winio.VsockServiceID(listener.Port),
@@ -59,6 +72,10 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 		}
 		set.listeners = append(set.listeners, l)
 		started++
+		if secrets != nil {
+			go secrets.Serve(l)
+			continue
+		}
 		go set.serve(l, listener.Target, listener.Target == resultPath(req))
 	}
 	if req.Config.Network != nil {
@@ -112,6 +129,9 @@ func hasResultTarget(req vmkit.Request) bool {
 
 func isAllowedHVSockTarget(req vmkit.Request, target string) bool {
 	if _, ok := parseTCPAddr(target); ok {
+		return true
+	}
+	if target == secretxfer.ServerTarget {
 		return true
 	}
 	return target == resultPath(req)

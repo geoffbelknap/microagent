@@ -1277,13 +1277,17 @@ func configureBootNetwork() error {
 		return err
 	}
 	log.Printf("microagent-init: network = %+v", cfg)
+	// Loopback is in-guest plumbing, not host networking: guest-local
+	// services (the model forward helper, workload servers probed over
+	// exec) need 127.0.0.1 working even when the workspace has no NIC
+	// (isolated mode).
+	if err := bringUpLoopback(); err != nil {
+		return err
+	}
 	if cfg.Interface == "" {
 		return nil
 	}
 	log.Printf("microagent-init: /sys/class/net = %v", listNetInterfaces())
-	if err := bringUpLoopback(); err != nil {
-		return err
-	}
 	if err := configureStaticIPv4(cfg); err != nil {
 		return err
 	}

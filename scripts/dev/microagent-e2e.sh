@@ -40,6 +40,7 @@ SCENARIOS=(
   "windows-hyperv-connect-host:scripts/dev/microagent-e2e-windows-hyperv-connect-host.sh:windows:vm"
   "windows-hyperv-exec-host:scripts/dev/microagent-e2e-windows-hyperv-exec-host.sh:windows:vm"
   "windows-hyperv-transport-host:scripts/dev/microagent-e2e-windows-hyperv-transport-host.sh:windows:vm"
+  "windows-hyperv-model-host:scripts/dev/microagent-e2e-windows-hyperv-model-host.sh:windows:vm"
   "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin:vm"
   "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin:vm"
   "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin:vm"
@@ -69,10 +70,10 @@ SCENARIO_COVERAGE=(
   "supervision-deep|backend-neutral|firecracker,apple-vf|restart supervision, signal, failure, cleanup"
   "volumes|backend-neutral|firecracker,apple-vf|volume create/ls/inspect/rm, attach persistence, single attach"
   "commit-images|backend-neutral|firecracker,apple-vf|commit stopped rootfs into local OCI image layout"
-  "secrets|backend-neutral|firecracker,apple-vf|secret check, materialized secrets, on-demand secrets, audit records"
+  "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secret check, materialized secrets, on-demand secrets, audit records"
   "health|backend-neutral|firecracker,apple-vf|health.exec validation and supervise restart on unhealthy probe"
   "exec-stream|backend-neutral|firecracker,apple-vf|structured exec streaming, non-zero exit propagation, buffered parity"
-  "model-serving|backend-neutral|firecracker,apple-vf|model pull/list/stop and run --model over backend vsock bridge"
+  "model-serving|backend-neutral|firecracker,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
   "firecracker-lifecycle-host|backend-specific|firecracker|Firecracker lifecycle host mechanics"
   "firecracker-networking-host|backend-specific|firecracker|Firecracker TAP, bridge, NAT, helper mechanics"
   "firecracker-transport-host|backend-specific|firecracker|Firecracker /dev/vhost-vsock and helper mechanics"
@@ -82,6 +83,7 @@ SCENARIO_COVERAGE=(
   "windows-hyperv-connect-host|backend-specific|windows-hyperv|Hyper-V socket shell connect and readiness"
   "windows-hyperv-exec-host|backend-specific|windows-hyperv|Structured exec bridge: buffered, stream, exit codes, readiness"
   "windows-hyperv-transport-host|backend-specific|windows-hyperv|Mediation channel over Hyper-V socket listener helpers"
+  "windows-hyperv-model-host|backend-specific|windows-hyperv|run/start --model pairing and the guest model URL bridge with a stand-in engine (no llama.cpp)"
   "applevf-boot|backend-specific|apple-vf|Apple VF boot smoke"
   "applevf-direct-console|backend-specific|apple-vf|Apple VF direct supervisor console input"
   "applevf-substrate|backend-specific|apple-vf|Apple VF lifecycle substrate smoke"
@@ -116,16 +118,16 @@ E2E_MATRIX=(
   "volume create/ls/inspect/rm|backend-neutral|firecracker,apple-vf|volumes|Managed ext4 volume lifecycle and attach semantics"
   "commit/images/prune|backend-neutral|firecracker,apple-vf|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/rm/prune, commit"
   "registry auth|portable|none|registry-auth|Private registry credential discovery"
-  "secrets|backend-neutral|firecracker,apple-vf|secrets|Secret reference validation, materialized/on-demand delivery, audit"
+  "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
   "health|backend-neutral|firecracker,apple-vf|health|Exec probes and supervise restart"
   "supervise|backend-neutral|firecracker,apple-vf|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
   "snapshot/pause/resume|backend-specific|firecracker|firecracker-lifecycle-host|Memory snapshot and vCPU pause are Firecracker-only"
-  "model|backend-neutral|firecracker,apple-vf|model-serving|Model store and run --model vsock pairing"
+  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving|Model store and run --model vsock pairing"
   "perf|backend-neutral|firecracker,apple-vf|public-surface|Boot/steady/footprint surfaces where host supports sampling"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|firecracker,apple-vf|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
-  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host|Portable scenarios, public-surface, lifecycle-deep, transport-deep, and windows-hyperv-*-host probes run under Git Bash; remaining feature scenarios join as VHD volumes and guest-mediated copy land"
+  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host,windows-hyperv-model-host|Portable scenarios, public-surface, lifecycle-deep, transport-deep, secrets, model-serving (env-gated), and windows-hyperv-*-host probes run under Git Bash; remaining feature scenarios join as VHD volumes and guest-mediated copy land"
 )
 
 usage() {
@@ -179,7 +181,8 @@ Scenarios:
   exec-stream        Streaming structured exec (exec --stream) line delivery and
                      exit-status propagation.
   model-serving      Local host model server paired into a workspace over the
-                     backend vsock bridge (Firecracker on Linux, Apple VF on macOS).
+                     backend vsock bridge (Firecracker on Linux, Apple VF on
+                     macOS, Hyper-V sockets on Windows).
   survive-reboot     supervise --install/--uninstall boot-unit generation
                      (systemd user unit / launchd plist); no real reboot.
   named-network      Two workspaces on a managed named-network bridge: stable

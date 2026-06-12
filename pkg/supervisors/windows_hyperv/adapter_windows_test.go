@@ -91,6 +91,52 @@ func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 	}
 }
 
+func TestBuildComputeSystemDocumentEmitsSecretsAndModelCmdline(t *testing.T) {
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath:      "C:\\microagent\\Image",
+			RootfsPath:      "C:\\microagent\\rootfs.vhd",
+			SecretsPort:     1026,
+			OnDemandSecrets: []vmkit.SecretRef{{Name: "DB", Ref: "env:X"}},
+			// The control port is snapshot-only (Firecracker); it must NOT
+			// reach the cmdline so the guest never starts a listener the
+			// host will not dial.
+			SecretsControlPort: 1027,
+			ModelGuestPort:     18080,
+			ModelVsockPort:     1028,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		VirtualMachine struct {
+			Chipset struct {
+				LinuxKernelDirect struct {
+					KernelCmdLine string `json:"KernelCmdLine"`
+				} `json:"LinuxKernelDirect"`
+			} `json:"Chipset"`
+		} `json:"VirtualMachine"`
+	}
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	cmdline := doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelCmdLine
+	for _, want := range []string{
+		"microagent_secrets_port=1026",
+		"microagent_secrets_api=1",
+		"microagent_model_fwd=18080:1028",
+	} {
+		if !strings.Contains(cmdline, want) {
+			t.Fatalf("kernel cmdline %q missing %q", cmdline, want)
+		}
+	}
+	if strings.Contains(cmdline, "microagent_secrets_ctl_port") {
+		t.Fatalf("kernel cmdline %q must not emit the snapshot-only control port", cmdline)
+	}
+}
+
 func TestBuildComputeSystemDocumentAttachesConfiguredDisks(t *testing.T) {
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",

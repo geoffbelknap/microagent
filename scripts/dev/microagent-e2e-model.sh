@@ -31,7 +31,7 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
-CLI="${MICROAGENT_CLI:-$ROOT/.build/dev/microagent}"
+CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
 MODEL_REF="${MICROAGENT_E2E_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 IMAGE="docker.io/curlimages/curl:latest"
 
@@ -99,6 +99,20 @@ case "$BACKEND" in
     CREATE_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL" --guest-init "$GUEST_INIT")
     START_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR" --kernel "$KERNEL")
     CTRL_FLAGS=(--backend apple-vf --supervisor "$SUPERVISOR")
+    ;;
+  windows-hyperv)
+    e2e_is_windows || skip "windows-hyperv model E2E requires a Windows host"
+    e2e_have_hcs || skip "Hyper-V HCS services (vmms/vmcompute) are not running"
+    KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
+    [ -r "$KERNEL" ] || skip "windows-hyperv kernel not installed at $KERNEL (run: microagent kernel install)"
+    GUEST_INIT="${MICROAGENT_GUEST_INIT:-$ROOT/.build/dev/microagent-guestinit-amd64}"
+    [ -e "$GUEST_INIT" ] || skip "guest init not found at $GUEST_INIT (build with GOOS=linux GOARCH=amd64)"
+    # The model path rides hv_sock, not the guest NIC; isolated networking
+    # keeps the scenario runnable on non-elevated hosts (no HNS NAT).
+    RUN_FLAGS=(--backend windows-hyperv --guest-init "$GUEST_INIT" --network isolated --size-mib 512 "${RUN_FLAGS[@]}")
+    CREATE_FLAGS=(--backend windows-hyperv --guest-init "$GUEST_INIT" --network isolated --size-mib 512)
+    START_FLAGS=(--backend windows-hyperv)
+    CTRL_FLAGS=(--backend windows-hyperv)
     ;;
   *)
     skip "unsupported host/backend for model E2E: os=$(uname -s) arch=$(uname -m) backend=$BACKEND"

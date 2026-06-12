@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
+	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
@@ -5302,6 +5303,187 @@ func TestWindowsHyperVExecSmoke(t *testing.T) {
 	if !status.Readiness.ShellReady.Ready {
 		logWindowsHyperVSmokeState(t, dir, workspaceName)
 		t.Fatalf("shell readiness = %+v, want hv_sock probe ready", status.Readiness.ShellReady)
+	}
+}
+
+// stubEngineSource is a stand-in OpenAI-style model server used by the model
+// bridge smoke: it accepts llama-server's argv shape and serves /health plus
+// /v1/models, so the full `create/start --model` pairing path runs without
+// llama.cpp.
+const stubEngineSource = `package main
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+)
+
+func main() {
+	host, port := "127.0.0.1", ""
+	for i, arg := range os.Args {
+		if arg == "--host" && i+1 < len(os.Args) {
+			host = os.Args[i+1]
+		}
+		if arg == "--port" && i+1 < len(os.Args) {
+			port = os.Args[i+1]
+		}
+	}
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	http.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, ` + "`" + `{"object":"list","data":[{"id":"stub-model"}]}` + "`" + `)
+	})
+	if err := http.ListenAndServe(host+":"+port, nil); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+`
+
+// TestWindowsHyperVModelBridgeSmoke proves model serving on a real Hyper-V
+// guest without needing llama.cpp: a stub engine binary stands in for
+// llama-server (MICROAGENT_LLAMA_SERVER override), the model store carries a
+// fabricated record, and the real `create/start --model` CLI path must pair
+// the workspace and give the guest a working MICROAGENT_MODEL_URL — guest
+// TCP forward helper, AF_VSOCK dial, hv_sock host listener, host TCP.
+func TestWindowsHyperVModelBridgeSmoke(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V model bridge smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
+	if imageRef == "" {
+		imageRef = "docker.io/library/busybox:1.36"
+	}
+	// The detached runtime listener helper and the stub engine keep their
+	// binaries and log files locked until they fully exit, which races
+	// t.TempDir cleanup on Windows (a cleanup failure fails the test).
+	// Everything lives in best-effort temp dirs instead.
+	dir, err := os.MkdirTemp("", "whv-model-state-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir, err := os.MkdirTemp("", "whv-model-bin-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		time.Sleep(500 * time.Millisecond)
+		_ = os.RemoveAll(dir)
+		_ = os.RemoveAll(binDir)
+	})
+	workspaceName := fmt.Sprintf("whv-model-%d", time.Now().UnixNano()%1000000000)
+	cliPath := filepath.Join(binDir, "microagent.exe")
+	guestInitPath := filepath.Join(binDir, "microagent-guestinit")
+	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
+	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
+
+	// Build the stub engine and stage a fabricated model store record so
+	// pairing resolves without any network or llama.cpp dependency.
+	engineDir := filepath.Join(binDir, "stub-engine")
+	if err := os.MkdirAll(engineDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(engineDir, "main.go"), []byte(stubEngineSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(engineDir, "go.mod"), []byte("module stubengine\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	enginePath := filepath.Join(binDir, "stub-engine.exe")
+	buildCmd(t, engineDir, enginePath, ".", "", "")
+
+	const modelRef = "stub/stub-model-GGUF/stub.gguf"
+	canonicalRef, _, err := model.Resolve(modelRef)
+	if err != nil {
+		t.Fatalf("resolve stub model ref: %v", err)
+	}
+	blobPath := filepath.Join(dir, "models", "blobs", "stub.gguf")
+	if err := os.MkdirAll(filepath.Dir(blobPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blobPath, []byte("GGUF-stub"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	index, err := json.Marshal(model.Index{Models: []model.Record{{
+		ModelRef:   canonicalRef,
+		OutputPath: blobPath,
+		SizeBytes:  9,
+		LastUsedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "models", "index.json"), index, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	env := append(os.Environ(), "MICROAGENT_LLAMA_SERVER="+enginePath)
+	runCLI := func(args ...string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, cliPath, args...)
+		cmd.Env = env
+		return cmd.CombinedOutput()
+	}
+	t.Cleanup(func() {
+		_, _ = runCLI("kill", workspaceName, "--state-dir", dir)
+		_, _ = runCLI("delete", workspaceName, "--force", "--yes", "--state-dir", dir)
+		_, _ = runCLI("model", "stop", canonicalRef, "--state-dir", dir)
+	})
+
+	if out, err := runCLI("create", "--name", workspaceName, "--image", imageRef,
+		"--network", "isolated", "--size-mib", "512", "--service-command", "sleep 120",
+		"--model", modelRef, "--kernel", kernelPath, "--guest-init", guestInitPath,
+		"--state-dir", dir); err != nil {
+		t.Fatalf("create --model: %v\n%s", err, out)
+	}
+	if out, err := runCLI("start", workspaceName, "--state-dir", dir, "--kernel", kernelPath); err != nil {
+		t.Fatalf("start paired workspace: %v\n%s", err, out)
+	}
+	waitForWorkspaceState(t, dir, workspaceName, vmkit.StateRunning, 30*time.Second)
+	execReadyDeadline := time.Now().Add(45 * time.Second)
+	for {
+		status, err := workspace.Status(workspace.Options{
+			Name:     workspaceName,
+			Backend:  vmkit.BackendWindowsHyperV,
+			StateDir: dir,
+		})
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if status.Readiness != nil && status.Readiness.ExecReady.Ready {
+			break
+		}
+		if time.Now().After(execReadyDeadline) {
+			logWindowsHyperVSmokeState(t, dir, workspaceName)
+			t.Fatalf("exec readiness = %#v", status.Readiness)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Start must have registered the workspace as a runner holder.
+	runnersOut, err := runCLI("--json", "model", "runners", "--state-dir", dir)
+	if err != nil {
+		t.Fatalf("model runners: %v\n%s", err, runnersOut)
+	}
+	if !strings.Contains(string(runnersOut), workspaceName) {
+		t.Fatalf("model runners does not hold %s:\n%s", workspaceName, runnersOut)
+	}
+
+	// The guest reaches the stand-in model server purely over the hv_sock
+	// bridge: busybox wget against MICROAGENT_MODEL_URL. The guest forward
+	// helper may come up moments after the exec service; retry.
+	out, err := runCLI("exec", workspaceName, "--state-dir", dir, "--",
+		"sh", "-c", `for i in $(seq 1 20); do R=$(wget -qO- "$MICROAGENT_MODEL_URL/models" 2>&1) && case "$R" in *stub-model*) echo "BRIDGE_OK: $R"; exit 0;; esac; sleep 1; done; echo "BRIDGE_FAIL: $R"; exit 1`)
+	if err != nil || !strings.Contains(string(out), "BRIDGE_OK") {
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatalf("model bridge output (err=%v): %q", err, out)
 	}
 }
 
