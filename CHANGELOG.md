@@ -5,6 +5,69 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv writable rootfs (for real this time)
+
+The guest can now write to its root filesystem. Three compounding causes,
+all in the VHD rootfs build on hcsshim's tar2ext4:
+
+- tar2ext4 stamps the ext4 `RO_COMPAT_READONLY` feature flag into every
+  filesystem it writes (its images back shared read-only container
+  layers), so the kernel forced a read-only root mount even though the
+  HCS attach is writable and the cmdline says `root=/dev/sda rw`. The
+  builder now clears the flag after conversion.
+- tar2ext4 sizes the filesystem to its content with zero free blocks —
+  `--size-mib` only capped metadata reservations — so even a writable
+  mount hit ENOSPC on the first write. Rootfs builds now append a
+  zero-filled reserved-space file padding the filesystem to the requested
+  size; the guest init deletes it on first boot, releasing the space.
+  Content that cannot fit the requested size now fails the build with a
+  clear message instead of tar2ext4's internal error.
+- Hard links exploded into full copies in the stage tar (the NTFS stage
+  preserves them, but the tar writer didn't), so a ~4 MiB busybox image
+  produced ~400 MiB of rootfs. The stage tar now emits tar hard links;
+  this is also why 256 MiB rootfs builds "overflowed".
+
+Setup commands, exec writes, and clone state inheritance on windows-hyperv
+all silently hit `Read-only file system` (or ENOSPC) before this — the
+windows-hyperv lifecycle-deep lane now live-verifies write → halt →
+reboot → read → clone → read.
+
+### windows-hyperv terminal controls actually stop the guest
+
+- `stop`/`halt` performed an HCS shutdown call and recorded the terminal
+  state immediately — but the call only initiates a guest shutdown the
+  guest was ignoring (see below), so the workspace reported `halted` while
+  the VM kept running, and a restart collided with the live registration
+  ("a virtual machine or container with the specified identifier already
+  exists"). Terminal controls now wait (bounded) for the compute system to
+  unregister; graceful controls give the guest a 15s window and then
+  escalate to terminate, container-runtime style. A system that survives
+  terminate fails the control instead of recording a state the host does
+  not match.
+- `microagent-guestinit` now honors the init power-signal protocol
+  (SIGUSR1/SIGUSR2/SIGTERM → sync + power off). The kernel's
+  orderly-poweroff helper signals PID 1 rather than calling reboot(2), so
+  host-initiated graceful shutdown was silently ignored on every backend
+  image whose `/sbin/poweroff` defers to init.
+
+### status of a missing workspace
+
+- `status`/`inspect` on a workspace that does not exist now report
+  `workspace <name> not found` on every backend instead of the raw
+  state-file open error. Corrupt state files still surface as-is.
+
+### windows-hyperv lifecycle-deep E2E lane
+
+- The `lifecycle-deep` scenario runs on the windows-hyperv backend in the
+  unified E2E runner: create (+dry-run and validation failures), start with
+  channel-true exec/shell readiness, status/inspect/ps, connect `--send`,
+  structured exec, logs, the JSON-array events history, HCS-backed stats on
+  a busy guest, halt + restart, stop/kill idempotency, clone of a stopped
+  workspace booted and exec'd, quarantine semantics, artifacts list, images
+  list, prune, and delete cleanup. `cp`/`commit`/artifact extraction stay
+  deferred pending the guest-mediated VHD copy decision; mke2fs segments
+  stay on the ext4 lanes. The live-windows-hyperv workflow runs the lane.
+
 ### windows-hyperv events/stats
 
 - `stats` works for windows-hyperv workspaces: there is no host guest PID

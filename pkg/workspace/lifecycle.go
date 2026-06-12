@@ -374,6 +374,12 @@ func Status(opts Options) (vmkit.Response, error) {
 	}
 	event, eventErr := ReadEvent(opts)
 	if eventErr != nil {
+		// No runtime state and no event file means the workspace does not
+		// exist; report that instead of the raw file-open error. Corrupt
+		// state (unreadable or malformed files) still surfaces as-is.
+		if os.IsNotExist(err) && os.IsNotExist(eventErr) {
+			return vmkit.Response{}, WorkspaceNotFoundError{Name: opts.Name}
+		}
 		return vmkit.Response{}, err
 	}
 	return responseFromEvent(opts, event, ""), nil

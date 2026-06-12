@@ -27,6 +27,10 @@ if [ "$BACKEND" = "firecracker" ]; then
   exec "$ROOT/scripts/dev/microagent-e2e-lifecycle-matrix.sh"
 fi
 
+if [ "$BACKEND" = "windows-hyperv" ]; then
+  exec "$ROOT/scripts/dev/microagent-e2e-lifecycle-windows.sh"
+fi
+
 if [ "$BACKEND" != "applevf" ]; then
   e2e_skip "microagent lifecycle E2E does not support backend lane: $BACKEND"
 fi

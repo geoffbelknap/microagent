@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-func buildVHDImage(ctx context.Context, stageDir, tmpImage, outputPath string, sizeBytes int64) error {
+func buildVHDImage(ctx context.Context, stageDir, tmpImage, outputPath string, sizeBytes int64, reserveFreeSpace bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

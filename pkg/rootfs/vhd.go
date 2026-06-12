@@ -14,17 +14,69 @@ import (
 const symlinkMarkerPrefix = "microagent-symlink\x00"
 const stageMetadataName = ".microagent-rootfs-metadata.jsonl"
 
+// reservedSpaceName is a zero-filled file appended to rootfs image tars so
+// the tar2ext4-built filesystem carries guest-writable capacity (tar2ext4
+// sizes filesystems to their content with no free blocks). The guest init
+// deletes it on first boot, releasing the blocks. The name must match the
+// removal in cmd/microagent-guestinit.
+const reservedSpaceName = ".microagent-reserved-space"
+
+// vhdMetadataAllowanceBytes is headroom left for ext4 metadata (inode
+// tables, bitmaps, group descriptors) when sizing the reserved-space file;
+// actual metadata for workspace-scale images is well under this.
+const vhdMetadataAllowanceBytes = 8 * 1024 * 1024
+
+// writeImageTar streams the stage tree as a tar archive. When
+// targetSizeBytes is positive, it appends a zero-filled reserved-space
+// entry that pads the resulting filesystem toward targetSizeBytes so the
+// guest has writable capacity once the entry is deleted at first boot.
+// Fails closed when the content plus metadata cannot fit the target size.
+func writeImageTar(stageDir string, tw *tar.Writer, targetSizeBytes int64) error {
+	contentBytes, err := writeStageTar(stageDir, tw)
+	if err != nil {
+		return err
+	}
+	if targetSizeBytes <= 0 {
+		return nil
+	}
+	reserve := targetSizeBytes - contentBytes - vhdMetadataAllowanceBytes
+	if reserve <= 0 {
+		return fmt.Errorf("rootfs size %d MiB cannot hold the image content (%d MiB plus filesystem metadata); increase the rootfs size",
+			targetSizeBytes/(1024*1024), contentBytes/(1024*1024))
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: reservedSpaceName, Mode: 0o600, Size: reserve}); err != nil {
+		return err
+	}
+	_, err = io.CopyN(tw, zeroReader{}, reserve)
+	return err
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
 type stageModeRecord struct {
 	Path string `json:"path"`
 	Mode int64  `json:"mode"`
 }
 
-func writeStageTar(stageDir string, tw *tar.Writer) error {
+// writeStageTar streams the stage tree to tw and returns an estimate of the
+// data bytes the resulting filesystem will hold (file sizes rounded up to
+// 4 KiB blocks). Hard-linked stage files are emitted as tar hard links so
+// images that link heavily (busybox applets) do not explode into copies.
+func writeStageTar(stageDir string, tw *tar.Writer) (int64, error) {
 	modes, err := readStageModes(stageDir)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return filepath.WalkDir(stageDir, func(hostPath string, entry os.DirEntry, err error) error {
+	var contentBytes int64
+	hardLinks := map[string]string{}
+	walkErr := filepath.WalkDir(stageDir, func(hostPath string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -68,6 +120,18 @@ func writeStageTar(stageDir string, tw *tar.Writer) error {
 				}
 				return tw.WriteHeader(header)
 			}
+			if id, linked := stageHardLinkID(hostPath, info); linked {
+				if first, seen := hardLinks[id]; seen {
+					return tw.WriteHeader(&tar.Header{
+						Name:     name,
+						Typeflag: tar.TypeLink,
+						Linkname: first,
+						Mode:     int64(info.Mode().Perm()),
+						ModTime:  info.ModTime(),
+					})
+				}
+				hardLinks[id] = name
+			}
 		}
 		header, err := tar.FileInfoHeader(info, link)
 		if err != nil {
@@ -86,6 +150,7 @@ func writeStageTar(stageDir string, tw *tar.Writer) error {
 		if !info.Mode().IsRegular() {
 			return nil
 		}
+		contentBytes += (header.Size + 4095) &^ 4095
 		in, err := os.Open(hostPath)
 		if err != nil {
 			return err
@@ -96,6 +161,7 @@ func writeStageTar(stageDir string, tw *tar.Writer) error {
 		}
 		return in.Close()
 	})
+	return contentBytes, walkErr
 }
 
 func writeSymlinkMarker(path, target string) error {

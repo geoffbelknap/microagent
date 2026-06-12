@@ -810,7 +810,7 @@ func TestWriteStageTarPreservesWindowsSymlinkMarker(t *testing.T) {
 
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	if err := writeStageTar(dir, tw); err != nil {
+	if _, err := writeStageTar(dir, tw); err != nil {
 		t.Fatalf("writeStageTar: %v", err)
 	}
 	if err := tw.Close(); err != nil {
@@ -852,7 +852,7 @@ func TestWriteStageTarPreservesRecordedMode(t *testing.T) {
 
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	if err := writeStageTar(dir, tw); err != nil {
+	if _, err := writeStageTar(dir, tw); err != nil {
 		t.Fatalf("writeStageTar: %v", err)
 	}
 	if err := tw.Close(); err != nil {

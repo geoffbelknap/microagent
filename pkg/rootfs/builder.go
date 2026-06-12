@@ -462,7 +462,7 @@ func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir st
 	case FormatVHD:
 		provenance.BuilderPhase = "build-vhd"
 		progress.emit("build-vhd", "building vhd image", 0, 0, 0, 0)
-		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "rootfs.vhd"), req.OutputPath, req.SizeMiB*1024*1024)
+		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "rootfs.vhd"), req.OutputPath, req.SizeMiB*1024*1024, true)
 	default:
 		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
 	}
@@ -475,7 +475,7 @@ func buildBundleImage(ctx context.Context, req BundleRequest, stageDir, tmpDir s
 		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "bundle.ext4"), req.OutputPath, req.SizeMiB*1024*1024, "bundle")
 	case FormatVHD:
 		provenance.BuilderPhase = "build-vhd"
-		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "bundle.vhd"), req.OutputPath, req.SizeMiB*1024*1024)
+		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "bundle.vhd"), req.OutputPath, req.SizeMiB*1024*1024, false)
 	default:
 		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
 	}
