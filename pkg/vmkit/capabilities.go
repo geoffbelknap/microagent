@@ -59,10 +59,12 @@ func BackendCapabilities(backend string) Capabilities {
 		}
 	case BackendWindowsHyperV:
 		return Capabilities{
+			StructuredExec:       true,
 			VHDRootfs:            true,
 			OwnsRuntimeState:     true,
 			DetachedStartCommand: "start",
 			ShellNetwork:         "hvsock",
+			ShellReadinessProbe:  true,
 			SCSIBlockDevices:     true,
 		}
 	default:

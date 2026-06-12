@@ -32,10 +32,12 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 		{
 			backend: BackendWindowsHyperV,
 			want: Capabilities{
+				StructuredExec:       true,
 				VHDRootfs:            true,
 				OwnsRuntimeState:     true,
 				DetachedStartCommand: "start",
 				ShellNetwork:         "hvsock",
+				ShellReadinessProbe:  true,
 				SCSIBlockDevices:     true,
 			},
 		},

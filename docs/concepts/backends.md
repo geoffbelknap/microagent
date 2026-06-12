@@ -4,7 +4,7 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-12_
 
 microagent installs with one backend per host OS: Firecracker on Linux,
 Apple Virtualization.framework on macOS, and experimental Hyper-V on Windows.
@@ -64,6 +64,8 @@ covered in [Networking](/concepts/networking/).
   `halt`, `quarantine`, `stop`, `kill`, and `delete` experimentally.
 - Supports HNS NAT networking and published TCP ports through Hyper-V socket
   bridging.
+- Supports structured [`exec`](/cli/exec/) (buffered and `--stream`) through a
+  host TCP listener bridged to the guest exec service over Hyper-V sockets.
 - Fails closed for the direct supervisor `console` command; use
   [`connect`](/cli/connect/).
 - See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol

@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
 )
 
 func TestHostResponseReportsBackend(t *testing.T) {
@@ -154,14 +158,14 @@ func TestRunCommandUsesAdapterAndWritesRuntimeState(t *testing.T) {
 	if runtimeState.SerialInputPath != filepath.Join(stateDir, "agent-1", "serial.in") {
 		t.Fatalf("serialInputPath = %q", runtimeState.SerialInputPath)
 	}
-	if runtimeState.Readiness.GuestReady.Ready || runtimeState.Readiness.ShellReady.Ready {
-		t.Fatalf("readiness = %#v, want HCS running without guest/shell readiness", runtimeState.Readiness)
+	if !runtimeState.Readiness.GuestReady.Ready || !strings.Contains(runtimeState.Readiness.GuestReady.Detail, "workspace reached runtime state running") {
+		t.Fatalf("guest readiness = %#v, want state-signaled running", runtimeState.Readiness.GuestReady)
 	}
-	if !strings.Contains(runtimeState.Readiness.GuestReady.Detail, "compute system started") {
-		t.Fatalf("guest readiness detail = %q", runtimeState.Readiness.GuestReady.Detail)
+	if !runtimeState.Readiness.ShellReady.Ready || !strings.Contains(runtimeState.Readiness.ShellReady.Detail, "console input is available") {
+		t.Fatalf("shell readiness = %#v, want console input fallback without a shell port", runtimeState.Readiness.ShellReady)
 	}
-	if !strings.Contains(runtimeState.Readiness.ShellReady.Detail, "shell socket configured") {
-		t.Fatalf("shell readiness detail = %q", runtimeState.Readiness.ShellReady.Detail)
+	if runtimeState.Readiness.ExecReady.Ready || !strings.Contains(runtimeState.Readiness.ExecReady.Detail, "structured exec port is not configured") {
+		t.Fatalf("exec readiness = %#v, want not configured without an exec port", runtimeState.Readiness.ExecReady)
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, "agent-1", "serial.log")); err != nil {
 		t.Fatalf("serial.log: %v", err)
@@ -1243,5 +1247,275 @@ func readJSON(t *testing.T, path string, out any) {
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		t.Fatalf("parse %s: %v", path, err)
+	}
+}
+
+func writeReadinessSerialInput(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "serial.in")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("write serial input marker: %v", err)
+	}
+	return path
+}
+
+func runningReadinessState(t *testing.T, config vmkit.Config) runtimeState {
+	t.Helper()
+	dir := t.TempDir()
+	config.StateDir = dir
+	if err := os.MkdirAll(filepath.Join(dir, "agent-1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return runtimeState{
+		Event: eventFile{
+			Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
+			State:      vmkit.StateRunning,
+			ObservedAt: "2026-06-12T00:00:00Z",
+		},
+		Config:                 config,
+		ComputeSystemRuntimeID: "11111111-1111-1111-1111-111111111111",
+		SerialInputPath:        writeReadinessSerialInput(t, filepath.Join(dir, "agent-1")),
+		StartedAt:              "2026-06-12T00:00:00Z",
+	}
+}
+
+func TestRuntimeReadinessShellProbeSignalsChannelTruth(t *testing.T) {
+	oldProbe := shellHVSockProbeHook
+	t.Cleanup(func() { shellHVSockProbeHook = oldProbe })
+
+	state := runningReadinessState(t, vmkit.Config{ShellPort: 22001})
+
+	shellHVSockProbeHook = func(ctx context.Context, probed runtimeState, timeout time.Duration) (time.Duration, error) {
+		if got := guestShellPort(probed.Config); got != 22001 {
+			t.Errorf("probed shell port = %d, want 22001", got)
+		}
+		return time.Millisecond, nil
+	}
+	readiness := runtimeReadinessForState(state)
+	if !readiness.ShellReady.Ready || !strings.Contains(readiness.ShellReady.Detail, "shell target reachable") {
+		t.Fatalf("shell readiness = %#v, want probe-signaled ready", readiness.ShellReady)
+	}
+
+	shellHVSockProbeHook = func(ctx context.Context, probed runtimeState, timeout time.Duration) (time.Duration, error) {
+		return time.Millisecond, fmt.Errorf("connection refused")
+	}
+	readiness = runtimeReadinessForState(state)
+	if readiness.ShellReady.Ready || !strings.Contains(readiness.ShellReady.Detail, "shell target unreachable") {
+		t.Fatalf("shell readiness = %#v, want probe-signaled not ready", readiness.ShellReady)
+	}
+}
+
+func TestRuntimeReadinessExecProbeRoundTrip(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen fake exec service: %v", err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				var req execprotocol.ExecRequest
+				if err := execprotocol.DecodeMessage(conn, &req); err != nil {
+					return
+				}
+				code := 0
+				result := execprotocol.NewExecResult(execprotocol.ExecStatusExited)
+				result.ExitCode = &code
+				_ = execprotocol.EncodeMessage(conn, result)
+			}(conn)
+		}
+	}()
+
+	port := uint16(listener.Addr().(*net.TCPAddr).Port)
+	state := runningReadinessState(t, vmkit.Config{ExecPort: port})
+	readiness := runtimeReadinessForState(state)
+	if !readiness.ExecReady.Ready || !strings.Contains(readiness.ExecReady.Detail, "exec service round-trip ready") {
+		t.Fatalf("exec readiness = %#v, want round-trip ready", readiness.ExecReady)
+	}
+}
+
+func TestRuntimeReadinessExecUnreachableReportsDetail(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve unused port: %v", err)
+	}
+	port := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	state := runningReadinessState(t, vmkit.Config{ExecPort: port})
+	readiness := runtimeReadinessForState(state)
+	if readiness.ExecReady.Ready || !strings.Contains(readiness.ExecReady.Detail, "exec service unreachable") {
+		t.Fatalf("exec readiness = %#v, want unreachable detail", readiness.ExecReady)
+	}
+}
+
+func TestHasDetachedRuntimeServicesIncludesExecBridge(t *testing.T) {
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RuntimeID: "agent-1"},
+		Config:   &vmkit.Config{StateDir: t.TempDir(), ExecPort: 25279},
+	}
+	if !hasDetachedRuntimeServices(req) {
+		t.Fatal("exec bridge should require the detached runtime listener helper")
+	}
+	req.Config.ExecPort = 0
+	if hasDetachedRuntimeServices(req) {
+		t.Fatal("no services configured should not require the detached runtime listener helper")
+	}
+}
+
+func TestEnsureBindableManagementPortsMovesHeldExecPort(t *testing.T) {
+	holder, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("hold exec port: %v", err)
+	}
+	defer holder.Close()
+	held := uint16(holder.Addr().(*net.TCPAddr).Port)
+
+	config := &vmkit.Config{ExecPort: held}
+	ensureBindableManagementPorts(config)
+	if config.ExecPort == held || config.ExecPort == 0 {
+		t.Fatalf("exec port = %d, want moved off held port %d", config.ExecPort, held)
+	}
+	if config.GuestExecPort != held {
+		t.Fatalf("guest exec port = %d, want preserved original %d", config.GuestExecPort, held)
+	}
+}
+
+func TestEnsureBindableManagementPortsKeepsFreeExecPort(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve exec port: %v", err)
+	}
+	free := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	config := &vmkit.Config{ExecPort: free}
+	ensureBindableManagementPorts(config)
+	if config.ExecPort != free || config.GuestExecPort != 0 {
+		t.Fatalf("config = %#v, want unchanged ports", config)
+	}
+}
+
+func TestDetachedStartFailsClosedWhenExecBridgeNeverAccepts(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	oldStart := startRuntimeListenerProcessHook
+	oldTerminate := terminateRuntimeListenerProcessHook
+	oldTimeout := execBridgeWaitTimeout
+	t.Cleanup(func() {
+		startRuntimeListenerProcessHook = oldStart
+		terminateRuntimeListenerProcessHook = oldTerminate
+		execBridgeWaitTimeout = oldTimeout
+	})
+	startRuntimeListenerProcessHook = func(req vmkit.Request) (int, error) { return 424242, nil }
+	terminated := 0
+	terminateRuntimeListenerProcessHook = func(pid int) { terminated++ }
+	execBridgeWaitTimeout = 300 * time.Millisecond
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve exec port: %v", err)
+	}
+	execPort := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			ExecPort:   execPort,
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err == nil || resp.OK {
+		t.Fatalf("start resp=%#v err=%v, want fail-closed exec bridge error", resp, err)
+	}
+	if !strings.Contains(resp.Error, "structured exec bridge did not accept") {
+		t.Fatalf("start error = %q, want exec bridge detail", resp.Error)
+	}
+	if terminated == 0 {
+		t.Fatal("dead listener helper was not terminated")
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Event.State != vmkit.StateFailed {
+		t.Fatalf("runtime state = %s, want failed", state.Event.State)
+	}
+}
+
+func TestDetachedStartWaitsForAcceptingExecBridge(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	oldStart := startRuntimeListenerProcessHook
+	t.Cleanup(func() { startRuntimeListenerProcessHook = oldStart })
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve exec port: %v", err)
+	}
+	execPort := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	var bridge net.Listener
+	startRuntimeListenerProcessHook = func(req vmkit.Request) (int, error) {
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(execPort))))
+		if err != nil {
+			return 0, err
+		}
+		bridge = l
+		go func() {
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					return
+				}
+				_ = conn.Close()
+			}
+		}()
+		return 424242, nil
+	}
+	t.Cleanup(func() {
+		if bridge != nil {
+			_ = bridge.Close()
+		}
+	})
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			ExecPort:   execPort,
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("start resp=%#v err=%v", resp, err)
 	}
 }
