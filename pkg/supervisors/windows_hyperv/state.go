@@ -306,14 +306,18 @@ func (s Supervisor) inspect(ctx context.Context, req vmkit.Request) (vmkit.Respo
 	// nothing rewrites runtime.json at that moment. Reconcile here so inspect
 	// (and the supervise restart loop polling it) reports the truth instead
 	// of a stale running state. A probe error leaves the recorded state
-	// untouched: only a definite "gone" marks the workspace stopped.
+	// untouched: only a definite "gone" transitions the workspace, and the
+	// final state follows the delivered guest result (failed on a non-zero
+	// exit) so on-failure supervision restarts it, mirroring the firecracker
+	// inspect reconcile.
 	if (state.Event.State == vmkit.StateRunning || state.Event.State == vmkit.StateStarting) && state.ComputeSystemID != "" {
 		if exists, existsErr := s.runtimeAdapter().Exists(ctx, state.ComputeSystemID); existsErr == nil && !exists {
 			terminateRuntimeListenerProcessHook(state.VsockListenerPID)
 			if cleanupErr := s.runtimeAdapter().CleanupNetwork(ctx, state); cleanupErr != nil {
 				return failRun(req, vmkit.StateFailed, fmt.Sprintf("network cleanup failed: %s", cleanupErr), cleanupErr)
 			}
-			if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "windows-hyperv compute system exited", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID); err != nil {
+			finalState, errorText := guestExitState(req, guestExitResultWait)
+			if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, finalState, "windows-hyperv compute system exited", errorText, state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID); err != nil {
 				return vmkit.Response{}, err
 			}
 			state, err = readRuntimeState(req)
@@ -1144,20 +1148,77 @@ func readRuntimeState(req vmkit.Request) (runtimeState, error) {
 	return state, nil
 }
 
+// guestExitResultWait bounds how long the inspect reconcile waits for the
+// result file after the compute system is gone: the listener helper may still
+// be flushing the guest's final result. A variable so tests can shorten it.
+var guestExitResultWait = 2 * time.Second
+
+// guestExitState classifies a guest self-exit by its delivered result,
+// mirroring the firecracker guestHaltedState contract: a missing result or a
+// zero exit code is a clean stop; a non-zero exit is a failure, so on-failure
+// supervision restarts the workspace. The result file is the guest schema
+// (snake_case), written by the runtime listener helper.
+func guestExitState(req vmkit.Request, waitForResult time.Duration) (vmkit.VMState, string) {
+	path := resultPath(req)
+	deadline := time.Now().Add(waitForResult)
+	for {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			if waitForResult <= 0 || !os.IsNotExist(err) || time.Now().After(deadline) {
+				return vmkit.StateStopped, ""
+			}
+		} else {
+			var result struct {
+				ExitCode int    `json:"exit_code"`
+				Error    string `json:"error"`
+			}
+			if jsonErr := json.Unmarshal(data, &result); jsonErr == nil {
+				if result.ExitCode == 0 {
+					return vmkit.StateStopped, ""
+				}
+				if result.Error != "" {
+					return vmkit.StateFailed, result.Error
+				}
+				return vmkit.StateFailed, fmt.Sprintf("guest exited with code %d", result.ExitCode)
+			} else if waitForResult <= 0 || time.Now().After(deadline) {
+				return vmkit.StateFailed, jsonErr.Error()
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func readRuntimeResult(req vmkit.Request, identity vmkit.Identity) (vmkit.RuntimeResult, error) {
 	path := resultPath(req)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return vmkit.RuntimeResult{}, err
 	}
-	var result vmkit.RuntimeResult
-	if err := json.Unmarshal(data, &result); err != nil {
+	// The result file holds the raw guest result (snake_case schema written
+	// by the runtime listener helper), not the vmkit wire form; parse the
+	// guest schema and map it so exit codes and output survive intact.
+	var guest struct {
+		StartedAt string `json:"started_at"`
+		ExitedAt  string `json:"exited_at"`
+		ExitCode  int    `json:"exit_code"`
+		Stdout    string `json:"stdout"`
+		Stderr    string `json:"stderr"`
+		Error     string `json:"error"`
+	}
+	if err := json.Unmarshal(data, &guest); err != nil {
 		return vmkit.RuntimeResult{}, err
 	}
-	result.Identity = identity
-	result.Backend = vmkit.BackendWindowsHyperV
-	result.ResultPath = path
-	return result, nil
+	return vmkit.RuntimeResult{
+		Identity:    identity,
+		Backend:     vmkit.BackendWindowsHyperV,
+		ResultPath:  path,
+		StartedAt:   guest.StartedAt,
+		CompletedAt: guest.ExitedAt,
+		ExitCode:    guest.ExitCode,
+		Stdout:      guest.Stdout,
+		Stderr:      guest.Stderr,
+		Error:       guest.Error,
+	}, nil
 }
 
 func eventFromFile(file eventFile) (vmkit.Event, error) {

@@ -777,7 +777,7 @@ func TestRunCommandWaitsForResultListenerAndReturnsResult(t *testing.T) {
 	t.Cleanup(func() { startRuntimeListenersHook = oldHook })
 	startRuntimeListenersHook = func(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
 		return fakeListenerSet{wait: func() error {
-			return os.WriteFile(filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "result.json"), []byte(`{"exitCode":0,"stdout":"ok\n"}`+"\n"), 0o644)
+			return os.WriteFile(filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "result.json"), []byte(`{"exit_code":0,"stdout":"ok\n"}`+"\n"), 0o644)
 		}}, nil
 	}
 
@@ -821,7 +821,7 @@ func TestRunCommandCleansUpNetworkAfterForegroundResult(t *testing.T) {
 	t.Cleanup(func() { startRuntimeListenersHook = oldHook })
 	startRuntimeListenersHook = func(ctx context.Context, handle computeSystemHandle, req vmkit.Request) (runtimeListenerSet, error) {
 		return fakeListenerSet{wait: func() error {
-			return os.WriteFile(filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "result.json"), []byte(`{"exitCode":0}`+"\n"), 0o644)
+			return os.WriteFile(filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "result.json"), []byte(`{"exit_code":0}`+"\n"), 0o644)
 		}}, nil
 	}
 
@@ -1220,7 +1220,7 @@ func TestInspectAndControlCommandsUseRuntimeState(t *testing.T) {
 		t.Fatalf("inspect resp=%#v err=%v", resp, err)
 	}
 	resultPath := filepath.Join(stateDir, "agent-1", "result.json")
-	if err := os.WriteFile(resultPath, []byte(`{"exitCode":0,"stdout":"ok\n","stderr":"","error":""}`+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(resultPath, []byte(`{"exit_code":0,"stdout":"ok\n","stderr":"","error":""}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write result.json: %v", err)
 	}
 	resp, err = supervisor.Do(context.Background(), inspectReq)
@@ -1947,6 +1947,60 @@ func TestInspectMarksVanishedComputeSystemStopped(t *testing.T) {
 	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
 	if state.Event.State != vmkit.StateStopped {
 		t.Fatalf("persisted state = %s, want stopped", state.Event.State)
+	}
+}
+
+func TestInspectMarksVanishedComputeSystemFailedOnNonZeroExit(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv inspect path is windows-only")
+	}
+	oldTerminate := terminateRuntimeListenerProcessHook
+	t.Cleanup(func() { terminateRuntimeListenerProcessHook = oldTerminate })
+	terminateRuntimeListenerProcessHook = func(pid int) {}
+
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "inspect",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:/microagent/Image",
+			RootfsPath: "C:/microagent/rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDs(req, vmkit.StateRunning, "serial=x", "", "fake", "11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	// The guest delivered a non-zero result (guest snake_case schema) before
+	// its compute system vanished: the reconcile must classify the exit as
+	// failed so on-failure supervision restarts it.
+	resultFile := filepath.Join(stateDir, "agent-1", "result.json")
+	if err := os.WriteFile(resultFile, []byte(`{"exit_code":42,"stdout":"boom","error":"exit status 42"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write result.json: %v", err)
+	}
+	adapter := &fakeAdapter{gone: true}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || resp.Event == nil || resp.Event.State != vmkit.StateFailed {
+		t.Fatalf("inspect resp=%#v err=%v, want reconciled failed", resp, err)
+	}
+	if resp.OK {
+		t.Fatalf("inspect OK = true for a failed workspace")
+	}
+	if resp.Result == nil || resp.Result.ExitCode != 42 || resp.Result.Stdout != "boom" {
+		t.Fatalf("result = %#v, want guest exit code 42 and stdout", resp.Result)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, "agent-1", "runtime.json"), &state)
+	if state.Event.State != vmkit.StateFailed {
+		t.Fatalf("persisted state = %s, want failed", state.Event.State)
+	}
+	if !strings.Contains(state.Error, "exit status 42") {
+		t.Fatalf("persisted error = %q, want guest exit error", state.Error)
 	}
 }
 

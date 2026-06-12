@@ -134,6 +134,42 @@ case "$(uname -s)" in
     assert_unit_command() {
       grep -q "<Arguments>supervise $WS" "$UNIT" && grep -q "<LogonTrigger>" "$UNIT"
     }
+    # On Windows the boot unit is a Scheduled Task XML registered with
+    # `schtasks /Create`, which needs an elevated token. Both outcomes are
+    # valid and both are asserted honestly:
+    #   - elevated host (hosted CI runners run elevated): registration
+    #     succeeds, enabled=true, and no manual command is needed — the
+    #     uninstall below proves the /Delete round-trip.
+    #   - unelevated host (this dev shell): `/Create` returns "Access is
+    #     denied", enabled=false, and the install must surface the manual
+    #     `schtasks /Create /TN <label> /XML <file> /F` command alongside the
+    #     written unit file (fail-open contract).
+    assert_install_json() {
+      python3 - "$STATE_DIR/install.json" "$UNIT" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+label = "microagent-supervise-reboot-survivor"
+if data.get("installed") != label:
+    raise SystemExit(f"install label = {data.get('installed')!r}, want {label!r}")
+enabled = data.get("enabled")
+if enabled is True:
+    # Elevated host: the registration round-trip succeeded; no manual
+    # command is expected in the JSON.
+    raise SystemExit(0)
+if enabled is not False:
+    raise SystemExit(f"unexpected enabled value: {enabled!r}")
+# Unelevated host: the denied registration must surface the manual command.
+enable = data.get("enable_command", "")
+for token in ("schtasks", "/Create", "/TN", label, "/XML", "/F"):
+    if token not in enable:
+        raise SystemExit(f"enable_command missing {token!r}: {enable!r}")
+if not data.get("enable_error"):
+    raise SystemExit(f"enabled=false without enable_error: {data!r}")
+PY
+    }
     ;;
   *) e2e_skip "survive-reboot units are linux/darwin/windows only" ;;
 esac
@@ -150,10 +186,14 @@ e2e_step "prepare a workspace to supervise"
   "${CREATE_FLAGS[@]}" >/dev/null 2>&1 || e2e_fail "create workspace"
 
 e2e_step "supervise --install writes the boot unit"
-env "${UNIT_HOME_ENV[@]}" "$CLI" supervise "$WS" --install --state-dir "$STATE_DIR" "${SUPERVISOR_FLAGS[@]}" >"$STATE_DIR/install.json" 2>&1 \
-  || { cat "$STATE_DIR/install.json"; e2e_fail "supervise --install"; }
+env "${UNIT_HOME_ENV[@]}" "$CLI" --json supervise "$WS" --install --state-dir "$STATE_DIR" "${SUPERVISOR_FLAGS[@]}" >"$STATE_DIR/install.json" 2>"$STATE_DIR/install.err" \
+  || { cat "$STATE_DIR/install.json" "$STATE_DIR/install.err"; e2e_fail "supervise --install"; }
 [ -f "$UNIT" ] || e2e_fail "boot unit not written at $UNIT"
 assert_unit_command || e2e_fail "boot unit missing supervise command for $WS"
+# On Windows, also assert the schtasks enable command shape and honest gating.
+if e2e_is_windows; then
+  assert_install_json || e2e_fail "supervise --install JSON did not report the expected schtasks enable contract"
+fi
 e2e_log "unit written: $UNIT"
 
 e2e_step "supervise --uninstall removes the boot unit"

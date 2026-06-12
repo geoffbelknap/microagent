@@ -27,6 +27,10 @@ if [ "$BACKEND" = "firecracker" ]; then
   exec "$ROOT/scripts/dev/microagent-e2e-supervision.sh"
 fi
 
+if [ "$BACKEND" = "windows-hyperv" ]; then
+  exec "$ROOT/scripts/dev/microagent-e2e-supervision-windows.sh"
+fi
+
 if [ "$BACKEND" != "applevf" ]; then
   e2e_skip "microagent supervision E2E does not support backend lane: $BACKEND"
 fi

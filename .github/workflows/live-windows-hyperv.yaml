@@ -104,6 +104,7 @@ jobs:
           coverage-matrix contract help-usage mcp-stdio registry-auth
           text-output init public-surface lifecycle-deep networking-deep
           transport-deep secrets commit-images volumes exec-stream health
+          supervision-deep survive-reboot
           windows-hyperv-lifecycle-host windows-hyperv-connect-host
           windows-hyperv-exec-host windows-hyperv-transport-host
           windows-hyperv-model-host
