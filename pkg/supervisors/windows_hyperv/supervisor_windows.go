@@ -31,6 +31,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return s.run(ctx, req)
 	case "start":
 		return s.start(ctx, req)
+	case "apply":
+		return s.apply(ctx, req)
 	case "inspect":
 		return s.inspect(ctx, req)
 	case "halt":

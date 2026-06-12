@@ -33,6 +33,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 			backend: BackendWindowsHyperV,
 			want: Capabilities{
 				StructuredExec:       true,
+				LiveNetworkApply:     true,
 				VHDRootfs:            true,
 				OwnsRuntimeState:     true,
 				DetachedStartCommand: "start",

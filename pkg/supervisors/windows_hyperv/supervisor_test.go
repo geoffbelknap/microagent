@@ -417,6 +417,144 @@ func TestHaltFailsClosedWhenComputeSystemNeverUnregisters(t *testing.T) {
 	}
 }
 
+func applyTestRunningState(t *testing.T, listenerPID int) (vmkit.Request, string) {
+	t.Helper()
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			ExecPort:   6100,
+			Network: &vmkit.NetworkConfig{
+				Mode: "user",
+				PortForwards: []vmkit.PortForward{
+					{Host: "127.0.0.1", HostPort: 8080, GuestPort: 80, Protocol: "tcp"},
+				},
+			},
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateRunning, "running", "", "fake", "11111111-1111-1111-1111-111111111111", listenerPID); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	return req, stateDir
+}
+
+func TestApplyRestartsListenerHelperWithUpdatedHostBind(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv apply path is windows-only")
+	}
+	oldStart, oldTerminate, oldBridge, oldExit := startRuntimeListenerProcessHook, terminateRuntimeListenerProcessHook, waitForExecBridgeHook, waitForProcessExitHook
+	t.Cleanup(func() {
+		startRuntimeListenerProcessHook, terminateRuntimeListenerProcessHook, waitForExecBridgeHook, waitForProcessExitHook = oldStart, oldTerminate, oldBridge, oldExit
+	})
+	var terminated []int
+	terminateRuntimeListenerProcessHook = func(pid int) { terminated = append(terminated, pid) }
+	waitForProcessExitHook = func(pid int, timeout time.Duration) error { return nil }
+	var helperConfig vmkit.Config
+	startRuntimeListenerProcessHook = func(req vmkit.Request) (int, error) {
+		helperConfig = *req.Config
+		return 777, nil
+	}
+	waitForExecBridgeHook = func(ctx context.Context, req vmkit.Request) error { return nil }
+
+	startReq, _ := applyTestRunningState(t, 4242)
+	applyReq := startReq
+	applyReq.Command = "apply"
+	applyReq.Config = &vmkit.Config{
+		KernelPath: startReq.Config.KernelPath,
+		RootfsPath: startReq.Config.RootfsPath,
+		StateDir:   startReq.Config.StateDir,
+		// The apply request carries manifest-derived ports; the runtime
+		// ports recorded at start must win.
+		ExecPort: 9999,
+		Network: &vmkit.NetworkConfig{
+			Mode: "user",
+			PortForwards: []vmkit.PortForward{
+				{Host: "0.0.0.0", HostPort: 8080, GuestPort: 80, Protocol: "tcp"},
+			},
+		},
+	}
+	resp, err := (Supervisor{adapter: &fakeAdapter{}}).Do(context.Background(), applyReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("apply resp=%#v err=%v", resp, err)
+	}
+	if len(terminated) != 1 || terminated[0] != 4242 {
+		t.Fatalf("terminated = %v, want the old helper PID", terminated)
+	}
+	if helperConfig.ExecPort != 6100 {
+		t.Fatalf("helper exec port = %d, want the runtime port 6100, not the request's", helperConfig.ExecPort)
+	}
+	if helperConfig.Network == nil || len(helperConfig.Network.PortForwards) != 1 || helperConfig.Network.PortForwards[0].Host != "0.0.0.0" {
+		t.Fatalf("helper network = %#v, want the new host bind", helperConfig.Network)
+	}
+	state, err := readRuntimeState(applyReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.VsockListenerPID != 777 {
+		t.Fatalf("listener pid = %d, want the new helper", state.VsockListenerPID)
+	}
+	if state.Config.Network.PortForwards[0].Host != "0.0.0.0" || state.Config.ExecPort != 6100 {
+		t.Fatalf("persisted config = %#v, want new bind with runtime ports", state.Config)
+	}
+}
+
+func TestApplyRejectsForwardShapeChanges(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv apply path is windows-only")
+	}
+	oldTerminate := terminateRuntimeListenerProcessHook
+	t.Cleanup(func() { terminateRuntimeListenerProcessHook = oldTerminate })
+	terminated := 0
+	terminateRuntimeListenerProcessHook = func(pid int) { terminated++ }
+
+	startReq, _ := applyTestRunningState(t, 4242)
+	applyReq := startReq
+	applyReq.Command = "apply"
+	applyReq.Config = &vmkit.Config{
+		KernelPath: startReq.Config.KernelPath,
+		RootfsPath: startReq.Config.RootfsPath,
+		StateDir:   startReq.Config.StateDir,
+		Network: &vmkit.NetworkConfig{
+			Mode: "user",
+			PortForwards: []vmkit.PortForward{
+				{Host: "127.0.0.1", HostPort: 8080, GuestPort: 8081, Protocol: "tcp"},
+			},
+		},
+	}
+	resp, err := (Supervisor{adapter: &fakeAdapter{}}).Do(context.Background(), applyReq)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "host bind changes") {
+		t.Fatalf("apply resp=%#v err=%v, want shape-change rejection", resp, err)
+	}
+	if terminated != 0 {
+		t.Fatalf("terminated = %d, want the helper untouched on rejection", terminated)
+	}
+}
+
+func TestApplyRejectsNonRunningWorkspace(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv apply path is windows-only")
+	}
+	startReq, _ := applyTestRunningState(t, 4242)
+	if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(startReq, vmkit.StateHalted, "halted", "", "fake", "11111111-1111-1111-1111-111111111111", clearVsockListenerPID); err != nil {
+		t.Fatal(err)
+	}
+	applyReq := startReq
+	applyReq.Command = "apply"
+	resp, err := (Supervisor{adapter: &fakeAdapter{}}).Do(context.Background(), applyReq)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "only live-reloads running") {
+		t.Fatalf("apply resp=%#v err=%v, want running-only rejection", resp, err)
+	}
+}
+
 func TestPreparedWindowsHyperVControlCommandsDoNotTouchComputeSystem(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv lifecycle path is windows-only")

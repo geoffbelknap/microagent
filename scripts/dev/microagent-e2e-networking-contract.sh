@@ -32,6 +32,9 @@ case "$BACKEND" in
     "$ROOT/scripts/dev/applevf-publish-smoke.sh"
     "$ROOT/scripts/dev/applevf-cached-nats-e2e.sh"
     ;;
+  windows-hyperv)
+    exec "$ROOT/scripts/dev/microagent-e2e-networking-windows.sh"
+    ;;
   *)
     e2e_skip "microagent networking E2E does not support backend lane: $BACKEND"
     ;;

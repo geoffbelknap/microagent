@@ -30,6 +30,13 @@ var (
 	computeSystemTeardownPollInterval = 200 * time.Millisecond
 )
 
+// listenerExitTimeout bounds how long apply waits for a terminated runtime
+// listener helper to release its host binds before the replacement rebinds.
+var listenerExitTimeout = 10 * time.Second
+
+// waitForProcessExitHook lets tests substitute a deterministic exit wait.
+var waitForProcessExitHook = waitForProcessExit
+
 // waitForComputeSystemGone polls the HCS Exists probe until the compute
 // system is unregistered or the timeout elapses.
 func (s Supervisor) waitForComputeSystemGone(ctx context.Context, id string, timeout time.Duration) error {
@@ -328,6 +335,104 @@ func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response
 		return vmkit.Response{}, err
 	}
 	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
+}
+
+// apply live-reloads host bind changes for existing port forwards on a
+// running workspace. The forwards (and the exec bridge) live in the runtime
+// listener helper, so the helper restarts with the updated network config —
+// in-flight forwarded connections and exec sessions drop, exactly like the
+// Firecracker port-forwarder restart, and the exec bridge is confirmed back
+// before the apply reports success.
+func (s Supervisor) apply(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
+	state, err := readRuntimeState(req)
+	if err != nil {
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	if state.Event.State != vmkit.StateRunning {
+		err := fmt.Errorf("windows-hyperv apply only live-reloads running workspaces")
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	if !sameGuestPortForwardShape(networkPortForwards(state.Config.Network), networkPortForwards(req.Config.Network)) {
+		err := fmt.Errorf("windows-hyperv apply can only live-reload host bind changes for existing port forwards; stop and start the workspace for port, guest port, protocol, or network mode changes")
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	// The runtime ports (exec/shell binds chosen at start) stay; only the
+	// network block changes. The new helper re-reads this state file.
+	runtimeReq := req
+	config := state.Config
+	config.Network = req.Config.Network
+	runtimeReq.Config = &config
+	if hasDetachedRuntimeServices(runtimeReq) && state.VsockListenerPID == 0 {
+		err := fmt.Errorf("windows-hyperv apply requires a detached workspace with a runtime listener helper; foreground runs hold their listeners in-process")
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	terminateRuntimeListenerProcessHook(state.VsockListenerPID)
+	// The new helper rebinds the same exec port; wait for the old process to
+	// release its sockets so the rebind cannot race into address-in-use.
+	if state.VsockListenerPID > 0 {
+		if err := waitForProcessExitHook(state.VsockListenerPID, listenerExitTimeout); err != nil {
+			err = fmt.Errorf("windows-hyperv apply: old runtime listener helper did not exit: %w", err)
+			return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+		}
+	}
+	listenerPID := clearVsockListenerPID
+	if hasDetachedRuntimeServices(runtimeReq) {
+		pid, err := startRuntimeListenerProcessHook(runtimeReq)
+		if err != nil {
+			detail := fmt.Sprintf("windows-hyperv apply: listener helper failed: %s", err)
+			_, _ = writeRuntimeTransitionWithComputeIDsAndListenerPID(runtimeReq, vmkit.StateRunning, detail, err.Error(), state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
+			return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: detail}, fmt.Errorf("%s", detail)
+		}
+		// The helper reads runtime.json, so the updated config must be on
+		// disk before the exec bridge is probed.
+		if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(runtimeReq, vmkit.StateRunning, "windows-hyperv network applying", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, pid); err != nil {
+			terminateRuntimeListenerProcessHook(pid)
+			return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+		}
+		if err := waitForExecBridgeHook(ctx, runtimeReq); err != nil {
+			terminateRuntimeListenerProcessHook(pid)
+			detail := fmt.Sprintf("windows-hyperv apply: exec bridge failed: %s", err)
+			_, _ = writeRuntimeTransitionWithComputeIDsAndListenerPID(runtimeReq, vmkit.StateRunning, detail, err.Error(), state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
+			return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: detail}, fmt.Errorf("%s", detail)
+		}
+		listenerPID = pid
+	}
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(runtimeReq, vmkit.StateRunning, "windows-hyperv network applied", "", state.ComputeSystemID, state.ComputeSystemRuntimeID, listenerPID)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
+}
+
+func networkPortForwards(network *vmkit.NetworkConfig) []vmkit.PortForward {
+	if network == nil {
+		return nil
+	}
+	return network.PortForwards
+}
+
+// sameGuestPortForwardShape reports whether two forward lists differ only in
+// host bind addresses — the one change apply can deliver without a restart.
+func sameGuestPortForwardShape(oldForwards, newForwards []vmkit.PortForward) bool {
+	if len(oldForwards) != len(newForwards) {
+		return false
+	}
+	for i := range oldForwards {
+		oldForward := oldForwards[i]
+		newForward := newForwards[i]
+		oldProtocol := strings.TrimSpace(oldForward.Protocol)
+		if oldProtocol == "" {
+			oldProtocol = "tcp"
+		}
+		newProtocol := strings.TrimSpace(newForward.Protocol)
+		if newProtocol == "" {
+			newProtocol = "tcp"
+		}
+		if oldProtocol != newProtocol || oldForward.HostPort != newForward.HostPort || oldForward.GuestPort != newForward.GuestPort {
+			return false
+		}
+	}
+	return true
 }
 
 func (s Supervisor) quarantine(req vmkit.Request) (vmkit.Response, error) {
