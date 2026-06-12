@@ -417,6 +417,37 @@ func TestHaltFailsClosedWhenComputeSystemNeverUnregisters(t *testing.T) {
 	}
 }
 
+func TestAppendEventMigratesLegacyJSONLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.json")
+	legacy := `{"identity":{"runtimeID":"agent-1","backend":"windows-hyperv"},"state":"prepared","observedAt":"2026-05-12T16:01:52Z"}
+{"identity":{"runtimeID":"agent-1","backend":"windows-hyperv"},"state":"running","observedAt":"2026-05-12T16:07:23Z"}
+`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendEvent(path, eventFile{State: vmkit.StateHalted, ObservedAt: "2026-06-12T00:00:00Z"}); err != nil {
+		t.Fatalf("appendEvent on legacy history: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []eventFile
+	if err := json.Unmarshal(data, &events); err != nil {
+		t.Fatalf("migrated history is not a JSON array: %v\n%s", err, data)
+	}
+	if len(events) != 3 || events[0].State != vmkit.StatePrepared || events[2].State != vmkit.StateHalted {
+		t.Fatalf("migrated events = %#v, want legacy entries plus the appended one", events)
+	}
+
+	if err := os.WriteFile(path, []byte("{not json at all"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendEvent(path, eventFile{State: vmkit.StateHalted}); err == nil {
+		t.Fatal("malformed history must still fail the append")
+	}
+}
+
 func applyTestRunningState(t *testing.T, listenerPID int) (vmkit.Request, string) {
 	t.Helper()
 	stateDir := t.TempDir()

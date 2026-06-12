@@ -190,14 +190,17 @@ if [ "$published" != "NET_WHV_PUBLISH_OK" ]; then
 fi
 
 e2e_step "user mode records the HNS endpoint address host-side"
-# The packaged windows-hyperv kernel has no hv_netvsc yet, so the guest
-# sees no NIC for the HNS endpoint — guest-side IP/outbound assertions
-# wait on the kernel artifact gaining CONFIG_HYPERV_NET. The endpoint
-# address must still be visible on the host inspection surface.
 "$CLI" --json network "$WS_NAT" --state-dir "$STATE_DIR" >"$STATE_DIR/network-nat.json"
 grep -q '"user"' "$STATE_DIR/network-nat.json"
 grep -q '192\.168\.' "$STATE_DIR/network-nat.json"
-e2e_log "guest NIC assertions deferred: kernel lacks CONFIG_HYPERV_NET (hv_netvsc)"
+
+e2e_step "guest has an addressed NIC and a default route in user mode"
+# hv_netvsc (kernels-6.12.22-r2) exposes the HNS endpoint as eth0 and the
+# boot args carry the endpoint's static config.
+"$CLI" exec "$WS_NAT" --state-dir "$STATE_DIR" -- \
+  sh -c "ifconfig eth0 && route -n" >"$STATE_DIR/exec-nat-net.txt"
+grep -q "inet addr:192.168." "$STATE_DIR/exec-nat-net.txt"
+grep -Eq "^0\.0\.0\.0[[:space:]]+192\.168\." "$STATE_DIR/exec-nat-net.txt"
 
 e2e_step "apply live-reloads a host bind change for the existing forward"
 cat >"$STATE_DIR/apply-bind.yaml" <<YAML
