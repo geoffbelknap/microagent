@@ -98,8 +98,10 @@ func TestCopyFromWorkspaceQuotesDebugFSArguments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	log := string(data)
-	if !strings.Contains(log, `-R dump "/workspace/out.json" "`) {
+	// Unescape the Windows .cmd shim's re-escaped quotes so the quoting
+	// assertion checks the same tokens on every host.
+	log := strings.ReplaceAll(string(data), `\"`, `"`)
+	if !strings.Contains(log, `-R dump "/workspace/out.json" "`) && !strings.Contains(log, `-R "dump "/workspace/out.json" "`) {
 		t.Fatalf("debugfs log missing quoted dump arguments:\n%s", log)
 	}
 	if !strings.Contains(log, `out dir/.microagent-cp-`) && !strings.Contains(log, `out dir\.microagent-cp-`) {
@@ -233,6 +235,9 @@ func shellQuoteForTest(value string) string {
 }
 
 func debugFSLogForAssert(log string) string {
+	// The Windows .cmd shim echoes the re-escaped command line, so strip
+	// escaped quotes before bare ones.
+	log = strings.ReplaceAll(log, "\\\"", "")
 	return strings.ReplaceAll(log, "\"", "")
 }
 

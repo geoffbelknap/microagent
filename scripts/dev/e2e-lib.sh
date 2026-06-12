@@ -229,6 +229,25 @@ e2e_wait_exec_ready() {
   return 1
 }
 
+# e2e_windows_hyperv_host_probe <gate-env> <package> <run-pattern>: run a
+# gated windows-hyperv Go smoke as a host probe scenario. Installs the
+# default kernel when missing and stages the guest init the smokes expect.
+e2e_windows_hyperv_host_probe() {
+  gate="$1"; pkg="$2"; pattern="$3"
+  e2e_is_windows || e2e_skip "windows-hyperv host probes require a Windows host"
+  e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
+  kernel="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
+  if [ ! -r "$kernel" ]; then
+    probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/microagent-whv-host.XXXXXX")"
+    go build -buildvcs=false -o "$probe_dir/microagent.exe" ./cmd/microagent
+    "$probe_dir/microagent.exe" kernel install || e2e_skip "windows-hyperv kernel install failed"
+    rm -rf "$probe_dir"
+  fi
+  mkdir -p .build/dev
+  GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o .build/dev/microagent-guestinit-amd64 ./cmd/microagent-guestinit
+  env "$gate=1" MICROAGENT_WINDOWS_HYPERV_KERNEL="$(e2e_host_path "$kernel")" \
+    go test "$pkg" -run "$pattern" -count=1 -timeout 10m -v
+}
 # e2e_build_cli <out>: build the microagent CLI for the host.
 e2e_build_cli() { go build -buildvcs=false -o "$1" ./cmd/microagent; }
 
