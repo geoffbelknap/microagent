@@ -334,16 +334,26 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	// config the same way the Firecracker boot args do. Requires the
 	// kernels-6.12.22-r2 artifact (CONFIG_HYPERV_NET).
 	if network := spec.Config.Network; network != nil &&
-		(network.Mode == "user" || network.Mode == "nat" || network.Mode == "bridged") &&
-		network.IP != "" && network.Gateway != "" {
-		kernelCmdLine += " microagent_net_if=eth0"
-		kernelCmdLine += " microagent_net_ip=" + network.IP
-		kernelCmdLine += " microagent_net_gw=" + network.Gateway
-		if len(network.DNS) != 0 {
-			kernelCmdLine += " microagent_net_dns=" + strings.Join(network.DNS, ",")
-		}
-		if len(network.Hosts) != 0 {
-			kernelCmdLine += " microagent_net_hosts=" + strings.Join(network.Hosts, ",")
+		(network.Mode == "user" || network.Mode == "nat" || network.Mode == "bridged") {
+		switch {
+		case network.IP != "" && network.Gateway != "":
+			kernelCmdLine += " microagent_net_if=eth0"
+			kernelCmdLine += " microagent_net_ip=" + network.IP
+			kernelCmdLine += " microagent_net_gw=" + network.Gateway
+			if len(network.DNS) != 0 {
+				kernelCmdLine += " microagent_net_dns=" + strings.Join(network.DNS, ",")
+			}
+			if len(network.Hosts) != 0 {
+				kernelCmdLine += " microagent_net_hosts=" + strings.Join(network.Hosts, ",")
+			}
+		case network.Mode == "bridged" && strings.TrimSpace(spec.NetworkEndpointID) != "":
+			// Bridged to a network that does not statically allocate an
+			// endpoint IP at attach time (an external vSwitch, or an ICS
+			// switch like the built-in Default Switch, which serves addresses
+			// over DHCP at guest boot). The synthetic NIC is present but has
+			// no address to apply, so ask the guest to DHCP on it — the same
+			// in-guest udhcpc path the kernel-cmdline DHCP modes already use.
+			kernelCmdLine += " ip=dhcp"
 		}
 	}
 	comPorts := map[string]comPort(nil)

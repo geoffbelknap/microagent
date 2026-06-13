@@ -194,6 +194,71 @@ func TestBuildComputeSystemDocumentEmitsGuestNetworkCmdline(t *testing.T) {
 	}
 }
 
+func TestBuildComputeSystemDocumentBridgedWithoutStaticIPRequestsDHCP(t *testing.T) {
+	// A bridged endpoint on a network that does not statically allocate an
+	// address (external vSwitch, or the ICS Default Switch serving DHCP) has a
+	// NIC but no IP. The guest must be told to DHCP rather than left with an
+	// unconfigured, down interface.
+	cmdlineOf := func(t *testing.T, document []byte) string {
+		t.Helper()
+		var doc struct {
+			VirtualMachine struct {
+				Chipset struct {
+					LinuxKernelDirect struct {
+						KernelCmdLine string `json:"KernelCmdLine"`
+					} `json:"LinuxKernelDirect"`
+				} `json:"Chipset"`
+			} `json:"VirtualMachine"`
+		}
+		if err := json.Unmarshal(document, &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelCmdLine
+	}
+
+	dhcp, err := buildComputeSystemDocument(computeSystemSpec{
+		Name:              "agent-1",
+		NetworkEndpointID: "endpoint-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Network:    &vmkit.NetworkConfig{Mode: "bridged", Interface: "Default Switch"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmdline := cmdlineOf(t, dhcp)
+	if !strings.Contains(cmdline, "ip=dhcp") {
+		t.Fatalf("bridged-without-static-IP cmdline %q must request DHCP", cmdline)
+	}
+	if strings.Contains(cmdline, "microagent_net_ip") {
+		t.Fatalf("bridged-without-static-IP cmdline %q must not carry a static IP", cmdline)
+	}
+
+	// A bridged endpoint that did get a static address keeps the static path
+	// and does not also request DHCP.
+	static, err := buildComputeSystemDocument(computeSystemSpec{
+		Name:              "agent-1",
+		NetworkEndpointID: "endpoint-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Network:    &vmkit.NetworkConfig{Mode: "bridged", IP: "192.168.5.10/24", Gateway: "192.168.5.1"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staticCmdline := cmdlineOf(t, static)
+	if !strings.Contains(staticCmdline, "microagent_net_ip=192.168.5.10/24") {
+		t.Fatalf("static bridged cmdline %q must carry the static IP", staticCmdline)
+	}
+	if strings.Contains(staticCmdline, "ip=dhcp") {
+		t.Fatalf("static bridged cmdline %q must not also request DHCP", staticCmdline)
+	}
+}
+
 func TestBuildComputeSystemDocumentAttachesConfiguredDisks(t *testing.T) {
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",

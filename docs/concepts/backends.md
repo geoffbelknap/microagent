@@ -18,7 +18,7 @@ OS, microagent fails before it builds a rootfs or talks to a supervisor.
 |---|---|---|---|---|---|
 | `firecracker` | Linux | Production | `user`, `nat`, `isolated`, `bridged`, `named`, TCP `--publish` | `/dev/kvm`, `firecracker` binary | Full feature surface; importable as a Go package |
 | `apple-vf` | macOS (Apple silicon) | Production | `user`, `nat`, `isolated`, TCP `--publish`; `bridged` entitlement-gated | Virtualization.framework, Swift supervisor binary | NAT is macOS-managed; no `named` networks yet |
-| `windows-hyperv` | Windows | Supported | `user`/`nat` (HNS NAT), `isolated`, TCP `--publish`; `bridged` needs an external vSwitch | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
+| `windows-hyperv` | Windows | Supported | `user`/`nat` (HNS NAT), `isolated`, `bridged` (named HNS network/switch), TCP `--publish` | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
 
 All three expose the same backend-neutral request and response structures, the
 same lifecycle verbs, and interactive [`connect`](/cli/connect/) - the
@@ -77,8 +77,8 @@ covered in [Networking](/concepts/networking/).
   [`connect`](/cli/connect/), which is the interactive contract on every
   backend.
 - See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
-  details and current limitations (bridged mode needs an external vSwitch;
-  pause/resume, snapshots, and named networks are planned).
+  details and current limitations (bridged mode attaches to a named HNS network
+  or Hyper-V switch; pause/resume, snapshots, and named networks are planned).
 
 ## Checking your host
 

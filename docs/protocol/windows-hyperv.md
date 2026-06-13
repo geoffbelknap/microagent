@@ -94,7 +94,7 @@ Windows Hyper-V uses HNS/HCN networking for guest NIC attachment:
 | `user` | uses the managed `microagent-nat` HNS NAT network |
 | `nat` | uses the managed `microagent-nat` HNS NAT network |
 | `isolated` | starts without an external network adapter |
-| `bridged` | attaches to the named HNS network or Hyper-V switch from `network.interface` (requires an external vSwitch; not yet live-verified) |
+| `bridged` | attaches to the named HNS network or Hyper-V switch from `network.interface`; the guest takes the endpoint's static address when the network allocates one, otherwise it DHCPs |
 
 The managed NAT network uses `192.168.127.0/24` with gateway
 `192.168.127.1`. Runtime network details, including the HNS network and
@@ -107,8 +107,12 @@ proxies that stream to the configured `guestPort`. The listener helper is torn
 down during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
 
 Bridged mode fails closed unless `network.interface` names an existing HNS
-network or Hyper-V switch. Endpoint cleanup runs when foreground `run`
-completes and during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
+network or Hyper-V switch. If the named network statically allocates an
+endpoint address at attach time (a managed NAT-style network), the guest is
+configured with that static address; if it does not (an external vSwitch, or
+the built-in ICS `Default Switch`, which serve addresses over DHCP), the guest
+DHCPs on its NIC instead. Endpoint cleanup runs when foreground `run` completes
+and during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
 
 ## Structured exec
 
@@ -175,12 +179,15 @@ object and marks `readiness.resultReady.ready` true.
 
 ## Current limitations
 
-- `bridged` networking exists in the backend but is not yet live-verified: it
-  requires an external Hyper-V vSwitch named through `network.interface`, and
-  it fails closed when that switch or HNS network is missing. The `user`, `nat`
-  (HNS NAT), and `isolated` modes are live-verified.
-- HNS `user`/`nat` segments need an elevated host to provision the managed NAT
-  network.
+- `bridged` networking requires `network.interface` to name an existing HNS
+  network or Hyper-V switch and fails closed when it is missing. The DHCP path
+  (guest addressed by the bridged network) is live-verified against the
+  built-in ICS `Default Switch`; bridging to an external vSwitch on the
+  physical LAN follows the same path but is exercised manually, since hosted CI
+  runners have no external switch. `user`, `nat`, and `isolated` are all
+  live-verified.
+- HNS `user`/`nat`/`bridged` segments need an elevated host to provision or
+  attach HNS networks.
 - `survive-reboot` registers a Scheduled Task when run elevated; an unelevated
   host surfaces the manual `schtasks` command to register instead.
 - `pause`/`resume` and `snapshot`/save-state are planned, not yet implemented.
