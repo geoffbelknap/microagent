@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Microsoft/go-winio"
+	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -191,6 +192,58 @@ func TestBuildComputeSystemDocumentEmitsGuestNetworkCmdline(t *testing.T) {
 	}
 	if strings.Contains(string(isolated), "microagent_net_if") {
 		t.Fatalf("isolated cmdline must not carry guest network config: %s", isolated)
+	}
+}
+
+func TestBuildComputeSystemDocumentEmitsNamedNetworkStaticCmdline(t *testing.T) {
+	// A named-network member boots with the registry-allocated static member IP
+	// on its synthetic NIC, the network gateway, and /etc/hosts entries so it
+	// resolves the other members by name — the same static path nat/user use.
+	document, err := buildComputeSystemDocument(computeSystemSpec{
+		Name:              "agent-1",
+		NetworkEndpointID: "endpoint-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Network: &vmkit.NetworkConfig{
+				Mode:    "named",
+				Name:    "devnet",
+				IP:      "10.44.71.2/24",
+				Gateway: "10.44.71.1",
+				Hosts:   []string{"web:10.44.71.2", "db:10.44.71.3"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		VirtualMachine struct {
+			Chipset struct {
+				LinuxKernelDirect struct {
+					KernelCmdLine string `json:"KernelCmdLine"`
+				} `json:"LinuxKernelDirect"`
+			} `json:"Chipset"`
+		} `json:"VirtualMachine"`
+	}
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatal(err)
+	}
+	cmdline := doc.VirtualMachine.Chipset.LinuxKernelDirect.KernelCmdLine
+	for _, want := range []string{
+		"microagent_net_if=eth0",
+		"microagent_net_ip=10.44.71.2/24",
+		"microagent_net_gw=10.44.71.1",
+		"microagent_net_hosts=web:10.44.71.2,db:10.44.71.3",
+	} {
+		if !strings.Contains(cmdline, want) {
+			t.Fatalf("named cmdline %q missing %q", cmdline, want)
+		}
+	}
+	// A private named network has no NAT egress, so the static path must not
+	// fall back to DHCP.
+	if strings.Contains(cmdline, "ip=dhcp") {
+		t.Fatalf("named cmdline %q must not request DHCP", cmdline)
 	}
 }
 
@@ -652,4 +705,88 @@ func (f *fakeHCSClient) ProbeComputeSystem(ctx context.Context, id string) error
 
 func (f *fakeHCSClient) WaitComputeSystem(ctx context.Context, id string) error {
 	return nil
+}
+
+func TestManagedNamedNetworkName(t *testing.T) {
+	if got := managedNamedNetworkName("devnet"); got != "microagent-net-devnet" {
+		t.Fatalf("managedNamedNetworkName = %q", got)
+	}
+}
+
+func TestSubnetPrefixLen(t *testing.T) {
+	got, err := subnetPrefixLen("10.44.71.0/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 24 {
+		t.Fatalf("prefix = %d, want 24", got)
+	}
+	if _, err := subnetPrefixLen("not-a-subnet"); err == nil {
+		t.Fatal("expected error for an invalid subnet")
+	}
+}
+
+func TestNamedNetworkHosts(t *testing.T) {
+	record := network.Record{Members: []network.Member{
+		{Workspace: "web", IP: "10.44.71.2"},
+		{Workspace: "db", IP: "10.44.71.3"},
+	}}
+	got := namedNetworkHosts(record)
+	want := []string{"web:10.44.71.2", "db:10.44.71.3"}
+	if len(got) != len(want) {
+		t.Fatalf("hosts = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("hosts[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestPrepareNamedNetworkRequiresName(t *testing.T) {
+	_, err := prepareNamedNetwork(computeSystemSpec{
+		StateDir: t.TempDir(),
+		Identity: vmkit.Identity{RuntimeID: "web"},
+	}, vmkit.NetworkConfig{Mode: "named"})
+	if err == nil || !strings.Contains(err.Error(), "network.name") {
+		t.Fatalf("err = %v, want a missing-name error", err)
+	}
+}
+
+func TestPrepareNamedNetworkFailsClosedOnUnknownNetwork(t *testing.T) {
+	// An unknown network is a registry miss, surfaced before any HNS call.
+	_, err := prepareNamedNetwork(computeSystemSpec{
+		StateDir: t.TempDir(),
+		Identity: vmkit.Identity{RuntimeID: "web"},
+	}, vmkit.NetworkConfig{Mode: "named", Name: "missing"})
+	if err == nil || !strings.Contains(err.Error(), "join named network") {
+		t.Fatalf("err = %v, want a join-named-network error", err)
+	}
+}
+
+func TestPrepareNamedNetworkJoinsRegistryBeforeHostRealization(t *testing.T) {
+	// Joining the registry must allocate a stable member IP from the network's
+	// subnet. The HNS realization that follows needs a real host, so the test
+	// only asserts the registry-side allocation: the member is recorded and the
+	// address lies inside the subnet. A nil/empty member IP here would mean the
+	// adapter tried to realize the host network before the address existed.
+	dir := t.TempDir()
+	if _, err := network.Create(dir, "devnet", "10.44.71.0/24"); err != nil {
+		t.Fatal(err)
+	}
+	// Realization will fail without HCS, but the join must have happened first.
+	_, _ = prepareNamedNetwork(computeSystemSpec{
+		StateDir: dir,
+		Identity: vmkit.Identity{RuntimeID: "web"},
+	}, vmkit.NetworkConfig{Mode: "named", Name: "devnet"})
+	record, err := network.Get(dir, "devnet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(record.Members) != 1 || record.Members[0].Workspace != "web" {
+		t.Fatalf("members = %#v, want web joined", record.Members)
+	}
+	if !strings.HasPrefix(record.Members[0].IP, "10.44.71.") {
+		t.Fatalf("member IP = %q, want an address in 10.44.71.0/24", record.Members[0].IP)
+	}
 }
