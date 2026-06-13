@@ -163,6 +163,66 @@ func TestVMComputeClientWaitsForPendingStartNotification(t *testing.T) {
 	}
 }
 
+func TestVMComputeClientWaitsForPendingPauseNotification(t *testing.T) {
+	api := &fakeVMComputeAPI{
+		nextHandle: 77,
+		pauseErr:   hcsOperationPending,
+	}
+	client := vmcomputeClient{api: api}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- client.PauseComputeSystem(context.Background(), "agent-1")
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("PauseComputeSystem returned before completion notification: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if api.registers != 1 {
+		t.Fatalf("registers = %d, want 1", api.registers)
+	}
+
+	api.notify(hcsNotificationSystemPauseCompleted, nil)
+	if err := <-done; err != nil {
+		t.Fatalf("PauseComputeSystem: %v", err)
+	}
+	if api.unregisters != 1 {
+		t.Fatalf("unregisters = %d, want 1", api.unregisters)
+	}
+}
+
+func TestVMComputeClientWaitsForPendingResumeNotification(t *testing.T) {
+	api := &fakeVMComputeAPI{
+		nextHandle: 77,
+		resumeErr:  hcsOperationPending,
+	}
+	client := vmcomputeClient{api: api}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- client.ResumeComputeSystem(context.Background(), "agent-1")
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("ResumeComputeSystem returned before completion notification: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if api.registers != 1 {
+		t.Fatalf("registers = %d, want 1", api.registers)
+	}
+
+	api.notify(hcsNotificationSystemResumeCompleted, nil)
+	if err := <-done; err != nil {
+		t.Fatalf("ResumeComputeSystem: %v", err)
+	}
+	if api.unregisters != 1 {
+		t.Fatalf("unregisters = %d, want 1", api.unregisters)
+	}
+}
+
 func TestVMComputeClientPendingStartFailsOnUnexpectedExit(t *testing.T) {
 	api := &fakeVMComputeAPI{
 		nextHandle: 77,
@@ -193,6 +253,8 @@ type fakeVMComputeAPI struct {
 	closedHandles      []uintptr
 	createErr          error
 	startErr           error
+	pauseErr           error
+	resumeErr          error
 	propertiesResponse string
 	propertiesQuery    string
 	callbackContext    uintptr
@@ -232,6 +294,18 @@ func (f *fakeVMComputeAPI) TerminateComputeSystem(ctx context.Context, handle ui
 	f.operations = append(f.operations, "terminate")
 	f.operationOptions = append(f.operationOptions, options)
 	return "", nil
+}
+
+func (f *fakeVMComputeAPI) PauseComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
+	f.operations = append(f.operations, "pause")
+	f.operationOptions = append(f.operationOptions, options)
+	return "", f.pauseErr
+}
+
+func (f *fakeVMComputeAPI) ResumeComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
+	f.operations = append(f.operations, "resume")
+	f.operationOptions = append(f.operationOptions, options)
+	return "", f.resumeErr
 }
 
 func (f *fakeVMComputeAPI) GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error) {

@@ -395,6 +395,69 @@ func (s Supervisor) halt(ctx context.Context, req vmkit.Request) (vmkit.Response
 	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
 }
 
+// pause freezes a running compute system's vCPUs in place. Unlike the
+// teardown controls (halt/stop/kill), pause MUST NOT touch the runtime
+// listener helper: the helper holds the compute system open via its exit Wait
+// and brokers the exec/shell bridges, so it has to survive a pause for resume
+// to thaw an intact workspace. Memory, disk, the compute system registration,
+// the network endpoint, and the listener PID are all preserved.
+func (s Supervisor) pause(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
+	return s.transitionComputeSystemState(ctx, req, vmkit.StateRunning, vmkit.StatePaused, "windows-hyperv compute system paused",
+		func(id string) error { return s.runtimeAdapter().Pause(ctx, id) })
+}
+
+// resume thaws a paused compute system's vCPUs back to running, preserving the
+// same compute IDs, network endpoint, and runtime listener PID that pause left
+// intact.
+func (s Supervisor) resume(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
+	return s.transitionComputeSystemState(ctx, req, vmkit.StatePaused, vmkit.StateRunning, "windows-hyperv compute system resumed",
+		func(id string) error { return s.runtimeAdapter().Resume(ctx, id) })
+}
+
+// transitionComputeSystemState pauses or resumes the workspace in place. It
+// requires the recorded state to be fromState and the compute system to be
+// known, issues the HCS transition, and persists toState while PRESERVING the
+// compute IDs and the runtime listener PID (never clearVsockListenerPID). On a
+// transition error the persisted state is left untouched — the HCS pause/resume
+// is atomic, so a failure means the system is still in fromState.
+func (s Supervisor) transitionComputeSystemState(ctx context.Context, req vmkit.Request, fromState, toState vmkit.VMState, detail string, transition func(id string) error) (vmkit.Response, error) {
+	state, err := readRuntimeState(req)
+	if err != nil {
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	if state.Event.State != fromState {
+		// Fail closed WITHOUT rewriting runtime.json: a pause/resume request
+		// carries only a sparse config, so persisting here would clobber the
+		// stored exec/shell ports and network. The workspace stays exactly as it
+		// was; only the response reports the rejection.
+		err := fmt.Errorf("windows-hyperv workspace %s is %s; %s requires state %s", req.Identity.RuntimeID, state.Event.State, req.Command, fromState)
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	if state.ComputeSystemID == "" {
+		err := fmt.Errorf("windows-hyperv workspace %s has no compute system to %s", req.Identity.RuntimeID, req.Command)
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	if err := transition(state.ComputeSystemID); err != nil {
+		// The HCS transition is atomic; on failure the compute system stays in
+		// fromState, so leave the persisted state untouched rather than recording
+		// a spurious failed state.
+		resp := vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}
+		return resp, err
+	}
+	// A pause/resume request carries only a sparse config (StateDir); persist the
+	// stored runtime config so the resumed workspace keeps its exec/shell ports,
+	// network, and readiness shape — only the StateDir comes from the request.
+	runtimeReq := req
+	storedConfig := state.Config
+	storedConfig.StateDir = req.Config.StateDir
+	runtimeReq.Config = &storedConfig
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(runtimeReq, toState, detail, "", state.ComputeSystemID, state.ComputeSystemRuntimeID, state.VsockListenerPID)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
+}
+
 // apply live-reloads host bind changes for existing port forwards on a
 // running workspace. The forwards (and the exec bridge) live in the runtime
 // listener helper, so the helper restarts with the updated network config —

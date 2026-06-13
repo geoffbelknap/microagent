@@ -130,6 +130,14 @@ func (a defaultAdapter) Shutdown(ctx context.Context, id string) error {
 	return a.hcsClient().ShutdownComputeSystem(ctx, id)
 }
 
+func (a defaultAdapter) Pause(ctx context.Context, id string) error {
+	return a.hcsClient().PauseComputeSystem(ctx, id)
+}
+
+func (a defaultAdapter) Resume(ctx context.Context, id string) error {
+	return a.hcsClient().ResumeComputeSystem(ctx, id)
+}
+
 func (a defaultAdapter) Kill(ctx context.Context, id string) error {
 	return a.hcsClient().KillComputeSystem(ctx, id)
 }
@@ -618,6 +626,14 @@ func (unsupportedHCSClient) StartComputeSystem(ctx context.Context, id string) e
 
 func (unsupportedHCSClient) ShutdownComputeSystem(ctx context.Context, id string) error {
 	return errHCSNotImplemented("shutdown")
+}
+
+func (unsupportedHCSClient) PauseComputeSystem(ctx context.Context, id string) error {
+	return errHCSNotImplemented("pause")
+}
+
+func (unsupportedHCSClient) ResumeComputeSystem(ctx context.Context, id string) error {
+	return errHCSNotImplemented("resume")
 }
 
 func (unsupportedHCSClient) KillComputeSystem(ctx context.Context, id string) error {

@@ -17,9 +17,9 @@ forwarding, and vsock paths intact. After resume, [`exec`](/cli/exec/),
 [`connect`](/cli/connect/), and [`stats`](/cli/stats/) work again.
 
 `resume` requires the workspace to be paused - to boot a halted or stopped
-workspace from disk, use [`start`](/cli/start/). Pause/resume is currently
-implemented only for the Firecracker backend; on Apple VF and Windows Hyper-V it
-is planned, not yet implemented.
+workspace from disk, use [`start`](/cli/start/). Pause/resume is implemented on
+the Firecracker and Windows Hyper-V backends; on Apple VF it is planned, not yet
+implemented.
 
 ## Examples
 

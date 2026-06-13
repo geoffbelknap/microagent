@@ -5,6 +5,28 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv pause/resume (P7)
+
+- `microagent pause` and `microagent resume` now work on the Windows Hyper-V
+  backend. `pause` freezes a running workspace's vCPUs in place via
+  `HcsPauseComputeSystem` (state → `paused`); guest memory, the workspace disk,
+  the compute system registration, the HNS endpoint, and the runtime listener
+  helper are all preserved, so `resume` (`HcsResumeComputeSystem`) thaws the
+  workspace back to `running` with its exec/shell bridges intact. Unlike the
+  teardown controls, pause/resume never touch the runtime listener helper — it
+  holds the compute system open and brokers exec, so it must survive a pause.
+- Both HCS operations are asynchronous (they signal `SystemPauseCompleted` /
+  `SystemResumeCompleted`), handled through the same callback-wait path as
+  start/create. The wait is bound to a timeout so a standalone `pause`/`resume`
+  CLI process — whose only goroutine is blocked on the HCS notification an
+  OS-owned thread delivers — does not trip the Go runtime's deadlock detector,
+  and so a transition that never signals fails closed.
+- The `lifecycle-deep` windows arm now exercises pause → exec-rejected → resume,
+  asserting the workspace freezes, exec is refused while paused, and the same
+  exec channel answers again after resume with guest state preserved. The
+  `snapshot/pause/resume` coverage row records windows-hyperv for vCPU
+  pause/resume; memory snapshot remains Firecracker-only.
+
 ### windows-hyperv bridged networking DHCP
 
 - Bridged mode now configures the guest NIC when the named HNS network or
