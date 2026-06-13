@@ -59,6 +59,14 @@ func (defaultAdapter) Shutdown(ctx context.Context, id string) error {
 	return errUnsupportedHost()
 }
 
+func (defaultAdapter) Pause(ctx context.Context, id string) error {
+	return errUnsupportedHost()
+}
+
+func (defaultAdapter) Resume(ctx context.Context, id string) error {
+	return errUnsupportedHost()
+}
+
 func (defaultAdapter) Kill(ctx context.Context, id string) error {
 	return errUnsupportedHost()
 }

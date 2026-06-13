@@ -261,6 +261,35 @@ if not (5 <= cpu <= 400):
     raise SystemExit(f"cpuPercent out of sane busy-guest range: {stats}")
 PY
 
+e2e_step "pause freezes the workspace and resume thaws it in place"
+# pause freezes the running compute system's vCPUs: the workspace reports
+# paused, its memory and disk are preserved, and the runtime listener helper
+# survives (so exec/shell bridges resume intact). Exec is rejected while
+# paused because the guest's vCPUs are frozen; resume thaws it back to
+# running and the same exec channel answers again with state intact.
+"$CLI" pause "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/pause.json"
+test "$(json_get "$STATE_DIR/pause.json" event.state)" = "paused"
+"$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-paused.json"
+test "$(json_get "$STATE_DIR/status-paused.json" event.state)" = "paused"
+# Exec must not run against a frozen guest: the CLI rejects exec on a paused
+# workspace rather than dialing a bridge whose guest vCPUs cannot answer.
+expect_failure exec-paused "paused" \
+  "$CLI" exec "$WORKSPACE" --state-dir "$STATE_DIR" --timeout 5s -- sh -c "echo should-not-run"
+# pause is idempotent-closed: a second pause on an already-paused workspace
+# fails rather than silently no-op'ing.
+expect_failure pause-paused "requires state running" \
+  "$CLI" pause "$WORKSPACE" --state-dir "$STATE_DIR"
+"$CLI" resume "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/resume-paused.json"
+test "$(json_get "$STATE_DIR/resume-paused.json" event.state)" = "running"
+wait_for_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
+# State survived the freeze/thaw: the file the earlier exec wrote is still
+# there, proving memory and disk were preserved, not rebooted.
+"$CLI" exec "$WORKSPACE" --state-dir "$STATE_DIR" -- sh -c "cat /persist.txt" >"$STATE_DIR/exec-after-resume.out"
+grep -q "persisted" "$STATE_DIR/exec-after-resume.out"
+# resume on a running workspace fails closed (nothing to thaw).
+expect_failure resume-running "requires state paused" \
+  "$CLI" resume "$WORKSPACE" --state-dir "$STATE_DIR"
+
 e2e_step "halt is clean and restart comes back ready"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt.json"
 test "$(json_get "$STATE_DIR/halt.json" event.state)" = "halted"

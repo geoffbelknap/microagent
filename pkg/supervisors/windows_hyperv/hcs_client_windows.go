@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/Microsoft/hcsshim/hcn"
@@ -24,6 +25,8 @@ const (
 	hcsNotificationSystemExited          hcsNotification = 0x00000001
 	hcsNotificationSystemCreateCompleted hcsNotification = 0x00000002
 	hcsNotificationSystemStartCompleted  hcsNotification = 0x00000003
+	hcsNotificationSystemPauseCompleted  hcsNotification = 0x00000004
+	hcsNotificationSystemResumeCompleted hcsNotification = 0x00000005
 	hcsNotificationServiceDisconnect     hcsNotification = 0x01000000
 )
 
@@ -37,6 +40,10 @@ func (n hcsNotification) String() string {
 		return "SystemCreateCompleted"
 	case hcsNotificationSystemStartCompleted:
 		return "SystemStartCompleted"
+	case hcsNotificationSystemPauseCompleted:
+		return "SystemPauseCompleted"
+	case hcsNotificationSystemResumeCompleted:
+		return "SystemResumeCompleted"
 	case hcsNotificationServiceDisconnect:
 		return "ServiceDisconnect"
 	default:
@@ -68,6 +75,8 @@ type vmcomputeAPI interface {
 	StartComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	ShutdownComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
+	PauseComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
+	ResumeComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error)
 	RegisterComputeSystemCallback(ctx context.Context, handle, callback, callbackContext uintptr) (uintptr, error)
 	UnregisterComputeSystemCallback(ctx context.Context, callbackHandle uintptr) error
@@ -193,6 +202,41 @@ func (c vmcomputeClient) ShutdownComputeSystem(ctx context.Context, id string) e
 	})
 }
 
+// computeSystemPauseResumeTimeout bounds the async HCS pause/resume callback
+// wait. Unlike start/create/wait — which always run alongside other live
+// goroutines (network setup, the runtime listener helper) — pause and resume
+// are issued from a standalone CLI process whose only goroutine is the one
+// blocked on the HCS notification channel. The notification is delivered by an
+// HCS-owned OS thread through a syscall callback, which the Go runtime cannot
+// see as a runnable goroutine, so a bare channel wait trips the "all
+// goroutines are asleep" deadlock detector. Binding the wait to a context
+// deadline keeps a timer goroutine live (defeating the false positive) and
+// also fails closed if HCS never signals. hcsshim uses a 4-minute default for
+// the same operations. A variable so tests can shorten it.
+var computeSystemPauseResumeTimeout = 4 * time.Minute
+
+// PauseComputeSystem freezes the running compute system's vCPUs. HCS pause is
+// async (it returns HCS_E_PENDING and signals SystemPauseCompleted), so it
+// rides the same callback wait as start. Memory, disk, and the compute system
+// registration are all preserved; only execution stops.
+func (c vmcomputeClient) PauseComputeSystem(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, computeSystemPauseResumeTimeout)
+	defer cancel()
+	return c.withComputeSystem(ctx, id, "pause", hcsNotificationSystemPauseCompleted, func(handle uintptr) (string, error) {
+		return c.vmcomputeAPI().PauseComputeSystem(ctx, handle, "")
+	})
+}
+
+// ResumeComputeSystem thaws a paused compute system's vCPUs. Like pause, HCS
+// resume is async and signals SystemResumeCompleted.
+func (c vmcomputeClient) ResumeComputeSystem(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, computeSystemPauseResumeTimeout)
+	defer cancel()
+	return c.withComputeSystem(ctx, id, "resume", hcsNotificationSystemResumeCompleted, func(handle uintptr) (string, error) {
+		return c.vmcomputeAPI().ResumeComputeSystem(ctx, handle, "")
+	})
+}
+
 func (c vmcomputeClient) KillComputeSystem(ctx context.Context, id string) error {
 	return c.terminateComputeSystem(ctx, id, "kill")
 }
@@ -288,6 +332,8 @@ func registerComputeSystemCallback(ctx context.Context, api vmcomputeAPI, handle
 			hcsNotificationSystemExited:          make(chan error, 1),
 			hcsNotificationSystemCreateCompleted: make(chan error, 1),
 			hcsNotificationSystemStartCompleted:  make(chan error, 1),
+			hcsNotificationSystemPauseCompleted:  make(chan error, 1),
+			hcsNotificationSystemResumeCompleted: make(chan error, 1),
 		},
 	}
 	hcsCallbackMapLock.Lock()
@@ -382,6 +428,8 @@ var (
 	procHcsStartComputeSystem              = vmcomputeDLL.NewProc("HcsStartComputeSystem")
 	procHcsShutdownComputeSystem           = vmcomputeDLL.NewProc("HcsShutdownComputeSystem")
 	procHcsTerminateComputeSystem          = vmcomputeDLL.NewProc("HcsTerminateComputeSystem")
+	procHcsPauseComputeSystem              = vmcomputeDLL.NewProc("HcsPauseComputeSystem")
+	procHcsResumeComputeSystem             = vmcomputeDLL.NewProc("HcsResumeComputeSystem")
 	procHcsRegisterComputeSystemCallback   = vmcomputeDLL.NewProc("HcsRegisterComputeSystemCallback")
 	procHcsUnregisterComputeSystemCallback = vmcomputeDLL.NewProc("HcsUnregisterComputeSystemCallback")
 	procGrantVMAccess                      = vmcomputeDLL.NewProc("GrantVmAccess")
@@ -427,6 +475,14 @@ func (windowsVMComputeAPI) ShutdownComputeSystem(ctx context.Context, handle uin
 
 func (windowsVMComputeAPI) TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	return callComputeSystemOperation(procHcsTerminateComputeSystem, handle, options)
+}
+
+func (windowsVMComputeAPI) PauseComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
+	return callComputeSystemOperation(procHcsPauseComputeSystem, handle, options)
+}
+
+func (windowsVMComputeAPI) ResumeComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
+	return callComputeSystemOperation(procHcsResumeComputeSystem, handle, options)
 }
 
 func (windowsVMComputeAPI) GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error) {

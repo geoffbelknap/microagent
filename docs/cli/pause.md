@@ -24,9 +24,9 @@ While a workspace is paused, [`exec`](/cli/exec/), [`connect`](/cli/connect/),
 and [`stats`](/cli/stats/) are rejected with a message directing you to resume
 it first.
 
-`pause` requires the workspace to be running. Pause/resume is currently
-implemented only for the Firecracker backend; on Apple VF and Windows Hyper-V it
-is planned, not yet implemented.
+`pause` requires the workspace to be running. Pause/resume is implemented on the
+Firecracker and Windows Hyper-V backends; on Apple VF it is planned, not yet
+implemented.
 
 ## Examples
 

@@ -26,6 +26,11 @@ type runtimeAdapter interface {
 	Shutdown(ctx context.Context, id string) error
 	Kill(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
+	// Pause freezes a running compute system's vCPUs in place; Resume thaws
+	// them. Both preserve the compute system registration, its memory, and its
+	// disk — only execution is suspended.
+	Pause(ctx context.Context, id string) error
+	Resume(ctx context.Context, id string) error
 	Wait(ctx context.Context, id string) error
 	// Exists reports whether the compute system is still registered with HCS.
 	// A guest that exits on its own takes its compute system with it, so this
@@ -66,6 +71,8 @@ type hcsClient interface {
 	GrantVMAccess(ctx context.Context, vmID, path string) error
 	StartComputeSystem(ctx context.Context, id string) error
 	ShutdownComputeSystem(ctx context.Context, id string) error
+	PauseComputeSystem(ctx context.Context, id string) error
+	ResumeComputeSystem(ctx context.Context, id string) error
 	KillComputeSystem(ctx context.Context, id string) error
 	DeleteComputeSystem(ctx context.Context, id string) error
 	WaitComputeSystem(ctx context.Context, id string) error

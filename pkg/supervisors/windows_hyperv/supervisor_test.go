@@ -476,6 +476,154 @@ func TestTeardownTimeoutReportsHCSState(t *testing.T) {
 	}
 }
 
+// writeRunningStateWithListenerForControl records a running workspace whose
+// detached runtime listener helper PID is on disk, so pause/resume can be
+// asserted to preserve it (the helper holds the compute system open and must
+// survive a pause for resume to thaw an intact workspace).
+func writeRunningStateWithListenerForControl(t *testing.T, listenerPID int) (vmkit.Request, string) {
+	t.Helper()
+	stateDir := t.TempDir()
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateRunning, "running", "", "fake", "11111111-1111-1111-1111-111111111111", listenerPID); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	return req, stateDir
+}
+
+func TestPauseFreezesRunningComputeSystem(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	req, _ := writeRunningStateWithListenerForControl(t, 4321)
+	adapter := &fakeAdapter{}
+	controlReq := req
+	controlReq.Command = "pause"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), controlReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StatePaused {
+		t.Fatalf("pause resp=%#v err=%v, want paused", resp, err)
+	}
+	if adapter.pauses != 1 || adapter.pauseID != "fake" {
+		t.Fatalf("pauses=%d pauseID=%q, want one pause on the compute system", adapter.pauses, adapter.pauseID)
+	}
+	if adapter.kills != 0 || adapter.shutdowns != 0 || adapter.deletes != 0 {
+		t.Fatalf("pause must not tear the compute system down: kills=%d shutdowns=%d deletes=%d", adapter.kills, adapter.shutdowns, adapter.deletes)
+	}
+	// The runtime listener PID and the compute IDs must survive the pause: the
+	// helper holds the compute system open and brokers exec/shell for resume.
+	var state runtimeState
+	readJSON(t, filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "runtime.json"), &state)
+	if state.VsockListenerPID != 4321 {
+		t.Fatalf("VsockListenerPID=%d, want 4321 preserved across pause", state.VsockListenerPID)
+	}
+	if state.ComputeSystemID != "fake" || state.ComputeSystemRuntimeID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("compute IDs not preserved: id=%q runtimeID=%q", state.ComputeSystemID, state.ComputeSystemRuntimeID)
+	}
+}
+
+func TestResumeThawsPausedComputeSystem(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	req, _ := writeRunningStateWithListenerForControl(t, 4321)
+	// Pause first, then resume, so the recorded state is genuinely paused.
+	pauseReq := req
+	pauseReq.Command = "pause"
+	adapter := &fakeAdapter{}
+	if resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), pauseReq); err != nil || !resp.OK {
+		t.Fatalf("pause resp=%#v err=%v", resp, err)
+	}
+	resumeReq := req
+	resumeReq.Command = "resume"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), resumeReq)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("resume resp=%#v err=%v, want running", resp, err)
+	}
+	if adapter.resumes != 1 || adapter.resumeID != "fake" {
+		t.Fatalf("resumes=%d resumeID=%q, want one resume on the compute system", adapter.resumes, adapter.resumeID)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "runtime.json"), &state)
+	if state.VsockListenerPID != 4321 {
+		t.Fatalf("VsockListenerPID=%d, want 4321 preserved across resume", state.VsockListenerPID)
+	}
+}
+
+func TestPauseFailsClosedWhenNotRunning(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	req, _ := writeRunningStateWithListenerForControl(t, 4321)
+	// Pause once to reach paused, then a second pause must fail closed.
+	adapter := &fakeAdapter{}
+	pauseReq := req
+	pauseReq.Command = "pause"
+	if resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), pauseReq); err != nil || !resp.OK {
+		t.Fatalf("first pause resp=%#v err=%v", resp, err)
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), pauseReq)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "requires state running") {
+		t.Fatalf("second pause resp=%#v err=%v, want fail-closed requiring running", resp, err)
+	}
+	if adapter.pauses != 1 {
+		t.Fatalf("pauses=%d, want the non-running pause to be rejected before touching HCS", adapter.pauses)
+	}
+}
+
+func TestResumeFailsClosedWhenNotPaused(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	req, _ := writeRunningStateWithListenerForControl(t, 4321)
+	adapter := &fakeAdapter{}
+	resumeReq := req
+	resumeReq.Command = "resume"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), resumeReq)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "requires state paused") {
+		t.Fatalf("resume resp=%#v err=%v, want fail-closed requiring paused", resp, err)
+	}
+	if adapter.resumes != 0 {
+		t.Fatalf("resumes=%d, want resume on a running workspace rejected before touching HCS", adapter.resumes)
+	}
+}
+
+func TestPauseLeavesStateUnchangedOnTransitionError(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	req, _ := writeRunningStateWithListenerForControl(t, 4321)
+	adapter := &fakeAdapter{pauseErr: fmt.Errorf("HCS pause: device busy")}
+	controlReq := req
+	controlReq.Command = "pause"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), controlReq)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "device busy") {
+		t.Fatalf("pause resp=%#v err=%v, want the HCS error surfaced", resp, err)
+	}
+	// The HCS pause is atomic: a failure means the system is still running, so
+	// the persisted state must stay running rather than record a spurious
+	// paused or failed state.
+	var state runtimeState
+	readJSON(t, filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "runtime.json"), &state)
+	if state.Event.State != vmkit.StateRunning {
+		t.Fatalf("recorded state=%s, want running unchanged after a failed pause", state.Event.State)
+	}
+	if state.VsockListenerPID != 4321 {
+		t.Fatalf("VsockListenerPID=%d, want 4321 preserved after a failed pause", state.VsockListenerPID)
+	}
+}
+
 func TestTeardownTimeoutReportsDescribeFailure(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv lifecycle path is windows-only")
@@ -1395,6 +1543,12 @@ type fakeAdapter struct {
 	kills       int
 	killID      string
 	killErr     error
+	pauses      int
+	pauseID     string
+	pauseErr    error
+	resumes     int
+	resumeID    string
+	resumeErr   error
 	deletes     int
 	deleteID    string
 	waits       int
@@ -1492,6 +1646,18 @@ func (f *fakeAdapter) Kill(ctx context.Context, id string) error {
 	return nil
 }
 
+func (f *fakeAdapter) Pause(ctx context.Context, id string) error {
+	f.pauses++
+	f.pauseID = id
+	return f.pauseErr
+}
+
+func (f *fakeAdapter) Resume(ctx context.Context, id string) error {
+	f.resumes++
+	f.resumeID = id
+	return f.resumeErr
+}
+
 func (f *fakeAdapter) Delete(ctx context.Context, id string) error {
 	f.deletes++
 	f.deleteID = id
@@ -1574,6 +1740,14 @@ func (failingAdapter) Start(ctx context.Context, id string) error {
 
 func (failingAdapter) Shutdown(ctx context.Context, id string) error {
 	return fmt.Errorf("shutdown unavailable")
+}
+
+func (failingAdapter) Pause(ctx context.Context, id string) error {
+	return fmt.Errorf("pause unavailable")
+}
+
+func (failingAdapter) Resume(ctx context.Context, id string) error {
+	return fmt.Errorf("resume unavailable")
 }
 
 func (failingAdapter) Kill(ctx context.Context, id string) error {

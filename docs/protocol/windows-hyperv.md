@@ -190,7 +190,10 @@ object and marks `readiness.resultReady.ready` true.
   attach HNS networks.
 - `survive-reboot` registers a Scheduled Task when run elevated; an unelevated
   host surfaces the manual `schtasks` command to register instead.
-- `pause`/`resume` and `snapshot`/save-state are planned, not yet implemented.
+- `pause`/`resume` freeze and thaw a running workspace's vCPUs in place via
+  `HcsPauseComputeSystem`/`HcsResumeComputeSystem` (memory, disk, the compute
+  system registration, and the runtime listener helper are all preserved).
+  `snapshot`/save-state is planned, not yet implemented.
 - Named networks are planned; named-network attachment is currently implemented
   only on Linux.
 - Direct supervisor `console` is a deliberate non-goal on every backend; use

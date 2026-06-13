@@ -583,6 +583,10 @@ type fakeHCSClient struct {
 	createdID string
 	document  []byte
 	handle    computeSystemHandle
+	pauses    int
+	pauseID   string
+	resumes   int
+	resumeID  string
 	grants    []struct {
 		vmID string
 		path string
@@ -611,6 +615,18 @@ func (f *fakeHCSClient) StartComputeSystem(ctx context.Context, id string) error
 }
 
 func (f *fakeHCSClient) ShutdownComputeSystem(ctx context.Context, id string) error {
+	return nil
+}
+
+func (f *fakeHCSClient) PauseComputeSystem(ctx context.Context, id string) error {
+	f.pauses++
+	f.pauseID = id
+	return nil
+}
+
+func (f *fakeHCSClient) ResumeComputeSystem(ctx context.Context, id string) error {
+	f.resumes++
+	f.resumeID = id
 	return nil
 }
 
