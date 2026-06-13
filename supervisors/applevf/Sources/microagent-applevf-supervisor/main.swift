@@ -144,6 +144,37 @@ struct RuntimeReadiness: Codable {
     var execReady: ReadinessSignal
     var resultReady: ReadinessSignal
     var mediationReady: ReadinessSignal
+
+    enum CodingKeys: String, CodingKey {
+        case guestReady
+        case shellReady
+        case execReady
+        case resultReady
+        case mediationReady
+    }
+
+    init(
+        guestReady: ReadinessSignal = ReadinessSignal(),
+        shellReady: ReadinessSignal = ReadinessSignal(),
+        execReady: ReadinessSignal = ReadinessSignal(),
+        resultReady: ReadinessSignal = ReadinessSignal(),
+        mediationReady: ReadinessSignal = ReadinessSignal()
+    ) {
+        self.guestReady = guestReady
+        self.shellReady = shellReady
+        self.execReady = execReady
+        self.resultReady = resultReady
+        self.mediationReady = mediationReady
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guestReady = try container.decodeIfPresent(ReadinessSignal.self, forKey: .guestReady) ?? ReadinessSignal()
+        shellReady = try container.decodeIfPresent(ReadinessSignal.self, forKey: .shellReady) ?? ReadinessSignal()
+        execReady = try container.decodeIfPresent(ReadinessSignal.self, forKey: .execReady) ?? ReadinessSignal()
+        resultReady = try container.decodeIfPresent(ReadinessSignal.self, forKey: .resultReady) ?? ReadinessSignal()
+        mediationReady = try container.decodeIfPresent(ReadinessSignal.self, forKey: .mediationReady) ?? ReadinessSignal()
+    }
 }
 
 struct RuntimeResult: Codable {

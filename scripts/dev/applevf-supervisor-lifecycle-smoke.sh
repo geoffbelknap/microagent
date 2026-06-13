@@ -300,6 +300,20 @@ if (body.get("event") or {}).get("detail") != "forced":
     raise SystemExit(body)
 PY
 
+python3 - "$STATE_DIR/agent-smoke/runtime.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    runtime = json.load(handle)
+readiness = runtime.get("readiness") or {}
+readiness.pop("execReady", None)
+runtime["readiness"] = readiness
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(runtime, handle)
+    handle.write("\n")
+PY
+
 if start_response="$(request start | "$SUPERVISOR" 2>/dev/null)"; then
   echo "expected start to return a nonzero status" >&2
   exit 1
