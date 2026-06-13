@@ -736,6 +736,9 @@ func validateNetwork(req vmkit.Request) error {
 	if network.Mode == "bridged" && network.Interface == "" {
 		return fmt.Errorf("bridged network requires network.interface")
 	}
+	if network.Mode == "named" && strings.TrimSpace(network.Name) == "" {
+		return fmt.Errorf("named network requires network.name")
+	}
 	return nil
 }
 

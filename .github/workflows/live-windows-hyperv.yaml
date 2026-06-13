@@ -108,4 +108,4 @@ jobs:
           supervision-deep survive-reboot mcp-lifecycle
           windows-hyperv-lifecycle-host windows-hyperv-connect-host
           windows-hyperv-exec-host windows-hyperv-transport-host
-          windows-hyperv-model-host
+          windows-hyperv-model-host windows-hyperv-named-network-host

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/Microsoft/hcsshim/hcn"
+	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -25,7 +26,17 @@ const (
 	managedNATStartMAC        = "00-15-5D-52-D0-00"
 	managedNATEndMAC          = "00-15-5D-52-DF-FF"
 	managedEndpointNamePrefix = "microagent-"
+	// managedNamedNetworkPrefix marks the HNS network backing a user-defined
+	// named network. It is distinct from the shared NAT network so cleanup may
+	// reap an empty named network without touching the persistent NAT one.
+	managedNamedNetworkPrefix = "microagent-net-"
 )
+
+// managedNamedNetworkName derives the HNS network name backing a named-network
+// registry record.
+func managedNamedNetworkName(name string) string {
+	return managedNamedNetworkPrefix + name
+}
 
 type defaultAdapter struct {
 	client hcsClient
@@ -100,9 +111,81 @@ func (a defaultAdapter) PrepareNetwork(ctx context.Context, spec computeSystemSp
 			network.Routes = []string{managedNATRoute}
 		}
 		return createNetworkEndpoint(hcnNetwork, spec.Name, network)
+	case "named":
+		return prepareNamedNetwork(spec, network)
 	default:
 		return networkAttachment{}, fmt.Errorf("unsupported windows-hyperv network mode %q", network.Mode)
 	}
+}
+
+// prepareNamedNetwork joins the workspace to a user-defined named network and
+// realizes it on the host. A named network is private (matching the firecracker
+// private bridge): an isolated HNS network carrying the registry's subnet with
+// static IPAM, so members reach each other and the host but have no NAT egress.
+// The workspace's registry-allocated member IP is bound to a static endpoint so
+// its address is stable across stop/start, and the runtime network config feeds
+// the guest the same static config the firecracker named path emits.
+func prepareNamedNetwork(spec computeSystemSpec, runtimeNetwork vmkit.NetworkConfig) (networkAttachment, error) {
+	name := strings.TrimSpace(runtimeNetwork.Name)
+	if name == "" {
+		return networkAttachment{}, fmt.Errorf("named network requires network.name")
+	}
+	workspace := strings.TrimSpace(spec.Identity.RuntimeID)
+	if workspace == "" {
+		workspace = strings.TrimSpace(spec.Name)
+	}
+	record, err := network.Get(spec.StateDir, name)
+	if err != nil {
+		return networkAttachment{}, fmt.Errorf("join named network: %w", err)
+	}
+	ip, err := network.Join(spec.StateDir, name, workspace)
+	if err != nil {
+		return networkAttachment{}, fmt.Errorf("allocate address on network %q: %w", name, err)
+	}
+	// Refresh the record so the /etc/hosts entries include this member.
+	record, err = network.Get(spec.StateDir, name)
+	if err != nil {
+		return networkAttachment{}, err
+	}
+	prefix, err := subnetPrefixLen(record.Subnet)
+	if err != nil {
+		return networkAttachment{}, err
+	}
+	hcnNetwork, err := ensureManagedNamedNetwork(record)
+	if err != nil {
+		return networkAttachment{}, err
+	}
+	runtimeNetwork.Mode = "named"
+	runtimeNetwork.Name = name
+	runtimeNetwork.Subnet = record.Subnet
+	runtimeNetwork.Gateway = record.Gateway
+	// A private named network has no default route or NAT egress; members talk
+	// to each other and the host only.
+	runtimeNetwork.Routes = nil
+	// /etc/hosts entries let members resolve each other by workspace name, the
+	// same way the firecracker named path seeds them.
+	runtimeNetwork.Hosts = namedNetworkHosts(record)
+	return createStaticNetworkEndpoint(hcnNetwork, spec.Name, ip, prefix, runtimeNetwork)
+}
+
+// namedNetworkHosts renders one "name:ip" entry per member for the guest
+// /etc/hosts file, matching the firecracker named-network host seeding.
+func namedNetworkHosts(record network.Record) []string {
+	hosts := make([]string, 0, len(record.Members))
+	for _, m := range record.Members {
+		hosts = append(hosts, m.Workspace+":"+m.IP)
+	}
+	return hosts
+}
+
+// subnetPrefixLen returns the prefix length of a CIDR subnet.
+func subnetPrefixLen(subnet string) (int, error) {
+	_, parsed, err := net.ParseCIDR(strings.TrimSpace(subnet))
+	if err != nil {
+		return 0, fmt.Errorf("parse network subnet %q: %w", subnet, err)
+	}
+	ones, _ := parsed.Mask.Size()
+	return ones, nil
 }
 
 func (a defaultAdapter) CleanupNetwork(ctx context.Context, state runtimeState) error {
@@ -112,6 +195,7 @@ func (a defaultAdapter) CleanupNetwork(ctx context.Context, state runtimeState) 
 	endpoint, err := hcn.GetEndpointByID(state.NetworkEndpointID)
 	if err != nil {
 		if hcn.IsNotFoundError(err) {
+			reapManagedNamedNetworkIfEmpty(state.NetworkID)
 			return nil
 		}
 		return fmt.Errorf("find HNS endpoint %q: %w", state.NetworkEndpointID, err)
@@ -119,7 +203,33 @@ func (a defaultAdapter) CleanupNetwork(ctx context.Context, state runtimeState) 
 	if err := endpoint.Delete(); err != nil && !hcn.IsNotFoundError(err) {
 		return fmt.Errorf("delete HNS endpoint %q: %w", state.NetworkEndpointID, err)
 	}
+	// A named network's private HNS network persists across a single member's
+	// stop/start (its registry membership keeps the address), but once the last
+	// endpoint is gone the network is an orphan — reap it the way the firecracker
+	// backend reaps an empty managed bridge. Recreated lazily on the next start.
+	reapManagedNamedNetworkIfEmpty(state.NetworkID)
 	return nil
+}
+
+// reapManagedNamedNetworkIfEmpty deletes a microagent-managed named HNS network
+// once it has no remaining endpoints. Best-effort: any error is non-fatal to
+// teardown, and the NAT and operator bridged networks are never touched.
+func reapManagedNamedNetworkIfEmpty(networkID string) {
+	if strings.TrimSpace(networkID) == "" {
+		return
+	}
+	hcnNetwork, err := hcn.GetNetworkByID(networkID)
+	if err != nil || hcnNetwork == nil {
+		return
+	}
+	if !strings.HasPrefix(hcnNetwork.Name, managedNamedNetworkPrefix) {
+		return
+	}
+	endpoints, err := hcn.ListEndpointsOfNetwork(networkID)
+	if err != nil || len(endpoints) > 0 {
+		return
+	}
+	_ = hcnNetwork.Delete()
 }
 
 func (a defaultAdapter) Start(ctx context.Context, id string) error {
@@ -342,7 +452,7 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	// config the same way the Firecracker boot args do. Requires the
 	// kernels-6.12.22-r2 artifact (CONFIG_HYPERV_NET).
 	if network := spec.Config.Network; network != nil &&
-		(network.Mode == "user" || network.Mode == "nat" || network.Mode == "bridged") {
+		(network.Mode == "user" || network.Mode == "nat" || network.Mode == "bridged" || network.Mode == "named") {
 		switch {
 		case network.IP != "" && network.Gateway != "":
 			kernelCmdLine += " microagent_net_if=eth0"
@@ -479,6 +589,78 @@ func ensureManagedNATNetwork() (*hcn.HostComputeNetwork, error) {
 		return nil, fmt.Errorf("create HNS NAT network %q: %w", managedNATNetworkName, err)
 	}
 	return created, nil
+}
+
+// ensureManagedNamedNetwork lazily creates the private HNS network backing a
+// named-network record, carrying the registry's subnet and gateway with static
+// IPAM. It is idempotent so concurrent member starts and restarts converge on
+// the same network. Unlike the NAT network it installs no default route, so the
+// guests have no egress — only intra-network and host reachability.
+func ensureManagedNamedNetwork(record network.Record) (*hcn.HostComputeNetwork, error) {
+	name := managedNamedNetworkName(record.Name)
+	existing, err := hcn.GetNetworkByName(name)
+	if err == nil {
+		return existing, nil
+	}
+	if !hcn.IsNotFoundError(err) {
+		return nil, fmt.Errorf("find HNS named network %q: %w", name, err)
+	}
+	// HNS requires a subnet route carrying the gateway even for a Private
+	// network: it assigns the gateway to the host vNIC so members reach the host
+	// and each other. The network type stays Private, so this is host-internal
+	// reachability only — there is no NAT egress behind the gateway.
+	hcnNetwork := &hcn.HostComputeNetwork{
+		Type: hcn.Private,
+		Name: name,
+		Ipams: []hcn.Ipam{{
+			Type: "Static",
+			Subnets: []hcn.Subnet{{
+				IpAddressPrefix: record.Subnet,
+				Routes: []hcn.Route{{
+					NextHop:           record.Gateway,
+					DestinationPrefix: managedNATRoute,
+				}},
+			}},
+		}},
+		SchemaVersion: hcn.SchemaVersion{Major: 2, Minor: 0},
+	}
+	created, err := hcnNetwork.Create()
+	if err != nil {
+		return nil, fmt.Errorf("create HNS named network %q: %w", name, err)
+	}
+	return created, nil
+}
+
+// createStaticNetworkEndpoint creates an HNS endpoint bound to an explicit
+// static IP — the registry-allocated member address — rather than letting HNS
+// pick one from the IPAM pool. This gives each named-network member the stable
+// address the registry recorded, matching the firecracker named path.
+func createStaticNetworkEndpoint(hcnNetwork *hcn.HostComputeNetwork, runtimeID, ip string, prefix int, runtimeNetwork vmkit.NetworkConfig) (networkAttachment, error) {
+	name := managedEndpointNamePrefix + runtimeID
+	if old, err := hcn.GetEndpointByName(name); err == nil {
+		_ = old.Delete()
+	} else if !hcn.IsNotFoundError(err) {
+		return networkAttachment{}, fmt.Errorf("find stale HNS endpoint %q: %w", name, err)
+	}
+	endpoint := &hcn.HostComputeEndpoint{
+		Name:               name,
+		HostComputeNetwork: hcnNetwork.Id,
+		SchemaVersion:      hcn.V2SchemaVersion(),
+		IpConfigurations: []hcn.IpConfig{{
+			IpAddress:    ip,
+			PrefixLength: uint8(prefix),
+		}},
+	}
+	created, err := endpoint.Create()
+	if err != nil {
+		return networkAttachment{}, fmt.Errorf("create static HNS endpoint %q: %w", name, err)
+	}
+	runtimeNetwork.IP = fmt.Sprintf("%s/%d", ip, prefix)
+	return networkAttachment{
+		NetworkID:         hcnNetwork.Id,
+		NetworkEndpointID: created.Id,
+		RuntimeNetwork:    &runtimeNetwork,
+	}, nil
 }
 
 func createNetworkEndpoint(network *hcn.HostComputeNetwork, runtimeID string, runtimeNetwork vmkit.NetworkConfig) (networkAttachment, error) {

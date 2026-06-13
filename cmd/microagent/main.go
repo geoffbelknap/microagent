@@ -1907,9 +1907,11 @@ Options:
   --state-dir <dir>     State directory
 
 Join a workspace to a named network with create/run --network-name <name>:
-members get a stable IP from the subnet, share a managed bridge, and resolve
-each other by name. Workspace attachment is currently implemented by
-Firecracker on Linux; Apple VF does not currently implement network.mode=named.
+members get a stable IP from the subnet, share a managed bridge (HNS network on
+windows-hyperv), and resolve each other by name. Workspace attachment is
+implemented by Firecracker on Linux (privileged) and windows-hyperv (elevated,
+as a private HNS network); Apple VF does not currently implement
+network.mode=named.
 `)
 }
 

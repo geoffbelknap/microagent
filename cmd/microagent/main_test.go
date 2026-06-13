@@ -5318,6 +5318,165 @@ func TestWindowsHyperVExecSmoke(t *testing.T) {
 	}
 }
 
+// windowsHostElevated reports whether the current process holds the local
+// administrator rights that creating a private HNS network requires. `net
+// session` only succeeds for an elevated token, matching the e2e-lib gate.
+func windowsHostElevated() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "net", "session").Run() == nil
+}
+
+// namedNetworkMemberIP reads a workspace's allocated address on a named network
+// straight from the backend-neutral registry index, the same source the
+// firecracker named-network e2e inspects.
+func namedNetworkMemberIP(t *testing.T, stateDir, networkName, workspace string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(stateDir, "networks", "index.json"))
+	if err != nil {
+		t.Fatalf("read network index: %v", err)
+	}
+	var idx struct {
+		Networks []struct {
+			Name    string `json:"name"`
+			Members []struct {
+				Workspace string `json:"workspace"`
+				IP        string `json:"ip"`
+			} `json:"members"`
+		} `json:"networks"`
+	}
+	if err := json.Unmarshal(data, &idx); err != nil {
+		t.Fatalf("parse network index: %v\n%s", err, data)
+	}
+	for _, n := range idx.Networks {
+		if n.Name != networkName {
+			continue
+		}
+		for _, m := range n.Members {
+			if m.Workspace == workspace {
+				return m.IP
+			}
+		}
+	}
+	return ""
+}
+
+// TestWindowsHyperVNamedNetworkSmoke proves the windows-hyperv named-network
+// path end to end on a real Hyper-V host: `network create`, two workspaces join
+// the same private network with `--network-name`, each gets a distinct stable
+// 10.44.x member IP on a shared HNS network, and one reaches the other by IP
+// over the guest NIC. The network is private (no NAT egress), so this exercises
+// the static-IPAM HNS realization, not the managed NAT path. Creating the
+// private HNS network needs elevation, so the smoke skips when the host token is
+// not elevated rather than failing closed on a permission error.
+func TestWindowsHyperVNamedNetworkSmoke(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V named-network smoke test")
+	}
+	if !windowsHostElevated() {
+		t.Skip("named-network HNS realization requires an elevated (administrator) host")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
+	if imageRef == "" {
+		imageRef = "docker.io/library/busybox:1.36"
+	}
+	dir := t.TempDir()
+	cliPath := filepath.Join(dir, "microagent.exe")
+	guestInitPath := filepath.Join(dir, "microagent-guestinit")
+	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
+	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+
+	netName := "whvnet"
+	netSubnet := "10.44.91.0/24"
+	suffix := time.Now().UnixNano() % 1000000000
+	web := fmt.Sprintf("whv-net-web-%d", suffix)
+	db := fmt.Sprintf("whv-net-db-%d", suffix)
+
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cleanupCancel()
+		for _, ws := range []string{web, db} {
+			_, _ = runExternalOutput(cleanupCtx, cliPath, "kill", ws, "--state-dir", dir)
+			_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", ws, "--state-dir", dir, "--yes", "--force")
+		}
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "network", "rm", netName, "--state-dir", dir, "--force")
+	})
+
+	runExternal(t, ctx, cliPath, "network", "create", netName, "--subnet", netSubnet, "--state-dir", dir)
+
+	for _, ws := range []string{web, db} {
+		workspaceOpts := workspace.Options{
+			Name:            ws,
+			Backend:         vmkit.BackendWindowsHyperV,
+			Architecture:    "amd64",
+			StateDir:        dir,
+			KernelPath:      kernelPath,
+			GuestInitPath:   guestInitPath,
+			ImageRef:        imageRef,
+			ServiceCommand:  "sleep 600",
+			PrepareForStart: true,
+			MemoryMiB:       512,
+			CPUCount:        2,
+			Network:         vmkit.NetworkConfig{Mode: "named", Name: netName},
+		}
+		if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
+			t.Fatalf("BuildRootfs %s: %v", ws, err)
+		}
+		if err := workspace.WriteManifest(workspaceOpts); err != nil {
+			t.Fatalf("WriteManifest %s: %v", ws, err)
+		}
+		runExternal(t, ctx, cliPath, "start", ws, "--state-dir", dir, "--kernel", kernelPath)
+		waitForWorkspaceState(t, dir, ws, vmkit.StateRunning, 45*time.Second)
+		execReadyDeadline := time.Now().Add(60 * time.Second)
+		for {
+			status, err := workspace.Status(workspace.Options{Name: ws, Backend: vmkit.BackendWindowsHyperV, StateDir: dir})
+			if err != nil {
+				t.Fatalf("Status %s: %v", ws, err)
+			}
+			if status.Readiness != nil && status.Readiness.ExecReady.Ready {
+				break
+			}
+			if time.Now().After(execReadyDeadline) {
+				logWindowsHyperVSmokeState(t, dir, ws)
+				t.Fatalf("%s exec readiness = %#v", ws, status.Readiness)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	webIP := namedNetworkMemberIP(t, dir, netName, web)
+	dbIP := namedNetworkMemberIP(t, dir, netName, db)
+	if webIP == "" || dbIP == "" {
+		t.Fatalf("members did not receive stable IPs: web=%q db=%q", webIP, dbIP)
+	}
+	if webIP == dbIP {
+		t.Fatalf("members share an address %q, want distinct IPs", webIP)
+	}
+	for _, ip := range []string{webIP, dbIP} {
+		if !strings.HasPrefix(ip, "10.44.91.") {
+			t.Fatalf("member IP %q is outside the network subnet %s", ip, netSubnet)
+		}
+	}
+
+	// Cross-VM reachability over the shared private HNS network: web pings db's
+	// member IP. The guest NIC may settle a moment after the exec service, so
+	// allow a brief retry window inside the guest.
+	out := runExternal(t, ctx, cliPath, "exec", web, "--state-dir", dir, "--",
+		"sh", "-c", fmt.Sprintf(`for i in $(seq 1 10); do ping -c2 -w5 %s >/tmp/p 2>&1 && { echo PING_OK; cat /tmp/p; exit 0; }; sleep 1; done; echo PING_FAIL; cat /tmp/p; exit 1`, dbIP))
+	if !strings.Contains(string(out), "PING_OK") {
+		logWindowsHyperVSmokeState(t, dir, web)
+		logWindowsHyperVSmokeState(t, dir, db)
+		t.Fatalf("cross-VM ping web(%s) -> db(%s) failed:\n%s", webIP, dbIP, out)
+	}
+}
+
 // stubEngineSource is a stand-in OpenAI-style model server used by the model
 // bridge smoke: it accepts llama-server's argv shape and serves /health plus
 // /v1/models, so the full `create/start --model` pairing path runs without
