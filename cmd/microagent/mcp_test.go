@@ -230,6 +230,12 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "create", "demo", "-image", "docker.io/library/python:3.13-slim", "-model", "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "-model-token", "hf_test", "-dry-run"},
 		},
 		{
+			// network mode maps through to create (t.Run disambiguates with #01)
+			name: "workspace.create",
+			args: map[string]any{"name": "demo", "image": "docker.io/library/busybox:1.36", "network": "isolated"},
+			want: []string{"--mode=ax", "create", "demo", "-image", "docker.io/library/busybox:1.36", "-network", "isolated"},
+		},
+		{
 			name: "workspace.logs",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
 			want: []string{"--mode=ax", "logs", "demo", "-state-dir", "/tmp/state"},

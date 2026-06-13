@@ -272,10 +272,17 @@ assert_stdout_contains images-remove-alias '"removed"' \
   "$CLI" images remove local/remove-alias:test --state-dir "$STATE_DIR"
 assert_stdout_contains images-rmi-alias '"removed"' \
   "$CLI" images rmi local/rmi-alias:test --state-dir "$STATE_DIR"
-assert_stdout_contains perf-footprint-text "Benchmark: footprint" \
-  "$CLI" --output text perf footprint "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains perf-steady-text "Samples:" \
-  "$CLI" --text perf steady "$WORKSPACE" --duration 1 --interval 1 --state-dir "$STATE_DIR"
+# windows-hyperv perf samples live HCS statistics for the named compute
+# system, which this fabricated workspace does not have; the text formatting
+# asserted here is backend-independent, and the real windows-hyperv perf
+# sampling is covered by the public-surface windows arm against a booted
+# workspace.
+if ! e2e_is_windows; then
+  assert_stdout_contains perf-footprint-text "Benchmark: footprint" \
+    "$CLI" --output text perf footprint "$WORKSPACE" --state-dir "$STATE_DIR"
+  assert_stdout_contains perf-steady-text "Samples:" \
+    "$CLI" --text perf steady "$WORKSPACE" --duration 1 --interval 1 --state-dir "$STATE_DIR"
+fi
 
 MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \
   "$CLI" ps --state-dir "$STATE_DIR/empty"

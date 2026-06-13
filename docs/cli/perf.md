@@ -4,7 +4,7 @@ description: Measure workspace performance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-12_
 
 ```text
 microagent perf boot [flags]               Measure boot time over iterations
@@ -17,6 +17,10 @@ microagent perf steady <name> [flags]      Sample steady-state memory over time
 and reports per-iteration duration plus min/avg/max. `footprint` reports the
 host resident set size for the recorded backend process of a running workspace.
 `steady` samples that RSS over time for steady-state overhead reporting.
+
+On windows-hyperv there is no host backend process to sample (the Host
+Compute Service owns the VM worker process); `footprint` and `steady` read
+the workspace's HCS memory statistics instead, and the report's `pid` is 0.
 
 ## Examples
 
@@ -82,6 +86,7 @@ The complete set:
 | `--timeout <seconds>` | Per-iteration timeout |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
+| `--network <mode>` | Network mode for measured boots (`user`, `nat`, `isolated`, `bridged`); empty uses the backend default. Isolated boots need no host network privileges |
 
 ### `footprint` flags
 

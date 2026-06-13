@@ -36,6 +36,10 @@ for required in go python3; do
 done
 e2e_require_vm
 
+# NETWORK_MODE threads into both the MCP and CLI create calls when set.
+# Linux/macOS keep the backend default (empty); windows-hyperv pins isolated
+# because the default user/nat modes need HNS elevation on Windows hosts.
+NETWORK_MODE=""
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
     ARCH=amd64
@@ -52,8 +56,20 @@ case "$(uname -s):$(uname -m)" in
     fi
     export MICROAGENT_APPLEVF_SUPERVISOR="$SUPERVISOR"
     ;;
+  MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64)
+    e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
+    ARCH=amd64
+    KERNEL_BACKEND=windows-hyperv
+    # The CLI must be the .exe so os.Executable-based helpers resolve; the
+    # guest init built next to it ($STATE_DIR/microagent-guestinit-amd64) is
+    # found by the default sibling resolution, so the MCP create needs no
+    # guest-init plumbing. The in-process supervisor takes no path. The tiny
+    # profile's 512 MiB rootfs covers the busybox VHD build headroom.
+    CLI="$STATE_DIR/microagent.exe"
+    NETWORK_MODE="isolated"
+    ;;
   *)
-    e2e_skip "MCP lifecycle E2E requires Linux amd64 or macOS arm64"
+    e2e_skip "MCP lifecycle E2E requires Linux amd64, macOS arm64, or Windows amd64"
     ;;
 esac
 
@@ -78,7 +94,10 @@ e2e_step "install kernel"
 "$CLI" kernel install --backend "$KERNEL_BACKEND" --arch "$ARCH" >"$STATE_DIR/kernel-install.json"
 
 e2e_step "drive workspace lifecycle over MCP stdio and assert CLI parity"
-python3 - "$CLI" "$STATE_DIR" <<'PY'
+# Host-native path forms: python spawns the CLI directly (no Git Bash arg
+# conversion), so on Windows the CLI and state paths must already be in
+# Windows form. e2e_host_path is the identity off Windows.
+python3 - "$(e2e_host_path "$CLI")" "$(e2e_host_path "$STATE_DIR")" "$NETWORK_MODE" <<'PY'
 import base64
 import json
 import subprocess
@@ -86,6 +105,7 @@ import sys
 
 cli = sys.argv[1]
 state_root = sys.argv[2]
+network_mode = sys.argv[3] if len(sys.argv) > 3 else ""
 ws_state = state_root + "/ws"
 IMAGE = "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
 
@@ -202,7 +222,10 @@ if init.get("result", {}).get("serverInfo", {}).get("name") != "microagent":
 
 # --- MCP-driven lifecycle ---
 mcp = {}
-create = call("workspace.create", {"name": "mcp-lc", "image": IMAGE, "profile": "tiny", "state_dir": ws_state})
+create_args = {"name": "mcp-lc", "image": IMAGE, "profile": "tiny", "state_dir": ws_state}
+if network_mode:
+    create_args["network"] = network_mode
+create = call("workspace.create", create_args)
 mcp["create"] = find_state(create)
 
 start = call("workspace.start", {"name": "mcp-lc", "state_dir": ws_state})
@@ -226,7 +249,10 @@ mcp["listed"] = [w.get("name") for w in (listing.get("workspaces") or [])]
 
 # --- identical lifecycle through the CLI ---
 cli_states = {}
-create = cli_call(["create", "cli-lc", "--image", IMAGE, "--profile", "tiny", "--state-dir", ws_state])
+cli_create = ["create", "cli-lc", "--image", IMAGE, "--profile", "tiny", "--state-dir", ws_state]
+if network_mode:
+    cli_create += ["--network", network_mode]
+create = cli_call(cli_create)
 cli_states["create"] = find_state(create)
 
 start = cli_call(["start", "cli-lc", "--state-dir", ws_state])
