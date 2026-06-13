@@ -19,9 +19,12 @@ import (
 )
 
 const (
-	managedNATNetworkName     = "microagent-nat"
+	managedNATNetworkName = "microagent-nat"
+	// managedNATSubnet is the preferred managed-NAT /24. The actual subnet is
+	// chosen at create time from managedNATSubnetCandidates to avoid
+	// overlapping an existing HNS network, so the gateway is derived from the
+	// chosen subnet rather than fixed here.
 	managedNATSubnet          = "192.168.127.0/24"
-	managedNATGateway         = "192.168.127.1"
 	managedNATRoute           = "0.0.0.0/0"
 	managedNATStartMAC        = "00-15-5D-52-D0-00"
 	managedNATEndMAC          = "00-15-5D-52-DF-FF"
@@ -557,6 +560,100 @@ func normalizedNetwork(network *vmkit.NetworkConfig) vmkit.NetworkConfig {
 	return normalized
 }
 
+// managedNATSubnetCandidates are the /24 subnets the managed NAT network may
+// use, in preference order. The historical default is first; the rest are
+// fallbacks for hosts where it overlaps an existing HNS network. They are
+// spread across the private ranges so at least one is almost always clear of
+// the Default Switch's dynamic subnet.
+var managedNATSubnetCandidates = []string{
+	managedNATSubnet, // 192.168.127.0/24 — historical default, preferred
+	"192.168.214.0/24",
+	"10.71.214.0/24",
+	"10.99.127.0/24",
+	"172.28.127.0/24",
+	"172.31.214.0/24",
+}
+
+// pickManagedNATSubnet returns the first candidate /24 (and its first-host
+// gateway) that does not overlap any existing HNS network. It fails closed
+// when every candidate conflicts rather than letting HNS reject the create
+// with a misleading error.
+func pickManagedNATSubnet() (string, string, error) {
+	return pickFreeSubnet(managedNATSubnetCandidates, existingHNSNetworkPrefixes())
+}
+
+// pickFreeSubnet returns the first candidate that does not overlap any of the
+// existing prefixes, plus its first-host gateway. Pure, so the selection logic
+// is unit-tested without HNS.
+func pickFreeSubnet(candidates, existing []string) (string, string, error) {
+	for _, candidate := range candidates {
+		if cidrOverlapsAny(candidate, existing) {
+			continue
+		}
+		gateway, err := firstHostAddress(candidate)
+		if err != nil {
+			continue
+		}
+		return candidate, gateway, nil
+	}
+	return "", "", fmt.Errorf("no free /24 for the managed NAT network; existing HNS subnets: %s", strings.Join(existing, ", "))
+}
+
+// existingHNSNetworkPrefixes collects the IPv4 subnet prefixes of every HNS
+// network on the host, so a new managed network can avoid overlapping them.
+func existingHNSNetworkPrefixes() []string {
+	networks, err := hcn.ListNetworks()
+	if err != nil {
+		return nil
+	}
+	var prefixes []string
+	for i := range networks {
+		for _, ipam := range networks[i].Ipams {
+			for _, subnet := range ipam.Subnets {
+				if p := strings.TrimSpace(subnet.IpAddressPrefix); p != "" {
+					prefixes = append(prefixes, p)
+				}
+			}
+		}
+	}
+	return prefixes
+}
+
+// cidrOverlapsAny reports whether cidr overlaps any of the other CIDRs. An
+// unparseable target is treated as conflicting so it is skipped.
+func cidrOverlapsAny(cidr string, others []string) bool {
+	_, target, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return true
+	}
+	for _, other := range others {
+		_, parsed, err := net.ParseCIDR(strings.TrimSpace(other))
+		if err != nil {
+			continue
+		}
+		if target.Contains(parsed.IP) || parsed.Contains(target.IP) {
+			return true
+		}
+	}
+	return false
+}
+
+// firstHostAddress returns the first usable host (the .1) of an IPv4 CIDR.
+func firstHostAddress(cidr string) (string, error) {
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return "", err
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return "", fmt.Errorf("subnet %q is not IPv4", cidr)
+	}
+	host := make(net.IP, len(ip4))
+	copy(host, ip4)
+	host[3] = 1
+	return host.String(), nil
+}
+
 func ensureManagedNATNetwork() (*hcn.HostComputeNetwork, error) {
 	network, err := hcn.GetNetworkByName(managedNATNetworkName)
 	if err == nil {
@@ -564,6 +661,15 @@ func ensureManagedNATNetwork() (*hcn.HostComputeNetwork, error) {
 	}
 	if !hcn.IsNotFoundError(err) {
 		return nil, fmt.Errorf("find HNS NAT network %q: %w", managedNATNetworkName, err)
+	}
+	// The NAT subnet must not overlap an existing HNS network or HNS rejects
+	// the create with a misleading "duplicate name exists" (0x34). The Windows
+	// Default Switch (ICS) is the usual culprit: its dynamically assigned /20
+	// can span the historical default 192.168.127.0/24. Pick the first
+	// candidate /24 that is clear of every existing HNS network.
+	subnet, gateway, err := pickManagedNATSubnet()
+	if err != nil {
+		return nil, err
 	}
 	network = &hcn.HostComputeNetwork{
 		Type: hcn.NAT,
@@ -575,9 +681,9 @@ func ensureManagedNATNetwork() (*hcn.HostComputeNetwork, error) {
 		Ipams: []hcn.Ipam{{
 			Type: "Static",
 			Subnets: []hcn.Subnet{{
-				IpAddressPrefix: managedNATSubnet,
+				IpAddressPrefix: subnet,
 				Routes: []hcn.Route{{
-					NextHop:           managedNATGateway,
+					NextHop:           gateway,
 					DestinationPrefix: managedNATRoute,
 				}},
 			}},
@@ -586,7 +692,7 @@ func ensureManagedNATNetwork() (*hcn.HostComputeNetwork, error) {
 	}
 	created, err := network.Create()
 	if err != nil {
-		return nil, fmt.Errorf("create HNS NAT network %q: %w", managedNATNetworkName, err)
+		return nil, fmt.Errorf("create HNS NAT network %q (subnet %s): %w", managedNATNetworkName, subnet, err)
 	}
 	return created, nil
 }
