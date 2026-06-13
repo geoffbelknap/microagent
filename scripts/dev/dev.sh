@@ -67,6 +67,42 @@ run_doctor() {
   set -e
 }
 
+check_shell_command() {
+  local resolved
+  local cli_version
+  local path_version
+  local path_status
+
+  cli_version="$("$CLI" -v)"
+  if ! resolved="$(command -v microagent 2>/dev/null)"; then
+    echo "Shell command: missing"
+    echo "  Run 'make install' to install microagent on PATH, or use:"
+    echo "  export PATH=\"$DEV_DIR:\$PATH\""
+    return 1
+  fi
+
+  set +e
+  path_version="$("$resolved" -v 2>/dev/null)"
+  path_status=$?
+  set -e
+  if [ "$path_status" -ne 0 ]; then
+    echo "Shell command: $resolved"
+    echo "  Installed command exists but failed to report a version."
+    return 1
+  fi
+
+  if [ "$path_version" != "$cli_version" ]; then
+    echo "Shell command: $resolved ($path_version)"
+    echo "  Dev build: $cli_version"
+    echo "  Run 'make install' to update the command on PATH, or use:"
+    echo "  export PATH=\"$DEV_DIR:\$PATH\""
+    return 1
+  fi
+
+  echo "Shell command: $resolved ($path_version)"
+  return 0
+}
+
 bootstrap_host() {
   local make_cmd
   local -a install_args
@@ -95,6 +131,29 @@ run_doctor
 
 if [ "$doctor_status" -eq 0 ]; then
   print_doctor_summary "$doctor_json"
+  if ! check_shell_command; then
+    if [ "${MICROAGENT_DEV_BOOTSTRAP:-prompt}" = "never" ]; then
+      exit 0
+    fi
+    if [ -r /dev/tty ] && [ -w /dev/tty ] && [ "${CI:-}" != "true" ]; then
+      printf 'Run "make install" now to update the microagent command on PATH? [y/N] ' >/dev/tty
+      IFS= read -r answer </dev/tty || answer=""
+      case "$answer" in
+        y|Y|yes|YES|Yes)
+          bootstrap_host
+          "$ROOT/scripts/dev/build-local.sh" --quiet
+          print_build_summary
+          run_doctor
+          print_doctor_summary "$doctor_json"
+          check_shell_command || true
+          exit "$doctor_status"
+          ;;
+        *)
+          echo "Skipped command install. Use '.build/dev/microagent' or update PATH when ready." >&2
+          ;;
+      esac
+    fi
+  fi
   exit 0
 fi
 
