@@ -5,6 +5,19 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv teardown diagnostics
+
+- When a compute system survives teardown, the failure now reports what HCS
+  says about it — its `State`, or, when the follow-up `Describe` call itself
+  fails, that error — instead of a bare "still registered after teardown".
+  Previously a failed `Describe` was swallowed, leaving the most diagnostic
+  teardown failures with no evidence of the cause.
+- The post-terminate unregistration wait grew from 60s to 120s. Hosted CI
+  runners in a degraded-pool window have been observed to take over a minute
+  to unregister a NAT-attached compute system after Terminate, because the
+  HNS endpoint release that normally unblocks deregistration is itself async
+  and slow under that load. The wait still fails closed.
+
 ### windows-hyperv mcp-lifecycle and perf parity (P6)
 
 - `perf footprint` and `perf steady` work against windows-hyperv workspaces.

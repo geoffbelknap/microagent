@@ -476,6 +476,24 @@ func TestTeardownTimeoutReportsHCSState(t *testing.T) {
 	}
 }
 
+func TestTeardownTimeoutReportsDescribeFailure(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	shortenTeardownWindows(t)
+	req, _ := writeRunningStateForControl(t)
+	// The system survives teardown and Describe itself fails: the failure must
+	// surface that describe error rather than swallowing it into a bare
+	// "still registered".
+	adapter := &fakeAdapter{neverGone: true, describeErr: fmt.Errorf("HCS open: access denied")}
+	controlReq := req
+	controlReq.Command = "halt"
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), controlReq)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "HCS describe failed: HCS open: access denied") {
+		t.Fatalf("halt resp=%#v err=%v, want still-registered failure carrying the describe error", resp, err)
+	}
+}
+
 func TestAppendEventMigratesLegacyJSONLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.json")
 	legacy := `{"identity":{"runtimeID":"agent-1","backend":"windows-hyperv"},"state":"prepared","observedAt":"2026-05-12T16:01:52Z"}
@@ -1393,6 +1411,7 @@ type fakeAdapter struct {
 	// does.
 	goneAfterCleanup bool
 	describeProps    string
+	describeErr      error
 	existsErr        error
 }
 
@@ -1424,7 +1443,7 @@ func (f *fakeAdapter) CleanupNetwork(ctx context.Context, state runtimeState) er
 }
 
 func (f *fakeAdapter) DescribeComputeSystem(ctx context.Context, id string) (string, error) {
-	return f.describeProps, nil
+	return f.describeProps, f.describeErr
 }
 
 func (f *fakeAdapter) Create(ctx context.Context, spec computeSystemSpec) (computeSystemHandle, error) {

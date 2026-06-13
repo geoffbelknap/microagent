@@ -24,11 +24,13 @@ const clearVsockListenerPID = -1
 // system to actually disappear so an immediate restart cannot collide with
 // the old registration ("identifier already exists"). Variables so tests
 // can shorten the bounds. The post-terminate bound is sized for loaded
-// hosted CI runners, where HCS has been observed to take well over 30s to
-// unregister a NAT-attached compute system after Terminate.
+// hosted CI runners, where HCS has been observed to take well over a minute
+// to unregister a NAT-attached compute system after Terminate during a
+// degraded-pool window (the endpoint release that normally unblocks it is
+// itself async and slow under that load).
 var (
 	computeSystemShutdownGrace        = 15 * time.Second
-	computeSystemTeardownTimeout      = 60 * time.Second
+	computeSystemTeardownTimeout      = 120 * time.Second
 	computeSystemTeardownPollInterval = 200 * time.Millisecond
 )
 
@@ -60,11 +62,19 @@ func (s Supervisor) waitForComputeSystemGone(ctx context.Context, id string, tim
 			if err != nil {
 				return fmt.Errorf("compute system %s teardown probe: %w", id, err)
 			}
+			// The system is still registered. Surface whatever HCS will say
+			// about it — its State, or, when even Describe fails, that error —
+			// so a teardown timeout is never a bare "still registered" with no
+			// evidence of why (a terminate that never landed reads very
+			// differently from a registration pinned by an open handle or a
+			// slow async deregistration on a loaded host).
 			if describer, ok := s.runtimeAdapter().(computeSystemDescriber); ok {
-				if props, describeErr := describer.DescribeComputeSystem(ctx, id); describeErr == nil {
-					if detail := computeSystemStateDetail(props); detail != "" {
-						return fmt.Errorf("compute system %s is still registered after teardown (HCS state: %s)", id, detail)
-					}
+				props, describeErr := describer.DescribeComputeSystem(ctx, id)
+				if describeErr != nil {
+					return fmt.Errorf("compute system %s is still registered after teardown (HCS describe failed: %v)", id, describeErr)
+				}
+				if detail := computeSystemStateDetail(props); detail != "" {
+					return fmt.Errorf("compute system %s is still registered after teardown (HCS state: %s)", id, detail)
 				}
 			}
 			return fmt.Errorf("compute system %s is still registered after teardown", id)
