@@ -5,6 +5,23 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv bridged networking DHCP
+
+- Bridged mode now configures the guest NIC when the named HNS network or
+  Hyper-V switch does not statically allocate an endpoint address. Previously
+  the guest attached an interface but was left down with no IP (the cmdline
+  carried a static address only, which such networks never provide), so
+  bridged mode never actually reached the network. The supervisor now emits
+  `ip=dhcp` for a bridged endpoint without a static address, and the guest's
+  existing in-init `udhcpc` path brings the interface up from the bridged
+  network's DHCP. Live-verified against the built-in ICS `Default Switch`: the
+  guest DHCPs an address, installs a default route, and reaches the gateway.
+  Networks that do allocate a static endpoint address keep the static path
+  unchanged.
+- The `networking-deep` windows arm gains a bridged segment (gated on a
+  `Default Switch` being present) that asserts the guest NIC comes up addressed
+  with a default route.
+
 ### windows-hyperv teardown diagnostics
 
 - When a compute system survives teardown, the failure now reports what HCS
