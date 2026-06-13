@@ -5,6 +5,17 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv runtime.json read tolerates a concurrent atomic rewrite
+
+- Reading `runtime.json` now retries briefly on a transient read error. The
+  supervisor rewrites the file atomically (temp file + rename); on Windows a
+  concurrent reader — most often the freshly started runtime listener helper
+  reading its config while `apply` rewrites the file — could hit "the process
+  cannot access the file because it is being used by another process" during
+  the rename window, which surfaced as an `apply` exec-bridge failure on loaded
+  CI runners. A genuinely missing file still returns immediately, so the
+  not-exist callers stay fast.
+
 ### windows-hyperv managed NAT subnet no longer collides with the Default Switch
 
 - The managed `microagent-nat` HNS network is created on a subnet chosen to

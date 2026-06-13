@@ -1212,9 +1212,41 @@ func runtimeListenerRequest(opts Options) (vmkit.Request, runtimeState, error) {
 	return req, state, nil
 }
 
+// runtimeStateReadRetries bounds the transient-read retry on runtime.json.
+// The supervisor rewrites runtime.json atomically (temp file + rename); on
+// Windows a concurrent reader — most often the freshly started runtime
+// listener helper reading its config while apply rewrites the file — can hit
+// "the process cannot access the file because it is being used by another
+// process" (a sharing violation) during the rename window. Variables so tests
+// can shorten the bound.
+var (
+	runtimeStateReadRetries     = 25
+	runtimeStateReadRetryBackup = 20 * time.Millisecond
+)
+
+// readRuntimeStateFile reads runtime.json, retrying briefly on a transient
+// read error so a concurrent atomic rewrite does not surface as a hard
+// failure. A genuinely missing file returns immediately so the many
+// not-exist callers stay fast.
+func readRuntimeStateFile(path string) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < runtimeStateReadRetries; attempt++ {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return data, nil
+		}
+		if os.IsNotExist(err) {
+			return nil, err
+		}
+		lastErr = err
+		time.Sleep(runtimeStateReadRetryBackup)
+	}
+	return nil, lastErr
+}
+
 func readRuntimeState(req vmkit.Request) (runtimeState, error) {
 	var state runtimeState
-	data, err := os.ReadFile(filepath.Join(runtimeDir(req), "runtime.json"))
+	data, err := readRuntimeStateFile(filepath.Join(runtimeDir(req), "runtime.json"))
 	if err != nil {
 		return state, err
 	}
