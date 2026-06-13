@@ -25,7 +25,7 @@ jobs:
       # releases ship without the tap ever updating.
       - name: Generate Homebrew tap token
         id: app-token
-        uses: actions/create-github-app-token@v3.1.1
+        uses: actions/create-github-app-token@v3.2.0
         with:
           client-id: ${{ secrets.HOMEBREW_APP_CLIENT_ID }}
           private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
