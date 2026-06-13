@@ -16,6 +16,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				DetachedStartCommand: "start",
 				ShellNetwork:         "tcp",
 				ShellReadinessProbe:  true,
+				Snapshot:             true,
 			},
 		},
 		{

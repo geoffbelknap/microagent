@@ -193,9 +193,15 @@ object and marks `readiness.resultReady.ready` true.
 - `pause`/`resume` freeze and thaw a running workspace's vCPUs in place via
   `HcsPauseComputeSystem`/`HcsResumeComputeSystem` (memory, disk, the compute
   system registration, and the runtime listener helper are all preserved).
-  `snapshot`/save-state is planned, not yet implemented.
-- Named networks are planned; named-network attachment is currently implemented
-  only on Linux.
+- `snapshot`/save-state is **not supported and not planned**: HCS-direct
+  (`LinuxKernelDirect`) compute systems have no guest-memory save-state. The
+  HCS save call captures only device state, and the Hyper-V mechanisms that do
+  save memory (`Save-VM`, checkpoints) belong to VMMS, which this backend
+  deliberately does not use. Snapshot commands fail closed; use `commit` (a
+  distributable image) or `clone` (a disk copy) instead.
+- Named networks are supported: `network create`/`ls`/`rm` plus
+  `--network named --network-name <n>` back onto a private HNS network with
+  static IPAM (members share a subnet and address each other).
 - Direct supervisor `console` is a deliberate non-goal on every backend; use
   `microagent connect`, which is the interactive contract.
 

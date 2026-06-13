@@ -168,6 +168,13 @@ test "$(json_get "$STATE_DIR/create.json" network.mode)" = "isolated"
 test "$(json_get "$STATE_DIR/create.json" result.exit_code)" = "0"
 test -e "$STATE_DIR/workspaces/$WORKSPACE/rootfs.vhd"
 
+e2e_step "snapshot fails closed (unsupported on windows-hyperv)"
+# HCS-direct compute systems have no guest-memory save-state, so snapshot is
+# unsupported and not planned; the capability gate must reject it with a clear
+# message rather than dispatching into the supervisor.
+expect_failure snapshot-unsupported "not supported on the windows-hyperv backend" \
+  "$CLI" snapshot create "$WORKSPACE" --tag probe --state-dir "$STATE_DIR"
+
 e2e_step "status / inspect / ps on the prepared workspace"
 # create with setup commands boots the guest once to run them, so the
 # workspace lands on stopped (prepared when no setup boot was needed).
