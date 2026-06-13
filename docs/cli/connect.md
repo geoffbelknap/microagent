@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -20,8 +20,8 @@ the workspace. Typing `exit` closes the current guest shell and returns from
 `connect`; the workspace stays running unless you run a shutdown command such as
 `poweroff`.
 
-`connect` is supported by Apple VF, Firecracker, and experimental
-Windows Hyper-V. Windows Hyper-V uses Hyper-V sockets rather than WSL or QEMU.
+`connect` is supported by Apple VF, Firecracker, and Windows Hyper-V. Windows
+Hyper-V uses Hyper-V sockets rather than WSL or QEMU.
 [`logs`](/cli/logs/) remains available for captured serial output.
 
 ## Examples

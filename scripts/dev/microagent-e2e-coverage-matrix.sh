@@ -77,7 +77,7 @@ for line in matrix_text.splitlines()[1:]:
 if not matrix_rows:
     raise SystemExit("matrix has no rows")
 
-valid_classes = {"portable", "backend-neutral", "backend-specific", "host-specific", "not-yet-practical"}
+valid_classes = {"portable", "backend-neutral", "backend-specific", "host-specific"}
 for row in matrix_rows:
     if row["class"] not in valid_classes:
         raise SystemExit(f"unknown matrix class for {row['feature']}: {row['class']}")
@@ -119,7 +119,6 @@ required_features = {
     "serve mcp": [],
     "serve mcp lifecycle": [],
     "AX/text output": [],
-    "Windows Hyper-V": [],
 }
 
 matrix_features = {row["feature"] for row in matrix_rows}

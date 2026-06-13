@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -271,8 +271,9 @@ rootfs, then resumes from the snapshot's memory and device state.
 A Firecracker snapshot binds its vsock socket to the source workspace's path, so
 each fork runs Firecracker in a private mount namespace that maps the fork's own
 directory over the source's, and the fork takes its own host-side service ports
-while bridging them to the guest's snapshot ports. This is Firecracker-only; the
-snapshot kernel must match and bridged networking is unsupported. In-flight guest
+while bridging them to the guest's snapshot ports. This is currently implemented
+only for the Firecracker backend; the snapshot kernel must match and bridged
+networking is unsupported. In-flight guest
 connections do not survive the fork - the guest process must reconnect.
 
 For forks with networking, use `user` mode (pasta): every fork resumes with the

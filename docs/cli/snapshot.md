@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]   Checkpoint a running workspace
@@ -14,7 +14,8 @@ microagent snapshot rm <name> <tag> [--state-dir <dir>]               Remove one
 
 A snapshot is a full checkpoint of a workspace: its guest memory and device
 state plus a coherent copy of its rootfs disk, taken together while the VM is
-paused. Snapshots are Firecracker-only. They are stored under
+paused. Snapshots are currently implemented only for the Firecracker backend.
+They are stored under
 `<state-dir>/<name>/snapshots/<tag>/` as `vmstate`, `memory`, `rootfs.ext4`,
 and `manifest.json`. A workspace may hold multiple named snapshots; `--tag`
 defaults to a timestamp.

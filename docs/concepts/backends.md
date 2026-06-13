@@ -4,10 +4,10 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-13_
 
 microagent installs with one backend per host OS: Firecracker on Linux,
-Apple Virtualization.framework on macOS, and experimental Hyper-V on Windows.
+Apple Virtualization.framework on macOS, and Hyper-V on Windows.
 This page is the cross-platform picture - what each backend supports and what
 it needs from the host - so you can decide which OS to deploy on and check
 whether yours has what it needs. The CLI does not fall back to a cross-host
@@ -18,7 +18,7 @@ OS, microagent fails before it builds a rootfs or talks to a supervisor.
 |---|---|---|---|---|---|
 | `firecracker` | Linux | Production | `user`, `nat`, `isolated`, `bridged`, `named`, TCP `--publish` | `/dev/kvm`, `firecracker` binary | Full feature surface; importable as a Go package |
 | `apple-vf` | macOS (Apple silicon) | Production | `user`, `nat`, `isolated`, TCP `--publish`; `bridged` entitlement-gated | Virtualization.framework, Swift supervisor binary | NAT is macOS-managed; no `named` networks yet |
-| `windows-hyperv` | Windows | Experimental | `user`/`nat` (HNS NAT), `isolated`, `bridged`, TCP `--publish` | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
+| `windows-hyperv` | Windows | Supported | `user`/`nat` (HNS NAT), `isolated`, TCP `--publish`; `bridged` needs an external vSwitch | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
 
 All three expose the same backend-neutral request and response structures, the
 same lifecycle verbs, and interactive [`connect`](/cli/connect/) - the
@@ -54,22 +54,31 @@ covered in [Networking](/concepts/networking/).
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
 
-## Windows Hyper-V (experimental)
+## Windows Hyper-V
 
 - Targets Linux microVM-style workspaces on Windows without WSL or QEMU.
 - Uses the backend name `windows-hyperv` and Host Compute Service through
   `vmcompute.dll`; lifecycle state records HCS compute IDs.
-- Consumes VHD root disks at `~/.microagent/workspaces/<name>/rootfs.vhd`.
-- Supports `host`, `check`, `prepare`, `run`, `start`, `inspect`, `connect`,
-  `halt`, `quarantine`, `stop`, `kill`, and `delete` experimentally.
-- Supports HNS NAT networking and published TCP ports through Hyper-V socket
-  bridging.
+- Consumes VHD root disks at `~/.microagent/workspaces/<name>/rootfs.vhd`, and
+  wraps named volumes as VHD-backed ext4 disks.
+- Supports the full lifecycle: `host`, `check`, `prepare`, `run`, `start`,
+  `inspect`, `connect`, `halt`, `quarantine`, `stop`, `kill`, and `delete`.
+  `clone`, `cp`, artifacts, and `commit` ride guest-mediated maintenance boots.
+- Supports `user`/`nat` (HNS NAT) and `isolated` networking plus published TCP
+  ports through Hyper-V socket bridging. Live `apply` of host-bind forward
+  changes is supported.
 - Supports structured [`exec`](/cli/exec/) (buffered and `--stream`) through a
-  host TCP listener bridged to the guest exec service over Hyper-V sockets.
+  host TCP listener bridged to the guest exec service over Hyper-V sockets,
+  [`connect`](/cli/connect/) over Hyper-V sockets, secrets (materialized,
+  on-demand, and audited), model serving, supervised restart, survive-reboot
+  via a Scheduled Task, and `perf` footprint/steady sampling from HCS memory
+  statistics.
 - Fails closed for the direct supervisor `console` command; use
-  [`connect`](/cli/connect/).
+  [`connect`](/cli/connect/), which is the interactive contract on every
+  backend.
 - See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
-  details and current limitations.
+  details and current limitations (bridged mode needs an external vSwitch;
+  pause/resume, snapshots, and named networks are planned).
 
 ## Checking your host
 

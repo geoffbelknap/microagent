@@ -4,18 +4,19 @@ description: Depend on one set of runtime semantics across Firecracker, Apple VF
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 If you are building an agent runtime on top of microagent, this page defines
 the semantics you can rely on across every backend - Firecracker, Apple VF,
-and experimental Windows Hyper-V. `microagent --json contract` is the JSON
+and Windows Hyper-V. `microagent --json contract` is the JSON
 source for the shared runtime contract.
 
 ## Scope
 
-Stable backends expose the same public runtime primitives. Experimental
-backends may advertise a smaller command surface while preserving the same
-state, result, readiness, and diagnostic field shapes for supported commands:
+Backends expose the same public runtime primitives. A backend may advertise a
+smaller command surface for commands it does not yet implement while preserving
+the same state, result, readiness, and diagnostic field shapes for the commands
+it supports:
 
 | Primitive | Contract |
 |---|---|

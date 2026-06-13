@@ -4,11 +4,12 @@ description: Checkpoint a running workspace, restore it in place, or fork copies
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 A snapshot freezes a workspace - guest memory, device state, and disk - at
 one moment. This guide takes one, rolls back to it, and forks independent
-copies that resume from it. Snapshots are Firecracker-only.
+copies that resume from it. Snapshots are currently implemented only for the
+Firecracker backend.
 
 ## 1. Get a workspace into a state worth keeping
 

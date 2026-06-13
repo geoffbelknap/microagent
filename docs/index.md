@@ -4,7 +4,7 @@ description: Boot real Linux microVMs from OCI images, from the CLI or from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 microagent boots real Linux microVMs from the OCI images you already use, and
 gives you a CLI and a Go API to run commands inside them, move files in and
@@ -12,7 +12,7 @@ out, and manage their lifecycle. The kernel, disk, and network plumbing is
 handled for you.
 
 Each host OS uses one backend: Firecracker on Linux, Apple
-Virtualization.framework on macOS, and experimental Hyper-V on Windows. The
+Virtualization.framework on macOS, and Hyper-V on Windows. The
 choice is automatic. For what microagent deliberately leaves to your control
 plane, see [Boundaries](/concepts/boundaries/).
 

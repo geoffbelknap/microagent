@@ -121,13 +121,12 @@ E2E_MATRIX=(
   "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
   "supervise|backend-neutral|firecracker,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
-  "snapshot/pause/resume|backend-specific|firecracker|firecracker-lifecycle-host|Memory snapshot and vCPU pause are Firecracker-only"
+  "snapshot/pause/resume|backend-specific|firecracker|firecracker-lifecycle-host|Memory snapshot and vCPU pause are currently implemented only for Firecracker; planned on apple-vf/windows-hyperv"
   "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving|Model store and run --model vsock pairing"
   "perf|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|firecracker,apple-vf,windows-hyperv|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
-  "Windows Hyper-V|not-yet-practical|windows-hyperv|coverage-matrix,contract,help-usage,mcp-stdio,registry-auth,text-output,init,mcp-lifecycle,volumes,exec-stream,health,supervision-deep,survive-reboot,windows-hyperv-lifecycle-host,windows-hyperv-connect-host,windows-hyperv-exec-host,windows-hyperv-transport-host,windows-hyperv-model-host|Portable scenarios, public-surface, lifecycle-deep, networking-deep (HNS segments need elevation), transport-deep, secrets, commit-images, volumes, exec-stream, health, supervision-deep, survive-reboot (boot-unit generation; schtasks registration needs elevation), mcp-lifecycle, perf (via public-surface), model-serving (env-gated), and windows-hyperv-*-host probes run under Git Bash"
 )
 
 usage() {

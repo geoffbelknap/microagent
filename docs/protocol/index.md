@@ -4,7 +4,7 @@ description: Speak the JSON protocol backend supervisors implement - requests, r
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 If you are implementing a supervisor, calling one directly, or debugging what
 a backend returned, this page is the protocol reference. Backend supervisors
@@ -303,6 +303,6 @@ Reading the table:
 - [Apple VF supervisor](/protocol/applevf/) documents the macOS executable
   protocol.
 - [Windows Hyper-V supervisor](/protocol/windows-hyperv/) documents the
-  experimental Windows HCS backend.
+  Windows HCS backend.
 - [Runtime contract](/protocol/runtime-contract/) documents the shared
   agent-runtime semantics.
