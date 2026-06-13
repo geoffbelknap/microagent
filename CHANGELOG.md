@@ -5,6 +5,20 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv managed NAT subnet no longer collides with the Default Switch
+
+- The managed `microagent-nat` HNS network is created on a subnet chosen to
+  avoid overlapping any existing HNS network, instead of a hardcoded
+  `192.168.127.0/24`. The Windows Default Switch (ICS) takes a dynamically
+  assigned `/20` that can span `192.168.127.x`; when it did, HNS rejected the
+  NAT create with a misleading "duplicate name exists on the network" (`0x34`)
+  error, failing any `user`/`nat` workspace boot. This was the root cause of
+  the windows-hyperv NAT failures that reproduced reliably on some hosts (and
+  intermittently on hosted CI runners, depending on each runner's Default
+  Switch subnet). The preferred `192.168.127.0/24` is still used when it is
+  clear; otherwise the first non-overlapping candidate is chosen and the
+  gateway is derived from it. Fails closed if every candidate conflicts.
+
 ### windows-hyperv pause/resume (P7)
 
 - `microagent pause` and `microagent resume` now work on the Windows Hyper-V

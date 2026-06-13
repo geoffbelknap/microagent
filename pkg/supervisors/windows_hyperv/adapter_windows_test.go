@@ -247,6 +247,46 @@ func TestBuildComputeSystemDocumentEmitsNamedNetworkStaticCmdline(t *testing.T) 
 	}
 }
 
+func TestPickFreeSubnetAvoidsOverlap(t *testing.T) {
+	candidates := []string{"192.168.127.0/24", "192.168.214.0/24", "10.71.214.0/24"}
+
+	// The Default Switch's ICS /20 (192.168.112.0/20) spans 192.168.112-127, so
+	// it covers the preferred 192.168.127.0/24 — the fix must skip to the next
+	// clear candidate. This is the exact collision that fails NAT creation with
+	// a misleading 0x34 "duplicate name" error.
+	subnet, gateway, err := pickFreeSubnet(candidates, []string{"192.168.112.0/20"})
+	if err != nil {
+		t.Fatalf("pickFreeSubnet: %v", err)
+	}
+	if subnet != "192.168.214.0/24" || gateway != "192.168.214.1" {
+		t.Fatalf("pickFreeSubnet = %q gw %q, want 192.168.214.0/24 gw 192.168.214.1", subnet, gateway)
+	}
+
+	// No conflicts: the preferred candidate and its .1 gateway are used.
+	subnet, gateway, err = pickFreeSubnet(candidates, nil)
+	if err != nil || subnet != "192.168.127.0/24" || gateway != "192.168.127.1" {
+		t.Fatalf("pickFreeSubnet(nil) = %q gw %q err %v, want the preferred candidate", subnet, gateway, err)
+	}
+
+	// Every candidate conflicts: fail closed rather than create an overlapping
+	// network HNS would reject.
+	if _, _, err := pickFreeSubnet(candidates, []string{"0.0.0.0/0"}); err == nil {
+		t.Fatal("pickFreeSubnet must fail closed when every candidate overlaps")
+	}
+}
+
+func TestCIDROverlapsAny(t *testing.T) {
+	if !cidrOverlapsAny("192.168.127.0/24", []string{"10.0.0.0/8", "192.168.112.0/20"}) {
+		t.Fatal("192.168.127.0/24 must overlap 192.168.112.0/20")
+	}
+	if cidrOverlapsAny("192.168.214.0/24", []string{"192.168.112.0/20", "10.0.0.0/8"}) {
+		t.Fatal("192.168.214.0/24 must not overlap 192.168.112.0/20 or 10.0.0.0/8")
+	}
+	if cidrOverlapsAny("192.168.127.0/24", nil) {
+		t.Fatal("no existing prefixes means no overlap")
+	}
+}
+
 func TestBuildComputeSystemDocumentBridgedWithoutStaticIPRequestsDHCP(t *testing.T) {
 	// A bridged endpoint on a network that does not statically allocate an
 	// address (external vSwitch, or the ICS Default Switch serving DHCP) has a
