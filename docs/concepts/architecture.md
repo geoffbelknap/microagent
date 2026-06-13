@@ -4,7 +4,7 @@ description: Understand how the CLI, Go library, and supervisors fit before embe
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 There are three ways to drive microagent - the CLI, the Go library, and the
 MCP server - and all three sit on the same Go packages. The CLI is a thin
@@ -22,7 +22,7 @@ your orchestrator (shell, MCP client, or Go program)
             └─ backend supervisor
                  ├─ Firecracker supervisor (Linux, Go JSON exec)
                  ├─ Apple VF supervisor (macOS, Swift JSON exec)
-                 └─ Windows Hyper-V supervisor (Windows, Go JSON exec, experimental)
+                 └─ Windows Hyper-V supervisor (Windows, Go JSON exec)
 
 OCI image ──► pkg/rootfs ──► ext4 disk ──► microVM
 ```

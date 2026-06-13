@@ -4,7 +4,7 @@ description: Choose a network mode and see what each one does under the hood on 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 This is the internals page for workspace networking: read it to choose a
 network mode and to understand what each mode actually does on each backend.
@@ -47,9 +47,8 @@ The portable contract is the network intent: outbound access in `user` and
 it.
 
 The backend mechanics are intentionally different. The table below is a
-Firecracker-vs-Apple VF deep dive on the two production backends; experimental
-Windows Hyper-V is covered in the quick matrix above and in
-[Backends](/concepts/backends/).
+Firecracker-vs-Apple VF deep dive on those two backends; Windows Hyper-V is
+covered in the quick matrix above and in [Backends](/concepts/backends/).
 
 | Capability | Firecracker on Linux | Apple VF on macOS |
 |---|---|---|

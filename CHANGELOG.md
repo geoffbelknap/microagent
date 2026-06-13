@@ -18,6 +18,34 @@ been cut into a release yet.
   HNS endpoint release that normally unblocks deregistration is itself async
   and slow under that load. The wait still fails closed.
 
+### windows-hyperv docs and coverage-matrix closure (P6)
+
+- Documented windows-hyperv as a supported backend rather than experimental.
+  Dropped the "experimental" qualifier across `docs/` (backends, protocol,
+  architecture, boundaries, glossary, networking, runtime-contract, contract,
+  doctor, connect, persistent-workspaces, index) and the
+  "supported experimentally" lifecycle-table cells on
+  `docs/protocol/windows-hyperv.md`.
+- Rewrote the windows-hyperv current-limitations section to the real
+  remainder: bridged mode exists in the backend but is not yet live-verified
+  (needs an external Hyper-V vSwitch); HNS user/nat segments need an elevated
+  host; pause/resume and snapshots are planned, not yet implemented; named
+  networks are planned (named-network attachment is currently Linux-only);
+  survive-reboot registers a Scheduled Task when elevated and surfaces the
+  manual `schtasks` command otherwise. The no-WSL/no-QEMU statements stay, and
+  direct supervisor `console` is restated as a deliberate cross-backend
+  non-goal (use `connect`).
+- Reframed "Firecracker-only" pause/resume and snapshot phrasings in the CLI
+  docs (`pause`, `resume`, `snapshot`, `start`, `create`,
+  snapshots-and-forking) as current state ("currently implemented only for the
+  Firecracker backend"), since those are planned on the other backends rather
+  than permanent platform facts.
+- Removed the stale `Windows Hyper-V|not-yet-practical|...` E2E_MATRIX row;
+  windows-hyperv parity is now expressed by its presence in the per-feature
+  backend-neutral rows. Dropped the now-unused `not-yet-practical` matrix class
+  and the `Windows Hyper-V` required-feature key from the coverage-matrix
+  validator. `coverage-matrix` passes.
+
 ### windows-hyperv mcp-lifecycle and perf parity (P6)
 
 - `perf footprint` and `perf steady` work against windows-hyperv workspaces.

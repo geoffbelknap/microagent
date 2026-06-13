@@ -4,7 +4,7 @@ description: Print the backend-neutral agent runtime contract.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-13_
 
 ```text
 microagent [--json] contract
@@ -12,9 +12,10 @@ microagent [--json] contract
 
 `contract` prints the backend-neutral runtime contract: lifecycle commands,
 states, readiness signals, result fields, artifact channels, mediation fields,
-and verification. Stable backends implement the full surface; experimental
-backends may support a smaller command set while preserving the same response
-shapes for the commands they support. Use it when you're building an agent
+and verification. Backends share the same response shapes; a backend may
+support a smaller command set for commands it does not yet implement while
+preserving those shapes for the commands it supports. Use it when you're
+building an agent
 runtime or host integration and need a machine-readable statement of what the
 substrate guarantees.
 

@@ -1,13 +1,13 @@
 ---
 title: Windows Hyper-V supervisor
-description: Run Linux guests on Windows through HCS - no WSL, no QEMU. Experimental.
+description: Run Linux guests on Windows through HCS - no WSL, no QEMU.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-13_
 
 If you want Linux guests on a Windows host - without WSL and without QEMU -
-this page documents the experimental `windows-hyperv` backend. It talks to
+this page documents the `windows-hyperv` backend. It talks to
 Windows Host Compute Service (HCS) through `vmcompute.dll` and prepares
 Hyper-V utility VM-style compute systems from microagent runtime requests.
 
@@ -63,16 +63,16 @@ The current lifecycle surface is:
 |---|---|
 | `host` | supported |
 | `check` | supported |
-| `prepare` | supported experimentally |
-| `run` | supported experimentally |
+| `prepare` | supported |
+| `run` | supported |
 | `inspect` | supported |
-| `start` | supported experimentally |
-| `halt` | supported experimentally |
-| `quarantine` | supported experimentally |
+| `start` | supported |
+| `halt` | supported |
+| `quarantine` | supported |
 | `stop` | supported |
 | `kill` | supported |
 | `delete` | supported |
-| `console` | unsupported |
+| `console` | unsupported (non-goal; use `connect`) |
 
 Unsupported commands fail closed with structured `ok: false` responses.
 
@@ -94,7 +94,7 @@ Windows Hyper-V uses HNS/HCN networking for guest NIC attachment:
 | `user` | uses the managed `microagent-nat` HNS NAT network |
 | `nat` | uses the managed `microagent-nat` HNS NAT network |
 | `isolated` | starts without an external network adapter |
-| `bridged` | attaches to the named HNS network from `network.interface` |
+| `bridged` | attaches to the named HNS network or Hyper-V switch from `network.interface` (requires an external vSwitch; not yet live-verified) |
 
 The managed NAT network uses `192.168.127.0/24` with gateway
 `192.168.127.1`. Runtime network details, including the HNS network and
@@ -158,7 +158,7 @@ reflects a structured exec round-trip through the host exec bridge. If
 `result.json` exists, `inspect` also returns the backend-neutral `result`
 object and marks `readiness.resultReady.ready` true.
 
-## Current limitations
+## Transport mechanics
 
 - No WSL dependency is used or required.
 - QEMU/WHPX is not used.
@@ -167,13 +167,27 @@ object and marks `readiness.resultReady.ready` true.
   Hyper-V sockets.
 - Mediation and guest-to-host TCP listener targets use Hyper-V socket listener
   helpers.
-- Direct supervisor `console` is not implemented; use `microagent connect`.
 - Foreground `run` supports the configured result listener by mapping the guest
   AF_VSOCK result port to a Hyper-V socket service and writing the received
   payload to `result.json`.
 - Result runs configure COM1 as an HCS named pipe and append guest serial output
   to `serial.log`.
 
-Treat this backend as experimental. It is intended for Windows Hyper-V Linux
-guest support without WSL, and it should fail closed when a host prerequisite or
-unsupported feature is missing.
+## Current limitations
+
+- `bridged` networking exists in the backend but is not yet live-verified: it
+  requires an external Hyper-V vSwitch named through `network.interface`, and
+  it fails closed when that switch or HNS network is missing. The `user`, `nat`
+  (HNS NAT), and `isolated` modes are live-verified.
+- HNS `user`/`nat` segments need an elevated host to provision the managed NAT
+  network.
+- `survive-reboot` registers a Scheduled Task when run elevated; an unelevated
+  host surfaces the manual `schtasks` command to register instead.
+- `pause`/`resume` and `snapshot`/save-state are planned, not yet implemented.
+- Named networks are planned; named-network attachment is currently implemented
+  only on Linux.
+- Direct supervisor `console` is a deliberate non-goal on every backend; use
+  `microagent connect`, which is the interactive contract.
+
+The backend fails closed when a host prerequisite or unsupported feature is
+missing.
