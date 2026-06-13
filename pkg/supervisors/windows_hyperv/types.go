@@ -31,6 +31,15 @@ type runtimeAdapter interface {
 	// disk — only execution is suspended.
 	Pause(ctx context.Context, id string) error
 	Resume(ctx context.Context, id string) error
+	// Save writes a paused compute system's guest memory and device state to a
+	// save-state file. The system must already be paused. saveType selects the
+	// save flavor ("ToFile" for a plain restorable save).
+	Save(ctx context.Context, id, stateFilePath, saveType string) error
+	// GrantAccess adds an ACE for the compute system's VM worker identity to a
+	// host path, so HCS can write the save-state file there (the worker process
+	// runs under a VM-specific SID and cannot write an arbitrary user directory
+	// by default). vmID is the compute system runtime ID.
+	GrantAccess(ctx context.Context, vmID, path string) error
 	Wait(ctx context.Context, id string) error
 	// Exists reports whether the compute system is still registered with HCS.
 	// A guest that exits on its own takes its compute system with it, so this
@@ -45,6 +54,11 @@ type computeSystemSpec struct {
 	Config            vmkit.Config
 	NetworkID         string
 	NetworkEndpointID string
+	// RestoreStateFilePath, when set, makes Create build a VirtualMachine with
+	// VirtualMachine.RestoreState pointing at this save-state file so the
+	// compute system boots from a saved snapshot rather than cold-booting the
+	// kernel. It is the absolute host path of the snapshot's vmstate file.
+	RestoreStateFilePath string
 }
 
 type computeSystemHandle struct {
@@ -73,6 +87,7 @@ type hcsClient interface {
 	ShutdownComputeSystem(ctx context.Context, id string) error
 	PauseComputeSystem(ctx context.Context, id string) error
 	ResumeComputeSystem(ctx context.Context, id string) error
+	SaveComputeSystem(ctx context.Context, id, stateFilePath, saveType string) error
 	KillComputeSystem(ctx context.Context, id string) error
 	DeleteComputeSystem(ctx context.Context, id string) error
 	WaitComputeSystem(ctx context.Context, id string) error

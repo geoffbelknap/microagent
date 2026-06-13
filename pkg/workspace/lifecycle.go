@@ -669,27 +669,40 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err
 	}
-	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsName), rootfsPath, 0o600); err != nil {
+	snapshotRootfsName := vmkit.SnapshotRootfsFilename(opts.Backend)
+	if err := CopyFile(filepath.Join(srcDir, snapshotRootfsName), rootfsPath, 0o600); err != nil {
 		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
 	}
 	if err := WriteManifest(opts); err != nil {
 		return Result{}, err
 	}
-	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err != nil {
+	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag), snapshotRootfsName); err != nil {
 		return Result{}, err
 	}
 	opts.FromSnapshot = tag
 	return Start(ctx, opts)
 }
 
-func copySnapshotInto(srcDir, dstDir string) error {
+func copySnapshotInto(srcDir, dstDir, rootfsName string) error {
 	if err := os.MkdirAll(dstDir, 0o700); err != nil {
 		return err
 	}
-	for _, name := range []string{vmkit.SnapshotVMStateName, vmkit.SnapshotMemoryName, vmkit.SnapshotRootfsName, vmkit.SnapshotManifestName} {
+	// vmstate, rootfs, and manifest are always present. memory is
+	// Firecracker/Apple VF only — windows-hyperv writes a single vmstate file —
+	// so a missing memory file is not an error.
+	required := []string{vmkit.SnapshotVMStateName, rootfsName, vmkit.SnapshotManifestName}
+	for _, name := range required {
 		if err := CopyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name), 0o644); err != nil {
 			return fmt.Errorf("copy snapshot %s into fork: %w", name, err)
 		}
+	}
+	memorySrc := filepath.Join(srcDir, vmkit.SnapshotMemoryName)
+	if _, err := os.Stat(memorySrc); err == nil {
+		if err := CopyFile(memorySrc, filepath.Join(dstDir, vmkit.SnapshotMemoryName), 0o644); err != nil {
+			return fmt.Errorf("copy snapshot %s into fork: %w", vmkit.SnapshotMemoryName, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }

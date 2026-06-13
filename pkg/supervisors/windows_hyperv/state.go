@@ -215,6 +215,19 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 		Identity: *req.Identity,
 		Config:   *req.Config,
 	}
+	// Snapshot restore/fork: a request carrying a snapshot tag rolls the rootfs
+	// back to the snapshot's coherent VHD copy and boots the compute system from
+	// the saved memory/device state (VirtualMachine.RestoreState) rather than
+	// cold-booting the kernel. Kernel/network compatibility is validated here,
+	// once, before any compute system is created. Mirrors the firecracker
+	// loadMode branch keyed off req.Tag.
+	if strings.TrimSpace(req.Tag) != "" {
+		vmStatePath, err := prepareSnapshotRestore(req)
+		if err != nil {
+			return failRun(req, vmkit.StateFailed, fmt.Sprintf("snapshot restore failed: %s", err), err)
+		}
+		spec.RestoreStateFilePath = vmStatePath
+	}
 	if _, err := writeRuntimeTransition(req, vmkit.StateStarting, "creating windows-hyperv compute system", ""); err != nil {
 		return vmkit.Response{}, err
 	}

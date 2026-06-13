@@ -41,6 +41,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return s.pause(ctx, req)
 	case "resume":
 		return s.resume(ctx, req)
+	case "snapshot":
+		return s.snapshot(ctx, req)
 	case "quarantine":
 		return s.quarantine(req)
 	case "stop":

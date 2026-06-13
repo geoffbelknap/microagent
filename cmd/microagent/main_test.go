@@ -5318,6 +5318,136 @@ func TestWindowsHyperVExecSmoke(t *testing.T) {
 	}
 }
 
+func TestWindowsHyperVSnapshotSmoke(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V snapshot smoke test")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
+	if imageRef == "" {
+		imageRef = "docker.io/library/busybox:1.36"
+	}
+	dir := t.TempDir()
+	source := fmt.Sprintf("whv-snap-%d", time.Now().UnixNano()%1000000000)
+	fork := source + "-fork"
+	cliPath := filepath.Join(dir, "microagent.exe")
+	guestInitPath := filepath.Join(dir, "microagent-guestinit")
+	// Restore and fork both spawn the runtime listener helper from the running
+	// executable, so the smoke must drive the real CLI binary end to end.
+	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
+	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+
+	// Structured exec rides hv_sock, so isolated networking keeps the snapshot
+	// round-trip independent of host HNS state and privileges.
+	workspaceOpts := workspace.Options{
+		Name:            source,
+		Backend:         vmkit.BackendWindowsHyperV,
+		Architecture:    "amd64",
+		StateDir:        dir,
+		KernelPath:      kernelPath,
+		GuestInitPath:   guestInitPath,
+		ImageRef:        imageRef,
+		ServiceCommand:  "sleep 300",
+		PrepareForStart: true,
+		MemoryMiB:       512,
+		CPUCount:        2,
+		Network:         vmkit.NetworkConfig{Mode: "isolated"},
+	}
+	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
+		t.Fatalf("BuildRootfs: %v", err)
+	}
+	if err := workspace.WriteManifest(workspaceOpts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cleanupCancel()
+		for _, name := range []string{fork, source} {
+			_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", name, "--state-dir", dir)
+			_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", name, "--state-dir", dir, "--yes")
+		}
+	})
+
+	waitExecReady := func(name string) {
+		t.Helper()
+		deadline := time.Now().Add(60 * time.Second)
+		for {
+			status, err := workspace.Status(workspace.Options{Name: name, Backend: vmkit.BackendWindowsHyperV, StateDir: dir})
+			if err == nil && status.Readiness != nil && status.Readiness.ExecReady.Ready {
+				return
+			}
+			if time.Now().After(deadline) {
+				logWindowsHyperVSmokeState(t, dir, name)
+				t.Fatalf("workspace %s exec did not become ready", name)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	// Boot the source and plant a marker on a freshly mounted tmpfs. The tmpfs
+	// lives entirely in guest RAM and has no presence on the rootfs, so a marker
+	// that survives restore proves the guest MEMORY was restored (the rootfs
+	// rollback copy carries no /mnt/mem content), not just the disk.
+	const marker = "SNAPSHOT_MEMORY_MARKER_42"
+	const markerPath = "/mnt/mem/marker"
+	runExternal(t, ctx, cliPath, "start", source, "--state-dir", dir, "--kernel", kernelPath)
+	waitForWorkspaceState(t, dir, source, vmkit.StateRunning, 30*time.Second)
+	waitExecReady(source)
+	runExternal(t, ctx, cliPath, "exec", source, "--state-dir", dir, "--", "sh", "-c",
+		"mkdir -p /mnt/mem && mount -t tmpfs none /mnt/mem && echo "+marker+" > "+markerPath)
+
+	// Snapshot the running source: it auto-pauses, captures vmstate + rootfs.vhd
+	// + manifest, and resumes.
+	const tag = "snap-1"
+	runExternal(t, ctx, cliPath, "snapshot", "create", source, "--state-dir", dir, "--tag", tag)
+	snapDir := vmkit.SnapshotDir(dir, source, tag)
+	for _, name := range []string{vmkit.SnapshotVMStateName, vmkit.SnapshotRootfsVHDName, vmkit.SnapshotManifestName} {
+		if _, err := os.Stat(filepath.Join(snapDir, name)); err != nil {
+			logWindowsHyperVSmokeState(t, dir, source)
+			t.Fatalf("snapshot artifact %s: %v", name, err)
+		}
+	}
+	listOut := runExternal(t, ctx, cliPath, "snapshot", "list", source, "--state-dir", dir)
+	if !strings.Contains(string(listOut), tag) {
+		t.Fatalf("snapshot list = %q, want it to show %q", listOut, tag)
+	}
+
+	// Restore in place: halt, then start --from-snapshot. The marker must be back
+	// from the restored memory image.
+	runExternal(t, ctx, cliPath, "halt", source, "--state-dir", dir)
+	waitForWorkspaceState(t, dir, source, vmkit.StateHalted, 60*time.Second)
+	runExternal(t, ctx, cliPath, "start", source, "--state-dir", dir, "--kernel", kernelPath, "--from-snapshot", tag)
+	waitForWorkspaceState(t, dir, source, vmkit.StateRunning, 60*time.Second)
+	waitExecReady(source)
+	restored := runExternal(t, ctx, cliPath, "exec", source, "--state-dir", dir, "--", "cat", markerPath)
+	if !strings.Contains(string(restored), marker) {
+		logWindowsHyperVSmokeState(t, dir, source)
+		t.Fatalf("restored marker = %q, want %q (memory not restored)", restored, marker)
+	}
+
+	// Fork into a second workspace from the same snapshot and confirm the marker.
+	runExternal(t, ctx, cliPath, "create", fork, "--state-dir", dir, "--from-snapshot", source+":"+tag, "--kernel", kernelPath)
+	waitForWorkspaceState(t, dir, fork, vmkit.StateRunning, 60*time.Second)
+	waitExecReady(fork)
+	forked := runExternal(t, ctx, cliPath, "exec", fork, "--state-dir", dir, "--", "cat", markerPath)
+	if !strings.Contains(string(forked), marker) {
+		logWindowsHyperVSmokeState(t, dir, fork)
+		t.Fatalf("forked marker = %q, want %q (memory not restored into fork)", forked, marker)
+	}
+
+	// snapshot rm reclaims the tag.
+	runExternal(t, ctx, cliPath, "snapshot", "rm", source, tag, "--state-dir", dir)
+	if _, err := os.Stat(snapDir); !os.IsNotExist(err) {
+		t.Fatalf("snapshot dir should be gone after rm, stat err=%v", err)
+	}
+}
+
 // windowsHostElevated reports whether the current process holds the local
 // administrator rights that creating a private HNS network requires. `net
 // session` only succeeds for an elevated token, matching the e2e-lib gate.

@@ -13,8 +13,27 @@ const (
 	SnapshotManifestName = "manifest.json"
 	SnapshotVMStateName  = "vmstate"
 	SnapshotMemoryName   = "memory"
-	SnapshotRootfsName   = "rootfs.ext4"
+	// SnapshotRootfsName is the Firecracker/Apple VF snapshot rootfs filename.
+	// windows-hyperv uses a VHD rootfs, so the snapshot path must use
+	// SnapshotRootfsFilename(backend) rather than this constant when the backend
+	// can vary. Kept as a constant for the Firecracker reference path and tests.
+	SnapshotRootfsName = "rootfs.ext4"
+	// SnapshotRootfsVHDName is the windows-hyperv snapshot rootfs filename: the
+	// snapshot copies the workspace VHD verbatim, so the snapshot rootfs keeps
+	// the .vhd extension HCS requires to attach it on restore.
+	SnapshotRootfsVHDName = "rootfs.vhd"
 )
+
+// SnapshotRootfsFilename returns the snapshot rootfs filename for a backend.
+// windows-hyperv stores a VHD; every other backend stores the ext4 image. The
+// snapshot directory is otherwise backend-neutral (one vmstate file + manifest),
+// so this is the single backend-dependent name in the snapshot layout.
+func SnapshotRootfsFilename(backend string) string {
+	if backend == BackendWindowsHyperV {
+		return SnapshotRootfsVHDName
+	}
+	return SnapshotRootfsName
+}
 
 // SnapshotManifest records the metadata needed to restore or fork a workspace
 // snapshot: the image and network identity it was taken from, the guest IP to

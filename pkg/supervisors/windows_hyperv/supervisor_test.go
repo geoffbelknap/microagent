@@ -624,6 +624,139 @@ func TestPauseLeavesStateUnchangedOnTransitionError(t *testing.T) {
 	}
 }
 
+// writeRunningStateForSnapshot writes a running workspace whose recorded config
+// points at real kernel and rootfs files on disk, so the snapshot path can hash
+// the kernel and copy the rootfs. Returns the request and state dir.
+func writeRunningStateForSnapshot(t *testing.T) (vmkit.Request, string) {
+	t.Helper()
+	stateDir := t.TempDir()
+	kernelPath := filepath.Join(stateDir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("fake-kernel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rootfsPath := filepath.Join(stateDir, "rootfs.vhd")
+	if err := os.WriteFile(rootfsPath, []byte("fake-rootfs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	req := vmkit.Request{
+		Command: "snapshot",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: kernelPath,
+			RootfsPath: rootfsPath,
+			StateDir:   stateDir,
+			CPUCount:   2,
+			MemoryMiB:  512,
+			Network:    &vmkit.NetworkConfig{Mode: "nat", IP: "192.168.127.2/24", Gateway: "192.168.127.1"},
+		},
+	}
+	if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateRunning, "running", "", "fake", "11111111-1111-1111-1111-111111111111", 4321); err != nil {
+		t.Fatalf("write running state: %v", err)
+	}
+	return req, stateDir
+}
+
+func TestSnapshotCapturesArtifactsAndResumes(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	req, stateDir := writeRunningStateForSnapshot(t)
+	req.Tag = "snap-1"
+	adapter := &fakeAdapter{}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK || resp.Event == nil || resp.Event.State != vmkit.StateRunning {
+		t.Fatalf("snapshot resp=%#v err=%v, want running after auto-pause/resume", resp, err)
+	}
+	// A running workspace is auto-paused around the capture and resumed.
+	if adapter.pauses != 1 || adapter.resumes != 1 {
+		t.Fatalf("pauses=%d resumes=%d, want one auto-pause and one resume", adapter.pauses, adapter.resumes)
+	}
+	if adapter.saves != 1 || adapter.saveID != "fake" {
+		t.Fatalf("saves=%d saveID=%q, want one save on the compute system", adapter.saves, adapter.saveID)
+	}
+	if adapter.saveType != "ToFile" {
+		t.Fatalf("saveType=%q, want ToFile", adapter.saveType)
+	}
+	dir := vmkit.SnapshotDir(stateDir, req.Identity.RuntimeID, "snap-1")
+	if adapter.saveStatePath != filepath.Join(dir, vmkit.SnapshotVMStateName) {
+		t.Fatalf("saveStatePath=%q, want %q", adapter.saveStatePath, filepath.Join(dir, vmkit.SnapshotVMStateName))
+	}
+	for _, name := range []string{vmkit.SnapshotVMStateName, vmkit.SnapshotRootfsVHDName, vmkit.SnapshotManifestName} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("snapshot artifact %s: %v", name, err)
+		}
+	}
+	manifest, err := vmkit.ReadSnapshotManifest(dir)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if manifest.Tag != "snap-1" || manifest.KernelSHA256 == "" || manifest.MemoryMiB != 512 || manifest.VCPUCount != 2 {
+		t.Fatalf("manifest = %#v, want tag/kernel hash/sizing recorded", manifest)
+	}
+	if manifest.NetworkMode != "nat" || manifest.GuestIP != "192.168.127.2" {
+		t.Fatalf("manifest network = mode %q ip %q, want nat 192.168.127.2", manifest.NetworkMode, manifest.GuestIP)
+	}
+	// The workspace ends running with its compute IDs and listener PID intact.
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, req.Identity.RuntimeID, "runtime.json"), &state)
+	if state.Event.State != vmkit.StateRunning || state.VsockListenerPID != 4321 || state.ComputeSystemID != "fake" {
+		t.Fatalf("post-snapshot state=%s listener=%d id=%q, want running/4321/fake", state.Event.State, state.VsockListenerPID, state.ComputeSystemID)
+	}
+}
+
+func TestSnapshotFailsClosedWhenNotRunningOrPaused(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	req, stateDir := writeRunningStateForSnapshot(t)
+	// Drive the workspace to stopped, then a snapshot must fail closed.
+	if _, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, "stopped", "", "fake", "11111111-1111-1111-1111-111111111111", clearVsockListenerPID); err != nil {
+		t.Fatal(err)
+	}
+	req.Tag = "snap-1"
+	adapter := &fakeAdapter{}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "requires a running or paused workspace") {
+		t.Fatalf("snapshot resp=%#v err=%v, want fail-closed on stopped", resp, err)
+	}
+	if adapter.pauses != 0 || adapter.saves != 0 {
+		t.Fatalf("pauses=%d saves=%d, want no HCS calls on a wrong-state snapshot", adapter.pauses, adapter.saves)
+	}
+	if _, err := os.Stat(vmkit.SnapshotDir(stateDir, req.Identity.RuntimeID, "snap-1")); !os.IsNotExist(err) {
+		t.Fatalf("snapshot dir should not exist after a fail-closed snapshot, stat err=%v", err)
+	}
+}
+
+func TestSnapshotResumesAndCleansUpOnSaveError(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv lifecycle path is windows-only")
+	}
+	req, stateDir := writeRunningStateForSnapshot(t)
+	req.Tag = "snap-1"
+	adapter := &fakeAdapter{saveErr: fmt.Errorf("HCS save: insufficient disk")}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err == nil || resp.OK || !strings.Contains(resp.Error, "insufficient disk") {
+		t.Fatalf("snapshot resp=%#v err=%v, want the save error surfaced", resp, err)
+	}
+	// The auto-paused workspace must be resumed and the partial snapshot removed.
+	if adapter.pauses != 1 || adapter.resumes != 1 {
+		t.Fatalf("pauses=%d resumes=%d, want auto-pause then resume on the rollback", adapter.pauses, adapter.resumes)
+	}
+	if _, err := os.Stat(vmkit.SnapshotDir(stateDir, req.Identity.RuntimeID, "snap-1")); !os.IsNotExist(err) {
+		t.Fatalf("partial snapshot dir should be removed, stat err=%v", err)
+	}
+	var state runtimeState
+	readJSON(t, filepath.Join(stateDir, req.Identity.RuntimeID, "runtime.json"), &state)
+	if state.Event.State != vmkit.StateRunning {
+		t.Fatalf("post-failure state=%s, want running restored", state.Event.State)
+	}
+}
+
 func TestTeardownTimeoutReportsDescribeFailure(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv lifecycle path is windows-only")
@@ -1550,36 +1683,44 @@ func TestSupervisorUsesInjectedAdapterForHostAndCheck(t *testing.T) {
 }
 
 type fakeAdapter struct {
-	host        vmkit.HostSupport
-	handle      computeSystemHandle
-	network     networkAttachment
-	checks      int
-	networks    int
-	cleanups    int
-	creates     int
-	starts      int
-	startedID   string
-	spec        computeSystemSpec
-	shutdowns   int
-	shutdownID  string
-	shutdownErr error
-	kills       int
-	killID      string
-	killErr     error
-	pauses      int
-	pauseID     string
-	pauseErr    error
-	resumes     int
-	resumeID    string
-	resumeErr   error
-	deletes     int
-	deleteID    string
-	waits       int
-	waitID      string
-	startErr    error
-	deleteErr   error
-	gone        bool
-	neverGone   bool
+	host          vmkit.HostSupport
+	handle        computeSystemHandle
+	network       networkAttachment
+	checks        int
+	networks      int
+	cleanups      int
+	creates       int
+	starts        int
+	startedID     string
+	spec          computeSystemSpec
+	shutdowns     int
+	shutdownID    string
+	shutdownErr   error
+	kills         int
+	killID        string
+	killErr       error
+	pauses        int
+	pauseID       string
+	pauseErr      error
+	resumes       int
+	resumeID      string
+	resumeErr     error
+	saves         int
+	saveID        string
+	saveStatePath string
+	saveType      string
+	saveErr       error
+	grants        int
+	grantVMID     string
+	grantPath     string
+	deletes       int
+	deleteID      string
+	waits         int
+	waitID        string
+	startErr      error
+	deleteErr     error
+	gone          bool
+	neverGone     bool
 	// shutdownIgnored models a guest with no shutdown integration: the HCS
 	// shutdown call succeeds but the compute system stays registered.
 	shutdownIgnored bool
@@ -1681,6 +1822,30 @@ func (f *fakeAdapter) Resume(ctx context.Context, id string) error {
 	return f.resumeErr
 }
 
+func (f *fakeAdapter) GrantAccess(ctx context.Context, vmID, path string) error {
+	f.grants++
+	f.grantVMID = vmID
+	f.grantPath = path
+	return nil
+}
+
+func (f *fakeAdapter) Save(ctx context.Context, id, stateFilePath, saveType string) error {
+	f.saves++
+	f.saveID = id
+	f.saveStatePath = stateFilePath
+	f.saveType = saveType
+	if f.saveErr != nil {
+		return f.saveErr
+	}
+	// A successful save writes the save-state file; the supervisor copies the
+	// rootfs and writes the manifest next, so the fake materializes the vmstate
+	// file the real HCS would create.
+	if err := os.MkdirAll(filepath.Dir(stateFilePath), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(stateFilePath, []byte("fake-vmstate"), 0o600)
+}
+
 func (f *fakeAdapter) Delete(ctx context.Context, id string) error {
 	f.deletes++
 	f.deleteID = id
@@ -1771,6 +1936,14 @@ func (failingAdapter) Pause(ctx context.Context, id string) error {
 
 func (failingAdapter) Resume(ctx context.Context, id string) error {
 	return fmt.Errorf("resume unavailable")
+}
+
+func (failingAdapter) Save(ctx context.Context, id, stateFilePath, saveType string) error {
+	return fmt.Errorf("save unavailable")
+}
+
+func (failingAdapter) GrantAccess(ctx context.Context, vmID, path string) error {
+	return fmt.Errorf("grant access unavailable")
 }
 
 func (failingAdapter) Kill(ctx context.Context, id string) error {

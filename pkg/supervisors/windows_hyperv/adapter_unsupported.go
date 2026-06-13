@@ -67,6 +67,21 @@ func (defaultAdapter) Resume(ctx context.Context, id string) error {
 	return errUnsupportedHost()
 }
 
+func (defaultAdapter) Save(ctx context.Context, id, stateFilePath, saveType string) error {
+	return errUnsupportedHost()
+}
+
+func (defaultAdapter) GrantAccess(ctx context.Context, vmID, path string) error {
+	return errUnsupportedHost()
+}
+
+// prepareSnapshotRestore is unsupported off windows; the snapshot restore path
+// (snapshot_windows.go) only compiles on windows, so the cross-platform
+// startComputeSystem in state.go needs this stub to build.
+func prepareSnapshotRestore(req vmkit.Request) (string, error) {
+	return "", errUnsupportedHost()
+}
+
 func (defaultAdapter) Kill(ctx context.Context, id string) error {
 	return errUnsupportedHost()
 }

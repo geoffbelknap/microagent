@@ -27,6 +27,7 @@ const (
 	hcsNotificationSystemStartCompleted  hcsNotification = 0x00000003
 	hcsNotificationSystemPauseCompleted  hcsNotification = 0x00000004
 	hcsNotificationSystemResumeCompleted hcsNotification = 0x00000005
+	hcsNotificationSystemSaveCompleted   hcsNotification = 0x00000008
 	hcsNotificationServiceDisconnect     hcsNotification = 0x01000000
 )
 
@@ -44,6 +45,8 @@ func (n hcsNotification) String() string {
 		return "SystemPauseCompleted"
 	case hcsNotificationSystemResumeCompleted:
 		return "SystemResumeCompleted"
+	case hcsNotificationSystemSaveCompleted:
+		return "SystemSaveCompleted"
 	case hcsNotificationServiceDisconnect:
 		return "ServiceDisconnect"
 	default:
@@ -77,6 +80,7 @@ type vmcomputeAPI interface {
 	TerminateComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	PauseComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	ResumeComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
+	SaveComputeSystem(ctx context.Context, handle uintptr, options string) (string, error)
 	GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error)
 	RegisterComputeSystemCallback(ctx context.Context, handle, callback, callbackContext uintptr) (uintptr, error)
 	UnregisterComputeSystemCallback(ctx context.Context, callbackHandle uintptr) error
@@ -237,6 +241,41 @@ func (c vmcomputeClient) ResumeComputeSystem(ctx context.Context, id string) err
 	})
 }
 
+// computeSystemSaveTimeout bounds the async HCS save callback wait. Like
+// pause/resume, save is issued from a standalone CLI process whose only live
+// goroutine is the one blocked on the HCS notification channel, so it binds the
+// wait to a context deadline to keep a timer goroutine live (defeating the
+// "all goroutines are asleep" deadlock-detector false positive) and to fail
+// closed if HCS never signals. A full memory save can take materially longer
+// than a pause, so this is sized generously. A variable so tests can shorten it.
+var computeSystemSaveTimeout = 10 * time.Minute
+
+// SaveComputeSystem writes the paused compute system's guest memory and device
+// state to a save-state file on the host. The system MUST already be paused
+// (HCS rejects a save of a running system). Save is async — it returns
+// HCS_E_PENDING and signals SystemSaveCompleted — so it rides the same callback
+// wait as pause. The saveType selects the save flavor: "ToFile" produces a plain
+// restorable save-to-file (the snapshot artifact), as opposed to "AsTemplate"
+// which produces a fast-clone template.
+func (c vmcomputeClient) SaveComputeSystem(ctx context.Context, id, saveStateFilePath, saveType string) error {
+	options, err := json.Marshal(saveOptions{SaveType: saveType, SaveStateFilePath: saveStateFilePath})
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, computeSystemSaveTimeout)
+	defer cancel()
+	return c.withComputeSystem(ctx, id, "save", hcsNotificationSystemSaveCompleted, func(handle uintptr) (string, error) {
+		return c.vmcomputeAPI().SaveComputeSystem(ctx, handle, string(options))
+	})
+}
+
+// saveOptions is the HCS save-state request document
+// (schema2/save_options.go SaveOptions).
+type saveOptions struct {
+	SaveType          string `json:"SaveType,omitempty"`
+	SaveStateFilePath string `json:"SaveStateFilePath,omitempty"`
+}
+
 func (c vmcomputeClient) KillComputeSystem(ctx context.Context, id string) error {
 	return c.terminateComputeSystem(ctx, id, "kill")
 }
@@ -334,6 +373,7 @@ func registerComputeSystemCallback(ctx context.Context, api vmcomputeAPI, handle
 			hcsNotificationSystemStartCompleted:  make(chan error, 1),
 			hcsNotificationSystemPauseCompleted:  make(chan error, 1),
 			hcsNotificationSystemResumeCompleted: make(chan error, 1),
+			hcsNotificationSystemSaveCompleted:   make(chan error, 1),
 		},
 	}
 	hcsCallbackMapLock.Lock()
@@ -420,6 +460,28 @@ type windowsVMComputeAPI struct{}
 
 var vmcomputeDLL = windows.NewLazySystemDLL("vmcompute.dll")
 
+// computecore.dll hosts the modern HCS API. HcsCreateEmptyRuntimeStateFile
+// creates the empty runtime-state (.vmrs) file that HcsSaveComputeSystem writes
+// the saved guest memory into; without it a save-to-file captures only ~24KB of
+// device state and the memory is lost (and RestoreState then cannot boot).
+var computecoreDLL = windows.NewLazySystemDLL("computecore.dll")
+
+var procHcsCreateEmptyRuntimeStateFile = computecoreDLL.NewProc("HcsCreateEmptyRuntimeStateFile")
+
+// createRuntimeStateFile creates an empty .vmrs runtime-state file at path. It
+// is the first step of an HCS save-to-file: the file is then granted to the VM
+// and passed as SaveStateFilePath to the save.
+func createRuntimeStateFile(path string) error {
+	pathPtr, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	if err := callHRESULT(procHcsCreateEmptyRuntimeStateFile, uintptr(unsafe.Pointer(pathPtr))); err != nil {
+		return hcsCallError("create runtime state file", "", err)
+	}
+	return nil
+}
+
 var (
 	procHcsCreateComputeSystem             = vmcomputeDLL.NewProc("HcsCreateComputeSystem")
 	procHcsOpenComputeSystem               = vmcomputeDLL.NewProc("HcsOpenComputeSystem")
@@ -430,6 +492,7 @@ var (
 	procHcsTerminateComputeSystem          = vmcomputeDLL.NewProc("HcsTerminateComputeSystem")
 	procHcsPauseComputeSystem              = vmcomputeDLL.NewProc("HcsPauseComputeSystem")
 	procHcsResumeComputeSystem             = vmcomputeDLL.NewProc("HcsResumeComputeSystem")
+	procHcsSaveComputeSystem               = vmcomputeDLL.NewProc("HcsSaveComputeSystem")
 	procHcsRegisterComputeSystemCallback   = vmcomputeDLL.NewProc("HcsRegisterComputeSystemCallback")
 	procHcsUnregisterComputeSystemCallback = vmcomputeDLL.NewProc("HcsUnregisterComputeSystemCallback")
 	procGrantVMAccess                      = vmcomputeDLL.NewProc("GrantVmAccess")
@@ -483,6 +546,10 @@ func (windowsVMComputeAPI) PauseComputeSystem(ctx context.Context, handle uintpt
 
 func (windowsVMComputeAPI) ResumeComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
 	return callComputeSystemOperation(procHcsResumeComputeSystem, handle, options)
+}
+
+func (windowsVMComputeAPI) SaveComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
+	return callComputeSystemOperation(procHcsSaveComputeSystem, handle, options)
 }
 
 func (windowsVMComputeAPI) GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error) {

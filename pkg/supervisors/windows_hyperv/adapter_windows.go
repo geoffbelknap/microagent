@@ -251,6 +251,14 @@ func (a defaultAdapter) Resume(ctx context.Context, id string) error {
 	return a.hcsClient().ResumeComputeSystem(ctx, id)
 }
 
+func (a defaultAdapter) Save(ctx context.Context, id, stateFilePath, saveType string) error {
+	return a.hcsClient().SaveComputeSystem(ctx, id, stateFilePath, saveType)
+}
+
+func (a defaultAdapter) GrantAccess(ctx context.Context, vmID, path string) error {
+	return a.hcsClient().GrantVMAccess(ctx, vmID, path)
+}
+
 func (a defaultAdapter) Kill(ctx context.Context, id string) error {
 	return a.hcsClient().KillComputeSystem(ctx, id)
 }
@@ -308,6 +316,15 @@ type virtualMachine struct {
 	Chipset         chipset         `json:"Chipset"`
 	ComputeTopology computeTopology `json:"ComputeTopology"`
 	Devices         devices         `json:"Devices"`
+	RestoreState    *restoreState   `json:"RestoreState,omitempty"`
+}
+
+// restoreState is the HCS VirtualMachine.RestoreState document
+// (schema2/restore_state.go RestoreState). A non-empty SaveStateFilePath makes
+// HCS boot the compute system from the save-state file rather than cold-booting
+// the kernel.
+type restoreState struct {
+	SaveStateFilePath string `json:"SaveStateFilePath,omitempty"`
 }
 
 type chipset struct {
@@ -498,12 +515,17 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 			ReadOnly: disk.Mode == "ro",
 		}
 	}
+	var restore *restoreState
+	if path := strings.TrimSpace(spec.RestoreStateFilePath); path != "" {
+		restore = &restoreState{SaveStateFilePath: path}
+	}
 	doc := computeSystemDocument{
 		Owner:                             "microagent",
 		SchemaVersion:                     versionDocument{Major: 2, Minor: 1},
 		ShouldTerminateOnLastHandleClosed: false,
 		VirtualMachine: virtualMachine{
-			StopOnReset: true,
+			StopOnReset:  true,
+			RestoreState: restore,
 			Chipset: chipset{LinuxKernelDirect: linuxKernelDirect{
 				KernelFilePath: spec.Config.KernelPath,
 				KernelCmdLine:  kernelCmdLine,
@@ -922,6 +944,10 @@ func (unsupportedHCSClient) PauseComputeSystem(ctx context.Context, id string) e
 
 func (unsupportedHCSClient) ResumeComputeSystem(ctx context.Context, id string) error {
 	return errHCSNotImplemented("resume")
+}
+
+func (unsupportedHCSClient) SaveComputeSystem(ctx context.Context, id, stateFilePath, saveType string) error {
+	return errHCSNotImplemented("save")
 }
 
 func (unsupportedHCSClient) KillComputeSystem(ctx context.Context, id string) error {

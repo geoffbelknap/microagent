@@ -5,6 +5,25 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv snapshot, restore, and fork
+
+- `snapshot create`, `start --from-snapshot <tag>` (restore in place), and
+  `create --from-snapshot <workspace>:<tag>` (fork) now work on the
+  windows-hyperv backend, matching the Firecracker contract. A snapshot captures
+  the guest memory and device state with `HcsSaveComputeSystem`
+  (`SaveType: "ToFile"`) into a single `vmstate` save-state file plus a coherent
+  copy of the rootfs VHD, taken while the compute system is paused; a running
+  workspace is auto-paused around the capture and resumed (`running → paused →
+  running`). Restore and fork rebuild the HCS compute-system document with
+  `VirtualMachine.RestoreState` pointing at the snapshot's `vmstate`, so the
+  guest boots from the saved state rather than cold-booting the kernel. The
+  backend-neutral manifest records the kernel sha256 (load is rejected on kernel
+  skew), network mode, guest IP, VM sizing, and the guest service ports a fork
+  adopts. Bridged networking is unsupported for snapshot, restore, and fork. The
+  snapshot directory layout stays backend-neutral; windows-hyperv writes a single
+  `vmstate` + `rootfs.vhd` where Firecracker writes `vmstate` + `memory` +
+  `rootfs.ext4`, and the manifest abstracts the difference.
+
 ### windows-hyperv runtime.json read tolerates a concurrent atomic rewrite
 
 - Reading `runtime.json` now retries briefly on a transient read error. The

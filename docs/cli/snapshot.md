@@ -14,11 +14,14 @@ microagent snapshot rm <name> <tag> [--state-dir <dir>]               Remove one
 
 A snapshot is a full checkpoint of a workspace: its guest memory and device
 state plus a coherent copy of its rootfs disk, taken together while the VM is
-paused. Snapshots are currently implemented only for the Firecracker backend.
-They are stored under
-`<state-dir>/<name>/snapshots/<tag>/` as `vmstate`, `memory`, `rootfs.ext4`,
-and `manifest.json`. A workspace may hold multiple named snapshots; `--tag`
-defaults to a timestamp.
+paused. Snapshots are implemented on the Firecracker and windows-hyperv
+backends. They are stored under `<state-dir>/<name>/snapshots/<tag>/` alongside
+a `manifest.json`. Firecracker writes the guest state as two files (`vmstate` +
+`memory`) and an ext4 rootfs (`rootfs.ext4`); windows-hyperv writes a single HCS
+save-state file (`vmstate`) and a VHD rootfs (`rootfs.vhd`). The manifest
+abstracts that difference so `snapshot list`/`rm`, restore, and fork are
+backend-neutral. A workspace may hold multiple named snapshots; `--tag` defaults
+to a timestamp.
 
 Three commands copy a workspace; pick by what you need to keep. `snapshot`
 captures a live moment - memory included - so you can restore or fork
@@ -47,18 +50,19 @@ microagent snapshot rm research pre-upgrade
 
 ## `create`
 
-`snapshot create` checkpoints a running or paused workspace. Firecracker
-requires the VM be paused before a snapshot is written, so a running workspace
-is briefly auto-paused, snapshotted, and resumed (the pause appears in the
-event history as `running → paused → running`). An already-paused workspace is
-snapshotted in place and left paused.
+`snapshot create` checkpoints a running or paused workspace. Both backends
+require the VM be paused before a snapshot is written (Firecracker over its API,
+windows-hyperv via `HcsSaveComputeSystem`), so a running workspace is briefly
+auto-paused, snapshotted, and resumed (the pause appears in the event history as
+`running → paused → running`). An already-paused workspace is snapshotted in
+place and left paused.
 
 The manifest records the image reference, network mode, the guest IP to
 re-establish on restore, the kernel sha256 (used to reject loading against a
 different kernel), the vCPU/memory sizing, and the creation time.
 
-Because each snapshot stores both a memory file and a full rootfs copy, total
-size is roughly the touched guest RAM plus the rootfs size. `snapshot list`
+Because each snapshot stores the saved guest state plus a full rootfs copy,
+total size is roughly the saved guest RAM plus the rootfs size. `snapshot list`
 reports each tag's size; `snapshot rm` and `delete <name>` reclaim the space.
 
 ## `list`

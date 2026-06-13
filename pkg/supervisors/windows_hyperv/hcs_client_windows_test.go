@@ -255,6 +255,7 @@ type fakeVMComputeAPI struct {
 	startErr           error
 	pauseErr           error
 	resumeErr          error
+	saveErr            error
 	propertiesResponse string
 	propertiesQuery    string
 	callbackContext    uintptr
@@ -306,6 +307,12 @@ func (f *fakeVMComputeAPI) ResumeComputeSystem(ctx context.Context, handle uintp
 	f.operations = append(f.operations, "resume")
 	f.operationOptions = append(f.operationOptions, options)
 	return "", f.resumeErr
+}
+
+func (f *fakeVMComputeAPI) SaveComputeSystem(ctx context.Context, handle uintptr, options string) (string, error) {
+	f.operations = append(f.operations, "save")
+	f.operationOptions = append(f.operationOptions, options)
+	return "", f.saveErr
 }
 
 func (f *fakeVMComputeAPI) GetComputeSystemProperties(ctx context.Context, handle uintptr, query string) (string, string, error) {

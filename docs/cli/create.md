@@ -208,7 +208,7 @@ The complete set:
 | Flag | Description |
 |---|---|
 | `--image <ref>` | OCI image reference. When omitted on the image path, defaults to Python 3.13 slim (digest-pinned for `arm64`/`amd64`, the `python:3.13-slim` tag for other architectures); the `--rootfs` and `--from-snapshot` paths take no image |
-| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image (Firecracker) |
+| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image (Firecracker, windows-hyperv) |
 | `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
 | `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
@@ -268,13 +268,15 @@ existing workspace's [snapshot](/cli/snapshot/) instead of building from an
 image. The fork gets a fresh identity and a private copy of the snapshot's
 rootfs, then resumes from the snapshot's memory and device state.
 
-A Firecracker snapshot binds its vsock socket to the source workspace's path, so
-each fork runs Firecracker in a private mount namespace that maps the fork's own
-directory over the source's, and the fork takes its own host-side service ports
-while bridging them to the guest's snapshot ports. This is currently implemented
-only for the Firecracker backend; the snapshot kernel must match and bridged
-networking is unsupported. In-flight guest
-connections do not survive the fork - the guest process must reconnect.
+This is implemented on the Firecracker and windows-hyperv backends; the snapshot
+kernel must match and bridged networking is unsupported. The fork takes its own
+host-side service ports while bridging them to the guest's snapshot ports. A
+Firecracker snapshot additionally binds its vsock socket to the source
+workspace's path, so each Firecracker fork runs in a private mount namespace
+that maps the fork's own directory over the source's; windows-hyperv addresses
+its guest services over hv_sock keyed on the fork's own compute-system runtime
+ID, so it needs no such remap. In-flight guest connections do not survive the
+fork - the guest process must reconnect.
 
 For forks with networking, use `user` mode (pasta): every fork resumes with the
 snapshot's recorded guest IP, and user-mode gives each fork its own network

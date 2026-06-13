@@ -13,6 +13,40 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
+func TestBuildComputeSystemDocumentEmitsRestoreState(t *testing.T) {
+	spec := computeSystemSpec{
+		Name:     "agent-1",
+		Identity: vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendWindowsHyperV},
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			MemoryMiB:  512,
+			CPUCount:   2,
+		},
+		RestoreStateFilePath: "C:\\snap\\vmstate",
+	}
+	document, err := buildComputeSystemDocument(spec)
+	if err != nil {
+		t.Fatalf("buildComputeSystemDocument: %v", err)
+	}
+	var doc computeSystemDocument
+	if err := json.Unmarshal(document, &doc); err != nil {
+		t.Fatalf("unmarshal document: %v", err)
+	}
+	if doc.VirtualMachine.RestoreState == nil || doc.VirtualMachine.RestoreState.SaveStateFilePath != "C:\\snap\\vmstate" {
+		t.Fatalf("RestoreState = %#v, want SaveStateFilePath set", doc.VirtualMachine.RestoreState)
+	}
+	// A cold-boot spec (no restore path) must NOT carry a RestoreState block.
+	spec.RestoreStateFilePath = ""
+	coldDocument, err := buildComputeSystemDocument(spec)
+	if err != nil {
+		t.Fatalf("buildComputeSystemDocument cold: %v", err)
+	}
+	if strings.Contains(string(coldDocument), "RestoreState") {
+		t.Fatalf("cold-boot document must omit RestoreState, got: %s", coldDocument)
+	}
+}
+
 func TestBuildComputeSystemDocumentUsesKernelDirectAndRootVHD(t *testing.T) {
 	document, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",
@@ -673,14 +707,18 @@ func TestDefaultAdapterCreateGrantsVMAccessToAttachedVHDs(t *testing.T) {
 }
 
 type fakeHCSClient struct {
-	createdID string
-	document  []byte
-	handle    computeSystemHandle
-	pauses    int
-	pauseID   string
-	resumes   int
-	resumeID  string
-	grants    []struct {
+	createdID     string
+	document      []byte
+	handle        computeSystemHandle
+	pauses        int
+	pauseID       string
+	resumes       int
+	resumeID      string
+	saves         int
+	saveID        string
+	saveStatePath string
+	saveType      string
+	grants        []struct {
 		vmID string
 		path string
 	}
@@ -720,6 +758,14 @@ func (f *fakeHCSClient) PauseComputeSystem(ctx context.Context, id string) error
 func (f *fakeHCSClient) ResumeComputeSystem(ctx context.Context, id string) error {
 	f.resumes++
 	f.resumeID = id
+	return nil
+}
+
+func (f *fakeHCSClient) SaveComputeSystem(ctx context.Context, id, stateFilePath, saveType string) error {
+	f.saves++
+	f.saveID = id
+	f.saveStatePath = stateFilePath
+	f.saveType = saveType
 	return nil
 }
 
