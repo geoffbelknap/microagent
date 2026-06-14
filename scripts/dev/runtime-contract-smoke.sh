@@ -228,7 +228,7 @@ PY
 
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status.json"
 "$CLI" result "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result.json"
-"$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts.json"
+"$CLI" artifact "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts.json"
 
 # Guest-mediated copy backends (windows-hyperv) extract artifacts through a
 # real maintenance boot of the workspace, which this fabricated workspace
@@ -241,7 +241,7 @@ if e2e_is_windows; then
 fi
 if [ "$ARTIFACT_GET" = "1" ]; then
   mkdir -p "$STATE_DIR/out"
-  "$CLI" artifacts get "$WORKSPACE" report "$STATE_DIR/out" --state-dir "$STATE_DIR" --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-get.json"
+  "$CLI" artifact get "$WORKSPACE" report "$STATE_DIR/out" --state-dir "$STATE_DIR" --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-get.json"
 fi
 
 python3 - "$STATE_DIR" "$WORKSPACE" "$ARTIFACT_GET" <<'PY'

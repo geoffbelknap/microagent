@@ -18,13 +18,11 @@ GO_DOC = ROOT / "docs" / "library" / "go.md"
 GLOBAL_FLAGS = {"--json", "--text", "--output", "--supervisor"}
 UNDOCUMENTED_HELP_COMMANDS = {"help", "exec"}
 COMMAND_DOC_ALIASES = {
-    "inspect": "status",
-    "rm": "delete",
     "rootfs build": "rootfs",
     "kernel install": "kernel",
     "kernel verify": "kernel",
     "host setup-networking": "host",
-    "artifacts get": "artifacts",
+    "artifact get": "artifact",
     "perf boot": "perf",
     "perf footprint": "perf",
     "perf steady": "perf",
@@ -34,12 +32,11 @@ NESTED_HELP_COMMANDS = {
     "kernel install",
     "kernel verify",
     "host setup-networking",
-    "artifacts get",
+    "artifact get",
     "perf boot",
     "perf footprint",
     "perf steady",
     "serve mcp",
-    "serve model",
     "secret check",
 }
 PUBLIC_GO_PACKAGES = {
@@ -332,7 +329,7 @@ def documented_flags(page: Path) -> set[str]:
 
 def check_cli() -> list[str]:
     errors: list[str] = []
-    help_commands = parse_help_commands(microagent_help("help"))
+    help_commands = parse_help_commands(microagent_help("help", "all"))
     for command in sorted(help_commands):
         if command in UNDOCUMENTED_HELP_COMMANDS:
             continue

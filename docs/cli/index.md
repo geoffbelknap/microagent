@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ## Which command do I want?
 
@@ -15,7 +15,7 @@ _Last updated: 2026-06-11_
 | Get a shell inside a workspace | [`connect`](/cli/connect/) |
 | Run a command inside and get its exit code | [`exec`](/cli/exec/) |
 | Copy files in or out | [`cp`](/cli/cp/) |
-| See what's running | [`ps`](/cli/ps/) |
+| See what's running | [`list`](/cli/list/) |
 | Dig into one workspace | [`status`](/cli/status/) |
 | See what the VM printed at boot | [`logs`](/cli/logs/) |
 | Get the structured result of a run | [`result`](/cli/result/) |
@@ -36,7 +36,7 @@ _Last updated: 2026-06-11_
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
 | [`commit`](/cli/commit/) | Snapshot a stopped workspace rootfs into an OCI image |
 | [`cp`](/cli/cp/) | Copy files into or out of stopped workspace disks |
-| [`artifacts`](/cli/artifacts/) | List and retrieve declared workspace artifacts |
+| [`artifact`](/cli/artifact/) | List and retrieve declared workspace artifacts |
 | [`network`](/cli/network/) | Inspect declared network intent and runtime network state |
 | [`model`](/cli/model/) | Download and manage local HuggingFace GGUF model files |
 | [`volume`](/cli/volume/) | Manage named volumes - VM-independent ext4 disks attached by name |
@@ -48,10 +48,10 @@ _Last updated: 2026-06-11_
 | [`resume`](/cli/resume/) | Thaw a paused workspace back to running |
 | [`stop`](/cli/stop/) | Graceful shutdown |
 | [`kill`](/cli/kill/) | Hard terminate |
-| [`delete`](/cli/delete/) | Remove a workspace and its state (alias: `rm`) |
-| [`status`](/cli/status/) | Show workspace state (alias: `inspect`, with JSON output) |
+| [`delete`](/cli/delete/) | Remove a workspace and its state |
+| [`status`](/cli/status/) | Show workspace state |
 | [`result`](/cli/result/) | Show structured workspace result |
-| [`ps`](/cli/ps/) | List workspaces |
+| [`list`](/cli/list/) | List workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
 | [`events`](/cli/events/) | Show or stream the lifecycle event history |
 | [`stats`](/cli/stats/) | Show or stream workspace resource usage |
@@ -60,8 +60,7 @@ _Last updated: 2026-06-11_
 | [`connect`](/cli/connect/) | Open the workspace console |
 | [`exec`](/cli/exec/) | Run a structured command in a workspace |
 | [`profiles`](/cli/profiles/) | List exact named resource profiles |
-| [`images`](/cli/images/) | List or prune local image records |
-| [`prune`](/cli/prune/) | Prune stale records and optional reusable image baselines |
+| [`image`](/cli/image/) | Manage local image records |
 | [`perf`](/cli/perf/) | Measure workspace boot performance |
 | [`serve`](/cli/serve/) | Serve machine-readable agent endpoints |
 | [`contract`](/cli/contract/) | Print the backend-neutral runtime contract |

@@ -116,7 +116,7 @@ file_sha256() {
 
 init_log() {
   if [ "$quiet" -eq 1 ] && [ -z "$log_path" ]; then
-    log_path="$(mktemp "${TMPDIR:-/tmp}/microagent-install.XXXXXX.log")"
+    log_path="$(mktemp "${TMPDIR:-/tmp}/microagent-install-log.XXXXXX")"
   fi
 }
 
@@ -540,7 +540,7 @@ if [ "$install_host_packages" -eq 1 ]; then
 fi
 
 if [ "$install_kernel" -eq 1 ]; then
-  kernel_json="$(mktemp "${TMPDIR:-/tmp}/microagent-kernel-install.XXXXXX.json")"
+  kernel_json="$(mktemp "${TMPDIR:-/tmp}/microagent-kernel-install-json.XXXXXX")"
   kernel_path="$prefix/libexec/kernels/$backend/$arch/Image"
   run_capture "$kernel_json" "$prefix/bin/microagent" kernel install --backend "$backend" --arch "$arch" --out "$kernel_path"
   kernel_installed_path="$(python3 - "$kernel_json" "$kernel_path" <<'PY'
@@ -572,7 +572,7 @@ if [ "$backend" = "firecracker" ]; then
 fi
 
 if [ "$check" -eq 1 ]; then
-  doctor_json="$(mktemp "${TMPDIR:-/tmp}/microagent-install-doctor.XXXXXX.json")"
+  doctor_json="$(mktemp "${TMPDIR:-/tmp}/microagent-install-doctor-json.XXXXXX")"
   set +e
   run_doctor_capture "$doctor_json"
   doctor_status=$?

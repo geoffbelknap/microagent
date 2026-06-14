@@ -421,7 +421,7 @@ EOF
     echo "refreshing cached networking image rootfs because guest init changed" >&2
   fi
   echo "refreshing cached networking image rootfs for $IMAGE" >&2
-  "$CLI" images pull "$IMAGE" \
+  "$CLI" image pull "$IMAGE" \
     --state-dir "$IMAGE_CACHE_STATE" \
     --arch amd64 \
     --guest-init "$GUEST_INIT" \
@@ -990,11 +990,11 @@ if "$CLI" --json apply --file "$STATE_DIR/apply-live-invalid.yaml" --state-dir "
   exit 1
 fi
 grep -qi "host bind changes" "$STATE_DIR/apply-live-invalid.err"
-"$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
+"$CLI" artifact "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-halted.json"
 mkdir -p "$ARTIFACT_DIR/running"
-"$CLI" artifacts get "$WORKSPACE" report "$ARTIFACT_DIR/running" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-running.json"
+"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/running" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-running.json"
 
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/resume.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-resumed.json"
@@ -1015,7 +1015,7 @@ if "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"
 fi
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-quarantined.json"
 mkdir -p "$ARTIFACT_DIR/resumed"
-"$CLI" artifacts get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-resumed.json"
+"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-resumed.json"
 cp "$STATE_DIR/$WORKSPACE/events.json" "$STATE_DIR/events.json"
 cp "$STATE_DIR/workspaces/$WORKSPACE/workspace.json" "$STATE_DIR/workspace-after-live-apply.json"
 "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete.json"

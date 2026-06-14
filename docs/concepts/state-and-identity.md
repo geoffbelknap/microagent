@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -54,7 +54,7 @@ gets its own subdirectory containing:
 - backend-specific scratch (PID files for Firecracker, console sockets for
   Apple VF, HCS runtime IDs for Windows Hyper-V)
 
-`microagent ps` reads this directory. `microagent delete` removes a
+`microagent list` reads this directory. `microagent delete` removes a
 workspace's subdirectory.
 
 ## Runtime verification

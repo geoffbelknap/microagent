@@ -197,23 +197,23 @@ func TestPrintServeHelpTreatsMCPAsClientIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(data)
-	if !strings.Contains(got, "model               Serve a local HuggingFace GGUF model") {
-		t.Fatalf("serve help missing model command:\n%s", got)
+	if !strings.Contains(got, "mcp                 Serve the MCP stdio endpoint") {
+		t.Fatalf("serve help missing mcp command:\n%s", got)
 	}
-	if strings.Contains(got, "mcp                 ") {
-		t.Fatalf("serve help advertises mcp as a normal command:\n%s", got)
+	if strings.Contains(got, "model               ") {
+		t.Fatalf("serve help advertises model command:\n%s", got)
 	}
 	if !strings.Contains(got, "MCP clients can launch") {
 		t.Fatalf("serve help missing MCP integration note:\n%s", got)
 	}
 }
 
-func TestRunServeModelAliasesModelServe(t *testing.T) {
+func TestRunServeRejectsModelServeAlias(t *testing.T) {
 	err := runServe(context.Background(), []string{"model"}, nil)
 	if err == nil {
-		t.Fatal("runServe model without ref succeeded, want usage error")
+		t.Fatal("runServe model succeeded, want unknown command error")
 	}
-	if !strings.Contains(err.Error(), "usage: microagent model serve <hf-ref>") {
+	if !strings.Contains(err.Error(), "unknown serve command: model") {
 		t.Fatalf("runServe model error = %q", err)
 	}
 }
@@ -278,7 +278,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		{
 			name: "artifacts.list",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "artifacts", "demo", "-state-dir", "/tmp/state"},
+			want: []string{"--mode=ax", "artifact", "demo", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "snapshot.create",
@@ -288,7 +288,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		{
 			name: "snapshot.delete",
 			args: map[string]any{"name": "demo", "tag": "before-upgrade", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "snapshot", "rm", "demo", "before-upgrade", "-state-dir", "/tmp/state"},
+			want: []string{"--mode=ax", "snapshot", "delete", "demo", "before-upgrade", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "network.create",
@@ -298,7 +298,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		{
 			name: "network.delete",
 			args: map[string]any{"name": "devnet", "force": true},
-			want: []string{"--mode=ax", "network", "rm", "devnet", "-force"},
+			want: []string{"--mode=ax", "network", "delete", "devnet", "-force"},
 		},
 		{
 			name: "volume.create",
@@ -308,27 +308,27 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		{
 			name: "volume.delete",
 			args: map[string]any{"name": "data", "force": true},
-			want: []string{"--mode=ax", "volume", "rm", "data", "-force"},
+			want: []string{"--mode=ax", "volume", "delete", "data", "-force"},
 		},
 		{
 			name: "images.push",
 			args: map[string]any{"image": "example.com/acme/demo:rc", "state_dir": "/tmp/state"},
-			want: []string{"--mode=ax", "images", "push", "example.com/acme/demo:rc", "-state-dir", "/tmp/state"},
+			want: []string{"--mode=ax", "image", "push", "example.com/acme/demo:rc", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "images.tag",
 			args: map[string]any{"source": "example.com/acme/demo:rc", "target": "example.com/acme/demo:stable"},
-			want: []string{"--mode=ax", "images", "tag", "example.com/acme/demo:rc", "example.com/acme/demo:stable"},
+			want: []string{"--mode=ax", "image", "tag", "example.com/acme/demo:rc", "example.com/acme/demo:stable"},
 		},
 		{
 			name: "images.delete",
 			args: map[string]any{"image": "example.com/acme/demo:old", "delete_files": true},
-			want: []string{"--mode=ax", "images", "rm", "example.com/acme/demo:old", "-delete", "-yes"},
+			want: []string{"--mode=ax", "image", "delete", "example.com/acme/demo:old", "-delete", "-yes"},
 		},
 		{
 			name: "images.prune",
 			args: map[string]any{"state_dir": "/tmp/state", "delete_files": true},
-			want: []string{"--mode=ax", "images", "prune", "-state-dir", "/tmp/state", "-delete", "-yes"},
+			want: []string{"--mode=ax", "image", "prune", "-state-dir", "/tmp/state", "-delete", "-yes"},
 		},
 		{
 			name: "profiles.list",

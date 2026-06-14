@@ -146,7 +146,7 @@ if "$CLI" connect connect-smoke --state-dir "$STATE_DIR/connect" --send "echo CO
 fi
 grep -q "console input is unavailable in state prepared" "$STATE_DIR/connect.err"
 "$CLI" logs connect-smoke --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-logs.txt"
-"$CLI" ps --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-ps.json"
+"$CLI" list --state-dir "$STATE_DIR/connect" >"$STATE_DIR/connect-ps.json"
 
 python3 - "$STATE_DIR/connect-create.json" "$CONNECT_RESULT" "$STATE_DIR/connect-logs.txt" "$STATE_DIR/connect-ps.json" <<'PY'
 import json
@@ -227,11 +227,11 @@ PY
 "$CLI" start substrate-smoke --state-dir "$STATE_DIR/substrate" --kernel "$kernel_path" >"$STATE_DIR/substrate-start.json"
 wait_for_status_ready substrate-smoke "$STATE_DIR/substrate" "$STATE_DIR/substrate-status-running.json"
 "$CLI" connect substrate-smoke --state-dir "$STATE_DIR/substrate" --send "printf substrate-live > /preserved.txt; printf '{\"ok\":true,\"phase\":\"running\"}' > /report.json; sync" --timeout 5 >"$STATE_DIR/substrate-write.txt"
-"$CLI" artifacts substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifacts.json"
+"$CLI" artifact substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifacts.json"
 "$CLI" halt substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-halt.json"
 "$CLI" status substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-status-halted.json"
 mkdir -p "$ARTIFACT_DIR/running"
-"$CLI" artifacts get substrate-smoke report "$ARTIFACT_DIR/running" --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifact-get-running.json"
+"$CLI" artifact get substrate-smoke report "$ARTIFACT_DIR/running" --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifact-get-running.json"
 "$CLI" start substrate-smoke --state-dir "$STATE_DIR/substrate" --kernel "$kernel_path" >"$STATE_DIR/substrate-resume.json"
 wait_for_status_ready substrate-smoke "$STATE_DIR/substrate" "$STATE_DIR/substrate-status-resumed.json"
 "$CLI" connect substrate-smoke --state-dir "$STATE_DIR/substrate" --send "cat /preserved.txt; printf '{\"ok\":true,\"phase\":\"resumed\"}' > /report.json; sync" --timeout 5 >"$STATE_DIR/substrate-resume-read.txt"
@@ -243,7 +243,7 @@ if "$CLI" start substrate-smoke --state-dir "$STATE_DIR/substrate" --kernel "$ke
 fi
 "$CLI" halt substrate-smoke --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-halt-quarantined.json"
 mkdir -p "$ARTIFACT_DIR/resumed"
-"$CLI" artifacts get substrate-smoke report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifact-get-resumed.json"
+"$CLI" artifact get substrate-smoke report "$ARTIFACT_DIR/resumed" --state-dir "$STATE_DIR/substrate" >"$STATE_DIR/substrate-artifact-get-resumed.json"
 
 python3 - "$STATE_DIR" <<'PY'
 import json

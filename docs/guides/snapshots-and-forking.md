@@ -4,7 +4,7 @@ description: Checkpoint a running workspace, restore it in place, or fork copies
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-14_
 
 A snapshot freezes a workspace - guest memory, device state, and disk - at
 one moment. This guide takes one, rolls back to it, and forks independent
@@ -43,7 +43,7 @@ baseline                 1.5GiB       2026-06-11T08:52:44Z  docker.io/library/al
 ```
 
 Each snapshot stores the memory file plus a full rootfs copy, so size is
-roughly touched RAM plus the disk. `snapshot rm` reclaims it.
+roughly touched RAM plus the disk. `snapshot delete` reclaims it.
 
 ## 3. Restore in place
 
@@ -105,11 +105,11 @@ namespace and are single-instance.
 ```bash
 microagent halt builder-fork && microagent delete builder-fork --yes
 microagent halt builder
-microagent snapshot rm builder baseline
+microagent snapshot delete builder baseline
 microagent delete builder --yes
 ```
 
-Deleting a workspace also removes its snapshots; `snapshot rm` removes a
+Deleting a workspace also removes its snapshots; `snapshot delete` removes a
 single tag.
 
 ## What's next

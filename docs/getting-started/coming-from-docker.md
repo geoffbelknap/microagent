@@ -4,7 +4,7 @@ description: Map the Docker commands you already know to their microagent equiva
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 If you think in Docker commands, most of your muscle memory carries over. The
 big difference: each "container" is a real microVM with its own kernel, and
@@ -17,17 +17,17 @@ first, then covers what is intentionally different.
 |---|---|---|
 | `docker run --rm IMAGE CMD` | `microagent run IMAGE CMD` | One-shot: boots a microVM, runs the command, removes scratch state. Disposable is the default; pass `--keep` to keep state. |
 | `docker run -d --name web IMAGE` | `microagent create --name web --image IMAGE`, then `microagent start web` | A workspace persists between starts. Use `--service-command` for a long-running process. |
-| `docker ps` | `microagent ps` | Lists workspaces. |
+| `docker ps` | `microagent list` | Lists workspaces. |
 | `docker exec web CMD` | `microagent exec web -- CMD` | Structured result with exit code, stdout, and stderr. Note the `--` before the command. |
 | `docker exec -it web bash` | `microagent connect web` | Opens the workspace console. |
 | `docker stop web` | `microagent stop web` | Graceful shutdown signal. If the VM doesn't shut down cleanly, follow up with `microagent kill`. See [halt is not stop](#halt-is-not-stop). |
-| `docker rm web` | `microagent delete web` | `microagent rm` works as an alias. Prompts before deleting; if the workspace is running it offers to stop it first. `--force` kills and deletes. |
+| `docker rm web` | `microagent delete web` | Prompts before deleting; if the workspace is running it offers to stop it first. `--force` kills and deletes. |
 | `docker cp app.py web:/srv/` | `microagent cp app.py web:/srv/` | Same shape, but works on a stopped workspace: files move through the disk image, not a running daemon. |
 | `docker logs web` | `microagent logs web` | Captured serial console output. `-f` follows. |
-| `docker images` | `microagent images` | Lists local image records. |
+| `docker images` | `microagent image list` | Lists local image records. |
 | `docker commit web REF` | `microagent commit web REF` | Snapshots a stopped workspace's rootfs into an OCI image. |
-| `docker network create/ls/rm` | `microagent network create/ls/rm` | Workspaces join a named network with `--network-name`. |
-| `docker volume create/ls/inspect/rm` | `microagent volume create/ls/inspect/rm` | Named volumes are managed ext4 disks. Attach with `-v data:/work`. |
+| `docker network create/ls/rm` | `microagent network create/list/delete` | Workspaces join a named network with `--network-name`. |
+| `docker volume create/ls/inspect/rm` | `microagent volume create/list/status/delete` | Named volumes are managed ext4 disks. Attach with `-v data:/work`. |
 
 The familiar flags work where they map cleanly to microVM behavior: `-e`
 (guest environment variable), `-p` (publish a TCP port), `--name`, `--rm`,

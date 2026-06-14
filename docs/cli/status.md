@@ -4,21 +4,17 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
 microagent [--json] status --name <name> [--state-dir <dir>]
-microagent inspect <name> [--state-dir <dir>]
 ```
 
 `status` reads the state file for one workspace and prints the latest event:
 identity, state (`prepared`, `running`, `halted`, `quarantined`, `stopped`, `failed`), and
-backend. It's the single-workspace deep view; use [`ps`](/cli/ps/) when you
+backend. It's the single-workspace deep view; use [`list`](/cli/list/) when you
 want one row per workspace across the whole state directory.
-
-`inspect` is a familiar alias for `status` that defaults to structured JSON
-output.
 
 ## Examples
 
@@ -26,7 +22,6 @@ Check a workspace:
 
 ```bash
 microagent status research
-microagent inspect research
 ```
 
 Get the full structured view, or point at another state directory:
@@ -123,7 +118,7 @@ payload returned by [`microagent result`](/cli/result/).
 
 Named workspaces also include `artifacts` when inputs or outputs were declared.
 `artifacts.ingress` lists attached bundle inputs, and `artifacts.egress` lists
-declared output paths. Use [`artifacts get`](/cli/artifacts/) to retrieve a
+declared output paths. Use [`artifact get`](/cli/artifact/) to retrieve a
 declared output by name without entering the workspace.
 
 ## Exit status
@@ -134,6 +129,6 @@ missing workspace is written as a structured `not_found` error envelope.
 
 ## Related
 
-- [`ps`](/cli/ps/) - the list view across all workspaces
+- [`list`](/cli/list/) - the list view across all workspaces
 - [State and identity](/concepts/state-and-identity/) - the state model behind these fields
 - [Readiness semantics](/concepts/state-and-identity/#readiness) - what each readiness signal means
