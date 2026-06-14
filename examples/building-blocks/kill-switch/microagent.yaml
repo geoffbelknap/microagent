@@ -1,0 +1,8 @@
+name: kill-switch
+image: docker.io/library/python:3.12-slim
+setup:
+  - mkdir -p /app
+entrypoint: python /app/worker.py
+files:
+  - src: ./worker.py
+    dst: /app/worker.py
