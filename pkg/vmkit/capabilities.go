@@ -39,6 +39,14 @@ type Capabilities struct {
 	// channel instead, using a transient maintenance boot for stopped
 	// workspaces.
 	GuestMediatedCopy bool
+	// Snapshot reports whether the backend can checkpoint a workspace's guest
+	// memory + device state to disk (snapshot create/restore/fork). Apple VF
+	// support is planned (VZ saveMachineStateTo, macOS 14+). windows-hyperv
+	// cannot: its HCS-direct (LinuxKernelDirect) compute systems have no
+	// guest-memory save-state — HcsSaveComputeSystem captures only device
+	// state, and the working Hyper-V mechanisms (Save-VM/checkpoints) belong
+	// to VMMS, which the HCS-direct backend deliberately does not use.
+	Snapshot bool
 }
 
 // BackendCapabilities returns the capability table entry for a backend.
@@ -53,6 +61,7 @@ func BackendCapabilities(backend string) Capabilities {
 			DetachedStartCommand: "start",
 			ShellNetwork:         "tcp",
 			ShellReadinessProbe:  true,
+			Snapshot:             true,
 		}
 	case BackendAppleVF:
 		return Capabilities{
