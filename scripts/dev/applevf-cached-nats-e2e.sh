@@ -208,7 +208,7 @@ EOF
     echo "refreshing cached Apple VF NATS rootfs because guest init changed" >&2
   fi
   echo "refreshing cached Apple VF NATS rootfs for $IMAGE" >&2
-  "$CLI" images pull "$IMAGE" \
+  "$CLI" image pull "$IMAGE" \
     --state-dir "$IMAGE_CACHE_STATE" \
     --arch "$ARCH" \
     --guest-init "$GUEST_INIT" \
@@ -473,11 +473,11 @@ if "$CLI" --json apply \
   exit 1
 fi
 grep -qi "host bind changes" "$STATE_DIR/apply-live-invalid.err"
-"$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
+"$CLI" artifact "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/halt.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-halted.json"
 mkdir -p "$ARTIFACT_DIR/running"
-"$CLI" artifacts get "$WORKSPACE" report "$ARTIFACT_DIR/running" \
+"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/running" \
   --state-dir "$STATE_DIR" \
   --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-running.json"
 
@@ -514,7 +514,7 @@ raise SystemExit(f"published NATS listeners stayed open after quarantine: {open_
 PY
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/halt-quarantined.json"
 mkdir -p "$ARTIFACT_DIR/resumed"
-"$CLI" artifacts get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" \
+"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" \
   --state-dir "$STATE_DIR" \
   --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-resumed.json"
 "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR" >"$STATE_DIR/delete.json"

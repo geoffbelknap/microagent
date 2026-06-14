@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -262,10 +262,10 @@ error: image reference is mutable, pass --allow-mutable to override
 
 `microagent create` and `microagent run` are looser - they accept tags by default and record the resolved digest in the workspace's verification record. See [security](/security/) for the trust-boundary discussion.
 
-### `microagent images pull` is slow or fails
+### `microagent image pull` is slow or fails
 
 - **Slow:** the OCI registry is slow, or the layers are large. Look at the registry/network rather than microagent.
-- **Disk space:** pulls land under `~/.microagent/images/`. Check disk space; prune old records with `microagent images prune --delete`.
+- **Disk space:** pulls land under `~/.microagent/images/`. Check disk space; prune old records with `microagent image prune --delete`.
 
 ## Still stuck?
 

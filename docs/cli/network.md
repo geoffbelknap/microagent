@@ -4,13 +4,13 @@ description: Inspect workspace networking and manage named networks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's network
 microagent network create <name> [--subnet <cidr>]   Create a named network
-microagent network ls                                 List named networks
-microagent network rm <name> [--force]                Remove a named network
+microagent network list                                 List named networks
+microagent network delete <name> [--force]                Remove a named network
 ```
 
 With a workspace name, `network` reports the network mode, bridged host
@@ -18,7 +18,7 @@ interface, declared port forwards, DNS servers, routes, and IP information
 recorded for that workspace. The top-level `network` field comes from the
 persistent workspace manifest; when a workspace has a runtime state file,
 `runtime` shows the last network config recorded by the backend supervisor.
-The `create`/`ls`/`rm` subcommands manage named networks - user-defined,
+The `create`/`list`/`delete` subcommands manage named networks - user-defined,
 VM-independent subnets that workspaces join by name.
 
 ## Examples
@@ -61,8 +61,8 @@ Manage named networks:
 ```bash
 microagent network create frontend
 microagent network create backend --subnet 10.99.0.0/24
-microagent network ls
-microagent network rm backend
+microagent network list
+microagent network delete backend
 ```
 
 ## Named networks
@@ -73,7 +73,7 @@ A subnet is auto-allocated from `10.44.0.0/16` (one `/24` per network) unless
 `--subnet` is given; the gateway is the first usable host. The registry lives at
 `<state-dir>/networks/index.json`.
 
-`network rm` fails closed while a network still has members; pass `--force` to
+`network delete` fails closed while a network still has members; pass `--force` to
 remove it anyway.
 
 ## Joining a network
@@ -126,7 +126,7 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 ## Exit status
 
 `network` exits `0` on success; nonzero when the workspace or named network
-cannot be found, or when `rm` would remove a network that still has members
+cannot be found, or when `delete` would remove a network that still has members
 (without `--force`). In AX mode a failure is written as a structured error
 envelope.
 

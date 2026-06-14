@@ -4,12 +4,12 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-14_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]   Checkpoint a running workspace
 microagent snapshot list <name> [--state-dir <dir>]                   List a workspace's snapshots
-microagent snapshot rm <name> <tag> [--state-dir <dir>]               Remove one snapshot
+microagent snapshot delete <name> <tag> [--state-dir <dir>]               Remove one snapshot
 ```
 
 A snapshot is a full checkpoint of a workspace: its guest memory and device
@@ -51,7 +51,7 @@ microagent start research --from-snapshot pre-upgrade
 Reclaim the space when the tag is no longer needed:
 
 ```bash
-microagent snapshot rm research pre-upgrade
+microagent snapshot delete research pre-upgrade
 ```
 
 ## `create`
@@ -68,7 +68,7 @@ different kernel), the vCPU/memory sizing, and the creation time.
 
 Because each snapshot stores both a memory file and a full rootfs copy, total
 size is roughly the touched guest RAM plus the rootfs size. `snapshot list`
-reports each tag's size; `snapshot rm` and `delete <name>` reclaim the space.
+reports each tag's size; `snapshot delete` and `delete <name>` reclaim the space.
 
 ## `list`
 
@@ -76,9 +76,9 @@ reports each tag's size; `snapshot rm` and `delete <name>` reclaim the space.
 on-disk size, creation time, and source image. It is a host-side read and works
 whether or not the workspace is running.
 
-## `rm`
+## `delete`
 
-`snapshot rm` deletes a single snapshot tag. It is a host-side operation and
+`snapshot delete` deletes a single snapshot tag. It is a host-side operation and
 does not require a running workspace.
 
 ## Connection-reset contract

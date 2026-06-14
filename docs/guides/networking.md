@@ -4,7 +4,7 @@ description: Put an app and a database on one named network so they reach and re
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 Two workspaces, one subnet: an app called `web` that reaches a database
 called `db` by name. That's where this guide ends up. A named network is
@@ -58,7 +58,7 @@ routed through the gateway with NAT.
 Check membership and runtime addresses:
 
 ```bash
-microagent network ls
+microagent network list
 microagent --json network web
 ```
 
@@ -109,11 +109,11 @@ database clients already do.
 ```bash
 microagent halt web && microagent delete web --yes
 microagent halt db && microagent delete db --yes
-microagent network rm devnet
+microagent network delete devnet
 ```
 
 Deleting a workspace frees its address; the managed bridge is reaped when the
-last member stops. `network rm` fails closed while members remain - `--force`
+last member stops. `network delete` fails closed while members remain - `--force`
 overrides.
 
 ## What's next

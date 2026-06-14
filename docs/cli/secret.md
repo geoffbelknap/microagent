@@ -4,7 +4,7 @@ description: Resolve and validate secret references without writing secrets to d
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]   Validate secret references
@@ -14,7 +14,7 @@ microagent secret audit <workspace> [--state-dir <dir>]                 Read a w
 microagent is a **secret conduit, not a store**. It never owns secrets at rest:
 it either passes operator-owned plaintext through (loudly warned) or resolves a
 reference from an external secret manager, holding the value only in host
-process memory. There is no encrypted store, keyring, or `secret set/ls/rm`.
+process memory. There is no encrypted store, keyring, or `secret set/ls/delete`.
 
 A secret is declared as `NAME=<scheme>:<ref>`, where the scheme selects the
 source and the reference names *where* the value lives - never the value

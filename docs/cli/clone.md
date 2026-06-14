@@ -4,7 +4,7 @@ description: Copy a stopped workspace into a new workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent clone <source> <target> [--state-dir <dir>]
@@ -54,4 +54,4 @@ as a structured error envelope.
 
 - [`create`](/cli/create/) - build a workspace from an image
 - [`start`](/cli/start/) - boot the clone
-- [`ps`](/cli/ps/) - list source and target side by side
+- [`list`](/cli/list/) - list source and target side by side

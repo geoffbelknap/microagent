@@ -94,7 +94,15 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
 		return runWindowsHyperVListener(ctx, args[1:])
 	}
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+	if len(args) > 0 && args[0] == "help" {
+		if len(args) > 1 && args[1] == "all" {
+			printFullHelp(stdout)
+			return nil
+		}
+		printHelp(stdout)
+		return nil
+	}
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		printHelp(stdout)
 		return nil
 	}
@@ -119,11 +127,8 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "profiles" {
 		return runProfiles(args[1:], stdout)
 	}
-	if args[0] == "images" {
-		return runImages(args[1:], stdout)
-	}
-	if args[0] == "prune" {
-		return runPrune(args[1:], stdout)
+	if args[0] == "image" {
+		return runImage(args[1:], stdout)
 	}
 	if args[0] == "perf" {
 		return runPerf(ctx, args[1:], stdout)
@@ -159,11 +164,11 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "cp" {
 		return runCP(ctx, args[1:], stdout)
 	}
-	if args[0] == "artifacts" {
-		return runArtifacts(ctx, args[1:], stdout)
+	if args[0] == "artifact" {
+		return runArtifact(ctx, args[1:], stdout)
 	}
-	if args[0] == "ps" {
-		return runPS(args[1:], stdout)
+	if args[0] == "list" {
+		return runList(args[1:], stdout)
 	}
 	if args[0] == "logs" || args[0] == "log" {
 		return runLogs(ctx, args[1:], stdout)
@@ -192,19 +197,10 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "result" {
 		return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 	}
-	if args[0] == "inspect" {
-		if outputFormat == "" {
-			outputFormat = "json"
-		}
-		return runWorkspaceStateCommand(ctx, "status", args[1:], stdout)
-	}
 	if args[0] == "status" || args[0] == "halt" || args[0] == "quarantine" || args[0] == "pause" || args[0] == "resume" || args[0] == "stop" || args[0] == "kill" || args[0] == "delete" {
 		if wantsHelp(args[1:]) || hasWorkspaceStateTarget(args[1:]) {
 			return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 		}
-	}
-	if args[0] == "rm" {
-		return runWorkspaceStateCommand(ctx, "delete", args[1:], stdout)
 	}
 	if args[0] == "exec" {
 		return runStructuredExec(ctx, args[1:], stdout, os.Stderr)
@@ -753,16 +749,16 @@ func pendingModelRelease(stateDir, name string) func() {
 	return func() { _ = modelrunner.Release(stateDir, modelRef, name) }
 }
 
-func runPS(args []string, stdout *os.File) error {
+func runList(args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
+	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("unexpected ps argument: %s", fs.Arg(0))
+		return fmt.Errorf("unexpected list argument: %s", fs.Arg(0))
 	}
 	entries, err := workspace.List(opts.StateDir)
 	if err != nil {
@@ -817,19 +813,19 @@ func runCP(ctx context.Context, args []string, stdout *os.File) error {
 	return writeCopyResult(stdout, result)
 }
 
-func runArtifacts(ctx context.Context, args []string, stdout *os.File) error {
+func runArtifact(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) > 0 && args[0] == "get" {
 		return runArtifactGet(ctx, args[1:], stdout)
 	}
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("artifacts", flag.ContinueOnError)
+	fs := flag.NewFlagSet("artifact", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: microagent artifacts <name> [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent artifact <name> [--state-dir <dir>]")
 	}
 	name := fs.Arg(0)
 	if err := validateWorkspaceName(name); err != nil {
@@ -846,7 +842,7 @@ func runArtifacts(ctx context.Context, args []string, stdout *os.File) error {
 func runArtifactGet(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	debugfsPath := defaultDebugFSPath()
-	fs := flag.NewFlagSet("artifacts get", flag.ContinueOnError)
+	fs := flag.NewFlagSet("artifact get", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	fs.StringVar(&debugfsPath, "debugfs", debugfsPath, "debugfs binary path")
@@ -854,7 +850,7 @@ func runArtifactGet(ctx context.Context, args []string, stdout *os.File) error {
 		return err
 	}
 	if fs.NArg() != 3 {
-		return fmt.Errorf("usage: microagent artifacts get <name> <artifact> <target> [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent artifact get <name> <artifact> <target> [--state-dir <dir>]")
 	}
 	name := fs.Arg(0)
 	if err := validateWorkspaceName(name); err != nil {
@@ -873,19 +869,19 @@ func runSnapshot(ctx context.Context, args []string, stdout *os.File) error {
 
   microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]
   microagent snapshot list <name> [--state-dir <dir>]
-  microagent snapshot rm <name> <tag> [--state-dir <dir>]
+  microagent snapshot delete <name> <tag> [--state-dir <dir>]
 `)
 		return nil
 	}
 	switch args[0] {
 	case "create":
 		return runSnapshotCreate(ctx, args[1:], stdout)
-	case "list", "ls":
+	case "list":
 		return runSnapshotList(args[1:], stdout)
-	case "rm", "remove", "delete":
+	case "delete":
 		return runSnapshotRemove(args[1:], stdout)
 	default:
-		return fmt.Errorf("unknown snapshot subcommand %q; use create, list, or rm", args[0])
+		return fmt.Errorf("unknown snapshot subcommand %q; use create, list, or delete", args[0])
 	}
 }
 
@@ -984,13 +980,13 @@ func runSnapshotRemove(args []string, stdout *os.File) error {
 	tag := ""
 	if name == "" {
 		if len(rest) != 2 {
-			return fmt.Errorf("usage: microagent snapshot rm <name> <tag> [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent snapshot delete <name> <tag> [--state-dir <dir>]")
 		}
 		name = rest[0]
 		tag = rest[1]
 	} else {
 		if len(rest) != 1 {
-			return fmt.Errorf("usage: microagent snapshot rm <name> <tag> [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent snapshot delete <name> <tag> [--state-dir <dir>]")
 		}
 		tag = rest[0]
 	}
@@ -1155,7 +1151,7 @@ func runCommit(ctx context.Context, args []string, stdout *os.File) error {
 	if pushed {
 		fmt.Fprintf(stdout, "Pushed %s\n", result.Reference)
 	} else {
-		fmt.Fprintf(stdout, "Push it with: microagent images push %s\n", result.Reference)
+		fmt.Fprintf(stdout, "Push it with: microagent image push %s\n", result.Reference)
 	}
 	return nil
 }
@@ -1164,7 +1160,7 @@ func printCommitHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent commit
 
 Snapshot a stopped workspace's rootfs into an OCI image, stored in the local
-image layout. Closes the OCI->rootfs loop; push it with `+"`microagent images push`"+`.
+image layout. Closes the OCI->rootfs loop; push it with `+"`microagent image push`"+`.
 
 Usage:
   microagent commit <workspace> <image-ref> [options]
@@ -1195,10 +1191,10 @@ Options:
 `)
 }
 
-func runImages(args []string, stdout *os.File) error {
+func runImage(args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	guestInitExplicit := hasFlagValue(args, "guest-init")
-	fs := flag.NewFlagSet("images", flag.ContinueOnError)
+	fs := flag.NewFlagSet("image", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	arch := fs.String("arch", defaultGuestArch(), "Image architecture")
@@ -1216,7 +1212,7 @@ func runImages(args []string, stdout *os.File) error {
 	}
 	if fs.NArg() == 0 || fs.Arg(0) == "list" {
 		if fs.NArg() > 1 {
-			return fmt.Errorf("usage: microagent images list [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent image list [--state-dir <dir>]")
 		}
 		images, err := imagecache.List(opts.StateDir)
 		if err != nil {
@@ -1227,7 +1223,7 @@ func runImages(args []string, stdout *os.File) error {
 	switch fs.Arg(0) {
 	case "pull":
 		if fs.NArg() != 2 {
-			return fmt.Errorf("usage: microagent images pull <image> [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent image pull <image> [--state-dir <dir>]")
 		}
 		record, err := imagecache.Pull(context.Background(), imagecache.PullOptions{
 			StateDir:      opts.StateDir,
@@ -1243,7 +1239,7 @@ func runImages(args []string, stdout *os.File) error {
 		return writeImageRecord(stdout, record)
 	case "push":
 		if fs.NArg() != 2 {
-			return fmt.Errorf("usage: microagent images push <image> [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent image push <image> [--state-dir <dir>]")
 		}
 		if err := commit.Push(context.Background(), opts.StateDir, fs.Arg(1)); err != nil {
 			return err
@@ -1255,16 +1251,16 @@ func runImages(args []string, stdout *os.File) error {
 		return nil
 	case "tag":
 		if fs.NArg() != 3 {
-			return fmt.Errorf("usage: microagent images tag <source> <target> [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent image tag <source> <target> [--state-dir <dir>]")
 		}
 		record, err := imagecache.Tag(opts.StateDir, fs.Arg(1), fs.Arg(2))
 		if err != nil {
 			return err
 		}
 		return writeImageRecord(stdout, record)
-	case "rm", "remove", "rmi":
+	case "delete":
 		if fs.NArg() != 2 {
-			return fmt.Errorf("usage: microagent images rm <image> [--delete] [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent image delete <image> [--delete] [--state-dir <dir>]")
 		}
 		if *deleteFiles {
 			if err := confirmImageCacheDelete(*yes); err != nil {
@@ -1278,7 +1274,7 @@ func runImages(args []string, stdout *os.File) error {
 		return writeImagePruneResult(stdout, result)
 	case "prune":
 		if fs.NArg() != 1 {
-			return fmt.Errorf("usage: microagent images prune [--state-dir <dir>]")
+			return fmt.Errorf("usage: microagent image prune [--state-dir <dir>]")
 		}
 		if *deleteFiles {
 			if err := confirmImageCacheDelete(*yes); err != nil {
@@ -1291,34 +1287,8 @@ func runImages(args []string, stdout *os.File) error {
 		}
 		return writeImagePruneResult(stdout, result)
 	default:
-		return fmt.Errorf("unknown images command: %s", fs.Arg(0))
+		return fmt.Errorf("unknown image command: %s", fs.Arg(0))
 	}
-}
-
-func runPrune(args []string, stdout *os.File) error {
-	opts := stateCommandOptions{StateDir: defaultStateDir()}
-	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
-	deleteImages := fs.Bool("images", false, "Delete reusable local image rootfs files")
-	yes := fs.Bool("yes", false, "Confirm destructive cleanup without prompting")
-	fs.BoolVar(yes, "y", false, "Confirm destructive cleanup without prompting")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
-		return err
-	}
-	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: microagent prune [--images] [--yes] [--state-dir <dir>]")
-	}
-	if *deleteImages {
-		if err := confirmImageCacheDelete(*yes); err != nil {
-			return err
-		}
-	}
-	result, err := imagecache.Prune(opts.StateDir, *deleteImages)
-	if err != nil {
-		return err
-	}
-	return writeImagePruneResult(stdout, result)
 }
 
 func confirmImageCacheDelete(yes bool) error {
@@ -1783,15 +1753,14 @@ func runNetwork(args []string, stdout *os.File) error {
 		switch args[0] {
 		case "create":
 			return runNetworkCreate(args[1:], stdout)
-		case "ls", "list":
+		case "list":
 			return runNetworkList(args[1:], stdout)
-		case "rm", "remove", "delete":
+		case "delete":
 			return runNetworkRemove(args[1:], stdout)
-		case "inspect":
+		case "status":
 			return runNetworkInspect(args[1:], stdout)
 		}
 	}
-	// Back-compatible default: inspect a workspace's network.
 	return runNetworkInspect(args, stdout)
 }
 
@@ -1877,7 +1846,7 @@ func runNetworkRemove(args []string, stdout *os.File) error {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: microagent network rm <name> [--force] [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent network delete <name> [--force] [--state-dir <dir>]")
 	}
 	name := fs.Arg(0)
 	if err := network.Remove(stateDir, name, force); err != nil {
@@ -1896,10 +1865,11 @@ func printNetworkHelp(stdout *os.File) {
 Inspect a workspace's network, or manage user-defined named networks.
 
 Usage:
-  microagent network <workspace>              Inspect a workspace's network
+  microagent network <workspace>              Show a workspace's network
+  microagent network status <workspace>       Show a workspace's network
   microagent network create <name> [options]  Create a named network
-  microagent network ls                        List named networks
-  microagent network rm <name> [options]       Remove a named network
+  microagent network list                      List named networks
+  microagent network delete <name> [options]       Remove a named network
 
 Options:
   --subnet <cidr>       Subnet for create; auto-allocated from 10.44.0.0/16 when omitted
@@ -1917,16 +1887,16 @@ network.mode=named.
 
 func runModel(args []string, stdout *os.File) error {
 	if wantsHelp(args) {
-		fmt.Fprintln(stdout, "usage: microagent model <pull|ls|rm|prune|serve|stop|runners> ...")
+		fmt.Fprintln(stdout, "usage: microagent model <pull|list|delete|prune|serve|stop|runners> ...")
 		return nil
 	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "pull":
 			return runModelPull(args[1:], stdout)
-		case "ls", "list":
+		case "list":
 			return runModelList(args[1:], stdout)
-		case "rm", "remove", "delete":
+		case "delete":
 			return runModelRemove(args[1:], stdout)
 		case "prune":
 			return runModelPrune(args[1:], stdout)
@@ -1934,11 +1904,11 @@ func runModel(args []string, stdout *os.File) error {
 			return runModelServe(args[1:], stdout)
 		case "stop":
 			return runModelStop(args[1:], stdout)
-		case "runners", "ps":
+		case "runners":
 			return runModelRunners(args[1:], stdout)
 		}
 	}
-	return fmt.Errorf("usage: microagent model <pull|ls|rm|prune|serve|stop|runners> [args]")
+	return fmt.Errorf("usage: microagent model <pull|list|delete|prune|serve|stop|runners> [args]")
 }
 
 func runModelPull(args []string, stdout *os.File) error {
@@ -1995,7 +1965,7 @@ func runModelRemove(args []string, stdout *os.File) error {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: microagent model rm <ref> [--keep-files] [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent model delete <ref> [--keep-files] [--state-dir <dir>]")
 	}
 	res, err := model.Remove(stateDir, fs.Arg(0), !*keepFiles)
 	if err != nil {
@@ -2082,7 +2052,7 @@ func runModelServe(args []string, stdout *os.File) error {
 
 func printModelServeHelp(stdout io.Writer) {
 	fmt.Fprint(stdout, `microagent model serve <hf-ref>
-microagent serve model <hf-ref>
+microagent model serve <hf-ref>
 
 Start or reuse a pinned host llama-server process for a HuggingFace GGUF model.
 
@@ -2148,11 +2118,11 @@ func runVolume(ctx context.Context, args []string, stdout *os.File) error {
 	switch args[0] {
 	case "create":
 		return runVolumeCreate(ctx, args[1:], stdout)
-	case "ls", "list":
+	case "list":
 		return runVolumeList(args[1:], stdout)
-	case "rm", "remove", "delete":
+	case "delete":
 		return runVolumeRemove(args[1:], stdout)
-	case "inspect":
+	case "status":
 		return runVolumeInspect(args[1:], stdout)
 	}
 	return fmt.Errorf("unknown volume command %q; see microagent volume --help", args[0])
@@ -2223,7 +2193,7 @@ func runVolumeRemove(args []string, stdout *os.File) error {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: microagent volume rm <name> [--force] [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent volume delete <name> [--force] [--state-dir <dir>]")
 	}
 	name := fs.Arg(0)
 	if err := volume.Remove(stateDir, name, force, workspaceRunningPredicate(stateDir)); err != nil {
@@ -2293,7 +2263,7 @@ Usage:
   microagent volume create <name> [options]  Create a named volume
   microagent volume ls                        List named volumes
   microagent volume inspect <name>            Show one volume
-  microagent volume rm <name> [options]       Remove a named volume
+  microagent volume delete <name> [options]       Remove a named volume
 
 Attach a volume to a workspace by name with --volume <name>:/mount, e.g.
   microagent run IMAGE --volume data:/work
@@ -6270,6 +6240,47 @@ func validEnvName(key string) bool {
 func printHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent
 
+Usage:
+  microagent run IMAGE [COMMAND ARG...]
+  microagent create NAME --image IMAGE
+  microagent start NAME
+  microagent exec NAME -- CMD
+
+Commands:
+  run                  Run something once and discard state
+  create               Create a persistent workspace
+  start                Boot a workspace
+  exec                 Run a structured command in a workspace
+  connect              Open the workspace console
+  status               Show one workspace
+  list                 List workspaces
+  logs                 Show workspace logs
+  halt                 Shut down cleanly and keep disk state
+  delete               Delete a workspace
+  doctor               Check whether this host can run microVMs
+
+Resources:
+  image                Manage reusable rootfs baselines
+  volume               Manage named ext4 volumes
+  network              Show workspace networking or manage named networks
+  model                Manage local GGUF models and runners
+  artifact             List or retrieve declared workspace artifacts
+  secret check         Validate secret references
+
+More:
+  microagent <command> --help
+  microagent help all
+
+Global options:
+  --json               Print JSON output
+  --text               Print human-readable output
+  --mode <ux|ax>       Select human UX or agent AX output mode
+`)
+}
+
+func printFullHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent
+
 Commands:
   init                 Scaffold a starter agent project
   run                  Run a command
@@ -6278,7 +6289,7 @@ Commands:
   clone                Clone a stopped workspace
   commit               Snapshot a stopped workspace rootfs into an OCI image
   cp                   Copy files into or out of a stopped workspace
-  artifacts            List or retrieve declared workspace artifacts
+  artifact             List or retrieve declared workspace artifacts
   network              Inspect workspace network or manage named networks
   model                Pull or manage local HuggingFace model files
   volume               Manage named volumes (create, ls, inspect, rm)
@@ -6286,8 +6297,7 @@ Commands:
   supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
   exec                 Run a structured command in a workspace
-  ps                   List workspaces
-  inspect              Alias for status with JSON output
+  list                 List workspaces
   status               Show workspace state
   result               Show structured workspace result
   logs                 Show workspace logs
@@ -6296,10 +6306,8 @@ Commands:
   snapshot             Create, list, or remove workspace snapshots
   secret check         Resolve and validate secret references
   profiles             List resource profiles
-  images               List or prune local image records
-  prune                Prune stale local records and optional image cache files
+  image                Manage local image records
   perf                 Measure workspace performance
-  serve model          Serve a local HuggingFace GGUF model
   halt                 Halt a workspace and preserve disk state
   quarantine           Sever host-side network and mediation
   pause                Pause a running workspace, freezing vCPUs with memory and disk preserved
@@ -6307,7 +6315,6 @@ Commands:
   stop                 Stop a workspace
   kill                 Force stop a workspace
   delete               Delete a workspace
-  rm                   Alias for delete
   contract             Show backend-neutral runtime contract
   host                 Report host capabilities
   host setup-networking  Enable nat/bridged/named networking (Linux; needs root). --check / --revert

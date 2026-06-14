@@ -4,11 +4,10 @@ description: Remove a workspace and everything it owns on disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent delete <name> [--yes] [--force] [--state-dir <dir>]
-microagent rm <name> [--yes] [--force] [--state-dir <dir>]
 ```
 
 `delete` removes the workspace record and its on-disk artifacts (rootfs,
@@ -18,9 +17,6 @@ keep it, use [`halt`](/cli/halt/) instead.
 By default, `delete` asks for confirmation. If the workspace is running, it
 asks whether to stop and delete it. Use `--yes` for non-interactive cleanup.
 Use `--force` to kill a running workspace before deleting it.
-
-`rm` is a familiar alias for `delete`; `-f`/`--force` and `-y`/`--yes` have
-the same behavior.
 
 ## Examples
 
@@ -34,7 +30,7 @@ Non-interactive cleanup:
 
 ```bash
 microagent delete research --yes
-microagent rm research -y
+microagent delete research -y
 ```
 
 Force-delete a running workspace:
@@ -83,4 +79,4 @@ missing workspace maps to `not_found`).
 
 - [`stop`](/cli/stop/) - shut down without removing state
 - [`kill`](/cli/kill/) - force-terminate first when needed
-- [`ps`](/cli/ps/) - see what's left
+- [`list`](/cli/list/) - see what's left

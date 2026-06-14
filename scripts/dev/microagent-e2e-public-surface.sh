@@ -344,16 +344,16 @@ expect_failure rootfs-bad-mke2fs "build ext4 rootfs\\|mke2fs\\|no such file" \
   --mke2fs "$STATE_DIR/not-mke2fs" \
   --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 
-expect_failure images-pull-missing-ref "usage: microagent images pull" \
-  "$CLI" images pull --state-dir "$STATE_DIR"
+expect_failure images-pull-missing-ref "usage: microagent image pull" \
+  "$CLI" image pull --state-dir "$STATE_DIR"
 expect_failure images-pull-invalid-ref "parse OCI image ref" \
-  "$CLI" images pull "bad ref@sha256:abc" --state-dir "$STATE_DIR" --arch "$ARCH" --guest-init "$GUEST_INIT" --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
+  "$CLI" image pull "bad ref@sha256:abc" --state-dir "$STATE_DIR" --arch "$ARCH" --guest-init "$GUEST_INIT" --size-mib "$PUBLIC_SURFACE_SIZE_MIB"
 expect_failure images-rm-missing-ref "image reference is required" \
-  "$CLI" images rm "" --state-dir "$STATE_DIR"
+  "$CLI" image delete "" --state-dir "$STATE_DIR"
 expect_failure images-tag-missing-source "source image is required" \
-  "$CLI" images tag "" local/microagent:test --state-dir "$STATE_DIR"
+  "$CLI" image tag "" local/microagent:test --state-dir "$STATE_DIR"
 expect_failure images-tag-missing-target "target image is required" \
-  "$CLI" images tag "$IMAGE" "" --state-dir "$STATE_DIR"
+  "$CLI" image tag "$IMAGE" "" --state-dir "$STATE_DIR"
 mkdir -p "$STATE_DIR/missing-image-cache/images"
 python3 - "$STATE_DIR/missing-image-cache/images/index.json" "$IMAGE" "$ARCH" <<'PY'
 import json
@@ -374,11 +374,11 @@ with open(path, "w", encoding="utf-8") as f:
     json.dump({"images": [record]}, f, indent=2, sort_keys=True)
     f.write("\n")
 PY
-"$CLI" images prune --state-dir "$STATE_DIR/missing-image-cache" >"$STATE_DIR/images-prune-missing-rootfs.json"
+"$CLI" image prune --state-dir "$STATE_DIR/missing-image-cache" >"$STATE_DIR/images-prune-missing-rootfs.json"
 assert_json "$STATE_DIR/images-prune-missing-rootfs.json" "len(data.get('removed') or []) == 1 and len(data.get('kept') or []) == 0"
 printf '{not-json\n' >"$STATE_DIR/missing-image-cache/images/index.json"
 expect_failure images-corrupt-index "invalid\\|json" \
-  "$CLI" images list --state-dir "$STATE_DIR/missing-image-cache"
+  "$CLI" image list --state-dir "$STATE_DIR/missing-image-cache"
 
 mkdir -p "$STATE_DIR/workspaces/confirm-delete"
 cat >"$STATE_DIR/workspaces/confirm-delete/workspace.json" <<'JSON'
@@ -431,14 +431,14 @@ with open(os.path.join(state_dir, "images", "index.json"), "w", encoding="utf-8"
     f.write("\n")
 PY
 expect_tty_cancel images-rm-delete-cancel "prune cancelled\\|pass --yes" \
-  "$CLI" images rm local/rm-cancel:test --delete --state-dir "$STATE_DIR/confirm-images"
+  "$CLI" image delete local/rm-cancel:test --delete --state-dir "$STATE_DIR/confirm-images"
 test -e "$STATE_DIR/confirm-images/images/rootfs/rm-cancel.ext4"
-"$CLI" images rm local/rm-yes:test --delete --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-rm-delete-yes.json"
+"$CLI" image delete local/rm-yes:test --delete --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-rm-delete-yes.json"
 test ! -e "$STATE_DIR/confirm-images/images/rootfs/rm-yes.ext4"
 expect_tty_cancel images-prune-delete-cancel "prune cancelled\\|pass --yes" \
-  "$CLI" images prune --delete --state-dir "$STATE_DIR/confirm-images"
+  "$CLI" image prune --delete --state-dir "$STATE_DIR/confirm-images"
 test -e "$STATE_DIR/confirm-images/images/rootfs/prune-cancel.ext4"
-"$CLI" images prune --delete --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-prune-delete-yes.json"
+"$CLI" image prune --delete --yes --state-dir "$STATE_DIR/confirm-images" >"$STATE_DIR/images-prune-delete-yes.json"
 test ! -e "$STATE_DIR/confirm-images/images/rootfs/prune-yes.ext4"
 
 python3 - "$STATE_DIR/confirm-prune-y" <<'PY'
@@ -470,9 +470,9 @@ with open(os.path.join(state_dir, "images", "index.json"), "w", encoding="utf-8"
     f.write("\n")
 PY
 expect_tty_cancel prune-images-cancel "prune cancelled\\|pass --yes" \
-  "$CLI" prune --images --state-dir "$STATE_DIR/confirm-prune-y"
+  "$CLI" image prune --delete --state-dir "$STATE_DIR/confirm-prune-y"
 test -e "$STATE_DIR/confirm-prune-y/images/rootfs/cancel.ext4"
-"$CLI" prune --images -y --state-dir "$STATE_DIR/confirm-prune-y" >"$STATE_DIR/prune-images-y.json"
+"$CLI" image prune --delete -y --state-dir "$STATE_DIR/confirm-prune-y" >"$STATE_DIR/prune-images-y.json"
 test ! -e "$STATE_DIR/confirm-prune-y/images/rootfs/yes.ext4"
 
 "$CLI" --json create high-dry-run \
@@ -885,7 +885,7 @@ assert_json "$STATE_DIR/status-run-keep.json" "data.get('readiness', {}).get('re
 grep -q "Workspace: $RUN_KEEP_WORKSPACE" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "State: stopped" "$STATE_DIR/status-run-keep-text.txt"
 grep -q "Readiness:" "$STATE_DIR/status-run-keep-text.txt"
-"$CLI" inspect "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/inspect-run-keep.json"
+"$CLI" status "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/inspect-run-keep.json"
 assert_json "$STATE_DIR/inspect-run-keep.json" "data.get('event', {}).get('identity', {}).get('runtimeID') == '$RUN_KEEP_WORKSPACE' and data.get('event', {}).get('state') == 'stopped'"
 "$CLI" --json result "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/result-run-keep.json"
 assert_json "$STATE_DIR/result-run-keep.json" "'RUN_KEEP_OK' in data.get('result', {}).get('stdout', '')"
@@ -898,7 +898,7 @@ grep -q "RUN_KEEP_OK" "$STATE_DIR/logs-run-keep.txt"
 "$CLI" --text logs "$RUN_KEEP_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-run-keep-text.txt"
 grep -q "RUN_KEEP_OK" "$STATE_DIR/logs-run-keep-text.txt"
 mkdir -p "$STATE_DIR/run-keep-artifacts"
-"$CLI" artifacts get "$RUN_KEEP_WORKSPACE" keep-state "$STATE_DIR/run-keep-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-run-keep.json"
+"$CLI" artifact get "$RUN_KEEP_WORKSPACE" keep-state "$STATE_DIR/run-keep-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-run-keep.json"
 grep -q "keep-state" "$STATE_DIR/run-keep-artifacts/keep-state.txt"
 "$CLI" delete "$RUN_KEEP_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-run-keep.json"
 test ! -e "$STATE_DIR/workspaces/$RUN_KEEP_WORKSPACE"
@@ -943,7 +943,7 @@ wait_for_status_ready "$SERVICE_WORKSPACE" "$STATE_DIR/status-service-options-ru
 sleep 5
 "$CLI" halt "$SERVICE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-service-options.json"
 mkdir -p "$STATE_DIR/service-options-artifacts"
-"$CLI" artifacts get "$SERVICE_WORKSPACE" service-report "$STATE_DIR/service-options-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-service-options.json"
+"$CLI" artifact get "$SERVICE_WORKSPACE" service-report "$STATE_DIR/service-options-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-service-options.json"
 assert_json "$STATE_DIR/service-options-artifacts/service-options-report.json" "data == {'ok': True, 'service': 'options', 'env': 'service-env', 'hostname': 'service-host'}"
 "$CLI" delete "$SERVICE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-service-options.json"
 
@@ -1022,14 +1022,14 @@ wait_for_status_ready "$BUNDLE_WORKSPACE" "$STATE_DIR/status-bundle-running.json
 "$CLI" --json artifacts "$BUNDLE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-bundle.json"
 assert_json "$STATE_DIR/artifacts-bundle.json" "any(item.get('name') == 'disk-report' for item in data.get('artifacts', {}).get('egress', []))"
 mkdir -p "$ARTIFACT_DIR"
-"$CLI" artifacts get "$BUNDLE_WORKSPACE" disk-report "$ARTIFACT_DIR" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-bundle.json"
+"$CLI" artifact get "$BUNDLE_WORKSPACE" disk-report "$ARTIFACT_DIR" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-bundle.json"
 grep -q "bundle-seed" "$ARTIFACT_DIR/report.txt"
 grep -q ":written" "$ARTIFACT_DIR/report.txt"
 expect_failure missing-artifact-file "missing.txt\\|not found\\|No such" \
-  "$CLI" artifacts get "$BUNDLE_WORKSPACE" missing-report "$ARTIFACT_DIR" --state-dir "$STATE_DIR"
+  "$CLI" artifact get "$BUNDLE_WORKSPACE" missing-report "$ARTIFACT_DIR" --state-dir "$STATE_DIR"
 "$CLI" cp "$BUNDLE_WORKSPACE:data:/report.txt" "$STATE_DIR/copied-report.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-attached-disk.json"
 grep -q "bundle-seed" "$STATE_DIR/copied-report.txt"
-"$CLI" rm "$BUNDLE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-bundle.json"
+"$CLI" delete "$BUNDLE_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-bundle.json"
 
 mkdir -p "$STATE_DIR/disk-src/dir"
 printf "existing-disk-seed\n" >"$STATE_DIR/disk-src/seed.txt"
@@ -1056,7 +1056,7 @@ wait_for_status_ready "$DISK_WORKSPACE" "$STATE_DIR/status-existing-disk-running
   --timeout 10 >"$STATE_DIR/connect-existing-disk.txt"
 "$CLI" halt "$DISK_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-existing-disk.json"
 mkdir -p "$STATE_DIR/existing-disk-artifacts"
-"$CLI" artifacts get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/existing-disk-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-existing-disk.json"
+"$CLI" artifact get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/existing-disk-artifacts" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-existing-disk.json"
 grep -q "existing-disk-seed" "$STATE_DIR/existing-disk-artifacts/report.txt"
 dd if=/dev/zero of="$STATE_DIR/large.bin" bs=1024 count=1024 status=none
 "$CLI" cp "$STATE_DIR/large.bin" "$DISK_WORKSPACE:workspace:/large.bin" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-large-to-disk.json"
@@ -1087,12 +1087,12 @@ expect_failure cp-readonly-disk "read-only" \
   "$CLI" cp "$STATE_DIR/host-copy.txt" "$DISK_WORKSPACE:readonly:/blocked.txt" --state-dir "$STATE_DIR"
 mv "$STATE_DIR/existing-disk.ext4" "$STATE_DIR/existing-disk.ext4.unavailable"
 expect_failure unavailable-disk-artifact "No such\\|not found\\|open" \
-  "$CLI" artifacts get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/unavailable-disk-artifacts" --state-dir "$STATE_DIR"
+  "$CLI" artifact get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/unavailable-disk-artifacts" --state-dir "$STATE_DIR"
 mv "$STATE_DIR/existing-disk.ext4.unavailable" "$STATE_DIR/existing-disk.ext4"
 cp "$STATE_DIR/workspaces/$DISK_WORKSPACE/workspace.json" "$STATE_DIR/workspace-json.backup"
 printf "{not-json\n" >"$STATE_DIR/workspaces/$DISK_WORKSPACE/workspace.json"
 expect_failure corrupt-workspace-artifact "invalid character\\|workspace.json\\|json" \
-  "$CLI" artifacts get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/corrupt-workspace-artifacts" --state-dir "$STATE_DIR"
+  "$CLI" artifact get "$DISK_WORKSPACE" existing-disk-report "$STATE_DIR/corrupt-workspace-artifacts" --state-dir "$STATE_DIR"
 mv "$STATE_DIR/workspace-json.backup" "$STATE_DIR/workspaces/$DISK_WORKSPACE/workspace.json"
 "$CLI" delete "$DISK_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-existing-disk.json"
 

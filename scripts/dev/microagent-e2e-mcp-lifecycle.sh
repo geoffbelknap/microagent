@@ -271,7 +271,7 @@ cli_states["halt"] = find_state(halt)
 delete = cli_call(["delete", "cli-lc", "--yes", "--state-dir", ws_state])
 cli_states["delete"] = find_state(delete)
 
-listing = cli_call(["ps", "--state-dir", ws_state])
+listing = cli_call(["list", "--state-dir", ws_state])
 cli_states["listed"] = [w.get("name") for w in (listing.get("workspaces") or [])]
 
 # --- parity assertions ---

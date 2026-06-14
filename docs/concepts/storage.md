@@ -4,7 +4,7 @@ description: Choose between the rootfs, attached disks, tar bundles, and named v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 A workspace sees block devices, never host directories. microagent does not
 expose host bind mounts - everything the guest reads or writes is an ext4
@@ -19,7 +19,7 @@ walkthrough of these mechanisms, see
 Every workspace boots from a rootfs: an ext4 image built from an OCI image
 (`run`/`create`) or an existing rootfs path. It is per-workspace and lives under
 `<state-dir>/workspaces/<name>/rootfs.ext4`. Writes inside the guest persist in
-that image across stop/start, and are discarded by `delete` (and by `run --rm`).
+that image across stop/start, and are discarded by `delete` (and by `run --delete`).
 [`commit`](/cli/commit/) snapshots a stopped rootfs back into an OCI image.
 
 ## Attaching extra storage
@@ -63,7 +63,7 @@ maps cleanly onto microVM semantics.
 
 ## Egress
 
-To get data *out* of a workspace, declare [`--output`](/cli/artifacts/) paths or
+To get data *out* of a workspace, declare [`--output`](/cli/artifact/) paths or
 use [`cp`](/cli/cp/) against a stopped workspace. A named volume is also a
 natural handoff: write results to it in one workspace, attach it to another.
 

@@ -83,10 +83,10 @@ expect_failure_contains() {
 }
 
 assert_stdout_contains top-help "Commands:" "$CLI" help
-assert_stdout_contains top-help-rm-alias "rm[[:space:]]+Alias for delete" "$CLI" help
-assert_stdout_contains top-help-inspect-alias "inspect[[:space:]]+Alias for status" "$CLI" help
+assert_stdout_contains top-help-list "list[[:space:]]+List workspaces" "$CLI" help
+assert_stdout_contains top-help-image "image[[:space:]]+Manage reusable rootfs baselines" "$CLI" help
 assert_stdout_contains top-help-exec "exec[[:space:]]+Run a structured command" "$CLI" help
-assert_stdout_contains default-help "rootfs build" "$CLI"
+assert_stdout_contains full-help "rootfs build" "$CLI" help all
 assert_stdout_contains create-help "Create a workspace from an image" "$CLI" create --help
 assert_stdout_contains run-help "Run a command from an image" "$CLI" run --help
 assert_stdout_contains run-help-env-alias "-e KEY=VALUE" "$CLI" run --help
@@ -115,7 +115,7 @@ mkdir -p "$STATE_DIR/host-bind"
 # form so Git Bash does not mangle the colon-separated spec on Windows.
 expect_failure_contains run-volume-bind-reject "does not expose host bind mounts" "$CLI" run -v "$(e2e_host_path "$STATE_DIR/host-bind"):/workspace:rw" example.com/acme/image:latest true --state-dir "$STATE_DIR"
 expect_failure_contains exec-missing-separator "usage: microagent exec" "$CLI" exec example.com/acme/image:latest true
-expect_failure_contains inspect-usage "usage: microagent status" "$CLI" inspect --state-dir "$STATE_DIR"
+expect_failure_contains inspect-usage "usage: microagent status" "$CLI" status --state-dir "$STATE_DIR"
 expect_failure_contains compose-unsupported "compose-style multi-workspace projects are not supported" "$CLI" compose up
 expect_failure_contains run-privileged-unsupported "microVM boundary" "$CLI" run --privileged example.com/acme/image:latest true
 expect_failure_contains run-pod-unsupported "does not implement pods" "$CLI" run --pod new:demo example.com/acme/image:latest true
@@ -123,10 +123,10 @@ expect_failure_contains run-mount-bind-unsupported "does not expose host bind mo
 expect_failure_contains run-cap-unsupported "namespace, capability, device, or security-opt controls" "$CLI" run --cap-add NET_ADMIN example.com/acme/image:latest true
 expect_failure_contains run-publish-alias-isolated "network.portForwards require user, nat, or bridged mode" "$CLI" run -p 127.0.0.1:18080:8080/tcp --network isolated example.com/acme/image:latest true --state-dir "$STATE_DIR"
 expect_failure_contains cp-usage "usage: microagent cp" "$CLI" cp only-one-arg --state-dir "$STATE_DIR"
-expect_failure_contains artifacts-usage "usage: microagent artifacts get" "$CLI" artifacts get only two --state-dir "$STATE_DIR"
-expect_failure_contains images-rm-usage "usage: microagent images rm" "$CLI" images rm --state-dir "$STATE_DIR"
-expect_failure_contains images-remove-usage "usage: microagent images rm" "$CLI" images remove --state-dir "$STATE_DIR"
-expect_failure_contains images-rmi-usage "usage: microagent images rm" "$CLI" images rmi --state-dir "$STATE_DIR"
+expect_failure_contains artifact-usage "usage: microagent artifact get" "$CLI" artifact get only two --state-dir "$STATE_DIR"
+expect_failure_contains image-delete-usage "usage: microagent image delete" "$CLI" image delete --state-dir "$STATE_DIR"
+expect_failure_contains image-unknown-remove "unknown image command: remove" "$CLI" image remove --state-dir "$STATE_DIR"
+expect_failure_contains image-unknown-rmi "unknown image command: rmi" "$CLI" image rmi --state-dir "$STATE_DIR"
 expect_failure_contains rootfs-unknown "unknown rootfs command: nope" "$CLI" rootfs nope
 expect_failure_contains rootfs-missing-out "output_path is required" "$CLI" rootfs build --image docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f --state-dir "$STATE_DIR"
 expect_failure_contains perf-steady-interval "perf steady interval must be less than or equal to duration" "$CLI" perf steady workspace --duration 1 --interval 2 --state-dir "$STATE_DIR"

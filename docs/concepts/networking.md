@@ -4,7 +4,7 @@ description: Choose a network mode and see what each one does under the hood on 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-14_
 
 This is the internals page for workspace networking: read it to choose a
 network mode and to understand what each mode actually does on each backend.
@@ -248,7 +248,7 @@ Live cross-member name updates are not currently implemented.
 
 Host requirements match `nat`: `net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in
 the supervisor (run as root, or grant `cap_net_admin,cap_setpcap+ep`).
-`network rm` fails closed while members exist; pass `--force` to override. See
+`network delete` fails closed while members exist; pass `--force` to override. See
 [`network`](/cli/network/) for the full command surface and
 [Connect workspaces on a named network](/guides/networking/) for a worked example.
 

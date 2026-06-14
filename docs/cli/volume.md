@@ -4,13 +4,13 @@ description: Manage user-defined named volumes - VM-independent ext4 disks attac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent volume create <name> [--size-mib <n>]   Create a named volume
-microagent volume ls                                List named volumes
-microagent volume inspect <name>                    Show one volume
-microagent volume rm <name> [--force]               Remove a named volume
+microagent volume list                                List named volumes
+microagent volume status <name>                    Show one volume
+microagent volume delete <name> [--force]               Remove a named volume
 ```
 
 A named volume is a platform-managed ext4 disk with a lifecycle independent of
@@ -21,19 +21,19 @@ volume once and attach it by name. The registry and backing disks live under
 
 ## Examples
 
-Create, inspect, and remove a volume:
+Create, show, and delete a volume:
 
 ```bash
 microagent volume create data --size-mib 2048
-microagent volume ls
-microagent volume inspect data
-microagent volume rm data
+microagent volume list
+microagent volume status data
+microagent volume delete data
 ```
 
 Get the structured record:
 
 ```bash
-microagent --json volume inspect data
+microagent --json volume status data
 ```
 
 ```json
@@ -66,7 +66,7 @@ a workspace releases the volumes it held; the data persists for the next attach.
 This is deliberately not the Docker volume model - there is no daemon, no volume
 drivers, and no concurrent sharing between workspaces.
 
-`volume rm` fails closed while the volume is attached to a running workspace;
+`volume delete` fails closed while the volume is attached to a running workspace;
 pass `--force` to remove it and its backing disk anyway.
 
 ## Flags
@@ -84,7 +84,7 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 ## Exit status
 
 `volume` subcommands exit `0` on success; nonzero when the volume cannot be
-found, a name collides on create, or `rm` would remove a volume still attached
+found, a name collides on create, or `delete` would remove a volume still attached
 to a running workspace (without `--force`). In AX mode a failure is written as
 a structured error envelope.
 

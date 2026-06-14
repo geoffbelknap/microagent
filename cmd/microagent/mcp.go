@@ -46,10 +46,8 @@ func runServe(ctx context.Context, args []string, stdout *os.File) error {
 	switch args[0] {
 	case "mcp":
 		return runServeMCP(ctx, args[1:], os.Stdin, stdout)
-	case "model":
-		return runModelServe(args[1:], stdout)
 	default:
-		return fmt.Errorf("unknown serve command: %s\n\nAvailable serve command: model\nMCP clients can launch: microagent serve mcp", args[0])
+		return fmt.Errorf("unknown serve command: %s\n\nAvailable serve command: mcp", args[0])
 	}
 }
 
@@ -1162,7 +1160,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "workspace.list":
-		return appendOptionalFlag([]string{"--mode=ax", "ps"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "list"}, "-state-dir", stateDir), nil
 	case "workspace.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
@@ -1218,7 +1216,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "artifacts", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "artifact", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "snapshot.create":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
@@ -1236,12 +1234,12 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name", "tag"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "snapshot", "rm", stringArg(args, "name"), stringArg(args, "tag")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "snapshot", "delete", stringArg(args, "name"), stringArg(args, "tag")}, "-state-dir", stateDir), nil
 	case "network.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "network", "inspect", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "network", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "network.create":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
@@ -1251,12 +1249,12 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-subnet", stringArg(args, "subnet"))
 		return cli, nil
 	case "network.list":
-		return appendOptionalFlag([]string{"--mode=ax", "network", "ls"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "network", "list"}, "-state-dir", stateDir), nil
 	case "network.delete":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "network", "rm", stringArg(args, "name")}
+		cli := []string{"--mode=ax", "network", "delete", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "force") {
 			cli = append(cli, "-force")
@@ -1273,17 +1271,17 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		return cli, nil
 	case "volume.list":
-		return appendOptionalFlag([]string{"--mode=ax", "volume", "ls"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "volume", "list"}, "-state-dir", stateDir), nil
 	case "volume.inspect":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "volume", "inspect", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "volume", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "volume.delete":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "volume", "rm", stringArg(args, "name")}
+		cli := []string{"--mode=ax", "volume", "delete", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "force") {
 			cli = append(cli, "-force")
@@ -1293,35 +1291,35 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "images", "pull", stringArg(args, "image")}
+		cli := []string{"--mode=ax", "image", "pull", stringArg(args, "image")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		return cli, nil
 	case "images.list":
-		return appendOptionalFlag([]string{"--mode=ax", "images", "list"}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "image", "list"}, "-state-dir", stateDir), nil
 	case "images.push":
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "images", "push", stringArg(args, "image")}
+		cli := []string{"--mode=ax", "image", "push", stringArg(args, "image")}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "images.tag":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "images", "tag", stringArg(args, "source"), stringArg(args, "target")}, "-state-dir", stateDir), nil
+		return appendOptionalFlag([]string{"--mode=ax", "image", "tag", stringArg(args, "source"), stringArg(args, "target")}, "-state-dir", stateDir), nil
 	case "images.delete":
 		if err := requireToolArgs(args, name, "image"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "images", "rm", stringArg(args, "image")}
+		cli := []string{"--mode=ax", "image", "delete", stringArg(args, "image")}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "delete_files") {
 			cli = append(cli, "-delete", "-yes")
 		}
 		return cli, nil
 	case "images.prune":
-		cli := []string{"--mode=ax", "images", "prune"}
+		cli := []string{"--mode=ax", "image", "prune"}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "delete_files") {
 			cli = append(cli, "-delete", "-yes")
@@ -1441,7 +1439,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name", "artifact", "target"); err != nil {
 			return nil, err
 		}
-		cli := []string{"--mode=ax", "artifacts", "get", stringArg(args, "name"), stringArg(args, "artifact"), stringArg(args, "target")}
+		cli := []string{"--mode=ax", "artifact", "get", stringArg(args, "name"), stringArg(args, "artifact"), stringArg(args, "target")}
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	default:
 		return nil, fmt.Errorf("unsupported MCP tool %s", name)
@@ -1610,7 +1608,7 @@ func printServeHelp(stdout *os.File) {
 	fmt.Fprint(stdout, `microagent serve
 
 Commands:
-  model               Serve a local HuggingFace GGUF model
+  mcp                 Serve the MCP stdio endpoint
 
 MCP clients can launch `+"`microagent serve mcp`"+` as a stdio server. See:
 docs/cli/serve.md#configure-mcp-clients

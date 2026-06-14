@@ -119,11 +119,11 @@ wait_for_status_ready "$STATE_DIR/status-running.json"
   --state-dir "$STATE_DIR" \
   --send "printf substrate-live > /preserved.txt; printf '{\"ok\":true,\"phase\":\"running\"}' > /report.json; sync" \
   --timeout 10 >"$STATE_DIR/write.txt"
-"$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts.json"
+"$CLI" artifact "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts.json"
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt.json"
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-halted.json"
 mkdir -p "$ARTIFACT_DIR/running"
-"$CLI" artifacts get "$WORKSPACE" report "$ARTIFACT_DIR/running" \
+"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/running" \
   --state-dir "$STATE_DIR" \
   --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-get-running.json"
 
@@ -147,7 +147,7 @@ if "$CLI" start "$WORKSPACE" \
 fi
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-quarantined.json"
 mkdir -p "$ARTIFACT_DIR/resumed"
-"$CLI" artifacts get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" \
+"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/resumed" \
   --state-dir "$STATE_DIR" \
   --debugfs "$DEBUGFS" >"$STATE_DIR/artifact-get-resumed.json"
 

@@ -29,7 +29,7 @@ INTENTIONAL_REQUEST_JSON_EXAMPLES = {
 
 def microagent_help() -> str:
     result = subprocess.run(
-        ["go", "run", "./cmd/microagent", "help"],
+        ["go", "run", "./cmd/microagent", "help", "all"],
         cwd=ROOT,
         check=True,
         text=True,

@@ -4,16 +4,11 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-14_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
-microagent serve model <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Serve a local GGUF model
 ```
-
-`serve` starts long-running local services from the main `microagent` binary.
-The user-facing command is `serve model`, which starts a host-local
-OpenAI-compatible GGUF model server.
 
 `microagent serve mcp` exists as an MCP client integration entry point. It is a
 foreground stdio transport that a client launches as a subprocess; it is not a
@@ -21,10 +16,7 @@ normal interactive CLI command and is intentionally not advertised in top-level
 help. When started directly from a terminal, the command exits with setup
 guidance instead of waiting for protocol frames on stdin.
 
-`microagent serve model` is an alias for [`microagent model serve`](/cli/model/).
-It starts or reuses a pinned host `llama-server` process for a HuggingFace GGUF
-model ref, auto-pulling the model first if needed. See [`model`](/cli/model/)
-for model ref forms, runner flags, and cleanup commands.
+Serve local GGUF models with [`microagent model serve`](/cli/model/).
 
 The MCP server automatically uses AX output mode. It exposes structured tools
 for workspace lifecycle, inspection, results, stats, logs, events, snapshots,
@@ -40,7 +32,7 @@ meaning, broker credentials, or make policy decisions.
 Serve a model:
 
 ```bash
-microagent serve model TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
 ```
 
 Probe the MCP transport without an MCP client:
@@ -307,7 +299,7 @@ come from the shared workspace exec layer and match CLI AX exec behavior.
 
 ## Flags
 
-`serve mcp` takes no flags. `serve model` takes the same flags as
+`serve mcp` takes no flags. `model serve` takes the same flags as
 [`model serve`](/cli/model/):
 
 | Flag | Description |
@@ -320,7 +312,7 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`serve model` exits `0` when the runner is started or reused; nonzero when no
+`model serve` exits `0` when the runner is started or reused; nonzero when no
 `llama-server` binary is found or the model cannot be pulled. `serve mcp` runs
 until its client closes stdin, then exits `0`; started from a terminal, it
 exits nonzero with setup guidance. In AX mode a failure is written as a

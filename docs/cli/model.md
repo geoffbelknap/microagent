@@ -4,15 +4,15 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
-microagent model ls [--state-dir <dir>]                                           List stored models
-microagent model rm <ref> [--keep-files] [--state-dir <dir>]                      Remove a model and its blob
+microagent model list [--state-dir <dir>]                                           List stored models
+microagent model delete <ref> [--keep-files] [--state-dir <dir>]                      Remove a model and its blob
 microagent model prune [--delete-files] [--state-dir <dir>]                       Drop records for missing blobs
 microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Serve a model on the host
-microagent serve model <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Alias for model serve
+microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Alias for model serve
 microagent model stop <hf-ref> [--state-dir <dir>]                                Stop a model's runners
 microagent model runners [--state-dir <dir>]                                      List running model servers
 ```
@@ -39,10 +39,10 @@ microagent model pull TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
 microagent model pull hf.co/meta-llama/Llama-2-7B/llama-2-7b.gguf --token hf_xxxxx
 
 # List stored models
-microagent model ls
+microagent model list
 
 # Remove a model and delete its blob
-microagent model rm TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+microagent model delete TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
 
 # Remove records for missing blobs (safe; no files deleted)
 microagent model prune
@@ -64,7 +64,7 @@ microagent model runners
 microagent model stop TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
 ```
 
-`model ls` prints one tab-separated row per recorded model (no header):
+`model list` prints one tab-separated row per recorded model (no header):
 
 ```text
 hf.co/TheBloke/Llama-2-7B-GGUF@main/llama-2-7b.Q4_K_M.gguf	3825819648	sha256:abc...
@@ -92,16 +92,12 @@ With the global `--json` flag, records are returned under `models`:
 | Command | Description |
 |---|---|
 | `pull` | Download a GGUF file from HuggingFace and record it in the local store |
-| `ls` | List locally stored model records (ref, size, digest) |
-| `rm` | Remove a model record, and optionally delete its blob |
+| `list` | List locally stored model records (ref, size, digest) |
+| `delete` | Remove a model record, and optionally delete its blob |
 | `prune` | Remove records whose blob files are missing; with `--delete-files`, also delete all indexed blob files |
 | `serve` | Start (or reuse) a pinned host model server for a model; auto-pulls if not yet stored |
 | `stop` | Force-stop all model server processes for a model ref |
 | `runners` | List currently running model server processes |
-
-`ls` is also available as `list`; `rm` as `remove` and `delete`; `runners` as
-`ps` (within the `model` subcommand). `microagent serve model ...` is an alias
-for `microagent model serve ...`.
 
 `serve` requires `llama-server` on PATH or set via the
 `MICROAGENT_LLAMA_SERVER` environment variable. If neither is present, the
@@ -165,7 +161,7 @@ directory:
     <24-hex-chars>.gguf    # raw GGUF file, named by first 24 hex chars of sha256(canonical-ref)
 ```
 
-`model rm` removes the index record and, unless `--keep-files` is set, deletes
+`model delete` removes the index record and, unless `--keep-files` is set, deletes
 the corresponding blob. `model prune` removes index records whose blob files
 are missing from disk. With `--delete-files`, it also deletes the blob file of
 every remaining indexed record (i.e. all indexed blobs are deleted).
@@ -174,7 +170,7 @@ every remaining indexed record (i.e. all indexed blobs are deleted).
 
 Most subcommands take only `--state-dir <dir>` (state directory, default
 `~/.microagent/`); the flags that change behavior are `--token` (pull/serve),
-`--keep-files` (rm), `--delete-files` (prune), and `--dedicated` (serve).
+`--keep-files` (delete), `--delete-files` (prune), and `--dedicated` (serve).
 
 ### Pull flags
 
@@ -216,8 +212,8 @@ envelope.
 
 ## Related
 
-- [`serve`](/cli/serve/) - `serve model` is the same command
+- [`serve`](/cli/serve/) - MCP stdio endpoint
 - [`run`](/cli/run/) - pair a one-shot run with a served model via `--model`
 - [`create`](/cli/create/) - pair a workspace persistently via `--model`
-- [`images`](/cli/images/) - the equivalent store for OCI images
+- [`image`](/cli/image/) - the equivalent store for OCI images
 - [`secret`](/cli/secret/) - deliver tokens to guests without writing them to disk

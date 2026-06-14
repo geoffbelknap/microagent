@@ -4,7 +4,7 @@ set -euo pipefail
 # windows-hyperv arm of the networking-deep scenario: the backend-neutral
 # networking feature contract on Hyper-V. Always covers network mode
 # validation, isolated-mode semantics (no NIC, working loopback), the
-# network inspect surface, and the live-apply guard rails. The HNS segments
+# network status surface, and the live-apply guard rails. The HNS segments
 # — user-mode boot with published ports, the live host-bind apply, and
 # listener cleanup — need an elevated shell (HNS NAT network creation) and
 # run on the elevated CI runner; a non-elevated host logs them as deferred.
@@ -150,7 +150,7 @@ if grep -Eq '^(eth|en)' "$STATE_DIR/exec-isolated.txt"; then
   e2e_fail "isolated workspace has a non-loopback interface: $(cat "$STATE_DIR/exec-isolated.txt")"
 fi
 
-e2e_step "network inspect reports the isolated mode"
+e2e_step "network status reports the isolated mode"
 "$CLI" --json network "$WS_ISOLATED" --state-dir "$STATE_DIR" >"$STATE_DIR/network-isolated.json"
 grep -q '"isolated"' "$STATE_DIR/network-isolated.json"
 
