@@ -78,8 +78,8 @@ covered in [Networking](/concepts/networking/).
   backend.
 - See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
   details and current limitations (bridged mode attaches to a named HNS network
-  or Hyper-V switch; pause/resume is supported, while snapshots and named
-  networks are planned).
+  or Hyper-V switch; pause/resume and named networks are supported; snapshots
+  are not supported — HCS-direct VMs have no guest-memory save-state).
 
 ## Checking your host
 

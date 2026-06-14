@@ -340,7 +340,12 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	startReq := Request(opts, "run", rootfsPath, NewRequestID())
-	startReq.Tag = strings.TrimSpace(opts.FromSnapshot)
+	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
+		if !vmkit.BackendCapabilities(opts.Backend).Snapshot {
+			return Result{}, fmt.Errorf("snapshot restore (--from-snapshot) is not supported on the %s backend", opts.Backend)
+		}
+		startReq.Tag = tag
+	}
 	resp, err := startDetached(opts, startReq)
 	return Result{
 		Workspace:    opts.Name,
@@ -532,6 +537,9 @@ func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotMani
 	if strings.TrimSpace(tag) == "" {
 		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot tag is required")
 	}
+	if !vmkit.BackendCapabilities(opts.Backend).Snapshot {
+		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot is not supported on the %s backend", opts.Backend)
+	}
 	req := vmkit.Request{
 		Command: "snapshot",
 		Identity: &vmkit.Identity{
@@ -623,6 +631,13 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	}
 	if opts.StateDir == "" {
 		opts.StateDir = StateDir()
+	}
+	forkBackend := opts.Backend
+	if forkBackend == "" {
+		forkBackend = HostBackend()
+	}
+	if !vmkit.BackendCapabilities(forkBackend).Snapshot {
+		return Result{}, fmt.Errorf("snapshot fork (--from-snapshot) is not supported on the %s backend", forkBackend)
 	}
 	srcDir := vmkit.SnapshotDir(opts.StateDir, sourceWorkspace, tag)
 	manifest, err := vmkit.ReadSnapshotManifest(srcDir)
