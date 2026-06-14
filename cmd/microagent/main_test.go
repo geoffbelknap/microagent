@@ -6008,6 +6008,51 @@ func TestRunListCanPrintHumanOutput(t *testing.T) {
 	}
 }
 
+func TestRunPSFiltersStoppedWorkspaces(t *testing.T) {
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	dir := t.TempDir()
+	writeTestEvent := func(name string, state vmkit.VMState) {
+		t.Helper()
+		eventDir := filepath.Join(dir, name)
+		if err := os.MkdirAll(eventDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		event := vmkit.Event{
+			Identity:   vmkit.Identity{RequestID: "req-" + name, RuntimeID: name, Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+			State:      state,
+			ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
+		}
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTestEvent("live", vmkit.StateRunning)
+	writeTestEvent("parked", vmkit.StateStopped)
+	stdoutPath := filepath.Join(dir, "ps.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPS([]string{"--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runPS: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "live") || strings.Contains(string(got), "parked") {
+		t.Fatalf("ps output = %s", got)
+	}
+}
+
 func TestRunLogsPrintsSerialLog(t *testing.T) {
 	dir := t.TempDir()
 	logDir := filepath.Join(dir, "research")

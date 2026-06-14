@@ -81,7 +81,8 @@ microagent connect research --send "uname -r"
 ## 3. Inspect it
 
 ```bash
-microagent list                # all workspaces
+microagent list                # saved workspaces
+microagent ps                  # running workspaces
 microagent status research   # one workspace
 microagent logs research     # boot/serial output
 ```

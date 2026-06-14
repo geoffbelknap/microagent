@@ -1,6 +1,6 @@
 ---
 title: microagent list
-description: List every workspace and its current state.
+description: List saved workspaces and their current state.
 ---
 
 <!-- docs-last-updated -->
@@ -10,21 +10,23 @@ _Last updated: 2026-06-14_
 microagent list [--state-dir <dir>]
 ```
 
-`list` walks the state directory and prints one row per workspace, with name,
-backend, and current state. It's the list view; for everything about one
-workspace - readiness, verification, network detail - use
+`list` walks the state directory and prints one row per saved workspace, with
+name, backend, and current state. It is an inventory view, so stopped
+workspaces appear because their disks and state still exist. To show only live
+VMs, use [`ps`](/cli/ps/). For everything about one workspace - readiness,
+verification, network detail - use
 [`status`](/cli/status/).
 
 ## Examples
 
-List workspaces:
+List saved workspaces:
 
 ```bash
 microagent list
 microagent --json list
 ```
 
-Text output is one row per workspace:
+Text output is one row per saved workspace:
 
 ```text
 NAME                     STATE        BACKEND      PROFILE      NETWORK    RESTART
@@ -71,3 +73,4 @@ failure is written as a structured error envelope.
 ## Related
 
 - [`status`](/cli/status/) - the deep view of a single workspace
+- [`ps`](/cli/ps/) - show only running workspaces

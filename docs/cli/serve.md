@@ -206,7 +206,7 @@ the minimum shape is:
 | `workspace.pause` | Pause a running workspace when supported |
 | `workspace.resume` | Resume a paused workspace when supported |
 | `workspace.delete` | Delete a workspace, with optional preview and force |
-| `workspace.list` | List workspaces |
+| `workspace.list` | List saved workspaces |
 | `workspace.inspect` | Inspect workspace state with `summary` or `full` output |
 | `workspace.result` | Read the structured workspace result |
 | `workspace.stats` | Sample workspace resource usage |

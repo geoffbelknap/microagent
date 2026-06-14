@@ -170,6 +170,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "list" {
 		return runList(args[1:], stdout)
 	}
+	if args[0] == "ps" {
+		return runPS(args[1:], stdout)
+	}
 	if args[0] == "logs" || args[0] == "log" {
 		return runLogs(ctx, args[1:], stdout)
 	}
@@ -765,6 +768,35 @@ func runList(args []string, stdout *os.File) error {
 		return err
 	}
 	return writeWorkspaceList(stdout, entries)
+}
+
+func runPS(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected ps argument: %s", fs.Arg(0))
+	}
+	entries, err := workspace.List(opts.StateDir)
+	if err != nil {
+		return err
+	}
+	return writeWorkspaceList(stdout, filterRunningWorkspaces(entries))
+}
+
+func filterRunningWorkspaces(entries []workspaceListEntry) []workspaceListEntry {
+	filtered := entries[:0]
+	for _, entry := range entries {
+		switch vmkit.VMState(entry.State) {
+		case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused, vmkit.StateQuarantined, vmkit.StateStopping:
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func runClone(args []string, stdout *os.File) error {
@@ -6266,7 +6298,8 @@ Commands:
   exec                 Run a structured command in a workspace
   connect              Open the workspace console
   status               Show one workspace
-  list                 List workspaces
+  list                 List saved workspaces
+  ps                   List running workspaces
   logs                 Show workspace logs
   halt                 Shut down cleanly and keep disk state
   delete               Delete a workspace
@@ -6310,7 +6343,8 @@ Commands:
   supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
   exec                 Run a structured command in a workspace
-  list                 List workspaces
+  list                 List saved workspaces
+  ps                   List running workspaces
   status               Show workspace state
   result               Show structured workspace result
   logs                 Show workspace logs
