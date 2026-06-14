@@ -1019,7 +1019,7 @@ wait_for_status_ready "$BUNDLE_WORKSPACE" "$STATE_DIR/status-bundle-running.json
   --ready-timeout 30 \
   --timeout 10 >"$STATE_DIR/connect-bundle.txt"
 "$CLI" halt "$BUNDLE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-bundle.json"
-"$CLI" --json artifacts "$BUNDLE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-bundle.json"
+"$CLI" --json artifact "$BUNDLE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-bundle.json"
 assert_json "$STATE_DIR/artifacts-bundle.json" "any(item.get('name') == 'disk-report' for item in data.get('artifacts', {}).get('egress', []))"
 mkdir -p "$ARTIFACT_DIR"
 "$CLI" artifact get "$BUNDLE_WORKSPACE" disk-report "$ARTIFACT_DIR" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-bundle.json"

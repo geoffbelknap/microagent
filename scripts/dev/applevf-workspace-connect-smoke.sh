@@ -112,7 +112,7 @@ if "CONNECT_READY" not in connect + serial:
     raise SystemExit("connect output did not reach the guest shell")
 PY
 
-"$STATE_DIR/microagent" ps --state-dir "$STATE_DIR"
+"$STATE_DIR/microagent" list --state-dir "$STATE_DIR"
 "$STATE_DIR/microagent" logs "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null
 
 echo "Apple VF workspace connect smoke passed"

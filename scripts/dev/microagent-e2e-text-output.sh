@@ -285,6 +285,6 @@ fi
 MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \
   "$CLI" list --state-dir "$STATE_DIR/empty"
 assert_stdout_contains output-human "No workspaces." \
-  "$CLI" --output=human ps --state-dir "$STATE_DIR/empty-human"
+  "$CLI" --output=human list --state-dir "$STATE_DIR/empty-human"
 
 echo "microagent E2E text output passed"

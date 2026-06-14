@@ -1811,14 +1811,14 @@ func runNetworkCreate(args []string, stdout *os.File) error {
 
 func runNetworkList(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("network ls", flag.ContinueOnError)
+	fs := flag.NewFlagSet("network list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: microagent network ls [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent network list [--state-dir <dir>]")
 	}
 	records, err := network.List(stateDir)
 	if err != nil {
@@ -1837,7 +1837,7 @@ func runNetworkList(args []string, stdout *os.File) error {
 func runNetworkRemove(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
 	force := false
-	fs := flag.NewFlagSet("network rm", flag.ContinueOnError)
+	fs := flag.NewFlagSet("network delete", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.BoolVar(&force, "force", false, "Remove even if the network still has members")
 	fs.BoolVar(&force, "f", false, "Remove even if the network still has members")
@@ -2154,14 +2154,14 @@ func runVolumeCreate(ctx context.Context, args []string, stdout *os.File) error 
 
 func runVolumeList(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
-	fs := flag.NewFlagSet("volume ls", flag.ContinueOnError)
+	fs := flag.NewFlagSet("volume list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: microagent volume ls [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent volume list [--state-dir <dir>]")
 	}
 	records, err := volume.List(stateDir)
 	if err != nil {
@@ -2184,7 +2184,7 @@ func runVolumeList(args []string, stdout *os.File) error {
 func runVolumeRemove(args []string, stdout *os.File) error {
 	stateDir := defaultStateDir()
 	force := false
-	fs := flag.NewFlagSet("volume rm", flag.ContinueOnError)
+	fs := flag.NewFlagSet("volume delete", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.BoolVar(&force, "force", false, "Remove even if the volume is attached")
 	fs.BoolVar(&force, "f", false, "Remove even if the volume is attached")
@@ -2261,7 +2261,7 @@ Manage user-defined named volumes: VM-independent ext4 disks attached by name.
 
 Usage:
   microagent volume create <name> [options]  Create a named volume
-  microagent volume ls                        List named volumes
+  microagent volume list                      List named volumes
   microagent volume inspect <name>            Show one volume
   microagent volume delete <name> [options]       Remove a named volume
 
