@@ -12,6 +12,7 @@ func runHostSetupNetworking(args []string, stdout *os.File) error {
 	fs.SetOutput(os.Stderr)
 	check := fs.Bool("check", false, "report readiness without changing the host")
 	revert := fs.Bool("revert", false, "undo a previous setup-networking")
+	assumeYes := fs.Bool("yes", false, "skip the confirmation prompt before re-running under sudo")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -32,7 +33,7 @@ func runHostSetupNetworking(args []string, stdout *os.File) error {
 	}
 
 	if os.Geteuid() != 0 {
-		return fmt.Errorf("setup requires root: run `sudo microagent host setup-networking`")
+		return maybeSelfElevate(*revert, *assumeYes, stdout)
 	}
 
 	if *revert {
