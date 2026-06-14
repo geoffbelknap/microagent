@@ -642,6 +642,29 @@ func TestTeardownTimeoutReportsDescribeFailure(t *testing.T) {
 	}
 }
 
+func TestReadRuntimeStateFileContentAndMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "runtime.json")
+	if err := os.WriteFile(path, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := readRuntimeStateFile(path)
+	if err != nil || string(data) != `{"ok":true}` {
+		t.Fatalf("readRuntimeStateFile = %q, %v; want the file content", data, err)
+	}
+
+	// A genuinely missing file returns the not-exist error immediately rather
+	// than burning the transient-retry budget — set the budget enormous so a
+	// fast return is the only way this completes, proving the not-exist fast
+	// path the many callers rely on.
+	oldRetries, oldBackup := runtimeStateReadRetries, runtimeStateReadRetryBackup
+	runtimeStateReadRetries, runtimeStateReadRetryBackup = 1_000_000, time.Second
+	t.Cleanup(func() { runtimeStateReadRetries, runtimeStateReadRetryBackup = oldRetries, oldBackup })
+	if _, err := readRuntimeStateFile(filepath.Join(dir, "missing.json")); !os.IsNotExist(err) {
+		t.Fatalf("missing file error = %v, want IsNotExist", err)
+	}
+}
+
 func TestAppendEventMigratesLegacyJSONLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "events.json")
 	legacy := `{"identity":{"runtimeID":"agent-1","backend":"windows-hyperv"},"state":"prepared","observedAt":"2026-05-12T16:01:52Z"}

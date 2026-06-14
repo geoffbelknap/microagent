@@ -5,6 +5,31 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv snapshot is unsupported (documented limitation)
+
+- `snapshot create`, `start --from-snapshot`, and `create --from-snapshot` now
+  fail closed with a clear message on backends that do not support snapshots,
+  gated by a new `Snapshot` capability (true only for Firecracker). Windows
+  Hyper-V cannot support snapshots: its HCS-direct (`LinuxKernelDirect`)
+  compute systems have no guest-memory save-state — `HcsSaveComputeSystem`
+  captures only device state (verified on a real host: a paused 512 MiB guest
+  saves a 24 KB device-only file and the worker aborts), and the Hyper-V
+  mechanisms that do save memory (`Save-VM`, checkpoints) belong to VMMS, which
+  this backend deliberately does not use. Apple VF snapshot support remains
+  planned (VZ `saveMachineStateTo`, macOS 14+). Use `commit` or `clone` on
+  Windows Hyper-V instead.
+
+### windows-hyperv runtime.json read tolerates a concurrent atomic rewrite
+
+- Reading `runtime.json` now retries briefly on a transient read error. The
+  supervisor rewrites the file atomically (temp file + rename); on Windows a
+  concurrent reader — most often the freshly started runtime listener helper
+  reading its config while `apply` rewrites the file — could hit "the process
+  cannot access the file because it is being used by another process" during
+  the rename window, which surfaced as an `apply` exec-bridge failure on loaded
+  CI runners. A genuinely missing file still returns immediately, so the
+  not-exist callers stay fast.
+
 ### windows-hyperv managed NAT subnet no longer collides with the Default Switch
 
 - The managed `microagent-nat` HNS network is created on a subnet chosen to

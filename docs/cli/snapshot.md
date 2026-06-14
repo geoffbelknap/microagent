@@ -14,8 +14,17 @@ microagent snapshot rm <name> <tag> [--state-dir <dir>]               Remove one
 
 A snapshot is a full checkpoint of a workspace: its guest memory and device
 state plus a coherent copy of its rootfs disk, taken together while the VM is
-paused. Snapshots are currently implemented only for the Firecracker backend.
-They are stored under
+paused. Snapshots are implemented only on the Firecracker backend. Apple VF
+support is planned (VZ `saveMachineStateTo`, macOS 14+). **Windows Hyper-V
+does not support snapshots and is not planned to:** its HCS-direct
+(`LinuxKernelDirect`) compute systems have no guest-memory save-state — the
+HCS save call captures only device state, and the Hyper-V mechanisms that do
+save memory (`Save-VM`, checkpoints) belong to VMMS, which this backend
+deliberately does not use. On Windows Hyper-V use [`commit`](/cli/commit/) for a
+distributable image or [`clone`](/cli/clone/) for a disk copy instead. Snapshot
+commands fail closed with a clear message on backends that do not support them.
+
+Snapshots are stored under
 `<state-dir>/<name>/snapshots/<tag>/` as `vmstate`, `memory`, `rootfs.ext4`,
 and `manifest.json`. A workspace may hold multiple named snapshots; `--tag`
 defaults to a timestamp.
