@@ -4,15 +4,15 @@ set -euo pipefail
 # windows-hyperv arm of the lifecycle-deep scenario: the backend-neutral
 # lifecycle feature contract over a real VHD boot on Hyper-V. Covers
 # create (+dry-run and validation failures), start, channel-true readiness,
-# status/inspect/ps, connect --send, structured exec, logs, events history,
+# status/list, connect --send, structured exec, logs, events history,
 # stats sampling, halt + restart, clone of a stopped workspace booted and
-# exec'd, quarantine semantics, artifacts list, images list, prune, and
+# exec'd, quarantine semantics, artifact list, image list/prune, and
 # delete cleanup.
 #
 # cp and artifact extraction ride the guest exec channel (Open Decision #1
 # resolved: guest-mediated copy with a transient maintenance boot for
 # stopped workspaces). mke2fs-based segments (standalone rootfs build,
-# images pull) stay on the ext4 lanes; mke2fs is never required on Windows.
+# image pull) stay on the ext4 lanes; mke2fs is never required on Windows.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
@@ -175,7 +175,7 @@ e2e_step "snapshot fails closed (unsupported on windows-hyperv)"
 expect_failure snapshot-unsupported "not supported on the windows-hyperv backend" \
   "$CLI" snapshot create "$WORKSPACE" --tag probe --state-dir "$STATE_DIR"
 
-e2e_step "status / inspect / ps on the prepared workspace"
+e2e_step "status / list on the prepared workspace"
 # create with setup commands boots the guest once to run them, so the
 # workspace lands on stopped (prepared when no setup boot was needed).
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-prepared.json"
@@ -184,9 +184,9 @@ case "$created_state" in
   prepared|stopped) ;;
   *) e2e_fail "post-create state = $created_state, want prepared or stopped" ;;
 esac
-"$CLI" inspect "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/inspect-prepared.json"
+"$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/inspect-prepared.json"
 test "$(json_get "$STATE_DIR/inspect-prepared.json" event.identity.backend)" = "windows-hyperv"
-"$CLI" ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps-prepared.json"
+"$CLI" list --state-dir "$STATE_DIR" >"$STATE_DIR/ps-prepared.json"
 grep -q "$WORKSPACE" "$STATE_DIR/ps-prepared.json"
 
 e2e_step "start and wait for channel-true readiness"
@@ -194,7 +194,7 @@ e2e_step "start and wait for channel-true readiness"
 wait_for_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 test "$(json_get "$STATE_DIR/status-running.json" readiness.execReady.ready)" = "True"
 test "$(json_get "$STATE_DIR/status-running.json" readiness.shellReady.ready)" = "True"
-"$CLI" ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps-running.json"
+"$CLI" list --state-dir "$STATE_DIR" >"$STATE_DIR/ps-running.json"
 grep -q "running" "$STATE_DIR/ps-running.json"
 expect_failure start-running "already running" \
   "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR"
@@ -218,8 +218,8 @@ e2e_step "logs carry guest init output"
 "$CLI" logs "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-running.txt"
 grep -q "microagent-init: starting" "$STATE_DIR/logs-running.txt"
 
-e2e_step "artifacts list shows the declared output"
-"$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
+e2e_step "artifact list shows the declared output"
+"$CLI" artifact "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
 grep -q '"report"' "$STATE_DIR/artifacts-running.json"
 
 e2e_step "events history is the backend-neutral JSON array"
@@ -308,7 +308,7 @@ wait_for_ready "$WORKSPACE" "$STATE_DIR/status-restarted.json"
 grep -q "persisted" "$STATE_DIR/exec-after-restart.out"
 
 e2e_step "guest-mediated cp and artifact extraction on the stopped workspace"
-# Open Decision #1 resolved: cp/artifacts get ride the guest exec channel
+# Open Decision #1 resolved: cp/artifact get ride the guest exec channel
 # via a transient maintenance boot. Local endpoints use Windows-form paths
 # (drive-absolute paths disambiguate from workspace endpoints).
 "$CLI" halt "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/halt-for-copy.json"
@@ -319,7 +319,7 @@ printf "host-injected" >"$STATE_DIR/host-copy.txt"
 "$CLI" cp "$(e2e_host_path "$STATE_DIR/host-copy.txt")" "$WORKSPACE:/host-copy.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-to.json"
 test "$(json_get "$STATE_DIR/cp-to.json" direction)" = "to-workspace"
 mkdir -p "$STATE_DIR/artifacts-out"
-"$CLI" artifacts get "$WORKSPACE" report "$(e2e_host_path "$STATE_DIR/artifacts-out")" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-get.json"
+"$CLI" artifact get "$WORKSPACE" report "$(e2e_host_path "$STATE_DIR/artifacts-out")" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-get.json"
 grep -q '"ok":true' "$STATE_DIR/artifacts-out/report.json"
 # The maintenance boots must leave the workspace stopped.
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-after-copy.json"
@@ -330,7 +330,7 @@ e2e_step "clone a stopped workspace, boot it, and exec the clone"
 test "$(json_get "$STATE_DIR/clone.json" workspace)" = "$CLONE"
 test "$(json_get "$STATE_DIR/clone.json" response.event.state)" = "prepared"
 test -e "$STATE_DIR/workspaces/$CLONE/rootfs.vhd"
-"$CLI" ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps-cloned.json"
+"$CLI" list --state-dir "$STATE_DIR" >"$STATE_DIR/ps-cloned.json"
 grep -q "$CLONE" "$STATE_DIR/ps-cloned.json"
 "$CLI" start "$CLONE" --state-dir "$STATE_DIR" >"$STATE_DIR/clone-start.json"
 wait_for_ready "$CLONE" "$STATE_DIR/clone-status-running.json"
@@ -371,9 +371,9 @@ if states.count("running") < 3:
 PY
 
 e2e_step "images and prune surfaces"
-"$CLI" images list --state-dir "$STATE_DIR" >"$STATE_DIR/images.json"
+"$CLI" image list --state-dir "$STATE_DIR" >"$STATE_DIR/images.json"
 json_get "$STATE_DIR/images.json" images >/dev/null
-"$CLI" prune --state-dir "$STATE_DIR" >"$STATE_DIR/prune.json"
+"$CLI" image prune --state-dir "$STATE_DIR" >"$STATE_DIR/prune.json"
 
 e2e_step "delete cleans workspace state"
 "$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-clone.json"

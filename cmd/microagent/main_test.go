@@ -75,7 +75,7 @@ func TestRunVersionAliases(t *testing.T) {
 	}
 }
 
-func TestHelpListsPauseAndResume(t *testing.T) {
+func TestHelpIsCompactAndHelpAllListsAdvancedCommands(t *testing.T) {
 	dir := t.TempDir()
 	stdoutPath := filepath.Join(dir, "stdout.txt")
 	stdout, err := os.Create(stdoutPath)
@@ -94,9 +94,35 @@ func TestHelpListsPauseAndResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	help := string(data)
-	for _, command := range []string{"pause", "resume", "snapshot"} {
-		if !strings.Contains(help, "\n  "+command+" ") {
-			t.Fatalf("help missing %q command:\n%s", command, help)
+	if !strings.Contains(help, "microagent help all") {
+		t.Fatalf("compact help missing help all pointer:\n%s", help)
+	}
+	for _, command := range []string{"pause", "resume", "snapshot", "rootfs build", "kernel install"} {
+		if strings.Contains(help, "\n  "+command+" ") {
+			t.Fatalf("compact help includes secondary command %q:\n%s", command, help)
+		}
+	}
+
+	allPath := filepath.Join(dir, "all.txt")
+	allOut, err := os.Create(allPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"help", "all"}, allOut)
+	if closeErr := allOut.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run help all: %v", err)
+	}
+	allData, err := os.ReadFile(allPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allHelp := string(allData)
+	for _, command := range []string{"pause", "resume", "snapshot", "rootfs build", "kernel install"} {
+		if !strings.Contains(allHelp, "\n  "+command+" ") {
+			t.Fatalf("full help missing %q command:\n%s", command, allHelp)
 		}
 	}
 }
@@ -198,10 +224,10 @@ func TestRunSnapshotListAndRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"snapshot", "rm", name, "snap-a", "--state-dir", dir}, rmOut)
+	err = run(t.Context(), []string{"snapshot", "delete", name, "snap-a", "--state-dir", dir}, rmOut)
 	_ = rmOut.Close()
 	if err != nil {
-		t.Fatalf("snapshot rm: %v", err)
+		t.Fatalf("snapshot delete: %v", err)
 	}
 	if _, err := os.Stat(vmkit.SnapshotDir(dir, name, "snap-a")); !os.IsNotExist(err) {
 		t.Fatalf("snap-a should be removed, stat err = %v", err)
@@ -1669,24 +1695,24 @@ func TestInspectAliasDefaultsToJSONStatus(t *testing.T) {
 	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateStopped, 0, ""); err != nil {
 		t.Fatal(err)
 	}
-	stdoutPath := filepath.Join(dir, "inspect.json")
+	stdoutPath := filepath.Join(dir, "status.json")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"inspect", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
+	err = run(t.Context(), []string{"status", "research", "--state-dir", dir, "--backend", hostBackend()}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
 	if err != nil {
-		t.Fatalf("run inspect: %v", err)
+		t.Fatalf("run status: %v", err)
 	}
 	data, err := os.ReadFile(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"runtimeID": "research"`) || !strings.Contains(string(data), `"state": "stopped"`) {
-		t.Fatalf("inspect output = %s", data)
+		t.Fatalf("status output = %s", data)
 	}
 }
 
@@ -2598,7 +2624,7 @@ func TestParseRSSKiB(t *testing.T) {
 		t.Fatalf("rss = %d", rss)
 	}
 	if _, err := parseRSSKiB([]byte("")); err == nil {
-		t.Fatal("parseRSSKiB accepted empty ps output")
+		t.Fatal("parseRSSKiB accepted empty list output")
 	}
 }
 
@@ -2672,12 +2698,12 @@ func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runImages([]string{"list", "--state-dir", dir}, stdout)
+	err = runImage([]string{"list", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
 	if err != nil {
-		t.Fatalf("runImages list: %v", err)
+		t.Fatalf("runImage list: %v", err)
 	}
 	data, err := os.ReadFile(stdoutPath)
 	if err != nil {
@@ -2741,7 +2767,7 @@ func TestRunImagesPruneDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runImages([]string{"prune", "--delete", "--state-dir", dir}, stdout)
+	err = runImage([]string{"prune", "--delete", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -2750,7 +2776,7 @@ func TestRunImagesPruneDeleteRequiresConfirmationWithoutTTY(t *testing.T) {
 	}
 }
 
-func TestRunPruneImagesDeletesReusableBaselinesWithYes(t *testing.T) {
+func TestRunImagePruneDeletesReusableBaselinesWithYes(t *testing.T) {
 	oldOutput := outputFormat
 	t.Cleanup(func() { outputFormat = oldOutput })
 	outputFormat = "text"
@@ -2778,12 +2804,12 @@ func TestRunPruneImagesDeletesReusableBaselinesWithYes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runPrune([]string{"--images", "--yes", "--state-dir", dir}, stdout)
+	err = runImage([]string{"prune", "--delete", "--yes", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
 	if err != nil {
-		t.Fatalf("runPrune: %v", err)
+		t.Fatalf("runImage: %v", err)
 	}
 	data, err := os.ReadFile(stdoutPath)
 	if err != nil {
@@ -3431,7 +3457,7 @@ func TestArtifactsCommandListsDeclaredArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"artifacts", "research", "--state-dir", dir}, stdout)
+	err = run(t.Context(), []string{"artifact", "research", "--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -3575,12 +3601,12 @@ func TestRunArtifactGetCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"artifacts", "get", "research", "report", targetDir, "--state-dir", dir, "--debugfs", debugfs}, stdout)
+	err = run(t.Context(), []string{"artifact", "get", "research", "report", targetDir, "--state-dir", dir, "--debugfs", debugfs}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
 	if err != nil {
-		t.Fatalf("run artifacts get: %v", err)
+		t.Fatalf("run artifact get: %v", err)
 	}
 	var result copyResult
 	data, err := os.ReadFile(stdoutPath)
@@ -5406,7 +5432,7 @@ func TestWindowsHyperVNamedNetworkSmoke(t *testing.T) {
 			_, _ = runExternalOutput(cleanupCtx, cliPath, "kill", ws, "--state-dir", dir)
 			_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", ws, "--state-dir", dir, "--yes", "--force")
 		}
-		_, _ = runExternalOutput(cleanupCtx, cliPath, "network", "rm", netName, "--state-dir", dir, "--force")
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "network", "delete", netName, "--state-dir", dir, "--force")
 	})
 
 	runExternal(t, ctx, cliPath, "network", "create", netName, "--subnet", netSubnet, "--state-dir", dir)
@@ -5896,7 +5922,7 @@ func TestDataAfterOffsetIgnoresOldConsoleMarkers(t *testing.T) {
 	}
 }
 
-func TestRunPSListsWorkspaces(t *testing.T) {
+func TestRunListListsWorkspaces(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "research"), 0o755); err != nil {
 		t.Fatal(err)
@@ -5920,28 +5946,28 @@ func TestRunPSListsWorkspaces(t *testing.T) {
 	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", RestartPolicy: "on-failure", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
 		t.Fatal(err)
 	}
-	stdoutPath := filepath.Join(dir, "ps.json")
+	stdoutPath := filepath.Join(dir, "list.json")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runPS([]string{"--state-dir", dir}, stdout)
+	err = runList([]string{"--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
 	if err != nil {
-		t.Fatalf("runPS: %v", err)
+		t.Fatalf("runList: %v", err)
 	}
 	got, err := os.ReadFile(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(got), `"name": "research"`) || !strings.Contains(string(got), `"state": "stopped"`) || !strings.Contains(string(got), `"restart": "on-failure"`) {
-		t.Fatalf("ps output = %s", got)
+		t.Fatalf("list output = %s", got)
 	}
 }
 
-func TestRunPSCanPrintHumanOutput(t *testing.T) {
+func TestRunListCanPrintHumanOutput(t *testing.T) {
 	t.Setenv("MICROAGENT_OUTPUT", "text")
 	dir := t.TempDir()
 	eventDir := filepath.Join(dir, "research")
@@ -5960,24 +5986,24 @@ func TestRunPSCanPrintHumanOutput(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	stdoutPath := filepath.Join(dir, "ps.txt")
+	stdoutPath := filepath.Join(dir, "list.txt")
 	stdout, err := os.Create(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runPS([]string{"--state-dir", dir}, stdout)
+	err = runList([]string{"--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
 	if err != nil {
-		t.Fatalf("runPS: %v", err)
+		t.Fatalf("runList: %v", err)
 	}
 	got, err := os.ReadFile(stdoutPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(got), "NAME") || !strings.Contains(string(got), "research") || strings.Contains(string(got), `"workspaces"`) {
-		t.Fatalf("ps human output = %s", got)
+		t.Fatalf("list human output = %s", got)
 	}
 }
 

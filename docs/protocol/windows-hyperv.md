@@ -4,7 +4,7 @@ description: Run Linux guests on Windows through HCS - no WSL, no QEMU.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-14_
 
 If you want Linux guests on a Windows host - without WSL and without QEMU -
 this page documents the `windows-hyperv` backend. It talks to
@@ -199,7 +199,7 @@ object and marks `readiness.resultReady.ready` true.
   save memory (`Save-VM`, checkpoints) belong to VMMS, which this backend
   deliberately does not use. Snapshot commands fail closed; use `commit` (a
   distributable image) or `clone` (a disk copy) instead.
-- Named networks are supported: `network create`/`ls`/`rm` plus
+- Named networks are supported: `network create`/`ls`/`delete` plus
   `--network named --network-name <n>` back onto a private HNS network with
   static IPAM (members share a subnet and address each other).
 - Direct supervisor `console` is a deliberate non-goal on every backend; use

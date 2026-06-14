@@ -146,8 +146,8 @@ run_iso() { # run_iso <name-hint> <volume-spec> <exec>
 
 e2e_step "volume create / ls / inspect"
 "$CLI" volume create data --size-mib 32 --state-dir "$STATE_DIR" >/dev/null || e2e_fail "volume create"
-"$CLI" volume ls --state-dir "$STATE_DIR" | grep -q "data" || e2e_fail "volume ls missing data"
-"$CLI" --json volume inspect data --state-dir "$STATE_DIR" | grep -q '"size_mib": 32' || e2e_fail "volume inspect size"
+"$CLI" volume list --state-dir "$STATE_DIR" | grep -q "data" || e2e_fail "volume list missing data"
+"$CLI" --json volume status data --state-dir "$STATE_DIR" | grep -q '"size_mib": 32' || e2e_fail "volume status size"
 [ -f "$VOLUME_BACKING" ] || e2e_fail "backing file not built at $VOLUME_BACKING"
 if ! e2e_is_windows; then
   file "$VOLUME_BACKING" | grep -qi "ext4 filesystem" || e2e_fail "backing file is not ext4"
@@ -174,7 +174,7 @@ grep -qi "already attached" "$STATE_DIR/intruder.json" || e2e_log "note: expecte
 "$CLI" kill holder "${START_FLAGS[@]}" >/dev/null 2>&1 || true
 
 e2e_step "rm removes the volume and its backing file"
-"$CLI" volume rm data --force --state-dir "$STATE_DIR" >/dev/null || e2e_fail "volume rm"
+"$CLI" volume delete data --force --state-dir "$STATE_DIR" >/dev/null || e2e_fail "volume delete"
 [ ! -e "$VOLUME_BACKING" ] || e2e_fail "backing file not removed"
 
 e2e_log "volumes scenario passed"

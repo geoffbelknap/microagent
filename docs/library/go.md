@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-14_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -91,7 +91,7 @@ symbols should be added to this page when they are introduced.
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check` |
 | `pkg/perf` | `BootOptions`, `BootReport`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `Boot`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeRSSSamples` |
-| `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
+| `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platfodelete`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
 
 ## Supervisor types
@@ -340,12 +340,12 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent init` | `scaffold.Generate` |
 | `microagent create` | `workspace.Create` |
 | `microagent start` | `workspace.Start` |
-| `microagent status` / `microagent inspect` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
+| `microagent status` / `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
 | `microagent result` | `workspace.ResultStatus` |
-| `microagent ps` | `workspace.List` |
-| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` / `microagent rm` | `workspace.Control` (one function, action picked via options) |
+| `microagent list` | `workspace.List` |
+| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` / `microagent delete` | `workspace.Control` (one function, action picked via options) |
 | `microagent pause` / `microagent resume` | `workspace.Pause` / `workspace.Resume` |
-| `microagent snapshot` create / list / rm | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
+| `microagent snapshot` create / list / delete | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
 | `microagent apply` | `workspace.Apply` |
 | `microagent supervise` | `workspace.Supervise` |
 | `microagent connect` | `workspace.DialConsole` / `SendConsoleCommand` (raw terminal mode stays CLI-only) |
@@ -355,8 +355,8 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent stats` | `workspace.SampleStats` |
 | `microagent cp` | `workspace.Copy` |
 | `microagent clone` | `workspace.Clone` |
-| `microagent commit` / `microagent images push` | `commit.Commit` / `commit.Push` |
-| `microagent artifacts` / `microagent artifacts get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
+| `microagent commit` / `microagent image push` | `commit.Commit` / `commit.Push` |
+| `microagent artifact` / `microagent artifact get` | `workspace.ArtifactsFor` / `workspace.GetArtifact` |
 | `microagent network` | `workspace.Network` |
 | `microagent model` | `model.Pull` / `model.List` / `model.Remove` / `model.Prune` / `modelrunner.Ensure` |
 | `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
@@ -366,11 +366,11 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent contract` | `vmkit.NewRuntimeContract` |
 | `microagent kernel install` / `microagent kernel verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
 | `microagent rootfs build` | `rootfs.Builder.Build` |
-| `microagent images` / `microagent prune` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
+| `microagent image` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
 | `microagent perf` / `microagent perf boot` / `microagent perf footprint` / `microagent perf steady` | `perf.Boot` / `Footprint` / `Steady` |
 | `microagent profiles` | `workspace.ProfileNames` / `workspace.LookupProfile` |
 | `microagent serve mcp` | CLI-only MCP stdio transport over the existing package APIs |
-| `microagent serve model` | Alias for `microagent model serve` / `modelrunner.Ensure` |
+| `microagent model serve` | Alias for `microagent model serve` / `modelrunner.Ensure` |
 | `microagent version` | CLI-only build metadata output |
 | `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |
 

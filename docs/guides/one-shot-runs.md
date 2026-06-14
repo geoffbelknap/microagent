@@ -4,7 +4,7 @@ description: Boot a microVM, run a command, and tear it down - with setup, env v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 By the end of this guide you can run any command in a disposable microVM:
 image plus command, setup steps before it, environment variables into it, and
@@ -98,8 +98,8 @@ microagent run --keep --name report-run \
 Then list and retrieve the artifact from the stopped workspace:
 
 ```bash
-microagent artifacts report-run
-microagent artifacts get report-run report ./report.txt
+microagent artifact report-run
+microagent artifact get report-run report ./report.txt
 cat ./report.txt
 ```
 
@@ -113,7 +113,7 @@ A kept run is a regular workspace until you delete it:
 microagent delete report-run --yes
 ```
 
-`--rm` spells out the default disposable behavior; it exists so container-style
+`--delete` spells out the default disposable behavior; it exists so container-style
 muscle memory works. You only need a flag when you want the opposite, `--keep`.
 
 ## 5. Bound the run with a timeout
@@ -132,18 +132,18 @@ The CLI exits nonzero and the workspace record is left behind in state
 `failed` so you can read its [logs](/cli/logs/). Delete it once you've looked:
 
 ```bash
-microagent ps
+microagent list
 microagent delete run-1781167843059951259 --yes
 ```
 
 ## Clean up
 
 Disposable runs clean up after themselves. Anything you ran with `--keep` (or
-that timed out) shows up in `microagent ps` - delete those when you're done,
+that timed out) shows up in `microagent list` - delete those when you're done,
 and confirm the list is empty:
 
 ```bash
-microagent ps
+microagent list
 ```
 
 ```text

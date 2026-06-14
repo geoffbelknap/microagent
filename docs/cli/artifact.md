@@ -1,18 +1,18 @@
 ---
-title: microagent artifacts
+title: microagent artifact
 description: List and retrieve declared workspace artifacts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
-microagent artifacts <name> [--state-dir <dir>]                                              List declared artifacts
-microagent artifacts get <name> <artifact> <target> [--state-dir <dir>] [--debugfs <path>]   Retrieve one output artifact
+microagent artifact <name> [--state-dir <dir>]                                              List declared artifacts
+microagent artifact get <name> <artifact> <target> [--state-dir <dir>] [--debugfs <path>]   Retrieve one output artifact
 ```
 
-`artifacts` reports the input bundles and output paths declared in the
-workspace manifest. `artifacts get` retrieves a declared output artifact by
+`artifact` reports the input bundles and output paths declared in the
+workspace manifest. `artifact get` retrieves a declared output artifact by
 name without entering the workspace - the host reads it straight off the
 workspace disk. Only declared `outputs` are retrievable by artifact name; for
 arbitrary file copying, use [`cp`](/cli/cp/).
@@ -22,11 +22,11 @@ arbitrary file copying, use [`cp`](/cli/cp/).
 List declared artifacts, then fetch one by name:
 
 ```bash
-microagent --json artifacts research
-microagent artifacts get research report ./out/
+microagent --json artifact research
+microagent artifact get research report ./out/
 ```
 
-If an output path sits under an attached disk mountpoint, `artifacts get`
+If an output path sits under an attached disk mountpoint, `artifact get`
 reads from that disk. Otherwise it reads from the rootfs image.
 
 ## Flags
@@ -37,13 +37,13 @@ lives somewhere unusual.
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-| `--debugfs <path>` | debugfs binary path for `artifacts get` |
+| `--debugfs <path>` | debugfs binary path for `artifact get` |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
 ## Exit status
 
-`artifacts` exits `0` when the workspace manifest is found and read; nonzero
+`artifact` exits `0` when the workspace manifest is found and read; nonzero
 when the workspace cannot be found, the named artifact is not declared, or the
 read from the workspace disk fails. In AX mode a failure is written as a
 structured error envelope.

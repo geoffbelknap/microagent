@@ -4,7 +4,7 @@ description: Register microagent serve mcp in Claude Code or another MCP client 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-14_
 
 Give a coding agent microVM workspaces as tools. This guide registers
 `microagent serve mcp` in Claude Code (or any MCP client) so the agent
@@ -99,7 +99,7 @@ subprocess. Workspaces an agent created are ordinary workspaces; list and
 remove leftovers like always:
 
 ```bash
-microagent ps
+microagent list
 microagent delete <name> --yes
 ```
 

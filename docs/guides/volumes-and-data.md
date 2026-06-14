@@ -4,7 +4,7 @@ description: Persist data in named volumes, attach disks and bundles, and copy f
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 microagent never exposes host directories to the guest - everything the guest
 reads or writes is a block device - so data moves through deliberate, declared
@@ -19,7 +19,7 @@ any one workspace - the in-boundary analog of a container volume.
 
 ```bash
 microagent volume create data --size-mib 512
-microagent volume ls
+microagent volume list
 ```
 
 ```text
@@ -42,11 +42,11 @@ microagent run -v data:/work docker.io/library/alpine:3.20 cat /work/counter.txt
 42
 ```
 
-Two one-shot runs, one surviving file. `volume inspect` shows the backing disk
+Two one-shot runs, one surviving file. `volume status` shows the backing disk
 and the last holder:
 
 ```bash
-microagent volume inspect data
+microagent volume status data
 ```
 
 ```text
@@ -131,12 +131,12 @@ are the more structured egress path.
 
 ```bash
 microagent delete scratch --yes
-microagent volume rm data
+microagent volume delete data
 ```
 
-`volume rm` fails closed while the volume is attached to a running workspace;
+`volume delete` fails closed while the volume is attached to a running workspace;
 `--force` overrides. Deleting a workspace releases its volumes - the data
-stays for the next attach, until `volume rm` removes the backing disk.
+stays for the next attach, until `volume delete` removes the backing disk.
 
 ## What's next
 

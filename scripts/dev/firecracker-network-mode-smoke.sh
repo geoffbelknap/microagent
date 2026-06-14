@@ -203,7 +203,7 @@ grep -q "network.portForwards require user, nat, or bridged mode" "$STATE_DIR/is
   --timeout 2 >"$STATE_DIR/isolated-connect.txt"
 "$CLI" network isolated-smoke --state-dir "$STATE_DIR/isolated" >"$STATE_DIR/isolated-network.json"
 "$CLI" status isolated-smoke --state-dir "$STATE_DIR/isolated" >"$STATE_DIR/isolated-status.json"
-"$CLI" ps --state-dir "$STATE_DIR/isolated" >"$STATE_DIR/isolated-ps.json"
+"$CLI" list --state-dir "$STATE_DIR/isolated" >"$STATE_DIR/isolated-ps.json"
 "$CLI" stop isolated-smoke --state-dir "$STATE_DIR/isolated" >"$STATE_DIR/isolated-stop.json"
 "$CLI" delete isolated-smoke --state-dir "$STATE_DIR/isolated" >"$STATE_DIR/isolated-delete.json"
 

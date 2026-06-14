@@ -81,17 +81,16 @@ You can also keep the workspace in a spec file. See
 
 Other useful surfaces:
 
-- `microagent inspect <name>` prints structured status.
+- `microagent status <name>` prints structured status.
 - `microagent exec <name> -- <argv...>` runs a structured command in a running workspace.
 - MCP clients launch `microagent serve mcp` as the machine-readable stdio endpoint.
-- `microagent rm <name>` is an alias for `delete`.
-- `microagent model pull/ls/rm/prune/serve` downloads, manages, and serves local HuggingFace GGUF model files; `microagent serve model` is the same model-server entry point.
-- `microagent images pull/list/tag/rm/prune` manages reusable local rootfs baselines.
-- `microagent cp` and `microagent artifacts get` move files without entering a running VM.
+- `microagent model pull/list/delete/prune/serve` downloads, manages, and serves local HuggingFace GGUF model files.
+- `microagent image pull/list/tag/delete/prune` manages reusable local rootfs baselines.
+- `microagent cp` and `microagent artifact get` move files without entering a running VM.
 - `microagent perf` measures boot and runtime footprint.
 
 For agent clients, AX mode and the MCP endpoint provide structured tool
-responses for lifecycle, status/inspect, exec, images, copy/artifacts, cost
+responses for lifecycle, status, exec, images, copy/artifacts, cost
 estimation, idempotency, and capability discovery. Coding tools should launch
 the local stdio server with `microagent serve mcp`; see
 [`microagent serve`](docs/cli/serve.md) for Codex, Claude Code, VS Code, and

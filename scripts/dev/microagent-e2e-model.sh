@@ -123,7 +123,7 @@ echo "microagent-e2e-model: backend=$BACKEND model=$MODEL_REF image=$IMAGE"
 
 # Ensure the model is in the store (auto-pull is part of run --model, but pull up
 # front keeps the timed run fast and fails early on network problems).
-if ! "$CLI" model ls 2>/dev/null | grep -q "$(printf '%s' "$MODEL_REF" | sed 's#.*/##')"; then
+if ! "$CLI" model list 2>/dev/null | grep -q "$(printf '%s' "$MODEL_REF" | sed 's#.*/##')"; then
   echo "microagent-e2e-model: pulling $MODEL_REF ..."
   "$CLI" model pull "$MODEL_REF" >/dev/null 2>&1 || fail "model pull failed"
 fi

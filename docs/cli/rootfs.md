@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -92,4 +92,4 @@ structured error envelope.
 
 - [`create`](/cli/create/) - consume the rootfs with `--rootfs`
 - [`run`](/cli/run/) - the one-shot path that builds this for you
-- [`images`](/cli/images/) - reusable cached rootfs baselines
+- [`image`](/cli/image/) - reusable cached rootfs baselines

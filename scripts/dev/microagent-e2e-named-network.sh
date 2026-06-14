@@ -98,6 +98,6 @@ run_cli delete db --yes --force >/dev/null 2>&1 || true
 if ip link show "$BRIDGE" >/dev/null 2>&1; then
   e2e_fail "managed bridge $BRIDGE not reaped after last member left"
 fi
-net_cli network rm "$NET" --force >/dev/null 2>&1 || true
+net_cli network delete "$NET" --force >/dev/null 2>&1 || true
 
 e2e_log "named-network scenario passed"

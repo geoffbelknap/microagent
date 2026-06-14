@@ -156,13 +156,13 @@ expect_failure reserved-disk "rootfs is reserved" \
 expect_failure mutable-rootfs "mutable" \
   "$CLI" rootfs build --image docker.io/library/nats:2.10.26-alpine --out "$STATE_DIR/mutable.ext4" --state-dir "$STATE_DIR/mutable-rootfs"
 
-"$CLI" images pull "$IMAGE" \
+"$CLI" image pull "$IMAGE" \
   --state-dir "$STATE_DIR" \
   --arch amd64 \
   --guest-init "$GUEST_INIT" \
   --size-mib 192 >"$STATE_DIR/images-pull.json"
-"$CLI" images tag "$IMAGE" local/nats-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag.json"
-"$CLI" images list --state-dir "$STATE_DIR" >"$STATE_DIR/images-list.json"
+"$CLI" image tag "$IMAGE" local/nats-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag.json"
+"$CLI" image list --state-dir "$STATE_DIR" >"$STATE_DIR/images-list.json"
 
 mkdir -p "$STATE_DIR/spec"
 printf "seed-from-spec\n" >"$STATE_DIR/spec/seed.txt"
@@ -200,7 +200,7 @@ YAML
 )
 
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status-prepared.json"
-"$CLI" ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps-prepared.json"
+"$CLI" list --state-dir "$STATE_DIR" >"$STATE_DIR/ps-prepared.json"
 "$CLI" start "$WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/start.json"
 wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 (
@@ -215,7 +215,7 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
   --send "cat /seed.txt; cat /matrix/setup.txt; printf env=%s \"\$MATRIX_ENV\"; printf persisted > /matrix/persist.txt; printf '{\"ok\":true,\"phase\":\"running\"}' > /matrix/report.json; sync" \
   --ready-timeout 30 \
   --timeout 10 >"$STATE_DIR/connect-running.txt"
-"$CLI" artifacts "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
+"$CLI" artifact "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/artifacts-running.json"
 "$CLI" logs "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/logs-running.txt"
 "$CLI" --json events "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/events-running.json"
 "$CLI" --json stats "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/stats-running.json"
@@ -224,13 +224,13 @@ wait_for_status_ready "$WORKSPACE" "$STATE_DIR/status-running.json"
 
 mkdir -p "$ARTIFACT_DIR/running" "$STATE_DIR/cp-out"
 expect_failure unknown-artifact "not declared" \
-  "$CLI" artifacts get "$WORKSPACE" no-such "$STATE_DIR/no-artifact" --state-dir "$STATE_DIR"
-"$CLI" artifacts get "$WORKSPACE" report "$ARTIFACT_DIR/running" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-running.json"
+  "$CLI" artifact get "$WORKSPACE" no-such "$STATE_DIR/no-artifact" --state-dir "$STATE_DIR"
+"$CLI" artifact get "$WORKSPACE" report "$ARTIFACT_DIR/running" --state-dir "$STATE_DIR" >"$STATE_DIR/artifact-running.json"
 printf "host-copied\n" >"$STATE_DIR/host-copy.txt"
 "$CLI" cp "$STATE_DIR/host-copy.txt" "$WORKSPACE:/matrix/host-copy.txt" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-to-workspace.json"
 "$CLI" cp "$WORKSPACE:/matrix/persist.txt" "$STATE_DIR/cp-out" --state-dir "$STATE_DIR" >"$STATE_DIR/cp-from-workspace.json"
 "$CLI" clone "$WORKSPACE" "$CLONE" --state-dir "$STATE_DIR" >"$STATE_DIR/clone.json"
-"$CLI" ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps-cloned.json"
+"$CLI" list --state-dir "$STATE_DIR" >"$STATE_DIR/ps-cloned.json"
 
 "$CLI" start "$CLONE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/clone-start.json"
 wait_for_status_ready "$CLONE" "$STATE_DIR/clone-status-running.json"
@@ -241,7 +241,7 @@ wait_for_status_ready "$CLONE" "$STATE_DIR/clone-status-running.json"
   --timeout 10 >"$STATE_DIR/clone-connect.txt"
 "$CLI" halt "$CLONE" --state-dir "$STATE_DIR" >"$STATE_DIR/clone-halt.json"
 mkdir -p "$ARTIFACT_DIR/clone"
-"$CLI" artifacts get "$CLONE" report "$ARTIFACT_DIR/clone" --state-dir "$STATE_DIR" >"$STATE_DIR/clone-artifact.json"
+"$CLI" artifact get "$CLONE" report "$ARTIFACT_DIR/clone" --state-dir "$STATE_DIR" >"$STATE_DIR/clone-artifact.json"
 
 "$CLI" clone "$WORKSPACE" "$FORCE_DELETE_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/force-delete-clone.json"
 "$CLI" start "$FORCE_DELETE_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/force-delete-start.json"
@@ -265,12 +265,12 @@ expect_failure start-quarantined "quarantined" \
 
 "$CLI" delete "$CLONE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-clone.json"
 "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-workspace.json"
-"$CLI" images rm local/nats-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-tag.json"
-"$CLI" images tag "$IMAGE" local/nats-feature:delete-probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag-delete.json"
-"$CLI" images rm local/nats-feature:delete-probe --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
-"$CLI" images prune --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune.json"
-"$CLI" prune --images --yes --state-dir "$STATE_DIR" >"$STATE_DIR/prune-images-yes.txt"
-"$CLI" images prune --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune-delete.json"
+"$CLI" image delete local/nats-feature:probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-tag.json"
+"$CLI" image tag "$IMAGE" local/nats-feature:delete-probe --state-dir "$STATE_DIR" >"$STATE_DIR/images-tag-delete.json"
+"$CLI" image delete local/nats-feature:delete-probe --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-rm-delete.json"
+"$CLI" image prune --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune.json"
+"$CLI" image prune --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/prune-images-yes.txt"
+"$CLI" image prune --delete --yes --state-dir "$STATE_DIR" >"$STATE_DIR/images-prune-delete.json"
 
 python3 - "$STATE_DIR" "$WORKSPACE" "$CLONE" "$FORCE_DELETE_WORKSPACE" <<'PY'
 import json

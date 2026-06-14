@@ -4,7 +4,7 @@ description: Speak the JSON protocol backend supervisors implement - requests, r
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-14_
 
 If you are implementing a supervisor, calling one directly, or debugging what
 a backend returned, this page is the protocol reference. Backend supervisors
@@ -238,7 +238,7 @@ stderr, and guest-reported error.
 
 `artifacts` reports declared input bundles and output paths. These declarations
 are persisted with the workspace manifest and are independent of serial logs.
-The CLI `artifacts get` command retrieves declared egress artifacts by name
+The CLI `artifact get` command retrieves declared egress artifacts by name
 from the rootfs or matching attached disk mountpoint without entering the
 workspace.
 

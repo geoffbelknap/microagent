@@ -4,7 +4,7 @@ description: Turn a stopped workspace's rootfs into an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent commit <workspace> <image-ref> [options]
@@ -14,7 +14,7 @@ microagent commit <workspace> <image-ref> [options]
 image, closing the loop with the OCI→rootfs realize path used by `create`/`run`.
 The image is written to a local OCI image layout under
 `<state-dir>/images/oci`; push it to a registry with
-[`images push`](/cli/images/) or the `--push` flag.
+[`image push`](/cli/image/) or the `--push` flag.
 
 The rootfs is extracted unprivileged with `debugfs`, so the workspace must be
 stopped (committing a running or paused workspace is refused to avoid reading a
@@ -31,7 +31,7 @@ Halt, commit, and push:
 ```bash
 microagent halt research
 microagent commit research registry.example.com/team/research:v1
-microagent images push registry.example.com/team/research:v1
+microagent image push registry.example.com/team/research:v1
 ```
 
 Or commit and push in one step:
@@ -70,6 +70,6 @@ envelope.
 
 ## Related
 
-- [`images`](/cli/images/) - `images push` and the local image records
+- [`image`](/cli/image/) - `image push` and the local image records
 - [`create`](/cli/create/) - realize an OCI image into a workspace
 - [`clone`](/cli/clone/) - copy a workspace without making an image

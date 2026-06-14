@@ -124,13 +124,13 @@ json_get "$STATE_DIR/result.json" result.stdout | grep -q "PUBLIC_SURFACE_WHV_OK
 "$CLI" status "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/status.json"
 test "$(json_get "$STATE_DIR/status.json" event.state)" = "stopped"
 test "$(json_get "$STATE_DIR/status.json" readiness.resultReady.ready)" = "True"
-"$CLI" ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps.json"
+"$CLI" list --state-dir "$STATE_DIR" >"$STATE_DIR/ps.json"
 grep -q "$WORKSPACE" "$STATE_DIR/ps.json"
 
 e2e_step "images and prune surfaces"
-"$CLI" images list --state-dir "$STATE_DIR" >"$STATE_DIR/images.json"
+"$CLI" image list --state-dir "$STATE_DIR" >"$STATE_DIR/images.json"
 json_get "$STATE_DIR/images.json" images >/dev/null
-"$CLI" prune --state-dir "$STATE_DIR" >"$STATE_DIR/prune.json"
+"$CLI" image prune --state-dir "$STATE_DIR" >"$STATE_DIR/prune.json"
 
 e2e_step "perf footprint and steady sample HCS statistics on a running workspace"
 "$CLI" create "$PERF_WORKSPACE" --image "$IMAGE" --network isolated --size-mib 512 \

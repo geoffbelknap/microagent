@@ -4,7 +4,7 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-14_
 
 microagent installs with one backend per host OS: Firecracker on Linux,
 Apple Virtualization.framework on macOS, and Hyper-V on Windows.
@@ -153,7 +153,7 @@ helper, set `DOCKER_CONFIG` to an empty temporary directory for public-image
 validation rather than editing host login state.
 
 The Apple VF lane should cover portable CLI behavior, lifecycle/substrate,
-connect/logs/ps, NAT/user/isolated/publish networking, mediation and generic
+connect/logs/list, NAT/user/isolated/publish networking, mediation and generic
 virtio-vsock behavior, supervision, quarantine cleanup, results, artifacts,
 attached disks, and text/JSON output. Bridged mode is entitlement-gated:
 open-source ad-hoc builds should fail closed with the

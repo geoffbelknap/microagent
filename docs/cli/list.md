@@ -1,16 +1,16 @@
 ---
-title: microagent ps
+title: microagent list
 description: List every workspace and its current state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
-microagent ps [--state-dir <dir>]
+microagent list [--state-dir <dir>]
 ```
 
-`ps` walks the state directory and prints one row per workspace, with name,
+`list` walks the state directory and prints one row per workspace, with name,
 backend, and current state. It's the list view; for everything about one
 workspace - readiness, verification, network detail - use
 [`status`](/cli/status/).
@@ -20,8 +20,8 @@ workspace - readiness, verification, network detail - use
 List workspaces:
 
 ```bash
-microagent ps
-microagent --json ps
+microagent list
+microagent --json list
 ```
 
 Text output is one row per workspace:
@@ -58,13 +58,13 @@ outside the default `~/.microagent/`.
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory to scan (default `~/.microagent/`) |
-| `--json` | Global flag before `ps`; print structured JSON output |
+| `--json` | Global flag before `list`; print structured JSON output |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
 ## Exit status
 
-`ps` exits `0` on success, including when no workspaces exist - a missing or
+`list` exits `0` on success, including when no workspaces exist - a missing or
 empty state directory lists zero rows rather than failing. In AX mode a
 failure is written as a structured error envelope.
 

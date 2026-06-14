@@ -261,17 +261,15 @@ assert_stdout_contains result-text "TEXT_STDOUT_OK" \
   "$CLI" --output text result "$WORKSPACE" --state-dir "$STATE_DIR"
 assert_stdout_contains network-text "Forward: tcp 127.0.0.1:18080 -> guest:8080" \
   "$CLI" --text network "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains artifacts-text "Egress: 1" \
-  "$CLI" --text artifacts "$WORKSPACE" --state-dir "$STATE_DIR"
-assert_stdout_contains ps-text "NAME[[:space:]]+STATE[[:space:]]+BACKEND" \
-  "$CLI" --text ps --state-dir "$STATE_DIR"
+assert_stdout_contains artifact-text "Egress: 1" \
+  "$CLI" --text artifact "$WORKSPACE" --state-dir "$STATE_DIR"
+assert_stdout_contains list-text "NAME[[:space:]]+STATE[[:space:]]+BACKEND" \
+  "$CLI" --text list --state-dir "$STATE_DIR"
 assert_stdout_contains images-list-text "docker.io/library/busybox" \
-  "$CLI" --text images list --state-dir "$STATE_DIR"
+  "$CLI" --text image list --state-dir "$STATE_DIR"
 assert_stdout_not_contains images-list-text '"images"'
-assert_stdout_contains images-remove-alias '"removed"' \
-  "$CLI" images remove local/remove-alias:test --state-dir "$STATE_DIR"
-assert_stdout_contains images-rmi-alias '"removed"' \
-  "$CLI" images rmi local/rmi-alias:test --state-dir "$STATE_DIR"
+assert_stdout_contains images-delete-text '"removed"' \
+  "$CLI" image delete local/remove-alias:test --state-dir "$STATE_DIR"
 # windows-hyperv perf samples live HCS statistics for the named compute
 # system, which this fabricated workspace does not have; the text formatting
 # asserted here is backend-independent, and the real windows-hyperv perf
@@ -285,8 +283,8 @@ if ! e2e_is_windows; then
 fi
 
 MICROAGENT_OUTPUT=text assert_stdout_contains env-text-output "No workspaces." \
-  "$CLI" ps --state-dir "$STATE_DIR/empty"
+  "$CLI" list --state-dir "$STATE_DIR/empty"
 assert_stdout_contains output-human "No workspaces." \
-  "$CLI" --output=human ps --state-dir "$STATE_DIR/empty-human"
+  "$CLI" --output=human list --state-dir "$STATE_DIR/empty-human"
 
 echo "microagent E2E text output passed"

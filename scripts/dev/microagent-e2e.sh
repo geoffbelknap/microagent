@@ -64,12 +64,12 @@ SCENARIO_COVERAGE=(
   "text-output|portable|none|human output mode for stable public CLI surfaces"
   "init|portable|none|init scaffold, providers, --force, generated spec validation"
   "survive-reboot|host-specific|host-default|supervise --install/--uninstall boot units; no real reboot"
-  "public-surface|backend-neutral|firecracker,apple-vf,windows-hyperv|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifacts, perf, prune"
-  "lifecycle-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|create/start/status/inspect/ps/connect/logs/events/stats/halt/quarantine/clone/cp/artifacts/images/prune/delete"
+  "public-surface|backend-neutral|firecracker,apple-vf,windows-hyperv|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifact, perf, image prune"
+  "lifecycle-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|create/start/status/list/connect/logs/events/stats/halt/quarantine/clone/cp/artifact/image/delete"
   "networking-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|network modes, publish, apply, quarantine, cached image/network paths"
   "transport-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|mediation and vsock transport contract"
   "supervision-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|restart supervision, signal, failure, cleanup"
-  "volumes|backend-neutral|firecracker,apple-vf,windows-hyperv|volume create/ls/inspect/rm, attach persistence, single attach"
+  "volumes|backend-neutral|firecracker,apple-vf,windows-hyperv|volume create/list/status/delete, attach persistence, single attach"
   "commit-images|backend-neutral|firecracker,apple-vf,windows-hyperv|commit stopped rootfs into local OCI image layout"
   "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secret check, materialized secrets, on-demand secrets, audit records"
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health.exec validation and supervise restart on unhealthy probe"
@@ -107,18 +107,18 @@ E2E_MATRIX=(
   "kernel install/verify|portable|host-default|public-surface,health,volumes|Backend-specific artifacts through a common CLI"
   "rootfs build|portable|host-default|public-surface,lifecycle-deep|OCI rootfs build plus validation failures"
   "run/create/start|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,health,volumes,model-serving,windows-hyperv-lifecycle-host|Core workspace boot paths"
-  "status/inspect/ps|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,applevf-workspace-connect|State/readiness/list surfaces"
-  "result/logs/artifacts|backend-neutral|firecracker,apple-vf,windows-hyperv|contract,public-surface,lifecycle-deep|Structured result, serial logs, declared artifacts"
+  "status/list|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,applevf-workspace-connect|State/readiness/list surfaces"
+  "result/logs/artifact|backend-neutral|firecracker,apple-vf,windows-hyperv|contract,public-surface,lifecycle-deep|Structured result, serial logs, declared artifacts"
   "events/stats|backend-neutral|firecracker,apple-vf,windows-hyperv|lifecycle-deep|Lifecycle event history and resource sampling"
   "connect|backend-neutral|firecracker,apple-vf,windows-hyperv|lifecycle-deep,applevf-workspace-connect,windows-hyperv-connect-host|Interactive and send-mode console paths"
   "exec|backend-neutral|firecracker,apple-vf,windows-hyperv|health,exec-stream,secrets,volumes,windows-hyperv-exec-host|Structured exec and streaming exec"
-  "halt/quarantine/stop/kill/delete/rm|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup"
+  "halt/quarantine/stop/kill/delete|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup"
   "clone/cp|backend-neutral|firecracker,apple-vf,windows-hyperv|lifecycle-deep|Stopped workspace copy and clone semantics; windows-hyperv cp rides a guest maintenance boot over exec"
   "apply|backend-neutral|firecracker,apple-vf,windows-hyperv|networking-deep|Supported spec changes"
-  "network inspect/modes/publish|backend-neutral|firecracker,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|Portable modes plus backend publish mechanics; windows-hyperv HNS segments need an elevated host"
-  "network create/ls/rm named|host-specific|firecracker,windows-hyperv|named-network,windows-hyperv-named-network-host|Privileged Linux named bridge and elevated windows-hyperv private HNS network; not Apple VF portable"
-  "volume create/ls/inspect/rm|backend-neutral|firecracker,apple-vf,windows-hyperv|volumes|Managed volume lifecycle and attach semantics (ext4, or VHD-wrapped ext4 on windows-hyperv)"
-  "commit/images/prune|backend-neutral|firecracker,apple-vf,windows-hyperv|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/rm/prune, commit"
+  "network status/modes/publish|backend-neutral|firecracker,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|Portable modes plus backend publish mechanics; windows-hyperv HNS segments need an elevated host"
+  "network create/list/delete named|host-specific|firecracker,windows-hyperv|named-network,windows-hyperv-named-network-host|Privileged Linux named bridge and elevated windows-hyperv private HNS network; not Apple VF portable"
+  "volume create/list/status/delete|backend-neutral|firecracker,apple-vf,windows-hyperv|volumes|Managed volume lifecycle and attach semantics (ext4, or VHD-wrapped ext4 on windows-hyperv)"
+  "commit/image|backend-neutral|firecracker,apple-vf,windows-hyperv|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/delete/prune, commit"
   "registry auth|portable|none|registry-auth|Private registry credential discovery"
   "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
@@ -157,8 +157,8 @@ Scenarios:
   public-surface     CLI contract, host/doctor, kernel/rootfs, run/result,
                      request JSON, bundles, attached-disk artifacts, kill, perf
   lifecycle-deep     Backend-neutral lifecycle feature contract:
-                     create/start/status/ps/connect/logs/halt/resume/cp/clone,
-                     validation failures, images, artifacts, quarantine/delete.
+                     create/start/status/list/connect/logs/halt/resume/cp/clone,
+                     validation failures, image, artifact, quarantine/delete.
                      Defaults to Firecracker on Linux, Apple VF on macOS, and
                      windows-hyperv on Windows; override with
                      MICROAGENT_E2E_BACKEND=firecracker|applevf|windows-hyperv.
