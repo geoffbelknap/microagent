@@ -116,8 +116,8 @@ bootstrap_host() {
   (cd "$ROOT" && "$make_cmd" "${install_args[@]}")
 }
 
-doctor_json="$(mktemp "${TMPDIR:-/tmp}/microagent-dev-doctor.XXXXXX.json")"
-doctor_err="$(mktemp "${TMPDIR:-/tmp}/microagent-dev-doctor.XXXXXX.err")"
+doctor_json="$(mktemp "${TMPDIR:-/tmp}/microagent-dev-doctor-json.XXXXXX")"
+doctor_err="$(mktemp "${TMPDIR:-/tmp}/microagent-dev-doctor-err.XXXXXX")"
 # shellcheck disable=SC2317
 cleanup() {
   rm -f "$doctor_json" "$doctor_err"
