@@ -167,7 +167,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "artifact" {
 		return runArtifact(ctx, args[1:], stdout)
 	}
-	if args[0] == "list" {
+	if args[0] == "list" || args[0] == "ls" {
 		return runList(args[1:], stdout)
 	}
 	if args[0] == "ps" {
@@ -6298,7 +6298,7 @@ Commands:
   exec                 Run a structured command in a workspace
   connect              Open the workspace console
   status               Show one workspace
-  list                 List saved workspaces
+  list, ls             List saved workspaces
   ps                   List running workspaces
   logs                 Show workspace logs
   halt                 Shut down cleanly and keep disk state
@@ -6343,7 +6343,7 @@ Commands:
   supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
   exec                 Run a structured command in a workspace
-  list                 List saved workspaces
+  list, ls             List saved workspaces
   ps                   List running workspaces
   status               Show workspace state
   result               Show structured workspace result

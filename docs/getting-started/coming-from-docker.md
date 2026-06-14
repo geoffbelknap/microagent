@@ -17,7 +17,7 @@ first, then covers what is intentionally different.
 |---|---|---|
 | `docker run --rm IMAGE CMD` | `microagent run IMAGE CMD` | One-shot: boots a microVM, runs the command, removes scratch state. Disposable is the default; pass `--keep` to keep state. |
 | `docker run -d --name web IMAGE` | `microagent create --name web --image IMAGE`, then `microagent start web` | A workspace persists between starts. Use `--service-command` for a long-running process. |
-| `docker ps` | `microagent ps` | Lists running workspaces. Use `microagent list` for saved workspace inventory. |
+| `docker ps` | `microagent ps` | Lists running workspaces. Use `microagent list` or `microagent ls` for saved workspace inventory. |
 | `docker exec web CMD` | `microagent exec web -- CMD` | Structured result with exit code, stdout, and stderr. Note the `--` before the command. |
 | `docker exec -it web bash` | `microagent connect web` | Opens the workspace console. |
 | `docker stop web` | `microagent stop web` | Graceful shutdown signal. If the VM doesn't shut down cleanly, follow up with `microagent kill`. See [halt is not stop](#halt-is-not-stop). |

@@ -15,7 +15,7 @@ _Last updated: 2026-06-14_
 | Get a shell inside a workspace | [`connect`](/cli/connect/) |
 | Run a command inside and get its exit code | [`exec`](/cli/exec/) |
 | Copy files in or out | [`cp`](/cli/cp/) |
-| See saved workspaces | [`list`](/cli/list/) |
+| See saved workspaces | [`list`](/cli/list/) or `ls` |
 | See what's running | [`ps`](/cli/ps/) |
 | Dig into one workspace | [`status`](/cli/status/) |
 | See what the VM printed at boot | [`logs`](/cli/logs/) |
@@ -52,7 +52,7 @@ _Last updated: 2026-06-14_
 | [`delete`](/cli/delete/) | Remove a workspace and its state |
 | [`status`](/cli/status/) | Show workspace state |
 | [`result`](/cli/result/) | Show structured workspace result |
-| [`list`](/cli/list/) | List saved workspaces |
+| [`list`](/cli/list/) | List saved workspaces (`ls` alias) |
 | [`ps`](/cli/ps/) | List running workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
 | [`events`](/cli/events/) | Show or stream the lifecycle event history |

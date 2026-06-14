@@ -8,6 +8,7 @@ _Last updated: 2026-06-14_
 
 ```text
 microagent list [--state-dir <dir>]
+microagent ls [--state-dir <dir>]
 ```
 
 `list` walks the state directory and prints one row per saved workspace, with
@@ -17,12 +18,15 @@ VMs, use [`ps`](/cli/ps/). For everything about one workspace - readiness,
 verification, network detail - use
 [`status`](/cli/status/).
 
+`ls` is an alias for `list`.
+
 ## Examples
 
 List saved workspaces:
 
 ```bash
 microagent list
+microagent ls
 microagent --json list
 ```
 

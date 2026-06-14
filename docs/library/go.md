@@ -342,7 +342,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent start` | `workspace.Start` |
 | `microagent status` / `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
 | `microagent result` | `workspace.ResultStatus` |
-| `microagent list` / `microagent ps` | `workspace.List` |
+| `microagent list` / `microagent ls` / `microagent ps` | `workspace.List` |
 | `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` / `microagent delete` | `workspace.Control` (one function, action picked via options) |
 | `microagent pause` / `microagent resume` | `workspace.Pause` / `workspace.Resume` |
 | `microagent snapshot` create / list / delete | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
