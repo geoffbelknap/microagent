@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DOCS_CLI = ROOT / "docs" / "cli"
 
-DOCUMENTED_SPECIAL_PAGES = {"index", "spec"}
+DOCUMENTED_SPECIAL_PAGES = {"index", "serve", "spec"}
 UNDOCUMENTED_HELP_COMMANDS = {"help", "exec"}
 COMMAND_DOC_ALIASES = {
     "inspect": "status",
