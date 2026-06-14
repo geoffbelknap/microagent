@@ -1,0 +1,2 @@
+Quarterly review notes. Revenue up, churn down, hiring two engineers.
+Local data the agent can read and summarize without any network access.

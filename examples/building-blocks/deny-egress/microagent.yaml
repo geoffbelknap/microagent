@@ -1,0 +1,13 @@
+name: deny-egress
+image: docker.io/library/python:3.12-slim
+setup:
+  - mkdir -p /app /workspace
+entrypoint: python /app/check.py
+files:
+  - src: ./check.py
+    dst: /app/check.py
+  - src: ./notes.txt
+    dst: /workspace/notes.txt
+outputs:
+  - name: result
+    path: /workspace/result.json
