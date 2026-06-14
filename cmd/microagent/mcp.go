@@ -699,6 +699,9 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		return nil, err
 	}
 	result, cliErr := runCLIForMCP(ctx, cliArgs)
+	if cliErr == nil && name == "workspace.create" {
+		result = summarizeWorkspaceLifecycle(result, "created")
+	}
 	if cliErr == nil && name == "workspace.inspect" && !strings.EqualFold(stringArg(args, "format"), "full") {
 		result = summarizeWorkspaceInspect(result)
 	}
@@ -946,19 +949,60 @@ func summarizeWorkspaceInspect(result any) any {
 			summary["workspace"] = identity["runtimeID"]
 		}
 	}
-	var next []string
-	switch fmt.Sprint(summary["state"]) {
-	case "running", "starting":
-		next = []string{"workspace.exec", "workspace.halt", "workspace.delete"}
-	case "prepared", "halted", "stopped":
-		next = []string{"workspace.start", "workspace.delete"}
-	case "failed", "quarantined":
-		next = []string{"workspace.inspect", "workspace.delete"}
-	default:
-		next = []string{"workspace.inspect"}
-	}
-	summary["next_decision_points"] = next
+	summary["next_decision_points"] = workspaceNextDecisionPoints(fmt.Sprint(summary["state"]))
 	return summary
+}
+
+func summarizeWorkspaceLifecycle(result any, outcome string) any {
+	resp, ok := result.(map[string]any)
+	if !ok {
+		return result
+	}
+	response, _ := resp["response"].(map[string]any)
+	summary := map[string]any{
+		"format":    "summary",
+		"outcome":   outcome,
+		"ok":        response["ok"],
+		"backend":   response["backend"],
+		"workspace": resp["workspace"],
+		"state":     resp["final_state"],
+		"error":     response["error"],
+		"error_cnt": 0,
+	}
+	if text, ok := response["error"].(string); ok && strings.TrimSpace(text) != "" {
+		summary["error_cnt"] = 1
+	}
+	if event, ok := response["event"].(map[string]any); ok {
+		summary["state"] = event["state"]
+		if identity, ok := event["identity"].(map[string]any); ok && summary["workspace"] == nil {
+			summary["workspace"] = identity["runtimeID"]
+		}
+		if detail, ok := event["detail"].(string); ok && strings.TrimSpace(detail) != "" {
+			summary["detail"] = detail
+		}
+	}
+	if summary["ok"] == true && outcome == "created" && fmt.Sprint(summary["state"]) == "stopped" {
+		summary["ready"] = true
+		summary["state_meaning"] = "created and ready to start"
+	}
+	if rootfs, ok := resp["rootfs_path"].(string); ok && strings.TrimSpace(rootfs) != "" {
+		summary["rootfs_path"] = rootfs
+	}
+	summary["next_decision_points"] = workspaceNextDecisionPoints(fmt.Sprint(summary["state"]))
+	return summary
+}
+
+func workspaceNextDecisionPoints(state string) []string {
+	switch state {
+	case "running", "starting":
+		return []string{"workspace.exec", "workspace.halt", "workspace.delete"}
+	case "prepared", "halted", "stopped":
+		return []string{"workspace.start", "workspace.delete"}
+	case "failed", "quarantined":
+		return []string{"workspace.inspect", "workspace.delete"}
+	default:
+		return []string{"workspace.inspect"}
+	}
 }
 
 func summarizeWorkspaceLogs(result any, tailLimit int) any {

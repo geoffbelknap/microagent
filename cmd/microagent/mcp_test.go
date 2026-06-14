@@ -471,6 +471,34 @@ func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
 	}
 }
 
+func TestMCPSummarizeWorkspaceCreateLifecycle(t *testing.T) {
+	summary, ok := summarizeWorkspaceLifecycle(map[string]any{
+		"workspace":   "demo",
+		"rootfs_path": "/tmp/rootfs.ext4",
+		"response": map[string]any{
+			"ok":      true,
+			"backend": "firecracker",
+			"event": map[string]any{
+				"state":  "stopped",
+				"detail": "workspace created",
+			},
+		},
+	}, "created").(map[string]any)
+	if !ok {
+		t.Fatalf("summary type = %T", summary)
+	}
+	if summary["format"] != "summary" || summary["outcome"] != "created" || summary["workspace"] != "demo" || summary["ready"] != true {
+		t.Fatalf("summary = %#v", summary)
+	}
+	if summary["state_meaning"] != "created and ready to start" {
+		t.Fatalf("state_meaning = %#v", summary["state_meaning"])
+	}
+	points, ok := summary["next_decision_points"].([]string)
+	if !ok || len(points) == 0 || points[0] != "workspace.start" {
+		t.Fatalf("next_decision_points = %#v", summary["next_decision_points"])
+	}
+}
+
 func TestMCPSummarizeWorkspaceLogs(t *testing.T) {
 	summary, ok := summarizeWorkspaceLogs(map[string]any{
 		"workspace": "demo",

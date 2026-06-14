@@ -2948,7 +2948,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
+	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -4264,17 +4264,22 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 
 type workspaceResultOptions struct {
 	SuppressSuccessfulResult bool
+	CreatedSummary           bool
 }
 
 func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, opts workspaceResultOptions) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, result)
 	}
-	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	if opts.CreatedSummary {
+		fmt.Fprintf(stdout, "Created workspace: %s\n", result.Workspace)
+	} else {
+		fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	}
 	if result.Response.Event != nil {
-		fmt.Fprintf(stdout, "State: %s\n", result.Response.Event.State)
+		fmt.Fprintf(stdout, "State: %s\n", humanWorkspaceState(result.Response.Event.State, opts))
 	} else if result.FinalState != "" {
-		fmt.Fprintf(stdout, "State: %s\n", result.FinalState)
+		fmt.Fprintf(stdout, "State: %s\n", humanWorkspaceState(vmkit.VMState(result.FinalState), opts))
 	}
 	if result.RootfsPath != "" {
 		fmt.Fprintf(stdout, "Rootfs: %s\n", result.RootfsPath)
@@ -4334,7 +4339,15 @@ func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, op
 func writeCreateResult(stdout *os.File, result workspaceResult, err error) error {
 	return writeWorkspaceResultWithOptions(stdout, result, workspaceResultOptions{
 		SuppressSuccessfulResult: err == nil,
+		CreatedSummary:           err == nil,
 	})
+}
+
+func humanWorkspaceState(state vmkit.VMState, opts workspaceResultOptions) string {
+	if opts.CreatedSummary && state == vmkit.StateStopped {
+		return "ready (stopped)"
+	}
+	return string(state)
 }
 
 func writeApplyResult(stdout *os.File, result applyResult) error {

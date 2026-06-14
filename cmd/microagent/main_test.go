@@ -4597,8 +4597,9 @@ func TestWriteCreateResultSuppressesSuccessfulSetupLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := workspaceResult{
-		Workspace: "homebridge",
-		Network:   networkSpec{Mode: "user"},
+		Workspace:  "homebridge",
+		FinalState: string(vmkit.StateStopped),
+		Network:    networkSpec{Mode: "user"},
 		Result: &guestResult{
 			ExitCode: 0,
 			Stdout:   "Homebridge Installation Complete!\n",
@@ -4619,7 +4620,7 @@ func TestWriteCreateResultSuppressesSuccessfulSetupLogs(t *testing.T) {
 	if strings.Contains(text, "Homebridge Installation Complete") || strings.Contains(text, "debconf") || strings.Contains(text, "Exit code") {
 		t.Fatalf("create output included setup logs: %q", text)
 	}
-	if !strings.Contains(text, "Workspace: homebridge") || !strings.Contains(text, "Network: user") {
+	if !strings.Contains(text, "Created workspace: homebridge") || !strings.Contains(text, "State: ready (stopped)") || !strings.Contains(text, "Network: user") {
 		t.Fatalf("create output missing summary: %q", text)
 	}
 }
