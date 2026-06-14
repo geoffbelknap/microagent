@@ -10,8 +10,13 @@ end. These show one idea at a time.
 | Block | The aha |
 |---|---|
 | [`local-coder`](local-coder/) | Run a coding agent against a model on your own machine — no API key, no cloud — fixing failing tests inside a throwaway microVM. |
+| [`deny-egress`](deny-egress/) | Boot an agent that *physically cannot* reach the network — one flag, fail-closed — and watch it still do its local work. |
+| [`ask-the-host`](ask-the-host/) | The agent doesn't *hold* the dangerous capability; it asks the host over a mediation channel, and the host decides and logs it. |
 
-More blocks land here over time; the theme is running an agent **securely** as a
-personal assistant or knowledge worker — containing its blast radius, keeping
-credentials out of its reach, and mediating the dangerous actions through code
-you control.
+The theme is running an agent **securely** as a personal assistant or knowledge
+worker — containing its blast radius, keeping credentials out of its reach, and
+mediating the dangerous actions through code you control. `deny-egress` removes
+the exfiltration path; `ask-the-host` gives the contained agent a narrow,
+audited way to still do real work; `local-coder` keeps the whole loop on your
+own machine. They compose: read top to bottom and they tell one secure-assistant
+story; each stands alone as a copy-paste starter.
