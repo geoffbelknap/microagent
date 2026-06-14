@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]   Report host backend capabilities
@@ -65,11 +65,13 @@ IPv4 forwarding enabled and the Firecracker supervisor to hold `CAP_NET_ADMIN`.
 prepares the host for the privileged modes; run [`doctor`](/cli/doctor/) to see
 which modes are currently available.
 
-Run as root (it mutates host state):
+Enable the privileged network modes (it mutates host state):
 
 ```bash
-sudo microagent host setup-networking
+microagent host setup-networking
 ```
+
+> Run it as your normal user — it explains the change, asks for confirmation, then re-runs itself under `sudo` (so it works regardless of where Homebrew installed the binary). Pass `--yes` to skip the prompt; on a non-interactive shell it prints the exact `sudo` command instead of elevating.
 
 It persists `net.ipv4.ip_forward=1` (via `/etc/sysctl.d/99-microagent.conf`) and
 runs `setcap cap_net_admin+eip` on the installed supervisor. A `brew upgrade`
@@ -80,6 +82,7 @@ upgrading.
 |---|---|
 | `--check` | Report readiness without changing the host (no root needed); nonzero exit if not ready |
 | `--revert` | Remove the sysctl drop-in and drop the supervisor capability |
+| `--yes` | Skip the confirmation prompt before re-running under `sudo` |
 
 ## Console modes
 

@@ -17,7 +17,7 @@ and `CAP_NET_ADMIN` in the supervisor. Check and apply that once:
 
 ```bash
 microagent host setup-networking --check
-sudo microagent host setup-networking
+microagent host setup-networking
 ```
 
 The registry commands below run anywhere; only booting members needs the

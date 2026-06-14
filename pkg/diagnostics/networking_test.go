@@ -55,9 +55,10 @@ func TestNetworkRemediation(t *testing.T) {
 	if got := NetworkRemediation(upgraded); !strings.Contains(got, "CAP_NET_ADMIN") || !strings.Contains(got, "setup-networking") {
 		t.Errorf("missing-cap remediation = %q, want CAP_NET_ADMIN + setup-networking hint", got)
 	}
-	// Nothing set -> generic remediation.
+	// Nothing set -> generic remediation (no broken sudo prefix).
 	none := &vmkit.HostSupport{}
-	if got := NetworkRemediation(none); !strings.Contains(got, "sudo microagent host setup-networking") {
-		t.Errorf("generic remediation = %q, want setup-networking command", got)
+	got := NetworkRemediation(none)
+	if !strings.Contains(got, "microagent host setup-networking") || strings.Contains(got, "sudo microagent") {
+		t.Errorf("generic remediation = %q, want no-sudo setup-networking command", got)
 	}
 }

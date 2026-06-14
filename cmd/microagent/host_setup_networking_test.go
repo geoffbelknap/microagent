@@ -19,18 +19,6 @@ func TestSetupNetworkingCheckReportsWithoutMutating(t *testing.T) {
 	}
 }
 
-func TestSetupNetworkingApplyRequiresRoot(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("test asserts the non-root guard")
-	}
-	f, _ := os.CreateTemp(t.TempDir(), "out")
-	defer f.Close()
-	err := runHostSetupNetworking(nil, f) // apply
-	if err == nil || !strings.Contains(err.Error(), "sudo microagent host setup-networking") {
-		t.Fatalf("apply as non-root must instruct sudo, got %v", err)
-	}
-}
-
 func TestSetupNetworkingRejectsUnknownFlag(t *testing.T) {
 	f, _ := os.CreateTemp(t.TempDir(), "out")
 	defer f.Close()
