@@ -1,0 +1,11 @@
+name: per-task
+image: docker.io/library/python:3.12-slim
+setup:
+  - mkdir -p /app /workspace
+entrypoint: python /app/task.py
+files:
+  - src: ./task.py
+    dst: /app/task.py
+outputs:
+  - name: result
+    path: /workspace/result.json
