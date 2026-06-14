@@ -65,7 +65,7 @@ IPv4 forwarding enabled and the Firecracker supervisor to hold `CAP_NET_ADMIN`.
 prepares the host for the privileged modes; run [`doctor`](/cli/doctor/) to see
 which modes are currently available.
 
-Run as root (it mutates host state):
+Enable the privileged network modes (it mutates host state):
 
 ```bash
 microagent host setup-networking
