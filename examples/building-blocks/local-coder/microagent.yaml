@@ -1,0 +1,20 @@
+name: local-coder
+image: docker.io/library/python:3.12-slim
+setup:
+  - pip install --no-cache-dir 'openai>=1.0' pytest
+  - mkdir -p /app /workspace
+entrypoint: python /app/agent.py
+files:
+  - src: ./agent.py
+    dst: /app/agent.py
+  - src: ./task/TASK.md
+    dst: /workspace/TASK.md
+  - src: ./task/calculator.py
+    dst: /workspace/calculator.py
+  - src: ./task/test_calculator.py
+    dst: /workspace/test_calculator.py
+outputs:
+  - name: calculator
+    path: /workspace/calculator.py
+  - name: result
+    path: /workspace/result.json
