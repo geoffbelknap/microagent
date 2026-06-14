@@ -82,6 +82,7 @@ upgrading.
 |---|---|
 | `--check` | Report readiness without changing the host (no root needed); nonzero exit if not ready |
 | `--revert` | Remove the sysctl drop-in and drop the supervisor capability |
+| `--yes` | Skip the confirmation prompt before re-running under `sudo` |
 
 ## Console modes
 
