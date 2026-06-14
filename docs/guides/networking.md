@@ -4,7 +4,7 @@ description: Put an app and a database on one named network so they reach and re
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-14_
 
 Two workspaces, one subnet: an app called `web` that reaches a database
 called `db` by name. That's where this guide ends up. A named network is
@@ -17,7 +17,7 @@ and `CAP_NET_ADMIN` in the supervisor. Check and apply that once:
 
 ```bash
 microagent host setup-networking --check
-sudo microagent host setup-networking
+microagent host setup-networking
 ```
 
 The registry commands below run anywhere; only booting members needs the
