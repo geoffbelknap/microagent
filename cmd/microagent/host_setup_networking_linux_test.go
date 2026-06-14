@@ -98,8 +98,8 @@ func TestSetupNetworkingNonInteractiveRefuses(t *testing.T) {
 	f, _ := os.CreateTemp(t.TempDir(), "out")
 	defer f.Close()
 	err := runHostSetupNetworking(nil, f)
-	if err == nil || !strings.Contains(err.Error(), "host setup-networking") {
-		t.Fatalf("err = %v, want manual-command instruction", err)
+	if err == nil || !strings.Contains(err.Error(), "(or pass --yes)") {
+		t.Fatalf("err = %v, want non-interactive manual-command instruction", err)
 	}
 	if *called {
 		t.Fatal("non-TTY without --yes must not elevate")
