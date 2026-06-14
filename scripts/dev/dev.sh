@@ -136,10 +136,13 @@ if [ "$doctor_status" -eq 0 ]; then
       exit 0
     fi
     if [ -r /dev/tty ] && [ -w /dev/tty ] && [ "${CI:-}" != "true" ]; then
-      printf 'Run "make install" now to update the microagent command on PATH? [y/N] ' >/dev/tty
+      printf 'Run "make install" now to update the microagent command on PATH? [Y/n] ' >/dev/tty
       IFS= read -r answer </dev/tty || answer=""
       case "$answer" in
-        y|Y|yes|YES|Yes)
+        n|N|no|NO|No)
+          echo "Skipped command install. Use '.build/dev/microagent' or update PATH when ready." >&2
+          ;;
+        *)
           bootstrap_host
           "$ROOT/scripts/dev/build-local.sh" --quiet
           print_build_summary
@@ -147,9 +150,6 @@ if [ "$doctor_status" -eq 0 ]; then
           print_doctor_summary "$doctor_json"
           check_shell_command || true
           exit "$doctor_status"
-          ;;
-        *)
-          echo "Skipped command install. Use '.build/dev/microagent' or update PATH when ready." >&2
           ;;
       esac
     fi
@@ -170,19 +170,19 @@ if [ ! -r /dev/tty ] || [ ! -w /dev/tty ] || [ "${CI:-}" = "true" ]; then
   exit "$doctor_status"
 fi
 
-printf 'Run "make install" now to bootstrap missing host dependencies? [y/N] ' >/dev/tty
+printf 'Run "make install" now to bootstrap missing host dependencies? [Y/n] ' >/dev/tty
 IFS= read -r answer </dev/tty || answer=""
 case "$answer" in
-  y|Y|yes|YES|Yes)
+  n|N|no|NO|No)
+    echo "Skipped host bootstrap. Run 'make install' when ready." >&2
+    exit "$doctor_status"
+    ;;
+  *)
     bootstrap_host
     "$ROOT/scripts/dev/build-local.sh" --quiet
     print_build_summary
     run_doctor
     print_doctor_summary "$doctor_json"
-    exit "$doctor_status"
-    ;;
-  *)
-    echo "Skipped host bootstrap. Run 'make install' when ready." >&2
     exit "$doctor_status"
     ;;
 esac
