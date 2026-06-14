@@ -103,6 +103,10 @@ check_shell_command() {
   return 0
 }
 
+print_shell_cache_hint() {
+  echo "If this shell still tries an old microagent path, run: hash -r" >&2
+}
+
 bootstrap_host() {
   local make_cmd
   local -a install_args
@@ -149,6 +153,7 @@ if [ "$doctor_status" -eq 0 ]; then
           run_doctor
           print_doctor_summary "$doctor_json"
           check_shell_command || true
+          print_shell_cache_hint
           exit "$doctor_status"
           ;;
       esac
@@ -183,6 +188,8 @@ case "$answer" in
     print_build_summary
     run_doctor
     print_doctor_summary "$doctor_json"
+    check_shell_command || true
+    print_shell_cache_hint
     exit "$doctor_status"
     ;;
 esac
