@@ -1,13 +1,15 @@
 # local-coding-model
 
 This example runs a local GGUF coding model through microagent's model runner.
-microagent starts `llama-server` on the host, pairs the workspace to that
-runner, and injects `OPENAI_BASE_URL` into the guest. The llama.cpp web UI is
-available on the same host runner URL.
+microagent starts `llama-server` on the host, pairs a workspace to that runner,
+and injects `OPENAI_BASE_URL` into the guest. The llama.cpp web UI is available
+on the same host runner URL.
 
-The workspace itself is deliberately small: it boots Python, sends one coding
-prompt to the paired local model, and writes the response to
-`/workspace/result.json`.
+The workspace itself is deliberately small and one-shot: it boots Python, sends
+one coding prompt to the paired local model, writes the response to
+`/workspace/result.json`, and exits. After it exits, `microagent list` should
+show `local-coding-model` as `stopped`. If the llama.cpp web UI is still open,
+you are using the host model runner, not a running VM.
 
 ## Files
 
@@ -45,14 +47,25 @@ microagent create --file examples/local-coding-model/microagent.yaml
 microagent start local-coding-model
 ```
 
-Print the llama.cpp web UI URL:
+Print the llama.cpp web UI URL for the model runner:
 
 ```sh
 examples/local-coding-model/webui-url.sh
 ```
 
-Open that URL in a browser. The same runner serves the web UI and the
-OpenAI-compatible API used by the guest.
+Open that URL in a browser. The same host runner serves the web UI and the
+OpenAI-compatible API used by the guest. The VM may already be stopped by this
+point because the example guest does one request and exits.
+
+To run only the llama.cpp web UI without starting the example VM, use a pinned
+model runner:
+
+```sh
+microagent model serve \
+  Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+
+examples/local-coding-model/webui-url.sh
+```
 
 Fetch the workspace result after the guest exits:
 
@@ -75,5 +88,7 @@ microagent model stop \
   workspace with a host runner.
 - `microagent model serve <ref>` starts a pinned runner without a workspace.
   That is useful when you only want the llama.cpp web UI.
+- `microagent list` reports VM state, not model runner state. Use
+  `microagent model runners` to inspect host model servers.
 - The model server is host-local. The guest reaches it through microagent's
   model forwarding path instead of a broad host filesystem or network mount.
