@@ -732,8 +732,85 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 	modelURL := fmt.Sprintf("http://127.0.0.1:%d/v1", workspace.DefaultModelGuestPort)
 	opts.Env["MICROAGENT_MODEL_URL"] = modelURL
 	opts.Env["OPENAI_BASE_URL"] = modelURL
-	stateDir, modelRef, holder := opts.StateDir, rec.ModelRef, opts.Name
-	return func() { _ = modelrunner.Release(stateDir, modelRef, holder) }, nil
+	if err := appendModelWorkerAttachedEvent(*opts, runner, modelURL); err != nil {
+		return nil, err
+	}
+	stateDir, modelRef, holder, backend := opts.StateDir, rec.ModelRef, opts.Name, opts.Backend
+	return func() {
+		_ = modelrunner.Release(stateDir, modelRef, holder)
+		_ = appendModelWorkerReleasedEvent(stateDir, holder, backend, modelRef)
+	}, nil
+}
+
+func appendModelWorkerAttachedEvent(opts workspaceOptions, runner modelrunner.Record, modelURL string) error {
+	detail := modelWorkerEventDetail("attached", []string{
+		"model_ref=" + runner.ModelRef,
+		"engine=" + runner.Engine,
+		fmt.Sprintf("pid=%d", runner.PID),
+		"runner_config_digest=" + runner.RunnerConfigDigest,
+		"holder=" + opts.Name,
+		"model_url=" + modelURL,
+	})
+	return appendModelWorkerEventIfWorkspaceExists(opts.StateDir, opts.Name, opts.Backend, vmkit.StateStarting, detail)
+}
+
+func appendModelWorkerReleasedEvent(stateDir, name, backend, modelRef string) error {
+	state := latestWorkspaceEventState(stateDir, name)
+	if state == vmkit.StateUnknown {
+		state = vmkit.StateHalted
+	}
+	detail := modelWorkerEventDetail("released", []string{
+		"model_ref=" + modelRef,
+		"holder=" + name,
+	})
+	return appendModelWorkerEventIfWorkspaceExists(stateDir, name, backend, state, detail)
+}
+
+func modelWorkerEventDetail(action string, fields []string) string {
+	parts := []string{"model_worker=" + action}
+	for _, field := range fields {
+		if strings.HasSuffix(field, "=") {
+			continue
+		}
+		parts = append(parts, field)
+	}
+	return strings.Join(parts, " ")
+}
+
+func appendModelWorkerEventIfWorkspaceExists(stateDir, name, backend string, state vmkit.VMState, detail string) error {
+	if strings.TrimSpace(stateDir) == "" || strings.TrimSpace(name) == "" {
+		return nil
+	}
+	workspaceDir := filepath.Join(stateDir, name)
+	if _, err := os.Stat(workspaceDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if strings.TrimSpace(backend) == "" {
+		backend = hostBackend()
+	}
+	event := workspaceEventFile{
+		Identity: vmkit.Identity{
+			RequestID: newRequestID(),
+			RuntimeID: name,
+			Role:      vmkit.RoleWorkload,
+			Backend:   backend,
+		},
+		State:      state,
+		Detail:     detail,
+		ObservedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	return appendWorkspaceEvent(filepath.Join(workspaceDir, "events.json"), event)
+}
+
+func latestWorkspaceEventState(stateDir, name string) vmkit.VMState {
+	events, err := workspace.ReadEvents(stateDir, name)
+	if err != nil || len(events) == 0 {
+		return vmkit.StateUnknown
+	}
+	return events[len(events)-1].State
 }
 
 type modelRunnerOverrides struct {
@@ -793,7 +870,7 @@ func resolveModelRunner(overrides modelRunnerOverrides) (modelrunner.Engine, mod
 // lifecycle verb has succeeded. Best-effort throughout: a missing manifest or
 // runner makes the func a no-op, and a stale holder is reclaimed by the next
 // verb.
-func pendingModelRelease(stateDir, name string) func() {
+func pendingModelRelease(stateDir, name, backend string) func() {
 	manifest, err := workspace.ReadManifest(stateDir, name)
 	if err != nil {
 		return func() {}
@@ -802,7 +879,10 @@ func pendingModelRelease(stateDir, name string) func() {
 	if modelRef == "" {
 		return func() {}
 	}
-	return func() { _ = modelrunner.Release(stateDir, modelRef, name) }
+	return func() {
+		_ = modelrunner.Release(stateDir, modelRef, name)
+		_ = appendModelWorkerReleasedEvent(stateDir, name, backend, modelRef)
+	}
 }
 
 func runList(args []string, stdout *os.File) error {
@@ -2456,7 +2536,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	var releaseModel func()
 	switch command {
 	case "halt", "stop", "kill", "delete":
-		releaseModel = pendingModelRelease(opts.StateDir, name)
+		releaseModel = pendingModelRelease(opts.StateDir, name, backend)
 	default:
 		releaseModel = func() {}
 	}

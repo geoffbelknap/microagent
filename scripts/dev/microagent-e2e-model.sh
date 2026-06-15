@@ -271,6 +271,24 @@ for r in idx.get("runners") or []:
 ' "$1"
 }
 
+events_contain() {
+  local workspace="$1"
+  local needle="$2"
+
+  "$CLI" --json events "$workspace" 2>/dev/null | python3 -c '
+import json, sys
+needle = sys.argv[1]
+try:
+    doc = json.load(sys.stdin) or {}
+except ValueError:
+    sys.exit(1)
+for event in doc.get("events") or []:
+    if needle in (event.get("detail") or ""):
+        sys.exit(0)
+sys.exit(1)
+' "$needle"
+}
+
 # Stale state from an earlier aborted run must not fail create.
 "$CLI" delete "$WS" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
 
@@ -293,6 +311,11 @@ if [ -z "$CANONICAL" ]; then
   fail "start did not register $WS as a model runner holder"
 fi
 echo "microagent-e2e-model: start re-paired $WS with $CANONICAL"
+if ! events_contain "$WS" "model_worker=attached"; then
+  "$CLI" --json events "$WS" >&2 || true
+  fail "start did not record a model worker attach event"
+fi
+echo "PASS microagent-e2e-model: model worker attach event recorded"
 
 # exec_is_ready: read status JSON on stdin; exit 0 iff readiness.execReady.ready.
 exec_is_ready() {
@@ -343,6 +366,11 @@ fi
 if [ -n "$(holders_of "$WS")" ]; then
   fail "halt did not release the model runner holder for $WS"
 fi
+if ! events_contain "$WS" "model_worker=released"; then
+  "$CLI" --json events "$WS" >&2 || true
+  fail "halt did not record a model worker release event"
+fi
+echo "PASS microagent-e2e-model: model worker release event recorded"
 echo "microagent-e2e-model: halt released the holder for $WS"
 
 if ! "$CLI" start "$WS" "${START_FLAGS[@]}" >/dev/null 2>&1; then

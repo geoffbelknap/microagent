@@ -1989,7 +1989,7 @@ func TestEnsureModelPairingRejectsInvalidRef(t *testing.T) {
 func TestPendingModelRelease(t *testing.T) {
 	dir := t.TempDir()
 	// Missing manifest must yield a silent no-op.
-	pendingModelRelease(dir, "ghost")()
+	pendingModelRelease(dir, "ghost", vmkit.BackendFirecracker)()
 
 	opts := workspace.DefaultOptions()
 	opts.Name = "ws"
@@ -2007,9 +2007,19 @@ func TestPendingModelRelease(t *testing.T) {
 	if err := modelrunner.WriteIndex(dir, idx); err != nil {
 		t.Fatalf("write index: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, "ws"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendWorkspaceEvent(filepath.Join(dir, "ws", "events.json"), workspaceEventFile{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "ws", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		State:      vmkit.StateRunning,
+		ObservedAt: "2026-06-15T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// The ref is captured at call time: removing the manifest afterwards (as
 	// delete does) must not stop the release.
-	release := pendingModelRelease(dir, "ws")
+	release := pendingModelRelease(dir, "ws", vmkit.BackendFirecracker)
 	if err := os.RemoveAll(filepath.Join(dir, "workspaces", "ws")); err != nil {
 		t.Fatal(err)
 	}
@@ -2020,6 +2030,52 @@ func TestPendingModelRelease(t *testing.T) {
 	}
 	if len(after.Runners) != 0 {
 		t.Fatalf("runner not released: %+v", after.Runners)
+	}
+	events, err := workspace.ReadEvents(dir, "ws")
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 2 || !strings.Contains(events[1].Detail, "model_worker=released") || events[1].State != vmkit.StateRunning {
+		t.Fatalf("events = %+v", events)
+	}
+}
+
+func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := appendModelWorkerEventIfWorkspaceExists(dir, "missing", vmkit.BackendFirecracker, vmkit.StateStarting, "model_worker=attached"); err != nil {
+		t.Fatalf("missing workspace event: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing")); !os.IsNotExist(err) {
+		t.Fatalf("missing workspace event created state: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "ws"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runner := modelrunner.Record{
+		ModelRef:           "hf.co/org/repo@main/m.gguf",
+		Engine:             "runner-x",
+		PID:                1234,
+		RunnerConfigDigest: "digest123",
+	}
+	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendFirecracker}, runner, "http://127.0.0.1:11434/v1"); err != nil {
+		t.Fatalf("append attached event: %v", err)
+	}
+	events, err := workspace.ReadEvents(dir, "ws")
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %+v", events)
+	}
+	event := events[0]
+	for _, want := range []string{"model_worker=attached", "model_ref=hf.co/org/repo@main/m.gguf", "engine=runner-x", "runner_config_digest=digest123", "model_url=http://127.0.0.1:11434/v1"} {
+		if !strings.Contains(event.Detail, want) {
+			t.Fatalf("event detail %q missing %q", event.Detail, want)
+		}
+	}
+	if event.State != vmkit.StateStarting || event.Identity.RuntimeID != "ws" || event.Identity.Backend != vmkit.BackendFirecracker {
+		t.Fatalf("event = %+v", event)
 	}
 }
 
