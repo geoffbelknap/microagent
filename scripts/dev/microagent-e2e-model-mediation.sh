@@ -25,7 +25,7 @@ CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
 OUT_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_OUT_DIR:-/tmp/microagent-e2e-model-mediation-$(date +%Y%m%d%H%M%S)}"
 STATE_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_STATE_DIR:-$OUT_DIR/state}"
 KEEP_FAILED="${MICROAGENT_E2E_MODEL_MEDIATION_KEEP:-${MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION:-0}}"
-IMAGE="${MICROAGENT_E2E_MODEL_MEDIATION_IMAGE:-docker.io/curlimages/curl:latest}"
+IMAGE="${MICROAGENT_E2E_MODEL_MEDIATION_IMAGE:-quay.io/curl/curl:latest}"
 MODEL_REF="${MICROAGENT_E2E_MODEL_MEDIATION_MODEL_REF:-stub/stub-model-GGUF/stub.gguf}"
 CANONICAL_REF="hf.co/stub/stub-model-GGUF@main/stub.gguf"
 POLICY_PID=""
@@ -45,7 +45,7 @@ cleanup() {
     wait "$POLICY_PID" >/dev/null 2>&1 || true
     POLICY_PID=""
   fi
-  for workspace in model-med-direct model-med-local-allow model-med-policy-allow model-med-policy-deny model-med-policy-file-allow model-med-policy-file-deny model-med-policy-unavailable; do
+  for workspace in model-med-direct model-med-local-allow model-med-policy-allow model-med-policy-deny model-med-policy-file-allow model-med-policy-file-deny model-med-pf-chat model-med-pf-tool-deny model-med-pf-stream-deny model-med-policy-unavailable; do
     "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
     "$CLI" delete "$workspace" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
   done
@@ -243,6 +243,35 @@ write_file_policy() {
 EOF
 }
 
+write_chat_file_policy() {
+  local path="$1"
+  cat >"$path" <<'EOF'
+{
+  "schema_version": "microagent.model_policy.v1",
+  "default": "deny",
+  "rules": [
+    {
+      "id": "chat",
+      "effect": "allow",
+      "match": {
+        "methods": ["POST"],
+        "paths": ["/v1/chat/completions"],
+        "models": ["stub-model"]
+      },
+      "limits": {
+        "max_request_bytes": 4096,
+        "max_text_bytes": 128,
+        "max_messages": 2,
+        "max_tokens": 16,
+        "stream": false,
+        "allowed_tool_names": ["shell"]
+      }
+    }
+  ]
+}
+EOF
+}
+
 audit_log_for_workspace() {
   local workspace="$1"
   printf '%s\n' "$STATE_DIR/host-workers/${workspace}_model.openai.jsonl"
@@ -386,6 +415,43 @@ run_case() {
   summarize_audit "$label" "$workspace" "$expected_status"
 }
 
+run_chat_case() {
+  local label="$1"
+  local expected_status="$2"
+  local request_body="$3"
+  local workspace="model-med-$label"
+  local run_log="$OUT_DIR/$label.run.log"
+  local env_args=(
+    "MICROAGENT_LLAMA_SERVER=$ENGINE"
+    "MICROAGENT_MODEL_RUNNER_ARGS="
+    "MICROAGENT_MODEL_MEDIATION=policy"
+    "MICROAGENT_MODEL_POLICY_TIMEOUT=1s"
+    "MICROAGENT_MODEL_POLICY_URL="
+    "MICROAGENT_MODEL_POLICY_FILE=$POLICY_FILE"
+  )
+
+  echo "microagent-e2e-model-mediation: case=$label mode=policy expected_http=$expected_status"
+  # shellcheck disable=SC2016
+  if ! env "${env_args[@]}" "$CLI" run --name "$workspace" --env "EXPECTED_STATUS=$expected_status" --env "REQUEST_BODY=$request_body" "${RUN_FLAGS[@]}" sh -c \
+    'printf "%s" "$REQUEST_BODY" >/tmp/request.json; code="$(curl -sS -o /tmp/model-body -w "%{http_code}" -H "Content-Type: application/json" --data-binary @/tmp/request.json "$MICROAGENT_MODEL_URL/chat/completions" || true)"; cat /tmp/model-body; echo; echo "HTTP_STATUS=$code"; test "$code" = "$EXPECTED_STATUS"' >"$run_log" 2>&1; then
+    cat "$run_log" >&2
+    fail "case $label failed"
+  fi
+  grep -q "HTTP_STATUS=$expected_status" "$run_log" || {
+    cat "$run_log" >&2
+    fail "case $label did not report expected status"
+  }
+  if [ "$expected_status" = "200" ]; then
+    grep -q "stub-chat" "$run_log" || {
+      cat "$run_log" >&2
+      fail "case $label did not reach stub chat endpoint"
+    }
+  fi
+  assert_audit_contains "$workspace" "request_end"
+  assert_index_clean
+  summarize_audit "$label" "$workspace" "$expected_status"
+}
+
 echo "microagent-e2e-model-mediation: building stub runner"
 write_stub_engine "$OUT_DIR/stub-engine"
 ENGINE="$OUT_DIR/bin/stub-engine"
@@ -420,6 +486,19 @@ write_file_policy "$POLICY_FILE" "deny"
 run_case "policy-file-deny" "policy" "403"
 assert_audit_contains "model-med-policy-file-deny" "mediation_decision_deny"
 assert_audit_lacks "model-med-policy-file-deny" "upstream_headers"
+POLICY_FILE=""
+
+POLICY_FILE="$OUT_DIR/policy-file-chat.json"
+write_chat_file_policy "$POLICY_FILE"
+run_chat_case "pf-chat" "200" '{"model":"stub-model","stream":false,"max_tokens":8,"messages":[{"role":"user","content":"ping"}],"tools":[{"type":"function","function":{"name":"shell"}}]}'
+assert_audit_contains "model-med-pf-chat" "mediation_decision_allow"
+assert_audit_contains "model-med-pf-chat" "upstream_headers"
+run_chat_case "pf-tool-deny" "403" '{"model":"stub-model","stream":false,"max_tokens":8,"messages":[{"role":"user","content":"ping"}],"tools":[{"type":"function","function":{"name":"network"}}]}'
+assert_audit_contains "model-med-pf-tool-deny" "mediation_decision_deny"
+assert_audit_lacks "model-med-pf-tool-deny" "upstream_headers"
+run_chat_case "pf-stream-deny" "403" '{"model":"stub-model","stream":true,"max_tokens":8,"messages":[{"role":"user","content":"ping"}]}'
+assert_audit_contains "model-med-pf-stream-deny" "mediation_decision_deny"
+assert_audit_lacks "model-med-pf-stream-deny" "upstream_headers"
 POLICY_FILE=""
 
 unavailable_port="$(choose_port)"

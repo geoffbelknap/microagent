@@ -232,7 +232,7 @@ direct-vs-mediated comparisons, telemetry summaries, and mediation gate TSVs
 under their output directories. Gates fail the scenario by default when local
 mediation, policy mediation, or decision latency exceeds the configured budget;
 set the scenario-specific `*_GATE_MODE=warn` only when collecting noisy
-experimental data. The backend mediation scenarios default to
+experimental data. The model mediation scenarios default to
 `quay.io/curl/curl:latest` for the guest HTTP probe image; use the
 scenario-specific `*_IMAGE` override when a different internal mirror is
 required.
@@ -279,6 +279,14 @@ Limit fields are `max_request_bytes`, `max_text_bytes`, `max_messages`,
 `max_tokens`, `stream`, and `allowed_tool_names`. If an allow rule matches but
 a limit fails, the request is denied rather than falling through to a later
 rule.
+
+File policy can mediate the request method, path, workspace/capability/worker
+identity, declared model, declared stream mode, declared token cap, declared
+tool/function names, request bytes, message count, and aggregate text bytes. It
+does not inspect prompt meaning, response content, semantic tool intent, quotas,
+trust scores, billing rules, or user/business authorization. Use the external
+policy URL path when those decisions need a policy service; microagent still
+owns the fail-closed substrate enforcement around that decision.
 
 ## HuggingFace ref forms
 

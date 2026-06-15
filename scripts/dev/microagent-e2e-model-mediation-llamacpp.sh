@@ -54,6 +54,7 @@ MAX_STREAM_TTFB_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_MAX_STREAM_
 MAX_DECISION_P95_MS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_MAX_DECISION_P95_MS:-100}"
 POLICY_PID=""
 POLICY_URL=""
+POLICY_FILE=""
 RUNNER_PID=""
 RUNNER_PORT=""
 REQUEST_MODEL=""
@@ -87,7 +88,7 @@ cleanup() {
     wait "$POLICY_PID" >/dev/null 2>&1 || true
     POLICY_PID=""
   fi
-  for workspace in mml-direct mml-local mml-pa mml-pd mml-pu; do
+  for workspace in mml-direct mml-local mml-pa mml-pd mml-pf mml-pfd mml-pu; do
     "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
     "$CLI" delete "$workspace" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
   done
@@ -232,6 +233,52 @@ start_policy() {
     fail "policy stub did not become ready"
   }
   POLICY_URL="http://$(awk '/^ready / {print $2; exit}' "$stdout")/decision"
+}
+
+write_file_policy() {
+  local path="$1"
+  local decision="$2"
+  if [ "$decision" = "allow" ]; then
+    cat >"$path" <<EOF
+{
+  "schema_version": "microagent.model_policy.v1",
+  "default": "deny",
+  "rules": [
+    {
+      "id": "models",
+      "effect": "allow",
+      "match": {
+        "methods": ["GET"],
+        "paths": ["/v1/models"]
+      }
+    },
+    {
+      "id": "chat",
+      "effect": "allow",
+      "match": {
+        "methods": ["POST"],
+        "paths": ["/v1/chat/completions"],
+        "models": ["$REQUEST_MODEL"]
+      },
+      "limits": {
+        "max_request_bytes": 65536,
+        "max_text_bytes": 4096,
+        "max_messages": 4,
+        "max_tokens": 4096
+      }
+    }
+  ]
+}
+EOF
+  else
+    cat >"$path" <<'EOF'
+{
+  "schema_version": "microagent.model_policy.v1",
+  "default": "deny",
+  "rules": []
+}
+EOF
+  fi
 }
 
 audit_log_for_workspace() {
@@ -659,12 +706,16 @@ run_case() {
     "${runner_env[@]}"
     "MICROAGENT_MODEL_MEDIATION=$mode"
     "MICROAGENT_MODEL_POLICY_TIMEOUT=1s"
-    "MICROAGENT_MODEL_POLICY_FILE="
   )
   if [ -n "$POLICY_URL" ]; then
     env_args+=("MICROAGENT_MODEL_POLICY_URL=$POLICY_URL")
   else
     env_args+=("MICROAGENT_MODEL_POLICY_URL=")
+  fi
+  if [ -n "$POLICY_FILE" ]; then
+    env_args+=("MICROAGENT_MODEL_POLICY_FILE=$POLICY_FILE")
+  else
+    env_args+=("MICROAGENT_MODEL_POLICY_FILE=")
   fi
 
   reset_audit_log "$workspace"
@@ -853,6 +904,19 @@ run_case "pd" "policy" "403"
 assert_audit_contains "mml-pd" "mediation_decision_deny"
 assert_audit_lacks "mml-pd" "upstream_headers"
 stop_policy
+
+POLICY_FILE="$OUT_DIR/policy-file-allow.json"
+write_file_policy "$POLICY_FILE" "allow"
+run_case "pf" "policy" "200"
+assert_audit_contains "mml-pf" "mediation_decision_allow"
+assert_audit_contains "mml-pf" "upstream_headers"
+
+POLICY_FILE="$OUT_DIR/policy-file-deny.json"
+write_file_policy "$POLICY_FILE" "deny"
+run_case "pfd" "policy" "403"
+assert_audit_contains "mml-pfd" "mediation_decision_deny"
+assert_audit_lacks "mml-pfd" "upstream_headers"
+POLICY_FILE=""
 
 unavailable_port="$(choose_port)"
 POLICY_URL="http://127.0.0.1:${unavailable_port}/decision"
