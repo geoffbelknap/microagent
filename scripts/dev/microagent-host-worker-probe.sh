@@ -1492,26 +1492,54 @@ def endpoint_summary(data):
     if "samples_seconds" in data:
         values = [float(value) * 1000 for value in data["samples_seconds"]]
     else:
-        values = data["samples_ms"]
+        values = [float(value) for value in data["samples_ms"]]
     summary = summarize(values)
     for key in ("first_start_epoch", "last_end_epoch", "wall_span_ms"):
         if key in data:
             summary[key] = data[key]
+    ttfb_values_ms = None
     if "ttfb_samples_seconds" in data:
-        summary.update(summarize_number([float(value) * 1000 for value in data["ttfb_samples_seconds"]], "ttfb", "ms"))
+        ttfb_values_ms = [float(value) * 1000 for value in data["ttfb_samples_seconds"]]
+        summary.update(summarize_number(ttfb_values_ms, "ttfb", "ms"))
     elif "ttfb_samples_ms" in data:
-        summary.update(summarize_number(data["ttfb_samples_ms"], "ttfb", "ms"))
+        ttfb_values_ms = [float(value) for value in data["ttfb_samples_ms"]]
+        summary.update(summarize_number(ttfb_values_ms, "ttfb", "ms"))
     if "connect_samples_seconds" in data:
         summary.update(summarize_number([float(value) * 1000 for value in data["connect_samples_seconds"]], "connect", "ms"))
     if "pretransfer_samples_seconds" in data:
         summary.update(summarize_number([float(value) * 1000 for value in data["pretransfer_samples_seconds"]], "pretransfer", "ms"))
+    body_read_values_ms = None
     if "body_read_samples_ms" in data:
-        summary.update(summarize_number(data["body_read_samples_ms"], "body_read", "ms"))
+        body_read_values_ms = [float(value) for value in data["body_read_samples_ms"]]
+    elif "body_read_samples_seconds" in data:
+        body_read_values_ms = [float(value) * 1000 for value in data["body_read_samples_seconds"]]
+    elif ttfb_values_ms is not None and len(ttfb_values_ms) == len(values):
+        body_read_values_ms = [max(0.0, elapsed - ttfb) for elapsed, ttfb in zip(values, ttfb_values_ms)]
+    if body_read_values_ms is not None:
+        summary.update(summarize_number(body_read_values_ms, "body_read", "ms"))
     if "response_bytes_samples" in data:
         summary.update(summarize_number(data["response_bytes_samples"], "response_bytes", ""))
+    chunk_values = None
     for key, name in (("bytes_samples", "bytes"), ("chunks_samples", "chunks")):
         if key in data:
             summary.update(summarize_number(data[key], name, ""))
+            if key == "chunks_samples":
+                chunk_values = [float(value) for value in data[key]]
+    if body_read_values_ms is not None and chunk_values is not None and len(body_read_values_ms) == len(chunk_values):
+        per_chunk = [
+            body_ms / chunks
+            for body_ms, chunks in zip(body_read_values_ms, chunk_values)
+            if chunks > 0
+        ]
+        per_chunk_gap = [
+            body_ms / (chunks - 1)
+            for body_ms, chunks in zip(body_read_values_ms, chunk_values)
+            if chunks > 1
+        ]
+        if per_chunk:
+            summary.update(summarize_number(per_chunk, "body_read_per_chunk", "ms"))
+        if per_chunk_gap:
+            summary.update(summarize_number(per_chunk_gap, "body_read_per_chunk_gap", "ms"))
     return summary
 
 def normalize(report):
@@ -1564,6 +1592,27 @@ def compare(level, endpoint):
             "guest_ttfb_p95_ms": guest_summary["ttfb_p95_ms"],
             "ttfb_delta_ms": round(guest_summary["ttfb_median_ms"] - host_summary["ttfb_median_ms"], 3),
             "ttfb_p95_delta_ms": round(guest_summary["ttfb_p95_ms"] - host_summary["ttfb_p95_ms"], 3),
+        })
+    if "body_read_median_ms" in host_summary and "body_read_median_ms" in guest_summary:
+        result.update({
+            "host_body_read_median_ms": host_summary["body_read_median_ms"],
+            "host_body_read_p95_ms": host_summary["body_read_p95_ms"],
+            "guest_body_read_median_ms": guest_summary["body_read_median_ms"],
+            "guest_body_read_p95_ms": guest_summary["body_read_p95_ms"],
+            "body_read_delta_ms": round(guest_summary["body_read_median_ms"] - host_summary["body_read_median_ms"], 3),
+            "body_read_p95_delta_ms": round(guest_summary["body_read_p95_ms"] - host_summary["body_read_p95_ms"], 3),
+        })
+    if "body_read_per_chunk_median_ms" in host_summary and "body_read_per_chunk_median_ms" in guest_summary:
+        result.update({
+            "host_body_read_per_chunk_median_ms": host_summary["body_read_per_chunk_median_ms"],
+            "guest_body_read_per_chunk_median_ms": guest_summary["body_read_per_chunk_median_ms"],
+            "body_read_per_chunk_delta_ms": round(guest_summary["body_read_per_chunk_median_ms"] - host_summary["body_read_per_chunk_median_ms"], 3),
+        })
+    if "body_read_per_chunk_gap_median_ms" in host_summary and "body_read_per_chunk_gap_median_ms" in guest_summary:
+        result.update({
+            "host_body_read_per_chunk_gap_median_ms": host_summary["body_read_per_chunk_gap_median_ms"],
+            "guest_body_read_per_chunk_gap_median_ms": guest_summary["body_read_per_chunk_gap_median_ms"],
+            "body_read_per_chunk_gap_delta_ms": round(guest_summary["body_read_per_chunk_gap_median_ms"] - host_summary["body_read_per_chunk_gap_median_ms"], 3),
         })
     return result
 
@@ -2201,6 +2250,7 @@ def endpoint_order(keys):
 sample_fields = {
     "samples_seconds",
     "ttfb_samples_seconds",
+    "body_read_samples_seconds",
     "connect_samples_seconds",
     "pretransfer_samples_seconds",
     "bytes_samples",
@@ -2278,6 +2328,15 @@ for level in report["concurrency_levels"]:
             line += (
                 f" ttfb_delta={item['ttfb_delta_ms']:.3f}ms "
                 f"ttfb_p95_delta={item['ttfb_p95_delta_ms']:.3f}ms"
+            )
+        if "body_read_delta_ms" in item:
+            line += (
+                f" body_delta={item['body_read_delta_ms']:.3f}ms "
+                f"body_p95_delta={item['body_read_p95_delta_ms']:.3f}ms"
+            )
+        if "body_read_per_chunk_gap_delta_ms" in item:
+            line += (
+                f" chunk_gap_delta={item['body_read_per_chunk_gap_delta_ms']:.3f}ms"
             )
         print(line)
 for level, item in (report.get("pressure", {}).get("levels", {}) or {}).items():

@@ -38,6 +38,15 @@ FIELDS = (
     "host_ttfb_median_ms",
     "guest_ttfb_median_ms",
     "ttfb_delta_ms",
+    "host_body_read_median_ms",
+    "guest_body_read_median_ms",
+    "body_read_delta_ms",
+    "host_body_read_per_chunk_median_ms",
+    "guest_body_read_per_chunk_median_ms",
+    "body_read_per_chunk_delta_ms",
+    "host_body_read_per_chunk_gap_median_ms",
+    "guest_body_read_per_chunk_gap_median_ms",
+    "body_read_per_chunk_gap_delta_ms",
     "pressure_runner",
     "pressure_gpu",
     "pressure_summary",
@@ -129,6 +138,27 @@ def rows_for_report(path: Path) -> list[dict[str, Any]]:
                     "host_ttfb_median_ms": host.get("ttfb_median_ms"),
                     "guest_ttfb_median_ms": guest.get("ttfb_median_ms"),
                     "ttfb_delta_ms": overhead.get("ttfb_delta_ms"),
+                    "host_body_read_median_ms": host.get("body_read_median_ms"),
+                    "guest_body_read_median_ms": guest.get("body_read_median_ms"),
+                    "body_read_delta_ms": overhead.get("body_read_delta_ms"),
+                    "host_body_read_per_chunk_median_ms": host.get(
+                        "body_read_per_chunk_median_ms"
+                    ),
+                    "guest_body_read_per_chunk_median_ms": guest.get(
+                        "body_read_per_chunk_median_ms"
+                    ),
+                    "body_read_per_chunk_delta_ms": overhead.get(
+                        "body_read_per_chunk_delta_ms"
+                    ),
+                    "host_body_read_per_chunk_gap_median_ms": host.get(
+                        "body_read_per_chunk_gap_median_ms"
+                    ),
+                    "guest_body_read_per_chunk_gap_median_ms": guest.get(
+                        "body_read_per_chunk_gap_median_ms"
+                    ),
+                    "body_read_per_chunk_gap_delta_ms": overhead.get(
+                        "body_read_per_chunk_gap_delta_ms"
+                    ),
                     "pressure_runner": classification.get("runner"),
                     "pressure_gpu": classification.get("gpu"),
                     "pressure_summary": classification.get("summary"),
