@@ -20,6 +20,10 @@ FIELDS = (
     "report",
     "backend",
     "engine",
+    "runner_mode",
+    "run_label",
+    "runner_slots",
+    "host_baseline",
     "workspace_count",
     "per_workspace_concurrency",
     "effective_concurrency",
@@ -77,6 +81,8 @@ def rows_for_report(path: Path) -> list[dict[str, Any]]:
     matrix = report.get("matrix") or {}
     pressure = get(report, "pressure", "levels") or {}
     runner = report.get("runner") or {}
+    experiment = report.get("experiment") or {}
+    measurement_design = report.get("measurement_design") or {}
 
     for level in levels:
         level_key = str(level)
@@ -104,6 +110,10 @@ def rows_for_report(path: Path) -> list[dict[str, Any]]:
                     "report": str(path),
                     "backend": report.get("backend"),
                     "engine": runner.get("engine"),
+                    "runner_mode": runner.get("mode"),
+                    "run_label": experiment.get("label"),
+                    "runner_slots": experiment.get("runner_slots"),
+                    "host_baseline": measurement_design.get("host_baseline"),
                     "workspace_count": report.get("workspace_count"),
                     "per_workspace_concurrency": level,
                     "effective_concurrency": guest.get("concurrency")

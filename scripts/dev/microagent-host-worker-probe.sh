@@ -25,6 +25,8 @@
 #   MICROAGENT_HOST_WORKER_URL             existing OpenAI-compatible base URL; skips pull/serve
 #   MICROAGENT_HOST_WORKER_HEALTH_URL      optional health URL for an existing worker
 #   MICROAGENT_HOST_WORKER_MODEL           request model id; auto-discovered from /models when unset
+#   MICROAGENT_HOST_WORKER_LABEL           optional report label
+#   MICROAGENT_HOST_WORKER_SLOTS           optional report annotation for runner slots/parallelism
 #   MICROAGENT_HOST_WORKER_PROBE_MODEL_REF HuggingFace GGUF ref
 #   MICROAGENT_HOST_WORKER_PROBE_IMAGE     guest image with curl
 #   MICROAGENT_HOST_WORKER_PROBE_STATE_DIR state dir (default: ~/.microagent)
@@ -32,6 +34,8 @@
 #   MICROAGENT_HOST_WORKER_PROBE_WARMUPS   warmup calls per endpoint (default: 1)
 #   MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY
 #                                           comma-separated per-workspace worker counts (default: 1)
+#   MICROAGENT_HOST_WORKER_PROBE_HOST_BASELINE
+#                                           before or bracket (default: bracket)
 #   MICROAGENT_HOST_WORKER_PROBE_WORKSPACES guest workspace count (default: 1)
 #   MICROAGENT_HOST_WORKER_PROBE_CHAT_PROFILE
 #                                           tiny or sustained (default: tiny)
@@ -69,12 +73,15 @@ CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
 HOST_WORKER_URL="${MICROAGENT_HOST_WORKER_URL:-}"
 HOST_WORKER_HEALTH_URL="${MICROAGENT_HOST_WORKER_HEALTH_URL:-}"
 REQUEST_MODEL="${MICROAGENT_HOST_WORKER_MODEL:-${MICROAGENT_HOST_WORKER_PROBE_REQUEST_MODEL:-}}"
+RUN_LABEL="${MICROAGENT_HOST_WORKER_LABEL:-${MICROAGENT_HOST_WORKER_PROBE_LABEL:-}}"
+RUNNER_SLOTS="${MICROAGENT_HOST_WORKER_SLOTS:-${MICROAGENT_HOST_WORKER_PROBE_RUNNER_SLOTS:-}}"
 MODEL_REF="${MICROAGENT_HOST_WORKER_PROBE_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 IMAGE="${MICROAGENT_HOST_WORKER_PROBE_IMAGE:-docker.io/curlimages/curl:latest}"
 STATE_DIR="${MICROAGENT_HOST_WORKER_PROBE_STATE_DIR:-$HOME/.microagent}"
 SAMPLES="${MICROAGENT_HOST_WORKER_PROBE_SAMPLES:-5}"
 WARMUPS="${MICROAGENT_HOST_WORKER_PROBE_WARMUPS:-1}"
 CONCURRENCY="${MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY:-1}"
+HOST_BASELINE="${MICROAGENT_HOST_WORKER_PROBE_HOST_BASELINE:-bracket}"
 WORKSPACE_COUNT="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACES:-1}"
 CHAT_PROFILE="${MICROAGENT_HOST_WORKER_PROBE_CHAT_PROFILE:-tiny}"
 CHAT_TOKENS="${MICROAGENT_HOST_WORKER_PROBE_CHAT_TOKENS:-16}"
@@ -1289,13 +1296,140 @@ print(json.dumps(report, sort_keys=True))
 PY
 }
 
+annotate_host_benchmark() {
+  local host_json="$1"
+  local baseline="$2"
+  python3 - "$host_json" "$baseline" <<'PY'
+import json
+import sys
+
+report = json.loads(sys.argv[1])
+baseline = sys.argv[2]
+report["host_baseline"] = baseline
+report["host_baseline_passes"] = [baseline]
+print(json.dumps(report, sort_keys=True))
+PY
+}
+
+merge_host_benchmarks() {
+  local before_json="$1"
+  local after_json="$2"
+  python3 - "$before_json" "$after_json" <<'PY'
+import json
+import statistics
+import sys
+
+before = json.loads(sys.argv[1])
+after = json.loads(sys.argv[2])
+
+def endpoint_order(keys):
+    preferred = ["models", "chat", "stream"]
+    present = set(keys)
+    return [key for key in preferred if key in present] + sorted(present - set(preferred))
+
+def summarize(values):
+    clean = [round(float(value), 3) for value in values]
+    ordered = sorted(clean)
+    p95_index = min(len(ordered) - 1, max(0, int(len(ordered) * 0.95 + 0.999999) - 1))
+    return {
+        "sample_count": len(clean),
+        "samples_ms": clean,
+        "min_ms": ordered[0],
+        "median_ms": round(statistics.median(ordered), 3),
+        "mean_ms": round(statistics.fmean(ordered), 3),
+        "p95_ms": ordered[p95_index],
+        "max_ms": ordered[-1],
+    }
+
+def summarize_number(values, name, unit):
+    clean = [round(float(value), 3) for value in values]
+    ordered = sorted(clean)
+    p95_index = min(len(ordered) - 1, max(0, int(len(ordered) * 0.95 + 0.999999) - 1))
+    unit_suffix = f"_{unit}" if unit else ""
+    return {
+        f"{name}_samples{unit_suffix}": clean,
+        f"{name}_min{unit_suffix}": ordered[0],
+        f"{name}_median{unit_suffix}": round(statistics.median(ordered), 3),
+        f"{name}_mean{unit_suffix}": round(statistics.fmean(ordered), 3),
+        f"{name}_p95{unit_suffix}": ordered[p95_index],
+        f"{name}_max{unit_suffix}": ordered[-1],
+    }
+
+def merged_endpoint(level, endpoint):
+    before_doc = before["levels"][level][endpoint]
+    after_doc = after["levels"][level][endpoint]
+    samples = list(before_doc.get("samples_ms") or []) + list(after_doc.get("samples_ms") or [])
+    if not samples:
+        raise SystemExit(f"host baseline {level}/{endpoint} had no samples")
+    out = summarize(samples)
+    for key in ("concurrency", "per_workspace_concurrency", "samples_per_worker", "warmups_per_worker", "workspace_count"):
+        if key in before_doc:
+            out[key] = before_doc[key]
+    start_epochs = [
+        value
+        for value in (before_doc.get("first_start_epoch"), after_doc.get("first_start_epoch"))
+        if value is not None
+    ]
+    end_epochs = [
+        value
+        for value in (before_doc.get("last_end_epoch"), after_doc.get("last_end_epoch"))
+        if value is not None
+    ]
+    if start_epochs and end_epochs:
+        out["first_start_epoch"] = min(start_epochs)
+        out["last_end_epoch"] = max(end_epochs)
+        spans = [
+            value
+            for value in (before_doc.get("wall_span_ms"), after_doc.get("wall_span_ms"))
+            if value is not None
+        ]
+        if spans:
+            out["wall_span_ms"] = round(sum(float(value) for value in spans), 3)
+    optional_metrics = (
+        ("ttfb_samples_ms", "ttfb", "ms"),
+        ("body_read_samples_ms", "body_read", "ms"),
+        ("response_bytes_samples", "response_bytes", ""),
+        ("bytes_samples", "bytes", ""),
+        ("chunks_samples", "chunks", ""),
+    )
+    for sample_key, name, unit in optional_metrics:
+        values = list(before_doc.get(sample_key) or []) + list(after_doc.get(sample_key) or [])
+        if values:
+            out.update(summarize_number(values, name, unit))
+    out["host_baseline"] = "bracket"
+    out["host_baseline_passes"] = ["before", "after"]
+    out["host_baseline_sample_counts"] = {
+        "before": before_doc.get("sample_count"),
+        "after": after_doc.get("sample_count"),
+    }
+    return out
+
+levels = sorted(set(before.get("levels", {})) & set(after.get("levels", {})), key=lambda value: int(value))
+merged = {
+    "host_baseline": "bracket",
+    "host_baseline_passes": ["before", "after"],
+    "levels": {},
+}
+for level in levels:
+    before_level = before["levels"][level]
+    after_level = after["levels"][level]
+    endpoints = endpoint_order(set(before_level) & set(after_level))
+    merged["levels"][level] = {
+        endpoint: merged_endpoint(level, endpoint)
+        for endpoint in endpoints
+    }
+
+print(json.dumps(merged, sort_keys=True))
+PY
+}
+
 combine_report() {
   local host_json="$1"
   local guest_json="$2"
   local backend="$3"
   local canonical="$4"
   local runner_json="$5"
-  python3 - "$host_json" "$guest_json" "$backend" "$canonical" "$runner_json" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" "$REQUEST_MODEL" <<'PY'
+  python3 - "$host_json" "$guest_json" "$backend" "$canonical" "$runner_json" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" "$REQUEST_MODEL" "$RUN_LABEL" "$RUNNER_SLOTS" <<'PY'
 import json
 import statistics
 import sys
@@ -1311,6 +1445,8 @@ chat_tokens = int(sys.argv[8])
 stream_enabled = sys.argv[9] == "1"
 stream_tokens = int(sys.argv[10])
 request_model = sys.argv[11] or None
+run_label = sys.argv[12] or None
+runner_slots_raw = sys.argv[13] or None
 
 def summarize(values_ms):
     values = [round(float(value), 3) for value in values_ms]
@@ -1460,6 +1596,10 @@ report = {
     ],
     "matrix": matrix,
     "model_ref": canonical,
+    "measurement_design": {
+        "host_baseline": host_raw.get("host_baseline", "before"),
+        "host_baseline_passes": host_raw.get("host_baseline_passes", ["before"]),
+    },
     "per_workspace_concurrency_levels": [int(level) for level in levels],
     "request_profiles": {
         "chat": {
@@ -1480,6 +1620,16 @@ report = {
     "workspace_count": workspace_count,
     "workspaces": workspace_names,
 }
+experiment = {}
+if run_label:
+    experiment["label"] = run_label
+if runner_slots_raw:
+    try:
+        experiment["runner_slots"] = int(runner_slots_raw)
+    except ValueError:
+        experiment["runner_slots"] = runner_slots_raw
+if experiment:
+    report["experiment"] = experiment
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
 }
@@ -1557,6 +1707,13 @@ case "$RUNNER_TELEMETRY" in
     fail "MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY must be off, auto, or required"
     ;;
 esac
+case "$HOST_BASELINE" in
+  before|bracket)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_PROBE_HOST_BASELINE must be before or bracket"
+    ;;
+esac
 CONCURRENCY_SPACES="$(printf '%s' "$CONCURRENCY" | tr ',' ' ')"
 if [ -z "$(printf '%s' "$CONCURRENCY_SPACES" | tr -d '[:space:]')" ]; then
   fail "MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY must include at least one positive integer"
@@ -1593,7 +1750,7 @@ RUNNER_MODE=managed
 if [ -n "$HOST_WORKER_URL" ]; then
   RUNNER_MODE=external
 fi
-echo "microagent-host-worker-probe: backend=$BACKEND runner_mode=$RUNNER_MODE model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY runner_telemetry=$RUNNER_TELEMETRY"
+echo "microagent-host-worker-probe: backend=$BACKEND runner_mode=$RUNNER_MODE model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY host_baseline=$HOST_BASELINE chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY runner_telemetry=$RUNNER_TELEMETRY"
 
 GUEST_MODEL_URL="http://127.0.0.1:$MODEL_GUEST_PORT/v1"
 if [ "$RUNNER_MODE" = "external" ]; then
@@ -1644,8 +1801,9 @@ fi
 start_gpu_telemetry
 start_runner_telemetry "$RUNNER_ROOT_URL"
 set_telemetry_phase host-direct
-echo "microagent-host-worker-probe: measuring direct host calls at $RUNNER_BASE_URL"
-HOST_JSON="$(host_benchmark "$RUNNER_BASE_URL")" || fail "direct host benchmark failed"
+echo "microagent-host-worker-probe: measuring direct host calls before guest run at $RUNNER_BASE_URL"
+HOST_BEFORE_JSON="$(host_benchmark "$RUNNER_BASE_URL")" || fail "direct host benchmark failed"
+HOST_JSON="$(annotate_host_benchmark "$HOST_BEFORE_JSON" before)"
 
 set_telemetry_phase workspace-start
 for workspace in "${WORKSPACE_NAMES[@]}"; do
@@ -2056,6 +2214,12 @@ PY
 }
 
 GUEST_JSON="$(run_guest_benchmarks)" || fail "guest benchmark failed"
+if [ "$HOST_BASELINE" = "bracket" ]; then
+  set_telemetry_phase host-after
+  echo "microagent-host-worker-probe: measuring direct host calls after guest run at $RUNNER_BASE_URL"
+  HOST_AFTER_JSON="$(host_benchmark "$RUNNER_BASE_URL")" || fail "post-guest direct host benchmark failed"
+  HOST_JSON="$(merge_host_benchmarks "$HOST_BEFORE_JSON" "$HOST_AFTER_JSON")"
+fi
 set_telemetry_phase report
 stop_gpu_telemetry
 stop_runner_telemetry
