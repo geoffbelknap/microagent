@@ -353,6 +353,25 @@ func mcpTools() []map[string]any {
 			map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("models.runners", "List running local model servers.", nil,
 			map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.policy.validate", "Validate a structured model mediation policy file.", []string{"policy_file"},
+			map[string]any{"policy_file": map[string]any{"type": "string"}}),
+		mcpTool("models.policy.evaluate", "Dry-run a structured model mediation policy file against request metadata.", []string{"policy_file"},
+			map[string]any{
+				"policy_file":   map[string]any{"type": "string"},
+				"method":        map[string]any{"type": "string"},
+				"request_path":  map[string]any{"type": "string"},
+				"workspace_id":  map[string]any{"type": "string"},
+				"capability":    map[string]any{"type": "string"},
+				"worker_id":     map[string]any{"type": "string"},
+				"model":         map[string]any{"type": "string"},
+				"request_bytes": map[string]any{"type": "integer"},
+				"text_bytes":    map[string]any{"type": "integer"},
+				"messages":      map[string]any{"type": "integer"},
+				"max_tokens":    map[string]any{"type": "integer"},
+				"stream":        map[string]any{"type": "boolean"},
+				"tools":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"expect":        map[string]any{"type": "string", "enum": []string{"allow", "deny"}},
+			}),
 		mcpTool("profiles.list", "List resource profiles.", nil, nil),
 		mcpTool("host.inspect", "Report host capabilities for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
 		mcpTool("doctor.check", "Run host diagnostics for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
@@ -601,7 +620,7 @@ func mcpToolIdempotency(name string) string {
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
 	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
-	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -622,7 +641,7 @@ func mcpToolPrincipalScope(name string) []string {
 		return []string{"images.read", "images.write"}
 	case "artifacts.list", "cp", "artifacts.get":
 		return []string{"workspace.files"}
-	case "models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners":
+	case "models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate":
 		return []string{"models.read", "models.write"}
 	case "host.networking.setup", "kernel.install", "rootfs.build":
 		return []string{"host.write"}
@@ -1500,6 +1519,46 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		return cli, nil
 	case "models.runners":
 		return appendOptionalFlag([]string{"--mode=ax", "model", "runners"}, "-state-dir", stateDir), nil
+	case "models.policy.validate":
+		if err := requireToolArgs(args, name, "policy_file"); err != nil {
+			return nil, err
+		}
+		return []string{"--mode=ax", "model", "policy", "validate", stringArg(args, "policy_file")}, nil
+	case "models.policy.evaluate":
+		if err := requireToolArgs(args, name, "policy_file"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "model", "policy", "evaluate", stringArg(args, "policy_file")}
+		cli = appendOptionalFlag(cli, "-method", stringArg(args, "method"))
+		cli = appendOptionalFlag(cli, "-path", stringArg(args, "request_path"))
+		cli = appendOptionalFlag(cli, "-workspace-id", stringArg(args, "workspace_id"))
+		cli = appendOptionalFlag(cli, "-capability", stringArg(args, "capability"))
+		cli = appendOptionalFlag(cli, "-worker-id", stringArg(args, "worker_id"))
+		cli = appendOptionalFlag(cli, "-model", stringArg(args, "model"))
+		if value := int64Arg(args, "request_bytes"); value > 0 {
+			cli = append(cli, "-request-bytes", strconv.FormatInt(value, 10))
+		}
+		if value := int64Arg(args, "text_bytes"); value > 0 {
+			cli = append(cli, "-text-bytes", strconv.FormatInt(value, 10))
+		}
+		if value := int64Arg(args, "messages"); value > 0 {
+			cli = append(cli, "-messages", strconv.FormatInt(value, 10))
+		}
+		if value := int64Arg(args, "max_tokens"); value > 0 {
+			cli = append(cli, "-max-tokens", strconv.FormatInt(value, 10))
+		}
+		if _, ok := args["stream"]; ok {
+			cli = append(cli, "-stream", strconv.FormatBool(boolArg(args, "stream")))
+		}
+		if tools, ok, err := stringSliceArg(args, "tools"); err != nil {
+			return nil, err
+		} else if ok {
+			for _, tool := range tools {
+				cli = append(cli, "-tool", tool)
+			}
+		}
+		cli = appendOptionalFlag(cli, "-expect", stringArg(args, "expect"))
+		return cli, nil
 	case "cp":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err

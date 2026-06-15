@@ -242,6 +242,8 @@ the minimum shape is:
 | `models.serve` | Start or reuse a local host model server for a stored or pulled model |
 | `models.stop` | Stop local host model server instances for a model |
 | `models.runners` | List running local model servers |
+| `models.policy.validate` | Validate a structured model mediation policy file |
+| `models.policy.evaluate` | Dry-run a policy file against structured request metadata |
 | `profiles.list` | List resource profiles |
 | `host.inspect` | Report host capabilities |
 | `doctor.check` | Run host diagnostics |

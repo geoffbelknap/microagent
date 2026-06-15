@@ -15,6 +15,8 @@ microagent model serve <hf-ref> [--dedicated] [--runner-command <template>] [--r
 microagent model serve <hf-ref> [--dedicated] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Alias for model serve
 microagent model stop <hf-ref> [--state-dir <dir>]                                Stop a model's runners
 microagent model runners [--state-dir <dir>]                                      List running model servers
+microagent model policy validate <policy.json>                                    Validate a mediation policy file
+microagent model policy evaluate <policy.json> [options]                          Dry-run a policy file against structured request metadata
 ```
 
 `model` manages a local content-addressed store of GGUF model files and the
@@ -108,6 +110,8 @@ With the global `--json` flag, records are returned under `models`:
 | `serve` | Start (or reuse) a pinned host model server for a model; auto-pulls if not yet stored |
 | `stop` | Force-stop all model server processes for a model ref |
 | `runners` | List currently running model server processes |
+| `policy validate` | Validate a structured model mediation policy file |
+| `policy evaluate` | Dry-run a policy file against structured request metadata |
 
 Without a custom command, `serve` uses the built-in `llama-server` runner
 resolver. It requires `llama-server` on PATH or set via the
@@ -287,6 +291,33 @@ does not inspect prompt meaning, response content, semantic tool intent, quotas,
 trust scores, billing rules, or user/business authorization. Use the external
 policy URL path when those decisions need a policy service; microagent still
 owns the fail-closed substrate enforcement around that decision.
+
+Validate a generated file before using it:
+
+```bash
+microagent model policy validate ./model-policy.json
+microagent --json model policy validate ./model-policy.json
+```
+
+Dry-run a structured request without starting a model runner or VM:
+
+```bash
+microagent model policy evaluate ./model-policy.json \
+  --method POST \
+  --path /v1/chat/completions \
+  --model local-model \
+  --max-tokens 128 \
+  --stream false \
+  --tool shell \
+  --text-bytes 512 \
+  --messages 1 \
+  --expect allow
+```
+
+`policy evaluate` exits nonzero only when the policy file is invalid, the
+sample metadata is invalid, or `--expect` does not match the evaluated
+decision. A denied decision is otherwise a successful dry run and is printed as
+`deny` with the policy reason. Use `--json` for CI assertions.
 
 ## HuggingFace ref forms
 

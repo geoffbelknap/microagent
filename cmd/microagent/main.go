@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -2230,7 +2231,7 @@ network.mode=named.
 
 func runModel(args []string, stdout *os.File) error {
 	if wantsHelp(args) {
-		fmt.Fprintln(stdout, "usage: microagent model <pull|list|delete|prune|serve|stop|runners> ...")
+		fmt.Fprintln(stdout, "usage: microagent model <pull|list|delete|prune|serve|stop|runners|policy> ...")
 		return nil
 	}
 	if len(args) > 0 {
@@ -2249,9 +2250,196 @@ func runModel(args []string, stdout *os.File) error {
 			return runModelStop(args[1:], stdout)
 		case "runners":
 			return runModelRunners(args[1:], stdout)
+		case "policy":
+			return runModelPolicy(args[1:], stdout)
 		}
 	}
-	return fmt.Errorf("usage: microagent model <pull|list|delete|prune|serve|stop|runners> [args]")
+	return fmt.Errorf("usage: microagent model <pull|list|delete|prune|serve|stop|runners|policy> [args]")
+}
+
+func runModelPolicy(args []string, stdout *os.File) error {
+	if wantsHelp(args) || len(args) == 0 {
+		printModelPolicyHelp(stdout)
+		return nil
+	}
+	switch args[0] {
+	case "validate":
+		return runModelPolicyValidate(args[1:], stdout)
+	case "evaluate", "eval":
+		return runModelPolicyEvaluate(args[1:], stdout)
+	default:
+		return fmt.Errorf("usage: microagent model policy <validate|evaluate> ...")
+	}
+}
+
+type modelPolicyValidationOutput struct {
+	OK            bool   `json:"ok"`
+	Path          string `json:"path"`
+	SHA256        string `json:"sha256"`
+	SchemaVersion string `json:"schema_version"`
+	Default       string `json:"default"`
+	Rules         int    `json:"rules"`
+}
+
+type modelPolicyEvaluationOutput struct {
+	OK            bool   `json:"ok"`
+	Path          string `json:"path"`
+	SHA256        string `json:"sha256"`
+	Decision      string `json:"decision"`
+	Reason        string `json:"reason"`
+	RuleID        string `json:"rule_id,omitempty"`
+	AuditEventID  string `json:"audit_event_id,omitempty"`
+	Expected      string `json:"expected,omitempty"`
+	MatchedExpect bool   `json:"matched_expect,omitempty"`
+}
+
+func runModelPolicyValidate(args []string, stdout *os.File) error {
+	fs := flag.NewFlagSet("model policy validate", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model policy validate <policy.json>")
+	}
+	policy, source, err := hostworker.LoadFilePolicy(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	out := modelPolicyValidationOutput{
+		OK:            true,
+		Path:          source.Path,
+		SHA256:        source.SHA256,
+		SchemaVersion: policy.SchemaVersion,
+		Default:       policy.Default,
+		Rules:         len(policy.Rules),
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, out)
+	}
+	fmt.Fprintf(stdout, "Policy valid: %s (%d rule(s), sha256 %s)\n", out.Path, out.Rules, out.SHA256)
+	return nil
+}
+
+func runModelPolicyEvaluate(args []string, stdout *os.File) error {
+	maxTokensSet := hasFlagValue(args, "max-tokens")
+	streamSet := hasFlagValue(args, "stream")
+	fs := flag.NewFlagSet("model policy evaluate", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	method := fs.String("method", http.MethodGet, "Request method")
+	requestPath := fs.String("path", "/v1/models", "Request path as seen by the mediator")
+	workspaceID := fs.String("workspace-id", "", "Workspace ID")
+	capability := fs.String("capability", hostworker.DefaultCapability, "Capability")
+	workerID := fs.String("worker-id", "policy-evaluate", "Worker ID")
+	modelName := fs.String("model", "", "Declared request model")
+	requestBytes := fs.Int64("request-bytes", 0, "Request body size in bytes")
+	textBytes := fs.Int64("text-bytes", 0, "Aggregate prompt/message text byte count")
+	messages := fs.Int("messages", 0, "Message count")
+	maxTokens := fs.Int("max-tokens", 0, "Declared max_tokens value")
+	streamRaw := fs.String("stream", "", "Declared stream mode: true or false")
+	expect := fs.String("expect", "", "Expected decision: allow or deny")
+	var tools multiFlag
+	fs.Var(&tools, "tool", "Declared tool/function name (repeatable)")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model policy evaluate <policy.json> [--method <method>] [--path <path>] [--model <model>] [--max-tokens <n>] [--stream true|false] [--tool <name>] [--expect allow|deny]")
+	}
+	policy, source, err := hostworker.LoadFilePolicy(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	body := &hostworker.DecisionRequestBody{
+		Model:        strings.TrimSpace(*modelName),
+		MessageCount: *messages,
+		TextBytes:    *textBytes,
+		ToolNames:    append([]string{}, tools...),
+	}
+	if streamSet {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(*streamRaw))
+		if err != nil {
+			return fmt.Errorf("--stream must be true or false")
+		}
+		body.Stream = &parsed
+	}
+	if maxTokensSet {
+		value := *maxTokens
+		body.MaxTokens = &value
+	}
+	envelope := hostworker.DecisionEnvelope{
+		SchemaVersion: 1,
+		RequestID:     "policy-evaluate",
+		Workspace:     hostworker.DecisionWorkspace{ID: strings.TrimSpace(*workspaceID)},
+		Capability:    strings.TrimSpace(*capability),
+		Worker: hostworker.DecisionWorker{
+			ID:       strings.TrimSpace(*workerID),
+			Protocol: "openai-compatible",
+		},
+		Request: hostworker.DecisionRequest{
+			Method: strings.ToUpper(strings.TrimSpace(*method)),
+			Path:   strings.TrimSpace(*requestPath),
+			Bytes:  *requestBytes,
+			Body:   body,
+		},
+	}
+	decision := policy.Decide(envelope, source, "policy-evaluate")
+	expected := strings.ToLower(strings.TrimSpace(*expect))
+	if expected != "" && expected != "allow" && expected != "deny" {
+		return fmt.Errorf("--expect must be allow or deny")
+	}
+	out := modelPolicyEvaluationOutput{
+		OK:            true,
+		Path:          source.Path,
+		SHA256:        source.SHA256,
+		Decision:      decision.Decision,
+		Reason:        decision.Reason,
+		RuleID:        decision.PolicyRuleID,
+		AuditEventID:  decision.AuditEventID,
+		Expected:      expected,
+		MatchedExpect: expected == "" || expected == decision.Decision,
+	}
+	if outputJSON(stdout) {
+		if err := writeJSON(stdout, out); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(stdout, "%s\t%s", out.Decision, out.Reason)
+		if out.RuleID != "" {
+			fmt.Fprintf(stdout, "\t%s", out.RuleID)
+		}
+		fmt.Fprintln(stdout)
+	}
+	if !out.MatchedExpect {
+		return fmt.Errorf("policy decision %s did not match expected %s", out.Decision, expected)
+	}
+	return nil
+}
+
+func printModelPolicyHelp(stdout io.Writer) {
+	fmt.Fprint(stdout, `microagent model policy
+
+Validate or dry-run experimental model mediation policy files.
+
+Usage:
+  microagent model policy validate <policy.json>
+  microagent model policy evaluate <policy.json> [options]
+
+Evaluate options:
+  --method <method>       Request method (default GET)
+  --path <path>           Request path as seen by the mediator (default /v1/models)
+  --workspace-id <id>     Workspace ID
+  --capability <name>     Capability (default model.openai)
+  --worker-id <id>        Worker ID
+  --model <model>         Declared request model
+  --request-bytes <n>     Request body byte count
+  --text-bytes <n>        Aggregate prompt/message text byte count
+  --messages <n>          Message count
+  --max-tokens <n>        Declared max_tokens value
+  --stream true|false     Declared stream mode
+  --tool <name>           Declared tool/function name (repeatable)
+  --expect allow|deny     Fail if the evaluated decision differs
+`)
 }
 
 func runModelPull(args []string, stdout *os.File) error {
@@ -6179,6 +6367,17 @@ func reorderFlagArgs(args []string) []string {
 		"-runner-health-path": true,
 		"-runner-arg":         true,
 		"-runner-env":         true,
+		"-method":             true,
+		"-workspace-id":       true,
+		"-capability":         true,
+		"-worker-id":          true,
+		"-request-bytes":      true,
+		"-text-bytes":         true,
+		"-messages":           true,
+		"-max-tokens":         true,
+		"-stream":             true,
+		"-tool":               true,
+		"-expect":             true,
 		"-secret":             true,
 		"-secrets-env-file":   true,
 		"-secret-on-demand":   true,
