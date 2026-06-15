@@ -98,6 +98,28 @@ PRESSURE_FIELDS = (
     "pressure_brief",
 )
 
+COMPACT_PRESSURE_FIELDS = (
+    "workload",
+    "run_label",
+    "runner_slots",
+    "workspace_count",
+    "per_workspace_concurrency",
+    "effective_concurrency",
+    "pressure_runner",
+    "pressure_gpu",
+    "active_slot_fraction_median",
+    "runner_active_median",
+    "runner_slot_median",
+    "gpu_util_median",
+    "gpu_util_p95",
+    "chat_delta_ms",
+    "chat_p95_delta_ms",
+    "stream_delta_ms",
+    "stream_p95_delta_ms",
+    "stream_ttfb_delta_ms",
+    "pressure_summary",
+)
+
 
 def get(doc: dict[str, Any] | None, *path: str) -> Any:
     value: Any = doc
@@ -312,6 +334,28 @@ def pressure_rows_for_report(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def compact_pressure_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    compact: list[dict[str, Any]] = []
+    for row in rows:
+        next_row = dict(row)
+        next_row["workload"] = (
+            f"ws={row.get('workspace_count')} "
+            f"c={row.get('per_workspace_concurrency')} "
+            f"total={row.get('effective_concurrency')}"
+        )
+        compact.append(next_row)
+    return sorted(
+        compact,
+        key=lambda row: (
+            row.get("workspace_count") or 0,
+            row.get("per_workspace_concurrency") or 0,
+            row.get("effective_concurrency") or 0,
+            row.get("runner_slots") or 0,
+            row.get("run_label") or "",
+        ),
+    )
+
+
 def write_tsv(rows: list[dict[str, Any]], fields: tuple[str, ...]) -> None:
     writer = csv.DictWriter(
         sys.stdout,
@@ -336,6 +380,11 @@ def main() -> int:
         action="store_true",
         help="write one pressure/backpressure row per report and concurrency level",
     )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="with --pressure, write a smaller comparison view sorted by workload",
+    )
     parser.add_argument("reports", nargs="+", type=Path)
     args = parser.parse_args()
 
@@ -345,12 +394,19 @@ def main() -> int:
             rows.extend(pressure_rows_for_report(report))
         else:
             rows.extend(rows_for_report(report))
+    if args.compact:
+        if not args.pressure:
+            parser.error("--compact requires --pressure")
+        rows = compact_pressure_rows(rows)
 
     if args.json:
         json.dump(rows, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     else:
-        write_tsv(rows, PRESSURE_FIELDS if args.pressure else FIELDS)
+        fields = FIELDS
+        if args.pressure:
+            fields = COMPACT_PRESSURE_FIELDS if args.compact else PRESSURE_FIELDS
+        write_tsv(rows, fields)
     return 0
 
 
