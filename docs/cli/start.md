@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-15_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -97,7 +97,9 @@ blob is auto-pulled), the workspace is registered as a holder, and the vsock
 bridge plus `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are wired into the
 guest. `halt`, `stop`, `kill`, and `delete` release the hold; a guest that
 exits on its own keeps it until the next lifecycle verb, and
-[`model stop`](/cli/model/) reclaims it immediately.
+[`model stop`](/cli/model/) reclaims it immediately. Attach and release
+actions are recorded in the workspace [`events`](/cli/events/) history as
+`model_worker=attached` and `model_worker=released` markers.
 
 ## Exit status
 

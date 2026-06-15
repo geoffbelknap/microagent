@@ -180,6 +180,11 @@ A workspace created with `create --model` re-pairs on every `start` and holds
 until `halt`, `stop`, `kill`, or `delete` releases it - a guest that exits on
 its own keeps its hold until the next lifecycle verb. An unpinned runner stops
 when its last holder releases; a pinned one (`model serve`) stays up.
+When an existing workspace attaches or releases a model runner, microagent
+appends `model_worker=attached` and `model_worker=released` markers to the
+workspace's [`events`](/cli/events/) history. These markers record the model
+ref, holder, runner engine, process ID, and runner config digest for tracing.
+Runner environment values are not recorded.
 
 `stop` force-stops all model server processes for the given ref (ignores
 whether the runner is pinned) and removes their entries from the runner index.

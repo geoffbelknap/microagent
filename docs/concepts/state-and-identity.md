@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-15_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -169,8 +169,12 @@ Two non-obvious things to read from that diagram:
 
 Each state write updates `<state-dir>/<runtimeID>/event.json` with the latest
 event and appends the same record to `<state-dir>/<runtimeID>/events.json`.
-The timeline survives VM runtime exit and is intentionally small: it is a
-forensic lifecycle record, not a log stream.
+Substrate events that do not change workspace state can also append to
+`events.json` without replacing `event.json`; for example, model-paired
+workspaces record `model_worker=attached` and `model_worker=released` markers
+when a host model runner is attached or released. The timeline survives VM
+runtime exit and is intentionally small: it is a forensic lifecycle and
+substrate record, not a log stream.
 
 See the [supervisor protocol](/protocol/) for the shared request and response
 schema.
