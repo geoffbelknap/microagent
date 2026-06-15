@@ -22,6 +22,9 @@
 # Optional:
 #   MICROAGENT_CLI                         microagent CLI (default: .build/dev/microagent)
 #   MICROAGENT_FIRECRACKER                 Firecracker binary for Linux runs
+#   MICROAGENT_HOST_WORKER_URL             existing OpenAI-compatible base URL; skips pull/serve
+#   MICROAGENT_HOST_WORKER_HEALTH_URL      optional health URL for an existing worker
+#   MICROAGENT_HOST_WORKER_MODEL           request model id; auto-discovered from /models when unset
 #   MICROAGENT_HOST_WORKER_PROBE_MODEL_REF HuggingFace GGUF ref
 #   MICROAGENT_HOST_WORKER_PROBE_IMAGE     guest image with curl
 #   MICROAGENT_HOST_WORKER_PROBE_STATE_DIR state dir (default: ~/.microagent)
@@ -63,6 +66,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
+HOST_WORKER_URL="${MICROAGENT_HOST_WORKER_URL:-}"
+HOST_WORKER_HEALTH_URL="${MICROAGENT_HOST_WORKER_HEALTH_URL:-}"
+REQUEST_MODEL="${MICROAGENT_HOST_WORKER_MODEL:-${MICROAGENT_HOST_WORKER_PROBE_REQUEST_MODEL:-}}"
 MODEL_REF="${MICROAGENT_HOST_WORKER_PROBE_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 IMAGE="${MICROAGENT_HOST_WORKER_PROBE_IMAGE:-docker.io/curlimages/curl:latest}"
 STATE_DIR="${MICROAGENT_HOST_WORKER_PROBE_STATE_DIR:-$HOME/.microagent}"
@@ -85,6 +91,8 @@ RUNNER_TELEMETRY_ENDPOINTS="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_ENDP
 RUNNER_TELEMETRY_TIMEOUT="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_TIMEOUT:-2}"
 WS_BASE="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACE:-host-worker-probe-$$}"
 REPORT_PATH="${MICROAGENT_HOST_WORKER_PROBE_REPORT:-}"
+MODEL_GUEST_PORT=11434
+MODEL_VSOCK_PORT=62100
 STARTED_RUNNER=0
 GPU_TELEMETRY_ACTIVE=0
 GPU_TELEMETRY_PID=""
@@ -925,6 +933,131 @@ else:
 ' "$field"
 }
 
+host_worker_url_info() {
+  local raw_url="$1"
+  python3 - "$raw_url" <<'PY'
+import json
+import sys
+import urllib.parse
+
+raw_url = sys.argv[1].strip()
+if not raw_url:
+    raise SystemExit("MICROAGENT_HOST_WORKER_URL must not be empty")
+if "://" not in raw_url:
+    raw_url = "http://" + raw_url
+raw_url = raw_url.rstrip("/")
+parsed = urllib.parse.urlparse(raw_url)
+if parsed.scheme != "http":
+    raise SystemExit("MICROAGENT_HOST_WORKER_URL must use http://; the guest bridge is a plain TCP forward")
+if parsed.username or parsed.password:
+    raise SystemExit("MICROAGENT_HOST_WORKER_URL must not include credentials")
+if parsed.query or parsed.fragment or parsed.params:
+    raise SystemExit("MICROAGENT_HOST_WORKER_URL must not include query, fragment, or path parameters")
+if not parsed.hostname:
+    raise SystemExit("MICROAGENT_HOST_WORKER_URL must include a host")
+try:
+    port = parsed.port or 80
+except ValueError as err:
+    raise SystemExit(f"invalid MICROAGENT_HOST_WORKER_URL port: {err}") from err
+
+path = parsed.path.rstrip("/")
+if not path:
+    path = "/v1"
+netloc = parsed.netloc
+base_url = urllib.parse.urlunparse((parsed.scheme, netloc, path, "", "", ""))
+if path.endswith("/v1"):
+    root_path = path[:-3].rstrip("/")
+else:
+    root_path = ""
+root_url = urllib.parse.urlunparse((parsed.scheme, netloc, root_path, "", "", "")).rstrip("/")
+if not root_url:
+    root_url = f"{parsed.scheme}://{netloc}"
+
+target_host = parsed.hostname
+if ":" in target_host and not target_host.startswith("["):
+    target_host = f"[{target_host}]"
+
+print(json.dumps({
+    "base_url": base_url,
+    "base_path": path,
+    "host": parsed.hostname,
+    "port": port,
+    "root_url": root_url,
+    "scheme": parsed.scheme,
+    "target": f"{target_host}:{port}",
+}, separators=(",", ":"), sort_keys=True))
+PY
+}
+
+host_worker_health_check() {
+  local base_url="$1"
+  local health_url="$2"
+  python3 - "$base_url" "$health_url" <<'PY'
+import sys
+import urllib.error
+import urllib.request
+
+base_url = sys.argv[1].rstrip("/")
+health_url = sys.argv[2].strip() or f"{base_url}/models"
+try:
+    with urllib.request.urlopen(health_url, timeout=10) as response:
+        response.read(1024 * 1024)
+        if not 200 <= response.status < 300:
+            raise SystemExit(f"{health_url} returned HTTP {response.status}")
+except urllib.error.HTTPError as err:
+    raise SystemExit(f"{health_url} returned HTTP {err.code}") from err
+except (OSError, urllib.error.URLError, TimeoutError) as err:
+    raise SystemExit(f"{health_url} is not reachable: {err}") from err
+PY
+}
+
+discover_request_model() {
+  local base_url="$1"
+  python3 - "$base_url" <<'PY'
+import json
+import sys
+import urllib.error
+import urllib.request
+
+base_url = sys.argv[1].rstrip("/")
+try:
+    with urllib.request.urlopen(f"{base_url}/models", timeout=10) as response:
+        doc = json.loads(response.read(1024 * 1024))
+except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+models = doc.get("data") if isinstance(doc, dict) else None
+if not isinstance(models, list):
+    raise SystemExit(1)
+for model in models:
+    if isinstance(model, dict) and model.get("id"):
+        print(model["id"])
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+external_runner_json() {
+  local info_json="$1"
+  python3 - "$info_json" <<'PY'
+import json
+import sys
+
+info = json.loads(sys.argv[1])
+print(json.dumps({
+    "base_url_path": info["base_path"],
+    "engine": "openai-compatible",
+    "host": info["host"],
+    "mode": "external",
+    "model_ref": "external-host-worker",
+    "pid": None,
+    "port": info["port"],
+    "runner_config_digest": "",
+    "scheme": info["scheme"],
+}, separators=(",", ":"), sort_keys=True))
+PY
+}
+
 runner_count_for_model() {
   local model_ref="$1"
   "$CLI" --json model runners --state-dir "$STATE_DIR" 2>/dev/null | python3 -c '
@@ -944,7 +1077,7 @@ print(sum(1 for runner in runners if runner.get("model_ref") == model_ref))
 
 host_benchmark() {
   local base_url="$1"
-  python3 - "$base_url" "$SAMPLES" "$WARMUPS" "$CONCURRENCY" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" <<'PY'
+  python3 - "$base_url" "$SAMPLES" "$WARMUPS" "$CONCURRENCY" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" "$REQUEST_MODEL" <<'PY'
 import concurrent.futures
 import json
 import statistics
@@ -963,6 +1096,7 @@ chat_profile = sys.argv[6]
 chat_tokens = int(sys.argv[7])
 stream_enabled = sys.argv[8] == "1"
 stream_tokens = int(sys.argv[9])
+request_model = sys.argv[10]
 timeout = 180
 
 if samples <= 0:
@@ -1015,11 +1149,14 @@ def request_chat():
         content = "Write one compact paragraph about mediated host GPU workers."
     else:
         content = "Reply with exactly: PONG"
-    payload = json.dumps({
+    payload_doc = {
         "messages": [{"role": "user", "content": content}],
         "max_tokens": chat_tokens,
         "temperature": 0,
-    }).encode("utf-8")
+    }
+    if request_model:
+        payload_doc["model"] = request_model
+    payload = json.dumps(payload_doc).encode("utf-8")
     req = urllib.request.Request(
         base_url + "/chat/completions",
         data=payload,
@@ -1033,7 +1170,7 @@ def request_chat():
     return timing
 
 def request_stream():
-    payload = json.dumps({
+    payload_doc = {
         "messages": [
             {
                 "role": "user",
@@ -1043,7 +1180,10 @@ def request_stream():
         "max_tokens": stream_tokens,
         "temperature": 0,
         "stream": True,
-    }).encode("utf-8")
+    }
+    if request_model:
+        payload_doc["model"] = request_model
+    payload = json.dumps(payload_doc).encode("utf-8")
     req = urllib.request.Request(
         base_url + "/chat/completions",
         data=payload,
@@ -1155,7 +1295,7 @@ combine_report() {
   local backend="$3"
   local canonical="$4"
   local runner_json="$5"
-  python3 - "$host_json" "$guest_json" "$backend" "$canonical" "$runner_json" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" <<'PY'
+  python3 - "$host_json" "$guest_json" "$backend" "$canonical" "$runner_json" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" "$REQUEST_MODEL" <<'PY'
 import json
 import statistics
 import sys
@@ -1170,6 +1310,7 @@ chat_profile = sys.argv[7]
 chat_tokens = int(sys.argv[8])
 stream_enabled = sys.argv[9] == "1"
 stream_tokens = int(sys.argv[10])
+request_model = sys.argv[11] or None
 
 def summarize(values_ms):
     values = [round(float(value), 3) for value in values_ms]
@@ -1305,6 +1446,9 @@ public_runner = {
     "pid": runner.get("pid"),
     "runner_config_digest": runner.get("runner_config_digest"),
 }
+for key in ("mode", "scheme", "base_url_path"):
+    if runner.get(key) is not None:
+        public_runner[key] = runner.get(key)
 report = {
     "backend": backend,
     "concurrency_levels": [int(level) for level in levels],
@@ -1321,11 +1465,13 @@ report = {
         "chat": {
             "profile": chat_profile,
             "max_tokens": chat_tokens,
+            "model": request_model,
             "stream": False,
         },
         "stream": {
             "enabled": stream_enabled,
             "max_tokens": stream_tokens,
+            "model": request_model,
         },
     },
     "runner": public_runner,
@@ -1443,23 +1589,57 @@ case "$BACKEND" in
     ;;
 esac
 
-echo "microagent-host-worker-probe: backend=$BACKEND model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY runner_telemetry=$RUNNER_TELEMETRY"
-echo "microagent-host-worker-probe: pulling or refreshing model record"
-PULL_JSON="$("$CLI" --json model pull "$MODEL_REF" --state-dir "$STATE_DIR")" || fail "model pull failed"
-CANONICAL="$(printf '%s' "$PULL_JSON" | json_get model_ref)"
+RUNNER_MODE=managed
+if [ -n "$HOST_WORKER_URL" ]; then
+  RUNNER_MODE=external
+fi
+echo "microagent-host-worker-probe: backend=$BACKEND runner_mode=$RUNNER_MODE model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY runner_telemetry=$RUNNER_TELEMETRY"
 
-existing_count="$(runner_count_for_model "$CANONICAL")"
-if [ "$existing_count" -ne 0 ]; then
-  skip "model $CANONICAL already has $existing_count active runner(s); stop them before running this destructive probe"
+GUEST_MODEL_URL="http://127.0.0.1:$MODEL_GUEST_PORT/v1"
+if [ "$RUNNER_MODE" = "external" ]; then
+  HOST_WORKER_INFO="$(host_worker_url_info "$HOST_WORKER_URL")" || fail "invalid MICROAGENT_HOST_WORKER_URL"
+  RUNNER_BASE_URL="$(printf '%s' "$HOST_WORKER_INFO" | json_get base_url)"
+  RUNNER_ROOT_URL="$(printf '%s' "$HOST_WORKER_INFO" | json_get root_url)"
+  HOST_WORKER_TARGET="$(printf '%s' "$HOST_WORKER_INFO" | json_get target)"
+  HOST_WORKER_BASE_PATH="$(printf '%s' "$HOST_WORKER_INFO" | json_get base_path)"
+  GUEST_MODEL_URL="http://127.0.0.1:$MODEL_GUEST_PORT$HOST_WORKER_BASE_PATH"
+  CANONICAL=external-host-worker
+  RUNNER_JSON="$(external_runner_json "$HOST_WORKER_INFO")"
+  echo "microagent-host-worker-probe: using existing host worker at $RUNNER_BASE_URL"
+  health_err=""
+  if ! health_err="$(host_worker_health_check "$RUNNER_BASE_URL" "$HOST_WORKER_HEALTH_URL" 2>&1)"; then
+    fail "external host worker health check failed: $health_err"
+  fi
+else
+  echo "microagent-host-worker-probe: pulling or refreshing model record"
+  PULL_JSON="$("$CLI" --json model pull "$MODEL_REF" --state-dir "$STATE_DIR")" || fail "model pull failed"
+  CANONICAL="$(printf '%s' "$PULL_JSON" | json_get model_ref)"
+
+  existing_count="$(runner_count_for_model "$CANONICAL")"
+  if [ "$existing_count" -ne 0 ]; then
+    skip "model $CANONICAL already has $existing_count active runner(s); stop them before running this destructive probe"
+  fi
+
+  echo "microagent-host-worker-probe: starting pinned host runner"
+  RUNNER_JSON="$("$CLI" --json model serve "$MODEL_REF" --state-dir "$STATE_DIR")" || fail "model serve failed"
+  STARTED_RUNNER=1
+  RUNNER_HOST="$(printf '%s' "$RUNNER_JSON" | json_get host)"
+  RUNNER_PORT="$(printf '%s' "$RUNNER_JSON" | json_get port)"
+  RUNNER_ROOT_URL="http://$RUNNER_HOST:$RUNNER_PORT"
+  RUNNER_BASE_URL="$RUNNER_ROOT_URL/v1"
 fi
 
-echo "microagent-host-worker-probe: starting pinned host runner"
-RUNNER_JSON="$("$CLI" --json model serve "$MODEL_REF" --state-dir "$STATE_DIR")" || fail "model serve failed"
-STARTED_RUNNER=1
-RUNNER_HOST="$(printf '%s' "$RUNNER_JSON" | json_get host)"
-RUNNER_PORT="$(printf '%s' "$RUNNER_JSON" | json_get port)"
-RUNNER_ROOT_URL="http://$RUNNER_HOST:$RUNNER_PORT"
-RUNNER_BASE_URL="$RUNNER_ROOT_URL/v1"
+if [ -z "$REQUEST_MODEL" ]; then
+  discovered_model=""
+  if discovered_model="$(discover_request_model "$RUNNER_BASE_URL" 2>/dev/null)"; then
+    REQUEST_MODEL="$discovered_model"
+    echo "microagent-host-worker-probe: using request model $REQUEST_MODEL"
+  else
+    echo "microagent-host-worker-probe: no request model discovered; chat payloads will omit model"
+  fi
+else
+  echo "microagent-host-worker-probe: using configured request model $REQUEST_MODEL"
+fi
 
 start_gpu_telemetry
 start_runner_telemetry "$RUNNER_ROOT_URL"
@@ -1474,7 +1654,18 @@ done
 echo "microagent-host-worker-probe: creating and starting $WORKSPACE_COUNT paired workspace(s)"
 for workspace in "${WORKSPACE_NAMES[@]}"; do
   echo "microagent-host-worker-probe: starting paired workspace $workspace"
-  "$CLI" create "$workspace" --image "$IMAGE" --model "$MODEL_REF" --state-dir "$STATE_DIR" "${CREATE_FLAGS[@]}" >/dev/null || fail "create --model failed for $workspace"
+  if [ "$RUNNER_MODE" = "external" ]; then
+    "$CLI" create "$workspace" \
+      --image "$IMAGE" \
+      --state-dir "$STATE_DIR" \
+      --mediation "$MODEL_VSOCK_PORT=$HOST_WORKER_TARGET" \
+      --env "MICROAGENT_VSOCK_TCP_LISTENERS=127.0.0.1:$MODEL_GUEST_PORT=$MODEL_VSOCK_PORT" \
+      --env "MICROAGENT_MODEL_URL=$GUEST_MODEL_URL" \
+      --env "OPENAI_BASE_URL=$GUEST_MODEL_URL" \
+      "${CREATE_FLAGS[@]}" >/dev/null || fail "create external worker bridge failed for $workspace"
+  else
+    "$CLI" create "$workspace" --image "$IMAGE" --model "$MODEL_REF" --state-dir "$STATE_DIR" "${CREATE_FLAGS[@]}" >/dev/null || fail "create --model failed for $workspace"
+  fi
   "$CLI" start "$workspace" --state-dir "$STATE_DIR" "${START_FLAGS[@]}" >/dev/null || fail "start failed for $workspace"
   if ! e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$workspace" 90; then
     "$CLI" --json status "$workspace" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >&2 || true
@@ -1492,6 +1683,16 @@ join_values() {
     result="${result}${result:+,}${value}"
   done <"$1"
   printf '%s' "$result"
+}
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+request_model_prefix() {
+  if [ -n "${PROBE_REQUEST_MODEL:-}" ]; then
+    printf '"model":"%s",' "$(json_escape "$PROBE_REQUEST_MODEL")"
+  fi
 }
 
 measure_models_worker() {
@@ -1535,10 +1736,11 @@ measure_chat_worker() {
   connect_out="$3"
   pretransfer_out="$4"
   bytes_out="$5"
+  model_prefix="$(request_model_prefix)"
   if [ "$PROBE_CHAT_PROFILE" = "sustained" ]; then
-    payload='{"messages":[{"role":"user","content":"Write one compact paragraph about mediated host GPU workers."}],"max_tokens":'"$PROBE_CHAT_TOKENS"',"temperature":0}'
+    payload='{'"$model_prefix"'"messages":[{"role":"user","content":"Write one compact paragraph about mediated host GPU workers."}],"max_tokens":'"$PROBE_CHAT_TOKENS"',"temperature":0}'
   else
-    payload='{"messages":[{"role":"user","content":"Reply with exactly: PONG"}],"max_tokens":'"$PROBE_CHAT_TOKENS"',"temperature":0}'
+    payload='{'"$model_prefix"'"messages":[{"role":"user","content":"Reply with exactly: PONG"}],"max_tokens":'"$PROBE_CHAT_TOKENS"',"temperature":0}'
   fi
   i=0
   total=$((PROBE_WARMUPS + PROBE_SAMPLES))
@@ -1576,7 +1778,8 @@ measure_stream_worker() {
   chunks_out="$4"
   connect_out="$5"
   pretransfer_out="$6"
-  payload='{"messages":[{"role":"user","content":"Write one compact paragraph about mediated host GPU workers."}],"max_tokens":'"$PROBE_STREAM_TOKENS"',"temperature":0,"stream":true}'
+  model_prefix="$(request_model_prefix)"
+  payload='{'"$model_prefix"'"messages":[{"role":"user","content":"Write one compact paragraph about mediated host GPU workers."}],"max_tokens":'"$PROBE_STREAM_TOKENS"',"temperature":0,"stream":true}'
   i=0
   total=$((PROBE_WARMUPS + PROBE_SAMPLES))
   while [ "$i" -lt "$total" ]; do
@@ -1777,6 +1980,7 @@ run_guest_benchmarks() {
         -env "PROBE_CONCURRENCY=$level" \
         -env "PROBE_CHAT_PROFILE=$CHAT_PROFILE" \
         -env "PROBE_CHAT_TOKENS=$CHAT_TOKENS" \
+        -env "PROBE_REQUEST_MODEL=$REQUEST_MODEL" \
         -env "PROBE_STREAM=$STREAM" \
         -env "PROBE_STREAM_TOKENS=$STREAM_TOKENS" \
         -- sh -c "$GUEST_BENCH" >"$tmp/$level-$idx.json" 2>"$tmp/$level-$idx.err" &
