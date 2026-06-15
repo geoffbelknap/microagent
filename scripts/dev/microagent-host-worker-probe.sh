@@ -11,8 +11,8 @@
 #   2. refuses to run if that model already has active runners,
 #   3. starts one pinned host runner through `microagent model serve`,
 #   4. measures direct host HTTP calls to /v1/models and /v1/chat/completions,
-#   5. starts a model-paired workspace and measures the same calls in-guest,
-#   6. cleans up the workspace and the runner it started.
+#   5. starts model-paired workspace(s) and measures the same calls in-guest,
+#   6. cleans up the workspace(s) and the runner it started.
 #
 # Required:
 #   A host model runner resolvable by microagent. For the built-in runner this
@@ -28,7 +28,8 @@
 #   MICROAGENT_HOST_WORKER_PROBE_SAMPLES   measured samples per endpoint (default: 5)
 #   MICROAGENT_HOST_WORKER_PROBE_WARMUPS   warmup calls per endpoint (default: 1)
 #   MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY
-#                                           comma-separated worker counts (default: 1)
+#                                           comma-separated per-workspace worker counts (default: 1)
+#   MICROAGENT_HOST_WORKER_PROBE_WORKSPACES guest workspace count (default: 1)
 #   MICROAGENT_HOST_WORKER_PROBE_CHAT_PROFILE
 #                                           tiny or sustained (default: tiny)
 #   MICROAGENT_HOST_WORKER_PROBE_CHAT_TOKENS
@@ -51,16 +52,18 @@ STATE_DIR="${MICROAGENT_HOST_WORKER_PROBE_STATE_DIR:-$HOME/.microagent}"
 SAMPLES="${MICROAGENT_HOST_WORKER_PROBE_SAMPLES:-5}"
 WARMUPS="${MICROAGENT_HOST_WORKER_PROBE_WARMUPS:-1}"
 CONCURRENCY="${MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY:-1}"
+WORKSPACE_COUNT="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACES:-1}"
 CHAT_PROFILE="${MICROAGENT_HOST_WORKER_PROBE_CHAT_PROFILE:-tiny}"
 CHAT_TOKENS="${MICROAGENT_HOST_WORKER_PROBE_CHAT_TOKENS:-16}"
 STREAM="${MICROAGENT_HOST_WORKER_PROBE_STREAM:-0}"
 STREAM_TOKENS="${MICROAGENT_HOST_WORKER_PROBE_STREAM_TOKENS:-128}"
-WS="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACE:-host-worker-probe-$$}"
+WS_BASE="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACE:-host-worker-probe-$$}"
 REPORT_PATH="${MICROAGENT_HOST_WORKER_PROBE_REPORT:-}"
 STARTED_RUNNER=0
 CREATE_FLAGS=()
 START_FLAGS=()
 CTRL_FLAGS=()
+WORKSPACE_NAMES=("$WS_BASE")
 
 skip() { e2e_skip "microagent-host-worker-probe: $1"; }
 fail() { echo "FAIL microagent-host-worker-probe: $1" >&2; exit 1; }
@@ -68,14 +71,30 @@ fail() { echo "FAIL microagent-host-worker-probe: $1" >&2; exit 1; }
 cleanup() {
   local status=$?
   set +e
-  "$CLI" kill "$WS" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
-  "$CLI" delete "$WS" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
+  for workspace in "${WORKSPACE_NAMES[@]}"; do
+    "$CLI" kill "$workspace" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
+    "$CLI" delete "$workspace" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
+  done
   if [ "$STARTED_RUNNER" -eq 1 ]; then
     "$CLI" model stop "$MODEL_REF" --state-dir "$STATE_DIR" >/dev/null 2>&1
   fi
   exit "$status"
 }
 trap cleanup EXIT
+
+build_workspace_names() {
+  local i
+  WORKSPACE_NAMES=()
+  if [ "$WORKSPACE_COUNT" -eq 1 ]; then
+    WORKSPACE_NAMES=("$WS_BASE")
+    return
+  fi
+  i=1
+  while [ "$i" -le "$WORKSPACE_COUNT" ]; do
+    WORKSPACE_NAMES+=("$WS_BASE-$i")
+    i=$((i + 1))
+  done
+}
 
 json_get() {
   local field="$1"
@@ -114,7 +133,7 @@ print(sum(1 for runner in runners if runner.get("model_ref") == model_ref))
 
 host_benchmark() {
   local base_url="$1"
-  python3 - "$base_url" "$SAMPLES" "$WARMUPS" "$CONCURRENCY" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" <<'PY'
+  python3 - "$base_url" "$SAMPLES" "$WARMUPS" "$CONCURRENCY" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" <<'PY'
 import concurrent.futures
 import json
 import statistics
@@ -128,10 +147,11 @@ base_url = sys.argv[1].rstrip("/")
 samples = int(sys.argv[2])
 warmups = int(sys.argv[3])
 levels = [int(part) for part in sys.argv[4].replace(",", " ").split()]
-chat_profile = sys.argv[5]
-chat_tokens = int(sys.argv[6])
-stream_enabled = sys.argv[7] == "1"
-stream_tokens = int(sys.argv[8])
+workspace_count = int(sys.argv[5])
+chat_profile = sys.argv[6]
+chat_tokens = int(sys.argv[7])
+stream_enabled = sys.argv[8] == "1"
+stream_tokens = int(sys.argv[9])
 timeout = 180
 
 if samples <= 0:
@@ -140,6 +160,8 @@ if warmups < 0:
     raise SystemExit("warmups must be >= 0")
 if not levels or any(level <= 0 for level in levels):
     raise SystemExit("concurrency levels must be positive integers")
+if workspace_count <= 0:
+    raise SystemExit("workspace count must be > 0")
 if chat_profile not in ("tiny", "sustained"):
     raise SystemExit("chat profile must be tiny or sustained")
 if chat_tokens <= 0:
@@ -232,14 +254,16 @@ def summarize_number(values, name, unit):
         f"{name}_max{unit_suffix}": ordered[-1],
     }
 
-def summarize(samples_for_endpoint, concurrency):
+def summarize(samples_for_endpoint, concurrency, per_workspace_concurrency):
     elapsed_values = [item["elapsed_ms"] for item in samples_for_endpoint]
     ordered = sorted(elapsed_values)
     p95_index = min(len(ordered) - 1, max(0, int(len(ordered) * 0.95 + 0.999999) - 1))
     summary = {
         "concurrency": concurrency,
+        "per_workspace_concurrency": per_workspace_concurrency,
         "samples_per_worker": samples,
         "warmups_per_worker": warmups,
+        "workspace_count": workspace_count,
         "sample_count": len(elapsed_values),
         "samples_ms": elapsed_values,
         "min_ms": ordered[0],
@@ -268,14 +292,15 @@ def worker(fn, barrier):
             values.append(sample)
     return values
 
-def run_level(fn, concurrency):
+def run_level(fn, per_workspace_concurrency):
+    concurrency = per_workspace_concurrency * workspace_count
     values = []
     barrier = threading.Barrier(concurrency)
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [pool.submit(worker, fn, barrier) for _ in range(concurrency)]
         for future in concurrent.futures.as_completed(futures):
             values.extend(future.result())
-    return summarize(values, concurrency)
+    return summarize(values, concurrency, per_workspace_concurrency)
 
 try:
     report = {"levels": {}}
@@ -302,7 +327,7 @@ combine_report() {
   local backend="$3"
   local canonical="$4"
   local runner_json="$5"
-  python3 - "$host_json" "$guest_json" "$backend" "$canonical" "$runner_json" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" <<'PY'
+  python3 - "$host_json" "$guest_json" "$backend" "$canonical" "$runner_json" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" <<'PY'
 import json
 import statistics
 import sys
@@ -312,10 +337,11 @@ guest_raw = json.loads(sys.argv[2])
 backend = sys.argv[3]
 canonical = sys.argv[4]
 runner = json.loads(sys.argv[5])
-chat_profile = sys.argv[6]
-chat_tokens = int(sys.argv[7])
-stream_enabled = sys.argv[8] == "1"
-stream_tokens = int(sys.argv[9])
+workspace_count = int(sys.argv[6])
+chat_profile = sys.argv[7]
+chat_tokens = int(sys.argv[8])
+stream_enabled = sys.argv[9] == "1"
+stream_tokens = int(sys.argv[10])
 
 def summarize(values_ms):
     values = [round(float(value), 3) for value in values_ms]
@@ -368,13 +394,16 @@ def endpoint_summary(data):
 def normalize(report):
     if "levels" not in report:
         report = {"levels": {"1": report}}
+    report_workspace_count = int(report.get("workspace_count") or workspace_count)
     normalized = {"levels": {}}
     for level, level_report in report["levels"].items():
         normalized["levels"][str(level)] = {}
         for endpoint in endpoint_order(level_report.keys()):
             data = level_report[endpoint]
             summary = endpoint_summary(data)
-            summary["concurrency"] = int(level)
+            summary["workspace_count"] = int(data.get("workspace_count") or report_workspace_count)
+            summary["per_workspace_concurrency"] = int(data.get("per_workspace_concurrency") or level)
+            summary["concurrency"] = int(data.get("concurrency") or (summary["per_workspace_concurrency"] * summary["workspace_count"]))
             for key in ("samples_per_worker", "warmups_per_worker"):
                 if key in data:
                     summary[key] = data[key]
@@ -417,6 +446,7 @@ def compare(level, endpoint):
 
 levels = sorted(host["levels"].keys(), key=lambda value: int(value))
 endpoints = endpoint_order(host["levels"][levels[0]].keys())
+workspace_names = guest_raw.get("workspaces") or []
 matrix = {}
 for level in levels:
     matrix[level] = {
@@ -440,8 +470,14 @@ report = {
     "backend": backend,
     "concurrency_levels": [int(level) for level in levels],
     "endpoints": endpoints,
+    "effective_concurrency_levels": [
+        matrix[level]["guest"]["models"].get("concurrency", int(level) * workspace_count)
+        for level in levels
+        if "models" in matrix[level]["guest"]
+    ],
     "matrix": matrix,
     "model_ref": canonical,
+    "per_workspace_concurrency_levels": [int(level) for level in levels],
     "request_profiles": {
         "chat": {
             "profile": chat_profile,
@@ -456,6 +492,8 @@ report = {
     "runner": public_runner,
     "samples_per_worker": matrix[levels[0]]["host"]["models"].get("samples_per_worker", matrix[levels[0]]["host"]["models"].get("sample_count", 0) // int(levels[0])),
     "warmups_per_worker": matrix[levels[0]]["host"]["models"].get("warmups_per_worker"),
+    "workspace_count": workspace_count,
+    "workspaces": workspace_names,
 }
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
@@ -481,6 +519,9 @@ esac
 case "$WARMUPS" in
   ''|*[!0-9]*) fail "MICROAGENT_HOST_WORKER_PROBE_WARMUPS must be a non-negative integer" ;;
 esac
+case "$WORKSPACE_COUNT" in
+  ''|*[!0-9]*) fail "MICROAGENT_HOST_WORKER_PROBE_WORKSPACES must be a positive integer" ;;
+esac
 case "$CHAT_TOKENS" in
   ''|*[!0-9]*) fail "MICROAGENT_HOST_WORKER_PROBE_CHAT_TOKENS must be a positive integer" ;;
 esac
@@ -489,6 +530,9 @@ case "$STREAM_TOKENS" in
 esac
 if [ "$SAMPLES" -le 0 ]; then
   fail "MICROAGENT_HOST_WORKER_PROBE_SAMPLES must be > 0"
+fi
+if [ "$WORKSPACE_COUNT" -le 0 ]; then
+  fail "MICROAGENT_HOST_WORKER_PROBE_WORKSPACES must be > 0"
 fi
 if [ "$CHAT_TOKENS" -le 0 ]; then
   fail "MICROAGENT_HOST_WORKER_PROBE_CHAT_TOKENS must be > 0"
@@ -526,6 +570,7 @@ for level in $CONCURRENCY_SPACES; do
     fail "MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY levels must be > 0"
   fi
 done
+build_workspace_names
 
 BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
 case "$BACKEND" in
@@ -545,7 +590,7 @@ case "$BACKEND" in
     ;;
 esac
 
-echo "microagent-host-worker-probe: backend=$BACKEND model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS"
+echo "microagent-host-worker-probe: backend=$BACKEND model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS"
 echo "microagent-host-worker-probe: pulling or refreshing model record"
 PULL_JSON="$("$CLI" --json model pull "$MODEL_REF" --state-dir "$STATE_DIR")" || fail "model pull failed"
 CANONICAL="$(printf '%s' "$PULL_JSON" | json_get model_ref)"
@@ -565,14 +610,19 @@ RUNNER_BASE_URL="http://$RUNNER_HOST:$RUNNER_PORT/v1"
 echo "microagent-host-worker-probe: measuring direct host calls at $RUNNER_BASE_URL"
 HOST_JSON="$(host_benchmark "$RUNNER_BASE_URL")" || fail "direct host benchmark failed"
 
-"$CLI" delete "$WS" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
-echo "microagent-host-worker-probe: creating and starting paired workspace $WS"
-"$CLI" create "$WS" --image "$IMAGE" --model "$MODEL_REF" --state-dir "$STATE_DIR" "${CREATE_FLAGS[@]}" >/dev/null || fail "create --model failed"
-"$CLI" start "$WS" --state-dir "$STATE_DIR" "${START_FLAGS[@]}" >/dev/null || fail "start failed"
-if ! e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$WS" 90; then
-  "$CLI" --json status "$WS" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >&2 || true
-  fail "workspace exec service did not become ready"
-fi
+for workspace in "${WORKSPACE_NAMES[@]}"; do
+  "$CLI" delete "$workspace" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
+done
+echo "microagent-host-worker-probe: creating and starting $WORKSPACE_COUNT paired workspace(s)"
+for workspace in "${WORKSPACE_NAMES[@]}"; do
+  echo "microagent-host-worker-probe: starting paired workspace $workspace"
+  "$CLI" create "$workspace" --image "$IMAGE" --model "$MODEL_REF" --state-dir "$STATE_DIR" "${CREATE_FLAGS[@]}" >/dev/null || fail "create --model failed for $workspace"
+  "$CLI" start "$workspace" --state-dir "$STATE_DIR" "${START_FLAGS[@]}" >/dev/null || fail "start failed for $workspace"
+  if ! e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$workspace" 90; then
+    "$CLI" --json status "$workspace" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >&2 || true
+    fail "workspace exec service did not become ready for $workspace"
+  fi
+done
 
 read -r -d '' GUEST_BENCH <<'SH' || true
 set -eu
@@ -782,8 +832,101 @@ done
 printf '}}\n'
 SH
 
-echo "microagent-host-worker-probe: measuring in-guest calls over the model bridge"
-GUEST_JSON="$("$CLI" exec "$WS" --state-dir "$STATE_DIR" -env "PROBE_SAMPLES=$SAMPLES" -env "PROBE_WARMUPS=$WARMUPS" -env "PROBE_CONCURRENCY=$CONCURRENCY" -env "PROBE_CHAT_PROFILE=$CHAT_PROFILE" -env "PROBE_CHAT_TOKENS=$CHAT_TOKENS" -env "PROBE_STREAM=$STREAM" -env "PROBE_STREAM_TOKENS=$STREAM_TOKENS" -- sh -c "$GUEST_BENCH")" || fail "guest benchmark failed"
+run_guest_benchmarks() {
+  local tmp
+  local level
+  local workspace
+  local idx
+  local status
+  local pid
+  local err
+  local -a pids
+
+  tmp="$(mktemp -d)"
+  for level in $CONCURRENCY_SPACES; do
+    echo "microagent-host-worker-probe: measuring in-guest calls at c=$level across $WORKSPACE_COUNT workspace(s)" >&2
+    pids=()
+    idx=1
+    for workspace in "${WORKSPACE_NAMES[@]}"; do
+      "$CLI" exec "$workspace" --state-dir "$STATE_DIR" \
+        -env "PROBE_SAMPLES=$SAMPLES" \
+        -env "PROBE_WARMUPS=$WARMUPS" \
+        -env "PROBE_CONCURRENCY=$level" \
+        -env "PROBE_CHAT_PROFILE=$CHAT_PROFILE" \
+        -env "PROBE_CHAT_TOKENS=$CHAT_TOKENS" \
+        -env "PROBE_STREAM=$STREAM" \
+        -env "PROBE_STREAM_TOKENS=$STREAM_TOKENS" \
+        -- sh -c "$GUEST_BENCH" >"$tmp/$level-$idx.json" 2>"$tmp/$level-$idx.err" &
+      pids+=("$!")
+      idx=$((idx + 1))
+    done
+
+    status=0
+    for pid in "${pids[@]}"; do
+      wait "$pid" || status=1
+    done
+    if [ "$status" -ne 0 ]; then
+      for err in "$tmp"/"$level"-*.err; do
+        [ ! -s "$err" ] || cat "$err" >&2
+      done
+      rm -rf "$tmp"
+      return 1
+    fi
+  done
+
+  python3 - "$tmp" "$WORKSPACE_COUNT" "$CONCURRENCY_SPACES" "${WORKSPACE_NAMES[@]}" <<'PY'
+import json
+import pathlib
+import sys
+
+tmp = pathlib.Path(sys.argv[1])
+workspace_count = int(sys.argv[2])
+levels = sys.argv[3].split()
+workspaces = sys.argv[4:]
+
+aggregate = {
+    "workspace_count": workspace_count,
+    "workspaces": workspaces,
+    "levels": {},
+}
+
+def endpoint_order(keys):
+    preferred = ["models", "chat", "stream"]
+    present = set(keys)
+    return [key for key in preferred if key in present] + sorted(present - set(preferred))
+
+sample_fields = {
+    "samples_seconds",
+    "ttfb_samples_seconds",
+    "bytes_samples",
+    "chunks_samples",
+}
+
+for level in levels:
+    level_out = aggregate["levels"].setdefault(level, {})
+    for idx, _workspace in enumerate(workspaces, start=1):
+        path = tmp / f"{level}-{idx}.json"
+        doc = json.loads(path.read_text())
+        level_doc = doc["levels"][str(level)]
+        for endpoint in endpoint_order(level_doc.keys()):
+            data = level_doc[endpoint]
+            endpoint_out = level_out.setdefault(endpoint, {
+                "samples_per_worker": data.get("samples_per_worker"),
+                "warmups_per_worker": data.get("warmups_per_worker"),
+                "workspace_count": workspace_count,
+                "per_workspace_concurrency": int(level),
+                "concurrency": int(level) * workspace_count,
+            })
+            for field in sample_fields:
+                if field in data:
+                    endpoint_out.setdefault(field, []).extend(data[field])
+
+print(json.dumps(aggregate, sort_keys=True))
+PY
+  rm -rf "$tmp"
+}
+
+GUEST_JSON="$(run_guest_benchmarks)" || fail "guest benchmark failed"
 
 REPORT_JSON="$(combine_report "$HOST_JSON" "$GUEST_JSON" "$BACKEND" "$CANONICAL" "$RUNNER_JSON")"
 if [ -n "$REPORT_PATH" ]; then
@@ -803,9 +946,11 @@ for level in report["concurrency_levels"]:
         if endpoint not in level_report["overhead"]:
             continue
         item = level_report["overhead"][endpoint]
+        effective = level_report["guest"][endpoint].get("concurrency", level)
         line = (
             "microagent-host-worker-probe: "
-            f"c={level} {endpoint} median host={item['host_median_ms']:.3f}ms "
+            f"workspaces={report.get('workspace_count', 1)} c={level} total_c={effective} "
+            f"{endpoint} median host={item['host_median_ms']:.3f}ms "
             f"guest={item['guest_median_ms']:.3f}ms "
             f"delta={item['delta_ms']:.3f}ms "
             f"p95_delta={item['p95_delta_ms']:.3f}ms "
