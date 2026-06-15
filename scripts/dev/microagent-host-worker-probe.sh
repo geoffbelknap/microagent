@@ -27,6 +27,12 @@
 #   MICROAGENT_HOST_WORKER_MODEL           request model id; auto-discovered from /models when unset
 #   MICROAGENT_HOST_WORKER_LABEL           optional report label
 #   MICROAGENT_HOST_WORKER_SLOTS           optional report annotation for runner slots/parallelism
+#   MICROAGENT_HOST_WORKER_PROTOCOL        worker protocol label (default: openai-compatible)
+#   MICROAGENT_HOST_WORKER_RUNNER_ENGINE   runner engine label override for external workers
+#   MICROAGENT_HOST_WORKER_RUNNER_VERSION  runner version label
+#   MICROAGENT_HOST_WORKER_TELEMETRY_ADAPTER
+#                                           telemetry adapter override: auto, generic,
+#                                           llama.cpp, vllm, sglang, tensorrt-llm, none
 #   MICROAGENT_HOST_WORKER_PROBE_MODEL_REF HuggingFace GGUF ref
 #   MICROAGENT_HOST_WORKER_PROBE_IMAGE     guest image with curl
 #   MICROAGENT_HOST_WORKER_PROBE_STATE_DIR state dir (default: ~/.microagent)
@@ -79,6 +85,10 @@ HOST_WORKER_HEALTH_URL="${MICROAGENT_HOST_WORKER_HEALTH_URL:-}"
 REQUEST_MODEL="${MICROAGENT_HOST_WORKER_MODEL:-${MICROAGENT_HOST_WORKER_PROBE_REQUEST_MODEL:-}}"
 RUN_LABEL="${MICROAGENT_HOST_WORKER_LABEL:-${MICROAGENT_HOST_WORKER_PROBE_LABEL:-}}"
 RUNNER_SLOTS="${MICROAGENT_HOST_WORKER_SLOTS:-${MICROAGENT_HOST_WORKER_PROBE_RUNNER_SLOTS:-}}"
+WORKER_PROTOCOL="${MICROAGENT_HOST_WORKER_PROTOCOL:-openai-compatible}"
+RUNNER_ENGINE_OVERRIDE="${MICROAGENT_HOST_WORKER_RUNNER_ENGINE:-}"
+RUNNER_VERSION="${MICROAGENT_HOST_WORKER_RUNNER_VERSION:-}"
+TELEMETRY_ADAPTER="${MICROAGENT_HOST_WORKER_TELEMETRY_ADAPTER:-auto}"
 MODEL_REF="${MICROAGENT_HOST_WORKER_PROBE_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 IMAGE="${MICROAGENT_HOST_WORKER_PROBE_IMAGE:-docker.io/curlimages/curl:latest}"
 STATE_DIR="${MICROAGENT_HOST_WORKER_PROBE_STATE_DIR:-$HOME/.microagent}"
@@ -312,9 +322,11 @@ active = sys.argv[2] == "1"
 path = Path(sys.argv[3]) if sys.argv[3] else None
 path_persisted = sys.argv[4] == "1"
 telemetry = {
+    "adapter": "nvidia-smi" if active else "none",
     "enabled": active,
     "path": str(path) if path and path_persisted else None,
     "sample_count": 0,
+    "diagnostic_sources": ["gpu:nvidia-smi"] if active else [],
     "phases": {},
 }
 
@@ -368,6 +380,12 @@ if path and path.exists():
         telemetry["phases"][phase] = phase_summary
 
 report.setdefault("telemetry", {})["gpu"] = telemetry
+diagnostics = report.setdefault("host_worker", {}).setdefault("diagnostics", {})
+sources = diagnostics.setdefault("sources", [])
+for source in telemetry.get("diagnostic_sources", []):
+    if source not in sources:
+        sources.append(source)
+diagnostics["gpu_adapter"] = telemetry["adapter"]
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
   status=$?
@@ -644,7 +662,7 @@ add_runner_telemetry_to_report() {
   report_file="$(mktemp)"
   printf '%s\n' "$report_json" >"$report_file"
   set +e
-  python3 - "$report_file" "$RUNNER_TELEMETRY_ACTIVE" "$RUNNER_TELEMETRY_PATH" "$RUNNER_TELEMETRY_PATH_PERSISTED" <<'PY'
+  python3 - "$report_file" "$RUNNER_TELEMETRY_ACTIVE" "$RUNNER_TELEMETRY_PATH" "$RUNNER_TELEMETRY_PATH_PERSISTED" "$TELEMETRY_ADAPTER" <<'PY'
 import json
 import statistics
 import sys
@@ -658,8 +676,39 @@ telemetry = {
     "enabled": active,
     "path": str(path) if path and path_persisted else None,
     "sample_count": 0,
+    "adapter": "none",
+    "diagnostic_sources": [],
     "phases": {},
 }
+
+adapter_override = sys.argv[5]
+
+def source_name(endpoint, sample_format):
+    clean_endpoint = str(endpoint or "unknown").lstrip("/") or "root"
+    clean_format = str(sample_format or "unknown")
+    return f"runner:{clean_endpoint}:{clean_format}"
+
+def detect_adapter(rows, source_set):
+    if adapter_override != "auto":
+        return adapter_override
+    text = " ".join(
+        [
+            " ".join(str(key) for key in (row.get("signals") or {}).keys())
+            for row in rows
+        ]
+        + [str(source) for source in source_set]
+    ).lower()
+    if "llamacpp" in text or "llama" in text:
+        return "llama.cpp"
+    if "vllm" in text:
+        return "vllm"
+    if "sglang" in text or "sgl_" in text:
+        return "sglang"
+    if "tensorrt" in text or "trtllm" in text:
+        return "tensorrt-llm"
+    if rows:
+        return "generic"
+    return "none"
 
 def summarize(values):
     clean = sorted(value for value in values if isinstance(value, (int, float)))
@@ -685,6 +734,13 @@ if path and path.exists():
             continue
     telemetry["sample_count"] = len(rows)
     telemetry["endpoints"] = sorted({row.get("endpoint") for row in rows if row.get("endpoint")})
+    source_set = {
+        source_name(row.get("endpoint"), row.get("format"))
+        for row in rows
+        if row.get("endpoint")
+    }
+    telemetry["diagnostic_sources"] = sorted(source_set)
+    telemetry["adapter"] = detect_adapter(rows, source_set)
     by_phase = {}
     for row in rows:
         phase = row.get("phase") or "unknown"
@@ -721,6 +777,13 @@ if path and path.exists():
         telemetry["phases"][phase] = phase_out
 
 report.setdefault("telemetry", {})["runner"] = telemetry
+diagnostics = report.setdefault("host_worker", {}).setdefault("diagnostics", {})
+sources = diagnostics.setdefault("sources", [])
+for source in telemetry.get("diagnostic_sources", []):
+    if source not in sources:
+        sources.append(source)
+diagnostics["runner_adapter"] = telemetry["adapter"]
+diagnostics["runner_sources"] = telemetry.get("diagnostic_sources", [])
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
   status=$?
@@ -901,6 +964,9 @@ gpu_telemetry = telemetry.get("gpu") or {}
 pressure = {
     "scope": PRESSURE_SCOPE,
     "schema_version": 1,
+    "runner_adapter": runner_telemetry.get("adapter") or "none",
+    "gpu_adapter": gpu_telemetry.get("adapter") or "none",
+    "runner_diagnostic_sources": runner_telemetry.get("diagnostic_sources") or [],
     "levels": {},
 }
 
@@ -1081,14 +1147,18 @@ PY
 
 external_runner_json() {
   local info_json="$1"
-  python3 - "$info_json" <<'PY'
+  local engine="$2"
+  local version="$3"
+  python3 - "$info_json" "$engine" "$version" <<'PY'
 import json
 import sys
 
 info = json.loads(sys.argv[1])
-print(json.dumps({
+engine = sys.argv[2] or "unknown"
+version = sys.argv[3] or None
+runner = {
     "base_url_path": info["base_path"],
-    "engine": "openai-compatible",
+    "engine": engine,
     "host": info["host"],
     "mode": "external",
     "model_ref": "external-host-worker",
@@ -1096,7 +1166,10 @@ print(json.dumps({
     "port": info["port"],
     "runner_config_digest": "",
     "scheme": info["scheme"],
-}, separators=(",", ":"), sort_keys=True))
+}
+if version:
+    runner["version"] = version
+print(json.dumps(runner, separators=(",", ":"), sort_keys=True))
 PY
 }
 
@@ -1492,7 +1565,7 @@ combine_report() {
   printf '%s\n' "$guest_json" >"$guest_file"
   printf '%s\n' "$runner_json" >"$runner_file"
   set +e
-  python3 - "$host_file" "$guest_file" "$backend" "$canonical" "$runner_file" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" "$REQUEST_MODEL" "$RUN_LABEL" "$RUNNER_SLOTS" <<'PY'
+  python3 - "$host_file" "$guest_file" "$backend" "$canonical" "$runner_file" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" "$REQUEST_MODEL" "$RUN_LABEL" "$RUNNER_SLOTS" "$WORKER_PROTOCOL" "$RUNNER_ENGINE_OVERRIDE" "$RUNNER_VERSION" "$RUNNER_TELEMETRY_ENDPOINTS" "$TELEMETRY_ADAPTER" "$RUNNER_TELEMETRY" "$GPU_TELEMETRY" <<'PY'
 import json
 import statistics
 import sys
@@ -1511,6 +1584,17 @@ stream_tokens = int(sys.argv[10])
 request_model = sys.argv[11] or None
 run_label = sys.argv[12] or None
 runner_slots_raw = sys.argv[13] or None
+worker_protocol = sys.argv[14]
+runner_engine_override = sys.argv[15] or None
+runner_version_arg = sys.argv[16] or None
+runner_telemetry_endpoints = [
+    part.strip()
+    for part in sys.argv[17].replace(" ", ",").split(",")
+    if part.strip()
+]
+telemetry_adapter_hint = sys.argv[18]
+runner_telemetry_mode = sys.argv[19]
+gpu_telemetry_mode = sys.argv[20]
 
 def summarize(values_ms):
     values = [round(float(value), 3) for value in values_ms]
@@ -1687,17 +1771,42 @@ for level in levels:
         if endpoint in host["levels"][level] and endpoint in guest["levels"][level]:
             matrix[level]["overhead"][endpoint] = compare(level, endpoint)
 
+runner_engine = runner_engine_override or runner.get("engine") or "unknown"
+runner_version = runner_version_arg or runner.get("version")
+launch_mode = runner.get("mode") or "managed"
 public_runner = {
     "model_ref": runner.get("model_ref"),
-    "engine": runner.get("engine"),
+    "engine": runner_engine,
     "host": runner.get("host"),
     "port": runner.get("port"),
     "pid": runner.get("pid"),
     "runner_config_digest": runner.get("runner_config_digest"),
 }
+if runner_version:
+    public_runner["version"] = runner_version
 for key in ("mode", "scheme", "base_url_path"):
     if runner.get(key) is not None:
         public_runner[key] = runner.get(key)
+generic_sources = ["openai.models", "openai.chat_completions"]
+if stream_enabled:
+    generic_sources.append("openai.chat_completions_stream")
+host_worker = {
+    "schema_version": 1,
+    "protocol": worker_protocol,
+    "launch_mode": launch_mode,
+    "runner_engine": runner_engine,
+    "runner_version": runner_version,
+    "model_ref": canonical,
+    "request_model": request_model,
+    "diagnostics": {
+        "generic_sources": generic_sources,
+        "runner_telemetry_mode": runner_telemetry_mode,
+        "gpu_telemetry_mode": gpu_telemetry_mode,
+        "requested_runner_endpoints": runner_telemetry_endpoints,
+        "telemetry_adapter_hint": telemetry_adapter_hint,
+        "sources": list(generic_sources),
+    },
+}
 report = {
     "backend": backend,
     "concurrency_levels": [int(level) for level in levels],
@@ -1727,6 +1836,7 @@ report = {
             "model": request_model,
         },
     },
+    "host_worker": host_worker,
     "runner": public_runner,
     "samples_per_worker": matrix[levels[0]]["host"]["models"].get("samples_per_worker", matrix[levels[0]]["host"]["models"].get("sample_count", 0) // int(levels[0])),
     "warmups_per_worker": matrix[levels[0]]["host"]["models"].get("warmups_per_worker"),
@@ -1824,6 +1934,20 @@ case "$RUNNER_TELEMETRY" in
     fail "MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY must be off, auto, or required"
     ;;
 esac
+case "$WORKER_PROTOCOL" in
+  openai-compatible)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_PROTOCOL must be openai-compatible for this probe"
+    ;;
+esac
+case "$TELEMETRY_ADAPTER" in
+  auto|generic|llama.cpp|vllm|sglang|tensorrt-llm|none)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_TELEMETRY_ADAPTER must be auto, generic, llama.cpp, vllm, sglang, tensorrt-llm, or none"
+    ;;
+esac
 case "$HOST_BASELINE" in
   before|bracket)
     ;;
@@ -1900,7 +2024,7 @@ if [ "$RUNNER_MODE" = "external" ]; then
   HOST_WORKER_BASE_PATH="$(printf '%s' "$HOST_WORKER_INFO" | json_get base_path)"
   GUEST_MODEL_URL="http://127.0.0.1:$MODEL_GUEST_PORT$HOST_WORKER_BASE_PATH"
   CANONICAL=external-host-worker
-  RUNNER_JSON="$(external_runner_json "$HOST_WORKER_INFO")"
+  RUNNER_JSON="$(external_runner_json "$HOST_WORKER_INFO" "$RUNNER_ENGINE_OVERRIDE" "$RUNNER_VERSION")"
   echo "microagent-host-worker-probe: using existing host worker at $RUNNER_BASE_URL"
   health_err=""
   if ! health_err="$(host_worker_health_check "$RUNNER_BASE_URL" "$HOST_WORKER_HEALTH_URL" 2>&1)"; then

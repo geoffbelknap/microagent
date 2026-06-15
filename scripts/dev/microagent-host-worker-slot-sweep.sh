@@ -156,6 +156,7 @@ for slots in $SLOTS_SPACES; do
   MICROAGENT_HOST_WORKER_URL="$base_url" \
     MICROAGENT_HOST_WORKER_LABEL="slots-$slots" \
     MICROAGENT_HOST_WORKER_SLOTS="$slots" \
+    MICROAGENT_HOST_WORKER_RUNNER_ENGINE="${MICROAGENT_HOST_WORKER_RUNNER_ENGINE:-llama.cpp}" \
     MICROAGENT_HOST_WORKER_PROBE_REPORT="$report" \
     MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT="${MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT:-0}" \
     "$ROOT/scripts/dev/microagent-host-worker-probe.sh" || fail "probe failed for slots=$slots"

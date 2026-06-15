@@ -21,6 +21,12 @@ FIELDS = (
     "backend",
     "engine",
     "runner_mode",
+    "worker_protocol",
+    "runner_engine",
+    "runner_version",
+    "launch_mode",
+    "telemetry_adapter",
+    "diagnostic_sources",
     "run_label",
     "runner_slots",
     "host_baseline",
@@ -68,6 +74,12 @@ FIELDS = (
 PRESSURE_FIELDS = (
     "report",
     "run_label",
+    "worker_protocol",
+    "runner_engine",
+    "runner_version",
+    "launch_mode",
+    "telemetry_adapter",
+    "diagnostic_sources",
     "runner_slots",
     "workspace_count",
     "per_workspace_concurrency",
@@ -101,6 +113,11 @@ PRESSURE_FIELDS = (
 COMPACT_PRESSURE_FIELDS = (
     "workload",
     "run_label",
+    "worker_protocol",
+    "runner_engine",
+    "runner_version",
+    "launch_mode",
+    "telemetry_adapter",
     "runner_slots",
     "workspace_count",
     "per_workspace_concurrency",
@@ -136,6 +153,44 @@ def stat(doc: dict[str, Any] | None, name: str) -> Any:
     return doc.get(name)
 
 
+def joined(values: Any) -> str | None:
+    if not values:
+        return None
+    if isinstance(values, list):
+        return ",".join(str(value) for value in values)
+    return str(values)
+
+
+def host_worker_meta(report: dict[str, Any]) -> dict[str, Any]:
+    host_worker = report.get("host_worker") or {}
+    runner = report.get("runner") or {}
+    diagnostics = host_worker.get("diagnostics") or {}
+    telemetry = report.get("telemetry") or {}
+    runner_telemetry = telemetry.get("runner") or {}
+    pressure = report.get("pressure") or {}
+
+    runner_engine = host_worker.get("runner_engine") or runner.get("engine")
+    launch_mode = host_worker.get("launch_mode") or runner.get("mode")
+    telemetry_adapter = (
+        diagnostics.get("runner_adapter")
+        or pressure.get("runner_adapter")
+        or runner_telemetry.get("adapter")
+    )
+    diagnostic_sources = (
+        diagnostics.get("sources")
+        or pressure.get("runner_diagnostic_sources")
+        or runner_telemetry.get("diagnostic_sources")
+    )
+    return {
+        "worker_protocol": host_worker.get("protocol"),
+        "runner_engine": runner_engine,
+        "runner_version": host_worker.get("runner_version") or runner.get("version"),
+        "launch_mode": launch_mode,
+        "telemetry_adapter": telemetry_adapter,
+        "diagnostic_sources": joined(diagnostic_sources),
+    }
+
+
 def rows_for_report(path: Path) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as f:
         report = json.load(f)
@@ -147,6 +202,7 @@ def rows_for_report(path: Path) -> list[dict[str, Any]]:
     runner = report.get("runner") or {}
     experiment = report.get("experiment") or {}
     measurement_design = report.get("measurement_design") or {}
+    worker_meta = host_worker_meta(report)
 
     for level in levels:
         level_key = str(level)
@@ -173,8 +229,9 @@ def rows_for_report(path: Path) -> list[dict[str, Any]]:
                 {
                     "report": str(path),
                     "backend": report.get("backend"),
-                    "engine": runner.get("engine"),
-                    "runner_mode": runner.get("mode"),
+                    "engine": worker_meta.get("runner_engine") or runner.get("engine"),
+                    "runner_mode": worker_meta.get("launch_mode") or runner.get("mode"),
+                    **worker_meta,
                     "run_label": experiment.get("label"),
                     "runner_slots": experiment.get("runner_slots"),
                     "host_baseline": measurement_design.get("host_baseline"),
@@ -275,6 +332,7 @@ def pressure_rows_for_report(path: Path) -> list[dict[str, Any]]:
     matrix = report.get("matrix") or {}
     pressure = get(report, "pressure", "levels") or {}
     experiment = report.get("experiment") or {}
+    worker_meta = host_worker_meta(report)
 
     for level in report.get("concurrency_levels") or []:
         level_key = str(level)
@@ -297,6 +355,7 @@ def pressure_rows_for_report(path: Path) -> list[dict[str, Any]]:
         row = {
             "report": str(path),
             "run_label": experiment.get("label"),
+            **worker_meta,
             "runner_slots": experiment.get("runner_slots"),
             "workspace_count": report.get("workspace_count"),
             "per_workspace_concurrency": level,
