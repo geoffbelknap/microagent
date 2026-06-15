@@ -213,6 +213,11 @@ making GPU access a default requirement:
 # Stub OpenAI-compatible runner; no GPU or llama.cpp required.
 MICROAGENT_E2E_MODEL_MEDIATION=1 scripts/dev/microagent-e2e.sh model-mediation
 
+# Runner-neutral matrix for any prepared OpenAI-compatible runner.
+MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF=org/repo/model.gguf \
+  scripts/dev/microagent-e2e.sh model-mediation-runner
+
 # llama.cpp runner, default CPU execution.
 MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
   MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
@@ -230,16 +235,21 @@ MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
   scripts/dev/microagent-e2e.sh model-mediation-vllm
 ```
 
-The llama.cpp and vLLM matrices run direct, local-allow, policy-allow,
-policy-deny, and policy-unavailable cases. They emit profile summaries,
-direct-vs-mediated comparisons, telemetry summaries, and mediation gate TSVs
-under their output directories. Gates fail the scenario by default when local
-mediation, policy mediation, or decision latency exceeds the configured budget;
-set the scenario-specific `*_GATE_MODE=warn` only when collecting noisy
-experimental data. The model mediation scenarios default to
-`quay.io/curl/curl:latest` for the guest HTTP probe image; use the
-scenario-specific `*_IMAGE` override when a different internal mirror is
-required.
+The runner-neutral matrix runs direct, local-allow, external policy allow,
+external policy deny, file-policy allow, file-policy deny, and policy
+unavailable cases. It also validates and dry-runs generated file policies with
+`microagent model policy validate` and `microagent model policy evaluate`
+before booting the corresponding guest probes. The llama.cpp and vLLM scenarios
+are adapters over that same matrix: they handle runner-specific preflight and
+startup, then delegate the mediated request cases to the shared harness. The
+matrices emit profile summaries, direct-vs-mediated comparisons, telemetry
+summaries, and mediation gate TSVs under their output directories. Gates fail
+the scenario by default when local mediation, policy mediation, or decision
+latency exceeds the configured budget; set the scenario-specific
+`*_GATE_MODE=warn` only when collecting noisy experimental data. The model
+mediation scenarios default to `quay.io/curl/curl:latest` for the guest HTTP
+probe image; use the scenario-specific `*_IMAGE` override when a different
+internal mirror is required.
 
 Set `MICROAGENT_MODEL_MEDIATION=policy` to require a policy source for the
 host-worker mediator. The source can be either an external decision endpoint

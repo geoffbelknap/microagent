@@ -33,6 +33,7 @@ SCENARIOS=(
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
   "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm"
   "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm"
+  "model-mediation-runner:scripts/dev/microagent-e2e-model-mediation-runner.sh:linux:vm"
   "model-mediation-llamacpp:scripts/dev/microagent-e2e-model-mediation-llamacpp.sh:linux:vm"
   "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm"
   "host-worker-contract:scripts/dev/microagent-e2e-host-worker-contract.sh:all:none"
@@ -82,6 +83,7 @@ SCENARIO_COVERAGE=(
   "exec-stream|backend-neutral|firecracker,apple-vf,windows-hyperv|structured exec streaming, non-zero exit propagation, buffered parity"
   "model-serving|backend-neutral|firecracker,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
   "model-mediation|host-specific|firecracker|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
+  "model-mediation-runner|host-specific|firecracker|Opt-in runner-neutral production run --model mediation matrix for a prepared OpenAI-compatible runner"
   "model-mediation-llamacpp|host-specific|firecracker|Opt-in production run --model mediation matrix with the llama.cpp runner"
   "model-mediation-vllm|host-specific|firecracker|Opt-in production run --model mediation matrix with a real vLLM GPU runner"
   "host-worker-contract|portable|none|Opt-in OpenAI-compatible host-worker contract conformance"
@@ -135,7 +137,7 @@ E2E_MATRIX=(
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
   "supervise|backend-neutral|firecracker,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
   "snapshot/pause/resume|backend-specific|firecracker,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
-  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, llama.cpp, and vLLM opt-in matrices while the mediator remains experimental"
+  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, runner-neutral, llama.cpp, and vLLM opt-in matrices while the mediator remains experimental"
   "host worker contract|portable|none|host-worker-contract|Opt-in OpenAI-compatible host-worker contract conformance; no GPU or microVM required"
   "host worker GPU|host-specific|firecracker|host-worker-gpu|Opt-in acceptance matrix for a host GPU worker reached by one and two Firecracker microVMs"
   "perf|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
@@ -199,6 +201,11 @@ Scenarios:
                      macOS, Hyper-V sockets on Windows).
   model-mediation    Opt-in Linux host backend matrix for the experimental
                      run --model mediator. Set MICROAGENT_E2E_MODEL_MEDIATION=1.
+  model-mediation-runner
+                    Opt-in Linux host backend matrix for the experimental
+                    run --model mediator against a prepared OpenAI-compatible
+                    runner. Set MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 and
+                    MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF.
   model-mediation-llamacpp
                     Opt-in Linux host backend matrix for the experimental
                     run --model mediator against the llama.cpp runner. Set

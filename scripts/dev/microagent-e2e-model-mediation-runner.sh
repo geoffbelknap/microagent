@@ -1,32 +1,31 @@
 #!/usr/bin/env bash
 #
-# microagent-e2e-model-mediation-llamacpp.sh - opt-in production model mediation
-# check against the default llama.cpp OpenAI-compatible runner.
+# microagent-e2e-model-mediation-runner.sh - opt-in runner-neutral production
+# model mediation check against an OpenAI-compatible host runner.
 #
 # This validates the real `run --model` path with the experimental host-worker
-# mediator enabled and the default llama.cpp runner. By default it exercises the
-# CPU runner behavior; set MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=1 or provide
-# explicit runner args to opt into GPU offload.
+# mediator enabled. The runner can be provided by an adapter script that has
+# already pinned it with `microagent model serve`, or this script can start it
+# directly from MICROAGENT_MODEL_RUNNER_* configuration.
 #
 # Required:
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1
-#   MICROAGENT_LLAMA_SERVER executable, unless llama-server is on PATH
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF
 #
 # Optional:
 #   MICROAGENT_CLI
 #   MICROAGENT_FIRECRACKER
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_IMAGE
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_OUT_DIR
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_STATE_DIR default: ~/.microagent
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_KEEP
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_MODEL_REF
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU       0/1 (default: 0)
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_RUNNER_ARGS
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_CHAT_TOKENS   default: 64
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_STREAM_TOKENS default: 96
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_SAMPLES       default: 3
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_TELEMETRY     off, auto, or required (default: auto)
-#   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GATE_MODE     off, warn, or required (default: required)
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_OUT_DIR
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_STATE_DIR
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_IMAGE
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_LABEL
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_CASE_PREFIX
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENV_FILE
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PID
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PORT
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENGINE
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_REQUEST_MODEL
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_KEEP_STATE
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -34,38 +33,39 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
-OUT_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_OUT_DIR:-/tmp/ma-e2e-mm-llama-$(date +%Y%m%d%H%M%S)}"
-STATE_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_STATE_DIR:-$HOME/.microagent}"
-KEEP_FAILED="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_KEEP:-${MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_LLAMA:-0}}"
-IMAGE="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_IMAGE:-quay.io/curl/curl:latest}"
-MODEL_REF="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
-GPU_MODE="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU:-0}"
-RUNNER_ARGS_RAW="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_RUNNER_ARGS:-}"
-CHAT_TOKENS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_CHAT_TOKENS:-64}"
-STREAM_TOKENS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_STREAM_TOKENS:-96}"
-SAMPLES="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_SAMPLES:-3}"
-TELEMETRY="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_TELEMETRY:-auto}"
-TELEMETRY_INTERVAL="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_TELEMETRY_INTERVAL:-0.5}"
-TELEMETRY_ENDPOINTS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_TELEMETRY_ENDPOINTS:-/metrics,/slots}"
-GATE_MODE="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GATE_MODE:-required}"
-MAX_MODELS_TOTAL_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_MAX_MODELS_TOTAL_P95_DELTA_MS:-100}"
-MAX_CHAT_TOTAL_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_MAX_CHAT_TOTAL_P95_DELTA_MS:-500}"
-MAX_STREAM_TTFB_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_MAX_STREAM_TTFB_P95_DELTA_MS:-250}"
-MAX_DECISION_P95_MS="${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_MAX_DECISION_P95_MS:-100}"
+LABEL="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_LABEL:-runner}"
+CASE_PREFIX="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_CASE_PREFIX:-mmr}"
+OUT_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_OUT_DIR:-/tmp/ma-e2e-mm-runner-$(date +%Y%m%d%H%M%S)}"
+STATE_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_STATE_DIR:-$OUT_DIR/state}"
+IMAGE="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_IMAGE:-quay.io/curl/curl:latest}"
+MODEL_REF="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF:-}"
+RUNNER_ENV_FILE="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENV_FILE:-}"
+RUNNER_PID="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PID:-}"
+RUNNER_PORT="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PORT:-}"
+RUNNER_ENGINE="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENGINE:-}"
+REQUEST_MODEL="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_REQUEST_MODEL:-}"
+KEEP_FAILED="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_KEEP:-${MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_RUNNER:-0}}"
+KEEP_STATE="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_KEEP_STATE:-0}"
+CHAT_TOKENS="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_CHAT_TOKENS:-64}"
+STREAM_TOKENS="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_STREAM_TOKENS:-96}"
+SAMPLES="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_SAMPLES:-3}"
+TELEMETRY="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY:-auto}"
+TELEMETRY_INTERVAL="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY_INTERVAL:-0.5}"
+TELEMETRY_ENDPOINTS="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY_ENDPOINTS:-/metrics,/health}"
+GATE_MODE="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_GATE_MODE:-required}"
+MAX_MODELS_TOTAL_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_MODELS_TOTAL_P95_DELTA_MS:-100}"
+MAX_CHAT_TOTAL_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_CHAT_TOTAL_P95_DELTA_MS:-500}"
+MAX_STREAM_TTFB_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_STREAM_TTFB_P95_DELTA_MS:-250}"
+MAX_DECISION_P95_MS="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_DECISION_P95_MS:-100}"
 POLICY_PID=""
 POLICY_URL=""
 POLICY_FILE=""
-RUNNER_PID=""
-RUNNER_PORT=""
-REQUEST_MODEL=""
-CANONICAL_REF=""
+STARTED_RUNNER=0
 TELEMETRY_PID=""
 TELEMETRY_PHASE_FILE=""
-RUN_FLAGS=(--backend firecracker --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF" --rm "$IMAGE")
-CTRL_FLAGS=(--backend firecracker --state-dir "$STATE_DIR")
 
-skip() { e2e_skip "microagent-e2e-model-mediation-llamacpp: $1"; }
-fail() { echo "FAIL microagent-e2e-model-mediation-llamacpp: $1" >&2; exit 1; }
+skip() { e2e_skip "microagent-e2e-model-mediation-runner: $1"; }
+fail() { echo "FAIL microagent-e2e-model-mediation-runner: $1" >&2; exit 1; }
 
 stop_telemetry() {
   if [ -n "$TELEMETRY_PID" ]; then
@@ -79,27 +79,28 @@ stop_telemetry() {
   fi
 }
 
-cleanup() {
-  local status=$?
-  set +e
-  stop_telemetry
+stop_policy() {
   if [ -n "$POLICY_PID" ]; then
     kill "$POLICY_PID" >/dev/null 2>&1 || true
     wait "$POLICY_PID" >/dev/null 2>&1 || true
     POLICY_PID=""
   fi
-  for workspace in mml-direct mml-local mml-pa mml-pd mml-pf mml-pfd mml-pu; do
-    "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
-    "$CLI" delete "$workspace" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
-  done
-  if [ -n "$CANONICAL_REF" ]; then
-    "$CLI" model stop "$CANONICAL_REF" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+  POLICY_URL=""
+}
+
+cleanup() {
+  local status=$?
+  set +e
+  stop_policy
+  stop_telemetry
+  if [ "$STARTED_RUNNER" = "1" ] && [ -n "$MODEL_REF" ]; then
+    "$CLI" model stop "$MODEL_REF" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
   fi
   if [ "$KEEP_FAILED" = "1" ]; then
     if [ "$status" -ne 0 ]; then
-      echo "microagent-e2e-model-mediation-llamacpp: preserved failed state under $OUT_DIR" >&2
+      echo "microagent-e2e-model-mediation-runner: preserved failed state under $OUT_DIR" >&2
     else
-      echo "microagent-e2e-model-mediation-llamacpp: preserved reports under $OUT_DIR" >&2
+      echo "microagent-e2e-model-mediation-runner: preserved reports under $OUT_DIR" >&2
     fi
   else
     rm -rf "$OUT_DIR"
@@ -109,76 +110,10 @@ cleanup() {
 trap cleanup EXIT
 
 runner_env_args() {
-  if [ -n "${MICROAGENT_LLAMA_SERVER:-}" ]; then
-    printf '%s\n' "MICROAGENT_LLAMA_SERVER=$MICROAGENT_LLAMA_SERVER"
+  if [ -n "$RUNNER_ENV_FILE" ]; then
+    [ -r "$RUNNER_ENV_FILE" ] || fail "runner env file is not readable: $RUNNER_ENV_FILE"
+    sed '/^[[:space:]]*$/d' "$RUNNER_ENV_FILE"
   fi
-  if [ -n "$RUNNER_ARGS_RAW" ]; then
-    printf '%s\n' "MICROAGENT_MODEL_RUNNER_ARGS=$RUNNER_ARGS_RAW"
-  else
-    printf '%s\n' "MICROAGENT_MODEL_RUNNER_ARGS="
-  fi
-}
-
-set_telemetry_phase() {
-  local phase="$1"
-  if [ -n "$TELEMETRY_PHASE_FILE" ]; then
-    printf '%s\n' "$phase" >"$TELEMETRY_PHASE_FILE"
-  fi
-}
-
-start_telemetry() {
-  case "$TELEMETRY" in
-    off)
-      return
-      ;;
-    auto|required)
-      ;;
-    *)
-      fail "MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_TELEMETRY must be off, auto, or required"
-      ;;
-  esac
-  TELEMETRY_PHASE_FILE="$OUT_DIR/telemetry.phase"
-  printf '%s\n' startup >"$TELEMETRY_PHASE_FILE"
-  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" sample \
-    --runner-root-url "http://127.0.0.1:$RUNNER_PORT" \
-    --phase-file "$TELEMETRY_PHASE_FILE" \
-    --runner-out "$OUT_DIR/runner-telemetry.jsonl" \
-    --gpu-out "$OUT_DIR/gpu-telemetry.csv" \
-    --endpoints "$TELEMETRY_ENDPOINTS" \
-    --interval "$TELEMETRY_INTERVAL" \
-    --gpu "$TELEMETRY" &
-  TELEMETRY_PID="$!"
-  sleep 0.2
-  if ! kill -0 "$TELEMETRY_PID" >/dev/null 2>&1; then
-    wait "$TELEMETRY_PID" >/dev/null 2>&1 || true
-    TELEMETRY_PID=""
-    fail "telemetry sampler exited before collection"
-  fi
-  echo "microagent-e2e-model-mediation-llamacpp: telemetry writing to $OUT_DIR/runner-telemetry.jsonl and $OUT_DIR/gpu-telemetry.csv"
-}
-
-write_telemetry_summary() {
-  if [ "$TELEMETRY" = "off" ]; then
-    return
-  fi
-  stop_telemetry
-  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" summary \
-    --runner-in "$OUT_DIR/runner-telemetry.jsonl" \
-    --gpu-in "$OUT_DIR/gpu-telemetry.csv" \
-    --adapter llama.cpp \
-    --out "$OUT_DIR/telemetry-summary.tsv"
-}
-
-write_gate_summary() {
-  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" gate \
-    --profile-comparison "$OUT_DIR/profile-comparison.tsv" \
-    --audit-summary "$OUT_DIR/summary.tsv" \
-    --out "$OUT_DIR/mediation-gates.tsv" \
-    --mode "$GATE_MODE" \
-    --max-models-total-p95-delta-ms "$MAX_MODELS_TOTAL_P95_DELTA_MS" \
-    --max-chat-total-p95-delta-ms "$MAX_CHAT_TOTAL_P95_DELTA_MS" \
-    --max-stream-ttfb-p95-delta-ms "$MAX_STREAM_TTFB_P95_DELTA_MS" \
-    --max-decision-p95-ms "$MAX_DECISION_P95_MS"
 }
 
 choose_port() {
@@ -206,15 +141,6 @@ wait_for_policy() {
   return 1
 }
 
-stop_policy() {
-  if [ -n "$POLICY_PID" ]; then
-    kill "$POLICY_PID" >/dev/null 2>&1 || true
-    wait "$POLICY_PID" >/dev/null 2>&1 || true
-    POLICY_PID=""
-  fi
-  POLICY_URL=""
-}
-
 start_policy() {
   local decision="$1"
   local label="$2"
@@ -235,50 +161,155 @@ start_policy() {
   POLICY_URL="http://$(awk '/^ready / {print $2; exit}' "$stdout")/decision"
 }
 
-write_file_policy() {
-  local path="$1"
-  local decision="$2"
-  if [ "$decision" = "allow" ]; then
-    cat >"$path" <<EOF
-{
-  "schema_version": "microagent.model_policy.v1",
-  "default": "deny",
-  "rules": [
-    {
-      "id": "models",
-      "effect": "allow",
-      "match": {
-        "methods": ["GET"],
-        "paths": ["/v1/models"]
-      }
-    },
-    {
-      "id": "chat",
-      "effect": "allow",
-      "match": {
-        "methods": ["POST"],
-        "paths": ["/v1/chat/completions"],
-        "models": ["$REQUEST_MODEL"]
-      },
-      "limits": {
-        "max_request_bytes": 65536,
-        "max_text_bytes": 4096,
-        "max_messages": 4,
-        "max_tokens": 4096
-      }
-    }
-  ]
-}
-EOF
-  else
-    cat >"$path" <<'EOF'
-{
-  "schema_version": "microagent.model_policy.v1",
-  "default": "deny",
-  "rules": []
-}
-EOF
+set_telemetry_phase() {
+  local phase="$1"
+  if [ -n "$TELEMETRY_PHASE_FILE" ]; then
+    printf '%s\n' "$phase" >"$TELEMETRY_PHASE_FILE"
   fi
+}
+
+start_telemetry() {
+  case "$TELEMETRY" in
+    off)
+      return
+      ;;
+    auto|required)
+      ;;
+    *)
+      fail "MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY must be off, auto, or required"
+      ;;
+  esac
+  [ -n "$RUNNER_PORT" ] || fail "runner port is required for telemetry"
+  TELEMETRY_PHASE_FILE="$OUT_DIR/telemetry.phase"
+  printf '%s\n' startup >"$TELEMETRY_PHASE_FILE"
+  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" sample \
+    --runner-root-url "http://127.0.0.1:$RUNNER_PORT" \
+    --phase-file "$TELEMETRY_PHASE_FILE" \
+    --runner-out "$OUT_DIR/runner-telemetry.jsonl" \
+    --gpu-out "$OUT_DIR/gpu-telemetry.csv" \
+    --endpoints "$TELEMETRY_ENDPOINTS" \
+    --interval "$TELEMETRY_INTERVAL" \
+    --gpu "$TELEMETRY" &
+  TELEMETRY_PID="$!"
+  sleep 0.2
+  if ! kill -0 "$TELEMETRY_PID" >/dev/null 2>&1; then
+    wait "$TELEMETRY_PID" >/dev/null 2>&1 || true
+    TELEMETRY_PID=""
+    fail "telemetry sampler exited before collection"
+  fi
+  echo "microagent-e2e-model-mediation-runner: telemetry writing to $OUT_DIR/runner-telemetry.jsonl and $OUT_DIR/gpu-telemetry.csv"
+}
+
+write_telemetry_summary() {
+  if [ "$TELEMETRY" = "off" ]; then
+    return
+  fi
+  stop_telemetry
+  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" summary \
+    --runner-in "$OUT_DIR/runner-telemetry.jsonl" \
+    --gpu-in "$OUT_DIR/gpu-telemetry.csv" \
+    --adapter "$LABEL" \
+    --out "$OUT_DIR/telemetry-summary.tsv"
+}
+
+write_gate_summary() {
+  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" gate \
+    --profile-comparison "$OUT_DIR/profile-comparison.tsv" \
+    --audit-summary "$OUT_DIR/summary.tsv" \
+    --out "$OUT_DIR/mediation-gates.tsv" \
+    --mode "$GATE_MODE" \
+    --max-models-total-p95-delta-ms "$MAX_MODELS_TOTAL_P95_DELTA_MS" \
+    --max-chat-total-p95-delta-ms "$MAX_CHAT_TOTAL_P95_DELTA_MS" \
+    --max-stream-ttfb-p95-delta-ms "$MAX_STREAM_TTFB_P95_DELTA_MS" \
+    --max-decision-p95-ms "$MAX_DECISION_P95_MS"
+}
+
+discover_request_model() {
+  [ -n "$RUNNER_PORT" ] || fail "runner port is required to discover the served model"
+  python3 - "$RUNNER_PORT" <<'PY'
+import json
+import sys
+import urllib.request
+
+port = sys.argv[1]
+with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=10) as response:
+    doc = json.loads(response.read(1024 * 1024))
+models = doc.get("data") if isinstance(doc, dict) else None
+if not isinstance(models, list):
+    raise SystemExit("model list was not OpenAI-compatible")
+for model in models:
+    if isinstance(model, dict) and model.get("id"):
+        print(model["id"])
+        raise SystemExit(0)
+raise SystemExit("no model id found")
+PY
+}
+
+start_pinned_runner() {
+  local log="$OUT_DIR/model-serve.log"
+  local runner_json="$OUT_DIR/model-serve.json"
+  mapfile -t env_args < <(runner_env_args)
+  if ! env "${env_args[@]}" "$CLI" --json model serve "$MODEL_REF" --state-dir "$STATE_DIR" >"$runner_json" 2>"$log"; then
+    cat "$log" >&2 || true
+    fail "model serve failed"
+  fi
+  STARTED_RUNNER=1
+  RUNNER_PID="$(python3 - "$runner_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+doc = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(doc["pid"])
+PY
+)"
+  RUNNER_PORT="$(python3 - "$runner_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+doc = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(doc["port"])
+PY
+)"
+  if [ -z "$RUNNER_ENGINE" ]; then
+    RUNNER_ENGINE="$(python3 - "$runner_json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+doc = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(doc.get("engine") or "")
+PY
+)"
+  fi
+  if [ -z "$REQUEST_MODEL" ]; then
+    REQUEST_MODEL="$(discover_request_model)"
+  fi
+  echo "microagent-e2e-model-mediation-runner: pinned $LABEL runner pid=$RUNNER_PID model=$REQUEST_MODEL"
+}
+
+assert_single_runner_reused() {
+  local runners_json="$OUT_DIR/runners.json"
+  [ -n "$RUNNER_PID" ] || fail "runner pid is required"
+  "$CLI" --json model runners --state-dir "$STATE_DIR" >"$runners_json"
+  python3 - "$runners_json" "$RUNNER_PID" "$RUNNER_ENGINE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+doc = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+want_pid = int(sys.argv[2])
+want_engine = sys.argv[3]
+runners = doc.get("runners") or []
+if len(runners) != 1:
+    raise SystemExit(f"runner count = {len(runners)}, want 1")
+runner = runners[0]
+if runner.get("pid") != want_pid:
+    raise SystemExit(f"runner pid = {runner.get('pid')}, want {want_pid}")
+if want_engine and runner.get("engine") != want_engine:
+    raise SystemExit(f"runner engine = {runner.get('engine')!r}, want {want_engine!r}")
+PY
 }
 
 audit_log_for_workspace() {
@@ -321,6 +352,36 @@ mediators = doc.get("mediators") or []
 if mediators:
     raise SystemExit(f"mediators still indexed: {mediators}")
 PY
+}
+
+assert_audit_contains() {
+  local workspace="$1"
+  local needle="$2"
+  local log_path
+  log_path="$(audit_report_for_workspace "$workspace")"
+  [ -r "$log_path" ] || fail "audit log not readable for $workspace: $log_path"
+  grep -q "\"event\":\"$needle\"" "$log_path" || fail "audit log $log_path missing event $needle"
+}
+
+assert_audit_lacks() {
+  local workspace="$1"
+  local needle="$2"
+  local log_path
+  log_path="$(audit_report_for_workspace "$workspace")"
+  [ -r "$log_path" ] || fail "audit log not readable for $workspace: $log_path"
+  if grep -q "\"event\":\"$needle\"" "$log_path"; then
+    fail "audit log $log_path unexpectedly contains event $needle"
+  fi
+}
+
+assert_audit_no_prompt_body() {
+  local workspace="$1"
+  local log_path
+  log_path="$(audit_report_for_workspace "$workspace")"
+  [ -r "$log_path" ] || fail "audit log not readable for $workspace: $log_path"
+  if grep -Fq "Reply with exactly PONG." "$log_path" || grep -Fq "mediated host model workers" "$log_path"; then
+    fail "audit log $log_path leaked prompt body text"
+  fi
 }
 
 extract_guest_stdout() {
@@ -510,7 +571,7 @@ for key, group in grouped.items():
 with summary_path.open("w", encoding="utf-8", newline="") as handle:
     writer = csv.writer(handle, delimiter="\t")
     writer.writerow(["case", "endpoint", "status", "samples", "total_p50_ms", "total_p95_ms", "ttfb_p50_ms", "ttfb_p95_ms"])
-    for case in ["direct", "local", "pa", "pd", "pu"]:
+    for case in ["direct", "local", "pa", "pd", "pf", "pfd", "pu"]:
         for endpoint in ["models", "chat", "stream"]:
             data = summary.get((case, endpoint))
             if data:
@@ -539,7 +600,7 @@ with comparison_path.open("w", encoding="utf-8", newline="") as handle:
         direct = summary.get(("direct", endpoint))
         if not direct:
             continue
-        for case in ["local", "pa"]:
+        for case in ["local", "pa", "pf"]:
             row = summary.get((case, endpoint))
             if not row:
                 continue
@@ -573,131 +634,77 @@ with comparison_path.open("w", encoding="utf-8", newline="") as handle:
 PY
 }
 
-assert_audit_contains() {
-  local workspace="$1"
-  local needle="$2"
-  local log_path
-  log_path="$(audit_report_for_workspace "$workspace")"
-  [ -r "$log_path" ] || fail "audit log not readable for $workspace: $log_path"
-  grep -q "\"event\":\"$needle\"" "$log_path" || fail "audit log $log_path missing event $needle"
+write_file_policy() {
+  local path="$1"
+  local decision="$2"
+  if [ "$decision" = "allow" ]; then
+    cat >"$path" <<EOF
+{
+  "schema_version": "microagent.model_policy.v1",
+  "default": "deny",
+  "rules": [
+    {
+      "id": "models",
+      "effect": "allow",
+      "match": {
+        "methods": ["GET"],
+        "paths": ["/v1/models"]
+      }
+    },
+    {
+      "id": "chat",
+      "effect": "allow",
+      "match": {
+        "methods": ["POST"],
+        "paths": ["/v1/chat/completions"],
+        "models": ["$REQUEST_MODEL"]
+      },
+      "limits": {
+        "max_request_bytes": 65536,
+        "max_text_bytes": 4096,
+        "max_messages": 4,
+        "max_tokens": 4096
+      }
+    }
+  ]
 }
-
-assert_audit_lacks() {
-  local workspace="$1"
-  local needle="$2"
-  local log_path
-  log_path="$(audit_report_for_workspace "$workspace")"
-  [ -r "$log_path" ] || fail "audit log not readable for $workspace: $log_path"
-  if grep -q "\"event\":\"$needle\"" "$log_path"; then
-    fail "audit log $log_path unexpectedly contains event $needle"
+EOF
+  else
+    cat >"$path" <<'EOF'
+{
+  "schema_version": "microagent.model_policy.v1",
+  "default": "deny",
+  "rules": []
+}
+EOF
   fi
 }
 
-canonical_model_ref() {
-  "$CLI" --json model pull "$MODEL_REF" --state-dir "$STATE_DIR" | python3 -c '
-import json
-import sys
-
-doc = json.load(sys.stdin)
-print(doc.get("model_ref") or sys.argv[1])
-' "$MODEL_REF"
-}
-
-runner_count_for_model() {
-  local model_ref="$1"
-  local runners_json
-  runners_json="$("$CLI" --json model runners --state-dir "$STATE_DIR" 2>/dev/null || printf '{}')"
-  python3 - "$model_ref" "$runners_json" <<'PY'
-import json
-import sys
-
-model_ref = sys.argv[1]
-try:
-    doc = json.loads(sys.argv[2]) or {}
-except Exception:
-    print(0)
-    raise SystemExit(0)
-runners = doc.get("runners") or []
-print(sum(1 for runner in runners if runner.get("model_ref") == model_ref))
-PY
-}
-
-discover_request_model() {
-  python3 - "$RUNNER_PORT" <<'PY'
-import json
-import sys
-import urllib.request
-
-port = sys.argv[1]
-with urllib.request.urlopen(f"http://127.0.0.1:{port}/v1/models", timeout=10) as response:
-    doc = json.loads(response.read(1024 * 1024))
-models = doc.get("data") if isinstance(doc, dict) else None
-if not isinstance(models, list):
-    raise SystemExit("model list was not OpenAI-compatible")
-for model in models:
-    if isinstance(model, dict) and model.get("id"):
-        print(model["id"])
-        raise SystemExit(0)
-raise SystemExit("no model id found")
-PY
-}
-
-start_pinned_runner() {
-  local log="$OUT_DIR/model-serve.log"
-  local runner_json="$OUT_DIR/model-serve.json"
-  mapfile -t env_args < <(runner_env_args)
-  if ! env "${env_args[@]}" "$CLI" --json model serve "$MODEL_REF" --state-dir "$STATE_DIR" >"$runner_json" 2>"$log"; then
-    cat "$log" >&2 || true
-    fail "model serve failed"
-  fi
-  RUNNER_PID="$(python3 - "$runner_json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-doc = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-print(doc["pid"])
-PY
-)"
-  RUNNER_PORT="$(python3 - "$runner_json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-doc = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-print(doc["port"])
-PY
-)"
-  REQUEST_MODEL="$(discover_request_model)"
-  echo "microagent-e2e-model-mediation-llamacpp: pinned llama.cpp runner pid=$RUNNER_PID model=$REQUEST_MODEL"
-}
-
-assert_single_runner_reused() {
-  local runners_json="$OUT_DIR/runners.json"
-  "$CLI" --json model runners --state-dir "$STATE_DIR" >"$runners_json"
-  python3 - "$runners_json" "$RUNNER_PID" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-doc = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-want_pid = int(sys.argv[2])
-runners = doc.get("runners") or []
-if len(runners) != 1:
-    raise SystemExit(f"runner count = {len(runners)}, want 1")
-runner = runners[0]
-if runner.get("pid") != want_pid:
-    raise SystemExit(f"runner pid = {runner.get('pid')}, want {want_pid}")
-if runner.get("engine") != "llama.cpp":
-    raise SystemExit(f"runner engine = {runner.get('engine')!r}, want 'llama.cpp'")
-PY
+validate_file_policy() {
+  local path="$1"
+  local label="$2"
+  local expected="$3"
+  "$CLI" --json model policy validate "$path" >"$OUT_DIR/policy-$label-validate.json"
+  "$CLI" --json model policy evaluate "$path" \
+    --method GET \
+    --path /v1/models \
+    --expect "$expected" >"$OUT_DIR/policy-$label-models-evaluate.json"
+  "$CLI" --json model policy evaluate "$path" \
+    --method POST \
+    --path /v1/chat/completions \
+    --model "$REQUEST_MODEL" \
+    --max-tokens "$CHAT_TOKENS" \
+    --stream false \
+    --text-bytes 24 \
+    --messages 1 \
+    --expect "$expected" >"$OUT_DIR/policy-$label-chat-evaluate.json"
 }
 
 run_case() {
   local label="$1"
   local mode="$2"
   local expected_status="$3"
-  local workspace="mml-$label"
+  local workspace="$CASE_PREFIX-$label"
   local run_log="$OUT_DIR/$label.run.log"
   local stdout_path="$OUT_DIR/$label.guest.stdout"
   local guest_script
@@ -761,6 +768,7 @@ while [ "$sample" -le "$SAMPLES" ]; do
   test "$status" = "$EXPECTED_STATUS"
   if [ "$EXPECTED_STATUS" = "200" ]; then
     grep -q "$REQUEST_MODEL" /tmp/model-body
+    echo "MODEL_REACHED=1"
   fi
   sample=$((sample + 1))
 done
@@ -774,6 +782,7 @@ while [ "$sample" -le "$SAMPLES" ]; do
   test "$status" = "$EXPECTED_STATUS"
   if [ "$EXPECTED_STATUS" = "200" ]; then
     grep -q '"choices"' /tmp/chat-body
+    echo "CHAT_COMPATIBLE=1"
   fi
   sample=$((sample + 1))
 done
@@ -788,13 +797,14 @@ while [ "$sample" -le "$SAMPLES" ]; do
   test "$status" = "$EXPECTED_STATUS"
   if [ "$EXPECTED_STATUS" = "200" ]; then
     grep -q '^data:' /tmp/stream-body
+    echo "STREAM_COMPATIBLE=1"
   fi
   sample=$((sample + 1))
 done
 EOF
 )"
 
-  echo "microagent-e2e-model-mediation-llamacpp: case=$label mode=$mode expected_http=$expected_status"
+  echo "microagent-e2e-model-mediation-runner: adapter=$LABEL case=$label mode=$mode expected_http=$expected_status"
   set_telemetry_phase "$label"
   if ! env "${env_args[@]}" "$CLI" run --name "$workspace" \
     --env "EXPECTED_STATUS=$expected_status" \
@@ -810,9 +820,15 @@ EOF
   grep -q $'PROFILE\tmodels' "$stdout_path" || fail "case $label missing model profile rows"
   grep -q $'PROFILE\tchat' "$stdout_path" || fail "case $label missing chat profile rows"
   grep -q $'PROFILE\tstream' "$stdout_path" || fail "case $label missing stream profile rows"
+  for prefix in MODEL CHAT STREAM; do
+    if [ "$expected_status" = "200" ]; then
+      grep -q "${prefix}_" "$stdout_path" || fail "case $label missing $prefix compatibility marker"
+    fi
+  done
   capture_audit_log "$workspace"
   if [ "$mode" != "off" ]; then
     assert_audit_contains "$workspace" "request_end"
+    assert_audit_no_prompt_body "$workspace"
   fi
   assert_index_clean
   assert_single_runner_reused
@@ -820,20 +836,21 @@ EOF
   summarize_profiles "$label" "$expected_status" "$stdout_path"
 }
 
-case "${MICROAGENT_E2E_MODEL_MEDIATION_LLAMA:-0}" in
+case "${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER:-0}" in
   1|true|TRUE|yes|YES|required)
     ;;
   *)
-    skip "set MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 to run the opt-in llama.cpp model mediation scenario"
+    skip "set MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 to run the opt-in runner-neutral model mediation scenario"
     ;;
 esac
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
     ;;
   *)
-    skip "llama.cpp model mediation E2E currently targets the Linux host backend"
+    skip "runner-neutral model mediation E2E currently targets the Linux host backend"
     ;;
 esac
+[ -n "$MODEL_REF" ] || fail "MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF is required"
 if [ ! -x "$CLI" ]; then
   skip "CLI not found at $CLI (run scripts/dev/build-local.sh)"
 fi
@@ -843,9 +860,6 @@ fi
 if [ -z "${MICROAGENT_FIRECRACKER:-}" ]; then
   MICROAGENT_FIRECRACKER="$(e2e_resolve_firecracker)" || skip "Firecracker binary not resolved"
   export MICROAGENT_FIRECRACKER
-fi
-if [ -z "${MICROAGENT_LLAMA_SERVER:-}" ] && ! command -v llama-server >/dev/null 2>&1; then
-  skip "llama-server not found; set MICROAGENT_LLAMA_SERVER"
 fi
 for numeric in CHAT_TOKENS STREAM_TOKENS SAMPLES; do
   value="${!numeric}"
@@ -858,59 +872,93 @@ for numeric in CHAT_TOKENS STREAM_TOKENS SAMPLES; do
 done
 case "$TELEMETRY" in
   off|auto|required) ;;
-  *) fail "MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_TELEMETRY must be off, auto, or required" ;;
+  *) fail "MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY must be off, auto, or required" ;;
 esac
 case "$GATE_MODE" in
   off|warn|required) ;;
-  *) fail "MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GATE_MODE must be off, warn, or required" ;;
+  *) fail "MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_GATE_MODE must be off, warn, or required" ;;
 esac
-case "$GPU_MODE" in
+case "$KEEP_STATE" in
   1|true|TRUE|yes|YES)
-    if [ -z "$RUNNER_ARGS_RAW" ]; then
-      RUNNER_ARGS_RAW='["-ngl","all","--no-ui","--metrics"]'
-    fi
-    ;;
-  0|false|FALSE|no|NO)
+    KEEP_STATE=1
     ;;
   *)
-    fail "MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU must be 0/1, true/false, or yes/no"
+    KEEP_STATE=0
     ;;
 esac
 
-mkdir -p "$OUT_DIR"
-CANONICAL_REF="$(canonical_model_ref)" || fail "model pull failed"
-existing_count="$(runner_count_for_model "$CANONICAL_REF")"
-if [ "$existing_count" -ne 0 ]; then
-  skip "model $CANONICAL_REF already has $existing_count active runner(s); stop them before running llama.cpp mediation"
+mkdir -p "$OUT_DIR" "$STATE_DIR"
+
+RUN_FLAGS=(--backend firecracker --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF")
+if [ "$KEEP_STATE" = "0" ]; then
+  RUN_FLAGS+=(--rm)
+fi
+RUN_FLAGS+=("$IMAGE")
+
+if [ -z "$RUNNER_PID" ] || [ -z "$RUNNER_PORT" ]; then
+  start_pinned_runner
+fi
+if [ -z "$REQUEST_MODEL" ]; then
+  REQUEST_MODEL="$(discover_request_model)"
 fi
 
-start_pinned_runner
 assert_single_runner_reused
+start_telemetry
 
-RUNNER_ENV_FILE="$OUT_DIR/runner-env.env"
-runner_env_args >"$RUNNER_ENV_FILE"
+run_case "direct" "off" "200"
+run_case "local" "local-allow" "200"
+assert_audit_contains "$CASE_PREFIX-local" "mediation_decision_allow"
+assert_audit_contains "$CASE_PREFIX-local" "upstream_headers"
 
-MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_LABEL="llama.cpp" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_CASE_PREFIX="mml" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_OUT_DIR="$OUT_DIR" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_STATE_DIR="$STATE_DIR" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_IMAGE="$IMAGE" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF="$MODEL_REF" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENV_FILE="$RUNNER_ENV_FILE" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PID="$RUNNER_PID" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PORT="$RUNNER_PORT" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENGINE="llama.cpp" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_REQUEST_MODEL="$REQUEST_MODEL" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_CHAT_TOKENS="$CHAT_TOKENS" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_STREAM_TOKENS="$STREAM_TOKENS" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_SAMPLES="$SAMPLES" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY="$TELEMETRY" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY_INTERVAL="$TELEMETRY_INTERVAL" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY_ENDPOINTS="$TELEMETRY_ENDPOINTS" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_GATE_MODE="$GATE_MODE" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_MODELS_TOTAL_P95_DELTA_MS="$MAX_MODELS_TOTAL_P95_DELTA_MS" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_CHAT_TOTAL_P95_DELTA_MS="$MAX_CHAT_TOTAL_P95_DELTA_MS" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_STREAM_TTFB_P95_DELTA_MS="$MAX_STREAM_TTFB_P95_DELTA_MS" \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_DECISION_P95_MS="$MAX_DECISION_P95_MS" \
-  "$ROOT/scripts/dev/microagent-e2e-model-mediation-runner.sh"
+start_policy allow "allow"
+run_case "pa" "policy" "200"
+assert_audit_contains "$CASE_PREFIX-pa" "mediation_decision_allow"
+assert_audit_contains "$CASE_PREFIX-pa" "upstream_headers"
+stop_policy
+
+start_policy deny "deny"
+run_case "pd" "policy" "403"
+assert_audit_contains "$CASE_PREFIX-pd" "mediation_decision_deny"
+assert_audit_lacks "$CASE_PREFIX-pd" "upstream_headers"
+stop_policy
+
+POLICY_FILE="$OUT_DIR/policy-file-allow.json"
+write_file_policy "$POLICY_FILE" "allow"
+validate_file_policy "$POLICY_FILE" "allow" "allow"
+run_case "pf" "policy" "200"
+assert_audit_contains "$CASE_PREFIX-pf" "mediation_decision_allow"
+assert_audit_contains "$CASE_PREFIX-pf" "upstream_headers"
+
+POLICY_FILE="$OUT_DIR/policy-file-deny.json"
+write_file_policy "$POLICY_FILE" "deny"
+validate_file_policy "$POLICY_FILE" "deny" "deny"
+run_case "pfd" "policy" "403"
+assert_audit_contains "$CASE_PREFIX-pfd" "mediation_decision_deny"
+assert_audit_lacks "$CASE_PREFIX-pfd" "upstream_headers"
+POLICY_FILE=""
+
+unavailable_port="$(choose_port)"
+POLICY_URL="http://127.0.0.1:${unavailable_port}/decision"
+run_case "pu" "policy" "503"
+assert_audit_contains "$CASE_PREFIX-pu" "mediation_decision_error"
+assert_audit_lacks "$CASE_PREFIX-pu" "upstream_headers"
+POLICY_URL=""
+
+echo "microagent-e2e-model-mediation-runner: summary"
+cat "$OUT_DIR/summary.tsv"
+write_profile_summaries
+echo "microagent-e2e-model-mediation-runner: profiles"
+cat "$OUT_DIR/profiles.tsv"
+echo "microagent-e2e-model-mediation-runner: profile summary"
+cat "$OUT_DIR/profile-summary.tsv"
+echo "microagent-e2e-model-mediation-runner: direct-vs-mediated profile comparison"
+cat "$OUT_DIR/profile-comparison.tsv"
+write_telemetry_summary
+if [ -s "$OUT_DIR/telemetry-summary.tsv" ]; then
+  echo "microagent-e2e-model-mediation-runner: telemetry summary"
+  cat "$OUT_DIR/telemetry-summary.tsv"
+fi
+write_gate_summary
+echo "microagent-e2e-model-mediation-runner: mediation gates"
+cat "$OUT_DIR/mediation-gates.tsv"
+echo "PASS microagent-e2e-model-mediation-runner: production model mediation matrix passed with $LABEL"

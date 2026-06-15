@@ -105,7 +105,7 @@ cleanup() {
   if [ "$KEEP_STATE" = "1" ] && [ "$status" -ne 0 ]; then
     echo "microagent-e2e-model-mediation-vllm: preserved workspace state under $STATE_DIR" >&2
   else
-    for workspace in mmv-direct mmv-local mmv-pa mmv-pd mmv-pu; do
+    for workspace in mmv-direct mmv-local mmv-pa mmv-pd mmv-pf mmv-pfd mmv-pu; do
       "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
       "$CLI" delete "$workspace" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
     done
@@ -1098,48 +1098,33 @@ stage_stub_model
 write_vllm_runner
 start_pinned_runner
 warm_vllm_runner
-start_telemetry
 assert_single_runner_reused
 
-run_case "direct" "off" "200"
-run_case "local" "local-allow" "200"
-assert_audit_contains "mmv-local" "mediation_decision_allow"
-assert_audit_contains "mmv-local" "upstream_headers"
+RUNNER_ENV_FILE="$OUT_DIR/runner-env.env"
+runner_env_args >"$RUNNER_ENV_FILE"
 
-start_policy allow "allow"
-run_case "pa" "policy" "200"
-assert_audit_contains "mmv-pa" "mediation_decision_allow"
-assert_audit_contains "mmv-pa" "upstream_headers"
-stop_policy
-
-start_policy deny "deny"
-run_case "pd" "policy" "403"
-assert_audit_contains "mmv-pd" "mediation_decision_deny"
-assert_audit_lacks "mmv-pd" "upstream_headers"
-stop_policy
-
-unavailable_port="$(choose_port)"
-POLICY_URL="http://127.0.0.1:${unavailable_port}/decision"
-run_case "pu" "policy" "503"
-assert_audit_contains "mmv-pu" "mediation_decision_error"
-assert_audit_lacks "mmv-pu" "upstream_headers"
-POLICY_URL=""
-
-echo "microagent-e2e-model-mediation-vllm: summary"
-cat "$OUT_DIR/summary.tsv"
-write_profile_summaries
-echo "microagent-e2e-model-mediation-vllm: profiles"
-cat "$OUT_DIR/profiles.tsv"
-echo "microagent-e2e-model-mediation-vllm: profile summary"
-cat "$OUT_DIR/profile-summary.tsv"
-echo "microagent-e2e-model-mediation-vllm: direct-vs-mediated profile comparison"
-cat "$OUT_DIR/profile-comparison.tsv"
-write_telemetry_summary
-if [ -s "$OUT_DIR/telemetry-summary.tsv" ]; then
-  echo "microagent-e2e-model-mediation-vllm: telemetry summary"
-  cat "$OUT_DIR/telemetry-summary.tsv"
-fi
-write_gate_summary
-echo "microagent-e2e-model-mediation-vllm: mediation gates"
-cat "$OUT_DIR/mediation-gates.tsv"
-echo "PASS microagent-e2e-model-mediation-vllm: production model mediation matrix passed with vLLM"
+MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_LABEL="vllm" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_CASE_PREFIX="mmv" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_OUT_DIR="$OUT_DIR" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_STATE_DIR="$STATE_DIR" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_IMAGE="$IMAGE" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF="$MODEL_REF" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENV_FILE="$RUNNER_ENV_FILE" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PID="$RUNNER_PID" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PORT="$RUNNER_PORT" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENGINE="vllm" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_REQUEST_MODEL="$VLLM_SERVED_MODEL" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_KEEP_STATE="$KEEP_STATE" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_CHAT_TOKENS="$CHAT_TOKENS" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_STREAM_TOKENS="$STREAM_TOKENS" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_SAMPLES="$SAMPLES" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY="$TELEMETRY" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY_INTERVAL="$TELEMETRY_INTERVAL" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_TELEMETRY_ENDPOINTS="$TELEMETRY_ENDPOINTS" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_GATE_MODE="$GATE_MODE" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_MODELS_TOTAL_P95_DELTA_MS="$MAX_MODELS_TOTAL_P95_DELTA_MS" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_CHAT_TOTAL_P95_DELTA_MS="$MAX_CHAT_TOTAL_P95_DELTA_MS" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_STREAM_TTFB_P95_DELTA_MS="$MAX_STREAM_TTFB_P95_DELTA_MS" \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MAX_DECISION_P95_MS="$MAX_DECISION_P95_MS" \
+  "$ROOT/scripts/dev/microagent-e2e-model-mediation-runner.sh"
