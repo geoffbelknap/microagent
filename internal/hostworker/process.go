@@ -23,6 +23,8 @@ type ProcessRecord struct {
 	TargetBaseURL     string `json:"target_base_url"`
 	Mode              Mode   `json:"mode"`
 	PolicyURL         string `json:"policy_url,omitempty"`
+	PolicyFile        string `json:"policy_file,omitempty"`
+	PolicyFileSHA256  string `json:"policy_file_sha256,omitempty"`
 	Host              string `json:"host"`
 	Port              int    `json:"port"`
 	PID               int    `json:"pid"`
@@ -45,6 +47,7 @@ type ProcessOptions struct {
 	TargetBaseURL   string
 	Mode            Mode
 	PolicyURL       string
+	PolicyFile      string
 	PolicyTimeout   time.Duration
 	UpstreamTimeout time.Duration
 	ExecPath        string
@@ -83,8 +86,22 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 	default:
 		return ProcessRecord{}, fmt.Errorf("unsupported process mediation mode %q", mode)
 	}
-	if mode == ModePolicy && strings.TrimSpace(opts.PolicyURL) == "" {
-		return ProcessRecord{}, fmt.Errorf("policy URL is required for policy mediation")
+	var policyFileSource policyFileSource
+	if mode == ModePolicy {
+		hasPolicyURL := strings.TrimSpace(opts.PolicyURL) != ""
+		hasPolicyFile := strings.TrimSpace(opts.PolicyFile) != ""
+		switch {
+		case hasPolicyURL && hasPolicyFile:
+			return ProcessRecord{}, fmt.Errorf("policy URL and policy file are mutually exclusive")
+		case hasPolicyFile:
+			_, source, err := LoadFilePolicy(opts.PolicyFile)
+			if err != nil {
+				return ProcessRecord{}, err
+			}
+			policyFileSource = source
+		case !hasPolicyURL:
+			return ProcessRecord{}, fmt.Errorf("policy URL or policy file is required for policy mediation")
+		}
 	}
 	capability := strings.TrimSpace(opts.Capability)
 	if capability == "" {
@@ -114,7 +131,7 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 		if existing.Key != key {
 			continue
 		}
-		if processLive(existing.PID) && sameProcessConfig(existing, opts, capability, mode, host, policyTimeout, upstreamTimeout) {
+		if processLive(existing.PID) && sameProcessConfig(existing, opts, capability, mode, host, policyTimeout, upstreamTimeout, policyFileSource) {
 			return existing, nil
 		}
 		if existing.PID > 0 {
@@ -150,6 +167,9 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 	if strings.TrimSpace(opts.PolicyURL) != "" {
 		args = append(args, "--policy-url", opts.PolicyURL)
 	}
+	if policyFileSource.Path != "" {
+		args = append(args, "--policy-file", policyFileSource.Path)
+	}
 	pid, err := spawnProcess(args, nil, logPath)
 	if err != nil {
 		return ProcessRecord{}, err
@@ -162,6 +182,8 @@ func EnsureProcess(ctx context.Context, opts ProcessOptions) (ProcessRecord, err
 		TargetBaseURL:     opts.TargetBaseURL,
 		Mode:              mode,
 		PolicyURL:         strings.TrimSpace(opts.PolicyURL),
+		PolicyFile:        policyFileSource.Path,
+		PolicyFileSHA256:  policyFileSource.SHA256,
 		Host:              host,
 		Port:              port,
 		PID:               pid,
@@ -255,13 +277,15 @@ func processKey(workspaceID, capability string) string {
 	return workspaceID + "#" + capability
 }
 
-func sameProcessConfig(rec ProcessRecord, opts ProcessOptions, capability string, mode Mode, host string, policyTimeout, upstreamTimeout time.Duration) bool {
+func sameProcessConfig(rec ProcessRecord, opts ProcessOptions, capability string, mode Mode, host string, policyTimeout, upstreamTimeout time.Duration, policyFileSource policyFileSource) bool {
 	return rec.WorkspaceID == opts.WorkspaceID &&
 		rec.Capability == capability &&
 		rec.WorkerID == strings.TrimSpace(opts.WorkerID) &&
 		rec.TargetBaseURL == opts.TargetBaseURL &&
 		rec.Mode == mode &&
 		rec.PolicyURL == strings.TrimSpace(opts.PolicyURL) &&
+		rec.PolicyFile == policyFileSource.Path &&
+		rec.PolicyFileSHA256 == policyFileSource.SHA256 &&
 		rec.Host == host &&
 		rec.PolicyTimeoutMS == policyTimeout.Milliseconds() &&
 		rec.UpstreamTimeoutMS == upstreamTimeout.Milliseconds()

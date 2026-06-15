@@ -945,6 +945,7 @@ run_case() {
     "${runner_env[@]}"
     "MICROAGENT_MODEL_MEDIATION=$mode"
     "MICROAGENT_MODEL_POLICY_TIMEOUT=1s"
+    "MICROAGENT_MODEL_POLICY_FILE="
   )
   if [ -n "$POLICY_URL" ]; then
     env_args+=("MICROAGENT_MODEL_POLICY_URL=$POLICY_URL")

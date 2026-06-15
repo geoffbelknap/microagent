@@ -3,6 +3,7 @@ package hostworker
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -175,8 +176,84 @@ func TestEnsureProcessValidatesPolicyMode(t *testing.T) {
 		Mode:          ModePolicy,
 		ExecPath:      "/bin/microagent",
 	})
-	if err == nil || !strings.Contains(err.Error(), "policy URL is required") {
+	if err == nil || !strings.Contains(err.Error(), "policy URL or policy file is required") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestEnsureProcessPolicyFileSpawnsAndReplacesOnDigestChange(t *testing.T) {
+	dir := t.TempDir()
+	policyFile := writePolicyFile(t, `{
+		"schema_version": "microagent.model_policy.v1",
+		"default": "deny",
+		"rules": [{"id": "models", "effect": "allow", "match": {"paths": ["/models"]}}]
+	}`)
+	var spawned [][]string
+	var stopped []int
+	prevSpawn, prevStop, prevLive, prevProbe := spawnProcess, stopProcess, processLive, probeMediatorHealth
+	spawnProcess = func(argv []string, env []string, logPath string) (int, error) {
+		spawned = append(spawned, append([]string{}, argv...))
+		return 100 + len(spawned), nil
+	}
+	stopProcess = func(pid int) error {
+		stopped = append(stopped, pid)
+		return nil
+	}
+	processLive = func(pid int) bool { return pid > 0 }
+	probeMediatorHealth = func(ctx context.Context, url string, timeout time.Duration) error { return nil }
+	t.Cleanup(func() {
+		spawnProcess = prevSpawn
+		stopProcess = prevStop
+		processLive = prevLive
+		probeMediatorHealth = prevProbe
+	})
+
+	opts := ProcessOptions{
+		StateDir:      dir,
+		WorkspaceID:   "ws",
+		TargetBaseURL: "http://127.0.0.1:9000/v1",
+		Mode:          ModePolicy,
+		PolicyFile:    policyFile,
+		ExecPath:      "/bin/microagent",
+	}
+	first, err := EnsureProcess(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("EnsureProcess first: %v", err)
+	}
+	if first.PolicyFile != policyFile || first.PolicyFileSHA256 == "" {
+		t.Fatalf("record policy source = %+v", first)
+	}
+	if !contains(spawned[0], "--policy-file") || !contains(spawned[0], policyFile) {
+		t.Fatalf("spawn argv missing policy file: %#v", spawned[0])
+	}
+
+	reused, err := EnsureProcess(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("EnsureProcess reuse: %v", err)
+	}
+	if len(spawned) != 1 || !reflect.DeepEqual(first, reused) {
+		t.Fatalf("expected reuse, spawned=%d first=%+v reused=%+v", len(spawned), first, reused)
+	}
+
+	if err := os.WriteFile(policyFile, []byte(`{
+		"schema_version": "microagent.model_policy.v1",
+		"default": "deny",
+		"rules": [{"id": "models", "effect": "deny", "match": {"paths": ["/models"]}}]
+	}`), 0o600); err != nil {
+		t.Fatalf("rewrite policy file: %v", err)
+	}
+	replaced, err := EnsureProcess(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("EnsureProcess replace: %v", err)
+	}
+	if len(spawned) != 2 {
+		t.Fatalf("spawn count = %d, want 2", len(spawned))
+	}
+	if !reflect.DeepEqual(stopped, []int{101}) {
+		t.Fatalf("stopped = %#v", stopped)
+	}
+	if replaced.PolicyFileSHA256 == first.PolicyFileSHA256 {
+		t.Fatalf("policy digest was not refreshed: first=%s replaced=%s", first.PolicyFileSHA256, replaced.PolicyFileSHA256)
 	}
 }
 

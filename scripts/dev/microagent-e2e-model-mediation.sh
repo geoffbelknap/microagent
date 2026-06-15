@@ -30,6 +30,7 @@ MODEL_REF="${MICROAGENT_E2E_MODEL_MEDIATION_MODEL_REF:-stub/stub-model-GGUF/stub
 CANONICAL_REF="hf.co/stub/stub-model-GGUF@main/stub.gguf"
 POLICY_PID=""
 POLICY_URL=""
+POLICY_FILE=""
 RUN_FLAGS=(--backend firecracker --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF" --rm "$IMAGE")
 CTRL_FLAGS=(--backend firecracker --state-dir "$STATE_DIR")
 
@@ -44,7 +45,7 @@ cleanup() {
     wait "$POLICY_PID" >/dev/null 2>&1 || true
     POLICY_PID=""
   fi
-  for workspace in model-med-direct model-med-local-allow model-med-policy-allow model-med-policy-deny model-med-policy-unavailable; do
+  for workspace in model-med-direct model-med-local-allow model-med-policy-allow model-med-policy-deny model-med-policy-file-allow model-med-policy-file-deny model-med-policy-unavailable; do
     "$CLI" kill "$workspace" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
     "$CLI" delete "$workspace" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
   done
@@ -221,6 +222,27 @@ start_policy() {
   POLICY_URL="http://$(awk '/^ready / {print $2; exit}' "$stdout")/decision"
 }
 
+write_file_policy() {
+  local path="$1"
+  local decision="$2"
+  cat >"$path" <<EOF
+{
+  "schema_version": "microagent.model_policy.v1",
+  "default": "deny",
+  "rules": [
+    {
+      "id": "models",
+      "effect": "$decision",
+      "match": {
+        "methods": ["GET"],
+        "paths": ["/v1/models"]
+      }
+    }
+  ]
+}
+EOF
+}
+
 audit_log_for_workspace() {
   local workspace="$1"
   printf '%s\n' "$STATE_DIR/host-workers/${workspace}_model.openai.jsonl"
@@ -334,6 +356,11 @@ run_case() {
   else
     env_args+=("MICROAGENT_MODEL_POLICY_URL=")
   fi
+  if [ -n "$POLICY_FILE" ]; then
+    env_args+=("MICROAGENT_MODEL_POLICY_FILE=$POLICY_FILE")
+  else
+    env_args+=("MICROAGENT_MODEL_POLICY_FILE=")
+  fi
 
   echo "microagent-e2e-model-mediation: case=$label mode=$mode expected_http=$expected_status"
   # shellcheck disable=SC2016
@@ -381,6 +408,19 @@ run_case "policy-deny" "policy" "403"
 assert_audit_contains "model-med-policy-deny" "mediation_decision_deny"
 assert_audit_lacks "model-med-policy-deny" "upstream_headers"
 stop_policy
+
+POLICY_FILE="$OUT_DIR/policy-file-allow.json"
+write_file_policy "$POLICY_FILE" "allow"
+run_case "policy-file-allow" "policy" "200"
+assert_audit_contains "model-med-policy-file-allow" "mediation_decision_allow"
+assert_audit_contains "model-med-policy-file-allow" "upstream_headers"
+
+POLICY_FILE="$OUT_DIR/policy-file-deny.json"
+write_file_policy "$POLICY_FILE" "deny"
+run_case "policy-file-deny" "policy" "403"
+assert_audit_contains "model-med-policy-file-deny" "mediation_decision_deny"
+assert_audit_lacks "model-med-policy-file-deny" "upstream_headers"
+POLICY_FILE=""
 
 unavailable_port="$(choose_port)"
 POLICY_URL="http://127.0.0.1:${unavailable_port}/decision"

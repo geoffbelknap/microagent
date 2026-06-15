@@ -5659,10 +5659,30 @@ func TestModelMediationConfigFromEnv(t *testing.T) {
 			t.Fatalf("cfg = %+v", cfg)
 		}
 	})
-	t.Run("policy requires endpoint", func(t *testing.T) {
+	t.Run("policy file", func(t *testing.T) {
+		t.Setenv(envModelMediation, "policy")
+		t.Setenv(envModelPolicyFile, "/tmp/model-policy.json")
+		cfg, err := modelMediationConfigFromEnv()
+		if err != nil {
+			t.Fatalf("modelMediationConfigFromEnv: %v", err)
+		}
+		if !cfg.Enabled || cfg.Mode != hostworker.ModePolicy || cfg.PolicyFile != "/tmp/model-policy.json" {
+			t.Fatalf("cfg = %+v", cfg)
+		}
+	})
+	t.Run("policy requires source", func(t *testing.T) {
 		t.Setenv(envModelMediation, "policy")
 		_, err := modelMediationConfigFromEnv()
-		if err == nil || !strings.Contains(err.Error(), envModelPolicyURL) {
+		if err == nil || !strings.Contains(err.Error(), envModelPolicyURL) || !strings.Contains(err.Error(), envModelPolicyFile) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("policy rejects multiple sources", func(t *testing.T) {
+		t.Setenv(envModelMediation, "policy")
+		t.Setenv(envModelPolicyURL, "http://127.0.0.1:8000/decide")
+		t.Setenv(envModelPolicyFile, "/tmp/model-policy.json")
+		_, err := modelMediationConfigFromEnv()
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 			t.Fatalf("error = %v", err)
 		}
 	})

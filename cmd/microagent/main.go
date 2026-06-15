@@ -72,6 +72,7 @@ const (
 const (
 	envModelMediation     = "MICROAGENT_MODEL_MEDIATION"
 	envModelPolicyURL     = "MICROAGENT_MODEL_POLICY_URL"
+	envModelPolicyFile    = "MICROAGENT_MODEL_POLICY_FILE"
 	envModelPolicyTimeout = "MICROAGENT_MODEL_POLICY_TIMEOUT"
 )
 
@@ -289,6 +290,7 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	fs.IntVar(&opts.BindPort, "bind-port", 0, "Bind port")
 	fs.StringVar(&mode, "mode", string(hostworker.ModeLocalAllow), "Mediation mode")
 	fs.StringVar(&opts.PolicyURL, "policy-url", "", "Policy endpoint URL")
+	fs.StringVar(&opts.PolicyFile, "policy-file", "", "Policy JSON file path")
 	fs.DurationVar(&opts.PolicyTimeout, "policy-timeout", 2*time.Second, "Policy timeout")
 	fs.StringVar(&opts.WorkspaceID, "workspace-id", "", "Workspace ID")
 	fs.StringVar(&opts.Capability, "capability", hostworker.DefaultCapability, "Capability")
@@ -299,7 +301,7 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 		return err
 	}
 	if fs.NArg() != 0 || strings.TrimSpace(opts.TargetBaseURL) == "" {
-		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode local-allow|policy] [--policy-url <url>] [--log-path <path>]")
+		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode local-allow|policy] [--policy-url <url>|--policy-file <path>] [--log-path <path>]")
 	}
 	opts.Mode = hostworker.Mode(mode)
 	opts.Ready = ready
@@ -806,6 +808,7 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 			TargetBaseURL:   "http://" + runnerTarget + "/v1",
 			Mode:            mediation.Mode,
 			PolicyURL:       mediation.PolicyURL,
+			PolicyFile:      mediation.PolicyFile,
 			PolicyTimeout:   mediation.PolicyTimeout,
 			UpstreamTimeout: 180 * time.Second,
 			ExecPath:        execPath,
@@ -928,6 +931,7 @@ type modelMediationConfig struct {
 	Enabled       bool
 	Mode          hostworker.Mode
 	PolicyURL     string
+	PolicyFile    string
 	PolicyTimeout time.Duration
 }
 
@@ -951,8 +955,14 @@ func modelMediationConfigFromEnv() (modelMediationConfig, error) {
 	}
 	cfg.PolicyTimeout = timeout
 	cfg.PolicyURL = strings.TrimSpace(os.Getenv(envModelPolicyURL))
-	if cfg.Mode == hostworker.ModePolicy && cfg.PolicyURL == "" {
-		return modelMediationConfig{}, fmt.Errorf("%s=policy requires %s", envModelMediation, envModelPolicyURL)
+	cfg.PolicyFile = strings.TrimSpace(os.Getenv(envModelPolicyFile))
+	if cfg.Mode == hostworker.ModePolicy {
+		switch {
+		case cfg.PolicyURL != "" && cfg.PolicyFile != "":
+			return modelMediationConfig{}, fmt.Errorf("%s and %s are mutually exclusive", envModelPolicyURL, envModelPolicyFile)
+		case cfg.PolicyURL == "" && cfg.PolicyFile == "":
+			return modelMediationConfig{}, fmt.Errorf("%s=policy requires %s or %s", envModelMediation, envModelPolicyURL, envModelPolicyFile)
+		}
 	}
 	return cfg, nil
 }

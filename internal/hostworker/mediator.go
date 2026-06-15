@@ -55,6 +55,7 @@ type Options struct {
 	BindPort        int
 	Mode            Mode
 	PolicyURL       string
+	PolicyFile      string
 	PolicyTimeout   time.Duration
 	WorkspaceID     string
 	Capability      string
@@ -74,18 +75,20 @@ type NopLogger struct{}
 func (NopLogger) Log(string, map[string]any) {}
 
 type Handler struct {
-	targetBaseURL   *url.URL
-	targetBasePath  string
-	mode            Mode
-	policyURL       *url.URL
-	policyTimeout   time.Duration
-	workspaceID     string
-	capability      string
-	workerID        string
-	upstreamTimeout time.Duration
-	maxRequestBytes int64
-	logger          Logger
-	client          *http.Client
+	targetBaseURL    *url.URL
+	targetBasePath   string
+	mode             Mode
+	policyURL        *url.URL
+	filePolicy       *FilePolicy
+	filePolicySource policyFileSource
+	policyTimeout    time.Duration
+	workspaceID      string
+	capability       string
+	workerID         string
+	upstreamTimeout  time.Duration
+	maxRequestBytes  int64
+	logger           Logger
+	client           *http.Client
 }
 
 type DecisionEnvelope struct {
@@ -111,12 +114,13 @@ type DecisionWorker struct {
 }
 
 type DecisionRequest struct {
-	Method     string `json:"method"`
-	Path       string `json:"path"`
-	Query      string `json:"query,omitempty"`
-	Upstream   string `json:"upstream_path"`
-	Bytes      int64  `json:"bytes"`
-	BodySHA256 string `json:"body_sha256"`
+	Method     string               `json:"method"`
+	Path       string               `json:"path"`
+	Query      string               `json:"query,omitempty"`
+	Upstream   string               `json:"upstream_path"`
+	Bytes      int64                `json:"bytes"`
+	BodySHA256 string               `json:"body_sha256"`
+	Body       *DecisionRequestBody `json:"body,omitempty"`
 }
 
 type DecisionLimits struct {
@@ -130,6 +134,9 @@ type decisionResult struct {
 	HTTPStatus   int
 	AuditEventID string
 	Error        string
+	PolicySource string
+	PolicyRuleID string
+	PolicySHA256 string
 }
 
 type policyResponse struct {
@@ -160,8 +167,19 @@ func NewHandler(opts Options) (*Handler, error) {
 			return nil, err
 		}
 	}
-	if mode == ModePolicy && policy == nil {
-		return nil, fmt.Errorf("policy URL is required for policy mediation")
+	var filePolicy *FilePolicy
+	var filePolicySource policyFileSource
+	if strings.TrimSpace(opts.PolicyFile) != "" {
+		filePolicy, filePolicySource, err = LoadFilePolicy(opts.PolicyFile)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if mode == ModePolicy && policy != nil && filePolicy != nil {
+		return nil, fmt.Errorf("policy URL and policy file are mutually exclusive")
+	}
+	if mode == ModePolicy && policy == nil && filePolicy == nil {
+		return nil, fmt.Errorf("policy URL or policy file is required for policy mediation")
 	}
 	policyTimeout := opts.PolicyTimeout
 	if policyTimeout <= 0 {
@@ -188,18 +206,20 @@ func NewHandler(opts Options) (*Handler, error) {
 		workerID = target.Host + normalizedBasePath(target)
 	}
 	return &Handler{
-		targetBaseURL:   target,
-		targetBasePath:  normalizedBasePath(target),
-		mode:            mode,
-		policyURL:       policy,
-		policyTimeout:   policyTimeout,
-		workspaceID:     strings.TrimSpace(opts.WorkspaceID),
-		capability:      capability,
-		workerID:        workerID,
-		upstreamTimeout: upstreamTimeout,
-		maxRequestBytes: maxRequestBytes,
-		logger:          logger,
-		client:          &http.Client{Timeout: upstreamTimeout},
+		targetBaseURL:    target,
+		targetBasePath:   normalizedBasePath(target),
+		mode:             mode,
+		policyURL:        policy,
+		filePolicy:       filePolicy,
+		filePolicySource: filePolicySource,
+		policyTimeout:    policyTimeout,
+		workspaceID:      strings.TrimSpace(opts.WorkspaceID),
+		capability:       capability,
+		workerID:         workerID,
+		upstreamTimeout:  upstreamTimeout,
+		maxRequestBytes:  maxRequestBytes,
+		logger:           logger,
+		client:           &http.Client{Timeout: upstreamTimeout},
 	}, nil
 }
 
@@ -226,6 +246,9 @@ func Run(ctx context.Context, opts Options) error {
 		"target_base_path": handler.targetBasePath,
 		"worker_id":        handler.workerID,
 		"workspace_id":     handler.workspaceID,
+		"policy_source":    handler.policySource(),
+		"policy_file":      handler.filePolicySource.Path,
+		"policy_sha256":    handler.filePolicySource.SHA256,
 	})
 	if opts.Ready != nil {
 		fmt.Fprintf(opts.Ready, "ready %s:%d\n", host, listener.Addr().(*net.TCPAddr).Port)
@@ -274,6 +297,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	requestBytes := int64(len(body))
 	bodySHA := sha256Hex(body)
+	bodyMeta := InspectDecisionRequestBody(r.Header.Get("Content-Type"), body)
 	upstreamPath := h.upstreamPath(r.URL)
 	h.log("request_body_read", map[string]any{
 		"request_id":          requestID,
@@ -283,7 +307,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"request_body_sha256": bodySHA,
 		"elapsed_ms":          elapsedMS(start),
 	})
-	decision := h.evaluateDecision(r.Context(), requestID, r, upstreamPath, requestBytes, bodySHA, start)
+	decision := h.evaluateDecision(r.Context(), requestID, r, upstreamPath, requestBytes, bodySHA, bodyMeta, start)
 	if decision.Decision != decisionAllow {
 		status := http.StatusServiceUnavailable
 		if decision.Decision == decisionDeny {
@@ -305,16 +329,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		_, _ = w.Write(data)
 		h.log("request_denied", map[string]any{
-			"request_id":              requestID,
-			"method":                  r.Method,
-			"path":                    r.URL.Path,
-			"status":                  status,
-			"mediation_mode":          h.mode,
-			"mediation_result":        decision.Decision,
-			"mediation_reason":        decision.Reason,
-			"mediation_policy_status": decision.HTTPStatus,
-			"audit_event_id":          decision.AuditEventID,
-			"duration_ms":             elapsedMS(start),
+			"request_id":               requestID,
+			"method":                   r.Method,
+			"path":                     r.URL.Path,
+			"status":                   status,
+			"mediation_mode":           h.mode,
+			"mediation_result":         decision.Decision,
+			"mediation_reason":         decision.Reason,
+			"mediation_policy_status":  decision.HTTPStatus,
+			"mediation_policy_source":  decision.PolicySource,
+			"mediation_policy_rule_id": decision.PolicyRuleID,
+			"mediation_policy_sha256":  decision.PolicySHA256,
+			"audit_event_id":           decision.AuditEventID,
+			"duration_ms":              elapsedMS(start),
 		})
 		h.logRequestEnd(requestID, r, requestBytes, bodySHA, int64(len(data)), status, decision, start)
 		return
@@ -322,7 +349,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.proxyUpstream(w, r, body, requestID, upstreamPath, requestBytes, bodySHA, decision, start)
 }
 
-func (h *Handler) evaluateDecision(ctx context.Context, requestID string, r *http.Request, upstreamPath string, requestBytes int64, bodySHA string, start time.Time) decisionResult {
+func (h *Handler) evaluateDecision(ctx context.Context, requestID string, r *http.Request, upstreamPath string, requestBytes int64, bodySHA string, bodyMeta *DecisionRequestBody, start time.Time) decisionResult {
 	if h.mode == ModePassthrough {
 		h.log("mediation_bypass", map[string]any{
 			"request_id":       requestID,
@@ -334,9 +361,9 @@ func (h *Handler) evaluateDecision(ctx context.Context, requestID string, r *htt
 		})
 		return decisionResult{Decision: decisionAllow, Reason: "passthrough"}
 	}
-	envelope := h.decisionEnvelope(requestID, r, upstreamPath, requestBytes, bodySHA)
+	envelope := h.decisionEnvelope(requestID, r, upstreamPath, requestBytes, bodySHA, bodyMeta)
 	decisionStart := time.Now()
-	h.log("mediation_decision_request", map[string]any{
+	requestFields := map[string]any{
 		"request_id":          requestID,
 		"method":              r.Method,
 		"path":                r.URL.Path,
@@ -346,8 +373,11 @@ func (h *Handler) evaluateDecision(ctx context.Context, requestID string, r *htt
 		"worker_id":           h.workerID,
 		"request_bytes":       requestBytes,
 		"request_body_sha256": bodySHA,
+		"policy_source":       h.policySource(),
 		"elapsed_ms":          elapsedMS(start),
-	})
+	}
+	addRequestBodyLogFields(requestFields, bodyMeta)
+	h.log("mediation_decision_request", requestFields)
 	decision := decisionResult{Decision: decisionAllow, Reason: "local_allow", AuditEventID: "local:" + requestID}
 	if h.mode == ModePolicy {
 		decision = h.policyDecision(ctx, requestID, envelope)
@@ -360,58 +390,67 @@ func (h *Handler) evaluateDecision(ctx context.Context, requestID string, r *htt
 		event = "mediation_decision_deny"
 	}
 	h.log(event, map[string]any{
-		"request_id":              requestID,
-		"method":                  r.Method,
-		"path":                    r.URL.Path,
-		"mediation_mode":          h.mode,
-		"mediation_result":        decision.Decision,
-		"mediation_reason":        decision.Reason,
-		"mediation_decision_ms":   elapsedMS(decisionStart),
-		"mediation_policy_status": decision.HTTPStatus,
-		"audit_event_id":          decision.AuditEventID,
-		"elapsed_ms":              elapsedMS(start),
+		"request_id":               requestID,
+		"method":                   r.Method,
+		"path":                     r.URL.Path,
+		"mediation_mode":           h.mode,
+		"mediation_result":         decision.Decision,
+		"mediation_reason":         decision.Reason,
+		"mediation_decision_ms":    elapsedMS(decisionStart),
+		"mediation_policy_status":  decision.HTTPStatus,
+		"mediation_policy_source":  decision.PolicySource,
+		"mediation_policy_rule_id": decision.PolicyRuleID,
+		"mediation_policy_sha256":  decision.PolicySHA256,
+		"audit_event_id":           decision.AuditEventID,
+		"elapsed_ms":               elapsedMS(start),
 	})
 	return decision
 }
 
 func (h *Handler) policyDecision(ctx context.Context, requestID string, envelope DecisionEnvelope) decisionResult {
+	if h.filePolicy != nil {
+		return h.filePolicy.Decide(envelope, h.filePolicySource, requestID)
+	}
+	if h.policyURL == nil {
+		return decisionResult{Decision: decisionError, Reason: "policy_unconfigured"}
+	}
 	payload, err := json.Marshal(envelope)
 	if err != nil {
-		return decisionResult{Decision: decisionError, Reason: "policy_envelope_error", Error: err.Error()}
+		return decisionResult{Decision: decisionError, Reason: "policy_envelope_error", Error: err.Error(), PolicySource: "url"}
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, h.policyTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, h.policyURL.String(), bytes.NewReader(payload))
 	if err != nil {
-		return decisionResult{Decision: decisionError, Reason: "policy_request_error", Error: err.Error()}
+		return decisionResult{Decision: decisionError, Reason: "policy_request_error", Error: err.Error(), PolicySource: "url"}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(requestIDHeader, requestID)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return decisionResult{Decision: decisionError, Reason: "policy_unavailable", Error: err.Error()}
+		return decisionResult{Decision: decisionError, Reason: "policy_unavailable", Error: err.Error(), PolicySource: "url"}
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 400 {
-		return decisionResult{Decision: decisionError, Reason: fmt.Sprintf("policy_http_%d", resp.StatusCode), HTTPStatus: resp.StatusCode}
+		return decisionResult{Decision: decisionError, Reason: fmt.Sprintf("policy_http_%d", resp.StatusCode), HTTPStatus: resp.StatusCode, PolicySource: "url"}
 	}
 	var doc policyResponse
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return decisionResult{Decision: decisionError, Reason: "policy_invalid_json", HTTPStatus: resp.StatusCode, Error: err.Error()}
+		return decisionResult{Decision: decisionError, Reason: "policy_invalid_json", HTTPStatus: resp.StatusCode, Error: err.Error(), PolicySource: "url"}
 	}
 	decision := strings.ToLower(strings.TrimSpace(doc.Decision))
 	if decision == "" {
 		decision = strings.ToLower(strings.TrimSpace(doc.Result))
 	}
 	if decision != decisionAllow && decision != decisionDeny {
-		return decisionResult{Decision: decisionError, Reason: "policy_invalid_decision", HTTPStatus: resp.StatusCode}
+		return decisionResult{Decision: decisionError, Reason: "policy_invalid_decision", HTTPStatus: resp.StatusCode, PolicySource: "url"}
 	}
 	reason := strings.TrimSpace(doc.Reason)
 	if reason == "" {
 		reason = "policy_" + decision
 	}
-	return decisionResult{Decision: decision, Reason: reason, HTTPStatus: resp.StatusCode, AuditEventID: doc.AuditEventID}
+	return decisionResult{Decision: decision, Reason: reason, HTTPStatus: resp.StatusCode, AuditEventID: doc.AuditEventID, PolicySource: "url"}
 }
 
 func (h *Handler) proxyUpstream(w http.ResponseWriter, r *http.Request, body []byte, requestID, upstreamPath string, requestBytes int64, bodySHA string, decision decisionResult, start time.Time) {
@@ -510,19 +549,22 @@ func (h *Handler) proxyUpstream(w http.ResponseWriter, r *http.Request, body []b
 
 func (h *Handler) logRequestEnd(requestID string, r *http.Request, requestBytes int64, bodySHA string, responseBytes int64, status int, decision decisionResult, start time.Time) {
 	h.log("request_end", map[string]any{
-		"request_id":              requestID,
-		"method":                  r.Method,
-		"path":                    r.URL.Path,
-		"request_bytes":           requestBytes,
-		"request_body_sha256":     bodySHA,
-		"response_bytes":          responseBytes,
-		"status":                  status,
-		"duration_ms":             elapsedMS(start),
-		"mediation_mode":          h.mode,
-		"mediation_result":        decision.Decision,
-		"mediation_reason":        decision.Reason,
-		"mediation_policy_status": decision.HTTPStatus,
-		"audit_event_id":          decision.AuditEventID,
+		"request_id":               requestID,
+		"method":                   r.Method,
+		"path":                     r.URL.Path,
+		"request_bytes":            requestBytes,
+		"request_body_sha256":      bodySHA,
+		"response_bytes":           responseBytes,
+		"status":                   status,
+		"duration_ms":              elapsedMS(start),
+		"mediation_mode":           h.mode,
+		"mediation_result":         decision.Decision,
+		"mediation_reason":         decision.Reason,
+		"mediation_policy_status":  decision.HTTPStatus,
+		"mediation_policy_source":  decision.PolicySource,
+		"mediation_policy_rule_id": decision.PolicyRuleID,
+		"mediation_policy_sha256":  decision.PolicySHA256,
+		"audit_event_id":           decision.AuditEventID,
 	})
 }
 
@@ -537,7 +579,7 @@ func (h *Handler) writeError(w http.ResponseWriter, requestID string, status int
 	_, _ = w.Write(data)
 }
 
-func (h *Handler) decisionEnvelope(requestID string, r *http.Request, upstreamPath string, requestBytes int64, bodySHA string) DecisionEnvelope {
+func (h *Handler) decisionEnvelope(requestID string, r *http.Request, upstreamPath string, requestBytes int64, bodySHA string, bodyMeta *DecisionRequestBody) DecisionEnvelope {
 	return DecisionEnvelope{
 		SchemaVersion: 1,
 		RequestID:     requestID,
@@ -555,6 +597,7 @@ func (h *Handler) decisionEnvelope(requestID string, r *http.Request, upstreamPa
 			Upstream:   upstreamPath,
 			Bytes:      requestBytes,
 			BodySHA256: bodySHA,
+			Body:       bodyMeta,
 		},
 		Limits: DecisionLimits{
 			UpstreamTimeoutSeconds: h.upstreamTimeout.Seconds(),
@@ -562,6 +605,19 @@ func (h *Handler) decisionEnvelope(requestID string, r *http.Request, upstreamPa
 		},
 		DeadlineEpoch: float64(time.Now().Add(h.upstreamTimeout).UnixNano()) / 1e9,
 	}
+}
+
+func (h *Handler) policySource() string {
+	if h.mode != ModePolicy {
+		return ""
+	}
+	if h.filePolicy != nil {
+		return "file"
+	}
+	if h.policyURL != nil {
+		return "url"
+	}
+	return ""
 }
 
 func (h *Handler) upstreamPath(incoming *url.URL) string {

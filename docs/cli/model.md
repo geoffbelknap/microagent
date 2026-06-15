@@ -237,6 +237,49 @@ experimental data. The backend mediation scenarios default to
 scenario-specific `*_IMAGE` override when a different internal mirror is
 required.
 
+Set `MICROAGENT_MODEL_MEDIATION=policy` to require a policy source for the
+host-worker mediator. The source can be either an external decision endpoint
+with `MICROAGENT_MODEL_POLICY_URL=http://127.0.0.1:9000/decision`, or a local
+structured policy file with `MICROAGENT_MODEL_POLICY_FILE=/path/to/policy.json`.
+The two sources are mutually exclusive. File policies fail closed by default
+and inspect only structured request metadata and aggregate body counts; prompt
+text is not written into mediation audit logs.
+
+```json
+{
+  "schema_version": "microagent.model_policy.v1",
+  "default": "deny",
+  "rules": [
+    {
+      "id": "small-chat",
+      "effect": "allow",
+      "match": {
+        "methods": ["POST"],
+        "paths": ["/v1/chat/completions"],
+        "models": ["local-model"]
+      },
+      "limits": {
+        "max_request_bytes": 32768,
+        "max_text_bytes": 4096,
+        "max_messages": 16,
+        "max_tokens": 512,
+        "stream": false,
+        "allowed_tool_names": ["shell", "read_file"]
+      }
+    }
+  ]
+}
+```
+
+The file policy match fields are `workspace_ids`, `capabilities`, `worker_ids`,
+`methods`, `paths`, and `models`; empty match fields are wildcards. `paths`
+matches the request path received by the mediator. For the default
+`MICROAGENT_MODEL_URL` exposed inside a workspace, that path includes `/v1`.
+Limit fields are `max_request_bytes`, `max_text_bytes`, `max_messages`,
+`max_tokens`, `stream`, and `allowed_tool_names`. If an allow rule matches but
+a limit fails, the request is denied rather than falling through to a later
+rule.
+
 ## HuggingFace ref forms
 
 `model pull` accepts several ref forms for the `<hf-ref>` argument:
