@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 # Each entry: name:script:platform:requirement
@@ -31,6 +32,7 @@ SCENARIOS=(
   "health:scripts/dev/microagent-e2e-health.sh:all:vm"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
   "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm"
+  "host-worker-gpu:scripts/dev/microagent-e2e-host-worker-gpu.sh:linux:vm"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
   "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:linux:vm"
   "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm"
@@ -75,6 +77,7 @@ SCENARIO_COVERAGE=(
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health.exec validation and supervise restart on unhealthy probe"
   "exec-stream|backend-neutral|firecracker,apple-vf,windows-hyperv|structured exec streaming, non-zero exit propagation, buffered parity"
   "model-serving|backend-neutral|firecracker,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
+  "host-worker-gpu|host-specific|firecracker|Opt-in host GPU worker acceptance over the external runner bridge"
   "firecracker-lifecycle-host|backend-specific|firecracker|Firecracker lifecycle host mechanics"
   "firecracker-networking-host|backend-specific|firecracker|Firecracker TAP, bridge, NAT, helper mechanics"
   "firecracker-transport-host|backend-specific|firecracker|Firecracker /dev/vhost-vsock and helper mechanics"
@@ -125,6 +128,7 @@ E2E_MATRIX=(
   "supervise|backend-neutral|firecracker,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
   "snapshot/pause/resume|backend-specific|firecracker,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
   "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving|Model store and run --model vsock pairing"
+  "host worker GPU|host-specific|firecracker|host-worker-gpu|Opt-in acceptance matrix for a host GPU worker reached by one and two Firecracker microVMs"
   "perf|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|firecracker,apple-vf,windows-hyperv|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
@@ -184,6 +188,9 @@ Scenarios:
   model-serving      Local host model server paired into a workspace over the
                      backend vsock bridge (Firecracker on Linux, Apple VF on
                      macOS, Hyper-V sockets on Windows).
+  host-worker-gpu    Opt-in Linux/Firecracker host GPU worker acceptance
+                     matrix. Set MICROAGENT_E2E_HOST_WORKER_GPU=1 and either
+                     MICROAGENT_LLAMA_SERVER or MICROAGENT_E2E_HOST_WORKER_URL.
   survive-reboot     supervise --install/--uninstall boot-unit generation
                      (systemd user unit / launchd plist); no real reboot.
   named-network      Two workspaces on a managed named-network bridge: stable
@@ -226,6 +233,12 @@ Environment:
   MICROAGENT_E2E_BACKEND=firecracker|applevf|windows-hyperv selects the backend
     lane for backend-agnostic feature scenarios. Windows runs use Git Bash with
     the windows-hyperv backend (Hyper-V role + HCS services).
+  MICROAGENT_E2E_HOST_WORKER_GPU=1 opts into the Linux/Firecracker host GPU
+    worker acceptance scenario. It is skipped by default so regular E2E runs do
+    not require a GPU or local model runner.
+  MICROAGENT_E2E_HOST_WORKER_URL=<url> uses an existing OpenAI-compatible host
+    worker for host-worker-gpu; otherwise set MICROAGENT_LLAMA_SERVER.
+  MICROAGENT_E2E_HOST_WORKER_OUT_DIR=<dir> stores host-worker-gpu reports.
   MICROAGENT_E2E_ALLOW_NETPRIV=1 opts the privileged networking lane in when you
     hold CAP_NET_ADMIN without uid 0 (file caps / capability-granting sandbox).
   MICROAGENT_E2E_HEARTBEAT=<seconds> sets the "still running" heartbeat interval
@@ -479,6 +492,7 @@ if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_SECRETS=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_HEALTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_EXEC_STREAM=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_HOST_WORKER_GPU=1
   export MICROAGENT_KEEP_BOOT_SMOKE=1
   export MICROAGENT_KEEP_DIRECT_CONSOLE_SMOKE=1
   export MICROAGENT_KEEP_APPLEVF_SUBSTRATE_SMOKE=1
