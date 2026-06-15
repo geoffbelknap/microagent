@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
@@ -1988,6 +1989,14 @@ func TestEnsureModelPairingRejectsInvalidRef(t *testing.T) {
 
 func TestPendingModelRelease(t *testing.T) {
 	dir := t.TempDir()
+	var releasedMediators []string
+	prevReleaseMediator := releaseHostWorkerMediator
+	releaseHostWorkerMediator = func(stateDir, workspaceID, capability string) error {
+		releasedMediators = append(releasedMediators, stateDir+"|"+workspaceID+"|"+capability)
+		return nil
+	}
+	t.Cleanup(func() { releaseHostWorkerMediator = prevReleaseMediator })
+
 	// Missing manifest must yield a silent no-op.
 	pendingModelRelease(dir, "ghost", vmkit.BackendFirecracker)()
 
@@ -2031,6 +2040,9 @@ func TestPendingModelRelease(t *testing.T) {
 	if len(after.Runners) != 0 {
 		t.Fatalf("runner not released: %+v", after.Runners)
 	}
+	if !containsTestString(releasedMediators, dir+"|ws|"+hostworker.DefaultCapability) {
+		t.Fatalf("mediator release not called: %#v", releasedMediators)
+	}
 	events, err := workspace.ReadEvents(dir, "ws")
 	if err != nil {
 		t.Fatalf("read events: %v", err)
@@ -2058,7 +2070,7 @@ func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
 		PID:                1234,
 		RunnerConfigDigest: "digest123",
 	}
-	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendFirecracker}, runner, "http://127.0.0.1:11434/v1"); err != nil {
+	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendFirecracker}, runner, "http://127.0.0.1:11434/v1", nil); err != nil {
 		t.Fatalf("append attached event: %v", err)
 	}
 	events, err := workspace.ReadEvents(dir, "ws")
@@ -2069,7 +2081,7 @@ func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
 		t.Fatalf("events = %+v", events)
 	}
 	event := events[0]
-	for _, want := range []string{"model_worker=attached", "model_ref=hf.co/org/repo@main/m.gguf", "engine=runner-x", "runner_config_digest=digest123", "model_url=http://127.0.0.1:11434/v1"} {
+	for _, want := range []string{"model_worker=attached", "model_ref=hf.co/org/repo@main/m.gguf", "engine=runner-x", "runner_config_digest=digest123", "model_url=http://127.0.0.1:11434/v1", "mediation=direct"} {
 		if !strings.Contains(event.Detail, want) {
 			t.Fatalf("event detail %q missing %q", event.Detail, want)
 		}
@@ -2077,6 +2089,33 @@ func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
 	if event.State != vmkit.StateStarting || event.Identity.RuntimeID != "ws" || event.Identity.Backend != vmkit.BackendFirecracker {
 		t.Fatalf("event = %+v", event)
 	}
+	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendFirecracker}, runner, "http://127.0.0.1:11434/v1", &hostworker.ProcessRecord{
+		Mode:         hostworker.ModeLocalAllow,
+		PID:          5678,
+		Port:         12345,
+		AuditLogPath: "/tmp/mediator.jsonl",
+	}); err != nil {
+		t.Fatalf("append mediated attached event: %v", err)
+	}
+	events, err = workspace.ReadEvents(dir, "ws")
+	if err != nil {
+		t.Fatalf("read mediated events: %v", err)
+	}
+	mediatedDetail := events[len(events)-1].Detail
+	for _, want := range []string{"mediation=host-worker", "mediation_mode=local-allow", "mediator_pid=5678", "mediator_port=12345", "mediator_audit_log=/tmp/mediator.jsonl"} {
+		if !strings.Contains(mediatedDetail, want) {
+			t.Fatalf("mediated event detail %q missing %q", mediatedDetail, want)
+		}
+	}
+}
+
+func containsTestString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing.T) {
@@ -5585,6 +5624,55 @@ func TestResolveModelRunnerCustomCommandAllowsEnvMetadata(t *testing.T) {
 	if engine.Name() != "runner-x" || engine.HealthPath() != "/ready" {
 		t.Fatalf("engine metadata = %q %q", engine.Name(), engine.HealthPath())
 	}
+}
+
+func TestModelMediationConfigFromEnv(t *testing.T) {
+	t.Run("off by default", func(t *testing.T) {
+		cfg, err := modelMediationConfigFromEnv()
+		if err != nil {
+			t.Fatalf("modelMediationConfigFromEnv: %v", err)
+		}
+		if cfg.Enabled {
+			t.Fatalf("cfg = %+v, want disabled", cfg)
+		}
+	})
+	t.Run("local allow", func(t *testing.T) {
+		t.Setenv(envModelMediation, "local-allow")
+		t.Setenv(envModelPolicyTimeout, "250ms")
+		cfg, err := modelMediationConfigFromEnv()
+		if err != nil {
+			t.Fatalf("modelMediationConfigFromEnv: %v", err)
+		}
+		if !cfg.Enabled || cfg.Mode != hostworker.ModeLocalAllow || cfg.PolicyTimeout != 250*time.Millisecond {
+			t.Fatalf("cfg = %+v", cfg)
+		}
+	})
+	t.Run("policy", func(t *testing.T) {
+		t.Setenv(envModelMediation, "policy")
+		t.Setenv(envModelPolicyURL, "http://127.0.0.1:8000/decide")
+		t.Setenv(envModelPolicyTimeout, "2")
+		cfg, err := modelMediationConfigFromEnv()
+		if err != nil {
+			t.Fatalf("modelMediationConfigFromEnv: %v", err)
+		}
+		if !cfg.Enabled || cfg.Mode != hostworker.ModePolicy || cfg.PolicyURL != "http://127.0.0.1:8000/decide" || cfg.PolicyTimeout != 2*time.Second {
+			t.Fatalf("cfg = %+v", cfg)
+		}
+	})
+	t.Run("policy requires endpoint", func(t *testing.T) {
+		t.Setenv(envModelMediation, "policy")
+		_, err := modelMediationConfigFromEnv()
+		if err == nil || !strings.Contains(err.Error(), envModelPolicyURL) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("rejects unsupported mode", func(t *testing.T) {
+		t.Setenv(envModelMediation, "broker")
+		_, err := modelMediationConfigFromEnv()
+		if err == nil || !strings.Contains(err.Error(), envModelMediation) {
+			t.Fatalf("error = %v", err)
+		}
+	})
 }
 
 // stubEngineSource is a stand-in OpenAI-style model server used by the model

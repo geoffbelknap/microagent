@@ -32,6 +32,7 @@ SCENARIOS=(
   "health:scripts/dev/microagent-e2e-health.sh:all:vm"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
   "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm"
+  "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm"
   "host-worker-contract:scripts/dev/microagent-e2e-host-worker-contract.sh:all:none"
   "host-worker-gpu:scripts/dev/microagent-e2e-host-worker-gpu.sh:linux:vm"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
@@ -78,6 +79,7 @@ SCENARIO_COVERAGE=(
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health.exec validation and supervise restart on unhealthy probe"
   "exec-stream|backend-neutral|firecracker,apple-vf,windows-hyperv|structured exec streaming, non-zero exit propagation, buffered parity"
   "model-serving|backend-neutral|firecracker,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
+  "model-mediation|host-specific|firecracker|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
   "host-worker-contract|portable|none|Opt-in OpenAI-compatible host-worker contract conformance"
   "host-worker-gpu|host-specific|firecracker|Opt-in host GPU worker acceptance over the external runner bridge"
   "firecracker-lifecycle-host|backend-specific|firecracker|Firecracker lifecycle host mechanics"
@@ -129,7 +131,7 @@ E2E_MATRIX=(
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
   "supervise|backend-neutral|firecracker,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
   "snapshot/pause/resume|backend-specific|firecracker,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
-  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving|Model store and run --model vsock pairing"
+  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving,model-mediation|Model store and run --model vsock pairing; model-mediation is opt-in while the mediator remains experimental"
   "host worker contract|portable|none|host-worker-contract|Opt-in OpenAI-compatible host-worker contract conformance; no GPU or microVM required"
   "host worker GPU|host-specific|firecracker|host-worker-gpu|Opt-in acceptance matrix for a host GPU worker reached by one and two Firecracker microVMs"
   "perf|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
@@ -191,6 +193,8 @@ Scenarios:
   model-serving      Local host model server paired into a workspace over the
                      backend vsock bridge (Firecracker on Linux, Apple VF on
                      macOS, Hyper-V sockets on Windows).
+  model-mediation    Opt-in Linux host backend matrix for the experimental
+                     run --model mediator. Set MICROAGENT_E2E_MODEL_MEDIATION=1.
   host-worker-contract
                     Opt-in host-side OpenAI-compatible contract conformance for
                     an existing host worker. Set
@@ -245,6 +249,10 @@ Environment:
     scenario. It only needs an existing OpenAI-compatible worker URL and does
     not require a GPU, model runner install, or microVM support.
   MICROAGENT_E2E_HOST_WORKER_CONTRACT_REPORT=<path> stores the contract report.
+  MICROAGENT_E2E_MODEL_MEDIATION=1 opts into the production run --model
+    mediation matrix with a stub OpenAI-compatible runner. It does not require
+    a GPU or llama.cpp.
+  MICROAGENT_E2E_MODEL_MEDIATION_OUT_DIR=<dir> stores model-mediation reports.
   MICROAGENT_E2E_HOST_WORKER_GPU=1 opts into the Linux/Firecracker host GPU
     worker acceptance scenario. It is skipped by default so regular E2E runs do
     not require a GPU or local model runner.
@@ -504,6 +512,7 @@ if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_SECRETS=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_HEALTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_EXEC_STREAM=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_HOST_WORKER_GPU=1
   export MICROAGENT_KEEP_BOOT_SMOKE=1
   export MICROAGENT_KEEP_DIRECT_CONSOLE_SMOKE=1

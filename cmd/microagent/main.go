@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
@@ -48,6 +49,11 @@ var (
 	readConfirmation = defaultReadConfirmation
 )
 
+var (
+	ensureHostWorkerMediator  = hostworker.EnsureProcess
+	releaseHostWorkerMediator = hostworker.ReleaseProcess
+)
+
 const (
 	defaultWorkspaceImageArm64 = workspace.DefaultWorkspaceImageArm64
 	defaultWorkspaceImageAMD64 = workspace.DefaultWorkspaceImageAMD64
@@ -61,6 +67,12 @@ const (
 	consoleDetachPrefix        = byte(0x10) // Ctrl-P
 	consoleDetachSuffix        = byte(0x11) // Ctrl-Q
 	consoleShellExitedMarker   = "microagent-init: console shell exited; closing connect session"
+)
+
+const (
+	envModelMediation     = "MICROAGENT_MODEL_MEDIATION"
+	envModelPolicyURL     = "MICROAGENT_MODEL_POLICY_URL"
+	envModelPolicyTimeout = "MICROAGENT_MODEL_POLICY_TIMEOUT"
 )
 
 func main() {
@@ -93,6 +105,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	ctx = contextWithOutputMode(ctx, currentOutputMode())
 	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
 		return runWindowsHyperVListener(ctx, args[1:])
+	}
+	if len(args) > 0 && args[0] == "--host-worker-mediator" {
+		return runHostWorkerMediator(ctx, args[1:], stdout)
 	}
 	if len(args) > 0 && args[0] == "help" {
 		if len(args) > 1 && args[1] == "all" {
@@ -261,6 +276,46 @@ func runWindowsHyperVListener(ctx context.Context, args []string) error {
 		return fmt.Errorf("usage: microagent --windows-hyperv-listener --state-dir <dir> --name <name>")
 	}
 	return windowshyperv.RunRuntimeListeners(ctx, windowshyperv.Options{StateDir: *stateDir, Name: *name})
+}
+
+func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) error {
+	fs := flag.NewFlagSet("host-worker-mediator", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var opts hostworker.Options
+	var mode string
+	var logPath string
+	fs.StringVar(&opts.TargetBaseURL, "target-base-url", "", "Target worker base URL")
+	fs.StringVar(&opts.BindHost, "bind-host", "127.0.0.1", "Bind host")
+	fs.IntVar(&opts.BindPort, "bind-port", 0, "Bind port")
+	fs.StringVar(&mode, "mode", string(hostworker.ModeLocalAllow), "Mediation mode")
+	fs.StringVar(&opts.PolicyURL, "policy-url", "", "Policy endpoint URL")
+	fs.DurationVar(&opts.PolicyTimeout, "policy-timeout", 2*time.Second, "Policy timeout")
+	fs.StringVar(&opts.WorkspaceID, "workspace-id", "", "Workspace ID")
+	fs.StringVar(&opts.Capability, "capability", hostworker.DefaultCapability, "Capability")
+	fs.StringVar(&opts.WorkerID, "worker-id", "", "Worker ID")
+	fs.DurationVar(&opts.UpstreamTimeout, "upstream-timeout", 180*time.Second, "Upstream timeout")
+	fs.StringVar(&logPath, "log-path", "", "JSONL audit log path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || strings.TrimSpace(opts.TargetBaseURL) == "" {
+		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode local-allow|policy] [--policy-url <url>] [--log-path <path>]")
+	}
+	opts.Mode = hostworker.Mode(mode)
+	opts.Ready = ready
+	var logger *hostworker.JSONLLogger
+	if strings.TrimSpace(logPath) != "" {
+		var err error
+		logger, err = hostworker.OpenJSONLLogger(logPath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = logger.Close() }()
+		opts.Logger = logger
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return hostworker.Run(ctx, opts)
 }
 
 type doctorOptions struct {
@@ -725,32 +780,88 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 	}
 	// Activate pairing on the workspace options.
 	opts.Model = rec.ModelRef
-	opts.ModelTarget = fmt.Sprintf("%s:%d", runner.Host, runner.Port)
+	runnerTarget := fmt.Sprintf("%s:%d", runner.Host, runner.Port)
+	modelTarget := runnerTarget
+	mediation, err := modelMediationConfigFromEnv()
+	if err != nil {
+		_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+		return nil, err
+	}
+	var mediator *hostworker.ProcessRecord
+	if mediation.Enabled {
+		execPath, err := os.Executable()
+		if err != nil {
+			_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+			return nil, fmt.Errorf("resolve microagent executable for model mediation: %w", err)
+		}
+		workerID := strings.TrimSpace(runner.Key)
+		if workerID == "" {
+			workerID = runnerTarget
+		}
+		mediated, err := ensureHostWorkerMediator(ctx, hostworker.ProcessOptions{
+			StateDir:        opts.StateDir,
+			WorkspaceID:     opts.Name,
+			Capability:      hostworker.DefaultCapability,
+			WorkerID:        workerID,
+			TargetBaseURL:   "http://" + runnerTarget + "/v1",
+			Mode:            mediation.Mode,
+			PolicyURL:       mediation.PolicyURL,
+			PolicyTimeout:   mediation.PolicyTimeout,
+			UpstreamTimeout: 180 * time.Second,
+			ExecPath:        execPath,
+		})
+		if err != nil {
+			_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+			return nil, fmt.Errorf("start model mediator: %w", err)
+		}
+		mediator = &mediated
+		modelTarget = fmt.Sprintf("%s:%d", mediated.Host, mediated.Port)
+	}
+	opts.ModelTarget = modelTarget
 	if opts.Env == nil {
 		opts.Env = map[string]string{}
 	}
 	modelURL := fmt.Sprintf("http://127.0.0.1:%d/v1", workspace.DefaultModelGuestPort)
 	opts.Env["MICROAGENT_MODEL_URL"] = modelURL
 	opts.Env["OPENAI_BASE_URL"] = modelURL
-	if err := appendModelWorkerAttachedEvent(*opts, runner, modelURL); err != nil {
+	if err := appendModelWorkerAttachedEvent(*opts, runner, modelURL, mediator); err != nil {
+		if mediator != nil {
+			_ = releaseHostWorkerMediator(opts.StateDir, opts.Name, hostworker.DefaultCapability)
+		}
+		_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
 		return nil, err
 	}
 	stateDir, modelRef, holder, backend := opts.StateDir, rec.ModelRef, opts.Name, opts.Backend
 	return func() {
+		if mediator != nil {
+			_ = releaseHostWorkerMediator(stateDir, holder, hostworker.DefaultCapability)
+		}
 		_ = modelrunner.Release(stateDir, modelRef, holder)
 		_ = appendModelWorkerReleasedEvent(stateDir, holder, backend, modelRef)
 	}, nil
 }
 
-func appendModelWorkerAttachedEvent(opts workspaceOptions, runner modelrunner.Record, modelURL string) error {
-	detail := modelWorkerEventDetail("attached", []string{
+func appendModelWorkerAttachedEvent(opts workspaceOptions, runner modelrunner.Record, modelURL string, mediator *hostworker.ProcessRecord) error {
+	fields := []string{
 		"model_ref=" + runner.ModelRef,
 		"engine=" + runner.Engine,
 		fmt.Sprintf("pid=%d", runner.PID),
 		"runner_config_digest=" + runner.RunnerConfigDigest,
 		"holder=" + opts.Name,
 		"model_url=" + modelURL,
-	})
+	}
+	if mediator == nil {
+		fields = append(fields, "mediation=direct")
+	} else {
+		fields = append(fields,
+			"mediation=host-worker",
+			"mediation_mode="+string(mediator.Mode),
+			fmt.Sprintf("mediator_pid=%d", mediator.PID),
+			fmt.Sprintf("mediator_port=%d", mediator.Port),
+			"mediator_audit_log="+mediator.AuditLogPath,
+		)
+	}
+	detail := modelWorkerEventDetail("attached", fields)
 	return appendModelWorkerEventIfWorkspaceExists(opts.StateDir, opts.Name, opts.Backend, vmkit.StateStarting, detail)
 }
 
@@ -813,6 +924,58 @@ func latestWorkspaceEventState(stateDir, name string) vmkit.VMState {
 	return events[len(events)-1].State
 }
 
+type modelMediationConfig struct {
+	Enabled       bool
+	Mode          hostworker.Mode
+	PolicyURL     string
+	PolicyTimeout time.Duration
+}
+
+func modelMediationConfigFromEnv() (modelMediationConfig, error) {
+	rawMode := strings.ToLower(strings.TrimSpace(os.Getenv(envModelMediation)))
+	if rawMode == "" || rawMode == "off" || rawMode == "0" || rawMode == "false" || rawMode == "disabled" {
+		return modelMediationConfig{}, nil
+	}
+	cfg := modelMediationConfig{Enabled: true, PolicyTimeout: 2 * time.Second}
+	switch rawMode {
+	case "local", "local-allow", "allow":
+		cfg.Mode = hostworker.ModeLocalAllow
+	case "policy":
+		cfg.Mode = hostworker.ModePolicy
+	default:
+		return modelMediationConfig{}, fmt.Errorf("%s must be off, local-allow, or policy", envModelMediation)
+	}
+	timeout, err := durationEnv(envModelPolicyTimeout, cfg.PolicyTimeout)
+	if err != nil {
+		return modelMediationConfig{}, err
+	}
+	cfg.PolicyTimeout = timeout
+	cfg.PolicyURL = strings.TrimSpace(os.Getenv(envModelPolicyURL))
+	if cfg.Mode == hostworker.ModePolicy && cfg.PolicyURL == "" {
+		return modelMediationConfig{}, fmt.Errorf("%s=policy requires %s", envModelMediation, envModelPolicyURL)
+	}
+	return cfg, nil
+}
+
+func durationEnv(name string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		seconds, parseErr := strconv.ParseFloat(raw, 64)
+		if parseErr != nil {
+			return 0, fmt.Errorf("%s must be a Go duration like 250ms or 2s, or a number of seconds", name)
+		}
+		duration = time.Duration(seconds * float64(time.Second))
+	}
+	if duration <= 0 {
+		return 0, fmt.Errorf("%s must be positive", name)
+	}
+	return duration, nil
+}
+
 type modelRunnerOverrides struct {
 	Command    string
 	Name       string
@@ -873,13 +1036,18 @@ func resolveModelRunner(overrides modelRunnerOverrides) (modelrunner.Engine, mod
 func pendingModelRelease(stateDir, name, backend string) func() {
 	manifest, err := workspace.ReadManifest(stateDir, name)
 	if err != nil {
-		return func() {}
+		return func() {
+			_ = releaseHostWorkerMediator(stateDir, name, hostworker.DefaultCapability)
+		}
 	}
 	modelRef := strings.TrimSpace(manifest.Model)
 	if modelRef == "" {
-		return func() {}
+		return func() {
+			_ = releaseHostWorkerMediator(stateDir, name, hostworker.DefaultCapability)
+		}
 	}
 	return func() {
+		_ = releaseHostWorkerMediator(stateDir, name, hostworker.DefaultCapability)
 		_ = modelrunner.Release(stateDir, modelRef, name)
 		_ = appendModelWorkerReleasedEvent(stateDir, name, backend, modelRef)
 	}
