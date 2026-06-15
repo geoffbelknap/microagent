@@ -37,6 +37,8 @@
 #   MICROAGENT_HOST_WORKER_PROBE_HOST_BASELINE
 #                                           before or bracket (default: bracket)
 #   MICROAGENT_HOST_WORKER_PROBE_WORKSPACES guest workspace count (default: 1)
+#   MICROAGENT_HOST_WORKER_PROBE_KEEP_FAILED
+#                                           preserve failed workspaces for inspection: 0/1 (default: 0)
 #   MICROAGENT_HOST_WORKER_PROBE_CHAT_PROFILE
 #                                           tiny or sustained (default: tiny)
 #   MICROAGENT_HOST_WORKER_PROBE_CHAT_TOKENS
@@ -83,6 +85,7 @@ WARMUPS="${MICROAGENT_HOST_WORKER_PROBE_WARMUPS:-1}"
 CONCURRENCY="${MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY:-1}"
 HOST_BASELINE="${MICROAGENT_HOST_WORKER_PROBE_HOST_BASELINE:-bracket}"
 WORKSPACE_COUNT="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACES:-1}"
+KEEP_FAILED="${MICROAGENT_HOST_WORKER_PROBE_KEEP_FAILED:-0}"
 CHAT_PROFILE="${MICROAGENT_HOST_WORKER_PROBE_CHAT_PROFILE:-tiny}"
 CHAT_TOKENS="${MICROAGENT_HOST_WORKER_PROBE_CHAT_TOKENS:-16}"
 STREAM="${MICROAGENT_HOST_WORKER_PROBE_STREAM:-0}"
@@ -164,10 +167,14 @@ cleanup() {
   stop_runner_telemetry
   cleanup_gpu_telemetry_files
   cleanup_runner_telemetry_files
-  for workspace in "${WORKSPACE_NAMES[@]}"; do
-    "$CLI" kill "$workspace" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
-    "$CLI" delete "$workspace" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
-  done
+  if [ "$status" -ne 0 ] && [ "$KEEP_FAILED" -eq 1 ]; then
+    echo "microagent-host-worker-probe: preserving failed workspace state: ${WORKSPACE_NAMES[*]}" >&2
+  else
+    for workspace in "${WORKSPACE_NAMES[@]}"; do
+      "$CLI" kill "$workspace" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
+      "$CLI" delete "$workspace" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
+    done
+  fi
   if [ "$STARTED_RUNNER" -eq 1 ]; then
     "$CLI" model stop "$MODEL_REF" --state-dir "$STATE_DIR" >/dev/null 2>&1
   fi
@@ -1712,6 +1719,17 @@ case "$HOST_BASELINE" in
     ;;
   *)
     fail "MICROAGENT_HOST_WORKER_PROBE_HOST_BASELINE must be before or bracket"
+    ;;
+esac
+case "$KEEP_FAILED" in
+  1|true|TRUE|yes|YES)
+    KEEP_FAILED=1
+    ;;
+  0|false|FALSE|no|NO)
+    KEEP_FAILED=0
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_PROBE_KEEP_FAILED must be 0/1, true/false, or yes/no"
     ;;
 esac
 CONCURRENCY_SPACES="$(printf '%s' "$CONCURRENCY" | tr ',' ' ')"
