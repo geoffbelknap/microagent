@@ -160,4 +160,6 @@ done
 echo "microagent-host-worker-slot-sweep: reports written under $OUT_DIR"
 "$ROOT/scripts/dev/microagent-host-worker-report-summary.py" "${reports[@]}" >"$OUT_DIR/summary.tsv"
 cat "$OUT_DIR/summary.tsv"
+"$ROOT/scripts/dev/microagent-host-worker-report-summary.py" --pressure "${reports[@]}" >"$OUT_DIR/pressure.tsv"
+cat "$OUT_DIR/pressure.tsv"
 echo "PASS microagent-host-worker-slot-sweep"

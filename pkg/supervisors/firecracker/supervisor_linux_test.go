@@ -1968,6 +1968,35 @@ func TestEnsureBindableManagementPortsFallsBackWhenHostPortUnavailable(t *testin
 	}
 }
 
+func TestMoveManagementHostPortsPreservesGuestPorts(t *testing.T) {
+	cfg := &vmkit.Config{ShellPort: 24279, ExecPort: 25279}
+	if !moveManagementHostPorts(cfg) {
+		t.Fatal("moveManagementHostPorts = false, want changed")
+	}
+	if cfg.ShellPort == 24279 || cfg.ShellPort == 0 {
+		t.Fatalf("shell host port = %d, want reassigned", cfg.ShellPort)
+	}
+	if cfg.ExecPort == 25279 || cfg.ExecPort == 0 {
+		t.Fatalf("exec host port = %d, want reassigned", cfg.ExecPort)
+	}
+	if cfg.ShellPort == cfg.ExecPort {
+		t.Fatalf("shell and exec host ports both assigned %d", cfg.ShellPort)
+	}
+	if cfg.GuestShellPort != 24279 {
+		t.Fatalf("guest shell port = %d, want original 24279", cfg.GuestShellPort)
+	}
+	if cfg.GuestExecPort != 25279 {
+		t.Fatalf("guest exec port = %d, want original 25279", cfg.GuestExecPort)
+	}
+	for _, port := range []uint16{cfg.ShellPort, cfg.ExecPort} {
+		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port))))
+		if err != nil {
+			t.Fatalf("reassigned host port %d is not bindable: %v", port, err)
+		}
+		_ = listener.Close()
+	}
+}
+
 func TestFirecrackerBootArgsModelForward(t *testing.T) {
 	args := firecrackerBootArgs(&vmkit.Config{ModelGuestPort: 11434, ModelVsockPort: 62100})
 	if !strings.Contains(args, "microagent_model_fwd=11434:62100") {

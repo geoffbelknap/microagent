@@ -524,7 +524,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 	}
 	if detached && needsPortForwarder(req.Config) {
-		pid, err := startReadyPortForwarderProcess(ctx, opts, *runtimeReq.Config)
+		pid, err := startReadyPortForwarderProcessWithManagementPortRetry(ctx, opts, runtimeReq.Config, func() error {
+			return writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, vsockListenerPID, networkDevices, firewallRules, "")
+		})
 		if err != nil {
 			if vsockListenerPID != 0 {
 				_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
@@ -1007,7 +1009,9 @@ func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, erro
 		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 	}
 	if needsPortForwarder(req.Config) {
-		pid, err := startReadyPortForwarderProcess(context.Background(), opts, *runtimeReq.Config)
+		pid, err := startReadyPortForwarderProcessWithManagementPortRetry(context.Background(), opts, runtimeReq.Config, func() error {
+			return writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, "")
+		})
 		if err != nil {
 			_ = writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, err.Error())
 			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
@@ -1017,6 +1021,7 @@ func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, erro
 			_ = signalProcessGroup(pid, syscall.SIGTERM)
 			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 		}
+		state.Config = *runtimeReq.Config
 	}
 	return responseFromRuntimeState(opts, state), nil
 }
@@ -2042,6 +2047,79 @@ func startReadyPortForwarderProcess(ctx context.Context, opts Options, config vm
 		return 0, fmt.Errorf("start port forwarder: %w; see %s", err, portForwarderLogPath(opts))
 	}
 	return pid, nil
+}
+
+func startReadyPortForwarderProcessWithManagementPortRetry(ctx context.Context, opts Options, config *vmkit.Config, persistRuntimeConfig func() error) (int, error) {
+	if config == nil {
+		return 0, fmt.Errorf("start port forwarder: missing runtime config")
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		pid, err := startReadyPortForwarderProcess(ctx, opts, *config)
+		if err == nil {
+			return pid, nil
+		}
+		lastErr = err
+		if attempt == 2 || !moveManagementHostPorts(config) {
+			break
+		}
+		if persistRuntimeConfig != nil {
+			if err := persistRuntimeConfig(); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return 0, lastErr
+}
+
+func moveManagementHostPorts(config *vmkit.Config) bool {
+	if config == nil {
+		return false
+	}
+	excluded := map[uint16]bool{}
+	if config.ShellPort != 0 {
+		excluded[config.ShellPort] = true
+	}
+	if config.ExecPort != 0 {
+		excluded[config.ExecPort] = true
+	}
+	changed := false
+	if config.ShellPort != 0 {
+		if port, ok := replacementHostPort(excluded); ok {
+			if config.GuestShellPort == 0 {
+				config.GuestShellPort = config.ShellPort
+			}
+			config.ShellPort = port
+			excluded[port] = true
+			changed = true
+		}
+	}
+	if config.ExecPort != 0 {
+		if port, ok := replacementHostPort(excluded); ok {
+			if config.GuestExecPort == 0 {
+				config.GuestExecPort = config.ExecPort
+			}
+			config.ExecPort = port
+			excluded[port] = true
+			changed = true
+		}
+	}
+	return changed
+}
+
+func replacementHostPort(excluded map[uint16]bool) (uint16, bool) {
+	for i := 0; i < 20; i++ {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return 0, false
+		}
+		port := uint16(listener.Addr().(*net.TCPAddr).Port)
+		_ = listener.Close()
+		if port != 0 && !excluded[port] {
+			return port, true
+		}
+	}
+	return 0, false
 }
 
 func waitForPortForwarderReady(ctx context.Context, pid int, config vmkit.Config, timeout time.Duration) error {

@@ -2342,11 +2342,41 @@ for level in report["concurrency_levels"]:
 for level, item in (report.get("pressure", {}).get("levels", {}) or {}).items():
     classification = item.get("classification") or {}
     effective = item.get("effective_concurrency")
+    runner = item.get("runner") or {}
+    gpu = item.get("gpu") or {}
+    latency = item.get("latency") or {}
+    active = runner.get("active_requests") or {}
+    slots = runner.get("slot_count") or {}
+    waiting = runner.get("waiting_requests") or {}
+    deferred = runner.get("deferred_requests") or {}
+    util = (gpu.get("gpu_util_pct") or {}) if isinstance(gpu, dict) else {}
+    power = (gpu.get("power_draw_w") or {}) if isinstance(gpu, dict) else {}
+    chat = latency.get("chat") or {}
+    stream = latency.get("stream") or {}
+
+    def fmt(value, suffix=""):
+        if value is None:
+            return "na"
+        if isinstance(value, float):
+            text = f"{value:.3f}".rstrip("0").rstrip(".")
+        else:
+            text = str(value)
+        return f"{text}{suffix}"
+
     print(
         "microagent-host-worker-probe: "
         f"pressure c={level} total_c={effective} "
         f"runner={classification.get('runner')} "
+        f"active_slots={fmt(active.get('median'))}/{fmt(slots.get('median'))} "
+        f"active_frac={fmt(runner.get('active_slot_fraction_median'))} "
+        f"waiting_max={fmt(waiting.get('max'))} "
+        f"deferred_max={fmt(deferred.get('max'))} "
         f"gpu={classification.get('gpu')} "
+        f"gpu_util={fmt(util.get('median'), '%')}/{fmt(util.get('p95'), '%')}/{fmt(util.get('max'), '%')} "
+        f"gpu_power={fmt(power.get('median'), 'W')}/{fmt(power.get('p95'), 'W')} "
+        f"chat_delta={fmt(chat.get('guest_to_host_delta_ms'), 'ms')} "
+        f"stream_delta={fmt(stream.get('guest_to_host_delta_ms'), 'ms')} "
+        f"stream_ttfb_delta={fmt(stream.get('guest_to_host_ttfb_delta_ms'), 'ms')} "
         f"summary={classification.get('summary')}"
     )
 PY

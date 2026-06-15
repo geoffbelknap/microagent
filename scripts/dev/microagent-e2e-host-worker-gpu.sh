@@ -200,6 +200,10 @@ run_case "acceptance-ws2-c2" 2 2
   "$OUT_DIR/acceptance-ws1-c1.json" \
   "$OUT_DIR/acceptance-ws2-c2.json" >"$OUT_DIR/summary.tsv"
 cat "$OUT_DIR/summary.tsv"
+"$ROOT/scripts/dev/microagent-host-worker-report-summary.py" --pressure \
+  "$OUT_DIR/acceptance-ws1-c1.json" \
+  "$OUT_DIR/acceptance-ws2-c2.json" >"$OUT_DIR/pressure.tsv"
+cat "$OUT_DIR/pressure.tsv"
 
 python3 - "$MAX_CHAT_DELTA_MS" "$MAX_STREAM_DELTA_MS" "$OUT_DIR/acceptance-ws1-c1.json" "$OUT_DIR/acceptance-ws2-c2.json" <<'PY'
 import json
