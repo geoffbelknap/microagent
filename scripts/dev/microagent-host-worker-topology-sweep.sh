@@ -10,6 +10,7 @@
 #   MICROAGENT_HOST_WORKER_URL                  OpenAI-compatible runner base URL
 #
 # Optional:
+#   MICROAGENT_FIRECRACKER                    Firecracker binary for Linux runs
 #   MICROAGENT_HOST_WORKER_TOPOLOGY_WORKSPACES  comma-separated workspace counts (default: 1,2)
 #   MICROAGENT_HOST_WORKER_TOPOLOGY_OUT_DIR     report directory (default: /tmp/microagent-host-worker-topology-sweep-$$)
 #   MICROAGENT_HOST_WORKER_TOPOLOGY_LABEL       report label prefix (default: topology)
@@ -28,10 +29,17 @@ WORKSPACES="${MICROAGENT_HOST_WORKER_TOPOLOGY_WORKSPACES:-1,2}"
 OUT_DIR="${MICROAGENT_HOST_WORKER_TOPOLOGY_OUT_DIR:-/tmp/microagent-host-worker-topology-sweep-$$}"
 LABEL="${MICROAGENT_HOST_WORKER_TOPOLOGY_LABEL:-topology}"
 
+skip() { e2e_skip "microagent-host-worker-topology-sweep: $1"; }
 fail() { echo "FAIL microagent-host-worker-topology-sweep: $1" >&2; exit 1; }
 
 if [ -z "$HOST_WORKER_URL" ]; then
   fail "MICROAGENT_HOST_WORKER_URL must point at an OpenAI-compatible host worker"
+fi
+if [ -z "${MICROAGENT_FIRECRACKER:-}" ]; then
+  MICROAGENT_FIRECRACKER="$(e2e_resolve_firecracker)" || skip "Firecracker binary not resolved"
+  export MICROAGENT_FIRECRACKER
+elif [ ! -x "${MICROAGENT_FIRECRACKER:-/nonexistent}" ]; then
+  skip "MICROAGENT_FIRECRACKER not executable: $MICROAGENT_FIRECRACKER"
 fi
 
 WORKSPACE_SPACES="$(printf '%s' "$WORKSPACES" | tr ',' ' ')"

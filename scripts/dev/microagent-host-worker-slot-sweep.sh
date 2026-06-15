@@ -110,6 +110,12 @@ fi
 if [ -z "${MICROAGENT_LLAMA_SERVER:-}" ] || [ ! -x "${MICROAGENT_LLAMA_SERVER:-/nonexistent}" ]; then
   skip "MICROAGENT_LLAMA_SERVER not set/executable"
 fi
+if [ -z "${MICROAGENT_FIRECRACKER:-}" ]; then
+  MICROAGENT_FIRECRACKER="$(e2e_resolve_firecracker)" || skip "Firecracker binary not resolved"
+  export MICROAGENT_FIRECRACKER
+elif [ ! -x "${MICROAGENT_FIRECRACKER:-/nonexistent}" ]; then
+  skip "MICROAGENT_FIRECRACKER not executable: $MICROAGENT_FIRECRACKER"
+fi
 
 SLOTS_SPACES="$(printf '%s' "$SLOTS" | tr ',' ' ')"
 if [ -z "$(printf '%s' "$SLOTS_SPACES" | tr -d '[:space:]')" ]; then
