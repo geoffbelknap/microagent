@@ -227,6 +227,8 @@ Two honest caveats before you start:
   NVIDIA CUDA, `scripts/dev/build-llama-cuda.sh --llama-dir ../llama.cpp`
   reproduces the CUDA-enabled dev build and prints the matching
   `MICROAGENT_LLAMA_SERVER` and `MICROAGENT_MODEL_RUNNER_ARGS` exports.
+  microagent defaults llama.cpp to CPU execution; pass the printed runner args or
+  equivalent `--runner-arg` flags to opt into GPU offload.
 
 Pull the model - a 2.5 GB download (`create` and `start` auto-pull a missing
 blob, but pulling first makes the wait visible):

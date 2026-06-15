@@ -30,10 +30,32 @@ func (l LlamaCPP) Name() string { return "llama.cpp" }
 
 func (l LlamaCPP) Argv(modelPath, host string, port int) []string {
 	argv := []string{l.BinPath, "--model", modelPath, "--host", host, "--port", strconv.Itoa(port)}
+	if !llamaArgsOptIntoGPU(l.ExtraArgs) {
+		argv = append(argv, "--device", "none", "--gpu-layers", "0")
+	}
 	return append(argv, l.ExtraArgs...)
 }
 
 func (l LlamaCPP) HealthPath() string { return "/health" }
+
+func llamaArgsOptIntoGPU(args []string) bool {
+	for _, arg := range args {
+		flag := arg
+		if before, _, ok := strings.Cut(arg, "="); ok {
+			flag = before
+		}
+		switch flag {
+		case "-dev", "--device",
+			"-ngl", "--gpu-layers", "--n-gpu-layers",
+			"-sm", "--split-mode",
+			"-ts", "--tensor-split",
+			"-mg", "--main-gpu",
+			"--gpu":
+			return true
+		}
+	}
+	return false
+}
 
 // CommandEngine runs an operator-supplied command template. The template is
 // argv-shaped, not shell-expanded, and supports {model}, {host}, {port}, and

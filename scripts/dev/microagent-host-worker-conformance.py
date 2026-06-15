@@ -383,10 +383,6 @@ def infer_runner_engine(
         return "vllm"
     if "llamacpp" in text or "llama" in text:
         return "llama.cpp"
-    if "sglang" in text or "sgl_" in text:
-        return "sglang"
-    if "tensorrt" in text or "trtllm" in text:
-        return "tensorrt-llm"
     return None
 
 

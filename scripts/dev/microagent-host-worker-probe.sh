@@ -32,7 +32,7 @@
 #   MICROAGENT_HOST_WORKER_RUNNER_VERSION  runner version label
 #   MICROAGENT_HOST_WORKER_TELEMETRY_ADAPTER
 #                                           telemetry adapter override: auto, generic,
-#                                           llama.cpp, vllm, sglang, tensorrt-llm, none
+#                                           llama.cpp, vllm, none
 #   MICROAGENT_HOST_WORKER_PROBE_MODEL_REF HuggingFace GGUF ref
 #   MICROAGENT_HOST_WORKER_PROBE_IMAGE     guest image with curl
 #   MICROAGENT_HOST_WORKER_PROBE_STATE_DIR state dir (default: ~/.microagent)
@@ -709,10 +709,6 @@ def detect_adapter(rows, source_set):
         return "llama.cpp"
     if "vllm" in text:
         return "vllm"
-    if "sglang" in text or "sgl_" in text:
-        return "sglang"
-    if "tensorrt" in text or "trtllm" in text:
-        return "tensorrt-llm"
     if rows:
         return "generic"
     return "none"
@@ -959,6 +955,12 @@ def summary_sentence(runner_state, gpu_state):
         return "runner and GPU both showed high pressure"
     if runner_state == "slots_available" and gpu_state in {"low", "moderate"}:
         return "no clear runner or GPU saturation in sampled telemetry"
+    if runner_state == "active_observed" and gpu_state in {"low", "moderate"}:
+        return "runner had active work but no queued work or clear GPU saturation"
+    if runner_state == "active_observed" and gpu_state == "high":
+        return "runner had active work while GPU telemetry showed high pressure"
+    if runner_state == "active_observed":
+        return "runner had active work but pressure source is incomplete"
     if runner_state == "unavailable" and gpu_state == "unavailable":
         return "pressure telemetry unavailable"
     return "pressure source is inconclusive from sampled telemetry"
@@ -2086,10 +2088,10 @@ case "$WORKER_PROTOCOL" in
     ;;
 esac
 case "$TELEMETRY_ADAPTER" in
-  auto|generic|llama.cpp|vllm|sglang|tensorrt-llm|none)
+  auto|generic|llama.cpp|vllm|none)
     ;;
   *)
-    fail "MICROAGENT_HOST_WORKER_TELEMETRY_ADAPTER must be auto, generic, llama.cpp, vllm, sglang, tensorrt-llm, or none"
+    fail "MICROAGENT_HOST_WORKER_TELEMETRY_ADAPTER must be auto, generic, llama.cpp, vllm, or none"
     ;;
 esac
 case "$HOST_BASELINE" in
@@ -2718,7 +2720,7 @@ for level, item in (report.get("pressure", {}).get("levels", {}) or {}).items():
         "microagent-host-worker-probe: "
         f"pressure c={level} total_c={effective} "
         f"runner={classification.get('runner')} "
-        f"active_slots={fmt(active.get('median'))}/{fmt(slots.get('median'))} "
+        f"active={fmt(active.get('median'))} slots={fmt(slots.get('median'))} "
         f"active_frac={fmt(runner.get('active_slot_fraction_median'))} "
         f"waiting_max={fmt(waiting.get('max'))} "
         f"deferred_max={fmt(deferred.get('max'))} "

@@ -28,6 +28,24 @@ func TestLlamaCPPEngine(t *testing.T) {
 	}
 }
 
+func TestLlamaCPPEngineDefaultsToCPU(t *testing.T) {
+	e := LlamaCPP{BinPath: "/usr/bin/llama-server"}
+	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--device", "none", "--gpu-layers", "0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestLlamaCPPEngineGPUOptInSkipsCPUDefault(t *testing.T) {
+	e := LlamaCPP{BinPath: "/usr/bin/llama-server", ExtraArgs: []string{"--gpu-layers=all"}}
+	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--gpu-layers=all"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
 func TestCommandEngine(t *testing.T) {
 	e := CommandEngine{
 		RunnerName: "runner-x",

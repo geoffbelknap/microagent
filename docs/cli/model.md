@@ -127,6 +127,12 @@ export MICROAGENT_LLAMA_SERVER=/tmp/llama.cpp-cuda13-ninja-build/bin/llama-serve
 export MICROAGENT_MODEL_RUNNER_ARGS='["-ngl","all","--no-ui"]'
 ```
 
+microagent starts the default llama.cpp runner with `--device none
+--gpu-layers 0` unless you explicitly pass GPU-related runner args. Pointing
+`MICROAGENT_LLAMA_SERVER` at a CUDA-enabled binary is therefore not enough to opt
+into GPU use; pass args such as `["-ngl","all"]` or `--runner-arg -ngl
+--runner-arg all`.
+
 By default the helper downloads pinned CUDA 13.3 Ubuntu 24.04 debs, verifies
 their SHA256 checksums, extracts them under `/tmp/microagent-cuda13-root`
 without installing system packages, builds llama.cpp out of tree with Ninja,
