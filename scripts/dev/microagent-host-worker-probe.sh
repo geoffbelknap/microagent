@@ -37,6 +37,13 @@
 #   MICROAGENT_HOST_WORKER_PROBE_STREAM     measure streaming chat too: 0/1 (default: 0)
 #   MICROAGENT_HOST_WORKER_PROBE_STREAM_TOKENS
 #                                           max tokens for streaming chat (default: 128)
+#   MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY
+#                                           off, auto, or required (default: auto)
+#   MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY_INTERVAL
+#                                           sampling interval in seconds (default: 0.5)
+#   MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY_PATH
+#                                           path to write GPU telemetry CSV
+#   MICROAGENT_HOST_WORKER_PROBE_NVIDIA_SMI nvidia-smi path override
 #   MICROAGENT_HOST_WORKER_PROBE_WORKSPACE workspace name
 #   MICROAGENT_HOST_WORKER_PROBE_REPORT    path to write final JSON report
 set -euo pipefail
@@ -57,9 +64,18 @@ CHAT_PROFILE="${MICROAGENT_HOST_WORKER_PROBE_CHAT_PROFILE:-tiny}"
 CHAT_TOKENS="${MICROAGENT_HOST_WORKER_PROBE_CHAT_TOKENS:-16}"
 STREAM="${MICROAGENT_HOST_WORKER_PROBE_STREAM:-0}"
 STREAM_TOKENS="${MICROAGENT_HOST_WORKER_PROBE_STREAM_TOKENS:-128}"
+GPU_TELEMETRY="${MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY:-auto}"
+GPU_TELEMETRY_INTERVAL="${MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY_INTERVAL:-0.5}"
+GPU_TELEMETRY_PATH="${MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY_PATH:-}"
+NVIDIA_SMI="${MICROAGENT_HOST_WORKER_PROBE_NVIDIA_SMI:-}"
 WS_BASE="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACE:-host-worker-probe-$$}"
 REPORT_PATH="${MICROAGENT_HOST_WORKER_PROBE_REPORT:-}"
 STARTED_RUNNER=0
+GPU_TELEMETRY_ACTIVE=0
+GPU_TELEMETRY_PID=""
+GPU_TELEMETRY_PHASE_FILE=""
+GPU_TELEMETRY_TMPDIR=""
+GPU_TELEMETRY_PATH_PERSISTED=0
 CREATE_FLAGS=()
 START_FLAGS=()
 CTRL_FLAGS=()
@@ -68,9 +84,30 @@ WORKSPACE_NAMES=("$WS_BASE")
 skip() { e2e_skip "microagent-host-worker-probe: $1"; }
 fail() { echo "FAIL microagent-host-worker-probe: $1" >&2; exit 1; }
 
+stop_gpu_telemetry() {
+  if [ -n "$GPU_TELEMETRY_PID" ]; then
+    kill "$GPU_TELEMETRY_PID" >/dev/null 2>&1 || true
+    wait "$GPU_TELEMETRY_PID" >/dev/null 2>&1 || true
+    GPU_TELEMETRY_PID=""
+  fi
+}
+
+cleanup_gpu_telemetry_files() {
+  if [ -n "$GPU_TELEMETRY_PHASE_FILE" ]; then
+    rm -f "$GPU_TELEMETRY_PHASE_FILE"
+    GPU_TELEMETRY_PHASE_FILE=""
+  fi
+  if [ -n "$GPU_TELEMETRY_TMPDIR" ]; then
+    rm -rf "$GPU_TELEMETRY_TMPDIR"
+    GPU_TELEMETRY_TMPDIR=""
+  fi
+}
+
 cleanup() {
   local status=$?
   set +e
+  stop_gpu_telemetry
+  cleanup_gpu_telemetry_files
   for workspace in "${WORKSPACE_NAMES[@]}"; do
     "$CLI" kill "$workspace" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
     "$CLI" delete "$workspace" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
@@ -94,6 +131,172 @@ build_workspace_names() {
     WORKSPACE_NAMES+=("$WS_BASE-$i")
     i=$((i + 1))
   done
+}
+
+resolve_nvidia_smi() {
+  if [ -n "$NVIDIA_SMI" ]; then
+    return
+  fi
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    NVIDIA_SMI="$(command -v nvidia-smi)"
+    return
+  fi
+  if [ -x /usr/lib/wsl/lib/nvidia-smi ]; then
+    NVIDIA_SMI=/usr/lib/wsl/lib/nvidia-smi
+  fi
+}
+
+gpu_telemetry_query_fields() {
+  printf '%s\n' 'timestamp,index,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,pstate,clocks.current.sm,clocks.current.memory,temperature.gpu'
+}
+
+gpu_telemetry_available() {
+  resolve_nvidia_smi
+  if [ -z "$NVIDIA_SMI" ] || [ ! -x "$NVIDIA_SMI" ]; then
+    return 1
+  fi
+  "$NVIDIA_SMI" --query-gpu="$(gpu_telemetry_query_fields)" --format=csv,noheader,nounits >/dev/null 2>&1
+}
+
+set_telemetry_phase() {
+  local phase="$1"
+  if [ "$GPU_TELEMETRY_ACTIVE" -eq 1 ] && [ -n "$GPU_TELEMETRY_PHASE_FILE" ]; then
+    printf '%s\n' "$phase" >"$GPU_TELEMETRY_PHASE_FILE"
+  fi
+}
+
+start_gpu_telemetry() {
+  case "$GPU_TELEMETRY" in
+    off)
+      GPU_TELEMETRY_ACTIVE=0
+      return
+      ;;
+    auto|required)
+      ;;
+    *)
+      fail "MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY must be off, auto, or required"
+      ;;
+  esac
+
+  if ! gpu_telemetry_available; then
+    if [ "$GPU_TELEMETRY" = "required" ]; then
+      fail "GPU telemetry required but nvidia-smi query is unavailable"
+    fi
+    echo "microagent-host-worker-probe: GPU telemetry unavailable; continuing without it"
+    GPU_TELEMETRY_ACTIVE=0
+    return
+  fi
+
+  if [ -n "$GPU_TELEMETRY_PATH" ]; then
+    GPU_TELEMETRY_PATH_PERSISTED=1
+  elif [ -n "$REPORT_PATH" ]; then
+    case "$REPORT_PATH" in
+      *.json) GPU_TELEMETRY_PATH="${REPORT_PATH%.json}.gpu.csv" ;;
+      *) GPU_TELEMETRY_PATH="$REPORT_PATH.gpu.csv" ;;
+    esac
+    GPU_TELEMETRY_PATH_PERSISTED=1
+  else
+    GPU_TELEMETRY_TMPDIR="$(mktemp -d)"
+    GPU_TELEMETRY_PATH="$GPU_TELEMETRY_TMPDIR/gpu.csv"
+    GPU_TELEMETRY_PATH_PERSISTED=0
+  fi
+  mkdir -p "$(dirname "$GPU_TELEMETRY_PATH")"
+  GPU_TELEMETRY_PHASE_FILE="$(mktemp)"
+  printf '%s\n' startup >"$GPU_TELEMETRY_PHASE_FILE"
+  printf '%s\n' 'host_epoch,phase,nvidia_timestamp,gpu_index,gpu_util_pct,memory_util_pct,memory_used_mib,memory_total_mib,power_draw_w,pstate,sm_clock_mhz,memory_clock_mhz,temperature_c' >"$GPU_TELEMETRY_PATH"
+  GPU_TELEMETRY_ACTIVE=1
+
+  (
+    while :; do
+      phase="$(cat "$GPU_TELEMETRY_PHASE_FILE" 2>/dev/null || printf '%s' unknown)"
+      sample="$("$NVIDIA_SMI" --query-gpu="$(gpu_telemetry_query_fields)" --format=csv,noheader,nounits 2>/dev/null || true)"
+      if [ -n "$sample" ]; then
+        while IFS= read -r sample_line; do
+          [ -n "$sample_line" ] || continue
+          printf '%s,%s,%s\n' "$(date +%s.%N)" "$phase" "$sample_line" >>"$GPU_TELEMETRY_PATH"
+        done <<EOF
+$sample
+EOF
+      fi
+      sleep "$GPU_TELEMETRY_INTERVAL"
+    done
+  ) &
+  GPU_TELEMETRY_PID="$!"
+  echo "microagent-host-worker-probe: GPU telemetry writing to $GPU_TELEMETRY_PATH"
+}
+
+add_gpu_telemetry_to_report() {
+  local report_json="$1"
+  python3 - "$report_json" "$GPU_TELEMETRY_ACTIVE" "$GPU_TELEMETRY_PATH" "$GPU_TELEMETRY_PATH_PERSISTED" <<'PY'
+import csv
+import json
+import statistics
+import sys
+from pathlib import Path
+
+report = json.loads(sys.argv[1])
+active = sys.argv[2] == "1"
+path = Path(sys.argv[3]) if sys.argv[3] else None
+path_persisted = sys.argv[4] == "1"
+telemetry = {
+    "enabled": active,
+    "path": str(path) if path and path_persisted else None,
+    "sample_count": 0,
+    "phases": {},
+}
+
+def number(value):
+    text = str(value).strip()
+    if not text or text.upper() in {"N/A", "[NOT SUPPORTED]", "NOT SUPPORTED"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+def summarize(values):
+    clean = sorted(value for value in values if value is not None)
+    if not clean:
+        return None
+    p95_index = min(len(clean) - 1, max(0, int(len(clean) * 0.95 + 0.999999) - 1))
+    return {
+        "min": clean[0],
+        "median": round(statistics.median(clean), 3),
+        "mean": round(statistics.fmean(clean), 3),
+        "p95": clean[p95_index],
+        "max": clean[-1],
+    }
+
+if path and path.exists():
+    rows = list(csv.DictReader(path.open()))
+    telemetry["sample_count"] = len(rows)
+    telemetry["gpu_indices"] = sorted({row.get("gpu_index", "").strip() for row in rows if row.get("gpu_index", "").strip()})
+    fields = {
+        "gpu_util_pct": "gpu_util_pct",
+        "memory_util_pct": "memory_util_pct",
+        "memory_used_mib": "memory_used_mib",
+        "power_draw_w": "power_draw_w",
+        "sm_clock_mhz": "sm_clock_mhz",
+        "memory_clock_mhz": "memory_clock_mhz",
+        "temperature_c": "temperature_c",
+    }
+    phases = {}
+    for row in rows:
+        phases.setdefault(row.get("phase") or "unknown", []).append(row)
+    for phase, phase_rows in phases.items():
+        phase_summary = {"sample_count": len(phase_rows)}
+        for source, dest in fields.items():
+            stats = summarize(number(row.get(source)) for row in phase_rows)
+            if stats is not None:
+                phase_summary[dest] = stats
+        pstates = sorted({row.get("pstate", "").strip() for row in phase_rows if row.get("pstate", "").strip()})
+        if pstates:
+            phase_summary["pstates"] = pstates
+        telemetry["phases"][phase] = phase_summary
+
+report["telemetry"] = {"gpu": telemetry}
+print(json.dumps(report, indent=2, sort_keys=True))
+PY
 }
 
 json_get() {
@@ -558,6 +761,13 @@ case "$STREAM" in
     fail "MICROAGENT_HOST_WORKER_PROBE_STREAM must be 0/1, true/false, or yes/no"
     ;;
 esac
+case "$GPU_TELEMETRY" in
+  off|auto|required)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY must be off, auto, or required"
+    ;;
+esac
 CONCURRENCY_SPACES="$(printf '%s' "$CONCURRENCY" | tr ',' ' ')"
 if [ -z "$(printf '%s' "$CONCURRENCY_SPACES" | tr -d '[:space:]')" ]; then
   fail "MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY must include at least one positive integer"
@@ -590,7 +800,7 @@ case "$BACKEND" in
     ;;
 esac
 
-echo "microagent-host-worker-probe: backend=$BACKEND model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS"
+echo "microagent-host-worker-probe: backend=$BACKEND model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY"
 echo "microagent-host-worker-probe: pulling or refreshing model record"
 PULL_JSON="$("$CLI" --json model pull "$MODEL_REF" --state-dir "$STATE_DIR")" || fail "model pull failed"
 CANONICAL="$(printf '%s' "$PULL_JSON" | json_get model_ref)"
@@ -607,9 +817,12 @@ RUNNER_HOST="$(printf '%s' "$RUNNER_JSON" | json_get host)"
 RUNNER_PORT="$(printf '%s' "$RUNNER_JSON" | json_get port)"
 RUNNER_BASE_URL="http://$RUNNER_HOST:$RUNNER_PORT/v1"
 
+start_gpu_telemetry
+set_telemetry_phase host-direct
 echo "microagent-host-worker-probe: measuring direct host calls at $RUNNER_BASE_URL"
 HOST_JSON="$(host_benchmark "$RUNNER_BASE_URL")" || fail "direct host benchmark failed"
 
+set_telemetry_phase workspace-start
 for workspace in "${WORKSPACE_NAMES[@]}"; do
   "$CLI" delete "$workspace" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
 done
@@ -844,6 +1057,7 @@ run_guest_benchmarks() {
 
   tmp="$(mktemp -d)"
   for level in $CONCURRENCY_SPACES; do
+    set_telemetry_phase "guest:c=$level"
     echo "microagent-host-worker-probe: measuring in-guest calls at c=$level across $WORKSPACE_COUNT workspace(s)" >&2
     pids=()
     idx=1
@@ -927,8 +1141,11 @@ PY
 }
 
 GUEST_JSON="$(run_guest_benchmarks)" || fail "guest benchmark failed"
+set_telemetry_phase report
+stop_gpu_telemetry
 
 REPORT_JSON="$(combine_report "$HOST_JSON" "$GUEST_JSON" "$BACKEND" "$CANONICAL" "$RUNNER_JSON")"
+REPORT_JSON="$(add_gpu_telemetry_to_report "$REPORT_JSON")"
 if [ -n "$REPORT_PATH" ]; then
   mkdir -p "$(dirname "$REPORT_PATH")"
   printf '%s\n' "$REPORT_JSON" >"$REPORT_PATH"
