@@ -835,6 +835,29 @@ func TestRunPortForwarderOpensAndClosesExecPort(t *testing.T) {
 	_ = listener.Close()
 }
 
+func TestWaitForPortForwarderReadyRequiresReachableListener(t *testing.T) {
+	port := freeTCPPort(t)
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port)))
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	live := startSleepProcess(t)
+	config := vmkit.Config{ExecPort: port}
+	if err := waitForPortForwarderReady(context.Background(), live.Process.Pid, config, time.Second); err != nil {
+		t.Fatalf("waitForPortForwarderReady: %v", err)
+	}
+}
+
+func TestWaitForPortForwarderReadyReportsExitedProcess(t *testing.T) {
+	config := vmkit.Config{ExecPort: freeTCPPort(t)}
+	err := waitForPortForwarderReady(context.Background(), deadProcessPID(t), config, 100*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "exited before listeners became ready") {
+		t.Fatalf("waitForPortForwarderReady error = %v, want exited process detail", err)
+	}
+}
+
 func TestFirecrackerShellReadinessRequiresLiveShellTarget(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}
@@ -883,6 +906,36 @@ func TestFirecrackerShellReadinessRequiresLiveShellTarget(t *testing.T) {
 	readiness = readinessFromRuntimeState(state)
 	if !readiness.ShellReady.Ready {
 		t.Fatalf("shell readiness = %#v, want ready when shell target is reachable", readiness.ShellReady)
+	}
+}
+
+func TestFirecrackerReadinessReportsDeadPortForwarder(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	if err := os.MkdirAll(filepath.Join(dir, "agent-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(serialInputPath(opts), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := runtimeState{
+		Event: eventFile{
+			Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendFirecracker},
+			State:      vmkit.StateRunning,
+			ObservedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		Config:          vmkit.Config{StateDir: dir, ShellPort: freeTCPPort(t), ExecPort: freeTCPPort(t), SerialInput: true},
+		PortForwardPID:  deadProcessPID(t),
+		SerialInputPath: serialInputPath(opts),
+		SerialLogPath:   serialLogPath(opts),
+		StartedAt:       time.Now().UTC().Format(time.RFC3339),
+	}
+	readiness := readinessFromRuntimeState(state)
+	if readiness.ShellReady.Ready || !strings.Contains(readiness.ShellReady.Detail, "port forwarder process") {
+		t.Fatalf("shell readiness = %#v, want dead port forwarder detail", readiness.ShellReady)
+	}
+	if readiness.ExecReady.Ready || !strings.Contains(readiness.ExecReady.Detail, "port forwarder process") {
+		t.Fatalf("exec readiness = %#v, want dead port forwarder detail", readiness.ExecReady)
 	}
 }
 

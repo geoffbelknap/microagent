@@ -157,7 +157,7 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 					state.VsockListenerPID = vsockListenerPID
 				}
 				if needsPortForwarder(req.Config) && state.PortForwardPID == 0 {
-					portForwardPID, err := startPortForwarderProcess(opts)
+					portForwardPID, err := startReadyPortForwarderProcess(ctx, opts, state.Config)
 					if err != nil {
 						if vsockListenerPID != 0 {
 							_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
