@@ -22,6 +22,7 @@
 #   MICROAGENT_HOST_WORKER_DIAGNOSTIC_WORKSPACE        workspace name
 #   MICROAGENT_HOST_WORKER_DIAGNOSTIC_IMAGE            guest image with curl
 #   MICROAGENT_HOST_WORKER_DIAGNOSTIC_STATE_DIR        state dir (default: ~/.microagent)
+#   MICROAGENT_HOST_WORKER_DIAGNOSTIC_REPEATS          repeat count for all four lanes (default: 1)
 #   MICROAGENT_HOST_WORKER_DIAGNOSTIC_SAMPLES          measured samples per lane/endpoint (default: 3)
 #   MICROAGENT_HOST_WORKER_DIAGNOSTIC_WARMUPS          warmups per lane/endpoint (default: 1)
 #   MICROAGENT_HOST_WORKER_DIAGNOSTIC_CHAT_TOKENS      tiny chat max tokens (default: 16)
@@ -45,6 +46,7 @@ OUT_DIR="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_OUT_DIR:-/tmp/microagent-host-worke
 WORKSPACE="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_WORKSPACE:-host-worker-broker-diagnostic-$$}"
 IMAGE="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_IMAGE:-docker.io/curlimages/curl:latest}"
 STATE_DIR="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_STATE_DIR:-${MICROAGENT_HOST_WORKER_PROBE_STATE_DIR:-$HOME/.microagent}}"
+REPEATS="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_REPEATS:-1}"
 SAMPLES="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_SAMPLES:-3}"
 WARMUPS="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_WARMUPS:-1}"
 CHAT_TOKENS="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_CHAT_TOKENS:-16}"
@@ -384,8 +386,8 @@ measure_endpoint() {
     esac
     if [ "$i" -ge "$MEASURE_WARMUPS" ]; then
       sample_index=$((i - MEASURE_WARMUPS))
-      printf '{"lane":"%s","endpoint":"%s","sample_index":%s,"connect_seconds":%s,"pretransfer_seconds":%s,"ttfb_seconds":%s,"total_seconds":%s,"response_bytes":%s,"status":%s,"chunks":%s,"request_bytes":%s}\n' \
-        "$MEASURE_LANE" "$endpoint" "$sample_index" "$connect" "$pretransfer" "$ttfb" "$total_time" "$response_bytes" "$status" "$chunks" "$request_bytes"
+      printf '{"lane":"%s","endpoint":"%s","repeat_index":%s,"sample_index":%s,"connect_seconds":%s,"pretransfer_seconds":%s,"ttfb_seconds":%s,"total_seconds":%s,"response_bytes":%s,"status":%s,"chunks":%s,"request_bytes":%s}\n' \
+        "$MEASURE_LANE" "$endpoint" "${MEASURE_REPEAT_INDEX:-0}" "$sample_index" "$connect" "$pretransfer" "$ttfb" "$total_time" "$response_bytes" "$status" "$chunks" "$request_bytes"
     fi
     rm -f "$body"
     i=$((i + 1))
@@ -401,7 +403,9 @@ run_host_lane() {
   local lane="$1"
   local base_url="$2"
   local out="$3"
+  local repeat_index="$4"
   MEASURE_LANE="$lane" \
+    MEASURE_REPEAT_INDEX="$repeat_index" \
     MEASURE_BASE_URL="$base_url" \
     MEASURE_PAYLOAD_DIR="$OUT_DIR/payloads" \
     MEASURE_SAMPLES="$SAMPLES" \
@@ -414,8 +418,10 @@ run_guest_lane() {
   local lane="$1"
   local base_url="$2"
   local out="$3"
+  local repeat_index="$4"
   "$CLI" exec "$WORKSPACE" --state-dir "$STATE_DIR" --timeout "$CURL_TIMEOUT"s \
     -env "MEASURE_LANE=$lane" \
+    -env "MEASURE_REPEAT_INDEX=$repeat_index" \
     -env "MEASURE_BASE_URL=$base_url" \
     -env "MEASURE_PAYLOAD_DIR=/tmp/microagent-host-worker-diagnostic" \
     -env "MEASURE_SAMPLES=$SAMPLES" \
@@ -432,6 +438,7 @@ write_summary() {
   python3 - "$raw_jsonl" "$payload_manifest" "$summary_tsv" "$comparison_tsv" <<'PY'
 import csv
 import json
+import math
 import statistics
 import sys
 from pathlib import Path
@@ -444,59 +451,122 @@ rows = [json.loads(line) for line in raw_path.read_text(encoding="utf-8").splitl
 lanes = ("host-direct", "host-broker", "guest-direct", "guest-broker")
 endpoints = ("models", "chat", "stream")
 
-def median(values):
+def clean_numbers(values):
     clean = sorted(float(value) for value in values)
+    return clean
+
+def percentile(values, pct):
+    clean = clean_numbers(values)
     if not clean:
         return None
-    return round(statistics.median(clean), 3)
+    index = max(0, min(len(clean) - 1, math.ceil((pct / 100.0) * len(clean)) - 1))
+    return round(clean[index], 3)
+
+def stats(values):
+    clean = clean_numbers(values)
+    if not clean:
+        return {
+            "median": None,
+            "p95": None,
+            "min": None,
+            "max": None,
+        }
+    return {
+        "median": round(statistics.median(clean), 3),
+        "p95": percentile(clean, 95),
+        "min": round(clean[0], 3),
+        "max": round(clean[-1], 3),
+    }
 
 def ms(row, key):
     return float(row[key]) * 1000
+
+def body_ms(row):
+    return max(0.0, ms(row, "total_seconds") - ms(row, "ttfb_seconds"))
+
+def metric_ms(row, metric):
+    if metric == "total":
+        return ms(row, "total_seconds")
+    if metric == "ttfb":
+        return ms(row, "ttfb_seconds")
+    if metric == "body":
+        return body_ms(row)
+    raise ValueError(metric)
+
+def repeat_count(samples):
+    return len({str(row.get("repeat_index", 0)) for row in samples})
 
 def summarize(lane, endpoint):
     samples = [row for row in rows if row.get("lane") == lane and row.get("endpoint") == endpoint]
     if not samples:
         return None
     payload = payload_manifest.get(endpoint) or {}
+    total = stats(ms(row, "total_seconds") for row in samples)
+    ttfb = stats(ms(row, "ttfb_seconds") for row in samples)
+    connect = stats(ms(row, "connect_seconds") for row in samples)
+    pretransfer = stats(ms(row, "pretransfer_seconds") for row in samples)
+    body = stats(body_ms(row) for row in samples)
     return {
         "lane": lane,
         "endpoint": endpoint,
+        "repeat_count": repeat_count(samples),
         "sample_count": len(samples),
         "request_bytes": samples[0].get("request_bytes"),
         "payload_bytes": payload.get("bytes"),
         "payload_sha256": payload.get("sha256"),
         "status_codes": ",".join(sorted({str(row.get("status")) for row in samples})),
-        "median_ms": median(ms(row, "total_seconds") for row in samples),
-        "ttfb_median_ms": median(ms(row, "ttfb_seconds") for row in samples),
-        "connect_median_ms": median(ms(row, "connect_seconds") for row in samples),
-        "pretransfer_median_ms": median(ms(row, "pretransfer_seconds") for row in samples),
-        "body_read_median_ms": median(max(0.0, ms(row, "total_seconds") - ms(row, "ttfb_seconds")) for row in samples),
-        "response_bytes_median": median(row.get("response_bytes") for row in samples),
-        "chunks_median": median(row.get("chunks") for row in samples),
+        "median_ms": total["median"],
+        "p95_ms": total["p95"],
+        "min_ms": total["min"],
+        "max_ms": total["max"],
+        "ttfb_median_ms": ttfb["median"],
+        "ttfb_p95_ms": ttfb["p95"],
+        "ttfb_min_ms": ttfb["min"],
+        "ttfb_max_ms": ttfb["max"],
+        "connect_median_ms": connect["median"],
+        "connect_p95_ms": connect["p95"],
+        "pretransfer_median_ms": pretransfer["median"],
+        "pretransfer_p95_ms": pretransfer["p95"],
+        "body_read_median_ms": body["median"],
+        "body_read_p95_ms": body["p95"],
+        "body_read_min_ms": body["min"],
+        "body_read_max_ms": body["max"],
+        "response_bytes_median": stats(row.get("response_bytes") for row in samples)["median"],
+        "chunks_median": stats(row.get("chunks") for row in samples)["median"],
     }
 
 summary_rows = []
-summary_map = {}
 for lane in lanes:
     for endpoint in endpoints:
         item = summarize(lane, endpoint)
         if item:
             summary_rows.append(item)
-            summary_map[(lane, endpoint)] = item
 
 summary_fields = (
     "lane",
     "endpoint",
+    "repeat_count",
     "sample_count",
     "request_bytes",
     "payload_bytes",
     "payload_sha256",
     "status_codes",
     "median_ms",
+    "p95_ms",
+    "min_ms",
+    "max_ms",
     "ttfb_median_ms",
+    "ttfb_p95_ms",
+    "ttfb_min_ms",
+    "ttfb_max_ms",
     "connect_median_ms",
+    "connect_p95_ms",
     "pretransfer_median_ms",
+    "pretransfer_p95_ms",
     "body_read_median_ms",
+    "body_read_p95_ms",
+    "body_read_min_ms",
+    "body_read_max_ms",
     "response_bytes_median",
     "chunks_median",
 )
@@ -505,50 +575,129 @@ with summary_path.open("w", encoding="utf-8", newline="") as f:
     writer.writeheader()
     writer.writerows(summary_rows)
 
-def diff(left, right, field):
-    left_item = summary_map.get((left, endpoint))
-    right_item = summary_map.get((right, endpoint))
-    if not left_item or not right_item:
-        return None
-    left_value = left_item.get(field)
-    right_value = right_item.get(field)
-    if left_value is None or right_value is None:
-        return None
-    return round(float(right_value) - float(left_value), 3)
+def sample_key(row):
+    return (str(row.get("repeat_index", 0)), str(row.get("sample_index", 0)))
+
+def paired_diffs(endpoint, left_lane, right_lane, metric):
+    left_samples = {
+        sample_key(row): row
+        for row in rows
+        if row.get("lane") == left_lane and row.get("endpoint") == endpoint
+    }
+    right_samples = {
+        sample_key(row): row
+        for row in rows
+        if row.get("lane") == right_lane and row.get("endpoint") == endpoint
+    }
+    values = []
+    for key in sorted(set(left_samples) & set(right_samples)):
+        values.append(
+            metric_ms(right_samples[key], metric) - metric_ms(left_samples[key], metric)
+        )
+    return values
+
+def add_diff(row, endpoint, field, left_lane, right_lane, metric):
+    values = paired_diffs(endpoint, left_lane, right_lane, metric)
+    item = stats(values)
+    row[field] = item["median"]
+    row[field.replace("_ms", "_p95_ms")] = item["p95"]
+    row[field.replace("_ms", "_min_ms")] = item["min"]
+    row[field.replace("_ms", "_max_ms")] = item["max"]
+    return len(values)
+
+def endpoint_repeat_count(endpoint):
+    return len(
+        {
+            str(row.get("repeat_index", 0))
+            for row in rows
+            if row.get("endpoint") == endpoint
+        }
+    )
+
+diff_specs = (
+    ("host_broker_overhead_ms", "host-direct", "host-broker", "total"),
+    ("guest_broker_overhead_ms", "guest-direct", "guest-broker", "total"),
+    ("direct_bridge_overhead_ms", "host-direct", "guest-direct", "total"),
+    ("broker_bridge_overhead_ms", "host-broker", "guest-broker", "total"),
+    ("host_broker_ttfb_overhead_ms", "host-direct", "host-broker", "ttfb"),
+    ("guest_broker_ttfb_overhead_ms", "guest-direct", "guest-broker", "ttfb"),
+    ("direct_bridge_ttfb_overhead_ms", "host-direct", "guest-direct", "ttfb"),
+    ("broker_bridge_ttfb_overhead_ms", "host-broker", "guest-broker", "ttfb"),
+    ("host_broker_body_overhead_ms", "host-direct", "host-broker", "body"),
+    ("guest_broker_body_overhead_ms", "guest-direct", "guest-broker", "body"),
+)
 
 comparison_rows = []
 for endpoint in endpoints:
-    comparison_rows.append({
+    item = {
         "endpoint": endpoint,
-        "host_broker_overhead_ms": diff("host-direct", "host-broker", "median_ms"),
-        "guest_broker_overhead_ms": diff("guest-direct", "guest-broker", "median_ms"),
-        "direct_bridge_overhead_ms": diff("host-direct", "guest-direct", "median_ms"),
-        "broker_bridge_overhead_ms": diff("host-broker", "guest-broker", "median_ms"),
-        "host_broker_ttfb_overhead_ms": diff("host-direct", "host-broker", "ttfb_median_ms"),
-        "guest_broker_ttfb_overhead_ms": diff("guest-direct", "guest-broker", "ttfb_median_ms"),
-        "direct_bridge_ttfb_overhead_ms": diff("host-direct", "guest-direct", "ttfb_median_ms"),
-        "broker_bridge_ttfb_overhead_ms": diff("host-broker", "guest-broker", "ttfb_median_ms"),
-        "host_broker_body_overhead_ms": diff("host-direct", "host-broker", "body_read_median_ms"),
-        "guest_broker_body_overhead_ms": diff("guest-direct", "guest-broker", "body_read_median_ms"),
-    })
+        "repeat_count": endpoint_repeat_count(endpoint),
+        "paired_sample_count": None,
+    }
+    paired_counts = []
+    for field, left_lane, right_lane, metric in diff_specs:
+        paired_counts.append(add_diff(item, endpoint, field, left_lane, right_lane, metric))
+    item["paired_sample_count"] = min(paired_counts) if paired_counts else 0
+    comparison_rows.append(item)
 
-comparison_fields = (
-    "endpoint",
-    "host_broker_overhead_ms",
-    "guest_broker_overhead_ms",
-    "direct_bridge_overhead_ms",
-    "broker_bridge_overhead_ms",
-    "host_broker_ttfb_overhead_ms",
-    "guest_broker_ttfb_overhead_ms",
-    "direct_bridge_ttfb_overhead_ms",
-    "broker_bridge_ttfb_overhead_ms",
-    "host_broker_body_overhead_ms",
-    "guest_broker_body_overhead_ms",
-)
+comparison_fields = ["endpoint", "repeat_count", "paired_sample_count"]
+for field, *_ in diff_specs:
+    comparison_fields.extend(
+        [
+            field,
+            field.replace("_ms", "_p95_ms"),
+            field.replace("_ms", "_min_ms"),
+            field.replace("_ms", "_max_ms"),
+        ]
+    )
 with comparison_path.open("w", encoding="utf-8", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=comparison_fields, delimiter="\t", lineterminator="\n")
     writer.writeheader()
     writer.writerows(comparison_rows)
+PY
+}
+
+write_comparison_compact() {
+  local comparison_tsv="$1"
+  local compact_tsv="$2"
+  python3 - "$comparison_tsv" "$compact_tsv" <<'PY'
+import csv
+import sys
+from pathlib import Path
+
+comparison_path = Path(sys.argv[1])
+compact_path = Path(sys.argv[2])
+fields = (
+    "endpoint",
+    "repeat_count",
+    "paired_sample_count",
+    "guest_broker_overhead_ms",
+    "guest_broker_overhead_p95_ms",
+    "guest_broker_ttfb_overhead_ms",
+    "guest_broker_ttfb_overhead_p95_ms",
+    "guest_broker_body_overhead_ms",
+    "guest_broker_body_overhead_p95_ms",
+    "host_broker_overhead_ms",
+    "host_broker_overhead_p95_ms",
+    "host_broker_ttfb_overhead_ms",
+    "host_broker_ttfb_overhead_p95_ms",
+    "direct_bridge_overhead_ms",
+    "direct_bridge_overhead_p95_ms",
+    "broker_bridge_overhead_ms",
+    "broker_bridge_overhead_p95_ms",
+)
+with comparison_path.open(encoding="utf-8", newline="") as f:
+    rows = list(csv.DictReader(f, delimiter="\t"))
+with compact_path.open("w", encoding="utf-8", newline="") as f:
+    writer = csv.DictWriter(
+        f,
+        fieldnames=fields,
+        delimiter="\t",
+        extrasaction="ignore",
+        lineterminator="\n",
+    )
+    writer.writeheader()
+    writer.writerows(rows)
 PY
 }
 
@@ -630,7 +779,7 @@ with tsv_path.open("w", encoding="utf-8", newline="") as f:
 PY
 }
 
-for value_name in SAMPLES WARMUPS CHAT_TOKENS STREAM_TOKENS CURL_TIMEOUT BROKER_PORT; do
+for value_name in REPEATS SAMPLES WARMUPS CHAT_TOKENS STREAM_TOKENS CURL_TIMEOUT BROKER_PORT; do
   value="${!value_name}"
   case "$value" in
     ''|*[!0-9]*)
@@ -638,8 +787,8 @@ for value_name in SAMPLES WARMUPS CHAT_TOKENS STREAM_TOKENS CURL_TIMEOUT BROKER_
       ;;
   esac
 done
-if [ "$SAMPLES" -le 0 ]; then
-  fail "SAMPLES must be > 0"
+if [ "$REPEATS" -le 0 ] || [ "$SAMPLES" -le 0 ]; then
+  fail "REPEATS and SAMPLES must be > 0"
 fi
 case "$KEEP_FAILED" in
   1|true|TRUE|yes|YES)
@@ -746,22 +895,41 @@ echo "microagent-host-worker-broker-diagnostic: copying byte-identical payloads 
 "$CLI" exec "$WORKSPACE" --state-dir "$STATE_DIR" --stdin "$PAYLOAD_DIR/chat.json" -- sh -c "cat > /tmp/microagent-host-worker-diagnostic/chat.json" >/dev/null
 "$CLI" exec "$WORKSPACE" --state-dir "$STATE_DIR" --stdin "$PAYLOAD_DIR/stream.json" -- sh -c "cat > /tmp/microagent-host-worker-diagnostic/stream.json" >/dev/null
 
-echo "microagent-host-worker-broker-diagnostic: measuring host-direct"
-run_host_lane host-direct "$TARGET_BASE_URL" "$OUT_DIR/host-direct.jsonl"
-echo "microagent-host-worker-broker-diagnostic: measuring host-broker"
-run_host_lane host-broker "$BROKER_URL" "$OUT_DIR/host-broker.jsonl"
-echo "microagent-host-worker-broker-diagnostic: measuring guest-direct"
-run_guest_lane guest-direct "$GUEST_DIRECT_URL" "$OUT_DIR/guest-direct.jsonl"
-echo "microagent-host-worker-broker-diagnostic: measuring guest-broker"
-run_guest_lane guest-broker "$GUEST_BROKER_URL" "$OUT_DIR/guest-broker.jsonl"
+rm -rf "$OUT_DIR/repeats"
+mkdir -p "$OUT_DIR/repeats"
+for lane in host-direct host-broker guest-direct guest-broker; do
+  : >"$OUT_DIR/$lane.jsonl"
+done
+
+repeat_index=0
+while [ "$repeat_index" -lt "$REPEATS" ]; do
+  repeat_label="$(printf '%03d' "$repeat_index")"
+  repeat_dir="$OUT_DIR/repeats/$repeat_label"
+  mkdir -p "$repeat_dir"
+
+  echo "microagent-host-worker-broker-diagnostic: repeat=$repeat_label measuring host-direct"
+  run_host_lane host-direct "$TARGET_BASE_URL" "$repeat_dir/host-direct.jsonl" "$repeat_index"
+  echo "microagent-host-worker-broker-diagnostic: repeat=$repeat_label measuring host-broker"
+  run_host_lane host-broker "$BROKER_URL" "$repeat_dir/host-broker.jsonl" "$repeat_index"
+  echo "microagent-host-worker-broker-diagnostic: repeat=$repeat_label measuring guest-direct"
+  run_guest_lane guest-direct "$GUEST_DIRECT_URL" "$repeat_dir/guest-direct.jsonl" "$repeat_index"
+  echo "microagent-host-worker-broker-diagnostic: repeat=$repeat_label measuring guest-broker"
+  run_guest_lane guest-broker "$GUEST_BROKER_URL" "$repeat_dir/guest-broker.jsonl" "$repeat_index"
+
+  for lane in host-direct host-broker guest-direct guest-broker; do
+    cat "$repeat_dir/$lane.jsonl" >>"$OUT_DIR/$lane.jsonl"
+  done
+  repeat_index=$((repeat_index + 1))
+done
 
 cat "$OUT_DIR/host-direct.jsonl" \
   "$OUT_DIR/host-broker.jsonl" \
   "$OUT_DIR/guest-direct.jsonl" \
   "$OUT_DIR/guest-broker.jsonl" >"$OUT_DIR/raw.jsonl"
 write_summary "$OUT_DIR/raw.jsonl" "$PAYLOAD_DIR/manifest.json" "$OUT_DIR/summary.tsv" "$OUT_DIR/comparison.tsv"
+write_comparison_compact "$OUT_DIR/comparison.tsv" "$OUT_DIR/comparison-compact.tsv"
 write_broker_summary "$BROKER_LOG" "$OUT_DIR/broker-summary.json" "$OUT_DIR/broker-summary.tsv"
 
 echo "microagent-host-worker-broker-diagnostic: reports written under $OUT_DIR"
-cat "$OUT_DIR/comparison.tsv"
+cat "$OUT_DIR/comparison-compact.tsv"
 echo "PASS microagent-host-worker-broker-diagnostic"
