@@ -32,7 +32,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=scripts/dev/e2e-lib.sh
+# shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
 CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
 MODEL_REF="${MICROAGENT_E2E_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
@@ -212,9 +212,10 @@ if ! "$CLI" model list 2>/dev/null | grep -q "$(printf '%s' "$MODEL_REF" | sed '
   "$CLI" model pull "$MODEL_REF" >/dev/null 2>&1 || fail "model pull failed"
 fi
 
-# Guest script: retry until the model endpoint answers over the vsock bridge.
+# Guest script: assert the model path exposes no host GPU devices, then retry
+# until the model endpoint answers over the vsock bridge.
 # shellcheck disable=SC2016
-GUEST='echo "GUEST_MODEL_URL=$MICROAGENT_MODEL_URL"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: PONG\"}],\"max_tokens\":16,\"temperature\":0}"); case "$R" in *choices*) echo "E2E_RESPONSE: $R"; exit 0;; esac; sleep 1; done; echo "E2E_FAIL: model unreachable from guest"; exit 1'
+GUEST='echo "GUEST_MODEL_URL=$MICROAGENT_MODEL_URL"; for p in /dev/dxg /dev/nvidiactl /dev/nvidia0 /dev/dri/renderD128; do if [ -e "$p" ]; then echo "E2E_GPU_DEVICE_EXPOSED: $p"; exit 1; fi; done; echo "E2E_GPU_DEVICES_ABSENT"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: PONG\"}],\"max_tokens\":16,\"temperature\":0}"); case "$R" in *choices*) echo "E2E_RESPONSE: $R"; exit 0;; esac; sleep 1; done; echo "E2E_FAIL: model unreachable from guest"; exit 1'
 
 OUT="$("$CLI" run "${RUN_FLAGS[@]}" sh -c "$GUEST" 2>&1)"
 RUN_RC=$?
@@ -235,6 +236,11 @@ if ! printf '%s' "$OUT" | grep -q 'E2E_RESPONSE'; then
   echo "$OUT" >&2
   fail "guest did not receive a valid OpenAI chat completion"
 fi
+if ! printf '%s' "$OUT" | grep -q 'E2E_GPU_DEVICES_ABSENT'; then
+  echo "$OUT" >&2
+  fail "guest did not prove GPU device nodes are absent"
+fi
+echo "PASS microagent-e2e-model: guest GPU device nodes are absent"
 
 echo "PASS microagent-e2e-model: guest reached the locally-served model over vsock"
 
@@ -316,12 +322,17 @@ if [ "$exec_ready" -ne 1 ]; then
 fi
 
 # shellcheck disable=SC2016
-WS_GUEST='echo "WS_MODEL_URL=$MICROAGENT_MODEL_URL"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/models"); case "$R" in *object*|*data*) echo "WS_MODELS: $R"; exit 0;; esac; sleep 1; done; echo "WS_FAIL: model unreachable from guest"; exit 1'
+WS_GUEST='echo "WS_MODEL_URL=$MICROAGENT_MODEL_URL"; for p in /dev/dxg /dev/nvidiactl /dev/nvidia0 /dev/dri/renderD128; do if [ -e "$p" ]; then echo "WS_GPU_DEVICE_EXPOSED: $p"; exit 1; fi; done; echo "WS_GPU_DEVICES_ABSENT"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/models"); case "$R" in *object*|*data*) echo "WS_MODELS: $R"; exit 0;; esac; sleep 1; done; echo "WS_FAIL: model unreachable from guest"; exit 1'
 WS_OUT="$("$CLI" exec "$WS" -- sh -c "$WS_GUEST" 2>&1)"
 if ! printf '%s' "$WS_OUT" | grep -q 'WS_MODELS'; then
   echo "$WS_OUT" >&2
   fail "paired workspace could not reach the model over the vsock bridge"
 fi
+if ! printf '%s' "$WS_OUT" | grep -q 'WS_GPU_DEVICES_ABSENT'; then
+  echo "$WS_OUT" >&2
+  fail "paired workspace did not prove GPU device nodes are absent"
+fi
+echo "PASS microagent-e2e-model: paired workspace GPU device nodes are absent"
 if [ "$GPU_CHECK" -eq 1 ]; then
   assert_runner_gpu_log "$WS"
 fi
