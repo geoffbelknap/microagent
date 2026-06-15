@@ -157,6 +157,7 @@ for slots in $SLOTS_SPACES; do
     MICROAGENT_HOST_WORKER_LABEL="slots-$slots" \
     MICROAGENT_HOST_WORKER_SLOTS="$slots" \
     MICROAGENT_HOST_WORKER_PROBE_REPORT="$report" \
+    MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT="${MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT:-0}" \
     "$ROOT/scripts/dev/microagent-host-worker-probe.sh" || fail "probe failed for slots=$slots"
 
   "$CLI" model stop "$MODEL_REF" --state-dir "$STATE_DIR" >/dev/null || fail "model stop failed for slots=$slots"

@@ -69,6 +69,7 @@ for workspace_count in $WORKSPACE_SPACES; do
     MICROAGENT_HOST_WORKER_LABEL="$LABEL-workspaces-$workspace_count" \
     MICROAGENT_HOST_WORKER_PROBE_WORKSPACES="$workspace_count" \
     MICROAGENT_HOST_WORKER_PROBE_REPORT="$report" \
+    MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT="${MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT:-0}" \
     "$ROOT/scripts/dev/microagent-host-worker-probe.sh" || fail "probe failed for workspaces=$workspace_count"
 done
 

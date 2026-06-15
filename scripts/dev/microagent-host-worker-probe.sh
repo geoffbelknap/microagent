@@ -65,6 +65,8 @@
 #                                           per-endpoint sample timeout in seconds (default: 2)
 #   MICROAGENT_HOST_WORKER_PROBE_WORKSPACE workspace name
 #   MICROAGENT_HOST_WORKER_PROBE_REPORT    path to write final JSON report
+#   MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT
+#                                           print final JSON to stdout: 0/1 (default: 1)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -101,6 +103,7 @@ RUNNER_TELEMETRY_ENDPOINTS="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_ENDP
 RUNNER_TELEMETRY_TIMEOUT="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_TIMEOUT:-2}"
 WS_BASE="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACE:-host-worker-probe-$$}"
 REPORT_PATH="${MICROAGENT_HOST_WORKER_PROBE_REPORT:-}"
+PRINT_REPORT="${MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT:-1}"
 MODEL_GUEST_PORT=11434
 MODEL_VSOCK_PORT=62100
 STARTED_RUNNER=0
@@ -1781,6 +1784,17 @@ case "$KEEP_FAILED" in
     fail "MICROAGENT_HOST_WORKER_PROBE_KEEP_FAILED must be 0/1, true/false, or yes/no"
     ;;
 esac
+case "$PRINT_REPORT" in
+  1|true|TRUE|yes|YES)
+    PRINT_REPORT=1
+    ;;
+  0|false|FALSE|no|NO)
+    PRINT_REPORT=0
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT must be 0/1, true/false, or yes/no"
+    ;;
+esac
 CONCURRENCY_SPACES="$(printf '%s' "$CONCURRENCY" | tr ',' ' ')"
 if [ -z "$(printf '%s' "$CONCURRENCY_SPACES" | tr -d '[:space:]')" ]; then
   fail "MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY must include at least one positive integer"
@@ -2381,6 +2395,8 @@ for level, item in (report.get("pressure", {}).get("levels", {}) or {}).items():
     )
 PY
 
-echo "microagent-host-worker-probe: report"
-printf '%s\n' "$REPORT_JSON"
+if [ "$PRINT_REPORT" -eq 1 ]; then
+  echo "microagent-host-worker-probe: report"
+  printf '%s\n' "$REPORT_JSON"
+fi
 echo "PASS microagent-host-worker-probe: host worker direct and in-guest execution paths succeeded"
