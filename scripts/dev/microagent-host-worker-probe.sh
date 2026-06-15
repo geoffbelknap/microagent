@@ -44,6 +44,16 @@
 #   MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY_PATH
 #                                           path to write GPU telemetry CSV
 #   MICROAGENT_HOST_WORKER_PROBE_NVIDIA_SMI nvidia-smi path override
+#   MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY
+#                                           off, auto, or required (default: auto)
+#   MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_INTERVAL
+#                                           sampling interval in seconds (default: 0.5)
+#   MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_PATH
+#                                           path to write runner telemetry JSONL
+#   MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_ENDPOINTS
+#                                           comma-separated runner diagnostic paths (default: /metrics,/slots)
+#   MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_TIMEOUT
+#                                           per-endpoint sample timeout in seconds (default: 2)
 #   MICROAGENT_HOST_WORKER_PROBE_WORKSPACE workspace name
 #   MICROAGENT_HOST_WORKER_PROBE_REPORT    path to write final JSON report
 set -euo pipefail
@@ -68,6 +78,11 @@ GPU_TELEMETRY="${MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY:-auto}"
 GPU_TELEMETRY_INTERVAL="${MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY_INTERVAL:-0.5}"
 GPU_TELEMETRY_PATH="${MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY_PATH:-}"
 NVIDIA_SMI="${MICROAGENT_HOST_WORKER_PROBE_NVIDIA_SMI:-}"
+RUNNER_TELEMETRY="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY:-auto}"
+RUNNER_TELEMETRY_INTERVAL="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_INTERVAL:-0.5}"
+RUNNER_TELEMETRY_PATH="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_PATH:-}"
+RUNNER_TELEMETRY_ENDPOINTS="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_ENDPOINTS:-/metrics,/slots}"
+RUNNER_TELEMETRY_TIMEOUT="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_TIMEOUT:-2}"
 WS_BASE="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACE:-host-worker-probe-$$}"
 REPORT_PATH="${MICROAGENT_HOST_WORKER_PROBE_REPORT:-}"
 STARTED_RUNNER=0
@@ -76,6 +91,11 @@ GPU_TELEMETRY_PID=""
 GPU_TELEMETRY_PHASE_FILE=""
 GPU_TELEMETRY_TMPDIR=""
 GPU_TELEMETRY_PATH_PERSISTED=0
+RUNNER_TELEMETRY_ACTIVE=0
+RUNNER_TELEMETRY_PID=""
+RUNNER_TELEMETRY_PHASE_FILE=""
+RUNNER_TELEMETRY_TMPDIR=""
+RUNNER_TELEMETRY_PATH_PERSISTED=0
 CREATE_FLAGS=()
 START_FLAGS=()
 CTRL_FLAGS=()
@@ -92,6 +112,14 @@ stop_gpu_telemetry() {
   fi
 }
 
+stop_runner_telemetry() {
+  if [ -n "$RUNNER_TELEMETRY_PID" ]; then
+    kill "$RUNNER_TELEMETRY_PID" >/dev/null 2>&1 || true
+    wait "$RUNNER_TELEMETRY_PID" >/dev/null 2>&1 || true
+    RUNNER_TELEMETRY_PID=""
+  fi
+}
+
 cleanup_gpu_telemetry_files() {
   if [ -n "$GPU_TELEMETRY_PHASE_FILE" ]; then
     rm -f "$GPU_TELEMETRY_PHASE_FILE"
@@ -103,11 +131,24 @@ cleanup_gpu_telemetry_files() {
   fi
 }
 
+cleanup_runner_telemetry_files() {
+  if [ -n "$RUNNER_TELEMETRY_PHASE_FILE" ]; then
+    rm -f "$RUNNER_TELEMETRY_PHASE_FILE"
+    RUNNER_TELEMETRY_PHASE_FILE=""
+  fi
+  if [ -n "$RUNNER_TELEMETRY_TMPDIR" ]; then
+    rm -rf "$RUNNER_TELEMETRY_TMPDIR"
+    RUNNER_TELEMETRY_TMPDIR=""
+  fi
+}
+
 cleanup() {
   local status=$?
   set +e
   stop_gpu_telemetry
+  stop_runner_telemetry
   cleanup_gpu_telemetry_files
+  cleanup_runner_telemetry_files
   for workspace in "${WORKSPACE_NAMES[@]}"; do
     "$CLI" kill "$workspace" --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
     "$CLI" delete "$workspace" --force --yes --state-dir "$STATE_DIR" "${CTRL_FLAGS[@]}" >/dev/null 2>&1
@@ -162,6 +203,9 @@ set_telemetry_phase() {
   local phase="$1"
   if [ "$GPU_TELEMETRY_ACTIVE" -eq 1 ] && [ -n "$GPU_TELEMETRY_PHASE_FILE" ]; then
     printf '%s\n' "$phase" >"$GPU_TELEMETRY_PHASE_FILE"
+  fi
+  if [ "$RUNNER_TELEMETRY_ACTIVE" -eq 1 ] && [ -n "$RUNNER_TELEMETRY_PHASE_FILE" ]; then
+    printf '%s\n' "$phase" >"$RUNNER_TELEMETRY_PHASE_FILE"
   fi
 }
 
@@ -294,7 +338,352 @@ if path and path.exists():
             phase_summary["pstates"] = pstates
         telemetry["phases"][phase] = phase_summary
 
-report["telemetry"] = {"gpu": telemetry}
+report.setdefault("telemetry", {})["gpu"] = telemetry
+print(json.dumps(report, indent=2, sort_keys=True))
+PY
+}
+
+runner_telemetry_available() {
+  local root_url="$1"
+  python3 - "$root_url" "$RUNNER_TELEMETRY_ENDPOINTS" "$RUNNER_TELEMETRY_TIMEOUT" <<'PY'
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+root_url = sys.argv[1].rstrip("/")
+endpoints = [part.strip() for part in sys.argv[2].replace(" ", ",").split(",") if part.strip()]
+timeout = float(sys.argv[3])
+
+for endpoint in endpoints:
+    path = endpoint if endpoint.startswith("/") else "/" + endpoint
+    url = urllib.parse.urljoin(root_url + "/", path.lstrip("/"))
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            if 200 <= response.status < 300:
+                raise SystemExit(0)
+    except (OSError, urllib.error.URLError, TimeoutError):
+        continue
+
+raise SystemExit(1)
+PY
+}
+
+start_runner_telemetry() {
+  local root_url="$1"
+  case "$RUNNER_TELEMETRY" in
+    off)
+      RUNNER_TELEMETRY_ACTIVE=0
+      return
+      ;;
+    auto|required)
+      ;;
+    *)
+      fail "MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY must be off, auto, or required"
+      ;;
+  esac
+
+  if ! runner_telemetry_available "$root_url"; then
+    if [ "$RUNNER_TELEMETRY" = "required" ]; then
+      fail "runner telemetry required but no configured runner diagnostic endpoint is available"
+    fi
+    echo "microagent-host-worker-probe: runner telemetry unavailable; continuing without it"
+    RUNNER_TELEMETRY_ACTIVE=0
+    return
+  fi
+
+  if [ -n "$RUNNER_TELEMETRY_PATH" ]; then
+    RUNNER_TELEMETRY_PATH_PERSISTED=1
+  elif [ -n "$REPORT_PATH" ]; then
+    case "$REPORT_PATH" in
+      *.json) RUNNER_TELEMETRY_PATH="${REPORT_PATH%.json}.runner.jsonl" ;;
+      *) RUNNER_TELEMETRY_PATH="$REPORT_PATH.runner.jsonl" ;;
+    esac
+    RUNNER_TELEMETRY_PATH_PERSISTED=1
+  else
+    RUNNER_TELEMETRY_TMPDIR="$(mktemp -d)"
+    RUNNER_TELEMETRY_PATH="$RUNNER_TELEMETRY_TMPDIR/runner.jsonl"
+    RUNNER_TELEMETRY_PATH_PERSISTED=0
+  fi
+
+  mkdir -p "$(dirname "$RUNNER_TELEMETRY_PATH")"
+  : >"$RUNNER_TELEMETRY_PATH"
+  RUNNER_TELEMETRY_PHASE_FILE="$(mktemp)"
+  printf '%s\n' startup >"$RUNNER_TELEMETRY_PHASE_FILE"
+  RUNNER_TELEMETRY_ACTIVE=1
+
+  python3 - "$root_url" "$RUNNER_TELEMETRY_PATH" "$RUNNER_TELEMETRY_PHASE_FILE" "$RUNNER_TELEMETRY_INTERVAL" "$RUNNER_TELEMETRY_TIMEOUT" "$RUNNER_TELEMETRY_ENDPOINTS" <<'PY' &
+import json
+import re
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+root_url = sys.argv[1].rstrip("/")
+out_path = Path(sys.argv[2])
+phase_path = Path(sys.argv[3])
+interval = float(sys.argv[4])
+timeout = float(sys.argv[5])
+endpoints = [part.strip() for part in sys.argv[6].replace(" ", ",").split(",") if part.strip()]
+metric_pattern = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{[^}]*\})?\s+(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)$")
+interesting_metric = re.compile(r"(llama|slot|queue|request|prompt|token|eval|cache|kv|batch|busy|process)", re.IGNORECASE)
+active_states = {"active", "busy", "processing", "generating", "decode", "prefill", "queued", "pending"}
+bool_active_keys = ("is_processing", "processing", "active", "busy", "is_busy", "is_generating", "has_task")
+numeric_slot_keys = (
+    "n_ctx",
+    "n_past",
+    "n_prompt_tokens",
+    "n_decoded",
+    "n_remaining",
+    "n_predict",
+    "n_tokens",
+    "n_cache_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+    "tokens",
+)
+
+def endpoint_url(endpoint):
+    path = endpoint if endpoint.startswith("/") else "/" + endpoint
+    return urllib.parse.urljoin(root_url + "/", path.lstrip("/"))
+
+def numeric(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+def item_active(item):
+    for key in bool_active_keys:
+        if item.get(key) is True:
+            return True
+    state = str(item.get("state") or item.get("status") or "").strip().lower()
+    if state in active_states:
+        return True
+    return False
+
+def summarize_items(items):
+    signals = {
+        "json_items": len(items),
+        "slot_count": len(items),
+    }
+    active_count = sum(1 for item in items if item_active(item))
+    signals["active_slot_count"] = active_count
+    signals["idle_slot_count"] = max(0, len(items) - active_count)
+    for key in numeric_slot_keys:
+        values = [numeric(item.get(key)) for item in items if isinstance(item, dict)]
+        values = [value for value in values if value is not None]
+        if values:
+            signals[f"{key}_sum"] = round(sum(values), 3)
+            signals[f"{key}_max"] = round(max(values), 3)
+    return signals
+
+def json_signals(doc):
+    if isinstance(doc, list):
+        dict_items = [item for item in doc if isinstance(item, dict)]
+        return summarize_items(dict_items)
+    if isinstance(doc, dict):
+        for key in ("slots", "data", "items"):
+            value = doc.get(key)
+            if isinstance(value, list):
+                signals = summarize_items([item for item in value if isinstance(item, dict)])
+                signals["json_object_keys"] = len(doc)
+                return signals
+        signals = {"json_object_keys": len(doc)}
+        for key, value in doc.items():
+            value_num = numeric(value)
+            if value_num is not None:
+                signals[f"json_{key}"] = value_num
+        return signals
+    return {}
+
+def prometheus_signals(text):
+    totals = {}
+    series_counts = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = metric_pattern.match(line)
+        if not match:
+            continue
+        name = match.group(1)
+        if name.endswith("_bucket") or not interesting_metric.search(name):
+            continue
+        try:
+            value = float(match.group(2))
+        except ValueError:
+            continue
+        totals[name] = totals.get(name, 0.0) + value
+        series_counts[name] = series_counts.get(name, 0) + 1
+    signals = {"metric_series": sum(series_counts.values())}
+    for name in sorted(totals)[:80]:
+        signals[f"metric_{name}_sum"] = round(totals[name], 6)
+        signals[f"metric_{name}_series"] = series_counts[name]
+    return signals
+
+def summarize_body(content_type, body):
+    text = body.decode("utf-8", errors="replace")
+    stripped = text.lstrip()
+    if "json" in content_type.lower() or stripped.startswith(("[", "{")):
+        try:
+            return "json", json_signals(json.loads(text))
+        except json.JSONDecodeError:
+            pass
+    return "prometheus", prometheus_signals(text)
+
+def read_phase():
+    try:
+        phase = phase_path.read_text().strip()
+        return phase or "unknown"
+    except OSError:
+        return "unknown"
+
+def sample_endpoint(endpoint):
+    url = endpoint_url(endpoint)
+    start_epoch = time.time()
+    start = time.perf_counter()
+    sample = {
+        "host_epoch": round(start_epoch, 6),
+        "phase": read_phase(),
+        "endpoint": endpoint if endpoint.startswith("/") else "/" + endpoint,
+        "url": url,
+        "ok": False,
+    }
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            body = response.read(1024 * 1024 + 1)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            content_type = response.headers.get("Content-Type", "")
+            sample.update({
+                "ok": 200 <= response.status < 300,
+                "status": response.status,
+                "elapsed_ms": round(elapsed_ms, 3),
+                "content_type": content_type,
+                "body_bytes": len(body),
+                "body_truncated": len(body) > 1024 * 1024,
+            })
+            body_format, signals = summarize_body(content_type, body[:1024 * 1024])
+            sample["format"] = body_format
+            sample["signals"] = signals
+    except urllib.error.HTTPError as err:
+        body = err.read(1024 * 1024 + 1)
+        content_type = err.headers.get("Content-Type", "") if err.headers else ""
+        sample.update({
+            "elapsed_ms": round((time.perf_counter() - start) * 1000, 3),
+            "status": err.code,
+            "content_type": content_type,
+            "body_bytes": len(body),
+            "body_truncated": len(body) > 1024 * 1024,
+            "error": str(err),
+        })
+        if body:
+            body_format, signals = summarize_body(content_type, body[:1024 * 1024])
+            sample["format"] = body_format
+            sample["signals"] = signals
+    except (OSError, urllib.error.URLError, TimeoutError) as err:
+        sample.update({
+            "elapsed_ms": round((time.perf_counter() - start) * 1000, 3),
+            "error": str(err),
+        })
+    return sample
+
+with out_path.open("a", encoding="utf-8") as out:
+    while True:
+        loop_start = time.perf_counter()
+        for endpoint in endpoints:
+            out.write(json.dumps(sample_endpoint(endpoint), sort_keys=True) + "\n")
+        out.flush()
+        remaining = interval - (time.perf_counter() - loop_start)
+        time.sleep(max(0.05, remaining))
+PY
+  RUNNER_TELEMETRY_PID="$!"
+  echo "microagent-host-worker-probe: runner telemetry writing to $RUNNER_TELEMETRY_PATH"
+}
+
+add_runner_telemetry_to_report() {
+  local report_json="$1"
+  python3 - "$report_json" "$RUNNER_TELEMETRY_ACTIVE" "$RUNNER_TELEMETRY_PATH" "$RUNNER_TELEMETRY_PATH_PERSISTED" <<'PY'
+import json
+import statistics
+import sys
+from pathlib import Path
+
+report = json.loads(sys.argv[1])
+active = sys.argv[2] == "1"
+path = Path(sys.argv[3]) if sys.argv[3] else None
+path_persisted = sys.argv[4] == "1"
+telemetry = {
+    "enabled": active,
+    "path": str(path) if path and path_persisted else None,
+    "sample_count": 0,
+    "phases": {},
+}
+
+def summarize(values):
+    clean = sorted(value for value in values if isinstance(value, (int, float)))
+    if not clean:
+        return None
+    p95_index = min(len(clean) - 1, max(0, int(len(clean) * 0.95 + 0.999999) - 1))
+    return {
+        "min": clean[0],
+        "median": round(statistics.median(clean), 3),
+        "mean": round(statistics.fmean(clean), 3),
+        "p95": clean[p95_index],
+        "max": clean[-1],
+    }
+
+if path and path.exists():
+    rows = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    telemetry["sample_count"] = len(rows)
+    telemetry["endpoints"] = sorted({row.get("endpoint") for row in rows if row.get("endpoint")})
+    by_phase = {}
+    for row in rows:
+        phase = row.get("phase") or "unknown"
+        endpoint = row.get("endpoint") or "unknown"
+        by_phase.setdefault(phase, {}).setdefault(endpoint, []).append(row)
+    for phase, endpoints in by_phase.items():
+        phase_out = {}
+        for endpoint, endpoint_rows in endpoints.items():
+            endpoint_out = {
+                "sample_count": len(endpoint_rows),
+                "ok_count": sum(1 for row in endpoint_rows if row.get("ok") is True),
+                "status_codes": sorted({str(row.get("status")) for row in endpoint_rows if row.get("status") is not None}),
+                "formats": sorted({row.get("format") for row in endpoint_rows if row.get("format")}),
+            }
+            elapsed = summarize([row.get("elapsed_ms") for row in endpoint_rows])
+            if elapsed is not None:
+                endpoint_out["elapsed_ms"] = elapsed
+            signal_values = {}
+            for row in endpoint_rows:
+                for key, value in (row.get("signals") or {}).items():
+                    if isinstance(value, (int, float)):
+                        signal_values.setdefault(key, []).append(value)
+            signals_out = {}
+            for key in sorted(signal_values)[:120]:
+                stats = summarize(signal_values[key])
+                if stats is not None:
+                    signals_out[key] = stats
+            if signals_out:
+                endpoint_out["signals"] = signals_out
+            errors = [row.get("error") for row in endpoint_rows if row.get("error")]
+            if errors:
+                endpoint_out["last_error"] = errors[-1]
+            phase_out[endpoint] = endpoint_out
+        telemetry["phases"][phase] = phase_out
+
+report.setdefault("telemetry", {})["runner"] = telemetry
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
 }
@@ -373,16 +762,34 @@ if stream_tokens <= 0:
     raise SystemExit("stream tokens must be > 0")
 total = warmups + samples
 
-def request_models():
+def open_and_read(req, max_bytes):
+    start_epoch = time.time()
     start = time.perf_counter()
-    req = urllib.request.Request(base_url + "/models", method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = resp.read(4 * 1024 * 1024)
+        first = resp.read(1)
+        if not first:
+            raise RuntimeError("response body was empty")
+        ttfb_ms = (time.perf_counter() - start) * 1000
+        body_read_start = time.perf_counter()
+        body = first + resp.read(max_bytes)
+        body_read_ms = (time.perf_counter() - body_read_start) * 1000
     elapsed_ms = (time.perf_counter() - start) * 1000
+    return body, {
+        "elapsed_ms": round(elapsed_ms, 3),
+        "ttfb_ms": round(ttfb_ms, 3),
+        "body_read_ms": round(body_read_ms, 3),
+        "response_bytes": len(body),
+        "start_epoch": round(start_epoch, 6),
+        "end_epoch": round(time.time(), 6),
+    }
+
+def request_models():
+    req = urllib.request.Request(base_url + "/models", method="GET")
+    body, timing = open_and_read(req, 4 * 1024 * 1024)
     doc = json.loads(body)
     if "object" not in doc and "data" not in doc:
         raise RuntimeError("/models response did not look OpenAI-compatible")
-    return {"elapsed_ms": round(elapsed_ms, 3)}
+    return timing
 
 def request_chat():
     if chat_profile == "sustained":
@@ -394,20 +801,17 @@ def request_chat():
         "max_tokens": chat_tokens,
         "temperature": 0,
     }).encode("utf-8")
-    start = time.perf_counter()
     req = urllib.request.Request(
         base_url + "/chat/completions",
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = resp.read(4 * 1024 * 1024)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    body, timing = open_and_read(req, 4 * 1024 * 1024)
     doc = json.loads(body)
     if not doc.get("choices"):
         raise RuntimeError("/chat/completions response did not contain choices")
-    return {"elapsed_ms": round(elapsed_ms, 3)}
+    return timing
 
 def request_stream():
     payload = json.dumps({
@@ -427,22 +831,14 @@ def request_stream():
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    start = time.perf_counter()
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        first = resp.read(1)
-        if not first:
-            raise RuntimeError("stream response was empty")
-        ttfb_ms = (time.perf_counter() - start) * 1000
-        body = first + resp.read(64 * 1024 * 1024)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    body, timing = open_and_read(req, 64 * 1024 * 1024)
     if b"[DONE]" not in body and b'"choices"' not in body:
         raise RuntimeError("stream response did not look OpenAI-compatible")
-    return {
-        "elapsed_ms": round(elapsed_ms, 3),
-        "ttfb_ms": round(ttfb_ms, 3),
+    timing.update({
         "bytes": len(body),
         "chunks": sum(1 for line in body.splitlines() if line.startswith(b"data:")),
-    }
+    })
+    return timing
 
 def summarize_number(values, name, unit):
     ordered = sorted(values)
@@ -475,8 +871,18 @@ def summarize(samples_for_endpoint, concurrency, per_workspace_concurrency):
         "p95_ms": ordered[p95_index],
         "max_ms": ordered[-1],
     }
+    start_epochs = [item["start_epoch"] for item in samples_for_endpoint if "start_epoch" in item]
+    end_epochs = [item["end_epoch"] for item in samples_for_endpoint if "end_epoch" in item]
+    if start_epochs and end_epochs:
+        summary.update({
+            "first_start_epoch": min(start_epochs),
+            "last_end_epoch": max(end_epochs),
+            "wall_span_ms": round((max(end_epochs) - min(start_epochs)) * 1000, 3),
+        })
     optional_metrics = (
         ("ttfb_ms", "ttfb", "ms"),
+        ("body_read_ms", "body_read", "ms"),
+        ("response_bytes", "response_bytes", ""),
         ("bytes", "bytes", ""),
         ("chunks", "chunks", ""),
     )
@@ -585,10 +991,21 @@ def endpoint_summary(data):
     else:
         values = data["samples_ms"]
     summary = summarize(values)
+    for key in ("first_start_epoch", "last_end_epoch", "wall_span_ms"):
+        if key in data:
+            summary[key] = data[key]
     if "ttfb_samples_seconds" in data:
         summary.update(summarize_number([float(value) * 1000 for value in data["ttfb_samples_seconds"]], "ttfb", "ms"))
     elif "ttfb_samples_ms" in data:
         summary.update(summarize_number(data["ttfb_samples_ms"], "ttfb", "ms"))
+    if "connect_samples_seconds" in data:
+        summary.update(summarize_number([float(value) * 1000 for value in data["connect_samples_seconds"]], "connect", "ms"))
+    if "pretransfer_samples_seconds" in data:
+        summary.update(summarize_number([float(value) * 1000 for value in data["pretransfer_samples_seconds"]], "pretransfer", "ms"))
+    if "body_read_samples_ms" in data:
+        summary.update(summarize_number(data["body_read_samples_ms"], "body_read", "ms"))
+    if "response_bytes_samples" in data:
+        summary.update(summarize_number(data["response_bytes_samples"], "response_bytes", ""))
     for key, name in (("bytes_samples", "bytes"), ("chunks_samples", "chunks")):
         if key in data:
             summary.update(summarize_number(data[key], name, ""))
@@ -768,6 +1185,13 @@ case "$GPU_TELEMETRY" in
     fail "MICROAGENT_HOST_WORKER_PROBE_GPU_TELEMETRY must be off, auto, or required"
     ;;
 esac
+case "$RUNNER_TELEMETRY" in
+  off|auto|required)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY must be off, auto, or required"
+    ;;
+esac
 CONCURRENCY_SPACES="$(printf '%s' "$CONCURRENCY" | tr ',' ' ')"
 if [ -z "$(printf '%s' "$CONCURRENCY_SPACES" | tr -d '[:space:]')" ]; then
   fail "MICROAGENT_HOST_WORKER_PROBE_CONCURRENCY must include at least one positive integer"
@@ -800,7 +1224,7 @@ case "$BACKEND" in
     ;;
 esac
 
-echo "microagent-host-worker-probe: backend=$BACKEND model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY"
+echo "microagent-host-worker-probe: backend=$BACKEND model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY runner_telemetry=$RUNNER_TELEMETRY"
 echo "microagent-host-worker-probe: pulling or refreshing model record"
 PULL_JSON="$("$CLI" --json model pull "$MODEL_REF" --state-dir "$STATE_DIR")" || fail "model pull failed"
 CANONICAL="$(printf '%s' "$PULL_JSON" | json_get model_ref)"
@@ -815,9 +1239,11 @@ RUNNER_JSON="$("$CLI" --json model serve "$MODEL_REF" --state-dir "$STATE_DIR")"
 STARTED_RUNNER=1
 RUNNER_HOST="$(printf '%s' "$RUNNER_JSON" | json_get host)"
 RUNNER_PORT="$(printf '%s' "$RUNNER_JSON" | json_get port)"
-RUNNER_BASE_URL="http://$RUNNER_HOST:$RUNNER_PORT/v1"
+RUNNER_ROOT_URL="http://$RUNNER_HOST:$RUNNER_PORT"
+RUNNER_BASE_URL="$RUNNER_ROOT_URL/v1"
 
 start_gpu_telemetry
+start_runner_telemetry "$RUNNER_ROOT_URL"
 set_telemetry_phase host-direct
 echo "microagent-host-worker-probe: measuring direct host calls at $RUNNER_BASE_URL"
 HOST_JSON="$(host_benchmark "$RUNNER_BASE_URL")" || fail "direct host benchmark failed"
@@ -851,11 +1277,21 @@ join_values() {
 
 measure_models_worker() {
   out="$1"
+  ttfb_out="$2"
+  connect_out="$3"
+  pretransfer_out="$4"
+  bytes_out="$5"
   i=0
   total=$((PROBE_WARMUPS + PROBE_SAMPLES))
   while [ "$i" -lt "$total" ]; do
     body="$(mktemp)"
-    elapsed="$(curl -sS -o "$body" -w '%{time_total}' "$MICROAGENT_MODEL_URL/models")"
+    metrics="$(curl -sS -o "$body" -w '%{time_connect} %{time_pretransfer} %{time_starttransfer} %{time_total} %{size_download}' "$MICROAGENT_MODEL_URL/models")"
+    set -- $metrics
+    connect="$1"
+    pretransfer="$2"
+    ttfb="$3"
+    elapsed="$4"
+    bytes="$5"
     if ! grep -Eq '"object"|"data"' "$body"; then
       echo "models response did not look OpenAI-compatible" >&2
       cat "$body" >&2
@@ -865,6 +1301,10 @@ measure_models_worker() {
     rm -f "$body"
     if [ "$i" -ge "$PROBE_WARMUPS" ]; then
       printf '%s\n' "$elapsed" >>"$out"
+      printf '%s\n' "$ttfb" >>"$ttfb_out"
+      printf '%s\n' "$connect" >>"$connect_out"
+      printf '%s\n' "$pretransfer" >>"$pretransfer_out"
+      printf '%s\n' "$bytes" >>"$bytes_out"
     fi
     i=$((i + 1))
   done
@@ -872,6 +1312,10 @@ measure_models_worker() {
 
 measure_chat_worker() {
   out="$1"
+  ttfb_out="$2"
+  connect_out="$3"
+  pretransfer_out="$4"
+  bytes_out="$5"
   if [ "$PROBE_CHAT_PROFILE" = "sustained" ]; then
     payload='{"messages":[{"role":"user","content":"Write one compact paragraph about mediated host GPU workers."}],"max_tokens":'"$PROBE_CHAT_TOKENS"',"temperature":0}'
   else
@@ -881,7 +1325,13 @@ measure_chat_worker() {
   total=$((PROBE_WARMUPS + PROBE_SAMPLES))
   while [ "$i" -lt "$total" ]; do
     body="$(mktemp)"
-    elapsed="$(curl -sS -o "$body" -w '%{time_total}' "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "$payload")"
+    metrics="$(curl -sS -o "$body" -w '%{time_connect} %{time_pretransfer} %{time_starttransfer} %{time_total} %{size_download}' "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "$payload")"
+    set -- $metrics
+    connect="$1"
+    pretransfer="$2"
+    ttfb="$3"
+    elapsed="$4"
+    bytes="$5"
     if ! grep -q '"choices"' "$body"; then
       echo "chat response did not contain choices" >&2
       cat "$body" >&2
@@ -891,6 +1341,10 @@ measure_chat_worker() {
     rm -f "$body"
     if [ "$i" -ge "$PROBE_WARMUPS" ]; then
       printf '%s\n' "$elapsed" >>"$out"
+      printf '%s\n' "$ttfb" >>"$ttfb_out"
+      printf '%s\n' "$connect" >>"$connect_out"
+      printf '%s\n' "$pretransfer" >>"$pretransfer_out"
+      printf '%s\n' "$bytes" >>"$bytes_out"
     fi
     i=$((i + 1))
   done
@@ -901,16 +1355,20 @@ measure_stream_worker() {
   ttfb_out="$2"
   bytes_out="$3"
   chunks_out="$4"
+  connect_out="$5"
+  pretransfer_out="$6"
   payload='{"messages":[{"role":"user","content":"Write one compact paragraph about mediated host GPU workers."}],"max_tokens":'"$PROBE_STREAM_TOKENS"',"temperature":0,"stream":true}'
   i=0
   total=$((PROBE_WARMUPS + PROBE_SAMPLES))
   while [ "$i" -lt "$total" ]; do
     body="$(mktemp)"
-    metrics="$(curl -sS -N -o "$body" -w '%{time_starttransfer} %{time_total} %{size_download}' "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "$payload")"
+    metrics="$(curl -sS -N -o "$body" -w '%{time_connect} %{time_pretransfer} %{time_starttransfer} %{time_total} %{size_download}' "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "$payload")"
     set -- $metrics
-    ttfb="$1"
-    elapsed="$2"
-    bytes="$3"
+    connect="$1"
+    pretransfer="$2"
+    ttfb="$3"
+    elapsed="$4"
+    bytes="$5"
     if ! grep -Eq '\[DONE\]|"choices"' "$body"; then
       echo "stream response did not look OpenAI-compatible" >&2
       cat "$body" >&2
@@ -925,6 +1383,8 @@ measure_stream_worker() {
       printf '%s\n' "$ttfb" >>"$ttfb_out"
       printf '%s\n' "$bytes" >>"$bytes_out"
       printf '%s\n' "$chunks" >>"$chunks_out"
+      printf '%s\n' "$connect" >>"$connect_out"
+      printf '%s\n' "$pretransfer" >>"$pretransfer_out"
     fi
     i=$((i + 1))
   done
@@ -936,7 +1396,7 @@ measure_models() {
   pids=""
   worker=1
   while [ "$worker" -le "$level" ]; do
-    measure_models_worker "$tmp/$worker" &
+    measure_models_worker "$tmp/$worker.total" "$tmp/$worker.ttfb" "$tmp/$worker.connect" "$tmp/$worker.pretransfer" "$tmp/$worker.bytes" &
     pids="$pids $!"
     worker=$((worker + 1))
   done
@@ -949,13 +1409,25 @@ measure_models() {
     exit "$status"
   fi
   values_file="$tmp/values"
+  ttfb_file="$tmp/ttfb"
+  connect_file="$tmp/connect"
+  pretransfer_file="$tmp/pretransfer"
+  bytes_file="$tmp/bytes"
   : >"$values_file"
+  : >"$ttfb_file"
+  : >"$connect_file"
+  : >"$pretransfer_file"
+  : >"$bytes_file"
   worker=1
   while [ "$worker" -le "$level" ]; do
-    cat "$tmp/$worker" >>"$values_file"
+    cat "$tmp/$worker.total" >>"$values_file"
+    cat "$tmp/$worker.ttfb" >>"$ttfb_file"
+    cat "$tmp/$worker.connect" >>"$connect_file"
+    cat "$tmp/$worker.pretransfer" >>"$pretransfer_file"
+    cat "$tmp/$worker.bytes" >>"$bytes_file"
     worker=$((worker + 1))
   done
-  join_values "$values_file"
+  printf '"samples_seconds":[%s],"ttfb_samples_seconds":[%s],"connect_samples_seconds":[%s],"pretransfer_samples_seconds":[%s],"bytes_samples":[%s]' "$(join_values "$values_file")" "$(join_values "$ttfb_file")" "$(join_values "$connect_file")" "$(join_values "$pretransfer_file")" "$(join_values "$bytes_file")"
   rm -rf "$tmp"
 }
 
@@ -965,7 +1437,7 @@ measure_chat() {
   pids=""
   worker=1
   while [ "$worker" -le "$level" ]; do
-    measure_chat_worker "$tmp/$worker" &
+    measure_chat_worker "$tmp/$worker.total" "$tmp/$worker.ttfb" "$tmp/$worker.connect" "$tmp/$worker.pretransfer" "$tmp/$worker.bytes" &
     pids="$pids $!"
     worker=$((worker + 1))
   done
@@ -978,13 +1450,25 @@ measure_chat() {
     exit "$status"
   fi
   values_file="$tmp/values"
+  ttfb_file="$tmp/ttfb"
+  connect_file="$tmp/connect"
+  pretransfer_file="$tmp/pretransfer"
+  bytes_file="$tmp/bytes"
   : >"$values_file"
+  : >"$ttfb_file"
+  : >"$connect_file"
+  : >"$pretransfer_file"
+  : >"$bytes_file"
   worker=1
   while [ "$worker" -le "$level" ]; do
-    cat "$tmp/$worker" >>"$values_file"
+    cat "$tmp/$worker.total" >>"$values_file"
+    cat "$tmp/$worker.ttfb" >>"$ttfb_file"
+    cat "$tmp/$worker.connect" >>"$connect_file"
+    cat "$tmp/$worker.pretransfer" >>"$pretransfer_file"
+    cat "$tmp/$worker.bytes" >>"$bytes_file"
     worker=$((worker + 1))
   done
-  join_values "$values_file"
+  printf '"samples_seconds":[%s],"ttfb_samples_seconds":[%s],"connect_samples_seconds":[%s],"pretransfer_samples_seconds":[%s],"bytes_samples":[%s]' "$(join_values "$values_file")" "$(join_values "$ttfb_file")" "$(join_values "$connect_file")" "$(join_values "$pretransfer_file")" "$(join_values "$bytes_file")"
   rm -rf "$tmp"
 }
 
@@ -994,7 +1478,7 @@ measure_stream() {
   pids=""
   worker=1
   while [ "$worker" -le "$level" ]; do
-    measure_stream_worker "$tmp/$worker.total" "$tmp/$worker.ttfb" "$tmp/$worker.bytes" "$tmp/$worker.chunks" &
+    measure_stream_worker "$tmp/$worker.total" "$tmp/$worker.ttfb" "$tmp/$worker.bytes" "$tmp/$worker.chunks" "$tmp/$worker.connect" "$tmp/$worker.pretransfer" &
     pids="$pids $!"
     worker=$((worker + 1))
   done
@@ -1010,19 +1494,25 @@ measure_stream() {
   ttfb_file="$tmp/ttfb"
   bytes_file="$tmp/bytes"
   chunks_file="$tmp/chunks"
+  connect_file="$tmp/connect"
+  pretransfer_file="$tmp/pretransfer"
   : >"$total_file"
   : >"$ttfb_file"
   : >"$bytes_file"
   : >"$chunks_file"
+  : >"$connect_file"
+  : >"$pretransfer_file"
   worker=1
   while [ "$worker" -le "$level" ]; do
     cat "$tmp/$worker.total" >>"$total_file"
     cat "$tmp/$worker.ttfb" >>"$ttfb_file"
     cat "$tmp/$worker.bytes" >>"$bytes_file"
     cat "$tmp/$worker.chunks" >>"$chunks_file"
+    cat "$tmp/$worker.connect" >>"$connect_file"
+    cat "$tmp/$worker.pretransfer" >>"$pretransfer_file"
     worker=$((worker + 1))
   done
-  printf '"samples_seconds":[%s],"ttfb_samples_seconds":[%s],"bytes_samples":[%s],"chunks_samples":[%s]' "$(join_values "$total_file")" "$(join_values "$ttfb_file")" "$(join_values "$bytes_file")" "$(join_values "$chunks_file")"
+  printf '"samples_seconds":[%s],"ttfb_samples_seconds":[%s],"connect_samples_seconds":[%s],"pretransfer_samples_seconds":[%s],"bytes_samples":[%s],"chunks_samples":[%s]' "$(join_values "$total_file")" "$(join_values "$ttfb_file")" "$(join_values "$connect_file")" "$(join_values "$pretransfer_file")" "$(join_values "$bytes_file")" "$(join_values "$chunks_file")"
   rm -rf "$tmp"
 }
 
@@ -1035,7 +1525,7 @@ for level in $(printf '%s' "$PROBE_CONCURRENCY" | tr ',' ' '); do
     printf ','
   fi
   first_level=0
-  printf '"%s":{"models":{"samples_seconds":[%s],"samples_per_worker":%s,"warmups_per_worker":%s},"chat":{"samples_seconds":[%s],"samples_per_worker":%s,"warmups_per_worker":%s}' "$level" "$models_values" "$PROBE_SAMPLES" "$PROBE_WARMUPS" "$chat_values" "$PROBE_SAMPLES" "$PROBE_WARMUPS"
+  printf '"%s":{"models":{%s,"samples_per_worker":%s,"warmups_per_worker":%s},"chat":{%s,"samples_per_worker":%s,"warmups_per_worker":%s}' "$level" "$models_values" "$PROBE_SAMPLES" "$PROBE_WARMUPS" "$chat_values" "$PROBE_SAMPLES" "$PROBE_WARMUPS"
   if [ "$PROBE_STREAM" = "1" ]; then
     stream_values="$(measure_stream "$level")"
     printf ',"stream":{%s,"samples_per_worker":%s,"warmups_per_worker":%s}' "$stream_values" "$PROBE_SAMPLES" "$PROBE_WARMUPS"
@@ -1112,6 +1602,8 @@ def endpoint_order(keys):
 sample_fields = {
     "samples_seconds",
     "ttfb_samples_seconds",
+    "connect_samples_seconds",
+    "pretransfer_samples_seconds",
     "bytes_samples",
     "chunks_samples",
 }
@@ -1143,9 +1635,11 @@ PY
 GUEST_JSON="$(run_guest_benchmarks)" || fail "guest benchmark failed"
 set_telemetry_phase report
 stop_gpu_telemetry
+stop_runner_telemetry
 
 REPORT_JSON="$(combine_report "$HOST_JSON" "$GUEST_JSON" "$BACKEND" "$CANONICAL" "$RUNNER_JSON")"
 REPORT_JSON="$(add_gpu_telemetry_to_report "$REPORT_JSON")"
+REPORT_JSON="$(add_runner_telemetry_to_report "$REPORT_JSON")"
 if [ -n "$REPORT_PATH" ]; then
   mkdir -p "$(dirname "$REPORT_PATH")"
   printf '%s\n' "$REPORT_JSON" >"$REPORT_PATH"
