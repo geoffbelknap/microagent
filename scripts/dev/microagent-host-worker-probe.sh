@@ -69,6 +69,10 @@
 #                                           comma-separated runner diagnostic paths (default: /metrics,/slots)
 #   MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_TIMEOUT
 #                                           per-endpoint sample timeout in seconds (default: 2)
+#   MICROAGENT_HOST_WORKER_PROBE_CONFORMANCE
+#                                           required, auto, or off (default: required)
+#   MICROAGENT_HOST_WORKER_CONFORMANCE_REPORT
+#                                           path to write host worker contract report
 #   MICROAGENT_HOST_WORKER_PROBE_WORKSPACE workspace name
 #   MICROAGENT_HOST_WORKER_PROBE_REPORT    path to write final JSON report
 #   MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT
@@ -111,6 +115,8 @@ RUNNER_TELEMETRY_INTERVAL="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_INTER
 RUNNER_TELEMETRY_PATH="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_PATH:-}"
 RUNNER_TELEMETRY_ENDPOINTS="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_ENDPOINTS:-/metrics,/slots}"
 RUNNER_TELEMETRY_TIMEOUT="${MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY_TIMEOUT:-2}"
+CONFORMANCE="${MICROAGENT_HOST_WORKER_PROBE_CONFORMANCE:-required}"
+CONFORMANCE_REPORT_PATH="${MICROAGENT_HOST_WORKER_CONFORMANCE_REPORT:-}"
 WS_BASE="${MICROAGENT_HOST_WORKER_PROBE_WORKSPACE:-host-worker-probe-$$}"
 REPORT_PATH="${MICROAGENT_HOST_WORKER_PROBE_REPORT:-}"
 PRINT_REPORT="${MICROAGENT_HOST_WORKER_PROBE_PRINT_REPORT:-1}"
@@ -127,6 +133,7 @@ RUNNER_TELEMETRY_PID=""
 RUNNER_TELEMETRY_PHASE_FILE=""
 RUNNER_TELEMETRY_TMPDIR=""
 RUNNER_TELEMETRY_PATH_PERSISTED=0
+CONFORMANCE_JSON=""
 CREATE_FLAGS=()
 START_FLAGS=()
 CTRL_FLAGS=()
@@ -1145,6 +1152,136 @@ raise SystemExit(1)
 PY
 }
 
+run_host_worker_conformance() {
+  local base_url="$1"
+  local root_url="$2"
+  local report_arg=()
+  local output
+  local err
+  local status
+
+  case "$CONFORMANCE" in
+    off)
+      CONFORMANCE_JSON='{"enabled":false,"required_ok":null}'
+      return
+      ;;
+    auto|required)
+      ;;
+    *)
+      fail "MICROAGENT_HOST_WORKER_PROBE_CONFORMANCE must be required, auto, or off"
+      ;;
+  esac
+
+  if [ -z "$CONFORMANCE_REPORT_PATH" ] && [ -n "$REPORT_PATH" ]; then
+    case "$REPORT_PATH" in
+      *.json) CONFORMANCE_REPORT_PATH="${REPORT_PATH%.json}.conformance.json" ;;
+      *) CONFORMANCE_REPORT_PATH="$REPORT_PATH.conformance.json" ;;
+    esac
+  fi
+  if [ -n "$CONFORMANCE_REPORT_PATH" ]; then
+    report_arg=(--report "$CONFORMANCE_REPORT_PATH")
+  fi
+
+  err="$(mktemp)"
+  set +e
+  output="$(
+    python3 "$ROOT/scripts/dev/microagent-host-worker-conformance.py" \
+      --base-url "$base_url" \
+      --root-url "$root_url" \
+      --request-model "$REQUEST_MODEL" \
+      --runner-engine "$RUNNER_ENGINE_OVERRIDE" \
+      --runner-version "$RUNNER_VERSION" \
+      --label "$RUN_LABEL" \
+      --chat-tokens "$CHAT_TOKENS" \
+      --stream-tokens "$STREAM_TOKENS" \
+      --telemetry-endpoints "$RUNNER_TELEMETRY_ENDPOINTS" \
+      --telemetry-timeout "$RUNNER_TELEMETRY_TIMEOUT" \
+      "${report_arg[@]}" 2>"$err"
+  )"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    if [ "$CONFORMANCE" = "auto" ]; then
+      echo "microagent-host-worker-probe: host worker conformance failed; continuing because conformance=auto" >&2
+      [ ! -s "$err" ] || sed -n '1,120p' "$err" >&2
+      CONFORMANCE_JSON="$output"
+      rm -f "$err"
+      return
+    fi
+    [ ! -s "$err" ] || sed -n '1,120p' "$err" >&2
+    rm -f "$err"
+    fail "host worker conformance failed"
+  fi
+  rm -f "$err"
+  CONFORMANCE_JSON="$output"
+  python3 - "$CONFORMANCE_JSON" "$CONFORMANCE_REPORT_PATH" <<'PY'
+import json
+import sys
+
+doc = json.loads(sys.argv[1])
+path = sys.argv[2] or None
+cap = doc.get("capabilities") or {}
+sources = ",".join(cap.get("runner_telemetry_sources") or []) or "none"
+message = (
+    "microagent-host-worker-probe: conformance "
+    f"required_ok={cap.get('required_ok')} "
+    f"models={cap.get('model_count')} "
+    f"streaming={cap.get('streaming_chat_completions')} "
+    f"runner_telemetry={sources}"
+)
+if path:
+    message += f" report={path}"
+print(message)
+PY
+}
+
+add_conformance_to_report() {
+  local report_json="$1"
+  local report_file conformance_file status
+  if [ -z "$CONFORMANCE_JSON" ]; then
+    printf '%s\n' "$report_json"
+    return
+  fi
+  report_file="$(mktemp)"
+  conformance_file="$(mktemp)"
+  printf '%s\n' "$report_json" >"$report_file"
+  printf '%s\n' "$CONFORMANCE_JSON" >"$conformance_file"
+  set +e
+  python3 - "$report_file" "$conformance_file" "$CONFORMANCE_REPORT_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+conformance = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+report_path = sys.argv[3] or None
+host_worker = report.setdefault("host_worker", {})
+host_worker["conformance"] = conformance
+if report_path:
+    host_worker["conformance_report"] = report_path
+
+diagnostics = host_worker.setdefault("diagnostics", {})
+capabilities = conformance.get("capabilities") or {}
+diagnostics["conformance_required_ok"] = capabilities.get("required_ok")
+diagnostics["conformance_model_count"] = capabilities.get("model_count")
+diagnostics["conformance_streaming"] = capabilities.get(
+    "streaming_chat_completions"
+)
+sources = diagnostics.setdefault("sources", [])
+for source in capabilities.get("runner_telemetry_sources") or []:
+    if source not in sources:
+        sources.append(source)
+runner_engine = conformance.get("runner_engine")
+if runner_engine and not host_worker.get("runner_engine"):
+    host_worker["runner_engine"] = runner_engine
+print(json.dumps(report, indent=2, sort_keys=True))
+PY
+  status=$?
+  set -e
+  rm -f "$report_file" "$conformance_file"
+  return "$status"
+}
+
 external_runner_json() {
   local info_json="$1"
   local engine="$2"
@@ -1934,6 +2071,13 @@ case "$RUNNER_TELEMETRY" in
     fail "MICROAGENT_HOST_WORKER_PROBE_RUNNER_TELEMETRY must be off, auto, or required"
     ;;
 esac
+case "$CONFORMANCE" in
+  off|auto|required)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_PROBE_CONFORMANCE must be required, auto, or off"
+    ;;
+esac
 case "$WORKER_PROTOCOL" in
   openai-compatible)
     ;;
@@ -2013,7 +2157,7 @@ RUNNER_MODE=managed
 if [ -n "$HOST_WORKER_URL" ]; then
   RUNNER_MODE=external
 fi
-echo "microagent-host-worker-probe: backend=$BACKEND runner_mode=$RUNNER_MODE model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY host_baseline=$HOST_BASELINE chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY runner_telemetry=$RUNNER_TELEMETRY"
+echo "microagent-host-worker-probe: backend=$BACKEND runner_mode=$RUNNER_MODE model=$MODEL_REF image=$IMAGE samples=$SAMPLES warmups=$WARMUPS workspaces=$WORKSPACE_COUNT concurrency=$CONCURRENCY host_baseline=$HOST_BASELINE chat_profile=$CHAT_PROFILE chat_tokens=$CHAT_TOKENS stream=$STREAM stream_tokens=$STREAM_TOKENS gpu_telemetry=$GPU_TELEMETRY runner_telemetry=$RUNNER_TELEMETRY conformance=$CONFORMANCE"
 
 GUEST_MODEL_URL="http://127.0.0.1:$MODEL_GUEST_PORT/v1"
 if [ "$RUNNER_MODE" = "external" ]; then
@@ -2061,6 +2205,7 @@ else
   echo "microagent-host-worker-probe: using configured request model $REQUEST_MODEL"
 fi
 
+run_host_worker_conformance "$RUNNER_BASE_URL" "$RUNNER_ROOT_URL"
 start_gpu_telemetry
 start_runner_telemetry "$RUNNER_ROOT_URL"
 set_telemetry_phase host-direct
@@ -2489,6 +2634,7 @@ stop_gpu_telemetry
 stop_runner_telemetry
 
 REPORT_JSON="$(combine_report "$HOST_JSON" "$GUEST_JSON" "$BACKEND" "$CANONICAL" "$RUNNER_JSON")"
+REPORT_JSON="$(add_conformance_to_report "$REPORT_JSON")"
 REPORT_JSON="$(add_gpu_telemetry_to_report "$REPORT_JSON")"
 REPORT_JSON="$(add_runner_telemetry_to_report "$REPORT_JSON")"
 REPORT_JSON="$(add_pressure_summary_to_report "$REPORT_JSON")"
