@@ -13,19 +13,23 @@ import (
 
 // Record is one tracked host model-server process.
 type Record struct {
-	Key       string   `json:"key"`
-	ModelRef  string   `json:"model_ref"`
-	Engine    string   `json:"engine"`
-	BinPath   string   `json:"bin_path,omitempty"`
-	Host      string   `json:"host"`
-	Port      int      `json:"port"`
-	PID       int      `json:"pid"`
-	Dedicated bool     `json:"dedicated,omitempty"`
-	Pinned    bool     `json:"pinned,omitempty"`
-	Holders   []string `json:"holders,omitempty"`
-	LogPath   string   `json:"log_path,omitempty"`
-	StartedAt string   `json:"started_at"`
-	ReadyAt   string   `json:"ready_at,omitempty"`
+	Key                string   `json:"key"`
+	ModelRef           string   `json:"model_ref"`
+	Engine             string   `json:"engine"`
+	BinPath            string   `json:"bin_path,omitempty"`
+	Host               string   `json:"host"`
+	Port               int      `json:"port"`
+	PID                int      `json:"pid"`
+	RunnerCommand      []string `json:"runner_command,omitempty"`
+	RunnerArgs         []string `json:"runner_args,omitempty"`
+	RunnerEnvKeys      []string `json:"runner_env_keys,omitempty"`
+	RunnerConfigDigest string   `json:"runner_config_digest,omitempty"`
+	Dedicated          bool     `json:"dedicated,omitempty"`
+	Pinned             bool     `json:"pinned,omitempty"`
+	Holders            []string `json:"holders,omitempty"`
+	LogPath            string   `json:"log_path,omitempty"`
+	StartedAt          string   `json:"started_at"`
+	ReadyAt            string   `json:"ready_at,omitempty"`
 }
 
 type Index struct {
@@ -64,7 +68,10 @@ func WriteIndex(stateDir string, idx Index) error {
 	return os.WriteFile(IndexPath(stateDir), data, 0o600)
 }
 
-func runnerKey(modelRef string, dedicated bool, holder string) string {
+func runnerKey(modelRef string, dedicated bool, holder string, configDigest string) string {
+	if configDigest != "" {
+		modelRef += "#runner=" + configDigest
+	}
 	if dedicated {
 		return modelRef + "#" + holder
 	}
@@ -83,6 +90,7 @@ type EnsureOptions struct {
 	Dedicated    bool   // give this holder its own runner
 	Host         string // default 127.0.0.1
 	ReadyTimeout time.Duration
+	RunnerConfig RunnerConfig
 }
 
 // Ensure returns a ready runner for the model, reusing a live one for the same
@@ -102,7 +110,12 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Record, error) {
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	key := runnerKey(opts.ModelRef, opts.Dedicated, opts.Holder)
+	runnerConfig, err := normalizeRunnerConfig(opts.RunnerConfig)
+	if err != nil {
+		return Record{}, err
+	}
+	configDigest := runnerConfig.Digest()
+	key := runnerKey(opts.ModelRef, opts.Dedicated, opts.Holder, configDigest)
 	idx, err := ReadIndex(opts.StateDir)
 	if err != nil {
 		return Record{}, err
@@ -129,23 +142,27 @@ func Ensure(ctx context.Context, opts EnsureOptions) (Record, error) {
 	}
 	argv := opts.Engine.Argv(opts.ModelPath, host, port)
 	logPath := filepath.Join(opts.StateDir, "runners", sanitizeKey(key)+".log")
-	pid, err := spawnProcess(argv, logPath)
+	pid, err := spawnProcess(argv, runnerConfig.Env, logPath)
 	if err != nil {
 		return Record{}, err
 	}
 	rec := Record{
-		Key:       key,
-		ModelRef:  opts.ModelRef,
-		Engine:    opts.Engine.Name(),
-		BinPath:   argv[0],
-		Host:      host,
-		Port:      port,
-		PID:       pid,
-		Dedicated: opts.Dedicated,
-		Pinned:    opts.Pinned,
-		Holders:   addHolder(nil, opts.Holder),
-		LogPath:   logPath,
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
+		Key:                key,
+		ModelRef:           opts.ModelRef,
+		Engine:             opts.Engine.Name(),
+		BinPath:            argv[0],
+		Host:               host,
+		Port:               port,
+		PID:                pid,
+		RunnerCommand:      append([]string{}, runnerConfig.Command...),
+		RunnerArgs:         append([]string{}, runnerConfig.Args...),
+		RunnerEnvKeys:      runnerConfig.EnvKeys(),
+		RunnerConfigDigest: configDigest,
+		Dedicated:          opts.Dedicated,
+		Pinned:             opts.Pinned,
+		Holders:            addHolder(nil, opts.Holder),
+		LogPath:            logPath,
+		StartedAt:          time.Now().UTC().Format(time.RFC3339),
 	}
 	idx.Runners = append(idx.Runners, rec)
 	if err := WriteIndex(opts.StateDir, idx); err != nil {

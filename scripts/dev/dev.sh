@@ -122,7 +122,7 @@ bootstrap_host() {
 
 doctor_json="$(mktemp "${TMPDIR:-/tmp}/microagent-dev-doctor-json.XXXXXX")"
 doctor_err="$(mktemp "${TMPDIR:-/tmp}/microagent-dev-doctor-err.XXXXXX")"
-# shellcheck disable=SC2317
+# shellcheck disable=SC2317,SC2329
 cleanup() {
   rm -f "$doctor_json" "$doctor_err"
 }

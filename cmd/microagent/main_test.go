@@ -154,6 +154,9 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"secret", []string{"app", "--secret", "API=env:TOKEN"}, "-secret", "API=env:TOKEN"},
 		{"secrets-env-file", []string{"app", "--image", "img", "--secrets-env-file", "/tmp/app.env"}, "-secrets-env-file", "/tmp/app.env"},
 		{"secret-on-demand", []string{"app", "--secret-on-demand", "DB=env:DB"}, "-secret-on-demand", "DB=env:DB"},
+		{"runner-command", []string{"local/smoke/smoke.gguf", "--runner-command", "runner serve {model} --listen {addr}"}, "-runner-command", "runner serve {model} --listen {addr}"},
+		{"runner-arg", []string{"local/smoke/smoke.gguf", "--runner-arg", "-ngl"}, "-runner-arg", "-ngl"},
+		{"runner-env", []string{"local/smoke/smoke.gguf", "--runner-env", "CUDA_VISIBLE_DEVICES=0"}, "-runner-env", "CUDA_VISIBLE_DEVICES=0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)
@@ -5501,6 +5504,30 @@ func TestWindowsHyperVNamedNetworkSmoke(t *testing.T) {
 		logWindowsHyperVSmokeState(t, dir, web)
 		logWindowsHyperVSmokeState(t, dir, db)
 		t.Fatalf("cross-VM ping web(%s) -> db(%s) failed:\n%s", webIP, dbIP, out)
+	}
+}
+
+func TestResolveModelRunnerCustomCommandAllowsEnvMetadata(t *testing.T) {
+	t.Setenv(modelrunner.EnvModelRunnerName, "runner-x")
+	t.Setenv(modelrunner.EnvModelRunnerHealthPath, "/ready")
+
+	engine, config, err := resolveModelRunner(modelRunnerOverrides{
+		Command: "runner serve {model} --listen {addr}",
+		Args:    []string{"--gpu", "auto"},
+	})
+	if err != nil {
+		t.Fatalf("resolveModelRunner: %v", err)
+	}
+	if config.Name != "runner-x" || config.HealthPath != "/ready" {
+		t.Fatalf("config metadata = %q %q", config.Name, config.HealthPath)
+	}
+	got := engine.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"runner", "serve", "/models/m.gguf", "--listen", "127.0.0.1:9999", "--gpu", "auto"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+	if engine.Name() != "runner-x" || engine.HealthPath() != "/ready" {
+		t.Fatalf("engine metadata = %q %q", engine.Name(), engine.HealthPath())
 	}
 }
 

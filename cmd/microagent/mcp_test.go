@@ -281,6 +281,20 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "artifact", "demo", "-state-dir", "/tmp/state"},
 		},
 		{
+			name: "models.serve",
+			args: map[string]any{
+				"model":              "org/repo/model.gguf",
+				"dedicated":          true,
+				"runner_command":     "runner serve {model} --listen {addr}",
+				"runner_name":        "runner",
+				"runner_health_path": "/ready",
+				"runner_args":        []any{"--gpu", "auto"},
+				"runner_env":         []any{"CUDA_VISIBLE_DEVICES=0"},
+				"state_dir":          "/tmp/state",
+			},
+			want: []string{"--mode=ax", "model", "serve", "org/repo/model.gguf", "-dedicated", "-runner-command", "runner serve {model} --listen {addr}", "-runner-name", "runner", "-runner-health-path", "/ready", "-runner-arg", "--gpu", "-runner-arg", "auto", "-runner-env", "CUDA_VISIBLE_DEVICES=0", "-state-dir", "/tmp/state"},
+		},
+		{
 			name: "snapshot.create",
 			args: map[string]any{"name": "demo", "tag": "before-upgrade"},
 			want: []string{"--mode=ax", "snapshot", "create", "demo", "-tag", "before-upgrade"},

@@ -55,10 +55,10 @@ fi
 
 find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
-if command -v shellcheck >/dev/null 2>&1; then
-  find scripts -name '*.sh' -print0 | xargs -0 shellcheck
-else
-  echo "shellcheck not found; skipping shell lint" >&2
+if ! command -v shellcheck >/dev/null 2>&1; then
+  echo "shellcheck not found; install shellcheck before running release checks" >&2
+  exit 1
 fi
+find scripts -name '*.sh' -print0 | xargs -0 shellcheck
 
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...

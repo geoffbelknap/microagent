@@ -338,7 +338,17 @@ func mcpTools() []map[string]any {
 		mcpTool("models.remove", "Remove a model from the local store.", []string{"model"}, map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("models.prune", "Prune local model records whose blobs are missing.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("models.serve", "Start or reuse a local host model server for a stored or pulled model.", []string{"model"},
-			map[string]any{"model": map[string]any{"type": "string"}, "dedicated": map[string]any{"type": "boolean"}, "token": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+			map[string]any{
+				"model":              map[string]any{"type": "string"},
+				"dedicated":          map[string]any{"type": "boolean"},
+				"runner_command":     map[string]any{"type": "string"},
+				"runner_name":        map[string]any{"type": "string"},
+				"runner_health_path": map[string]any{"type": "string"},
+				"runner_args":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"runner_env":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"token":              map[string]any{"type": "string"},
+				"state_dir":          map[string]any{"type": "string"},
+			}),
 		mcpTool("models.stop", "Stop local host model server instances for a model.", []string{"model"},
 			map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("models.runners", "List running local model servers.", nil,
@@ -1460,6 +1470,23 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli := []string{"--mode=ax", "model", "serve", stringArg(args, "model")}
 		if boolArg(args, "dedicated") {
 			cli = append(cli, "-dedicated")
+		}
+		cli = appendOptionalFlag(cli, "-runner-command", stringArg(args, "runner_command"))
+		cli = appendOptionalFlag(cli, "-runner-name", stringArg(args, "runner_name"))
+		cli = appendOptionalFlag(cli, "-runner-health-path", stringArg(args, "runner_health_path"))
+		if runnerArgs, ok, err := stringSliceArg(args, "runner_args"); err != nil {
+			return nil, err
+		} else if ok {
+			for _, arg := range runnerArgs {
+				cli = append(cli, "-runner-arg", arg)
+			}
+		}
+		if runnerEnv, ok, err := stringSliceArg(args, "runner_env"); err != nil {
+			return nil, err
+		} else if ok {
+			for _, entry := range runnerEnv {
+				cli = append(cli, "-runner-env", entry)
+			}
 		}
 		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)

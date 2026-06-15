@@ -4,7 +4,7 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-15_
 
 Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
@@ -223,7 +223,10 @@ Two honest caveats before you start:
   completing it end to end, and it needs a low sampling temperature to do it.
 - **You need `llama-server` on the host.** Install it from
   [llama.cpp](https://github.com/ggml-org/llama.cpp) and put it on your PATH,
-  or point `MICROAGENT_LLAMA_SERVER` at the binary.
+  or point `MICROAGENT_LLAMA_SERVER` at the binary. On Linux x86_64 hosts with
+  NVIDIA CUDA, `scripts/dev/build-llama-cuda.sh --llama-dir ../llama.cpp`
+  reproduces the CUDA-enabled dev build and prints the matching
+  `MICROAGENT_LLAMA_SERVER` and `MICROAGENT_MODEL_RUNNER_ARGS` exports.
 
 Pull the model - a 2.5 GB download (`create` and `start` auto-pull a missing
 blob, but pulling first makes the wait visible):

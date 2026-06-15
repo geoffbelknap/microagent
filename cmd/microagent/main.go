@@ -707,7 +707,7 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 			return nil, fmt.Errorf("pull model %s: %w", modelRefRaw, err)
 		}
 	}
-	binPath, err := modelrunner.ResolveLlamaServerPath()
+	engine, runnerConfig, err := resolveModelRunner(modelRunnerOverrides{})
 	if err != nil {
 		return nil, err
 	}
@@ -715,9 +715,10 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 		StateDir:     opts.StateDir,
 		ModelRef:     rec.ModelRef,
 		ModelPath:    rec.OutputPath,
-		Engine:       modelrunner.LlamaCPP{BinPath: binPath},
+		Engine:       engine,
 		Holder:       opts.Name,
 		ReadyTimeout: 120 * time.Second,
+		RunnerConfig: runnerConfig,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start model runner: %w", err)
@@ -733,6 +734,58 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 	opts.Env["OPENAI_BASE_URL"] = modelURL
 	stateDir, modelRef, holder := opts.StateDir, rec.ModelRef, opts.Name
 	return func() { _ = modelrunner.Release(stateDir, modelRef, holder) }, nil
+}
+
+type modelRunnerOverrides struct {
+	Command    string
+	Name       string
+	HealthPath string
+	Args       []string
+	Env        []string
+}
+
+func resolveModelRunner(overrides modelRunnerOverrides) (modelrunner.Engine, modelrunner.RunnerConfig, error) {
+	command, err := modelrunner.ParseRunnerCommand(os.Getenv(modelrunner.EnvModelRunnerCommand))
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerCommand, err)
+	}
+	args, err := modelrunner.ParseRunnerArgs(os.Getenv(modelrunner.EnvModelRunnerArgs))
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerArgs, err)
+	}
+	env, err := modelrunner.ParseRunnerEnv(os.Getenv(modelrunner.EnvModelRunnerEnv))
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerEnv, err)
+	}
+	config := modelrunner.RunnerConfig{
+		Command:    command,
+		Name:       os.Getenv(modelrunner.EnvModelRunnerName),
+		HealthPath: os.Getenv(modelrunner.EnvModelRunnerHealthPath),
+		Args:       args,
+		Env:        env,
+	}
+	if strings.TrimSpace(overrides.Command) != "" {
+		command, err := modelrunner.ParseRunnerCommand(overrides.Command)
+		if err != nil {
+			return nil, modelrunner.RunnerConfig{}, fmt.Errorf("runner command: %w", err)
+		}
+		config.Command = command
+	}
+	if strings.TrimSpace(overrides.Name) != "" {
+		config.Name = overrides.Name
+	}
+	if strings.TrimSpace(overrides.HealthPath) != "" {
+		config.HealthPath = overrides.HealthPath
+	}
+	config, err = config.WithAdditional(overrides.Args, overrides.Env)
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, err
+	}
+	engine, err := modelrunner.ResolveEngine(config)
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, err
+	}
+	return engine, config, nil
 }
 
 // pendingModelRelease captures the workspace's paired model ref now (delete
@@ -2040,12 +2093,19 @@ func runModelServe(args []string, stdout *os.File) error {
 	fs.SetOutput(os.Stderr)
 	dedicated := fs.Bool("dedicated", false, "Start a dedicated runner instead of sharing one")
 	token := fs.String("token", "", "HuggingFace token for auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
+	runnerCommand := fs.String("runner-command", "", "Host model runner command template")
+	runnerName := fs.String("runner-name", "", "Host model runner name for state output")
+	runnerHealthPath := fs.String("runner-health-path", "", "Host model runner health probe path")
+	var runnerArgs multiFlag
+	var runnerEnv multiFlag
+	fs.Var(&runnerArgs, "runner-arg", "Extra model runner argument (repeatable)")
+	fs.Var(&runnerEnv, "runner-env", "Extra model runner environment KEY=VALUE (repeatable)")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent model serve <hf-ref> [--dedicated] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]")
 	}
 	ref := fs.Arg(0)
 	canonical, _, err := model.Resolve(ref)
@@ -2060,17 +2120,24 @@ func runModelServe(args []string, stdout *os.File) error {
 			return err
 		}
 	}
-	binPath, err := modelrunner.ResolveLlamaServerPath()
+	engine, runnerConfig, err := resolveModelRunner(modelRunnerOverrides{
+		Command:    *runnerCommand,
+		Name:       *runnerName,
+		HealthPath: *runnerHealthPath,
+		Args:       runnerArgs,
+		Env:        runnerEnv,
+	})
 	if err != nil {
 		return err
 	}
 	runner, err := modelrunner.Ensure(context.Background(), modelrunner.EnsureOptions{
-		StateDir:  stateDir,
-		ModelRef:  rec.ModelRef,
-		ModelPath: rec.OutputPath,
-		Engine:    modelrunner.LlamaCPP{BinPath: binPath},
-		Pinned:    true,
-		Dedicated: *dedicated,
+		StateDir:     stateDir,
+		ModelRef:     rec.ModelRef,
+		ModelPath:    rec.OutputPath,
+		Engine:       engine,
+		Pinned:       true,
+		Dedicated:    *dedicated,
+		RunnerConfig: runnerConfig,
 	})
 	if err != nil {
 		return err
@@ -2086,12 +2153,17 @@ func printModelServeHelp(stdout io.Writer) {
 	fmt.Fprint(stdout, `microagent model serve <hf-ref>
 microagent model serve <hf-ref>
 
-Start or reuse a pinned host llama-server process for a HuggingFace GGUF model.
+Start or reuse a pinned host model runner process for a HuggingFace GGUF model.
 
 Options:
-  --dedicated          Start a dedicated runner instead of sharing one
-  --token <t>          HuggingFace token for auto-pull
-  --state-dir <dir>    State directory
+  --dedicated                    Start a dedicated runner instead of sharing one
+  --runner-command <template>    Host model runner command template
+  --runner-name <name>           Host model runner name for state output
+  --runner-health-path <path>    Host model runner health probe path
+  --runner-arg <arg>             Extra model runner argument (repeatable)
+  --runner-env KEY=VALUE         Extra model runner environment override (repeatable)
+  --token <t>                    HuggingFace token for auto-pull
+  --state-dir <dir>              State directory
 `)
 }
 
@@ -5783,70 +5855,75 @@ func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identi
 
 func reorderFlagArgs(args []string) []string {
 	valueFlags := map[string]bool{
-		"-supervisor":        true,
-		"-json":              true,
-		"-id":                true,
-		"-name":              true,
-		"-image":             true,
-		"-exec":              true,
-		"-setup-file":        true,
-		"-service-command":   true,
-		"-entrypoint":        true,
-		"-shell":             true,
-		"-hostname":          true,
-		"-file":              true,
-		"-env":               true,
-		"-setup":             true,
-		"-request-id":        true,
-		"-role":              true,
-		"-backend":           true,
-		"-kernel":            true,
-		"-rootfs":            true,
-		"-disk":              true,
-		"-bundle":            true,
-		"-volume":            true,
-		"-v":                 true,
-		"-output":            true,
-		"-debugfs":           true,
-		"-profile":           true,
-		"-restart":           true,
-		"-network":           true,
-		"-network-interface": true,
-		"-network-name":      true,
-		"-mediation":         true,
-		"-publish":           true,
-		"-p":                 true,
-		"-state-dir":         true,
-		"-tag":               true,
-		"-provider":          true,
-		"-dir":               true,
-		"-subnet":            true,
-		"-from-snapshot":     true,
-		"-url":               true,
-		"-from":              true,
-		"-sha256":            true,
-		"-out":               true,
-		"-path":              true,
-		"-memory":            true,
-		"-cpus":              true,
-		"-vsock":             true,
-		"-mke2fs":            true,
-		"-guest-init":        true,
-		"-arch":              true,
-		"-size-mib":          true,
-		"-timeout":           true,
-		"-ready-timeout":     true,
-		"-duration":          true,
-		"-interval":          true,
-		"-max-restarts":      true,
-		"-result-port":       true,
-		"-send":              true,
-		"-e":                 true,
-		"-model":             true,
-		"-model-token":       true,
-		"-secret":            true,
-		"-secrets-env-file":  true,
-		"-secret-on-demand":  true,
+		"-supervisor":         true,
+		"-json":               true,
+		"-id":                 true,
+		"-name":               true,
+		"-image":              true,
+		"-exec":               true,
+		"-setup-file":         true,
+		"-service-command":    true,
+		"-entrypoint":         true,
+		"-shell":              true,
+		"-hostname":           true,
+		"-file":               true,
+		"-env":                true,
+		"-setup":              true,
+		"-request-id":         true,
+		"-role":               true,
+		"-backend":            true,
+		"-kernel":             true,
+		"-rootfs":             true,
+		"-disk":               true,
+		"-bundle":             true,
+		"-volume":             true,
+		"-v":                  true,
+		"-output":             true,
+		"-debugfs":            true,
+		"-profile":            true,
+		"-restart":            true,
+		"-network":            true,
+		"-network-interface":  true,
+		"-network-name":       true,
+		"-mediation":          true,
+		"-publish":            true,
+		"-p":                  true,
+		"-state-dir":          true,
+		"-tag":                true,
+		"-provider":           true,
+		"-dir":                true,
+		"-subnet":             true,
+		"-from-snapshot":      true,
+		"-url":                true,
+		"-from":               true,
+		"-sha256":             true,
+		"-out":                true,
+		"-path":               true,
+		"-memory":             true,
+		"-cpus":               true,
+		"-vsock":              true,
+		"-mke2fs":             true,
+		"-guest-init":         true,
+		"-arch":               true,
+		"-size-mib":           true,
+		"-timeout":            true,
+		"-ready-timeout":      true,
+		"-duration":           true,
+		"-interval":           true,
+		"-max-restarts":       true,
+		"-result-port":        true,
+		"-send":               true,
+		"-e":                  true,
+		"-model":              true,
+		"-model-token":        true,
+		"-runner-command":     true,
+		"-runner-name":        true,
+		"-runner-health-path": true,
+		"-runner-arg":         true,
+		"-runner-env":         true,
+		"-secret":             true,
+		"-secrets-env-file":   true,
+		"-secret-on-demand":   true,
 	}
 	var flags []string
 	var positional []string

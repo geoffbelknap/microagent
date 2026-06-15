@@ -4,15 +4,15 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-15_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
 microagent model list [--state-dir <dir>]                                           List stored models
 microagent model delete <ref> [--keep-files] [--state-dir <dir>]                      Remove a model and its blob
 microagent model prune [--delete-files] [--state-dir <dir>]                       Drop records for missing blobs
-microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Serve a model on the host
-microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]   Alias for model serve
+microagent model serve <hf-ref> [--dedicated] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Serve a model on the host
+microagent model serve <hf-ref> [--dedicated] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Alias for model serve
 microagent model stop <hf-ref> [--state-dir <dir>]                                Stop a model's runners
 microagent model runners [--state-dir <dir>]                                      List running model servers
 ```
@@ -22,9 +22,10 @@ host model server processes that serve them. Downloaded blobs are stored under
 `~/.microagent/models/` by default, indexed by the HuggingFace reference used
 to pull them. All subcommands read and write this index; no remote state is
 modified by the store commands. The server commands (`serve`, `stop`,
-`runners`) manage long-running `llama-server` processes on the host. Pair a
-workspace with a served model using [`run --model`](/cli/run/) for one-shots or
-[`create --model`](/cli/create/) for a persistent pairing that every
+`runners`) manage long-running host model runner processes. The built-in
+default runner is `llama-server`, but the runner command is configurable. Pair
+a workspace with a served model using [`run --model`](/cli/run/) for one-shots
+or [`create --model`](/cli/create/) for a persistent pairing that every
 [`start`](/cli/start/) re-establishes.
 
 ## Examples
@@ -56,6 +57,15 @@ microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
 
 # Start a dedicated runner (exclusive to this caller)
 microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf --dedicated
+
+# Pass host runner arguments to the selected runner
+microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf \
+  --runner-arg -ngl --runner-arg all
+
+# Use a custom OpenAI-compatible host runner command template
+microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf \
+  --runner-command 'runner serve {model} --host {host} --port {port}' \
+  --runner-name runner
 
 # List running model servers
 microagent model runners
@@ -99,12 +109,71 @@ With the global `--json` flag, records are returned under `models`:
 | `stop` | Force-stop all model server processes for a model ref |
 | `runners` | List currently running model server processes |
 
-`serve` requires `llama-server` on PATH or set via the
+Without a custom command, `serve` uses the built-in `llama-server` runner
+resolver. It requires `llama-server` on PATH or set via the
 `MICROAGENT_LLAMA_SERVER` environment variable. If neither is present, the
 command exits with a clear error message. If the model is not yet in the local
 store, `serve` pulls it automatically before starting the server (equivalent to
 running `model pull` first). The runner is started pinned, so it stays alive
 even when no workspace holds it.
+
+For Linux x86_64 hosts with NVIDIA CUDA, the dev build helper can reproduce the
+CUDA `llama-server` build used by microagent model-runner testing:
+
+```bash
+scripts/dev/build-llama-cuda.sh --llama-dir ../llama.cpp
+
+export MICROAGENT_LLAMA_SERVER=/tmp/llama.cpp-cuda13-ninja-build/bin/llama-server
+export MICROAGENT_MODEL_RUNNER_ARGS='["-ngl","all","--no-ui"]'
+```
+
+By default the helper downloads pinned CUDA 13.3 Ubuntu 24.04 debs, verifies
+their SHA256 checksums, extracts them under `/tmp/microagent-cuda13-root`
+without installing system packages, builds llama.cpp out of tree with Ninja,
+and verifies `llama-server --list-devices`. Override `--cuda-arch` for GPUs
+other than the RTX 3080 Ti's compute capability `86`, or pass `--cuda-home`
+to use an existing CUDA toolkit. The script does not install dependencies; if
+`cmake`, `ninja`, `curl`, `dpkg-deb`, `sha256sum`, `g++`, or `git` is missing,
+install it explicitly and rerun the helper.
+
+Set `MICROAGENT_MODEL_RUNNER_COMMAND` or pass `--runner-command` to use another
+OpenAI-compatible host runner. The command is parsed as argv fields, not shell
+evaluated. It must include `{model}` and either `{port}` or `{addr}`; `{host}`
+is also available. The environment variable accepts shell-like fields or a JSON
+string array:
+
+```bash
+MICROAGENT_MODEL_RUNNER_COMMAND='runner serve {model} --host {host} --port {port}' \
+  MICROAGENT_MODEL_RUNNER_NAME=runner \
+  microagent start research
+
+MICROAGENT_MODEL_RUNNER_COMMAND='["runner","serve","{model}","--listen","{addr}"]' \
+  microagent model serve TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+```
+
+Use `MICROAGENT_MODEL_RUNNER_NAME` and
+`MICROAGENT_MODEL_RUNNER_HEALTH_PATH` to label a custom runner and change its
+readiness probe path; the matching one-shot flags are `--runner-name` and
+`--runner-health-path`.
+
+Runner arguments are opaque host-runner configuration. Use repeatable
+`--runner-arg` flags for a single `model serve` invocation, or set
+`MICROAGENT_MODEL_RUNNER_ARGS` to apply defaults to any model runner that
+microagent starts, including workspace `run --model`, `create --model`, and
+later `start` re-pairing. The environment variable accepts shell-like fields
+or a JSON string array:
+
+```bash
+MICROAGENT_MODEL_RUNNER_ARGS='-ngl all' microagent model serve \
+  TheBloke/Llama-2-7B-GGUF/llama-2-7b.Q4_K_M.gguf
+
+MICROAGENT_MODEL_RUNNER_ARGS='["-ngl","all"]' microagent start research
+```
+
+Use repeatable `--runner-env KEY=VALUE` flags for a single `model serve`
+invocation, or `MICROAGENT_MODEL_RUNNER_ENV` for defaults. The environment
+variable accepts shell-like `KEY=VALUE` fields, a JSON string array, or a JSON
+object. Runner env keys, not values, are recorded in the runner registry.
 
 Workspaces hold runners. `run --model` holds one for the duration of the run.
 A workspace created with `create --model` re-pairs on every `start` and holds
@@ -170,13 +239,27 @@ every remaining indexed record (i.e. all indexed blobs are deleted).
 
 Most subcommands take only `--state-dir <dir>` (state directory, default
 `~/.microagent/`); the flags that change behavior are `--token` (pull/serve),
-`--keep-files` (delete), `--delete-files` (prune), and `--dedicated` (serve).
+`--keep-files` (delete), `--delete-files` (prune), `--dedicated` (serve), and
+the host runner flags for `serve`.
 
 ### Pull flags
 
 | Flag | Description |
 |---|---|
 | `--token <t>` | HuggingFace bearer token (falls back to `HF_TOKEN`, then `HUGGING_FACE_HUB_TOKEN`) |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+
+### Serve flags
+
+| Flag | Description |
+|---|---|
+| `--dedicated` | Start a dedicated runner instead of reusing a shared one |
+| `--runner-command <template>` | Custom host model runner command template |
+| `--runner-name <name>` | Name to record for a custom host model runner |
+| `--runner-health-path <path>` | HTTP health path for a custom host model runner |
+| `--runner-arg <arg>` | Extra host model runner argument. Repeat for multiple argv entries |
+| `--runner-env KEY=VALUE` | Extra host model runner environment override. Repeat for multiple variables |
+| `--token <t>` | HuggingFace bearer token used if the model must be auto-pulled |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
 ### Remove flags
@@ -193,22 +276,14 @@ Most subcommands take only `--state-dir <dir>` (state directory, default
 | `--delete-files` | Also delete the blob files of all indexed models (not just orphaned/missing ones) |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
-### Serve flags
-
-| Flag | Description |
-|---|---|
-| `--dedicated` | Start a dedicated runner for this caller instead of reusing a shared one |
-| `--token <t>` | HuggingFace bearer token used if the model must be auto-pulled |
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
 ## Exit status
 
 `model` subcommands exit `0` on success; nonzero when a ref cannot be parsed, a
-download or authentication fails, a record is not found, or `serve` cannot find
-a `llama-server` binary. In AX mode a failure is written as a structured error
-envelope.
+download or authentication fails, a record is not found, or `serve` cannot
+start the selected host model runner. In AX mode a failure is written as a
+structured error envelope.
 
 ## Related
 

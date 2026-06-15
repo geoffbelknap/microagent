@@ -2,6 +2,7 @@ package modelrunner
 
 import (
 	"context"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -56,6 +57,21 @@ func TestEnsureSpawnsReusesAndReaps(t *testing.T) {
 		t.Fatalf("expected reuse of PID %d, got %d", r1.PID, r2.PID)
 	}
 
+	o3 := base
+	o3.Holder = "vm3"
+	o3.RunnerConfig = RunnerConfig{Args: []string{"--gpu"}}
+	r3, err := Ensure(context.Background(), o3)
+	if err != nil {
+		t.Fatalf("Ensure vm3: %v", err)
+	}
+	defer stopProcess(r3.PID)
+	if r3.PID == r1.PID {
+		t.Fatal("runner with different config reused the existing process")
+	}
+	if r3.RunnerConfigDigest == "" || !reflect.DeepEqual(r3.RunnerArgs, []string{"--gpu"}) {
+		t.Fatalf("runner config not recorded: %+v", r3)
+	}
+
 	// Releasing one holder keeps it alive.
 	if err := Release(dir, base.ModelRef, "vm1"); err != nil {
 		t.Fatalf("Release vm1: %v", err)
@@ -75,6 +91,7 @@ func TestEnsureSpawnsReusesAndReaps(t *testing.T) {
 		t.Fatal("runner not reaped after last release")
 		_ = stopProcess(r1.PID)
 	}
+	_ = Release(dir, base.ModelRef, "vm3")
 	list, _ := List(dir)
 	if len(list) != 0 {
 		t.Fatalf("expected empty registry, got %+v", list)

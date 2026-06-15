@@ -161,7 +161,7 @@ echo "PASS microagent-e2e-model: guest reached the locally-served model over vso
 
 WS="model-pair-e2e"
 
-# shellcheck disable=SC2317
+# shellcheck disable=SC2317,SC2329
 ws_cleanup() {
   "$CLI" kill "$WS" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
   "$CLI" delete "$WS" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
