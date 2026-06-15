@@ -56,8 +56,10 @@ def main() -> int:
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
+            self.close_connection = True
 
         def do_POST(self) -> None:
             content_length = int(self.headers.get("Content-Length") or 0)
@@ -93,8 +95,10 @@ def main() -> int:
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(response)))
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(response)
+            self.close_connection = True
 
     server = ThreadingHTTPServer((args.bind_host, args.bind_port), PolicyHandler)
     write_log(

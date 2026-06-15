@@ -33,6 +33,7 @@ SCENARIOS=(
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
   "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm"
   "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm"
+  "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm"
   "host-worker-contract:scripts/dev/microagent-e2e-host-worker-contract.sh:all:none"
   "host-worker-gpu:scripts/dev/microagent-e2e-host-worker-gpu.sh:linux:vm"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
@@ -80,6 +81,7 @@ SCENARIO_COVERAGE=(
   "exec-stream|backend-neutral|firecracker,apple-vf,windows-hyperv|structured exec streaming, non-zero exit propagation, buffered parity"
   "model-serving|backend-neutral|firecracker,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
   "model-mediation|host-specific|firecracker|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
+  "model-mediation-vllm|host-specific|firecracker|Opt-in production run --model mediation matrix with a real vLLM GPU runner"
   "host-worker-contract|portable|none|Opt-in OpenAI-compatible host-worker contract conformance"
   "host-worker-gpu|host-specific|firecracker|Opt-in host GPU worker acceptance over the external runner bridge"
   "firecracker-lifecycle-host|backend-specific|firecracker|Firecracker lifecycle host mechanics"
@@ -195,6 +197,10 @@ Scenarios:
                      macOS, Hyper-V sockets on Windows).
   model-mediation    Opt-in Linux host backend matrix for the experimental
                      run --model mediator. Set MICROAGENT_E2E_MODEL_MEDIATION=1.
+  model-mediation-vllm
+                    Opt-in Linux host backend matrix for the experimental
+                    run --model mediator against a real vLLM GPU runner. Set
+                    MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1.
   host-worker-contract
                     Opt-in host-side OpenAI-compatible contract conformance for
                     an existing host worker. Set
@@ -253,6 +259,10 @@ Environment:
     mediation matrix with a stub OpenAI-compatible runner. It does not require
     a GPU or llama.cpp.
   MICROAGENT_E2E_MODEL_MEDIATION_OUT_DIR=<dir> stores model-mediation reports.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 opts into the production run --model
+    mediation matrix with a real vLLM GPU runner.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=<dir> points at a vLLM checkout.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_OUT_DIR=<dir> stores vLLM reports.
   MICROAGENT_E2E_HOST_WORKER_GPU=1 opts into the Linux/Firecracker host GPU
     worker acceptance scenario. It is skipped by default so regular E2E runs do
     not require a GPU or local model runner.
@@ -513,6 +523,7 @@ if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_HEALTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_EXEC_STREAM=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_HOST_WORKER_GPU=1
   export MICROAGENT_KEEP_BOOT_SMOKE=1
   export MICROAGENT_KEEP_DIRECT_CONSOLE_SMOKE=1
