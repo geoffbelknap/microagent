@@ -20,11 +20,14 @@
 #   MICROAGENT_HOST_WORKER_VLLM_CUDA_HOME   CUDA toolkit path for FlashInfer JIT
 #   MICROAGENT_HOST_WORKER_VLLM_FLASHINFER_SAMPLER
 #                                           default: 0 for portable smoke runs
-#   MICROAGENT_HOST_WORKER_VLLM_PROBE       run Firecracker probe: 0/1 (default: 1)
+#   MICROAGENT_HOST_WORKER_VLLM_PROBE       run microagent host-worker probe: 0/1 (default: 1)
+#   MICROAGENT_HOST_WORKER_VLLM_BROKER_DIAGNOSTIC
+#                                           run direct vs broker diagnostic: 0/1 (default: 0)
 #   MICROAGENT_HOST_WORKER_VLLM_STARTUP_TIMEOUT
 #                                           seconds to wait for /v1/models (default: 300)
 #   MICROAGENT_FIRECRACKER                  Firecracker binary for probe runs
 #   MICROAGENT_HOST_WORKER_PROBE_*          forwarded to the VM probe
+#   MICROAGENT_HOST_WORKER_DIAGNOSTIC_*     forwarded to the broker diagnostic
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -38,6 +41,7 @@ PORT="${MICROAGENT_HOST_WORKER_VLLM_PORT:-}"
 OUT_DIR="${MICROAGENT_HOST_WORKER_VLLM_OUT_DIR:-/tmp/microagent-host-worker-vllm-smoke-$(date +%Y%m%d-%H%M%S)}"
 EXTRA_ARGS_RAW="${MICROAGENT_HOST_WORKER_VLLM_ARGS:-}"
 RUN_PROBE="${MICROAGENT_HOST_WORKER_VLLM_PROBE:-1}"
+RUN_BROKER_DIAGNOSTIC="${MICROAGENT_HOST_WORKER_VLLM_BROKER_DIAGNOSTIC:-0}"
 STARTUP_TIMEOUT="${MICROAGENT_HOST_WORKER_VLLM_STARTUP_TIMEOUT:-300}"
 VLLM_BIN="${MICROAGENT_HOST_WORKER_VLLM_BIN:-}"
 VLLM_REPO="${MICROAGENT_HOST_WORKER_VLLM_REPO:-$WORKSPACE_ROOT/vllm}"
@@ -183,6 +187,17 @@ case "$RUN_PROBE" in
     fail "MICROAGENT_HOST_WORKER_VLLM_PROBE must be 0/1, true/false, or yes/no"
     ;;
 esac
+case "$RUN_BROKER_DIAGNOSTIC" in
+  1|true|TRUE|yes|YES)
+    RUN_BROKER_DIAGNOSTIC=1
+    ;;
+  0|false|FALSE|no|NO)
+    RUN_BROKER_DIAGNOSTIC=0
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_VLLM_BROKER_DIAGNOSTIC must be 0/1, true/false, or yes/no"
+    ;;
+esac
 case "$STARTUP_TIMEOUT" in
   ''|*[!0-9]*) fail "MICROAGENT_HOST_WORKER_VLLM_STARTUP_TIMEOUT must be a positive integer" ;;
 esac
@@ -227,7 +242,7 @@ if [ "$RUN_PROBE" -eq 1 ]; then
   elif [ ! -x "${MICROAGENT_FIRECRACKER:-/nonexistent}" ]; then
     skip "MICROAGENT_FIRECRACKER not executable: $MICROAGENT_FIRECRACKER"
   fi
-  echo "microagent-host-worker-vllm-smoke: running Firecracker host-worker probe"
+  echo "microagent-host-worker-vllm-smoke: running microagent host-worker probe on Firecracker backend"
   set +e
   MICROAGENT_HOST_WORKER_URL="$BASE_URL" \
     MICROAGENT_HOST_WORKER_MODEL="$MODEL" \
@@ -249,11 +264,11 @@ if [ "$RUN_PROBE" -eq 1 ]; then
   set -e
   if [ "$status" -eq "$E2E_SKIP_EXIT" ]; then
     cat "$OUT_DIR/probe.log" >&2
-    skip "Firecracker probe skipped"
+    skip "microagent host-worker probe skipped"
   fi
   if [ "$status" -ne 0 ]; then
     cat "$OUT_DIR/probe.log" >&2
-    fail "Firecracker host-worker probe failed"
+    fail "microagent host-worker probe failed"
   fi
   grep '^microagent-host-worker-probe:' "$OUT_DIR/probe.log" || true
   "$ROOT/scripts/dev/microagent-host-worker-report-summary.py" \
@@ -262,6 +277,35 @@ if [ "$RUN_PROBE" -eq 1 ]; then
   "$ROOT/scripts/dev/microagent-host-worker-report-summary.py" --pressure \
     "$OUT_DIR/probe.json" >"$OUT_DIR/pressure.tsv"
   cat "$OUT_DIR/pressure.tsv"
+  "$ROOT/scripts/dev/microagent-host-worker-report-summary.py" --profiles \
+    "$OUT_DIR/probe.json" >"$OUT_DIR/profiles.tsv"
+  cat "$OUT_DIR/profiles.tsv"
+fi
+
+if [ "$RUN_BROKER_DIAGNOSTIC" -eq 1 ]; then
+  echo "microagent-host-worker-vllm-smoke: running broker diagnostic"
+  mkdir -p "$OUT_DIR/broker-diagnostic"
+  set +e
+  MICROAGENT_HOST_WORKER_URL="$BASE_URL" \
+    MICROAGENT_HOST_WORKER_MODEL="$MODEL" \
+    MICROAGENT_HOST_WORKER_DIAGNOSTIC_OUT_DIR="$OUT_DIR/broker-diagnostic" \
+    MICROAGENT_HOST_WORKER_DIAGNOSTIC_SAMPLES="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_SAMPLES:-3}" \
+    MICROAGENT_HOST_WORKER_DIAGNOSTIC_WARMUPS="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_WARMUPS:-1}" \
+    MICROAGENT_HOST_WORKER_DIAGNOSTIC_CHAT_TOKENS="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_CHAT_TOKENS:-16}" \
+    MICROAGENT_HOST_WORKER_DIAGNOSTIC_STREAM_TOKENS="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_STREAM_TOKENS:-32}" \
+    "$ROOT/scripts/dev/microagent-host-worker-broker-diagnostic.sh" >"$OUT_DIR/broker-diagnostic.log" 2>&1
+  status=$?
+  set -e
+  if [ "$status" -eq "$E2E_SKIP_EXIT" ]; then
+    cat "$OUT_DIR/broker-diagnostic.log" >&2
+    skip "broker diagnostic skipped"
+  fi
+  if [ "$status" -ne 0 ]; then
+    cat "$OUT_DIR/broker-diagnostic.log" >&2
+    fail "broker diagnostic failed"
+  fi
+  grep '^microagent-host-worker-broker-diagnostic:' "$OUT_DIR/broker-diagnostic.log" || true
+  cat "$OUT_DIR/broker-diagnostic/comparison.tsv"
 fi
 
 python3 - "$OUT_DIR/conformance.json" <<'PY'

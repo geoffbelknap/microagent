@@ -137,6 +137,48 @@ COMPACT_PRESSURE_FIELDS = (
     "pressure_summary",
 )
 
+RUNNER_PROFILE_FIELDS = (
+    "report",
+    "run_label",
+    "worker_protocol",
+    "runner_engine",
+    "runner_version",
+    "launch_mode",
+    "telemetry_adapter",
+    "diagnostic_sources",
+    "conformance_required_ok",
+    "conformance_models",
+    "conformance_streaming",
+    "runner_slots",
+    "workspace_count",
+    "per_workspace_concurrency",
+    "effective_concurrency",
+    "pressure_runner",
+    "pressure_gpu",
+    "active_slot_fraction_median",
+    "runner_active_median",
+    "runner_slot_median",
+    "runner_waiting_max",
+    "runner_deferred_max",
+    "runner_kv_cache_usage_median",
+    "gpu_util_median",
+    "gpu_util_p95",
+    "gpu_power_median_w",
+    "models_guest_median_ms",
+    "models_delta_ms",
+    "chat_guest_median_ms",
+    "chat_delta_ms",
+    "chat_p95_delta_ms",
+    "chat_ttfb_delta_ms",
+    "stream_guest_median_ms",
+    "stream_delta_ms",
+    "stream_p95_delta_ms",
+    "stream_ttfb_delta_ms",
+    "stream_chunk_gap_delta_ms",
+    "pressure_summary",
+    "profile_brief",
+)
+
 
 def get(doc: dict[str, Any] | None, *path: str) -> Any:
     value: Any = doc
@@ -188,6 +230,17 @@ def host_worker_meta(report: dict[str, Any]) -> dict[str, Any]:
         "launch_mode": launch_mode,
         "telemetry_adapter": telemetry_adapter,
         "diagnostic_sources": joined(diagnostic_sources),
+    }
+
+
+def conformance_meta(report: dict[str, Any]) -> dict[str, Any]:
+    host_worker = report.get("host_worker") or {}
+    conformance = host_worker.get("conformance") or {}
+    capabilities = conformance.get("capabilities") or {}
+    return {
+        "conformance_required_ok": capabilities.get("required_ok"),
+        "conformance_models": capabilities.get("model_count"),
+        "conformance_streaming": capabilities.get("streaming_chat_completions"),
     }
 
 
@@ -324,6 +377,18 @@ def pressure_brief(row: dict[str, Any]) -> str:
     )
 
 
+def format_value(item: Any, suffix: str = "") -> str:
+    if item is None or item == "":
+        return "na"
+    if isinstance(item, bool):
+        text = "true" if item else "false"
+    elif isinstance(item, float):
+        text = f"{item:.3f}".rstrip("0").rstrip(".")
+    else:
+        text = str(item)
+    return f"{text}{suffix}"
+
+
 def pressure_rows_for_report(path: Path) -> list[dict[str, Any]]:
     with path.open(encoding="utf-8") as f:
         report = json.load(f)
@@ -393,6 +458,127 @@ def pressure_rows_for_report(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def profile_brief(row: dict[str, Any]) -> str:
+    workload = (
+        f"ws={format_value(row.get('workspace_count'))} "
+        f"c={format_value(row.get('per_workspace_concurrency'))} "
+        f"total={format_value(row.get('effective_concurrency'))}"
+    )
+    conformance = (
+        f"required={format_value(row.get('conformance_required_ok'))} "
+        f"models={format_value(row.get('conformance_models'))} "
+        f"streaming={format_value(row.get('conformance_streaming'))}"
+    )
+    runner = (
+        f"{row.get('runner_engine') or 'unknown'} "
+        f"protocol={row.get('worker_protocol') or 'unknown'} "
+        f"adapter={row.get('telemetry_adapter') or 'none'}"
+    )
+    pressure = (
+        f"runner={row.get('pressure_runner') or 'unavailable'} "
+        f"active={format_value(row.get('runner_active_median'))}/"
+        f"{format_value(row.get('runner_slot_median'))} "
+        f"wait_max={format_value(row.get('runner_waiting_max'))} "
+        f"def_max={format_value(row.get('runner_deferred_max'))}"
+    )
+    gpu = (
+        f"gpu={row.get('pressure_gpu') or 'unavailable'} "
+        f"util={format_value(row.get('gpu_util_median'), '%')}/"
+        f"{format_value(row.get('gpu_util_p95'), '%')} "
+        f"power={format_value(row.get('gpu_power_median_w'), 'W')}"
+    )
+    latency = (
+        f"models={format_value(row.get('models_delta_ms'), 'ms')} "
+        f"chat={format_value(row.get('chat_delta_ms'), 'ms')} "
+        f"stream={format_value(row.get('stream_delta_ms'), 'ms')} "
+        f"stream_ttfb={format_value(row.get('stream_ttfb_delta_ms'), 'ms')}"
+    )
+    return (
+        f"{runner}; {workload}; {conformance}; {pressure}; {gpu}; "
+        f"delta {latency}; {row.get('pressure_summary') or 'no pressure summary'}"
+    )
+
+
+def runner_profile_rows_for_report(path: Path) -> list[dict[str, Any]]:
+    with path.open(encoding="utf-8") as f:
+        report = json.load(f)
+
+    rows: list[dict[str, Any]] = []
+    matrix = report.get("matrix") or {}
+    pressure = get(report, "pressure", "levels") or {}
+    experiment = report.get("experiment") or {}
+    worker_meta = host_worker_meta(report)
+    conformance = conformance_meta(report)
+
+    for level in report.get("concurrency_levels") or []:
+        level_key = str(level)
+        pressure_doc = pressure.get(level_key) or {}
+        classification = pressure_doc.get("classification") or {}
+        runner_pressure = pressure_doc.get("runner") or {}
+        gpu_pressure = pressure_doc.get("gpu") or {}
+        level_doc = matrix.get(level_key) or {}
+
+        active = runner_pressure.get("active_requests") or {}
+        slots = runner_pressure.get("slot_count") or {}
+        waiting = runner_pressure.get("waiting_requests") or {}
+        deferred = runner_pressure.get("deferred_requests") or {}
+        kv_usage = runner_pressure.get("kv_cache_usage") or {}
+        gpu_util = gpu_pressure.get("gpu_util_pct") or {}
+        gpu_power = gpu_pressure.get("power_draw_w") or {}
+        guest = level_doc.get("guest") or {}
+        overhead = level_doc.get("overhead") or {}
+        models_guest = guest.get("models") or {}
+        chat_guest = guest.get("chat") or {}
+        stream_guest = guest.get("stream") or {}
+        models = overhead.get("models") or {}
+        chat = overhead.get("chat") or {}
+        stream = overhead.get("stream") or {}
+
+        row = {
+            "report": str(path),
+            "run_label": experiment.get("label"),
+            **worker_meta,
+            **conformance,
+            "runner_slots": experiment.get("runner_slots"),
+            "workspace_count": report.get("workspace_count"),
+            "per_workspace_concurrency": level,
+            "effective_concurrency": pressure_doc.get("effective_concurrency")
+            or chat_guest.get("concurrency")
+            or stream_guest.get("concurrency")
+            or models_guest.get("concurrency"),
+            "pressure_runner": classification.get("runner"),
+            "pressure_gpu": classification.get("gpu"),
+            "active_slot_fraction_median": runner_pressure.get(
+                "active_slot_fraction_median"
+            ),
+            "runner_active_median": stat(active, "median"),
+            "runner_slot_median": stat(slots, "median"),
+            "runner_waiting_max": stat(waiting, "max"),
+            "runner_deferred_max": stat(deferred, "max"),
+            "runner_kv_cache_usage_median": stat(kv_usage, "median"),
+            "gpu_util_median": stat(gpu_util, "median"),
+            "gpu_util_p95": stat(gpu_util, "p95"),
+            "gpu_power_median_w": stat(gpu_power, "median"),
+            "models_guest_median_ms": models_guest.get("median_ms"),
+            "models_delta_ms": models.get("delta_ms"),
+            "chat_guest_median_ms": chat_guest.get("median_ms"),
+            "chat_delta_ms": chat.get("delta_ms"),
+            "chat_p95_delta_ms": chat.get("p95_delta_ms"),
+            "chat_ttfb_delta_ms": chat.get("ttfb_delta_ms"),
+            "stream_guest_median_ms": stream_guest.get("median_ms"),
+            "stream_delta_ms": stream.get("delta_ms"),
+            "stream_p95_delta_ms": stream.get("p95_delta_ms"),
+            "stream_ttfb_delta_ms": stream.get("ttfb_delta_ms"),
+            "stream_chunk_gap_delta_ms": stream.get(
+                "body_read_per_chunk_gap_delta_ms"
+            ),
+            "pressure_summary": classification.get("summary"),
+        }
+        row["profile_brief"] = profile_brief(row)
+        rows.append(row)
+    return rows
+
+
 def compact_pressure_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     compact: list[dict[str, Any]] = []
     for row in rows:
@@ -434,10 +620,16 @@ def main() -> int:
         action="store_true",
         help="write a JSON array instead of tab-separated rows",
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--pressure",
         action="store_true",
         help="write one pressure/backpressure row per report and concurrency level",
+    )
+    mode.add_argument(
+        "--profiles",
+        action="store_true",
+        help="write one compact runner profile row per report and concurrency level",
     )
     parser.add_argument(
         "--compact",
@@ -449,7 +641,9 @@ def main() -> int:
 
     rows: list[dict[str, Any]] = []
     for report in args.reports:
-        if args.pressure:
+        if args.profiles:
+            rows.extend(runner_profile_rows_for_report(report))
+        elif args.pressure:
             rows.extend(pressure_rows_for_report(report))
         else:
             rows.extend(rows_for_report(report))
@@ -463,7 +657,9 @@ def main() -> int:
         sys.stdout.write("\n")
     else:
         fields = FIELDS
-        if args.pressure:
+        if args.profiles:
+            fields = RUNNER_PROFILE_FIELDS
+        elif args.pressure:
             fields = COMPACT_PRESSURE_FIELDS if args.compact else PRESSURE_FIELDS
         write_tsv(rows, fields)
     return 0
