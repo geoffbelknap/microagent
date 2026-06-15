@@ -688,6 +688,225 @@ print(json.dumps(report, indent=2, sort_keys=True))
 PY
 }
 
+add_pressure_summary_to_report() {
+  local report_json="$1"
+  python3 - "$report_json" <<'PY'
+import json
+import sys
+
+report = json.loads(sys.argv[1])
+
+PRESSURE_SCOPE = (
+    "descriptive telemetry only; the model runner owns request scheduling, "
+    "batching, KV cache management, and GPU execution"
+)
+
+RUNNING_CANDIDATES = (
+    ("runner", "/slots", "active_slot_count"),
+    ("runner", "/metrics", "metric_llamacpp:requests_processing_sum"),
+    ("runner", "/metrics", "metric_vllm:num_requests_running_sum"),
+    ("runner", "/metrics", "metric_vllm:num_requests_processing_sum"),
+    ("runner", "/metrics", "json_num_requests_running"),
+)
+SLOT_COUNT_CANDIDATES = (
+    ("runner", "/slots", "slot_count"),
+    ("runner", "/slots", "json_items"),
+)
+WAITING_CANDIDATES = (
+    ("runner", "/metrics", "metric_vllm:num_requests_waiting_sum"),
+    ("runner", "/metrics", "metric_vllm:num_requests_waiting_by_reason_sum"),
+    ("runner", "/metrics", "json_num_requests_waiting"),
+)
+DEFERRED_CANDIDATES = (
+    ("runner", "/metrics", "metric_llamacpp:requests_deferred_sum"),
+    ("runner", "/metrics", "metric_vllm:num_requests_waiting_by_reason_sum"),
+    ("runner", "/metrics", "json_num_requests_deferred"),
+    ("runner", "/metrics", "json_num_skipped_waiting_reqs"),
+)
+KV_USAGE_CANDIDATES = (
+    ("runner", "/metrics", "metric_vllm:kv_cache_usage_perc_sum"),
+    ("runner", "/metrics", "json_kv_cache_usage"),
+    ("runner", "/metrics", "json_kv_cache_usage_perc"),
+)
+
+
+def stat_at(telemetry, phase, candidates):
+    phase_doc = telemetry.get("phases", {}).get(phase, {})
+    for _kind, endpoint, key in candidates:
+        endpoint_doc = phase_doc.get(endpoint, {})
+        signals = endpoint_doc.get("signals", {})
+        value = signals.get(key)
+        if isinstance(value, dict):
+            return {
+                "source": f"{endpoint} signals.{key}",
+                "min": value.get("min"),
+                "median": value.get("median"),
+                "mean": value.get("mean"),
+                "p95": value.get("p95"),
+                "max": value.get("max"),
+            }
+    return None
+
+
+def phase_gpu(gpu_telemetry, phase):
+    phase_doc = gpu_telemetry.get("phases", {}).get(phase, {})
+    util = phase_doc.get("gpu_util_pct")
+    if not isinstance(util, dict):
+        return None
+    out = {
+        "gpu_util_pct": {
+            "median": util.get("median"),
+            "p95": util.get("p95"),
+            "max": util.get("max"),
+        },
+        "sample_count": phase_doc.get("sample_count"),
+    }
+    power = phase_doc.get("power_draw_w")
+    if isinstance(power, dict):
+        out["power_draw_w"] = {
+            "median": power.get("median"),
+            "p95": power.get("p95"),
+            "max": power.get("max"),
+        }
+    return out
+
+
+def classify_gpu(gpu):
+    if not gpu:
+        return "unavailable"
+    util = gpu.get("gpu_util_pct") or {}
+    median = util.get("median")
+    p95 = util.get("p95")
+    if median is None and p95 is None:
+        return "unavailable"
+    if (median is not None and median >= 85) or (p95 is not None and p95 >= 95):
+        return "high"
+    if (median is not None and median >= 50) or (p95 is not None and p95 >= 75):
+        return "moderate"
+    return "low"
+
+
+def active_fraction(active, slots):
+    if not active or not slots:
+        return None
+    active_median = active.get("median")
+    slot_median = slots.get("median")
+    if active_median is None or slot_median is None or slot_median == 0:
+        return None
+    return round(active_median / slot_median, 3)
+
+
+def classify_runner(active, slots, waiting, deferred):
+    waiting_max = (waiting or {}).get("max")
+    deferred_max = (deferred or {}).get("max")
+    if waiting_max and waiting_max > 0:
+        return "waiting_observed"
+    if deferred_max and deferred_max > 0:
+        return "deferred_observed"
+    fraction = active_fraction(active, slots)
+    if fraction is None:
+        if active:
+            return "active_observed"
+        return "unavailable"
+    if fraction >= 0.95:
+        return "slots_saturated"
+    if fraction >= 0.5:
+        return "slots_busy"
+    return "slots_available"
+
+
+def endpoint_latency(level_doc, endpoint):
+    guest = level_doc.get("guest", {}).get(endpoint, {})
+    overhead = level_doc.get("overhead", {}).get(endpoint, {})
+    if not guest:
+        return None
+    out = {
+        "guest_median_ms": guest.get("median_ms"),
+        "guest_p95_ms": guest.get("p95_ms"),
+        "guest_to_host_delta_ms": overhead.get("delta_ms"),
+        "guest_to_host_p95_delta_ms": overhead.get("p95_delta_ms"),
+    }
+    if "ttfb_median_ms" in guest:
+        out["guest_ttfb_median_ms"] = guest.get("ttfb_median_ms")
+        out["guest_to_host_ttfb_delta_ms"] = overhead.get("ttfb_delta_ms")
+    return out
+
+
+def summary_sentence(runner_state, gpu_state):
+    if runner_state in {"waiting_observed", "deferred_observed"}:
+        return "runner reported queued or deferred work"
+    if runner_state == "slots_saturated" and gpu_state in {"low", "moderate"}:
+        return "runner slots were saturated before GPU telemetry looked saturated"
+    if runner_state == "slots_busy" and gpu_state in {"low", "moderate"}:
+        return "runner slots were busy without clear GPU saturation"
+    if runner_state in {"slots_busy", "slots_saturated"} and gpu_state == "high":
+        return "runner and GPU both showed high pressure"
+    if runner_state == "slots_available" and gpu_state in {"low", "moderate"}:
+        return "no clear runner or GPU saturation in sampled telemetry"
+    if runner_state == "unavailable" and gpu_state == "unavailable":
+        return "pressure telemetry unavailable"
+    return "pressure source is inconclusive from sampled telemetry"
+
+
+telemetry = report.get("telemetry", {})
+runner_telemetry = telemetry.get("runner") or {}
+gpu_telemetry = telemetry.get("gpu") or {}
+
+pressure = {
+    "scope": PRESSURE_SCOPE,
+    "schema_version": 1,
+    "levels": {},
+}
+
+for level in report.get("concurrency_levels", []):
+    level_key = str(level)
+    phase = f"guest:c={level}"
+    level_doc = report.get("matrix", {}).get(level_key, {})
+    active = stat_at(runner_telemetry, phase, RUNNING_CANDIDATES)
+    slots = stat_at(runner_telemetry, phase, SLOT_COUNT_CANDIDATES)
+    waiting = stat_at(runner_telemetry, phase, WAITING_CANDIDATES)
+    deferred = stat_at(runner_telemetry, phase, DEFERRED_CANDIDATES)
+    kv_usage = stat_at(runner_telemetry, phase, KV_USAGE_CANDIDATES)
+    gpu = phase_gpu(gpu_telemetry, phase)
+    runner_state = classify_runner(active, slots, waiting, deferred)
+    gpu_state = classify_gpu(gpu)
+    effective = None
+    for endpoint_doc in level_doc.get("guest", {}).values():
+        if isinstance(endpoint_doc, dict) and endpoint_doc.get("concurrency"):
+            effective = endpoint_doc.get("concurrency")
+            break
+
+    runner_out = {
+        "active_requests": active,
+        "slot_count": slots,
+        "active_slot_fraction_median": active_fraction(active, slots),
+        "waiting_requests": waiting,
+        "deferred_requests": deferred,
+        "kv_cache_usage": kv_usage,
+    }
+    pressure["levels"][level_key] = {
+        "phase": phase,
+        "per_workspace_concurrency": level,
+        "effective_concurrency": effective,
+        "runner": {key: value for key, value in runner_out.items() if value is not None},
+        "gpu": gpu,
+        "latency": {
+            endpoint: latency
+            for endpoint in ("chat", "stream")
+            if (latency := endpoint_latency(level_doc, endpoint)) is not None
+        },
+        "classification": {
+            "runner": runner_state,
+            "gpu": gpu_state,
+            "summary": summary_sentence(runner_state, gpu_state),
+        },
+    }
+
+report["pressure"] = pressure
+print(json.dumps(report, indent=2, sort_keys=True))
+PY
+}
+
 json_get() {
   local field="$1"
   python3 -c '
@@ -1640,6 +1859,7 @@ stop_runner_telemetry
 REPORT_JSON="$(combine_report "$HOST_JSON" "$GUEST_JSON" "$BACKEND" "$CANONICAL" "$RUNNER_JSON")"
 REPORT_JSON="$(add_gpu_telemetry_to_report "$REPORT_JSON")"
 REPORT_JSON="$(add_runner_telemetry_to_report "$REPORT_JSON")"
+REPORT_JSON="$(add_pressure_summary_to_report "$REPORT_JSON")"
 if [ -n "$REPORT_PATH" ]; then
   mkdir -p "$(dirname "$REPORT_PATH")"
   printf '%s\n' "$REPORT_JSON" >"$REPORT_PATH"
@@ -1674,6 +1894,16 @@ for level in report["concurrency_levels"]:
                 f"ttfb_p95_delta={item['ttfb_p95_delta_ms']:.3f}ms"
             )
         print(line)
+for level, item in (report.get("pressure", {}).get("levels", {}) or {}).items():
+    classification = item.get("classification") or {}
+    effective = item.get("effective_concurrency")
+    print(
+        "microagent-host-worker-probe: "
+        f"pressure c={level} total_c={effective} "
+        f"runner={classification.get('runner')} "
+        f"gpu={classification.get('gpu')} "
+        f"summary={classification.get('summary')}"
+    )
 PY
 
 echo "microagent-host-worker-probe: report"
