@@ -296,14 +296,18 @@ EOF
 
 add_gpu_telemetry_to_report() {
   local report_json="$1"
-  python3 - "$report_json" "$GPU_TELEMETRY_ACTIVE" "$GPU_TELEMETRY_PATH" "$GPU_TELEMETRY_PATH_PERSISTED" <<'PY'
+  local report_file status
+  report_file="$(mktemp)"
+  printf '%s\n' "$report_json" >"$report_file"
+  set +e
+  python3 - "$report_file" "$GPU_TELEMETRY_ACTIVE" "$GPU_TELEMETRY_PATH" "$GPU_TELEMETRY_PATH_PERSISTED" <<'PY'
 import csv
 import json
 import statistics
 import sys
 from pathlib import Path
 
-report = json.loads(sys.argv[1])
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 active = sys.argv[2] == "1"
 path = Path(sys.argv[3]) if sys.argv[3] else None
 path_persisted = sys.argv[4] == "1"
@@ -366,6 +370,10 @@ if path and path.exists():
 report.setdefault("telemetry", {})["gpu"] = telemetry
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
+  status=$?
+  set -e
+  rm -f "$report_file"
+  return "$status"
 }
 
 runner_telemetry_available() {
@@ -632,13 +640,17 @@ PY
 
 add_runner_telemetry_to_report() {
   local report_json="$1"
-  python3 - "$report_json" "$RUNNER_TELEMETRY_ACTIVE" "$RUNNER_TELEMETRY_PATH" "$RUNNER_TELEMETRY_PATH_PERSISTED" <<'PY'
+  local report_file status
+  report_file="$(mktemp)"
+  printf '%s\n' "$report_json" >"$report_file"
+  set +e
+  python3 - "$report_file" "$RUNNER_TELEMETRY_ACTIVE" "$RUNNER_TELEMETRY_PATH" "$RUNNER_TELEMETRY_PATH_PERSISTED" <<'PY'
 import json
 import statistics
 import sys
 from pathlib import Path
 
-report = json.loads(sys.argv[1])
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 active = sys.argv[2] == "1"
 path = Path(sys.argv[3]) if sys.argv[3] else None
 path_persisted = sys.argv[4] == "1"
@@ -711,15 +723,24 @@ if path and path.exists():
 report.setdefault("telemetry", {})["runner"] = telemetry
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
+  status=$?
+  set -e
+  rm -f "$report_file"
+  return "$status"
 }
 
 add_pressure_summary_to_report() {
   local report_json="$1"
-  python3 - "$report_json" <<'PY'
+  local report_file status
+  report_file="$(mktemp)"
+  printf '%s\n' "$report_json" >"$report_file"
+  set +e
+  python3 - "$report_file" <<'PY'
 import json
 import sys
+from pathlib import Path
 
-report = json.loads(sys.argv[1])
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 
 PRESSURE_SCOPE = (
     "descriptive telemetry only; the model runner owns request scheduling, "
@@ -930,6 +951,10 @@ for level in report.get("concurrency_levels", []):
 report["pressure"] = pressure
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
+  status=$?
+  set -e
+  rm -f "$report_file"
+  return "$status"
 }
 
 json_get() {
@@ -1309,28 +1334,44 @@ PY
 annotate_host_benchmark() {
   local host_json="$1"
   local baseline="$2"
-  python3 - "$host_json" "$baseline" <<'PY'
+  local host_file status
+  host_file="$(mktemp)"
+  printf '%s\n' "$host_json" >"$host_file"
+  set +e
+  python3 - "$host_file" "$baseline" <<'PY'
 import json
 import sys
+from pathlib import Path
 
-report = json.loads(sys.argv[1])
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 baseline = sys.argv[2]
 report["host_baseline"] = baseline
 report["host_baseline_passes"] = [baseline]
 print(json.dumps(report, sort_keys=True))
 PY
+  status=$?
+  set -e
+  rm -f "$host_file"
+  return "$status"
 }
 
 merge_host_benchmarks() {
   local before_json="$1"
   local after_json="$2"
-  python3 - "$before_json" "$after_json" <<'PY'
+  local before_file after_file status
+  before_file="$(mktemp)"
+  after_file="$(mktemp)"
+  printf '%s\n' "$before_json" >"$before_file"
+  printf '%s\n' "$after_json" >"$after_file"
+  set +e
+  python3 - "$before_file" "$after_file" <<'PY'
 import json
 import statistics
 import sys
+from pathlib import Path
 
-before = json.loads(sys.argv[1])
-after = json.loads(sys.argv[2])
+before = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+after = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 
 def endpoint_order(keys):
     preferred = ["models", "chat", "stream"]
@@ -1431,6 +1472,10 @@ for level in levels:
 
 print(json.dumps(merged, sort_keys=True))
 PY
+  status=$?
+  set -e
+  rm -f "$before_file" "$after_file"
+  return "$status"
 }
 
 combine_report() {
@@ -1439,16 +1484,25 @@ combine_report() {
   local backend="$3"
   local canonical="$4"
   local runner_json="$5"
-  python3 - "$host_json" "$guest_json" "$backend" "$canonical" "$runner_json" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" "$REQUEST_MODEL" "$RUN_LABEL" "$RUNNER_SLOTS" <<'PY'
+  local host_file guest_file runner_file status
+  host_file="$(mktemp)"
+  guest_file="$(mktemp)"
+  runner_file="$(mktemp)"
+  printf '%s\n' "$host_json" >"$host_file"
+  printf '%s\n' "$guest_json" >"$guest_file"
+  printf '%s\n' "$runner_json" >"$runner_file"
+  set +e
+  python3 - "$host_file" "$guest_file" "$backend" "$canonical" "$runner_file" "$WORKSPACE_COUNT" "$CHAT_PROFILE" "$CHAT_TOKENS" "$STREAM" "$STREAM_TOKENS" "$REQUEST_MODEL" "$RUN_LABEL" "$RUNNER_SLOTS" <<'PY'
 import json
 import statistics
 import sys
+from pathlib import Path
 
-host_raw = json.loads(sys.argv[1])
-guest_raw = json.loads(sys.argv[2])
+host_raw = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+guest_raw = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 backend = sys.argv[3]
 canonical = sys.argv[4]
-runner = json.loads(sys.argv[5])
+runner = json.loads(Path(sys.argv[5]).read_text(encoding="utf-8"))
 workspace_count = int(sys.argv[6])
 chat_profile = sys.argv[7]
 chat_tokens = int(sys.argv[8])
@@ -1691,6 +1745,10 @@ if experiment:
     report["experiment"] = experiment
 print(json.dumps(report, indent=2, sort_keys=True))
 PY
+  status=$?
+  set -e
+  rm -f "$host_file" "$guest_file" "$runner_file"
+  return "$status"
 }
 
 default_backend() {
@@ -2316,11 +2374,20 @@ if [ -n "$REPORT_PATH" ]; then
   echo "microagent-host-worker-probe: wrote report to $REPORT_PATH"
 fi
 
-python3 - "$REPORT_JSON" <<'PY'
+SUMMARY_REPORT_PATH="$REPORT_PATH"
+SUMMARY_REPORT_TMP=""
+if [ -z "$SUMMARY_REPORT_PATH" ]; then
+  SUMMARY_REPORT_TMP="$(mktemp)"
+  printf '%s\n' "$REPORT_JSON" >"$SUMMARY_REPORT_TMP"
+  SUMMARY_REPORT_PATH="$SUMMARY_REPORT_TMP"
+fi
+set +e
+python3 - "$SUMMARY_REPORT_PATH" <<'PY'
 import json
 import sys
+from pathlib import Path
 
-report = json.loads(sys.argv[1])
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 for level in report["concurrency_levels"]:
     level_report = report["matrix"][str(level)]
     for endpoint in report["endpoints"]:
@@ -2394,6 +2461,14 @@ for level, item in (report.get("pressure", {}).get("levels", {}) or {}).items():
         f"summary={classification.get('summary')}"
     )
 PY
+SUMMARY_STATUS=$?
+set -e
+if [ -n "$SUMMARY_REPORT_TMP" ]; then
+  rm -f "$SUMMARY_REPORT_TMP"
+fi
+if [ "$SUMMARY_STATUS" -ne 0 ]; then
+  exit "$SUMMARY_STATUS"
+fi
 
 if [ "$PRINT_REPORT" -eq 1 ]; then
   echo "microagent-host-worker-probe: report"
