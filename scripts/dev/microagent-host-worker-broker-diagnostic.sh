@@ -707,6 +707,7 @@ write_broker_summary() {
   local tsv_path="$3"
   python3 - "$log_path" "$json_path" "$tsv_path" <<'PY'
 import csv
+import math
 import json
 import sys
 from collections import Counter, defaultdict
@@ -726,19 +727,49 @@ if log_path.exists():
             continue
 ends = [event for event in events if event.get("event") == "request_end"]
 errors = [event for event in events if event.get("event") == "request_error"]
-paths = defaultdict(lambda: {"request_count": 0, "error_count": 0, "response_bytes": 0, "durations_ms": [], "request_bytes": Counter()})
+phase_fields = (
+    "duration_ms",
+    "request_body_read_ms",
+    "upstream_request_write_ms",
+    "upstream_ttfb_ms",
+    "upstream_first_body_byte_ms",
+    "downstream_first_body_byte_ms",
+    "response_body_ms",
+    "downstream_complete_ms",
+)
+paths = defaultdict(
+    lambda: {
+        "request_count": 0,
+        "error_count": 0,
+        "response_bytes": 0,
+        "request_bytes": Counter(),
+        "status_counts": Counter(),
+        "phases": {field: [] for field in phase_fields},
+    }
+)
 for event in ends:
     item = paths[event.get("path") or ""]
     item["request_count"] += 1
     item["response_bytes"] += int(event.get("response_bytes") or 0)
     item["request_bytes"].update([str(event.get("request_bytes") or 0)])
-    if isinstance(event.get("duration_ms"), (int, float)):
-        item["durations_ms"].append(float(event["duration_ms"]))
+    if event.get("status") is not None:
+        item["status_counts"].update([str(event["status"])])
+    for field in phase_fields:
+        if isinstance(event.get(field), (int, float)):
+            item["phases"][field].append(float(event[field]))
 for event in errors:
     item = paths[event.get("path") or ""]
     item["error_count"] += 1
-    if isinstance(event.get("duration_ms"), (int, float)):
-        item["durations_ms"].append(float(event["duration_ms"]))
+    for field in phase_fields:
+        if isinstance(event.get(field), (int, float)):
+            item["phases"][field].append(float(event[field]))
+
+def percentile(values, pct):
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, math.ceil((pct / 100.0) * len(ordered)) - 1))
+    return round(ordered[index], 3)
 
 def median(values):
     if not values:
@@ -751,14 +782,22 @@ def median(values):
 
 rows = []
 for path, item in sorted(paths.items()):
-    rows.append({
+    row = {
         "path": path,
         "request_count": item["request_count"],
         "error_count": item["error_count"],
         "response_bytes": item["response_bytes"],
         "request_bytes_values": ",".join(sorted(item["request_bytes"])),
-        "duration_median_ms": median(item["durations_ms"]),
-    })
+        "status_counts": ",".join(
+            f"{status}:{count}"
+            for status, count in sorted(item["status_counts"].items())
+        ),
+    }
+    for field in phase_fields:
+        prefix = field.removesuffix("_ms")
+        row[f"{prefix}_median_ms"] = median(item["phases"][field])
+        row[f"{prefix}_p95_ms"] = percentile(item["phases"][field], 95)
+    rows.append(row)
 summary = {
     "event_count": len(events),
     "request_count": len(ends),
@@ -768,9 +807,21 @@ summary = {
 }
 json_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 with tsv_path.open("w", encoding="utf-8", newline="") as f:
+    fields = (
+        "path",
+        "request_count",
+        "error_count",
+        "response_bytes",
+        "request_bytes_values",
+        "status_counts",
+    )
+    phase_columns = []
+    for field in phase_fields:
+        prefix = field.removesuffix("_ms")
+        phase_columns.extend((f"{prefix}_median_ms", f"{prefix}_p95_ms"))
     writer = csv.DictWriter(
         f,
-        fieldnames=("path", "request_count", "error_count", "response_bytes", "request_bytes_values", "duration_median_ms"),
+        fieldnames=fields + tuple(phase_columns),
         delimiter="\t",
         lineterminator="\n",
     )

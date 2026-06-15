@@ -76,6 +76,11 @@ def main() -> int:
             return request_path
         return request_path
 
+    def elapsed_ms(start: float, end: float | None = None) -> float:
+        if end is None:
+            end = time.perf_counter()
+        return round((end - start) * 1000, 3)
+
     class BrokerHandler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "microagent-host-worker-broker/0"
@@ -102,6 +107,7 @@ def main() -> int:
 
         def proxy(self) -> None:
             request_id = str(uuid.uuid4())
+            start = time.perf_counter()
             parsed = urllib.parse.urlsplit(self.path)
             if parsed.path == "/healthz":
                 body = b"OK\n"
@@ -114,12 +120,28 @@ def main() -> int:
                     self.wfile.write(body)
                 return
 
+            write_log(
+                "request_accept",
+                request_id=request_id,
+                method=self.command,
+                path=parsed.path,
+                query=parsed.query,
+            )
             content_length = self.headers.get("Content-Length")
             request_bytes = 0
             body = None
             if content_length:
                 request_bytes = int(content_length)
                 body = self.rfile.read(request_bytes)
+            request_body_read_ms = elapsed_ms(start)
+            write_log(
+                "request_body_read",
+                request_id=request_id,
+                method=self.command,
+                path=parsed.path,
+                request_body_read_ms=request_body_read_ms,
+                request_bytes=request_bytes,
+            )
 
             upstream_path = upstream_path_for(parsed.path)
             if parsed.query:
@@ -132,7 +154,6 @@ def main() -> int:
             headers["Host"] = target.netloc
             headers["X-Microagent-Mediation-Request-ID"] = request_id
 
-            start = time.perf_counter()
             write_log(
                 "request_start",
                 request_id=request_id,
@@ -148,10 +169,46 @@ def main() -> int:
             response_started = False
             response_bytes = 0
             status = None
+            upstream_request_write_ms = None
+            upstream_ttfb_ms = None
+            upstream_first_body_byte_ms = None
+            downstream_first_body_byte_ms = None
+            response_body_ms = None
+            downstream_complete_ms = None
             try:
+                upstream_start = time.perf_counter()
+                write_log(
+                    "upstream_request_start",
+                    request_id=request_id,
+                    method=self.command,
+                    path=parsed.path,
+                    upstream_path=upstream_path,
+                    elapsed_ms=elapsed_ms(start, upstream_start),
+                )
                 conn.request(self.command, upstream_path, body=body, headers=headers)
+                upstream_request_sent = time.perf_counter()
+                upstream_request_write_ms = elapsed_ms(upstream_start, upstream_request_sent)
+                write_log(
+                    "upstream_request_sent",
+                    request_id=request_id,
+                    method=self.command,
+                    path=parsed.path,
+                    upstream_request_write_ms=upstream_request_write_ms,
+                    elapsed_ms=elapsed_ms(start, upstream_request_sent),
+                )
                 response = conn.getresponse()
+                upstream_headers = time.perf_counter()
+                upstream_ttfb_ms = elapsed_ms(upstream_start, upstream_headers)
                 status = response.status
+                write_log(
+                    "upstream_headers",
+                    request_id=request_id,
+                    method=self.command,
+                    path=parsed.path,
+                    status=status,
+                    upstream_ttfb_ms=upstream_ttfb_ms,
+                    elapsed_ms=elapsed_ms(start, upstream_headers),
+                )
                 self.send_response(response.status, response.reason)
                 has_length = False
                 for key, value in response.getheaders():
@@ -167,16 +224,62 @@ def main() -> int:
                     self.close_connection = True
                 self.end_headers()
                 response_started = True
+                downstream_headers_sent = time.perf_counter()
+                write_log(
+                    "downstream_headers_sent",
+                    request_id=request_id,
+                    method=self.command,
+                    path=parsed.path,
+                    status=status,
+                    elapsed_ms=elapsed_ms(start, downstream_headers_sent),
+                    downstream_header_write_ms=elapsed_ms(
+                        upstream_headers, downstream_headers_sent
+                    ),
+                )
                 if self.command != "HEAD":
                     reader = response.read1 if hasattr(response, "read1") else response.read
+                    first_body_started = None
                     while True:
                         chunk = reader(4096)
                         if not chunk:
                             break
+                        chunk_read_at = time.perf_counter()
+                        if first_body_started is None:
+                            first_body_started = chunk_read_at
+                            upstream_first_body_byte_ms = elapsed_ms(
+                                upstream_start, chunk_read_at
+                            )
+                            write_log(
+                                "upstream_first_body_byte",
+                                request_id=request_id,
+                                method=self.command,
+                                path=parsed.path,
+                                upstream_first_body_byte_ms=upstream_first_body_byte_ms,
+                                elapsed_ms=elapsed_ms(start, chunk_read_at),
+                            )
                         response_bytes += len(chunk)
                         self.wfile.write(chunk)
                         self.wfile.flush()
-                duration_ms = round((time.perf_counter() - start) * 1000, 3)
+                        chunk_sent_at = time.perf_counter()
+                        if downstream_first_body_byte_ms is None:
+                            downstream_first_body_byte_ms = elapsed_ms(
+                                start, chunk_sent_at
+                            )
+                            write_log(
+                                "downstream_first_body_byte",
+                                request_id=request_id,
+                                method=self.command,
+                                path=parsed.path,
+                                downstream_first_body_byte_ms=downstream_first_body_byte_ms,
+                                elapsed_ms=downstream_first_body_byte_ms,
+                            )
+                    response_end = time.perf_counter()
+                    if first_body_started is not None:
+                        response_body_ms = elapsed_ms(first_body_started, response_end)
+                else:
+                    response_end = time.perf_counter()
+                downstream_complete_ms = elapsed_ms(start, response_end)
+                duration_ms = downstream_complete_ms
                 write_log(
                     "request_end",
                     request_id=request_id,
@@ -186,9 +289,16 @@ def main() -> int:
                     response_bytes=response_bytes,
                     status=status,
                     duration_ms=duration_ms,
+                    request_body_read_ms=request_body_read_ms,
+                    upstream_request_write_ms=upstream_request_write_ms,
+                    upstream_ttfb_ms=upstream_ttfb_ms,
+                    upstream_first_body_byte_ms=upstream_first_body_byte_ms,
+                    downstream_first_body_byte_ms=downstream_first_body_byte_ms,
+                    response_body_ms=response_body_ms,
+                    downstream_complete_ms=downstream_complete_ms,
                 )
             except Exception as err:  # noqa: BLE001 - broker logs and returns a bounded 502.
-                duration_ms = round((time.perf_counter() - start) * 1000, 3)
+                duration_ms = elapsed_ms(start)
                 write_log(
                     "request_error",
                     request_id=request_id,
@@ -198,6 +308,13 @@ def main() -> int:
                     response_bytes=response_bytes,
                     status=status,
                     duration_ms=duration_ms,
+                    request_body_read_ms=request_body_read_ms,
+                    upstream_request_write_ms=upstream_request_write_ms,
+                    upstream_ttfb_ms=upstream_ttfb_ms,
+                    upstream_first_body_byte_ms=upstream_first_body_byte_ms,
+                    downstream_first_body_byte_ms=downstream_first_body_byte_ms,
+                    response_body_ms=response_body_ms,
+                    downstream_complete_ms=downstream_complete_ms,
                     error=str(err),
                 )
                 if not response_started:
