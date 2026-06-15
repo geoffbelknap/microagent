@@ -33,6 +33,12 @@
 #   MICROAGENT_HOST_WORKER_MEDIATION_BROKER_HOST       broker bind host (default: 127.0.0.1)
 #   MICROAGENT_HOST_WORKER_MEDIATION_BROKER_PORT       broker bind port, 0 means auto (default: 0)
 #   MICROAGENT_HOST_WORKER_MEDIATION_BROKER_TIMEOUT    upstream timeout seconds (default: 180)
+#   MICROAGENT_HOST_WORKER_MEDIATION_MODE              passthrough|local-allow|policy (default: passthrough)
+#   MICROAGENT_HOST_WORKER_MEDIATION_POLICY_URL        policy endpoint for policy mode
+#   MICROAGENT_HOST_WORKER_MEDIATION_POLICY_TIMEOUT    policy timeout seconds (default: 2)
+#   MICROAGENT_HOST_WORKER_MEDIATION_POLICY_STUB       off|allow|deny|unavailable (default: off)
+#   MICROAGENT_HOST_WORKER_DIAGNOSTIC_EXPECT_BROKER_DENIAL  expect brokered lanes to fail closed: 0/1/auto
+#   MICROAGENT_HOST_WORKER_MEDIATION_BUDGET            off|report|check (default: report)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -56,10 +62,29 @@ KEEP_FAILED="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_KEEP_FAILED:-0}"
 BROKER_HOST="${MICROAGENT_HOST_WORKER_MEDIATION_BROKER_HOST:-127.0.0.1}"
 BROKER_PORT="${MICROAGENT_HOST_WORKER_MEDIATION_BROKER_PORT:-0}"
 BROKER_TIMEOUT="${MICROAGENT_HOST_WORKER_MEDIATION_BROKER_TIMEOUT:-180}"
+MEDIATION_MODE="${MICROAGENT_HOST_WORKER_MEDIATION_MODE:-passthrough}"
+MEDIATION_CAPABILITY="${MICROAGENT_HOST_WORKER_MEDIATION_CAPABILITY:-model.openai}"
+POLICY_URL="${MICROAGENT_HOST_WORKER_MEDIATION_POLICY_URL:-}"
+POLICY_TIMEOUT="${MICROAGENT_HOST_WORKER_MEDIATION_POLICY_TIMEOUT:-2}"
+POLICY_STUB="${MICROAGENT_HOST_WORKER_MEDIATION_POLICY_STUB:-off}"
+POLICY_STUB_PORT="${MICROAGENT_HOST_WORKER_MEDIATION_POLICY_STUB_PORT:-0}"
+POLICY_STUB_DELAY_MS="${MICROAGENT_HOST_WORKER_MEDIATION_POLICY_STUB_DELAY_MS:-0}"
+EXPECT_BROKER_DENIAL="${MICROAGENT_HOST_WORKER_DIAGNOSTIC_EXPECT_BROKER_DENIAL:-auto}"
+BUDGET_MODE="${MICROAGENT_HOST_WORKER_MEDIATION_BUDGET:-report}"
+BUDGET_MODELS_P95_MS="${MICROAGENT_HOST_WORKER_MEDIATION_BUDGET_MODELS_P95_MS:-15}"
+BUDGET_CHAT_P95_MS="${MICROAGENT_HOST_WORKER_MEDIATION_BUDGET_CHAT_P95_MS:-50}"
+BUDGET_STREAM_TTFB_P95_MS="${MICROAGENT_HOST_WORKER_MEDIATION_BUDGET_STREAM_TTFB_P95_MS:-75}"
+BUDGET_REQUEST_BODY_READ_P95_MS="${MICROAGENT_HOST_WORKER_MEDIATION_BUDGET_REQUEST_BODY_READ_P95_MS:-5}"
+BUDGET_DECISION_P95_MS="${MICROAGENT_HOST_WORKER_MEDIATION_BUDGET_DECISION_P95_MS:-25}"
+BUDGET_UPSTREAM_REQUEST_WRITE_P95_MS="${MICROAGENT_HOST_WORKER_MEDIATION_BUDGET_UPSTREAM_REQUEST_WRITE_P95_MS:-5}"
 BROKER_LOG=""
 BROKER_STDOUT=""
 BROKER_STDERR=""
 BROKER_PID=""
+POLICY_LOG=""
+POLICY_STDOUT=""
+POLICY_STDERR=""
+POLICY_PID=""
 DIRECT_GUEST_PORT=11434
 BROKER_GUEST_PORT=11435
 DIRECT_VSOCK_PORT=62100
@@ -78,6 +103,11 @@ cleanup() {
     kill "$BROKER_PID" >/dev/null 2>&1 || true
     wait "$BROKER_PID" >/dev/null 2>&1 || true
     BROKER_PID=""
+  fi
+  if [ -n "$POLICY_PID" ]; then
+    kill "$POLICY_PID" >/dev/null 2>&1 || true
+    wait "$POLICY_PID" >/dev/null 2>&1 || true
+    POLICY_PID=""
   fi
   if [ "$status" -ne 0 ] && [ "$KEEP_FAILED" -eq 1 ]; then
     echo "microagent-host-worker-broker-diagnostic: preserving failed workspace $WORKSPACE" >&2
@@ -289,13 +319,33 @@ PY
 
 start_broker() {
   local target_base_url="$1"
-  python3 "$ROOT/scripts/dev/microagent-host-worker-broker.py" \
-    --target-base-url "$target_base_url" \
-    --bind-host "$BROKER_HOST" \
-    --bind-port "$BROKER_PORT" \
-    --log-path "$BROKER_LOG" \
-    --timeout "$BROKER_TIMEOUT" >"$BROKER_STDOUT" 2>"$BROKER_STDERR" &
+  local broker_args=(
+    "$ROOT/scripts/dev/microagent-host-worker-broker.py"
+    --target-base-url "$target_base_url"
+    --bind-host "$BROKER_HOST"
+    --bind-port "$BROKER_PORT"
+    --log-path "$BROKER_LOG"
+    --timeout "$BROKER_TIMEOUT"
+    --mediation-mode "$MEDIATION_MODE"
+    --workspace-id "$WORKSPACE"
+    --capability "$MEDIATION_CAPABILITY"
+  )
+  if [ -n "$POLICY_URL" ]; then
+    broker_args+=(--policy-url "$POLICY_URL" --policy-timeout "$POLICY_TIMEOUT")
+  fi
+  python3 "${broker_args[@]}" >"$BROKER_STDOUT" 2>"$BROKER_STDERR" &
   BROKER_PID="$!"
+}
+
+start_policy_stub() {
+  local decision="$1"
+  python3 "$ROOT/scripts/dev/microagent-host-worker-policy-stub.py" \
+    --bind-host "$BROKER_HOST" \
+    --bind-port "$POLICY_STUB_PORT" \
+    --decision "$decision" \
+    --delay-ms "$POLICY_STUB_DELAY_MS" \
+    --log-path "$POLICY_LOG" >"$POLICY_STDOUT" 2>"$POLICY_STDERR" &
+  POLICY_PID="$!"
 }
 
 wait_for_broker() {
@@ -322,6 +372,32 @@ PY
   done
   [ ! -s "$BROKER_STDERR" ] || sed -n '1,120p' "$BROKER_STDERR" >&2
   fail "broker did not become ready at $health_url"
+}
+
+wait_for_policy_stub() {
+  local health_url="$1"
+  local deadline=$((SECONDS + 20))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if python3 - "$health_url" <<'PY' >/dev/null 2>&1
+import sys
+import urllib.request
+
+with urllib.request.urlopen(sys.argv[1], timeout=1) as response:
+    if 200 <= response.status < 300:
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
+      return 0
+    fi
+    if ! kill -0 "$POLICY_PID" >/dev/null 2>&1; then
+      [ ! -s "$POLICY_STDERR" ] || sed -n '1,120p' "$POLICY_STDERR" >&2
+      fail "policy stub exited before becoming ready"
+    fi
+    sleep 0.2
+  done
+  [ ! -s "$POLICY_STDERR" ] || sed -n '1,120p' "$POLICY_STDERR" >&2
+  fail "policy stub did not become ready at $health_url"
 }
 
 read -r -d '' MEASURE_SH <<'SH' || true
@@ -371,19 +447,42 @@ measure_endpoint() {
     response_bytes="$5"
     status="$6"
     chunks=0
-    case "$endpoint" in
-      models)
-        grep -Eq '"object"|"data"' "$body" || { echo "models response did not look OpenAI-compatible" >&2; cat "$body" >&2; rm -f "$body"; exit 1; }
-        ;;
-      chat)
-        grep -q '"choices"' "$body" || { echo "chat response did not contain choices" >&2; cat "$body" >&2; rm -f "$body"; exit 1; }
-        ;;
-      stream)
-        grep -Eq '\[DONE\]|"choices"' "$body" || { echo "stream response did not look OpenAI-compatible" >&2; cat "$body" >&2; rm -f "$body"; exit 1; }
-        chunks="$(grep -c '^data:' "$body" 2>/dev/null || true)"
-        chunks="${chunks:-0}"
-        ;;
-    esac
+    if [ "${MEASURE_EXPECT_DENIED:-0}" = "1" ]; then
+      case "$status" in
+        403|503)
+          ;;
+        *)
+          echo "expected broker denial status 403/503 for $endpoint, got $status" >&2
+          cat "$body" >&2
+          rm -f "$body"
+          exit 1
+          ;;
+      esac
+    else
+      case "$status" in
+        2*)
+          ;;
+        *)
+          echo "$endpoint returned unexpected HTTP $status" >&2
+          cat "$body" >&2
+          rm -f "$body"
+          exit 1
+          ;;
+      esac
+      case "$endpoint" in
+        models)
+          grep -Eq '"object"|"data"' "$body" || { echo "models response did not look OpenAI-compatible" >&2; cat "$body" >&2; rm -f "$body"; exit 1; }
+          ;;
+        chat)
+          grep -q '"choices"' "$body" || { echo "chat response did not contain choices" >&2; cat "$body" >&2; rm -f "$body"; exit 1; }
+          ;;
+        stream)
+          grep -Eq '\[DONE\]|"choices"' "$body" || { echo "stream response did not look OpenAI-compatible" >&2; cat "$body" >&2; rm -f "$body"; exit 1; }
+          chunks="$(grep -c '^data:' "$body" 2>/dev/null || true)"
+          chunks="${chunks:-0}"
+          ;;
+      esac
+    fi
     if [ "$i" -ge "$MEASURE_WARMUPS" ]; then
       sample_index=$((i - MEASURE_WARMUPS))
       printf '{"lane":"%s","endpoint":"%s","repeat_index":%s,"sample_index":%s,"connect_seconds":%s,"pretransfer_seconds":%s,"ttfb_seconds":%s,"total_seconds":%s,"response_bytes":%s,"status":%s,"chunks":%s,"request_bytes":%s}\n' \
@@ -404,6 +503,14 @@ run_host_lane() {
   local base_url="$2"
   local out="$3"
   local repeat_index="$4"
+  local expect_denied=0
+  if [ "$EXPECT_BROKER_DENIAL" -eq 1 ]; then
+    case "$lane" in
+      *-broker)
+        expect_denied=1
+        ;;
+    esac
+  fi
   MEASURE_LANE="$lane" \
     MEASURE_REPEAT_INDEX="$repeat_index" \
     MEASURE_BASE_URL="$base_url" \
@@ -411,6 +518,7 @@ run_host_lane() {
     MEASURE_SAMPLES="$SAMPLES" \
     MEASURE_WARMUPS="$WARMUPS" \
     MEASURE_CURL_TIMEOUT="$CURL_TIMEOUT" \
+    MEASURE_EXPECT_DENIED="$expect_denied" \
     sh -c "$MEASURE_SH" >"$out"
 }
 
@@ -419,6 +527,14 @@ run_guest_lane() {
   local base_url="$2"
   local out="$3"
   local repeat_index="$4"
+  local expect_denied=0
+  if [ "$EXPECT_BROKER_DENIAL" -eq 1 ]; then
+    case "$lane" in
+      *-broker)
+        expect_denied=1
+        ;;
+    esac
+  fi
   "$CLI" exec "$WORKSPACE" --state-dir "$STATE_DIR" --timeout "$CURL_TIMEOUT"s \
     -env "MEASURE_LANE=$lane" \
     -env "MEASURE_REPEAT_INDEX=$repeat_index" \
@@ -427,6 +543,7 @@ run_guest_lane() {
     -env "MEASURE_SAMPLES=$SAMPLES" \
     -env "MEASURE_WARMUPS=$WARMUPS" \
     -env "MEASURE_CURL_TIMEOUT=$CURL_TIMEOUT" \
+    -env "MEASURE_EXPECT_DENIED=$expect_denied" \
     -- sh -c "$MEASURE_SH" >"$out"
 }
 
@@ -730,6 +847,7 @@ errors = [event for event in events if event.get("event") == "request_error"]
 phase_fields = (
     "duration_ms",
     "request_body_read_ms",
+    "mediation_decision_ms",
     "upstream_request_write_ms",
     "upstream_ttfb_ms",
     "upstream_first_body_byte_ms",
@@ -744,6 +862,7 @@ paths = defaultdict(
         "response_bytes": 0,
         "request_bytes": Counter(),
         "status_counts": Counter(),
+        "mediation_results": Counter(),
         "phases": {field: [] for field in phase_fields},
     }
 )
@@ -754,6 +873,8 @@ for event in ends:
     item["request_bytes"].update([str(event.get("request_bytes") or 0)])
     if event.get("status") is not None:
         item["status_counts"].update([str(event["status"])])
+    if event.get("mediation_result") is not None:
+        item["mediation_results"].update([str(event["mediation_result"])])
     for field in phase_fields:
         if isinstance(event.get(field), (int, float)):
             item["phases"][field].append(float(event[field]))
@@ -792,6 +913,10 @@ for path, item in sorted(paths.items()):
             f"{status}:{count}"
             for status, count in sorted(item["status_counts"].items())
         ),
+        "mediation_results": ",".join(
+            f"{result}:{count}"
+            for result, count in sorted(item["mediation_results"].items())
+        ),
     }
     for field in phase_fields:
         prefix = field.removesuffix("_ms")
@@ -814,6 +939,7 @@ with tsv_path.open("w", encoding="utf-8", newline="") as f:
         "response_bytes",
         "request_bytes_values",
         "status_counts",
+        "mediation_results",
     )
     phase_columns = []
     for field in phase_fields:
@@ -857,8 +983,75 @@ case "$BROKER_TIMEOUT" in
     fail "MICROAGENT_HOST_WORKER_MEDIATION_BROKER_TIMEOUT must be numeric"
     ;;
 esac
+case "$POLICY_TIMEOUT" in
+  ''|*[!0-9.]*)
+    fail "MICROAGENT_HOST_WORKER_MEDIATION_POLICY_TIMEOUT must be numeric"
+    ;;
+esac
+case "$POLICY_STUB_DELAY_MS" in
+  ''|*[!0-9.]*)
+    fail "MICROAGENT_HOST_WORKER_MEDIATION_POLICY_STUB_DELAY_MS must be numeric"
+    ;;
+esac
+case "$MEDIATION_MODE" in
+  passthrough|local-allow|policy)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_MEDIATION_MODE must be passthrough, local-allow, or policy"
+    ;;
+esac
+case "$POLICY_STUB" in
+  off|allow|deny|unavailable)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_MEDIATION_POLICY_STUB must be off, allow, deny, or unavailable"
+    ;;
+esac
+if [ "$MEDIATION_MODE" != "policy" ] && [ "$POLICY_STUB" != "off" ]; then
+  fail "MICROAGENT_HOST_WORKER_MEDIATION_POLICY_STUB requires MICROAGENT_HOST_WORKER_MEDIATION_MODE=policy"
+fi
+case "$EXPECT_BROKER_DENIAL" in
+  auto)
+    if [ "$MEDIATION_MODE" = "policy" ]; then
+      case "$POLICY_STUB" in
+        deny|unavailable)
+          EXPECT_BROKER_DENIAL=1
+          ;;
+        *)
+          EXPECT_BROKER_DENIAL=0
+          ;;
+      esac
+    else
+      EXPECT_BROKER_DENIAL=0
+    fi
+    ;;
+  1|true|TRUE|yes|YES)
+    EXPECT_BROKER_DENIAL=1
+    ;;
+  0|false|FALSE|no|NO)
+    EXPECT_BROKER_DENIAL=0
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_DIAGNOSTIC_EXPECT_BROKER_DENIAL must be auto, 0/1, true/false, or yes/no"
+    ;;
+esac
+case "$BUDGET_MODE" in
+  off|report|check)
+    ;;
+  *)
+    fail "MICROAGENT_HOST_WORKER_MEDIATION_BUDGET must be off, report, or check"
+    ;;
+esac
 if [ "$BROKER_PORT" -eq 0 ]; then
   BROKER_PORT="$(choose_port "$BROKER_HOST")"
+fi
+if [ "$POLICY_STUB_PORT" = "0" ]; then
+  POLICY_STUB_PORT="$(choose_port "$BROKER_HOST")"
+elif [ -n "${POLICY_STUB_PORT//[0-9]/}" ]; then
+  fail "MICROAGENT_HOST_WORKER_MEDIATION_POLICY_STUB_PORT must be a non-negative integer"
+fi
+if [ "$MEDIATION_MODE" = "policy" ] && [ "$POLICY_STUB" = "off" ] && [ -z "$POLICY_URL" ]; then
+  fail "MICROAGENT_HOST_WORKER_MEDIATION_POLICY_URL is required when policy mode does not start a stub"
 fi
 if [ -z "$HOST_WORKER_URL" ]; then
   fail "MICROAGENT_HOST_WORKER_URL must point at an OpenAI-compatible host worker"
@@ -890,7 +1083,11 @@ mkdir -p "$OUT_DIR"
 BROKER_LOG="$OUT_DIR/broker.jsonl"
 BROKER_STDOUT="$OUT_DIR/broker.stdout"
 BROKER_STDERR="$OUT_DIR/broker.stderr"
+POLICY_LOG="$OUT_DIR/policy-stub.jsonl"
+POLICY_STDOUT="$OUT_DIR/policy-stub.stdout"
+POLICY_STDERR="$OUT_DIR/policy-stub.stderr"
 : >"$BROKER_LOG"
+: >"$POLICY_LOG"
 
 WORKER_INFO="$(normalize_worker_url "$HOST_WORKER_URL")" || fail "invalid MICROAGENT_HOST_WORKER_URL"
 TARGET_BASE_URL="$(printf '%s' "$WORKER_INFO" | json_get base_url)"
@@ -899,8 +1096,22 @@ DIRECT_TARGET="$(printf '%s' "$WORKER_INFO" | json_get target)"
 BROKER_TARGET="$(broker_connect_host):$BROKER_PORT"
 BROKER_URL="http://$(broker_connect_host):$BROKER_PORT$TARGET_BASE_PATH"
 BROKER_HEALTH_URL="http://$(broker_connect_host):$BROKER_PORT/healthz"
+POLICY_HEALTH_URL="http://$(broker_connect_host):$POLICY_STUB_PORT/healthz"
 GUEST_DIRECT_URL="http://127.0.0.1:$DIRECT_GUEST_PORT$TARGET_BASE_PATH"
 GUEST_BROKER_URL="http://127.0.0.1:$BROKER_GUEST_PORT$TARGET_BASE_PATH"
+
+case "$POLICY_STUB" in
+  allow|deny)
+    POLICY_URL="http://$(broker_connect_host):$POLICY_STUB_PORT/decision"
+    echo "microagent-host-worker-broker-diagnostic: starting policy stub decision=$POLICY_STUB url=$POLICY_URL"
+    start_policy_stub "$POLICY_STUB"
+    wait_for_policy_stub "$POLICY_HEALTH_URL"
+    ;;
+  unavailable)
+    POLICY_URL="http://$(broker_connect_host):$POLICY_STUB_PORT/decision"
+    echo "microagent-host-worker-broker-diagnostic: using intentionally unavailable policy url=$POLICY_URL"
+    ;;
+esac
 
 host_worker_health_check "$TARGET_BASE_URL" || fail "external host worker health check failed"
 if [ -z "$REQUEST_MODEL" ]; then
@@ -918,7 +1129,7 @@ PAYLOAD_DIR="$OUT_DIR/payloads"
 PAYLOAD_MANIFEST_JSON="$(write_payloads "$PAYLOAD_DIR" "$REQUEST_MODEL")"
 printf '%s\n' "$PAYLOAD_MANIFEST_JSON" >"$OUT_DIR/payloads-manifest.compact.json"
 
-echo "microagent-host-worker-broker-diagnostic: starting broker $BROKER_URL -> $TARGET_BASE_URL"
+echo "microagent-host-worker-broker-diagnostic: starting broker $BROKER_URL -> $TARGET_BASE_URL mode=$MEDIATION_MODE"
 start_broker "$TARGET_BASE_URL"
 wait_for_broker "$BROKER_HEALTH_URL"
 
@@ -980,7 +1191,28 @@ cat "$OUT_DIR/host-direct.jsonl" \
 write_summary "$OUT_DIR/raw.jsonl" "$PAYLOAD_DIR/manifest.json" "$OUT_DIR/summary.tsv" "$OUT_DIR/comparison.tsv"
 write_comparison_compact "$OUT_DIR/comparison.tsv" "$OUT_DIR/comparison-compact.tsv"
 write_broker_summary "$BROKER_LOG" "$OUT_DIR/broker-summary.json" "$OUT_DIR/broker-summary.tsv"
+if [ "$BUDGET_MODE" != "off" ] && [ "$EXPECT_BROKER_DENIAL" -eq 0 ]; then
+  budget_args=(
+    --comparison "$OUT_DIR/comparison.tsv"
+    --broker-summary "$OUT_DIR/broker-summary.tsv"
+    --output-json "$OUT_DIR/mediation-budget.json"
+    --output-tsv "$OUT_DIR/mediation-budget.tsv"
+    --models-p95-ms "$BUDGET_MODELS_P95_MS"
+    --chat-p95-ms "$BUDGET_CHAT_P95_MS"
+    --stream-ttfb-p95-ms "$BUDGET_STREAM_TTFB_P95_MS"
+    --broker-request-body-read-p95-ms "$BUDGET_REQUEST_BODY_READ_P95_MS"
+    --broker-mediation-decision-p95-ms "$BUDGET_DECISION_P95_MS"
+    --broker-upstream-request-write-p95-ms "$BUDGET_UPSTREAM_REQUEST_WRITE_P95_MS"
+  )
+  if [ "$BUDGET_MODE" = "check" ]; then
+    budget_args+=(--check)
+  fi
+  python3 "$ROOT/scripts/dev/microagent-host-worker-mediation-budget.py" "${budget_args[@]}"
+fi
 
 echo "microagent-host-worker-broker-diagnostic: reports written under $OUT_DIR"
 cat "$OUT_DIR/comparison-compact.tsv"
+if [ -s "$OUT_DIR/mediation-budget.tsv" ]; then
+  cat "$OUT_DIR/mediation-budget.tsv"
+fi
 echo "PASS microagent-host-worker-broker-diagnostic"
