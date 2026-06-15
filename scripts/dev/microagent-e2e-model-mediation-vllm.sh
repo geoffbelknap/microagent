@@ -20,6 +20,7 @@
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_KEEP      preserve reports/state
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_KEEP_STATE
 #                                                    preserve workspaces on fail
+#   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_IMAGE     guest image with sh + curl
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO      vLLM repo checkout
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PYTHON    vLLM venv python
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_MODEL     HF model id
@@ -32,6 +33,8 @@
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_STREAM_TOKENS
 #                                                    default: 64
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_SAMPLES     default: 3
+#   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_TELEMETRY   off, auto, or required (default: auto)
+#   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_GATE_MODE   off, warn, or required (default: required)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -43,7 +46,7 @@ OUT_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_OUT_DIR:-/tmp/ma-e2e-mm-vllm-$(da
 STATE_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_STATE_DIR:-$OUT_DIR/state}"
 KEEP_FAILED="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_KEEP:-${MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_VLLM:-0}}"
 KEEP_STATE="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_KEEP_STATE:-0}"
-IMAGE="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_IMAGE:-docker.io/curlimages/curl:latest}"
+IMAGE="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_IMAGE:-quay.io/curl/curl:latest}"
 MODEL_REF="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_MODEL_REF:-stub/stub-model-GGUF/stub.gguf}"
 CANONICAL_REF="hf.co/stub/stub-model-GGUF@main/stub.gguf"
 VLLM_REPO="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO:-$ROOT/../vllm}"
@@ -57,12 +60,22 @@ VLLM_FLASHINFER_SAMPLER="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_FLASHINFER_SAMPLE
 CHAT_TOKENS="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_CHAT_TOKENS:-32}"
 STREAM_TOKENS="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_STREAM_TOKENS:-64}"
 SAMPLES="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_SAMPLES:-3}"
+TELEMETRY="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_TELEMETRY:-auto}"
+TELEMETRY_INTERVAL="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_TELEMETRY_INTERVAL:-0.5}"
+TELEMETRY_ENDPOINTS="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_TELEMETRY_ENDPOINTS:-/metrics,/health}"
+GATE_MODE="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_GATE_MODE:-required}"
+MAX_MODELS_TOTAL_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_MAX_MODELS_TOTAL_P95_DELTA_MS:-100}"
+MAX_CHAT_TOTAL_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_MAX_CHAT_TOTAL_P95_DELTA_MS:-500}"
+MAX_STREAM_TTFB_P95_DELTA_MS="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_MAX_STREAM_TTFB_P95_DELTA_MS:-250}"
+MAX_DECISION_P95_MS="${MICROAGENT_E2E_MODEL_MEDIATION_VLLM_MAX_DECISION_P95_MS:-100}"
 POLICY_PID=""
 POLICY_URL=""
 RUNNER_COMMAND_JSON=""
 RUNNER_ENV_JSON=""
 RUNNER_PID=""
 RUNNER_PORT=""
+TELEMETRY_PID=""
+TELEMETRY_PHASE_FILE=""
 RESOLVED_CUDA_HOME=""
 RUN_FLAGS=(--backend firecracker --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF")
 CTRL_FLAGS=(--backend firecracker --state-dir "$STATE_DIR")
@@ -83,6 +96,7 @@ fail() { echo "FAIL microagent-e2e-model-mediation-vllm: $1" >&2; exit 1; }
 cleanup() {
   local status=$?
   set +e
+  stop_telemetry
   if [ -n "$POLICY_PID" ]; then
     kill "$POLICY_PID" >/dev/null 2>&1 || true
     wait "$POLICY_PID" >/dev/null 2>&1 || true
@@ -109,6 +123,80 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
+
+stop_telemetry() {
+  if [ -n "$TELEMETRY_PID" ]; then
+    kill "$TELEMETRY_PID" >/dev/null 2>&1 || true
+    wait "$TELEMETRY_PID" >/dev/null 2>&1 || true
+    TELEMETRY_PID=""
+  fi
+  if [ -n "$TELEMETRY_PHASE_FILE" ]; then
+    rm -f "$TELEMETRY_PHASE_FILE"
+    TELEMETRY_PHASE_FILE=""
+  fi
+}
+
+set_telemetry_phase() {
+  local phase="$1"
+  if [ -n "$TELEMETRY_PHASE_FILE" ]; then
+    printf '%s\n' "$phase" >"$TELEMETRY_PHASE_FILE"
+  fi
+}
+
+start_telemetry() {
+  case "$TELEMETRY" in
+    off)
+      return
+      ;;
+    auto|required)
+      ;;
+    *)
+      fail "MICROAGENT_E2E_MODEL_MEDIATION_VLLM_TELEMETRY must be off, auto, or required"
+      ;;
+  esac
+  TELEMETRY_PHASE_FILE="$OUT_DIR/telemetry.phase"
+  printf '%s\n' startup >"$TELEMETRY_PHASE_FILE"
+  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" sample \
+    --runner-root-url "http://127.0.0.1:$RUNNER_PORT" \
+    --phase-file "$TELEMETRY_PHASE_FILE" \
+    --runner-out "$OUT_DIR/runner-telemetry.jsonl" \
+    --gpu-out "$OUT_DIR/gpu-telemetry.csv" \
+    --endpoints "$TELEMETRY_ENDPOINTS" \
+    --interval "$TELEMETRY_INTERVAL" \
+    --gpu "$TELEMETRY" &
+  TELEMETRY_PID="$!"
+  sleep 0.2
+  if ! kill -0 "$TELEMETRY_PID" >/dev/null 2>&1; then
+    wait "$TELEMETRY_PID" >/dev/null 2>&1 || true
+    TELEMETRY_PID=""
+    fail "telemetry sampler exited before collection"
+  fi
+  echo "microagent-e2e-model-mediation-vllm: telemetry writing to $OUT_DIR/runner-telemetry.jsonl and $OUT_DIR/gpu-telemetry.csv"
+}
+
+write_telemetry_summary() {
+  if [ "$TELEMETRY" = "off" ]; then
+    return
+  fi
+  stop_telemetry
+  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" summary \
+    --runner-in "$OUT_DIR/runner-telemetry.jsonl" \
+    --gpu-in "$OUT_DIR/gpu-telemetry.csv" \
+    --adapter vllm \
+    --out "$OUT_DIR/telemetry-summary.tsv"
+}
+
+write_gate_summary() {
+  python3 "$ROOT/scripts/dev/microagent-model-mediation-telemetry.py" gate \
+    --profile-comparison "$OUT_DIR/profile-comparison.tsv" \
+    --audit-summary "$OUT_DIR/summary.tsv" \
+    --out "$OUT_DIR/mediation-gates.tsv" \
+    --mode "$GATE_MODE" \
+    --max-models-total-p95-delta-ms "$MAX_MODELS_TOTAL_P95_DELTA_MS" \
+    --max-chat-total-p95-delta-ms "$MAX_CHAT_TOTAL_P95_DELTA_MS" \
+    --max-stream-ttfb-p95-delta-ms "$MAX_STREAM_TTFB_P95_DELTA_MS" \
+    --max-decision-p95-ms "$MAX_DECISION_P95_MS"
+}
 
 case "${MICROAGENT_E2E_MODEL_MEDIATION_VLLM:-0}" in
   1|true|TRUE|yes|YES|required)
@@ -149,6 +237,14 @@ for numeric in CHAT_TOKENS STREAM_TOKENS SAMPLES; do
     fail "$numeric must be a positive integer"
   fi
 done
+case "$TELEMETRY" in
+  off|auto|required) ;;
+  *) fail "MICROAGENT_E2E_MODEL_MEDIATION_VLLM_TELEMETRY must be off, auto, or required" ;;
+esac
+case "$GATE_MODE" in
+  off|warn|required) ;;
+  *) fail "MICROAGENT_E2E_MODEL_MEDIATION_VLLM_GATE_MODE must be off, warn, or required" ;;
+esac
 
 mkdir -p "$OUT_DIR/bin" "$STATE_DIR/models/blobs"
 
@@ -445,6 +541,27 @@ audit_log_for_workspace() {
   printf '%s\n' "$STATE_DIR/host-workers/${workspace}_model.openai.jsonl"
 }
 
+audit_report_for_workspace() {
+  local workspace="$1"
+  printf '%s\n' "$OUT_DIR/${workspace}_model.openai.jsonl"
+}
+
+reset_audit_log() {
+  local workspace="$1"
+  rm -f "$(audit_log_for_workspace "$workspace")" "$(audit_report_for_workspace "$workspace")"
+}
+
+capture_audit_log() {
+  local workspace="$1"
+  local live_log
+  local report_log
+  live_log="$(audit_log_for_workspace "$workspace")"
+  report_log="$(audit_report_for_workspace "$workspace")"
+  if [ -e "$live_log" ]; then
+    cp "$live_log" "$report_log"
+  fi
+}
+
 assert_index_clean() {
   python3 - "$STATE_DIR/host-workers/index.json" <<'PY'
 import json
@@ -487,7 +604,7 @@ summarize_audit() {
   local workspace="$2"
   local expected="$3"
   local log_path
-  log_path="$(audit_log_for_workspace "$workspace")"
+  log_path="$(audit_report_for_workspace "$workspace")"
   python3 - "$label" "$expected" "$log_path" "$OUT_DIR/summary.tsv" <<'PY'
 import json
 import sys
@@ -799,7 +916,7 @@ assert_audit_contains() {
   local workspace="$1"
   local needle="$2"
   local log_path
-  log_path="$(audit_log_for_workspace "$workspace")"
+  log_path="$(audit_report_for_workspace "$workspace")"
   [ -r "$log_path" ] || fail "audit log not readable for $workspace: $log_path"
   grep -q "\"event\":\"$needle\"" "$log_path" || fail "audit log $log_path missing event $needle"
 }
@@ -808,7 +925,7 @@ assert_audit_lacks() {
   local workspace="$1"
   local needle="$2"
   local log_path
-  log_path="$(audit_log_for_workspace "$workspace")"
+  log_path="$(audit_report_for_workspace "$workspace")"
   [ -r "$log_path" ] || fail "audit log not readable for $workspace: $log_path"
   if grep -q "\"event\":\"$needle\"" "$log_path"; then
     fail "audit log $log_path unexpectedly contains event $needle"
@@ -835,6 +952,7 @@ run_case() {
     env_args+=("MICROAGENT_MODEL_POLICY_URL=")
   fi
 
+  reset_audit_log "$workspace"
   guest_script="$(cat <<'EOF'
 set -eu
 
@@ -855,12 +973,32 @@ read_metrics() {
   echo "${prefix}_BYTES=${4:-0}"
 }
 
+profile_curl() {
+  out="$1"
+  shift
+  attempt=1
+  while :; do
+    metrics="$(curl -sS -o "$out" -w "%{http_code} %{time_starttransfer} %{time_total} %{size_download}" "$@" 2>/tmp/profile-curl.err || true)"
+    status="${metrics%% *}"
+    status="${status:-000}"
+    if [ "$status" != "000" ] || [ "$attempt" -ge 50 ]; then
+      if [ "$status" = "000" ] && [ -s /tmp/profile-curl.err ]; then
+        cat /tmp/profile-curl.err >&2
+      fi
+      printf '%s\n' "$metrics"
+      return
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.1
+  done
+}
+
 chat_payload='{"model":"'"$REQUEST_MODEL"'","messages":[{"role":"user","content":"Reply with exactly PONG."}],"max_tokens":'"$CHAT_TOKENS"',"temperature":0,"stream":false}'
 stream_payload='{"model":"'"$REQUEST_MODEL"'","messages":[{"role":"user","content":"Write one compact sentence about mediated host GPU workers."}],"max_tokens":'"$STREAM_TOKENS"',"temperature":0,"stream":true}'
 
 sample=1
 while [ "$sample" -le "$SAMPLES" ]; do
-  metrics="$(curl -sS -o /tmp/model-body -w "%{http_code} %{time_starttransfer} %{time_total} %{size_download}" "$MICROAGENT_MODEL_URL/models" || true)"
+  metrics="$(profile_curl /tmp/model-body "$MICROAGENT_MODEL_URL/models")"
   set -- $metrics
   model_status="${1:-000}"
   model_ttfb="${2:-0}"
@@ -878,7 +1016,7 @@ done
 
 sample=1
 while [ "$sample" -le "$SAMPLES" ]; do
-  metrics="$(curl -sS -o /tmp/chat-body -w "%{http_code} %{time_starttransfer} %{time_total} %{size_download}" "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "$chat_payload" || true)"
+  metrics="$(profile_curl /tmp/chat-body "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "$chat_payload")"
   set -- $metrics
   chat_status="${1:-000}"
   chat_ttfb="${2:-0}"
@@ -896,7 +1034,7 @@ done
 
 sample=1
 while [ "$sample" -le "$SAMPLES" ]; do
-  metrics="$(curl -sS -N -o /tmp/stream-body -w "%{http_code} %{time_starttransfer} %{time_total} %{size_download}" "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "$stream_payload" || true)"
+  metrics="$(profile_curl /tmp/stream-body -N "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "$stream_payload")"
   set -- $metrics
   stream_status="${1:-000}"
   stream_ttfb="${2:-0}"
@@ -917,6 +1055,7 @@ EOF
 )"
 
   echo "microagent-e2e-model-mediation-vllm: case=$label mode=$mode expected_http=$expected_status"
+  set_telemetry_phase "$label"
   if ! env "${env_args[@]}" "$CLI" run --name "$workspace" \
     --env "EXPECTED_STATUS=$expected_status" \
     --env "REQUEST_MODEL=$VLLM_SERVED_MODEL" \
@@ -928,6 +1067,7 @@ EOF
     fail "case $label failed"
   fi
   extract_guest_stdout "$run_log" "$stdout_path"
+  capture_audit_log "$workspace"
   for prefix in MODEL CHAT STREAM; do
     grep -q "${prefix}_STATUS=$expected_status" "$stdout_path" || {
       cat "$stdout_path" >&2
@@ -957,6 +1097,7 @@ stage_stub_model
 write_vllm_runner
 start_pinned_runner
 warm_vllm_runner
+start_telemetry
 assert_single_runner_reused
 
 run_case "direct" "off" "200"
@@ -992,4 +1133,12 @@ echo "microagent-e2e-model-mediation-vllm: profile summary"
 cat "$OUT_DIR/profile-summary.tsv"
 echo "microagent-e2e-model-mediation-vllm: direct-vs-mediated profile comparison"
 cat "$OUT_DIR/profile-comparison.tsv"
+write_telemetry_summary
+if [ -s "$OUT_DIR/telemetry-summary.tsv" ]; then
+  echo "microagent-e2e-model-mediation-vllm: telemetry summary"
+  cat "$OUT_DIR/telemetry-summary.tsv"
+fi
+write_gate_summary
+echo "microagent-e2e-model-mediation-vllm: mediation gates"
+cat "$OUT_DIR/mediation-gates.tsv"
 echo "PASS microagent-e2e-model-mediation-vllm: production model mediation matrix passed with vLLM"

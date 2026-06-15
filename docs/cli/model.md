@@ -199,6 +199,44 @@ Use it to reclaim a runner whose workspace exited without a lifecycle verb.
 `runners` self-heals the registry: any listed process that is no longer alive
 is silently removed before the list is printed.
 
+## Mediated backend validation
+
+The production model mediation path is still experimental, but the developer
+E2E suite can validate it against the supported external backends without
+making GPU access a default requirement:
+
+```bash
+# Stub OpenAI-compatible runner; no GPU or llama.cpp required.
+MICROAGENT_E2E_MODEL_MEDIATION=1 scripts/dev/microagent-e2e.sh model-mediation
+
+# llama.cpp runner, default CPU execution.
+MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
+  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
+  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
+
+# llama.cpp runner with explicit GPU offload.
+MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=1 \
+  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
+  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
+
+# vLLM GPU runner from a local checkout.
+MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
+  scripts/dev/microagent-e2e.sh model-mediation-vllm
+```
+
+The llama.cpp and vLLM matrices run direct, local-allow, policy-allow,
+policy-deny, and policy-unavailable cases. They emit profile summaries,
+direct-vs-mediated comparisons, telemetry summaries, and mediation gate TSVs
+under their output directories. Gates fail the scenario by default when local
+mediation, policy mediation, or decision latency exceeds the configured budget;
+set the scenario-specific `*_GATE_MODE=warn` only when collecting noisy
+experimental data. The backend mediation scenarios default to
+`quay.io/curl/curl:latest` for the guest HTTP probe image; use the
+scenario-specific `*_IMAGE` override when a different internal mirror is
+required.
+
 ## HuggingFace ref forms
 
 `model pull` accepts several ref forms for the `<hf-ref>` argument:
