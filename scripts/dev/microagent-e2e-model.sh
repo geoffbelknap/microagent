@@ -26,14 +26,20 @@
 #   MICROAGENT_APPLEVF_KERNEL          path to an Apple VF Linux ARM64 kernel
 #   MICROAGENT_CLI                     microagent CLI (default: .build/dev/microagent)
 #   MICROAGENT_E2E_MODEL_REF           HuggingFace GGUF ref (default: Qwen 0.5B Q4)
+#   MICROAGENT_E2E_MODEL_GPU           off|auto|required (default: auto)
+#   MICROAGENT_E2E_MODEL_GPU_PATTERN   grep -E pattern for runner log GPU evidence
 #   LD_LIBRARY_PATH                    must include llama-server's shared libs
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/dev/e2e-lib.sh
 . "$ROOT/scripts/dev/e2e-lib.sh"
 CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
 MODEL_REF="${MICROAGENT_E2E_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 IMAGE="docker.io/curlimages/curl:latest"
+GPU_MODE="${MICROAGENT_E2E_MODEL_GPU:-auto}"
+GPU_PATTERN="${MICROAGENT_E2E_MODEL_GPU_PATTERN:-CUDA[0-9]*[[:space:]]*:|ggml_cuda|CUDA[[:space:]]*:|Metal[[:space:]]*:|Vulkan[[:space:]]*:|SYCL}"
+GPU_CHECK=0
 
 skip() { e2e_skip "microagent-e2e-model: $1"; }
 fail() { echo "FAIL microagent-e2e-model: $1" >&2; exit 1; }
@@ -44,6 +50,84 @@ fi
 if [ -z "${MICROAGENT_LLAMA_SERVER:-}" ] || [ ! -x "${MICROAGENT_LLAMA_SERVER:-/nonexistent}" ]; then
   skip "MICROAGENT_LLAMA_SERVER not set/executable"
 fi
+
+runner_args_request_gpu() {
+  printf '%s' "${MICROAGENT_MODEL_RUNNER_ARGS:-}" | grep -Eq -- '(^|[^[:alnum:]_])(-ngl|--n-gpu-layers|--gpu-layers|--main-gpu|--tensor-split|--device|--gpu)([^[:alnum:]_]|$)'
+}
+
+host_runner_reports_gpu() {
+  "${MICROAGENT_LLAMA_SERVER}" --list-devices 2>/dev/null | grep -Eiq "$GPU_PATTERN"
+}
+
+configure_gpu_check() {
+  case "$GPU_MODE" in
+    off|false|no|0)
+      GPU_CHECK=0
+      echo "microagent-e2e-model: GPU assertion disabled"
+      ;;
+    auto|"")
+      if host_runner_reports_gpu && runner_args_request_gpu; then
+        GPU_CHECK=1
+        echo "microagent-e2e-model: GPU assertion enabled (runner reports GPU and runner args request GPU offload)"
+      else
+        GPU_CHECK=0
+        echo "microagent-e2e-model: GPU assertion skipped (set MICROAGENT_E2E_MODEL_GPU=required to require it)"
+      fi
+      ;;
+    required|require|true|yes|1)
+      if ! host_runner_reports_gpu; then
+        fail "GPU assertion required but $MICROAGENT_LLAMA_SERVER did not report a GPU matching: $GPU_PATTERN"
+      fi
+      GPU_CHECK=1
+      echo "microagent-e2e-model: GPU assertion required"
+      ;;
+    *)
+      fail "invalid MICROAGENT_E2E_MODEL_GPU=$GPU_MODE (expected off, auto, or required)"
+      ;;
+  esac
+}
+
+runner_log_for_holder() {
+  "$CLI" --json model runners 2>/dev/null | python3 -c '
+import json
+import sys
+
+holder = sys.argv[1]
+try:
+    idx = json.load(sys.stdin) or {}
+except Exception:
+    sys.exit(1)
+for runner in idx.get("runners") or []:
+    if holder in (runner.get("holders") or []):
+        log_path = runner.get("log_path") or ""
+        if log_path:
+            print(log_path)
+            sys.exit(0)
+sys.exit(1)
+' "$1"
+}
+
+assert_runner_gpu_log() {
+  local holder="$1"
+  local log_path
+
+  if ! log_path="$(runner_log_for_holder "$holder")"; then
+    "$CLI" --json model runners >&2 || true
+    fail "GPU assertion enabled but no runner log path was found for holder $holder"
+  fi
+  if [ ! -r "$log_path" ]; then
+    fail "GPU assertion enabled but runner log is not readable: $log_path"
+  fi
+  if grep -Eiq "$GPU_PATTERN" "$log_path"; then
+    echo "PASS microagent-e2e-model: runner log contains GPU backend evidence"
+    return
+  fi
+  echo "microagent-e2e-model: runner log missing GPU evidence matching: $GPU_PATTERN" >&2
+  tail -n 80 "$log_path" >&2 || true
+  fail "GPU assertion enabled but host runner did not report GPU backend evidence"
+}
+
+configure_gpu_check
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -237,6 +321,9 @@ WS_OUT="$("$CLI" exec "$WS" -- sh -c "$WS_GUEST" 2>&1)"
 if ! printf '%s' "$WS_OUT" | grep -q 'WS_MODELS'; then
   echo "$WS_OUT" >&2
   fail "paired workspace could not reach the model over the vsock bridge"
+fi
+if [ "$GPU_CHECK" -eq 1 ]; then
+  assert_runner_gpu_log "$WS"
 fi
 
 if ! "$CLI" halt "$WS" "${CTRL_FLAGS[@]}" >/dev/null 2>&1; then
