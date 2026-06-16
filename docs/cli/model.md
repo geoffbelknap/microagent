@@ -233,6 +233,12 @@ MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE=1 \
   scripts/dev/microagent-e2e.sh model-mediation-runner-fake
 
+# CI-safe fake pressure preset with required gates.
+MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE_PRESET=ci \
+  scripts/dev/microagent-e2e.sh model-mediation-runner-fake
+
 # llama.cpp runner, default CPU execution.
 MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
   MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
@@ -242,6 +248,13 @@ MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
 MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE=1 \
   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=0 \
+  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
+  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
+
+# Bounded llama.cpp hardware pressure preset.
+MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE_PRESET=hardware \
   MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
   scripts/dev/microagent-e2e.sh model-mediation-llamacpp
 
@@ -259,6 +272,13 @@ MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
 # vLLM GPU pressure probe.
 MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
+  scripts/dev/microagent-e2e.sh model-mediation-vllm
+
+# Bounded vLLM hardware pressure preset.
+MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE_PRESET=hardware \
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
   scripts/dev/microagent-e2e.sh model-mediation-vllm
 ```
@@ -306,6 +326,17 @@ TSVs when you need endpoint- or audit-level detail. Pressure gates default to
 budgets before making them release-blocking. Common knobs are
 `*_PRESSURE_WORKSPACES`, `*_PRESSURE_CONCURRENCY`, `*_PRESSURE_CASES`,
 `*_PRESSURE_WARMUPS`, and `*_PRESSURE_GATE_MODE`.
+
+The adapters also accept `*_PRESSURE_PRESET=ci|hardware|baseline|default`.
+`ci` is intended for the fake runner: one workspace, concurrency `1`, one
+sample, no warmup, telemetry off, short token caps, and required gates
+(`models <= 100ms`, `chat <= 250ms`, `stream TTFB <= 100ms`,
+`decision <= 50ms`). `hardware` is intended for llama.cpp and vLLM collection:
+one workspace, concurrency `1,2`, one sample, no warmup, short token caps,
+telemetry auto, and warn gates (`models <= 100ms`, `chat <= 500ms`,
+`stream TTFB <= 250ms`, `decision <= 100ms`). `baseline` and `default` keep
+the previous adapter defaults. Explicit `*_PRESSURE_*` env vars always override
+preset values.
 
 Set `MICROAGENT_MODEL_MEDIATION=policy` to require a policy source for the
 host-worker mediator. The source can be either an external decision endpoint
