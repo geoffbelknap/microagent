@@ -4,7 +4,7 @@ description: Create a named workspace and walk its create, start, halt, connect,
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 By the end of this guide you have a named workspace whose disk and state
 survive between starts - the environment you set up today is still there
@@ -81,7 +81,8 @@ microagent connect research --send "uname -r"
 ## 3. Inspect it
 
 ```bash
-microagent list                # all workspaces
+microagent list                # saved workspaces; ls is an alias
+microagent ps                  # running workspaces
 microagent status research   # one workspace
 microagent logs research     # boot/serial output
 ```

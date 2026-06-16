@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-16_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -30,6 +30,14 @@ files:
 env:
   MICROAGENT_NAME: research
 model: unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+modelRunner:
+  backend: llamacpp
+  gpu: off
+  args: ["--no-ui"]
+modelMediation:
+  mode: policy
+  policyFile: ./model-policy.json
+  policyTimeout: 250ms
 resources:
   memoryMiB: 2048
   cpuCount: 2
@@ -94,6 +102,18 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `files[].mode` | Optional octal file mode string, such as `"0755"` |
 | `env` | Guest environment variables |
 | `model` | HuggingFace GGUF ref of a locally served model to pair the workspace with; every `start` re-pairs it, and a CLI `--model` flag overrides the field. See [`model`](/cli/model/) |
+| `modelRunner.backend` | Model runner backend: `llamacpp`, `vllm`, or `custom` |
+| `modelRunner.gpu` | Model runner GPU intent: `off`, `on`, or `auto` |
+| `modelRunner.backendModel` | Backend model id for runners such as vLLM |
+| `modelRunner.servedModel` | OpenAI-compatible served model name for runners such as vLLM |
+| `modelRunner.command` | Custom runner argv template; supports `{model}`, `{host}`, `{port}`, and `{addr}` |
+| `modelRunner.name` | Custom runner name recorded in runner state |
+| `modelRunner.healthPath` | Custom runner health probe path |
+| `modelRunner.args` | Extra runner argv entries |
+| `modelMediation.mode` | Model mediation mode: `off`, `local-allow`, or `policy` |
+| `modelMediation.policyFile` | Structured model mediation policy file path |
+| `modelMediation.policyURL` | External model mediation policy endpoint URL |
+| `modelMediation.policyTimeout` | Model mediation policy timeout, such as `250ms` or `2s` |
 | `resources.memoryMiB` | Memory override |
 | `resources.cpuCount` | CPU override |
 | `resources.sizeMiB` | Rootfs disk size override |

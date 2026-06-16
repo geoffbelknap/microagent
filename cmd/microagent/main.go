@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -22,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
@@ -48,6 +50,11 @@ var (
 	readConfirmation = defaultReadConfirmation
 )
 
+var (
+	ensureHostWorkerMediator  = hostworker.EnsureProcess
+	releaseHostWorkerMediator = hostworker.ReleaseProcess
+)
+
 const (
 	defaultWorkspaceImageArm64 = workspace.DefaultWorkspaceImageArm64
 	defaultWorkspaceImageAMD64 = workspace.DefaultWorkspaceImageAMD64
@@ -61,6 +68,13 @@ const (
 	consoleDetachPrefix        = byte(0x10) // Ctrl-P
 	consoleDetachSuffix        = byte(0x11) // Ctrl-Q
 	consoleShellExitedMarker   = "microagent-init: console shell exited; closing connect session"
+)
+
+const (
+	envModelMediation     = "MICROAGENT_MODEL_MEDIATION"
+	envModelPolicyURL     = "MICROAGENT_MODEL_POLICY_URL"
+	envModelPolicyFile    = "MICROAGENT_MODEL_POLICY_FILE"
+	envModelPolicyTimeout = "MICROAGENT_MODEL_POLICY_TIMEOUT"
 )
 
 func main() {
@@ -93,6 +107,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	ctx = contextWithOutputMode(ctx, currentOutputMode())
 	if len(args) > 0 && args[0] == "--windows-hyperv-listener" {
 		return runWindowsHyperVListener(ctx, args[1:])
+	}
+	if len(args) > 0 && args[0] == "--host-worker-mediator" {
+		return runHostWorkerMediator(ctx, args[1:], stdout)
 	}
 	if len(args) > 0 && args[0] == "help" {
 		if len(args) > 1 && args[1] == "all" {
@@ -167,8 +184,11 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "artifact" {
 		return runArtifact(ctx, args[1:], stdout)
 	}
-	if args[0] == "list" {
+	if args[0] == "list" || args[0] == "ls" {
 		return runList(args[1:], stdout)
+	}
+	if args[0] == "ps" {
+		return runPS(args[1:], stdout)
 	}
 	if args[0] == "logs" || args[0] == "log" {
 		return runLogs(ctx, args[1:], stdout)
@@ -258,6 +278,47 @@ func runWindowsHyperVListener(ctx context.Context, args []string) error {
 		return fmt.Errorf("usage: microagent --windows-hyperv-listener --state-dir <dir> --name <name>")
 	}
 	return windowshyperv.RunRuntimeListeners(ctx, windowshyperv.Options{StateDir: *stateDir, Name: *name})
+}
+
+func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) error {
+	fs := flag.NewFlagSet("host-worker-mediator", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var opts hostworker.Options
+	var mode string
+	var logPath string
+	fs.StringVar(&opts.TargetBaseURL, "target-base-url", "", "Target worker base URL")
+	fs.StringVar(&opts.BindHost, "bind-host", "127.0.0.1", "Bind host")
+	fs.IntVar(&opts.BindPort, "bind-port", 0, "Bind port")
+	fs.StringVar(&mode, "mode", string(hostworker.ModeLocalAllow), "Mediation mode")
+	fs.StringVar(&opts.PolicyURL, "policy-url", "", "Policy endpoint URL")
+	fs.StringVar(&opts.PolicyFile, "policy-file", "", "Policy JSON file path")
+	fs.DurationVar(&opts.PolicyTimeout, "policy-timeout", 2*time.Second, "Policy timeout")
+	fs.StringVar(&opts.WorkspaceID, "workspace-id", "", "Workspace ID")
+	fs.StringVar(&opts.Capability, "capability", hostworker.DefaultCapability, "Capability")
+	fs.StringVar(&opts.WorkerID, "worker-id", "", "Worker ID")
+	fs.DurationVar(&opts.UpstreamTimeout, "upstream-timeout", 180*time.Second, "Upstream timeout")
+	fs.StringVar(&logPath, "log-path", "", "JSONL audit log path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 || strings.TrimSpace(opts.TargetBaseURL) == "" {
+		return fmt.Errorf("usage: microagent --host-worker-mediator --target-base-url <url> [--bind-host <host>] [--bind-port <port>] [--mode local-allow|policy] [--policy-url <url>|--policy-file <path>] [--log-path <path>]")
+	}
+	opts.Mode = hostworker.Mode(mode)
+	opts.Ready = ready
+	var logger *hostworker.JSONLLogger
+	if strings.TrimSpace(logPath) != "" {
+		var err error
+		logger, err = hostworker.OpenJSONLLogger(logPath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = logger.Close() }()
+		opts.Logger = logger
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return hostworker.Run(ctx, opts)
 }
 
 type doctorOptions struct {
@@ -704,7 +765,7 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 			return nil, fmt.Errorf("pull model %s: %w", modelRefRaw, err)
 		}
 	}
-	binPath, err := modelrunner.ResolveLlamaServerPath()
+	engine, runnerConfig, err := resolveModelRunner(modelRunnerOverridesFromSpec(opts.ModelRunner))
 	if err != nil {
 		return nil, err
 	}
@@ -712,24 +773,382 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 		StateDir:     opts.StateDir,
 		ModelRef:     rec.ModelRef,
 		ModelPath:    rec.OutputPath,
-		Engine:       modelrunner.LlamaCPP{BinPath: binPath},
+		Engine:       engine,
 		Holder:       opts.Name,
 		ReadyTimeout: 120 * time.Second,
+		RunnerConfig: runnerConfig,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("start model runner: %w", err)
 	}
 	// Activate pairing on the workspace options.
 	opts.Model = rec.ModelRef
-	opts.ModelTarget = fmt.Sprintf("%s:%d", runner.Host, runner.Port)
+	runnerTarget := fmt.Sprintf("%s:%d", runner.Host, runner.Port)
+	modelTarget := runnerTarget
+	mediation, err := modelMediationConfigFromSpec(opts.ModelMediation)
+	if err != nil {
+		_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+		return nil, err
+	}
+	var mediator *hostworker.ProcessRecord
+	if mediation.Enabled {
+		execPath, err := os.Executable()
+		if err != nil {
+			_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+			return nil, fmt.Errorf("resolve microagent executable for model mediation: %w", err)
+		}
+		workerID := strings.TrimSpace(runner.Key)
+		if workerID == "" {
+			workerID = runnerTarget
+		}
+		mediated, err := ensureHostWorkerMediator(ctx, hostworker.ProcessOptions{
+			StateDir:        opts.StateDir,
+			WorkspaceID:     opts.Name,
+			Capability:      hostworker.DefaultCapability,
+			WorkerID:        workerID,
+			TargetBaseURL:   "http://" + runnerTarget + "/v1",
+			Mode:            mediation.Mode,
+			PolicyURL:       mediation.PolicyURL,
+			PolicyFile:      mediation.PolicyFile,
+			PolicyTimeout:   mediation.PolicyTimeout,
+			UpstreamTimeout: 180 * time.Second,
+			ExecPath:        execPath,
+		})
+		if err != nil {
+			_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+			return nil, fmt.Errorf("start model mediator: %w", err)
+		}
+		mediator = &mediated
+		modelTarget = fmt.Sprintf("%s:%d", mediated.Host, mediated.Port)
+	}
+	opts.ModelTarget = modelTarget
 	if opts.Env == nil {
 		opts.Env = map[string]string{}
 	}
 	modelURL := fmt.Sprintf("http://127.0.0.1:%d/v1", workspace.DefaultModelGuestPort)
 	opts.Env["MICROAGENT_MODEL_URL"] = modelURL
 	opts.Env["OPENAI_BASE_URL"] = modelURL
-	stateDir, modelRef, holder := opts.StateDir, rec.ModelRef, opts.Name
-	return func() { _ = modelrunner.Release(stateDir, modelRef, holder) }, nil
+	if err := appendModelWorkerAttachedEvent(*opts, runner, modelURL, mediator); err != nil {
+		if mediator != nil {
+			_ = releaseHostWorkerMediator(opts.StateDir, opts.Name, hostworker.DefaultCapability)
+		}
+		_ = modelrunner.Release(opts.StateDir, rec.ModelRef, opts.Name)
+		return nil, err
+	}
+	stateDir, modelRef, holder, backend := opts.StateDir, rec.ModelRef, opts.Name, opts.Backend
+	return func() {
+		if mediator != nil {
+			_ = releaseHostWorkerMediator(stateDir, holder, hostworker.DefaultCapability)
+		}
+		_ = modelrunner.Release(stateDir, modelRef, holder)
+		_ = appendModelWorkerReleasedEvent(stateDir, holder, backend, modelRef)
+	}, nil
+}
+
+func appendModelWorkerAttachedEvent(opts workspaceOptions, runner modelrunner.Record, modelURL string, mediator *hostworker.ProcessRecord) error {
+	fields := []string{
+		"model_ref=" + runner.ModelRef,
+		"engine=" + runner.Engine,
+		fmt.Sprintf("pid=%d", runner.PID),
+		"runner_config_digest=" + runner.RunnerConfigDigest,
+		"holder=" + opts.Name,
+		"model_url=" + modelURL,
+	}
+	if mediator == nil {
+		fields = append(fields, "mediation=direct")
+	} else {
+		fields = append(fields,
+			"mediation=host-worker",
+			"mediation_mode="+string(mediator.Mode),
+			fmt.Sprintf("mediator_pid=%d", mediator.PID),
+			fmt.Sprintf("mediator_port=%d", mediator.Port),
+			"mediator_audit_log="+mediator.AuditLogPath,
+		)
+	}
+	detail := modelWorkerEventDetail("attached", fields)
+	return appendModelWorkerEventIfWorkspaceExists(opts.StateDir, opts.Name, opts.Backend, vmkit.StateStarting, detail)
+}
+
+func appendModelWorkerReleasedEvent(stateDir, name, backend, modelRef string) error {
+	state := latestWorkspaceEventState(stateDir, name)
+	if state == vmkit.StateUnknown {
+		state = vmkit.StateHalted
+	}
+	detail := modelWorkerEventDetail("released", []string{
+		"model_ref=" + modelRef,
+		"holder=" + name,
+	})
+	return appendModelWorkerEventIfWorkspaceExists(stateDir, name, backend, state, detail)
+}
+
+func modelWorkerEventDetail(action string, fields []string) string {
+	parts := []string{"model_worker=" + action}
+	for _, field := range fields {
+		if strings.HasSuffix(field, "=") {
+			continue
+		}
+		parts = append(parts, field)
+	}
+	return strings.Join(parts, " ")
+}
+
+func appendModelWorkerEventIfWorkspaceExists(stateDir, name, backend string, state vmkit.VMState, detail string) error {
+	if strings.TrimSpace(stateDir) == "" || strings.TrimSpace(name) == "" {
+		return nil
+	}
+	workspaceDir := filepath.Join(stateDir, name)
+	if _, err := os.Stat(workspaceDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if strings.TrimSpace(backend) == "" {
+		backend = hostBackend()
+	}
+	event := workspaceEventFile{
+		Identity: vmkit.Identity{
+			RequestID: newRequestID(),
+			RuntimeID: name,
+			Role:      vmkit.RoleWorkload,
+			Backend:   backend,
+		},
+		State:      state,
+		Detail:     detail,
+		ObservedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	return appendWorkspaceEvent(filepath.Join(workspaceDir, "events.json"), event)
+}
+
+func latestWorkspaceEventState(stateDir, name string) vmkit.VMState {
+	events, err := workspace.ReadEvents(stateDir, name)
+	if err != nil || len(events) == 0 {
+		return vmkit.StateUnknown
+	}
+	return events[len(events)-1].State
+}
+
+type modelMediationConfig struct {
+	Enabled       bool
+	Mode          hostworker.Mode
+	PolicyURL     string
+	PolicyFile    string
+	PolicyTimeout time.Duration
+}
+
+func modelMediationConfigFromEnv() (modelMediationConfig, error) {
+	return modelMediationConfigFromSpec(workspace.ModelMediationSpec{})
+}
+
+func modelMediationConfigFromSpec(spec workspace.ModelMediationSpec) (modelMediationConfig, error) {
+	rawMode := strings.ToLower(strings.TrimSpace(firstNonEmpty(spec.Mode, os.Getenv(envModelMediation))))
+	policyURL := strings.TrimSpace(firstNonEmpty(spec.PolicyURL, os.Getenv(envModelPolicyURL)))
+	policyFile := strings.TrimSpace(firstNonEmpty(spec.PolicyFile, os.Getenv(envModelPolicyFile)))
+	if rawMode == "" && (policyURL != "" || policyFile != "") {
+		rawMode = "policy"
+	}
+	if rawMode == "" || rawMode == "off" || rawMode == "0" || rawMode == "false" || rawMode == "disabled" {
+		return modelMediationConfig{}, nil
+	}
+	cfg := modelMediationConfig{Enabled: true, PolicyTimeout: 2 * time.Second}
+	switch rawMode {
+	case "local", "local-allow", "allow":
+		cfg.Mode = hostworker.ModeLocalAllow
+	case "policy":
+		cfg.Mode = hostworker.ModePolicy
+	default:
+		return modelMediationConfig{}, fmt.Errorf("%s must be off, local-allow, or policy", envModelMediation)
+	}
+	timeout, err := durationValue(envModelPolicyTimeout, firstNonEmpty(spec.PolicyTimeout, os.Getenv(envModelPolicyTimeout)), cfg.PolicyTimeout)
+	if err != nil {
+		return modelMediationConfig{}, err
+	}
+	cfg.PolicyTimeout = timeout
+	cfg.PolicyURL = policyURL
+	cfg.PolicyFile = policyFile
+	if cfg.Mode != hostworker.ModePolicy && (cfg.PolicyURL != "" || cfg.PolicyFile != "") {
+		return modelMediationConfig{}, fmt.Errorf("model policy source requires model mediation policy mode")
+	}
+	if cfg.Mode == hostworker.ModePolicy {
+		switch {
+		case cfg.PolicyURL != "" && cfg.PolicyFile != "":
+			return modelMediationConfig{}, fmt.Errorf("%s and %s are mutually exclusive", envModelPolicyURL, envModelPolicyFile)
+		case cfg.PolicyURL == "" && cfg.PolicyFile == "":
+			return modelMediationConfig{}, fmt.Errorf("%s=policy requires %s or %s", envModelMediation, envModelPolicyURL, envModelPolicyFile)
+		}
+	}
+	return cfg, nil
+}
+
+func durationValue(name, raw string, fallback time.Duration) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback, nil
+	}
+	duration, err := time.ParseDuration(raw)
+	if err != nil {
+		seconds, parseErr := strconv.ParseFloat(raw, 64)
+		if parseErr != nil {
+			return 0, fmt.Errorf("%s must be a Go duration like 250ms or 2s, or a number of seconds", name)
+		}
+		duration = time.Duration(seconds * float64(time.Second))
+	}
+	if duration <= 0 {
+		return 0, fmt.Errorf("%s must be positive", name)
+	}
+	return duration, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mergeModelRunnerSpec(base, override workspace.ModelRunnerSpec) workspace.ModelRunnerSpec {
+	out := base
+	if strings.TrimSpace(override.Backend) != "" {
+		out.Backend = override.Backend
+	}
+	if strings.TrimSpace(override.GPU) != "" {
+		out.GPU = override.GPU
+	}
+	if strings.TrimSpace(override.BackendModel) != "" {
+		out.BackendModel = override.BackendModel
+	}
+	if strings.TrimSpace(override.ServedModel) != "" {
+		out.ServedModel = override.ServedModel
+	}
+	if len(override.Command) != 0 {
+		out.Command = append([]string{}, override.Command...)
+	}
+	if strings.TrimSpace(override.Name) != "" {
+		out.Name = override.Name
+	}
+	if strings.TrimSpace(override.HealthPath) != "" {
+		out.HealthPath = override.HealthPath
+	}
+	if len(override.Args) != 0 {
+		out.Args = append([]string{}, override.Args...)
+	}
+	if len(override.Env) != 0 {
+		out.Env = append([]string{}, override.Env...)
+	}
+	return out
+}
+
+func mergeModelMediationSpec(base, override workspace.ModelMediationSpec) workspace.ModelMediationSpec {
+	out := base
+	if strings.TrimSpace(override.Mode) != "" {
+		out.Mode = override.Mode
+	}
+	if strings.TrimSpace(override.PolicyURL) != "" {
+		out.PolicyURL = override.PolicyURL
+	}
+	if strings.TrimSpace(override.PolicyFile) != "" {
+		out.PolicyFile = override.PolicyFile
+	}
+	if strings.TrimSpace(override.PolicyTimeout) != "" {
+		out.PolicyTimeout = override.PolicyTimeout
+	}
+	return out
+}
+
+type modelRunnerOverrides struct {
+	Backend      string
+	GPU          string
+	BackendModel string
+	ServedModel  string
+	CommandRaw   string
+	Command      []string
+	Name         string
+	HealthPath   string
+	Args         []string
+	Env          []string
+}
+
+func modelRunnerOverridesFromSpec(spec workspace.ModelRunnerSpec) modelRunnerOverrides {
+	return modelRunnerOverrides{
+		Backend:      spec.Backend,
+		GPU:          spec.GPU,
+		BackendModel: spec.BackendModel,
+		ServedModel:  spec.ServedModel,
+		Command:      append([]string{}, spec.Command...),
+		Name:         spec.Name,
+		HealthPath:   spec.HealthPath,
+		Args:         append([]string{}, spec.Args...),
+		Env:          append([]string{}, spec.Env...),
+	}
+}
+
+func resolveModelRunner(overrides modelRunnerOverrides) (modelrunner.Engine, modelrunner.RunnerConfig, error) {
+	command, err := modelrunner.ParseRunnerCommand(os.Getenv(modelrunner.EnvModelRunnerCommand))
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerCommand, err)
+	}
+	args, err := modelrunner.ParseRunnerArgs(os.Getenv(modelrunner.EnvModelRunnerArgs))
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerArgs, err)
+	}
+	env, err := modelrunner.ParseRunnerEnv(os.Getenv(modelrunner.EnvModelRunnerEnv))
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, fmt.Errorf("%s: %w", modelrunner.EnvModelRunnerEnv, err)
+	}
+	config := modelrunner.RunnerConfig{
+		Backend:      os.Getenv(modelrunner.EnvModelRunnerBackend),
+		GPU:          os.Getenv(modelrunner.EnvModelRunnerGPU),
+		BackendModel: os.Getenv(modelrunner.EnvModelRunnerModel),
+		ServedModel:  os.Getenv(modelrunner.EnvModelRunnerServedModel),
+		Command:      command,
+		Name:         os.Getenv(modelrunner.EnvModelRunnerName),
+		HealthPath:   os.Getenv(modelrunner.EnvModelRunnerHealthPath),
+		Args:         args,
+		Env:          env,
+	}
+	if strings.TrimSpace(overrides.Backend) != "" {
+		config.Backend = overrides.Backend
+		if strings.ToLower(strings.TrimSpace(overrides.Backend)) != modelrunner.BackendCustom && strings.TrimSpace(overrides.CommandRaw) == "" && len(overrides.Command) == 0 {
+			config.Command = nil
+			config.Name = ""
+			config.HealthPath = ""
+		}
+	}
+	if strings.TrimSpace(overrides.GPU) != "" {
+		config.GPU = overrides.GPU
+	}
+	if strings.TrimSpace(overrides.BackendModel) != "" {
+		config.BackendModel = overrides.BackendModel
+	}
+	if strings.TrimSpace(overrides.ServedModel) != "" {
+		config.ServedModel = overrides.ServedModel
+	}
+	if strings.TrimSpace(overrides.CommandRaw) != "" {
+		command, err := modelrunner.ParseRunnerCommand(overrides.CommandRaw)
+		if err != nil {
+			return nil, modelrunner.RunnerConfig{}, fmt.Errorf("runner command: %w", err)
+		}
+		config.Command = command
+	} else if len(overrides.Command) != 0 {
+		config.Command = append([]string{}, overrides.Command...)
+	}
+	if strings.TrimSpace(overrides.Name) != "" {
+		config.Name = overrides.Name
+	}
+	if strings.TrimSpace(overrides.HealthPath) != "" {
+		config.HealthPath = overrides.HealthPath
+	}
+	config, err = config.WithAdditional(overrides.Args, overrides.Env)
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, err
+	}
+	engine, err := modelrunner.ResolveEngine(config)
+	if err != nil {
+		return nil, modelrunner.RunnerConfig{}, err
+	}
+	return engine, config, nil
 }
 
 // pendingModelRelease captures the workspace's paired model ref now (delete
@@ -737,16 +1156,24 @@ func ensureModelPairing(ctx context.Context, opts *workspaceOptions, modelRefRaw
 // lifecycle verb has succeeded. Best-effort throughout: a missing manifest or
 // runner makes the func a no-op, and a stale holder is reclaimed by the next
 // verb.
-func pendingModelRelease(stateDir, name string) func() {
+func pendingModelRelease(stateDir, name, backend string) func() {
 	manifest, err := workspace.ReadManifest(stateDir, name)
 	if err != nil {
-		return func() {}
+		return func() {
+			_ = releaseHostWorkerMediator(stateDir, name, hostworker.DefaultCapability)
+		}
 	}
 	modelRef := strings.TrimSpace(manifest.Model)
 	if modelRef == "" {
-		return func() {}
+		return func() {
+			_ = releaseHostWorkerMediator(stateDir, name, hostworker.DefaultCapability)
+		}
 	}
-	return func() { _ = modelrunner.Release(stateDir, modelRef, name) }
+	return func() {
+		_ = releaseHostWorkerMediator(stateDir, name, hostworker.DefaultCapability)
+		_ = modelrunner.Release(stateDir, modelRef, name)
+		_ = appendModelWorkerReleasedEvent(stateDir, name, backend, modelRef)
+	}
 }
 
 func runList(args []string, stdout *os.File) error {
@@ -765,6 +1192,35 @@ func runList(args []string, stdout *os.File) error {
 		return err
 	}
 	return writeWorkspaceList(stdout, entries)
+}
+
+func runPS(args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected ps argument: %s", fs.Arg(0))
+	}
+	entries, err := workspace.List(opts.StateDir)
+	if err != nil {
+		return err
+	}
+	return writeWorkspaceList(stdout, filterRunningWorkspaces(entries))
+}
+
+func filterRunningWorkspaces(entries []workspaceListEntry) []workspaceListEntry {
+	filtered := entries[:0]
+	for _, entry := range entries {
+		switch vmkit.VMState(entry.State) {
+		case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused, vmkit.StateQuarantined, vmkit.StateStopping:
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func runClone(args []string, stdout *os.File) error {
@@ -1887,7 +2343,7 @@ network.mode=named.
 
 func runModel(args []string, stdout *os.File) error {
 	if wantsHelp(args) {
-		fmt.Fprintln(stdout, "usage: microagent model <pull|list|delete|prune|serve|stop|runners> ...")
+		fmt.Fprintln(stdout, "usage: microagent model <pull|list|delete|prune|serve|stop|runners|policy> ...")
 		return nil
 	}
 	if len(args) > 0 {
@@ -1906,9 +2362,196 @@ func runModel(args []string, stdout *os.File) error {
 			return runModelStop(args[1:], stdout)
 		case "runners":
 			return runModelRunners(args[1:], stdout)
+		case "policy":
+			return runModelPolicy(args[1:], stdout)
 		}
 	}
-	return fmt.Errorf("usage: microagent model <pull|list|delete|prune|serve|stop|runners> [args]")
+	return fmt.Errorf("usage: microagent model <pull|list|delete|prune|serve|stop|runners|policy> [args]")
+}
+
+func runModelPolicy(args []string, stdout *os.File) error {
+	if wantsHelp(args) || len(args) == 0 {
+		printModelPolicyHelp(stdout)
+		return nil
+	}
+	switch args[0] {
+	case "validate":
+		return runModelPolicyValidate(args[1:], stdout)
+	case "evaluate", "eval":
+		return runModelPolicyEvaluate(args[1:], stdout)
+	default:
+		return fmt.Errorf("usage: microagent model policy <validate|evaluate> args")
+	}
+}
+
+type modelPolicyValidationOutput struct {
+	OK            bool   `json:"ok"`
+	Path          string `json:"path"`
+	SHA256        string `json:"sha256"`
+	SchemaVersion string `json:"schema_version"`
+	Default       string `json:"default"`
+	Rules         int    `json:"rules"`
+}
+
+type modelPolicyEvaluationOutput struct {
+	OK            bool   `json:"ok"`
+	Path          string `json:"path"`
+	SHA256        string `json:"sha256"`
+	Decision      string `json:"decision"`
+	Reason        string `json:"reason"`
+	RuleID        string `json:"rule_id,omitempty"`
+	AuditEventID  string `json:"audit_event_id,omitempty"`
+	Expected      string `json:"expected,omitempty"`
+	MatchedExpect bool   `json:"matched_expect,omitempty"`
+}
+
+func runModelPolicyValidate(args []string, stdout *os.File) error {
+	fs := flag.NewFlagSet("model policy validate", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model policy validate <policy.json>")
+	}
+	policy, source, err := hostworker.LoadFilePolicy(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	out := modelPolicyValidationOutput{
+		OK:            true,
+		Path:          source.Path,
+		SHA256:        source.SHA256,
+		SchemaVersion: policy.SchemaVersion,
+		Default:       policy.Default,
+		Rules:         len(policy.Rules),
+	}
+	if outputJSON(stdout) {
+		return writeJSON(stdout, out)
+	}
+	fmt.Fprintf(stdout, "Policy valid: %s (%d rule(s), sha256 %s)\n", out.Path, out.Rules, out.SHA256)
+	return nil
+}
+
+func runModelPolicyEvaluate(args []string, stdout *os.File) error {
+	maxTokensSet := hasFlagValue(args, "max-tokens")
+	streamSet := hasFlagValue(args, "stream")
+	fs := flag.NewFlagSet("model policy evaluate", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	method := fs.String("method", http.MethodGet, "Request method")
+	requestPath := fs.String("path", "/v1/models", "Request path as seen by the mediator")
+	workspaceID := fs.String("workspace-id", "", "Workspace ID")
+	capability := fs.String("capability", hostworker.DefaultCapability, "Capability")
+	workerID := fs.String("worker-id", "policy-evaluate", "Worker ID")
+	modelName := fs.String("model", "", "Declared request model")
+	requestBytes := fs.Int64("request-bytes", 0, "Request body size in bytes")
+	textBytes := fs.Int64("text-bytes", 0, "Aggregate prompt/message text byte count")
+	messages := fs.Int("messages", 0, "Message count")
+	maxTokens := fs.Int("max-tokens", 0, "Declared max_tokens value")
+	streamRaw := fs.String("stream", "", "Declared stream mode: true or false")
+	expect := fs.String("expect", "", "Expected decision: allow or deny")
+	var tools multiFlag
+	fs.Var(&tools, "tool", "Declared tool/function name (repeatable)")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent model policy evaluate <policy.json> [--method <method>] [--path <path>] [--model <model>] [--max-tokens <n>] [--stream true|false] [--tool <name>] [--expect allow|deny]")
+	}
+	policy, source, err := hostworker.LoadFilePolicy(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	body := &hostworker.DecisionRequestBody{
+		Model:        strings.TrimSpace(*modelName),
+		MessageCount: *messages,
+		TextBytes:    *textBytes,
+		ToolNames:    append([]string{}, tools...),
+	}
+	if streamSet {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(*streamRaw))
+		if err != nil {
+			return fmt.Errorf("--stream must be true or false")
+		}
+		body.Stream = &parsed
+	}
+	if maxTokensSet {
+		value := *maxTokens
+		body.MaxTokens = &value
+	}
+	envelope := hostworker.DecisionEnvelope{
+		SchemaVersion: 1,
+		RequestID:     "policy-evaluate",
+		Workspace:     hostworker.DecisionWorkspace{ID: strings.TrimSpace(*workspaceID)},
+		Capability:    strings.TrimSpace(*capability),
+		Worker: hostworker.DecisionWorker{
+			ID:       strings.TrimSpace(*workerID),
+			Protocol: "openai-compatible",
+		},
+		Request: hostworker.DecisionRequest{
+			Method: strings.ToUpper(strings.TrimSpace(*method)),
+			Path:   strings.TrimSpace(*requestPath),
+			Bytes:  *requestBytes,
+			Body:   body,
+		},
+	}
+	decision := policy.Decide(envelope, source, "policy-evaluate")
+	expected := strings.ToLower(strings.TrimSpace(*expect))
+	if expected != "" && expected != "allow" && expected != "deny" {
+		return fmt.Errorf("--expect must be allow or deny")
+	}
+	out := modelPolicyEvaluationOutput{
+		OK:            true,
+		Path:          source.Path,
+		SHA256:        source.SHA256,
+		Decision:      decision.Decision,
+		Reason:        decision.Reason,
+		RuleID:        decision.PolicyRuleID,
+		AuditEventID:  decision.AuditEventID,
+		Expected:      expected,
+		MatchedExpect: expected == "" || expected == decision.Decision,
+	}
+	if outputJSON(stdout) {
+		if err := writeJSON(stdout, out); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintf(stdout, "%s\t%s", out.Decision, out.Reason)
+		if out.RuleID != "" {
+			fmt.Fprintf(stdout, "\t%s", out.RuleID)
+		}
+		fmt.Fprintln(stdout)
+	}
+	if !out.MatchedExpect {
+		return fmt.Errorf("policy decision %s did not match expected %s", out.Decision, expected)
+	}
+	return nil
+}
+
+func printModelPolicyHelp(stdout io.Writer) {
+	fmt.Fprint(stdout, `microagent model policy
+
+Validate or dry-run experimental model mediation policy files.
+
+Usage:
+  microagent model policy validate <policy.json>
+  microagent model policy evaluate <policy.json> [options]
+
+Evaluate options:
+  --method <method>       Request method (default GET)
+  --path <path>           Request path as seen by the mediator (default /v1/models)
+  --workspace-id <id>     Workspace ID
+  --capability <name>     Capability (default model.openai)
+  --worker-id <id>        Worker ID
+  --model <model>         Declared request model
+  --request-bytes <n>     Request body byte count
+  --text-bytes <n>        Aggregate prompt/message text byte count
+  --messages <n>          Message count
+  --max-tokens <n>        Declared max_tokens value
+  --stream true|false     Declared stream mode
+  --tool <name>           Declared tool/function name (repeatable)
+  --expect allow|deny     Fail if the evaluated decision differs
+`)
 }
 
 func runModelPull(args []string, stdout *os.File) error {
@@ -2008,12 +2651,23 @@ func runModelServe(args []string, stdout *os.File) error {
 	fs.SetOutput(os.Stderr)
 	dedicated := fs.Bool("dedicated", false, "Start a dedicated runner instead of sharing one")
 	token := fs.String("token", "", "HuggingFace token for auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
+	runnerBackend := fs.String("runner", "", "Model runner backend: llamacpp, vllm, or custom")
+	runnerGPU := fs.String("runner-gpu", "", "Model runner GPU intent: off, on, or auto")
+	runnerModel := fs.String("runner-model", "", "Backend model id for runners such as vLLM")
+	runnerServedModel := fs.String("runner-served-model", "", "OpenAI-compatible served model name for runners such as vLLM")
+	runnerCommand := fs.String("runner-command", "", "Host model runner command template")
+	runnerName := fs.String("runner-name", "", "Host model runner name for state output")
+	runnerHealthPath := fs.String("runner-health-path", "", "Host model runner health probe path")
+	var runnerArgs multiFlag
+	var runnerEnv multiFlag
+	fs.Var(&runnerArgs, "runner-arg", "Extra model runner argument (repeatable)")
+	fs.Var(&runnerEnv, "runner-env", "Extra model runner environment KEY=VALUE (repeatable)")
 	fs.StringVar(&stateDir, "state-dir", stateDir, "State directory")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: microagent model serve <hf-ref> [--dedicated] [--token <t>] [--state-dir <dir>]")
+		return fmt.Errorf("usage: microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>] [--runner-gpu <off|on|auto>] [--runner-model <id>] [--runner-served-model <name>] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]")
 	}
 	ref := fs.Arg(0)
 	canonical, _, err := model.Resolve(ref)
@@ -2028,17 +2682,28 @@ func runModelServe(args []string, stdout *os.File) error {
 			return err
 		}
 	}
-	binPath, err := modelrunner.ResolveLlamaServerPath()
+	engine, runnerConfig, err := resolveModelRunner(modelRunnerOverrides{
+		Backend:      *runnerBackend,
+		GPU:          *runnerGPU,
+		BackendModel: *runnerModel,
+		ServedModel:  *runnerServedModel,
+		CommandRaw:   *runnerCommand,
+		Name:         *runnerName,
+		HealthPath:   *runnerHealthPath,
+		Args:         runnerArgs,
+		Env:          runnerEnv,
+	})
 	if err != nil {
 		return err
 	}
 	runner, err := modelrunner.Ensure(context.Background(), modelrunner.EnsureOptions{
-		StateDir:  stateDir,
-		ModelRef:  rec.ModelRef,
-		ModelPath: rec.OutputPath,
-		Engine:    modelrunner.LlamaCPP{BinPath: binPath},
-		Pinned:    true,
-		Dedicated: *dedicated,
+		StateDir:     stateDir,
+		ModelRef:     rec.ModelRef,
+		ModelPath:    rec.OutputPath,
+		Engine:       engine,
+		Pinned:       true,
+		Dedicated:    *dedicated,
+		RunnerConfig: runnerConfig,
 	})
 	if err != nil {
 		return err
@@ -2054,12 +2719,21 @@ func printModelServeHelp(stdout io.Writer) {
 	fmt.Fprint(stdout, `microagent model serve <hf-ref>
 microagent model serve <hf-ref>
 
-Start or reuse a pinned host llama-server process for a HuggingFace GGUF model.
+Start or reuse a pinned host model runner process for a HuggingFace GGUF model.
 
 Options:
-  --dedicated          Start a dedicated runner instead of sharing one
-  --token <t>          HuggingFace token for auto-pull
-  --state-dir <dir>    State directory
+  --dedicated                    Start a dedicated runner instead of sharing one
+  --runner <backend>             Model runner backend: llamacpp, vllm, or custom
+  --runner-gpu <mode>            Model runner GPU intent: off, on, or auto
+  --runner-model <id>            Backend model id for runners such as vLLM
+  --runner-served-model <name>   OpenAI-compatible served model name
+  --runner-command <template>    Host model runner command template
+  --runner-name <name>           Host model runner name for state output
+  --runner-health-path <path>    Host model runner health probe path
+  --runner-arg <arg>             Extra model runner argument (repeatable)
+  --runner-env KEY=VALUE         Extra model runner environment override (repeatable)
+  --token <t>                    HuggingFace token for auto-pull
+  --state-dir <dir>              State directory
 `)
 }
 
@@ -2352,7 +3026,7 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 	var releaseModel func()
 	switch command {
 	case "halt", "stop", "kill", "delete":
-		releaseModel = pendingModelRelease(opts.StateDir, name)
+		releaseModel = pendingModelRelease(opts.StateDir, name, backend)
 	default:
 		releaseModel = func() {}
 	}
@@ -2662,6 +3336,24 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
+	var startModelRunner workspace.ModelRunnerSpec
+	var startModelMediation workspace.ModelMediationSpec
+	modelRunnerCommand := ""
+	var modelRunnerArgs multiFlag
+	var modelRunnerEnv multiFlag
+	fs.StringVar(&startModelRunner.Backend, "model-runner", "", "Model runner backend override: llamacpp, vllm, or custom")
+	fs.StringVar(&startModelRunner.GPU, "model-gpu", "", "Model runner GPU intent override: off, on, or auto")
+	fs.StringVar(&startModelRunner.BackendModel, "model-runner-model", "", "Backend model id override for runners such as vLLM")
+	fs.StringVar(&startModelRunner.ServedModel, "model-runner-served-model", "", "OpenAI-compatible served model name override for runners such as vLLM")
+	fs.StringVar(&modelRunnerCommand, "model-runner-command", "", "Custom host model runner command template override")
+	fs.StringVar(&startModelRunner.Name, "model-runner-name", "", "Custom host model runner name override")
+	fs.StringVar(&startModelRunner.HealthPath, "model-runner-health-path", "", "Custom host model runner health probe path override")
+	fs.Var(&modelRunnerArgs, "model-runner-arg", "Extra model runner argument override (repeatable)")
+	fs.Var(&modelRunnerEnv, "model-runner-env", "Extra model runner environment KEY=VALUE for this invocation (repeatable; not persisted)")
+	fs.StringVar(&startModelMediation.Mode, "model-mediation", "", "Model mediation mode override: off, local-allow, or policy")
+	fs.StringVar(&startModelMediation.PolicyURL, "model-policy-url", "", "Model mediation external policy endpoint URL override")
+	fs.StringVar(&startModelMediation.PolicyFile, "model-policy-file", "", "Model mediation policy JSON file path override")
+	fs.StringVar(&startModelMediation.PolicyTimeout, "model-policy-timeout", "", "Model mediation policy timeout override")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -2676,6 +3368,15 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		return fmt.Errorf("usage: microagent start <name> [--state-dir <dir>]")
 	}
 	opts.Name = fs.Arg(0)
+	if strings.TrimSpace(modelRunnerCommand) != "" {
+		command, err := modelrunner.ParseRunnerCommand(modelRunnerCommand)
+		if err != nil {
+			return fmt.Errorf("model runner command: %w", err)
+		}
+		startModelRunner.Command = command
+	}
+	startModelRunner.Args = append([]string{}, modelRunnerArgs...)
+	startModelRunner.Env = append([]string{}, modelRunnerEnv...)
 	opts.KernelExplicit = kernelExplicit
 	opts.ProfileExplicit = profileExplicit
 	opts.SpecMemory = memoryExplicit
@@ -2693,12 +3394,24 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	// ignored: the holder is dropped by the next lifecycle verb
 	// (halt/stop/kill/delete). A manifest read error is tolerated;
 	// workspace.Start surfaces it properly.
-	if manifest, err := workspace.ReadManifest(opts.StateDir, opts.Name); err == nil && strings.TrimSpace(manifest.Model) != "" {
-		release, err := ensureModelPairing(ctx, &opts, manifest.Model, "")
-		if err != nil {
-			return err
+	if manifest, err := workspace.ReadManifest(opts.StateDir, opts.Name); err == nil {
+		var manifestRunner workspace.ModelRunnerSpec
+		if manifest.ModelRunner != nil {
+			manifestRunner = *manifest.ModelRunner
 		}
-		_ = release
+		var manifestMediation workspace.ModelMediationSpec
+		if manifest.ModelMediation != nil {
+			manifestMediation = *manifest.ModelMediation
+		}
+		opts.ModelRunner = mergeModelRunnerSpec(manifestRunner, startModelRunner)
+		opts.ModelMediation = mergeModelMediationSpec(manifestMediation, startModelMediation)
+		if strings.TrimSpace(manifest.Model) != "" {
+			release, err := ensureModelPairing(ctx, &opts, manifest.Model, "")
+			if err != nil {
+				return err
+			}
+			_ = release
+		}
 	}
 	result, err := workspace.Start(ctx, opts)
 	if err != nil && result.Workspace == "" {
@@ -2948,7 +3661,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil && result.Workspace == "" {
 		return err
 	}
-	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
+	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
 		return encodeErr
 	}
 	return err
@@ -3099,6 +3812,22 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var absorbedModelToken string
 	fs.StringVar(&opts.Model, "model", opts.Model, "Pair this workspace with a locally-served model (HuggingFace GGUF ref); injects MICROAGENT_MODEL_URL/OPENAI_BASE_URL")
 	fs.StringVar(&absorbedModelToken, "model-token", "", "HuggingFace token for model auto-pull (else HF_TOKEN/HUGGING_FACE_HUB_TOKEN)")
+	modelRunnerCommand := ""
+	modelRunnerArgs := multiFlag(append([]string{}, opts.ModelRunner.Args...))
+	var modelRunnerEnv multiFlag
+	fs.StringVar(&opts.ModelRunner.Backend, "model-runner", opts.ModelRunner.Backend, "Model runner backend: llamacpp, vllm, or custom")
+	fs.StringVar(&opts.ModelRunner.GPU, "model-gpu", opts.ModelRunner.GPU, "Model runner GPU intent: off, on, or auto")
+	fs.StringVar(&opts.ModelRunner.BackendModel, "model-runner-model", opts.ModelRunner.BackendModel, "Backend model id for runners such as vLLM")
+	fs.StringVar(&opts.ModelRunner.ServedModel, "model-runner-served-model", opts.ModelRunner.ServedModel, "OpenAI-compatible served model name for runners such as vLLM")
+	fs.StringVar(&modelRunnerCommand, "model-runner-command", "", "Custom host model runner command template")
+	fs.StringVar(&opts.ModelRunner.Name, "model-runner-name", opts.ModelRunner.Name, "Custom host model runner name for state output")
+	fs.StringVar(&opts.ModelRunner.HealthPath, "model-runner-health-path", opts.ModelRunner.HealthPath, "Custom host model runner health probe path")
+	fs.Var(&modelRunnerArgs, "model-runner-arg", "Extra model runner argument (repeatable)")
+	fs.Var(&modelRunnerEnv, "model-runner-env", "Extra model runner environment KEY=VALUE for this invocation (repeatable; not persisted)")
+	fs.StringVar(&opts.ModelMediation.Mode, "model-mediation", opts.ModelMediation.Mode, "Model mediation mode: off, local-allow, or policy")
+	fs.StringVar(&opts.ModelMediation.PolicyURL, "model-policy-url", opts.ModelMediation.PolicyURL, "Model mediation external policy endpoint URL")
+	fs.StringVar(&opts.ModelMediation.PolicyFile, "model-policy-file", opts.ModelMediation.PolicyFile, "Model mediation policy JSON file path")
+	fs.StringVar(&opts.ModelMediation.PolicyTimeout, "model-policy-timeout", opts.ModelMediation.PolicyTimeout, "Model mediation policy timeout")
 	if err := rejectUnsupportedContainerCompatibilityFlags(args); err != nil {
 		return workspaceOptions{}, err
 	}
@@ -3116,6 +3845,15 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 			return workspaceOptions{}, fmt.Errorf("unexpected %s argument: %s", command, fs.Arg(0))
 		}
 	}
+	if strings.TrimSpace(modelRunnerCommand) != "" {
+		command, err := modelrunner.ParseRunnerCommand(modelRunnerCommand)
+		if err != nil {
+			return workspaceOptions{}, fmt.Errorf("model runner command: %w", err)
+		}
+		opts.ModelRunner.Command = command
+	}
+	opts.ModelRunner.Args = append([]string{}, modelRunnerArgs...)
+	opts.ModelRunner.Env = append([]string{}, modelRunnerEnv...)
 	opts.SetupCommands = append([]string{}, setupCommands...)
 	setupFileCommands, err := setupCommandsFromFiles(setupFiles, ".")
 	if err != nil {
@@ -3545,17 +4283,45 @@ func writeWorkspaceManifest(opts workspaceOptions) error {
 		return err
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), workspaceManifest{
-		Name:         opts.Name,
-		Profile:      opts.Profile,
-		Restart:      normalizeRestartPolicy(opts.RestartPolicy),
-		Resources:    workspaceResources(opts),
-		Network:      networkSpecFromConfig(opts.Network),
-		Service:      strings.TrimSpace(opts.ServiceCommand),
-		Mediation:    opts.Mediation,
-		Disks:        opts.Disks,
-		Artifacts:    workspaceArtifactsFromOptions(opts),
-		Verification: opts.Verification,
+		Name:           opts.Name,
+		Profile:        opts.Profile,
+		Restart:        normalizeRestartPolicy(opts.RestartPolicy),
+		Resources:      workspaceResources(opts),
+		Network:        networkSpecFromConfig(opts.Network),
+		Service:        strings.TrimSpace(opts.ServiceCommand),
+		Model:          strings.TrimSpace(opts.Model),
+		ModelRunner:    workspaceModelRunnerManifest(opts.ModelRunner),
+		ModelMediation: workspaceModelMediationManifest(opts.ModelMediation),
+		Mediation:      opts.Mediation,
+		Disks:          opts.Disks,
+		Artifacts:      workspaceArtifactsFromOptions(opts),
+		Verification:   opts.Verification,
 	})
+}
+
+func workspaceModelRunnerManifest(spec workspace.ModelRunnerSpec) *workspace.ModelRunnerSpec {
+	if strings.TrimSpace(spec.Backend) == "" &&
+		strings.TrimSpace(spec.GPU) == "" &&
+		strings.TrimSpace(spec.BackendModel) == "" &&
+		strings.TrimSpace(spec.ServedModel) == "" &&
+		len(spec.Command) == 0 &&
+		strings.TrimSpace(spec.Name) == "" &&
+		strings.TrimSpace(spec.HealthPath) == "" &&
+		len(spec.Args) == 0 {
+		return nil
+	}
+	spec.Env = nil
+	return &spec
+}
+
+func workspaceModelMediationManifest(spec workspace.ModelMediationSpec) *workspace.ModelMediationSpec {
+	if strings.TrimSpace(spec.Mode) == "" &&
+		strings.TrimSpace(spec.PolicyURL) == "" &&
+		strings.TrimSpace(spec.PolicyFile) == "" &&
+		strings.TrimSpace(spec.PolicyTimeout) == "" {
+		return nil
+	}
+	return &spec
 }
 
 func readWorkspaceManifest(stateDir, name string) (workspaceManifest, error) {
@@ -4264,17 +5030,22 @@ func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 
 type workspaceResultOptions struct {
 	SuppressSuccessfulResult bool
+	CreatedSummary           bool
 }
 
 func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, opts workspaceResultOptions) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, result)
 	}
-	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	if opts.CreatedSummary {
+		fmt.Fprintf(stdout, "Created workspace: %s\n", result.Workspace)
+	} else {
+		fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	}
 	if result.Response.Event != nil {
-		fmt.Fprintf(stdout, "State: %s\n", result.Response.Event.State)
+		fmt.Fprintf(stdout, "State: %s\n", humanWorkspaceState(result.Response.Event.State, opts))
 	} else if result.FinalState != "" {
-		fmt.Fprintf(stdout, "State: %s\n", result.FinalState)
+		fmt.Fprintf(stdout, "State: %s\n", humanWorkspaceState(vmkit.VMState(result.FinalState), opts))
 	}
 	if result.RootfsPath != "" {
 		fmt.Fprintf(stdout, "Rootfs: %s\n", result.RootfsPath)
@@ -4334,7 +5105,15 @@ func writeWorkspaceResultWithOptions(stdout *os.File, result workspaceResult, op
 func writeCreateResult(stdout *os.File, result workspaceResult, err error) error {
 	return writeWorkspaceResultWithOptions(stdout, result, workspaceResultOptions{
 		SuppressSuccessfulResult: err == nil,
+		CreatedSummary:           err == nil,
 	})
+}
+
+func humanWorkspaceState(state vmkit.VMState, opts workspaceResultOptions) string {
+	if opts.CreatedSummary && state == vmkit.StateStopped {
+		return "ready (stopped)"
+	}
+	return string(state)
 }
 
 func writeApplyResult(stdout *os.File, result applyResult) error {
@@ -5738,70 +6517,103 @@ func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identi
 
 func reorderFlagArgs(args []string) []string {
 	valueFlags := map[string]bool{
-		"-supervisor":        true,
-		"-json":              true,
-		"-id":                true,
-		"-name":              true,
-		"-image":             true,
-		"-exec":              true,
-		"-setup-file":        true,
-		"-service-command":   true,
-		"-entrypoint":        true,
-		"-shell":             true,
-		"-hostname":          true,
-		"-file":              true,
-		"-env":               true,
-		"-setup":             true,
-		"-request-id":        true,
-		"-role":              true,
-		"-backend":           true,
-		"-kernel":            true,
-		"-rootfs":            true,
-		"-disk":              true,
-		"-bundle":            true,
-		"-volume":            true,
-		"-v":                 true,
-		"-output":            true,
-		"-debugfs":           true,
-		"-profile":           true,
-		"-restart":           true,
-		"-network":           true,
-		"-network-interface": true,
-		"-network-name":      true,
-		"-mediation":         true,
-		"-publish":           true,
-		"-p":                 true,
-		"-state-dir":         true,
-		"-tag":               true,
-		"-provider":          true,
-		"-dir":               true,
-		"-subnet":            true,
-		"-from-snapshot":     true,
-		"-url":               true,
-		"-from":              true,
-		"-sha256":            true,
-		"-out":               true,
-		"-path":              true,
-		"-memory":            true,
-		"-cpus":              true,
-		"-vsock":             true,
-		"-mke2fs":            true,
-		"-guest-init":        true,
-		"-arch":              true,
-		"-size-mib":          true,
-		"-timeout":           true,
-		"-ready-timeout":     true,
-		"-duration":          true,
-		"-interval":          true,
-		"-max-restarts":      true,
-		"-result-port":       true,
-		"-send":              true,
-		"-e":                 true,
-		"-model":             true,
-		"-model-token":       true,
-		"-secret":            true,
-		"-secrets-env-file":  true,
-		"-secret-on-demand":  true,
+		"-supervisor":                true,
+		"-json":                      true,
+		"-id":                        true,
+		"-name":                      true,
+		"-image":                     true,
+		"-exec":                      true,
+		"-setup-file":                true,
+		"-service-command":           true,
+		"-entrypoint":                true,
+		"-shell":                     true,
+		"-hostname":                  true,
+		"-file":                      true,
+		"-env":                       true,
+		"-setup":                     true,
+		"-request-id":                true,
+		"-role":                      true,
+		"-backend":                   true,
+		"-kernel":                    true,
+		"-rootfs":                    true,
+		"-disk":                      true,
+		"-bundle":                    true,
+		"-volume":                    true,
+		"-v":                         true,
+		"-output":                    true,
+		"-debugfs":                   true,
+		"-profile":                   true,
+		"-restart":                   true,
+		"-network":                   true,
+		"-network-interface":         true,
+		"-network-name":              true,
+		"-mediation":                 true,
+		"-publish":                   true,
+		"-p":                         true,
+		"-state-dir":                 true,
+		"-tag":                       true,
+		"-provider":                  true,
+		"-dir":                       true,
+		"-subnet":                    true,
+		"-from-snapshot":             true,
+		"-url":                       true,
+		"-from":                      true,
+		"-sha256":                    true,
+		"-out":                       true,
+		"-path":                      true,
+		"-memory":                    true,
+		"-cpus":                      true,
+		"-vsock":                     true,
+		"-mke2fs":                    true,
+		"-guest-init":                true,
+		"-arch":                      true,
+		"-size-mib":                  true,
+		"-timeout":                   true,
+		"-ready-timeout":             true,
+		"-duration":                  true,
+		"-interval":                  true,
+		"-max-restarts":              true,
+		"-result-port":               true,
+		"-send":                      true,
+		"-e":                         true,
+		"-model":                     true,
+		"-model-token":               true,
+		"-model-runner":              true,
+		"-model-gpu":                 true,
+		"-model-runner-model":        true,
+		"-model-runner-served-model": true,
+		"-model-runner-command":      true,
+		"-model-runner-name":         true,
+		"-model-runner-health-path":  true,
+		"-model-runner-arg":          true,
+		"-model-runner-env":          true,
+		"-model-mediation":           true,
+		"-model-policy-url":          true,
+		"-model-policy-file":         true,
+		"-model-policy-timeout":      true,
+		"-runner":                    true,
+		"-runner-gpu":                true,
+		"-runner-model":              true,
+		"-runner-served-model":       true,
+		"-runner-command":            true,
+		"-runner-name":               true,
+		"-runner-health-path":        true,
+		"-runner-arg":                true,
+		"-runner-env":                true,
+		"-method":                    true,
+		"-workspace-id":              true,
+		"-capability":                true,
+		"-worker-id":                 true,
+		"-request-bytes":             true,
+		"-text-bytes":                true,
+		"-messages":                  true,
+		"-max-tokens":                true,
+		"-stream":                    true,
+		"-tool":                      true,
+		"-expect":                    true,
+		"-secret":                    true,
+		"-secrets-env-file":          true,
+		"-secret-on-demand":          true,
 	}
 	var flags []string
 	var positional []string
@@ -6253,7 +7065,8 @@ Commands:
   exec                 Run a structured command in a workspace
   connect              Open the workspace console
   status               Show one workspace
-  list                 List workspaces
+  list, ls             List saved workspaces
+  ps                   List running workspaces
   logs                 Show workspace logs
   halt                 Shut down cleanly and keep disk state
   delete               Delete a workspace
@@ -6297,7 +7110,8 @@ Commands:
   supervise            Run host restart supervision for a workspace
   connect              Open the workspace console
   exec                 Run a structured command in a workspace
-  list                 List workspaces
+  list, ls             List saved workspaces
+  ps                   List running workspaces
   status               Show workspace state
   result               Show structured workspace result
   logs                 Show workspace logs
@@ -6448,6 +7262,10 @@ Options:
                          injects MICROAGENT_MODEL_URL and OPENAI_BASE_URL
   -model-token <token>  HuggingFace token for model auto-pull
                          (defaults to HF_TOKEN or HUGGING_FACE_HUB_TOKEN)
+  -model-runner <name>  Model runner backend: llamacpp, vllm, or custom
+  -model-gpu <mode>     Model runner GPU intent: off, on, or auto
+  -model-mediation <mode> Model mediation: off, local-allow, or policy
+  -model-policy-file <path> Model mediation policy file
 
 Container-style examples:
   microagent run alpine echo hello
@@ -6512,6 +7330,10 @@ Options:
                          MICROAGENT_MODEL_URL and OPENAI_BASE_URL
   -model-token <token>  HuggingFace token for model auto-pull
                          (defaults to HF_TOKEN or HUGGING_FACE_HUB_TOKEN)
+  -model-runner <name>  Model runner backend: llamacpp, vllm, or custom
+  -model-gpu <mode>     Model runner GPU intent: off, on, or auto
+  -model-mediation <mode> Model mediation: off, local-allow, or policy
+  -model-policy-file <path> Model mediation policy file
   -dry-run              Validate without writing state
   -json <path|->        Read request JSON from a file or stdin
 `)

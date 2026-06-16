@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-16_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -171,6 +171,17 @@ The complete set:
 | `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model and inject `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL`; with `--keep`, the ref persists and later `start`s re-pair. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
+| `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom` |
+| `--model-gpu <mode>` | Model runner GPU intent: `off`, `on`, or `auto` |
+| `--model-runner-model <id>` | Backend model id for runners such as vLLM |
+| `--model-runner-served-model <name>` | OpenAI-compatible served model name for runners such as vLLM |
+| `--model-runner-command <template>` | Custom OpenAI-compatible host runner command template |
+| `--model-runner-arg <arg>` | Extra model runner argument. Repeatable |
+| `--model-runner-env KEY=VALUE` | Extra model runner environment for this invocation. Repeatable; values are not persisted |
+| `--model-mediation <mode>` | Model mediation mode: `off`, `local-allow`, or `policy` |
+| `--model-policy-file <path>` | Structured model mediation policy file for `--model-mediation policy` |
+| `--model-policy-url <url>` | External model mediation policy endpoint for `--model-mediation policy` |
+| `--model-policy-timeout <duration>` | Model mediation policy timeout, such as `250ms` or `2s` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |

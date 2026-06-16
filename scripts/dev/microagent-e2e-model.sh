@@ -26,14 +26,20 @@
 #   MICROAGENT_APPLEVF_KERNEL          path to an Apple VF Linux ARM64 kernel
 #   MICROAGENT_CLI                     microagent CLI (default: .build/dev/microagent)
 #   MICROAGENT_E2E_MODEL_REF           HuggingFace GGUF ref (default: Qwen 0.5B Q4)
+#   MICROAGENT_E2E_MODEL_GPU           off|auto|required (default: auto)
+#   MICROAGENT_E2E_MODEL_GPU_PATTERN   grep -E pattern for runner log GPU evidence
 #   LD_LIBRARY_PATH                    must include llama-server's shared libs
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
 CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
 MODEL_REF="${MICROAGENT_E2E_MODEL_REF:-Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf}"
 IMAGE="docker.io/curlimages/curl:latest"
+GPU_MODE="${MICROAGENT_E2E_MODEL_GPU:-auto}"
+GPU_PATTERN="${MICROAGENT_E2E_MODEL_GPU_PATTERN:-CUDA[0-9]*[[:space:]]*:|ggml_cuda|CUDA[[:space:]]*:|Metal[[:space:]]*:|Vulkan[[:space:]]*:|SYCL}"
+GPU_CHECK=0
 
 skip() { e2e_skip "microagent-e2e-model: $1"; }
 fail() { echo "FAIL microagent-e2e-model: $1" >&2; exit 1; }
@@ -44,6 +50,84 @@ fi
 if [ -z "${MICROAGENT_LLAMA_SERVER:-}" ] || [ ! -x "${MICROAGENT_LLAMA_SERVER:-/nonexistent}" ]; then
   skip "MICROAGENT_LLAMA_SERVER not set/executable"
 fi
+
+runner_args_request_gpu() {
+  printf '%s' "${MICROAGENT_MODEL_RUNNER_ARGS:-}" | grep -Eq -- '(^|[^[:alnum:]_])(-ngl|--n-gpu-layers|--gpu-layers|--main-gpu|--tensor-split|--device|--gpu)([^[:alnum:]_]|$)'
+}
+
+host_runner_reports_gpu() {
+  "${MICROAGENT_LLAMA_SERVER}" --list-devices 2>/dev/null | grep -Eiq "$GPU_PATTERN"
+}
+
+configure_gpu_check() {
+  case "$GPU_MODE" in
+    off|false|no|0)
+      GPU_CHECK=0
+      echo "microagent-e2e-model: GPU assertion disabled"
+      ;;
+    auto|"")
+      if host_runner_reports_gpu && runner_args_request_gpu; then
+        GPU_CHECK=1
+        echo "microagent-e2e-model: GPU assertion enabled (runner reports GPU and runner args request GPU offload)"
+      else
+        GPU_CHECK=0
+        echo "microagent-e2e-model: GPU assertion skipped (set MICROAGENT_E2E_MODEL_GPU=required to require it)"
+      fi
+      ;;
+    required|require|true|yes|1)
+      if ! host_runner_reports_gpu; then
+        fail "GPU assertion required but $MICROAGENT_LLAMA_SERVER did not report a GPU matching: $GPU_PATTERN"
+      fi
+      GPU_CHECK=1
+      echo "microagent-e2e-model: GPU assertion required"
+      ;;
+    *)
+      fail "invalid MICROAGENT_E2E_MODEL_GPU=$GPU_MODE (expected off, auto, or required)"
+      ;;
+  esac
+}
+
+runner_log_for_holder() {
+  "$CLI" --json model runners 2>/dev/null | python3 -c '
+import json
+import sys
+
+holder = sys.argv[1]
+try:
+    idx = json.load(sys.stdin) or {}
+except Exception:
+    sys.exit(1)
+for runner in idx.get("runners") or []:
+    if holder in (runner.get("holders") or []):
+        log_path = runner.get("log_path") or ""
+        if log_path:
+            print(log_path)
+            sys.exit(0)
+sys.exit(1)
+' "$1"
+}
+
+assert_runner_gpu_log() {
+  local holder="$1"
+  local log_path
+
+  if ! log_path="$(runner_log_for_holder "$holder")"; then
+    "$CLI" --json model runners >&2 || true
+    fail "GPU assertion enabled but no runner log path was found for holder $holder"
+  fi
+  if [ ! -r "$log_path" ]; then
+    fail "GPU assertion enabled but runner log is not readable: $log_path"
+  fi
+  if grep -Eiq "$GPU_PATTERN" "$log_path"; then
+    echo "PASS microagent-e2e-model: runner log contains GPU backend evidence"
+    return
+  fi
+  echo "microagent-e2e-model: runner log missing GPU evidence matching: $GPU_PATTERN" >&2
+  tail -n 80 "$log_path" >&2 || true
+  fail "GPU assertion enabled but host runner did not report GPU backend evidence"
+}
+
+configure_gpu_check
 
 default_backend() {
   case "$(uname -s):$(uname -m)" in
@@ -128,9 +212,10 @@ if ! "$CLI" model list 2>/dev/null | grep -q "$(printf '%s' "$MODEL_REF" | sed '
   "$CLI" model pull "$MODEL_REF" >/dev/null 2>&1 || fail "model pull failed"
 fi
 
-# Guest script: retry until the model endpoint answers over the vsock bridge.
+# Guest script: assert the model path exposes no host GPU devices, then retry
+# until the model endpoint answers over the vsock bridge.
 # shellcheck disable=SC2016
-GUEST='echo "GUEST_MODEL_URL=$MICROAGENT_MODEL_URL"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: PONG\"}],\"max_tokens\":16,\"temperature\":0}"); case "$R" in *choices*) echo "E2E_RESPONSE: $R"; exit 0;; esac; sleep 1; done; echo "E2E_FAIL: model unreachable from guest"; exit 1'
+GUEST='echo "GUEST_MODEL_URL=$MICROAGENT_MODEL_URL"; for p in /dev/dxg /dev/nvidiactl /dev/nvidia0 /dev/dri/renderD128; do if [ -e "$p" ]; then echo "E2E_GPU_DEVICE_EXPOSED: $p"; exit 1; fi; done; echo "E2E_GPU_DEVICES_ABSENT"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/chat/completions" -H "Content-Type: application/json" -d "{\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: PONG\"}],\"max_tokens\":16,\"temperature\":0}"); case "$R" in *choices*) echo "E2E_RESPONSE: $R"; exit 0;; esac; sleep 1; done; echo "E2E_FAIL: model unreachable from guest"; exit 1'
 
 OUT="$("$CLI" run "${RUN_FLAGS[@]}" sh -c "$GUEST" 2>&1)"
 RUN_RC=$?
@@ -151,6 +236,11 @@ if ! printf '%s' "$OUT" | grep -q 'E2E_RESPONSE'; then
   echo "$OUT" >&2
   fail "guest did not receive a valid OpenAI chat completion"
 fi
+if ! printf '%s' "$OUT" | grep -q 'E2E_GPU_DEVICES_ABSENT'; then
+  echo "$OUT" >&2
+  fail "guest did not prove GPU device nodes are absent"
+fi
+echo "PASS microagent-e2e-model: guest GPU device nodes are absent"
 
 echo "PASS microagent-e2e-model: guest reached the locally-served model over vsock"
 
@@ -161,7 +251,7 @@ echo "PASS microagent-e2e-model: guest reached the locally-served model over vso
 
 WS="model-pair-e2e"
 
-# shellcheck disable=SC2317
+# shellcheck disable=SC2317,SC2329
 ws_cleanup() {
   "$CLI" kill "$WS" "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
   "$CLI" delete "$WS" --force --yes "${CTRL_FLAGS[@]}" >/dev/null 2>&1 || true
@@ -179,6 +269,24 @@ for r in idx.get("runners") or []:
     if ws in (r.get("holders") or []):
         print(r.get("model_ref", ""))
 ' "$1"
+}
+
+events_contain() {
+  local workspace="$1"
+  local needle="$2"
+
+  "$CLI" --json events "$workspace" 2>/dev/null | python3 -c '
+import json, sys
+needle = sys.argv[1]
+try:
+    doc = json.load(sys.stdin) or {}
+except ValueError:
+    sys.exit(1)
+for event in doc.get("events") or []:
+    if needle in (event.get("detail") or ""):
+        sys.exit(0)
+sys.exit(1)
+' "$needle"
 }
 
 # Stale state from an earlier aborted run must not fail create.
@@ -203,6 +311,11 @@ if [ -z "$CANONICAL" ]; then
   fail "start did not register $WS as a model runner holder"
 fi
 echo "microagent-e2e-model: start re-paired $WS with $CANONICAL"
+if ! events_contain "$WS" "model_worker=attached"; then
+  "$CLI" --json events "$WS" >&2 || true
+  fail "start did not record a model worker attach event"
+fi
+echo "PASS microagent-e2e-model: model worker attach event recorded"
 
 # exec_is_ready: read status JSON on stdin; exit 0 iff readiness.execReady.ready.
 exec_is_ready() {
@@ -232,11 +345,19 @@ if [ "$exec_ready" -ne 1 ]; then
 fi
 
 # shellcheck disable=SC2016
-WS_GUEST='echo "WS_MODEL_URL=$MICROAGENT_MODEL_URL"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/models"); case "$R" in *object*|*data*) echo "WS_MODELS: $R"; exit 0;; esac; sleep 1; done; echo "WS_FAIL: model unreachable from guest"; exit 1'
+WS_GUEST='echo "WS_MODEL_URL=$MICROAGENT_MODEL_URL"; for p in /dev/dxg /dev/nvidiactl /dev/nvidia0 /dev/dri/renderD128; do if [ -e "$p" ]; then echo "WS_GPU_DEVICE_EXPOSED: $p"; exit 1; fi; done; echo "WS_GPU_DEVICES_ABSENT"; for i in $(seq 1 20); do R=$(curl -s "$MICROAGENT_MODEL_URL/models"); case "$R" in *object*|*data*) echo "WS_MODELS: $R"; exit 0;; esac; sleep 1; done; echo "WS_FAIL: model unreachable from guest"; exit 1'
 WS_OUT="$("$CLI" exec "$WS" -- sh -c "$WS_GUEST" 2>&1)"
 if ! printf '%s' "$WS_OUT" | grep -q 'WS_MODELS'; then
   echo "$WS_OUT" >&2
   fail "paired workspace could not reach the model over the vsock bridge"
+fi
+if ! printf '%s' "$WS_OUT" | grep -q 'WS_GPU_DEVICES_ABSENT'; then
+  echo "$WS_OUT" >&2
+  fail "paired workspace did not prove GPU device nodes are absent"
+fi
+echo "PASS microagent-e2e-model: paired workspace GPU device nodes are absent"
+if [ "$GPU_CHECK" -eq 1 ]; then
+  assert_runner_gpu_log "$WS"
 fi
 
 if ! "$CLI" halt "$WS" "${CTRL_FLAGS[@]}" >/dev/null 2>&1; then
@@ -245,6 +366,11 @@ fi
 if [ -n "$(holders_of "$WS")" ]; then
   fail "halt did not release the model runner holder for $WS"
 fi
+if ! events_contain "$WS" "model_worker=released"; then
+  "$CLI" --json events "$WS" >&2 || true
+  fail "halt did not record a model worker release event"
+fi
+echo "PASS microagent-e2e-model: model worker release event recorded"
 echo "microagent-e2e-model: halt released the holder for $WS"
 
 if ! "$CLI" start "$WS" "${START_FLAGS[@]}" >/dev/null 2>&1; then

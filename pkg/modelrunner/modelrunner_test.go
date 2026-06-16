@@ -6,17 +6,18 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
 
 func TestLlamaCPPEngine(t *testing.T) {
-	e := LlamaCPP{BinPath: "/usr/bin/llama-server"}
+	e := LlamaCPP{BinPath: "/usr/bin/llama-server", ExtraArgs: []string{"-ngl", "all"}}
 	if e.Name() != "llama.cpp" || e.HealthPath() != "/health" {
 		t.Fatalf("unexpected engine metadata: %s %s", e.Name(), e.HealthPath())
 	}
 	argv := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
-	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999"}
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "-ngl", "all"}
 	if len(argv) != len(want) {
 		t.Fatalf("argv len: got %v want %v", argv, want)
 	}
@@ -24,6 +25,67 @@ func TestLlamaCPPEngine(t *testing.T) {
 		if argv[i] != want[i] {
 			t.Fatalf("argv[%d]: got %q want %q", i, argv[i], want[i])
 		}
+	}
+}
+
+func TestLlamaCPPEngineDefaultsToCPU(t *testing.T) {
+	e := LlamaCPP{BinPath: "/usr/bin/llama-server"}
+	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--device", "none", "--gpu-layers", "0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestLlamaCPPEngineGPUOptInSkipsCPUDefault(t *testing.T) {
+	e := LlamaCPP{BinPath: "/usr/bin/llama-server", ExtraArgs: []string{"--gpu-layers=all"}}
+	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--gpu-layers=all"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestLlamaCPPEngineNamedGPUOptIn(t *testing.T) {
+	e := LlamaCPP{BinPath: "/usr/bin/llama-server", GPU: GPUOn}
+	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--gpu-layers", "all"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestVLLMEngine(t *testing.T) {
+	e := VLLM{
+		PythonPath:  "/venv/bin/python",
+		Model:       "Qwen/Qwen2.5-0.5B-Instruct",
+		ServedModel: "local-chat",
+		ExtraArgs:   []string{"--max-model-len", "2048"},
+	}
+	if e.Name() != "vllm" || e.HealthPath() != "/health" {
+		t.Fatalf("unexpected engine metadata: %s %s", e.Name(), e.HealthPath())
+	}
+	got := e.Argv("/ignored/local.gguf", "127.0.0.1", 9999)
+	want := []string{"/venv/bin/python", "-m", "vllm.entrypoints.openai.api_server", "--model", "Qwen/Qwen2.5-0.5B-Instruct", "--served-model-name", "local-chat", "--host", "127.0.0.1", "--port", "9999", "--max-model-len", "2048"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestCommandEngine(t *testing.T) {
+	e := CommandEngine{
+		RunnerName: "runner-x",
+		Command:    []string{"runner", "serve", "{model}", "--host", "{host}", "--port", "{port}", "--addr", "{addr}"},
+		ExtraArgs:  []string{"--gpu", "auto"},
+		Health:     "/ready",
+	}
+	if e.Name() != "runner-x" || e.HealthPath() != "/ready" {
+		t.Fatalf("unexpected engine metadata: %s %s", e.Name(), e.HealthPath())
+	}
+	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"runner", "serve", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--addr", "127.0.0.1:9999", "--gpu", "auto"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
 	}
 }
 
@@ -82,7 +144,7 @@ func TestWaitHealthyTimesOut(t *testing.T) {
 func TestSpawnAndStopRealProcess(t *testing.T) {
 	// Spawn a real, harmless long-lived process to exercise spawn/alive/stop.
 	logPath := filepath.Join(t.TempDir(), "proc.log")
-	pid, err := spawnProcess(longRunningArgv(), logPath)
+	pid, err := spawnProcess(longRunningArgv(), nil, logPath)
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}

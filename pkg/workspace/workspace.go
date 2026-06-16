@@ -94,6 +94,8 @@ type Options struct {
 	// persisted in the manifest so every start re-pairs; the pull-time token is
 	// never persisted.
 	Model           string
+	ModelRunner     ModelRunnerSpec
+	ModelMediation  ModelMediationSpec
 	ProfileExplicit bool
 	KernelExplicit  bool
 	// FromSnapshot, when set, restores the workspace in place from this snapshot
@@ -116,26 +118,28 @@ type Options struct {
 }
 
 type Spec struct {
-	Name       string                `yaml:"name"`
-	ImageRef   string                `yaml:"image"`
-	Profile    string                `yaml:"profile"`
-	Restart    string                `yaml:"restart"`
-	Entrypoint string                `yaml:"entrypoint"`
-	Service    string                `json:"service_command,omitempty" yaml:"service"`
-	Shell      string                `yaml:"shell"`
-	Hostname   string                `yaml:"hostname"`
-	Model      string                `yaml:"model"`
-	Setup      SetupSteps            `yaml:"setup"`
-	SetupFiles []string              `yaml:"setupFiles"`
-	Env        map[string]string     `yaml:"env"`
-	Resources  Resources             `yaml:"resources"`
-	Network    NetworkSpec           `yaml:"network"`
-	Mediation  vmkit.MediationConfig `yaml:"mediation"`
-	Health     Health                `yaml:"health"`
-	Disks      []Disk                `yaml:"disks"`
-	Bundles    []Disk                `yaml:"bundles"`
-	Outputs    []Output              `yaml:"outputs"`
-	Files      []File                `yaml:"files"`
+	Name           string                `yaml:"name"`
+	ImageRef       string                `yaml:"image"`
+	Profile        string                `yaml:"profile"`
+	Restart        string                `yaml:"restart"`
+	Entrypoint     string                `yaml:"entrypoint"`
+	Service        string                `json:"service_command,omitempty" yaml:"service"`
+	Shell          string                `yaml:"shell"`
+	Hostname       string                `yaml:"hostname"`
+	Model          string                `yaml:"model"`
+	ModelRunner    ModelRunnerSpec       `yaml:"modelRunner"`
+	ModelMediation ModelMediationSpec    `yaml:"modelMediation"`
+	Setup          SetupSteps            `yaml:"setup"`
+	SetupFiles     []string              `yaml:"setupFiles"`
+	Env            map[string]string     `yaml:"env"`
+	Resources      Resources             `yaml:"resources"`
+	Network        NetworkSpec           `yaml:"network"`
+	Mediation      vmkit.MediationConfig `yaml:"mediation"`
+	Health         Health                `yaml:"health"`
+	Disks          []Disk                `yaml:"disks"`
+	Bundles        []Disk                `yaml:"bundles"`
+	Outputs        []Output              `yaml:"outputs"`
+	Files          []File                `yaml:"files"`
 }
 
 type NetworkSpec struct {
@@ -242,6 +246,8 @@ type Manifest struct {
 	ConsoleShell    string                     `json:"shell,omitempty"`
 	Hostname        string                     `json:"hostname,omitempty"`
 	Model           string                     `json:"model,omitempty"`
+	ModelRunner     *ModelRunnerSpec           `json:"model_runner,omitempty"`
+	ModelMediation  *ModelMediationSpec        `json:"model_mediation,omitempty"`
 	Mediation       *vmkit.MediationConfig     `json:"mediation,omitempty"`
 	Health          *Health                    `json:"health,omitempty"`
 	Disks           []Disk                     `json:"disks,omitempty"`
@@ -251,6 +257,25 @@ type Manifest struct {
 	SecretEnvFiles  []string                   `json:"secret_env_files,omitempty"`
 	OnDemandSecrets []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
 	SecretsAudit    bool                       `json:"secrets_audit,omitempty"`
+}
+
+type ModelRunnerSpec struct {
+	Backend      string   `json:"backend,omitempty" yaml:"backend,omitempty"`
+	GPU          string   `json:"gpu,omitempty" yaml:"gpu,omitempty"`
+	BackendModel string   `json:"backend_model,omitempty" yaml:"backendModel,omitempty"`
+	ServedModel  string   `json:"served_model,omitempty" yaml:"servedModel,omitempty"`
+	Command      []string `json:"command,omitempty" yaml:"command,omitempty"`
+	Name         string   `json:"name,omitempty" yaml:"name,omitempty"`
+	HealthPath   string   `json:"health_path,omitempty" yaml:"healthPath,omitempty"`
+	Args         []string `json:"args,omitempty" yaml:"args,omitempty"`
+	Env          []string `json:"-" yaml:"-"`
+}
+
+type ModelMediationSpec struct {
+	Mode          string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	PolicyURL     string `json:"policy_url,omitempty" yaml:"policyURL,omitempty"`
+	PolicyFile    string `json:"policy_file,omitempty" yaml:"policyFile,omitempty"`
+	PolicyTimeout string `json:"policy_timeout,omitempty" yaml:"policyTimeout,omitempty"`
 }
 
 type Resources struct {

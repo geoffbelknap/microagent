@@ -294,9 +294,37 @@ func mcpTools() []map[string]any {
 			"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "exec": map[string]any{"type": "string"},
 			"state_dir": map[string]any{"type": "string"}, "profile": map[string]any{"type": "string"}, "dry_run": map[string]any{"type": "boolean"},
 			"model": map[string]any{"type": "string"}, "model_token": map[string]any{"type": "string"},
-			"network": map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated", "bridged"}},
+			"model_runner":              map[string]any{"type": "string", "enum": []string{"llamacpp", "vllm", "custom"}},
+			"model_gpu":                 map[string]any{"type": "string", "enum": []string{"off", "on", "auto"}},
+			"model_runner_model":        map[string]any{"type": "string"},
+			"model_runner_served_model": map[string]any{"type": "string"},
+			"model_runner_command":      map[string]any{"type": "string"},
+			"model_runner_name":         map[string]any{"type": "string"},
+			"model_runner_health_path":  map[string]any{"type": "string"},
+			"model_runner_args":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"model_runner_env":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"model_mediation":           map[string]any{"type": "string", "enum": []string{"off", "local-allow", "policy"}},
+			"model_policy_url":          map[string]any{"type": "string"},
+			"model_policy_file":         map[string]any{"type": "string"},
+			"model_policy_timeout":      map[string]any{"type": "string"},
+			"network":                   map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated", "bridged"}},
 		}),
-		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{
+			"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"},
+			"model_runner":              map[string]any{"type": "string", "enum": []string{"llamacpp", "vllm", "custom"}},
+			"model_gpu":                 map[string]any{"type": "string", "enum": []string{"off", "on", "auto"}},
+			"model_runner_model":        map[string]any{"type": "string"},
+			"model_runner_served_model": map[string]any{"type": "string"},
+			"model_runner_command":      map[string]any{"type": "string"},
+			"model_runner_name":         map[string]any{"type": "string"},
+			"model_runner_health_path":  map[string]any{"type": "string"},
+			"model_runner_args":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"model_runner_env":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"model_mediation":           map[string]any{"type": "string", "enum": []string{"off", "local-allow", "policy"}},
+			"model_policy_url":          map[string]any{"type": "string"},
+			"model_policy_file":         map[string]any{"type": "string"},
+			"model_policy_timeout":      map[string]any{"type": "string"},
+		}),
 		mcpTool("workspace.exec", "Run a structured command in a running workspace.", []string{"name"}, workspaceExecInputSchema()),
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.stop", "Stop a workspace runtime.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -338,11 +366,44 @@ func mcpTools() []map[string]any {
 		mcpTool("models.remove", "Remove a model from the local store.", []string{"model"}, map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("models.prune", "Prune local model records whose blobs are missing.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("models.serve", "Start or reuse a local host model server for a stored or pulled model.", []string{"model"},
-			map[string]any{"model": map[string]any{"type": "string"}, "dedicated": map[string]any{"type": "boolean"}, "token": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+			map[string]any{
+				"model":               map[string]any{"type": "string"},
+				"dedicated":           map[string]any{"type": "boolean"},
+				"runner":              map[string]any{"type": "string", "enum": []string{"llamacpp", "vllm", "custom"}},
+				"runner_gpu":          map[string]any{"type": "string", "enum": []string{"off", "on", "auto"}},
+				"runner_model":        map[string]any{"type": "string"},
+				"runner_served_model": map[string]any{"type": "string"},
+				"runner_command":      map[string]any{"type": "string"},
+				"runner_name":         map[string]any{"type": "string"},
+				"runner_health_path":  map[string]any{"type": "string"},
+				"runner_args":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"runner_env":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"token":               map[string]any{"type": "string"},
+				"state_dir":           map[string]any{"type": "string"},
+			}),
 		mcpTool("models.stop", "Stop local host model server instances for a model.", []string{"model"},
 			map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("models.runners", "List running local model servers.", nil,
 			map[string]any{"state_dir": map[string]any{"type": "string"}}),
+		mcpTool("models.policy.validate", "Validate a structured model mediation policy file.", []string{"policy_file"},
+			map[string]any{"policy_file": map[string]any{"type": "string"}}),
+		mcpTool("models.policy.evaluate", "Dry-run a structured model mediation policy file against request metadata.", []string{"policy_file"},
+			map[string]any{
+				"policy_file":   map[string]any{"type": "string"},
+				"method":        map[string]any{"type": "string"},
+				"request_path":  map[string]any{"type": "string"},
+				"workspace_id":  map[string]any{"type": "string"},
+				"capability":    map[string]any{"type": "string"},
+				"worker_id":     map[string]any{"type": "string"},
+				"model":         map[string]any{"type": "string"},
+				"request_bytes": map[string]any{"type": "integer"},
+				"text_bytes":    map[string]any{"type": "integer"},
+				"messages":      map[string]any{"type": "integer"},
+				"max_tokens":    map[string]any{"type": "integer"},
+				"stream":        map[string]any{"type": "boolean"},
+				"tools":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"expect":        map[string]any{"type": "string", "enum": []string{"allow", "deny"}},
+			}),
 		mcpTool("profiles.list", "List resource profiles.", nil, nil),
 		mcpTool("host.inspect", "Report host capabilities for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
 		mcpTool("doctor.check", "Run host diagnostics for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
@@ -591,7 +652,7 @@ func mcpToolIdempotency(name string) string {
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
 	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
-	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -612,7 +673,7 @@ func mcpToolPrincipalScope(name string) []string {
 		return []string{"images.read", "images.write"}
 	case "artifacts.list", "cp", "artifacts.get":
 		return []string{"workspace.files"}
-	case "models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners":
+	case "models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate":
 		return []string{"models.read", "models.write"}
 	case "host.networking.setup", "kernel.install", "rootfs.build":
 		return []string{"host.write"}
@@ -699,6 +760,9 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		return nil, err
 	}
 	result, cliErr := runCLIForMCP(ctx, cliArgs)
+	if cliErr == nil && name == "workspace.create" {
+		result = summarizeWorkspaceLifecycle(result, "created")
+	}
 	if cliErr == nil && name == "workspace.inspect" && !strings.EqualFold(stringArg(args, "format"), "full") {
 		result = summarizeWorkspaceInspect(result)
 	}
@@ -946,19 +1010,60 @@ func summarizeWorkspaceInspect(result any) any {
 			summary["workspace"] = identity["runtimeID"]
 		}
 	}
-	var next []string
-	switch fmt.Sprint(summary["state"]) {
-	case "running", "starting":
-		next = []string{"workspace.exec", "workspace.halt", "workspace.delete"}
-	case "prepared", "halted", "stopped":
-		next = []string{"workspace.start", "workspace.delete"}
-	case "failed", "quarantined":
-		next = []string{"workspace.inspect", "workspace.delete"}
-	default:
-		next = []string{"workspace.inspect"}
-	}
-	summary["next_decision_points"] = next
+	summary["next_decision_points"] = workspaceNextDecisionPoints(fmt.Sprint(summary["state"]))
 	return summary
+}
+
+func summarizeWorkspaceLifecycle(result any, outcome string) any {
+	resp, ok := result.(map[string]any)
+	if !ok {
+		return result
+	}
+	response, _ := resp["response"].(map[string]any)
+	summary := map[string]any{
+		"format":    "summary",
+		"outcome":   outcome,
+		"ok":        response["ok"],
+		"backend":   response["backend"],
+		"workspace": resp["workspace"],
+		"state":     resp["final_state"],
+		"error":     response["error"],
+		"error_cnt": 0,
+	}
+	if text, ok := response["error"].(string); ok && strings.TrimSpace(text) != "" {
+		summary["error_cnt"] = 1
+	}
+	if event, ok := response["event"].(map[string]any); ok {
+		summary["state"] = event["state"]
+		if identity, ok := event["identity"].(map[string]any); ok && summary["workspace"] == nil {
+			summary["workspace"] = identity["runtimeID"]
+		}
+		if detail, ok := event["detail"].(string); ok && strings.TrimSpace(detail) != "" {
+			summary["detail"] = detail
+		}
+	}
+	if summary["ok"] == true && outcome == "created" && fmt.Sprint(summary["state"]) == "stopped" {
+		summary["ready"] = true
+		summary["state_meaning"] = "created and ready to start"
+	}
+	if rootfs, ok := resp["rootfs_path"].(string); ok && strings.TrimSpace(rootfs) != "" {
+		summary["rootfs_path"] = rootfs
+	}
+	summary["next_decision_points"] = workspaceNextDecisionPoints(fmt.Sprint(summary["state"]))
+	return summary
+}
+
+func workspaceNextDecisionPoints(state string) []string {
+	switch state {
+	case "running", "starting":
+		return []string{"workspace.exec", "workspace.halt", "workspace.delete"}
+	case "prepared", "halted", "stopped":
+		return []string{"workspace.start", "workspace.delete"}
+	case "failed", "quarantined":
+		return []string{"workspace.inspect", "workspace.delete"}
+	default:
+		return []string{"workspace.inspect"}
+	}
 }
 
 func summarizeWorkspaceLogs(result any, tailLimit int) any {
@@ -1097,6 +1202,11 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-network", stringArg(args, "network"))
 		cli = appendOptionalFlag(cli, "-model", stringArg(args, "model"))
 		cli = appendOptionalFlag(cli, "-model-token", stringArg(args, "model_token"))
+		var err error
+		cli, err = appendMCPWorkspaceModelFlags(cli, args)
+		if err != nil {
+			return nil, err
+		}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "dry_run") {
 			cli = append(cli, "-dry-run")
@@ -1106,7 +1216,13 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "start", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		cli := []string{"--mode=ax", "start", stringArg(args, "name")}
+		var err error
+		cli, err = appendMCPWorkspaceModelFlags(cli, args)
+		if err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "workspace.exec":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
@@ -1417,6 +1533,27 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if boolArg(args, "dedicated") {
 			cli = append(cli, "-dedicated")
 		}
+		cli = appendOptionalFlag(cli, "-runner", stringArg(args, "runner"))
+		cli = appendOptionalFlag(cli, "-runner-gpu", stringArg(args, "runner_gpu"))
+		cli = appendOptionalFlag(cli, "-runner-model", stringArg(args, "runner_model"))
+		cli = appendOptionalFlag(cli, "-runner-served-model", stringArg(args, "runner_served_model"))
+		cli = appendOptionalFlag(cli, "-runner-command", stringArg(args, "runner_command"))
+		cli = appendOptionalFlag(cli, "-runner-name", stringArg(args, "runner_name"))
+		cli = appendOptionalFlag(cli, "-runner-health-path", stringArg(args, "runner_health_path"))
+		if runnerArgs, ok, err := stringSliceArg(args, "runner_args"); err != nil {
+			return nil, err
+		} else if ok {
+			for _, arg := range runnerArgs {
+				cli = append(cli, "-runner-arg", arg)
+			}
+		}
+		if runnerEnv, ok, err := stringSliceArg(args, "runner_env"); err != nil {
+			return nil, err
+		} else if ok {
+			for _, entry := range runnerEnv {
+				cli = append(cli, "-runner-env", entry)
+			}
+		}
 		cli = appendOptionalFlag(cli, "-token", stringArg(args, "token"))
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		return cli, nil
@@ -1429,6 +1566,46 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		return cli, nil
 	case "models.runners":
 		return appendOptionalFlag([]string{"--mode=ax", "model", "runners"}, "-state-dir", stateDir), nil
+	case "models.policy.validate":
+		if err := requireToolArgs(args, name, "policy_file"); err != nil {
+			return nil, err
+		}
+		return []string{"--mode=ax", "model", "policy", "validate", stringArg(args, "policy_file")}, nil
+	case "models.policy.evaluate":
+		if err := requireToolArgs(args, name, "policy_file"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "model", "policy", "evaluate", stringArg(args, "policy_file")}
+		cli = appendOptionalFlag(cli, "-method", stringArg(args, "method"))
+		cli = appendOptionalFlag(cli, "-path", stringArg(args, "request_path"))
+		cli = appendOptionalFlag(cli, "-workspace-id", stringArg(args, "workspace_id"))
+		cli = appendOptionalFlag(cli, "-capability", stringArg(args, "capability"))
+		cli = appendOptionalFlag(cli, "-worker-id", stringArg(args, "worker_id"))
+		cli = appendOptionalFlag(cli, "-model", stringArg(args, "model"))
+		if value := int64Arg(args, "request_bytes"); value > 0 {
+			cli = append(cli, "-request-bytes", strconv.FormatInt(value, 10))
+		}
+		if value := int64Arg(args, "text_bytes"); value > 0 {
+			cli = append(cli, "-text-bytes", strconv.FormatInt(value, 10))
+		}
+		if value := int64Arg(args, "messages"); value > 0 {
+			cli = append(cli, "-messages", strconv.FormatInt(value, 10))
+		}
+		if value := int64Arg(args, "max_tokens"); value > 0 {
+			cli = append(cli, "-max-tokens", strconv.FormatInt(value, 10))
+		}
+		if _, ok := args["stream"]; ok {
+			cli = append(cli, "-stream", strconv.FormatBool(boolArg(args, "stream")))
+		}
+		if tools, ok, err := stringSliceArg(args, "tools"); err != nil {
+			return nil, err
+		} else if ok {
+			for _, tool := range tools {
+				cli = append(cli, "-tool", tool)
+			}
+		}
+		cli = appendOptionalFlag(cli, "-expect", stringArg(args, "expect"))
+		return cli, nil
 	case "cp":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err
@@ -1586,6 +1763,35 @@ func appendOptionalFlag(args []string, name, value string) []string {
 		return args
 	}
 	return append(args, name, value)
+}
+
+func appendMCPWorkspaceModelFlags(cli []string, args map[string]any) ([]string, error) {
+	cli = appendOptionalFlag(cli, "-model-runner", stringArg(args, "model_runner"))
+	cli = appendOptionalFlag(cli, "-model-gpu", stringArg(args, "model_gpu"))
+	cli = appendOptionalFlag(cli, "-model-runner-model", stringArg(args, "model_runner_model"))
+	cli = appendOptionalFlag(cli, "-model-runner-served-model", stringArg(args, "model_runner_served_model"))
+	cli = appendOptionalFlag(cli, "-model-runner-command", stringArg(args, "model_runner_command"))
+	cli = appendOptionalFlag(cli, "-model-runner-name", stringArg(args, "model_runner_name"))
+	cli = appendOptionalFlag(cli, "-model-runner-health-path", stringArg(args, "model_runner_health_path"))
+	if runnerArgs, ok, err := stringSliceArg(args, "model_runner_args"); err != nil {
+		return nil, err
+	} else if ok {
+		for _, arg := range runnerArgs {
+			cli = append(cli, "-model-runner-arg", arg)
+		}
+	}
+	if runnerEnv, ok, err := stringSliceArg(args, "model_runner_env"); err != nil {
+		return nil, err
+	} else if ok {
+		for _, entry := range runnerEnv {
+			cli = append(cli, "-model-runner-env", entry)
+		}
+	}
+	cli = appendOptionalFlag(cli, "-model-mediation", stringArg(args, "model_mediation"))
+	cli = appendOptionalFlag(cli, "-model-policy-url", stringArg(args, "model_policy_url"))
+	cli = appendOptionalFlag(cli, "-model-policy-file", stringArg(args, "model_policy_file"))
+	cli = appendOptionalFlag(cli, "-model-policy-timeout", stringArg(args, "model_policy_timeout"))
+	return cli, nil
 }
 
 func requireToolArgs(args map[string]any, tool string, names ...string) error {

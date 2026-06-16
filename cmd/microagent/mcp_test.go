@@ -59,7 +59,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		"network.inspect", "network.create", "network.list", "network.delete",
 		"volume.create", "volume.list", "volume.inspect", "volume.delete",
 		"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune",
-		"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners",
+		"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate",
 		"profiles.list", "host.inspect", "doctor.check", "host.networking.setup", "contract.get", "kernel.verify", "kernel.install", "rootfs.build",
 		"cp",
 	} {
@@ -236,6 +236,34 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "create", "demo", "-image", "docker.io/library/busybox:1.36", "-network", "isolated"},
 		},
 		{
+			name: "workspace.create",
+			args: map[string]any{
+				"name":                      "demo",
+				"model":                     "org/repo/model.gguf",
+				"model_runner":              "vllm",
+				"model_gpu":                 "auto",
+				"model_runner_model":        "Qwen/Qwen2.5-0.5B-Instruct",
+				"model_runner_served_model": "local-chat",
+				"model_runner_args":         []any{"--max-model-len", "2048"},
+				"model_runner_env":          []any{"CUDA_VISIBLE_DEVICES=0"},
+				"model_mediation":           "policy",
+				"model_policy_file":         "/tmp/model-policy.json",
+				"model_policy_timeout":      "250ms",
+			},
+			want: []string{"--mode=ax", "create", "demo", "-model", "org/repo/model.gguf", "-model-runner", "vllm", "-model-gpu", "auto", "-model-runner-model", "Qwen/Qwen2.5-0.5B-Instruct", "-model-runner-served-model", "local-chat", "-model-runner-arg", "--max-model-len", "-model-runner-arg", "2048", "-model-runner-env", "CUDA_VISIBLE_DEVICES=0", "-model-mediation", "policy", "-model-policy-file", "/tmp/model-policy.json", "-model-policy-timeout", "250ms"},
+		},
+		{
+			name: "workspace.start",
+			args: map[string]any{
+				"name":            "demo",
+				"state_dir":       "/tmp/state",
+				"model_runner":    "llamacpp",
+				"model_gpu":       "on",
+				"model_mediation": "local-allow",
+			},
+			want: []string{"--mode=ax", "start", "demo", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
+		},
+		{
 			name: "workspace.logs",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
 			want: []string{"--mode=ax", "logs", "demo", "-state-dir", "/tmp/state"},
@@ -279,6 +307,44 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			name: "artifacts.list",
 			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
 			want: []string{"--mode=ax", "artifact", "demo", "-state-dir", "/tmp/state"},
+		},
+		{
+			name: "models.serve",
+			args: map[string]any{
+				"model":               "org/repo/model.gguf",
+				"dedicated":           true,
+				"runner":              "custom",
+				"runner_gpu":          "auto",
+				"runner_model":        "ignored/custom-model",
+				"runner_served_model": "local-chat",
+				"runner_command":      "runner serve {model} --listen {addr}",
+				"runner_name":         "runner",
+				"runner_health_path":  "/ready",
+				"runner_args":         []any{"--gpu", "auto"},
+				"runner_env":          []any{"CUDA_VISIBLE_DEVICES=0"},
+				"state_dir":           "/tmp/state",
+			},
+			want: []string{"--mode=ax", "model", "serve", "org/repo/model.gguf", "-dedicated", "-runner", "custom", "-runner-gpu", "auto", "-runner-model", "ignored/custom-model", "-runner-served-model", "local-chat", "-runner-command", "runner serve {model} --listen {addr}", "-runner-name", "runner", "-runner-health-path", "/ready", "-runner-arg", "--gpu", "-runner-arg", "auto", "-runner-env", "CUDA_VISIBLE_DEVICES=0", "-state-dir", "/tmp/state"},
+		},
+		{
+			name: "models.policy.evaluate",
+			args: map[string]any{
+				"policy_file":   "/tmp/policy.json",
+				"method":        "POST",
+				"request_path":  "/v1/chat/completions",
+				"workspace_id":  "ws",
+				"capability":    "model.openai",
+				"worker_id":     "worker",
+				"model":         "tiny",
+				"request_bytes": float64(512),
+				"text_bytes":    float64(128),
+				"messages":      float64(1),
+				"max_tokens":    float64(32),
+				"stream":        false,
+				"tools":         []any{"shell"},
+				"expect":        "allow",
+			},
+			want: []string{"--mode=ax", "model", "policy", "evaluate", "/tmp/policy.json", "-method", "POST", "-path", "/v1/chat/completions", "-workspace-id", "ws", "-capability", "model.openai", "-worker-id", "worker", "-model", "tiny", "-request-bytes", "512", "-text-bytes", "128", "-messages", "1", "-max-tokens", "32", "-stream", "false", "-tool", "shell", "-expect", "allow"},
 		},
 		{
 			name: "snapshot.create",
@@ -467,6 +533,34 @@ func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
 	}
 	points, ok := summary["next_decision_points"].([]string)
 	if !ok || len(points) == 0 {
+		t.Fatalf("next_decision_points = %#v", summary["next_decision_points"])
+	}
+}
+
+func TestMCPSummarizeWorkspaceCreateLifecycle(t *testing.T) {
+	summary, ok := summarizeWorkspaceLifecycle(map[string]any{
+		"workspace":   "demo",
+		"rootfs_path": "/tmp/rootfs.ext4",
+		"response": map[string]any{
+			"ok":      true,
+			"backend": "firecracker",
+			"event": map[string]any{
+				"state":  "stopped",
+				"detail": "workspace created",
+			},
+		},
+	}, "created").(map[string]any)
+	if !ok {
+		t.Fatalf("summary type = %T", summary)
+	}
+	if summary["format"] != "summary" || summary["outcome"] != "created" || summary["workspace"] != "demo" || summary["ready"] != true {
+		t.Fatalf("summary = %#v", summary)
+	}
+	if summary["state_meaning"] != "created and ready to start" {
+		t.Fatalf("state_meaning = %#v", summary["state_meaning"])
+	}
+	points, ok := summary["next_decision_points"].([]string)
+	if !ok || len(points) == 0 || points[0] != "workspace.start" {
 		t.Fatalf("next_decision_points = %#v", summary["next_decision_points"])
 	}
 }

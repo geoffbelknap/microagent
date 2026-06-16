@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 # Each entry: name:script:platform:requirement
@@ -31,6 +32,12 @@ SCENARIOS=(
   "health:scripts/dev/microagent-e2e-health.sh:all:vm"
   "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
   "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm"
+  "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm"
+  "model-mediation-runner:scripts/dev/microagent-e2e-model-mediation-runner.sh:linux:vm"
+  "model-mediation-runner-fake:scripts/dev/microagent-e2e-model-mediation-runner-fake.sh:linux:vm"
+  "model-mediation-pressure-ci:scripts/dev/microagent-e2e-model-mediation-pressure-ci.sh:linux:vm"
+  "model-mediation-llamacpp:scripts/dev/microagent-e2e-model-mediation-llamacpp.sh:linux:vm"
+  "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
   "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:linux:vm"
   "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm"
@@ -75,6 +82,12 @@ SCENARIO_COVERAGE=(
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health.exec validation and supervise restart on unhealthy probe"
   "exec-stream|backend-neutral|firecracker,apple-vf,windows-hyperv|structured exec streaming, non-zero exit propagation, buffered parity"
   "model-serving|backend-neutral|firecracker,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
+  "model-mediation|host-specific|firecracker|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
+  "model-mediation-runner|host-specific|firecracker|Opt-in runner-neutral production run --model mediation matrix for a prepared OpenAI-compatible runner"
+  "model-mediation-runner-fake|host-specific|firecracker|Opt-in runner-neutral production run --model mediation matrix through a fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
+  "model-mediation-pressure-ci|host-specific|firecracker|CI-safe required-gate pressure target through the fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
+  "model-mediation-llamacpp|host-specific|firecracker|Opt-in production run --model mediation matrix with the llama.cpp runner"
+  "model-mediation-vllm|host-specific|firecracker|Opt-in production run --model mediation matrix with a real vLLM GPU runner"
   "firecracker-lifecycle-host|backend-specific|firecracker|Firecracker lifecycle host mechanics"
   "firecracker-networking-host|backend-specific|firecracker|Firecracker TAP, bridge, NAT, helper mechanics"
   "firecracker-transport-host|backend-specific|firecracker|Firecracker /dev/vhost-vsock and helper mechanics"
@@ -124,7 +137,7 @@ E2E_MATRIX=(
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
   "supervise|backend-neutral|firecracker,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
   "snapshot/pause/resume|backend-specific|firecracker,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
-  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving|Model store and run --model vsock pairing"
+  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
   "perf|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
   "serve mcp lifecycle|backend-neutral|firecracker,apple-vf,windows-hyperv|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
@@ -184,6 +197,30 @@ Scenarios:
   model-serving      Local host model server paired into a workspace over the
                      backend vsock bridge (Firecracker on Linux, Apple VF on
                      macOS, Hyper-V sockets on Windows).
+  model-mediation    Opt-in Linux host backend matrix for run --model
+                     mediation. Set MICROAGENT_E2E_MODEL_MEDIATION=1.
+  model-mediation-runner
+                    Opt-in Linux host backend matrix for run --model
+                    mediation against a prepared OpenAI-compatible
+                    runner. Set MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 and
+                    MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF.
+  model-mediation-runner-fake
+                    Opt-in Linux host backend matrix for run --model
+                    mediation through the custom runner contract with a fake
+                    OpenAI-compatible runner. Set
+                    MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1.
+  model-mediation-pressure-ci
+                    CI-safe Linux host backend pressure target for the
+                    run --model mediator through the fake custom runner. Uses
+                    required gates and emits pressure-decision.*.
+  model-mediation-llamacpp
+                    Opt-in Linux host backend matrix for run --model mediation
+                    against the llama.cpp runner. Set
+                    MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1.
+  model-mediation-vllm
+                    Opt-in Linux host backend matrix for run --model mediation
+                    against a real vLLM GPU runner. Set
+                    MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1.
   survive-reboot     supervise --install/--uninstall boot-unit generation
                      (systemd user unit / launchd plist); no real reboot.
   named-network      Two workspaces on a managed named-network bridge: stable
@@ -226,6 +263,42 @@ Environment:
   MICROAGENT_E2E_BACKEND=firecracker|applevf|windows-hyperv selects the backend
     lane for backend-agnostic feature scenarios. Windows runs use Git Bash with
     the windows-hyperv backend (Hyper-V role + HCS services).
+  MICROAGENT_E2E_MODEL_MEDIATION=1 opts into the production run --model
+    mediation matrix with a stub OpenAI-compatible runner. It does not require
+    a GPU or llama.cpp.
+  MICROAGENT_E2E_MODEL_MEDIATION_OUT_DIR=<dir> stores model-mediation reports.
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 runs generated policy
+    validation/evaluation without KVM, Firecracker, a guest image, or a model runner.
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 opts into the runner-neutral
+    custom runner mediation matrix with a fake OpenAI-compatible runner.
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE=1 runs the fake runner
+    scenario through the runner-neutral mediation pressure probe instead of the
+    functional allow/deny matrix.
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE_PRESET=ci runs a short
+    fake-runner pressure profile with required gates for CI-style validation.
+    The named model-mediation-pressure-ci scenario sets these fake-runner
+    pressure env vars automatically.
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_OUT_DIR=<dir> stores fake runner
+    mediation reports.
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 opts into the production run --model
+    mediation matrix with llama.cpp. It defaults to CPU execution.
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE=1 runs the llama.cpp scenario
+    through the runner-neutral mediation pressure probe.
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE_PRESET=hardware runs a bounded
+    one-workspace hardware profile with warn gates and runner/GPU telemetry.
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=1 opts that scenario into llama.cpp
+    GPU runner args.
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_IMAGE=<ref> overrides the guest curl image.
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_OUT_DIR=<dir> stores llama.cpp reports.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 opts into the production run --model
+    mediation matrix with a real vLLM GPU runner.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE=1 runs the vLLM scenario through
+    the runner-neutral mediation pressure probe.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE_PRESET=hardware runs a bounded
+    one-workspace hardware profile with warn gates and runner/GPU telemetry.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=<dir> points at a vLLM checkout.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_IMAGE=<ref> overrides the guest curl image.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_OUT_DIR=<dir> stores vLLM reports.
   MICROAGENT_E2E_ALLOW_NETPRIV=1 opts the privileged networking lane in when you
     hold CAP_NET_ADMIN without uid 0 (file caps / capability-granting sandbox).
   MICROAGENT_E2E_HEARTBEAT=<seconds> sets the "still running" heartbeat interval
@@ -479,6 +552,10 @@ if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_SECRETS=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_HEALTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_EXEC_STREAM=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1
   export MICROAGENT_KEEP_BOOT_SMOKE=1
   export MICROAGENT_KEEP_DIRECT_CONSOLE_SMOKE=1
   export MICROAGENT_KEEP_APPLEVF_SUBSTRATE_SMOKE=1

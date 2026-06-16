@@ -1,0 +1,24 @@
+name: local-coding-model
+image: docker.io/library/python:3.13-slim
+hostname: local-coding-model
+
+model: Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf
+
+resources:
+  memoryMiB: 2048
+  cpuCount: 2
+  sizeMiB: 4096
+
+setup:
+  - mkdir -p /app /workspace
+
+files:
+  - src: ./ask_model.py
+    dst: /app/ask_model.py
+    mode: "0755"
+
+entrypoint: python /app/ask_model.py
+
+outputs:
+  - name: result
+    path: /workspace/result.json

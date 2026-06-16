@@ -897,6 +897,8 @@ func WriteManifest(opts Options) error {
 		ConsoleShell:    strings.TrimSpace(opts.ConsoleShell),
 		Hostname:        strings.TrimSpace(opts.Hostname),
 		Model:           strings.TrimSpace(opts.Model),
+		ModelRunner:     modelRunnerManifest(opts.ModelRunner),
+		ModelMediation:  modelMediationManifest(opts.ModelMediation),
 		Mediation:       opts.Mediation,
 		Health:          healthManifest(opts.Health),
 		Disks:           opts.Disks,
@@ -907,6 +909,21 @@ func WriteManifest(opts Options) error {
 		OnDemandSecrets: onDemandRefsFromOptions(opts),
 		SecretsAudit:    opts.SecretsAudit,
 	})
+}
+
+func modelRunnerManifest(spec ModelRunnerSpec) *ModelRunnerSpec {
+	if !modelRunnerSpecDeclared(spec) {
+		return nil
+	}
+	spec.Env = nil
+	return &spec
+}
+
+func modelMediationManifest(spec ModelMediationSpec) *ModelMediationSpec {
+	if !modelMediationSpecDeclared(spec) {
+		return nil
+	}
+	return &spec
 }
 
 func ReadManifest(stateDir, name string) (Manifest, error) {
@@ -1247,6 +1264,16 @@ func applyManifest(opts *Options, manifest Manifest) {
 		opts.Hostname = strings.TrimSpace(manifest.Hostname)
 	}
 	opts.Model = strings.TrimSpace(manifest.Model)
+	if manifest.ModelRunner != nil {
+		opts.ModelRunner = *manifest.ModelRunner
+	} else {
+		opts.ModelRunner = ModelRunnerSpec{}
+	}
+	if manifest.ModelMediation != nil {
+		opts.ModelMediation = *manifest.ModelMediation
+	} else {
+		opts.ModelMediation = ModelMediationSpec{}
+	}
 	if manifest.Resources.MemoryMiB != 0 {
 		opts.MemoryMiB = manifest.Resources.MemoryMiB
 	}

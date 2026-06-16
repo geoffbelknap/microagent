@@ -4,7 +4,7 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-16_
 
 Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
@@ -217,13 +217,15 @@ the guest and the OpenAI SDK picks it up.
 
 Two honest caveats before you start:
 
-- **Small models are not the hosted models above.** In our testing, Qwen2.5-Instruct at
-  0.5B, 3B, and 7B (Q4_K_M) all failed this page's first request - broken
-  scripts, fabricated output. The model below is the smallest we verified
-  completing it end to end, and it needs a low sampling temperature to do it.
+- **Small models are not the hosted models above.** Smaller local instruction
+  models may fail this page's first request with broken scripts or fabricated
+  output. The model below is a practical starting point, and it needs a low
+  sampling temperature.
 - **You need `llama-server` on the host.** Install it from
   [llama.cpp](https://github.com/ggml-org/llama.cpp) and put it on your PATH,
-  or point `MICROAGENT_LLAMA_SERVER` at the binary.
+  or point `MICROAGENT_LLAMA_SERVER` at the binary. microagent defaults
+  llama.cpp to CPU execution; use [`model serve --runner-gpu on`](/cli/model/)
+  or equivalent runner args to opt into GPU offload.
 
 Pull the model - a 2.5 GB download (`create` and `start` auto-pull a missing
 blob, but pulling first makes the wait visible):

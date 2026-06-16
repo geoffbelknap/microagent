@@ -4,7 +4,7 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
@@ -206,7 +206,7 @@ the minimum shape is:
 | `workspace.pause` | Pause a running workspace when supported |
 | `workspace.resume` | Resume a paused workspace when supported |
 | `workspace.delete` | Delete a workspace, with optional preview and force |
-| `workspace.list` | List workspaces |
+| `workspace.list` | List saved workspaces |
 | `workspace.inspect` | Inspect workspace state with `summary` or `full` output |
 | `workspace.result` | Read the structured workspace result |
 | `workspace.stats` | Sample workspace resource usage |
@@ -242,6 +242,8 @@ the minimum shape is:
 | `models.serve` | Start or reuse a local host model server for a stored or pulled model |
 | `models.stop` | Stop local host model server instances for a model |
 | `models.runners` | List running local model servers |
+| `models.policy.validate` | Validate a structured model mediation policy file |
+| `models.policy.evaluate` | Dry-run a policy file against structured request metadata |
 | `profiles.list` | List resource profiles |
 | `host.inspect` | Report host capabilities |
 | `doctor.check` | Run host diagnostics |
@@ -305,6 +307,15 @@ come from the shared workspace exec layer and match CLI AX exec behavior.
 | Flag | Description |
 |---|---|
 | `--dedicated` | Start a dedicated runner for this caller instead of reusing a shared one |
+| `--runner <backend>` | Runner backend: `llamacpp` (default), `vllm`, or `custom` |
+| `--runner-gpu <mode>` | Runner GPU intent: `off`, `on`, or `auto` |
+| `--runner-model <id>` | Backend model id for runners such as vLLM |
+| `--runner-served-model <name>` | OpenAI-compatible served model name for runners such as vLLM |
+| `--runner-command <template>` | Custom host model runner command template |
+| `--runner-name <name>` | Name to record for a custom host model runner |
+| `--runner-health-path <path>` | HTTP health path for a custom host model runner |
+| `--runner-arg <arg>` | Extra host model runner argument. Repeat for multiple argv entries |
+| `--runner-env KEY=VALUE` | Extra host model runner environment override. Repeat for multiple variables |
 | `--token <t>` | HuggingFace bearer token used if the model must be auto-pulled |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 
@@ -313,10 +324,10 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 ## Exit status
 
 `model serve` exits `0` when the runner is started or reused; nonzero when no
-`llama-server` binary is found or the model cannot be pulled. `serve mcp` runs
-until its client closes stdin, then exits `0`; started from a terminal, it
-exits nonzero with setup guidance. In AX mode a failure is written as a
-structured error envelope.
+host model runner binary is found, runner configuration is invalid, or the
+model cannot be pulled. `serve mcp` runs until its client closes stdin, then
+exits `0`; started from a terminal, it exits nonzero with setup guidance. In
+AX mode a failure is written as a structured error envelope.
 
 ## Related
 

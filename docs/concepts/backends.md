@@ -4,7 +4,7 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 microagent installs with one backend per host OS: Firecracker on Linux,
 Apple Virtualization.framework on macOS, and Hyper-V on Windows.
@@ -86,79 +86,3 @@ covered in [Networking](/concepts/networking/).
 `microagent doctor` reports the active backend, backend-specific host support,
 virtualization availability, guest-init availability, and the default kernel
 status. Run it before anything else on a new machine.
-
-## Backend validation (for contributors)
-
-This is contributor procedure for validating backends end-to-end, not
-conceptual background. Skip it unless you are running the live test suites.
-
-### Apple VF validation runbook
-
-Run Apple VF validation on Apple silicon macOS, not inside a Linux or KVM
-environment. The host needs Go, the Xcode command line tools with Swift,
-Virtualization.framework support, network access for OCI image pulls, and
-`e2fsprogs` tools (`mke2fs` and `debugfs`). Homebrew installs those tools under
-`/opt/homebrew/opt/e2fsprogs/sbin`, which the smoke scripts check
-automatically.
-
-Build and ad-hoc sign the supervisor before live runs:
-
-```bash
-scripts/dev/applevf-supervisor-build.sh
-```
-
-Install or verify the default Apple VF kernel if the host does not already have
-one at `~/.microagent/kernels/apple-vf/arm64/Image`:
-
-```bash
-go run ./cmd/microagent --json kernel install --backend apple-vf
-go run ./cmd/microagent --json doctor --backend apple-vf
-```
-
-Use the unified E2E runner for repeatable macOS validation:
-
-```bash
-scripts/dev/microagent-e2e.sh --list
-scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output
-scripts/dev/microagent-e2e.sh \
-  public-surface \
-  lifecycle \
-  networking \
-  transport \
-  supervision
-```
-
-On Linux, the same runner is the live full-suite parity gate in
-`.github/workflows/live-linux-parity.yaml`. That workflow runs on trusted
-`main` pushes or manual dispatch on a self-hosted runner labeled `linux`,
-`x64`, and `kvm`, with KVM, `/dev/vhost-vsock`, `/dev/net/tun`, Firecracker,
-and the network setup from `scripts/dev/microagent-e2e-linux-network-setup.sh`.
-
-On Windows, the same runner works under Git Bash with the windows-hyperv
-backend (Hyper-V role active, HCS services running): the portable scenarios
-plus the `windows-hyperv-*-host` probes — which wrap the gated Go smokes for
-boot/result, connect, structured exec, and mediation — run in the
-`live-windows-hyperv` workflow. Backend-neutral feature scenarios that have
-not joined the Windows lane yet self-skip with the lane named.
-
-The feature scenarios are backend-agnostic: the scenario names describe the
-shared CLI/runtime contract, while the host or
-`MICROAGENT_E2E_BACKEND=applevf` selects the Apple VF execution lane. Add the
-targeted `applevf-*` scenarios when you need narrower diagnostics for boot,
-direct console, substrate, workspace connect, network mode, TCP publish, or
-vsock forwarding. Use `--keep` or `MICROAGENT_E2E_KEEP=1` only when you need to
-preserve state directories for debugging; successful scenarios clean up their
-own temporary state. If the local Docker config names a missing credential
-helper, set `DOCKER_CONFIG` to an empty temporary directory for public-image
-validation rather than editing host login state.
-
-The Apple VF lane should cover portable CLI behavior, lifecycle/substrate,
-connect/logs/list, NAT/user/isolated/publish networking, mediation and generic
-virtio-vsock behavior, supervision, quarantine cleanup, results, artifacts,
-attached disks, and text/JSON output. Bridged mode is entitlement-gated:
-open-source ad-hoc builds should fail closed with the
-`com.apple.vm.networking` restriction named unless the supervisor is signed
-with Apple's restricted entitlement.
-
-Keep one-off run logs and investigation notes out of `docs/`; update an
-external tracker with run evidence instead.

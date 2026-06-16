@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-e2e-coverage-matrix.XXXXXX")"
@@ -86,51 +87,68 @@ for row in matrix_rows:
             raise SystemExit(f"matrix feature {row['feature']} references unknown scenario {scenario}")
 
 required_features = {
-    "help/version": ["help", "version"],
-    "init": ["init"],
-    "contract": ["contract"],
-    "profiles": ["profiles"],
-    "host/doctor": ["host", "doctor"],
-    "kernel install/verify": ["kernel install", "kernel verify"],
-    "rootfs build": ["rootfs build"],
-    "run/create/start": ["run", "create", "start"],
-    "status/list": ["status", "list"],
-    "result/logs/artifact": ["result", "logs", "artifact"],
-    "events/stats": ["events", "stats"],
-    "connect": ["connect"],
-    "exec": ["exec"],
-    "halt/quarantine/stop/kill/delete": ["halt", "quarantine", "stop", "kill", "delete"],
-    "clone/cp": ["clone", "cp"],
-    "apply": ["apply"],
-    "network status/modes/publish": ["network"],
-    "network create/list/delete named": ["network"],
-    "volume create/list/status/delete": ["volume"],
-    "commit/image": ["commit", "image"],
-    "registry auth": [],
-    "secrets": ["secret check"],
-    "health": [],
-    "supervise": ["supervise"],
-    "snapshot/pause/resume": ["snapshot", "pause", "resume"],
-    "model": ["model"],
-    "perf": ["perf"],
-    # serve mcp is intentionally not advertised in top-level help (see
-    # docs/cli/serve.md): it is an MCP client launch entry point, not an
-    # interactive command. The mcp-stdio/mcp-lifecycle scenarios cover it.
-    "serve mcp": [],
-    "serve mcp lifecycle": [],
-    "AX/text output": [],
+    "help/version",
+    "init",
+    "contract",
+    "profiles",
+    "host/doctor",
+    "kernel install/verify",
+    "rootfs build",
+    "run/create/start",
+    "status/list",
+    "result/logs/artifact",
+    "events/stats",
+    "connect",
+    "exec",
+    "halt/quarantine/stop/kill/delete",
+    "clone/cp",
+    "apply",
+    "network status/modes/publish",
+    "network create/list/delete named",
+    "volume create/list/status/delete",
+    "commit/image",
+    "registry auth",
+    "secrets",
+    "health",
+    "supervise",
+    "snapshot/pause/resume",
+    "model",
+    "perf",
+    "serve mcp",
+    "serve mcp lifecycle",
+    "AX/text output",
+}
+
+compact_help_commands = {
+    "run",
+    "create",
+    "start",
+    "exec",
+    "connect",
+    "status",
+    "list",
+    "ps",
+    "logs",
+    "halt",
+    "delete",
+    "doctor",
+    "image",
+    "volume",
+    "network",
+    "model",
+    "artifact",
+    "secret check",
 }
 
 matrix_features = {row["feature"] for row in matrix_rows}
-missing_rows = sorted(set(required_features) - matrix_features)
+missing_rows = sorted(required_features - matrix_features)
 if missing_rows:
     raise SystemExit(f"matrix missing feature rows: {missing_rows}")
 
-for feature, commands in required_features.items():
-    for command in commands:
-        pattern = r"(^|\n)\s+" + re.escape(command) + r"(\s|$)"
-        if not re.search(pattern, help_text):
-            raise SystemExit(f"CLI help no longer exposes {command!r}; update matrix expectation")
+for command in sorted(compact_help_commands):
+    pattern = r"(^|\n)\s+" + re.escape(command) + r"(\s|,|$)"
+    if not re.search(pattern, help_text):
+        raise SystemExit(f"CLI compact help no longer exposes {command!r}; update matrix expectation")
 
 scenario_classes = {}
 for line in list_text.splitlines()[1:]:

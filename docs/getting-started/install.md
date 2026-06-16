@@ -4,7 +4,7 @@ description: Install microagent with Homebrew or build it from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-16_
 
 Install the `microagent` CLI, then verify the host can boot microVMs with
 `microagent doctor`. Homebrew is the fast path on Linux and macOS; build from
@@ -100,7 +100,7 @@ namespaces for `pasta`. The final `microagent doctor` run reports those gaps
 with concrete remediation. For packaging or staged installs, `CHECK=0` skips
 that final check and `ARCH=<arch>` selects the guest architecture.
 
-## Developer build
+## Checkout-local build
 
 For a local build that stays inside the checkout:
 
@@ -111,26 +111,27 @@ make dev
 .build/dev/microagent version
 ```
 
-`make dev` writes a self-contained development build under `.build/dev/`, then
-runs `.build/dev/microagent doctor` so missing host prerequisites are visible.
+`make dev` writes a self-contained checkout-local build under `.build/dev/`,
+then runs `.build/dev/microagent doctor` so missing host prerequisites are
+visible.
 If the host is not ready and the command is running in an interactive
 terminal, it offers to run `make install` in quiet bootstrap mode, reusing the
 dev-linked Host VMM when one is present. In CI or other non-interactive
 shells, it prints that command and exits with the doctor failure.
 
-The CLI reports a development version based on the current release line, such
-as `0.8.0-8780315` or `0.8.0-8780315-dirty`, so it is obvious you are not
-running the latest stable Homebrew build. The script derives the `0.8.0`
+The CLI reports a source version based on the current release line, such as
+`0.8.0-8780315` or `0.8.0-8780315-dirty`, so it is obvious you are not running
+the latest stable Homebrew build. The build derives the `0.8.0`
 prefix from the latest stable tag, ignoring release-candidate and other
 prerelease tags, then adds the short SHA. It also places the host supervisor
 and Linux guest-init companion next to the CLI so the resolver can find them.
-When an installed Firecracker VMM is available, the dev build links it under
+When an installed Firecracker VMM is available, `make dev` links it under
 `.build/libexec/firecracker` so the checkout-local CLI can resolve it the same
 way as a packaged install.
 
-The script prints the absolute CLI path and a shell `PATH` export you can use
+The build prints the absolute CLI path and a shell `PATH` export you can use
 for interactive development. MCP clients do not inherit changes made inside
-the build script, so configure them either with that absolute CLI path or
+the build command, so configure them either with that absolute CLI path or
 restart the client from a shell where `.build/dev` is already on `PATH`.
 
 If you build by hand instead, set the CLI version explicitly:

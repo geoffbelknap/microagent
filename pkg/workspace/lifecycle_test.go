@@ -581,6 +581,16 @@ func TestApplySpecParsesModelRef(t *testing.T) {
 name: demo
 image: docker.io/library/ubuntu:24.04
 model: Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf
+modelRunner:
+  backend: vllm
+  gpu: on
+  backendModel: Qwen/Qwen2.5-0.5B-Instruct
+  servedModel: local-chat
+  args: ["--max-model-len", "2048"]
+modelMediation:
+  mode: policy
+  policyFile: model-policy.json
+  policyTimeout: 250ms
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -590,6 +600,13 @@ model: Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf
 	}
 	if opts.Model != "Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf" {
 		t.Fatalf("spec model not applied: %q", opts.Model)
+	}
+	if opts.ModelRunner.Backend != "vllm" || opts.ModelRunner.BackendModel != "Qwen/Qwen2.5-0.5B-Instruct" || opts.ModelRunner.ServedModel != "local-chat" {
+		t.Fatalf("spec model runner not applied: %+v", opts.ModelRunner)
+	}
+	wantPolicy := filepath.Join(filepath.Dir(specPath), "model-policy.json")
+	if opts.ModelMediation.Mode != "policy" || opts.ModelMediation.PolicyFile != wantPolicy || opts.ModelMediation.PolicyTimeout != "250ms" {
+		t.Fatalf("spec model mediation not applied: %+v", opts.ModelMediation)
 	}
 }
 

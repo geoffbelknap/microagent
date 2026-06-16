@@ -524,7 +524,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 	}
 	if detached && needsPortForwarder(req.Config) {
-		pid, err := startPortForwarderProcess(opts)
+		pid, err := startReadyPortForwarderProcessWithManagementPortRetry(ctx, opts, runtimeReq.Config, func() error {
+			return writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, vsockListenerPID, networkDevices, firewallRules, "")
+		})
 		if err != nil {
 			if vsockListenerPID != 0 {
 				_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
@@ -1007,7 +1009,9 @@ func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, erro
 		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 	}
 	if needsPortForwarder(req.Config) {
-		pid, err := startPortForwarderProcess(opts)
+		pid, err := startReadyPortForwarderProcessWithManagementPortRetry(context.Background(), opts, runtimeReq.Config, func() error {
+			return writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, "")
+		})
 		if err != nil {
 			_ = writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, err.Error())
 			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
@@ -1017,6 +1021,7 @@ func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, erro
 			_ = signalProcessGroup(pid, syscall.SIGTERM)
 			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 		}
+		state.Config = *runtimeReq.Config
 	}
 	return responseFromRuntimeState(opts, state), nil
 }
@@ -2006,7 +2011,7 @@ func startPortForwarderProcess(opts Options) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	logPath := filepath.Join(opts.StateDir, opts.Name, "port-forward.log")
+	logPath := portForwarderLogPath(opts)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, err
 	}
@@ -2026,6 +2031,163 @@ func startPortForwarderProcess(opts Options) (int, error) {
 	_ = cmd.Process.Release()
 	_ = logFile.Close()
 	return pid, nil
+}
+
+func portForwarderLogPath(opts Options) string {
+	return filepath.Join(opts.StateDir, opts.Name, "port-forward.log")
+}
+
+func startReadyPortForwarderProcess(ctx context.Context, opts Options, config vmkit.Config) (int, error) {
+	pid, err := startPortForwarderProcess(opts)
+	if err != nil {
+		return 0, err
+	}
+	if err := waitForPortForwarderReady(ctx, pid, config, 5*time.Second); err != nil {
+		terminateAuxProcess(pid)
+		return 0, fmt.Errorf("start port forwarder: %w; see %s", err, portForwarderLogPath(opts))
+	}
+	return pid, nil
+}
+
+func startReadyPortForwarderProcessWithManagementPortRetry(ctx context.Context, opts Options, config *vmkit.Config, persistRuntimeConfig func() error) (int, error) {
+	if config == nil {
+		return 0, fmt.Errorf("start port forwarder: missing runtime config")
+	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		pid, err := startReadyPortForwarderProcess(ctx, opts, *config)
+		if err == nil {
+			return pid, nil
+		}
+		lastErr = err
+		if attempt == 2 || !moveManagementHostPorts(config) {
+			break
+		}
+		if persistRuntimeConfig != nil {
+			if err := persistRuntimeConfig(); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return 0, lastErr
+}
+
+func moveManagementHostPorts(config *vmkit.Config) bool {
+	if config == nil {
+		return false
+	}
+	excluded := map[uint16]bool{}
+	if config.ShellPort != 0 {
+		excluded[config.ShellPort] = true
+	}
+	if config.ExecPort != 0 {
+		excluded[config.ExecPort] = true
+	}
+	changed := false
+	if config.ShellPort != 0 {
+		if port, ok := replacementHostPort(excluded); ok {
+			if config.GuestShellPort == 0 {
+				config.GuestShellPort = config.ShellPort
+			}
+			config.ShellPort = port
+			excluded[port] = true
+			changed = true
+		}
+	}
+	if config.ExecPort != 0 {
+		if port, ok := replacementHostPort(excluded); ok {
+			if config.GuestExecPort == 0 {
+				config.GuestExecPort = config.ExecPort
+			}
+			config.ExecPort = port
+			excluded[port] = true
+			changed = true
+		}
+	}
+	return changed
+}
+
+func replacementHostPort(excluded map[uint16]bool) (uint16, bool) {
+	for i := 0; i < 20; i++ {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return 0, false
+		}
+		port := uint16(listener.Addr().(*net.TCPAddr).Port)
+		_ = listener.Close()
+		if port != 0 && !excluded[port] {
+			return port, true
+		}
+	}
+	return 0, false
+}
+
+func waitForPortForwarderReady(ctx context.Context, pid int, config vmkit.Config, timeout time.Duration) error {
+	forwards := portForwarderForwards(config)
+	if len(forwards) == 0 {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		active, err := processActive(pid)
+		if err != nil {
+			return fmt.Errorf("inspect port forwarder process %d: %w", pid, err)
+		}
+		if !active {
+			return fmt.Errorf("port forwarder process %d exited before listeners became ready", pid)
+		}
+		ready := true
+		for _, forward := range forwards {
+			if forward.Protocol != "" && forward.Protocol != "tcp" {
+				continue
+			}
+			target := portForwardDialTarget(forward)
+			conn, err := net.DialTimeout("tcp", target, 50*time.Millisecond)
+			if err != nil {
+				ready = false
+				lastErr = fmt.Errorf("dial %s: %w", target, err)
+				break
+			}
+			_ = conn.Close()
+		}
+		if ready {
+			active, err := processActive(pid)
+			if err != nil {
+				return fmt.Errorf("inspect port forwarder process %d: %w", pid, err)
+			}
+			if !active {
+				return fmt.Errorf("port forwarder process %d exited after listeners became reachable", pid)
+			}
+			return nil
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("listeners not ready after %s: %w", timeout, lastErr)
+			}
+			return fmt.Errorf("listeners not ready after %s", timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+func portForwardDialTarget(forward vmkit.PortForward) string {
+	host := strings.TrimSpace(forward.Host)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil && ip.IsUnspecified() {
+		if ip.To4() != nil {
+			host = "127.0.0.1"
+		} else {
+			host = "::1"
+		}
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(forward.HostPort)))
 }
 
 func startVsockListenerProcess(opts Options) (int, error) {
@@ -2634,6 +2796,13 @@ func execReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, b
 			Detail:     "structured exec port is not configured",
 		}, true
 	}
+	if detail, ok := inactivePortForwarderDetail(state); ok {
+		return vmkit.ReadinessSignal{
+			Ready:      false,
+			ObservedAt: &observedAt,
+			Detail:     detail,
+		}, true
+	}
 	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(state.Config.ExecPort)))
 	req := execprotocol.NewExecRequest([]string{"true"})
 	req.TimeoutMS = 2000
@@ -2685,6 +2854,13 @@ func shellReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, 
 	if state.Config.ShellPort != 0 {
 		target := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(state.Config.ShellPort)))
 		observedAt := time.Now().UTC()
+		if detail, ok := inactivePortForwarderDetail(state); ok {
+			return vmkit.ReadinessSignal{
+				Ready:      false,
+				ObservedAt: &observedAt,
+				Detail:     detail,
+			}, true
+		}
 		start := time.Now()
 		conn, err := net.DialTimeout("tcp", target, 150*time.Millisecond)
 		elapsed := time.Since(start)
@@ -2707,6 +2883,17 @@ func shellReadinessFromRuntimeState(state runtimeState) (vmkit.ReadinessSignal, 
 		ObservedAt: fileModTime(state.SerialInputPath),
 		Detail:     "console input is available",
 	}, true
+}
+
+func inactivePortForwarderDetail(state runtimeState) (string, bool) {
+	if state.PortForwardPID == 0 {
+		return "", false
+	}
+	active, err := processActive(state.PortForwardPID)
+	if err != nil || active {
+		return "", false
+	}
+	return fmt.Sprintf("port forwarder process %d is not running", state.PortForwardPID), true
 }
 
 func resultPathFromState(opts Options, state runtimeState) string {

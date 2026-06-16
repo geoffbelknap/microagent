@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-16_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -245,6 +245,17 @@ The complete set:
 | `--mediation-optional` | Allow startup when mediation is unavailable |
 | `--model <ref>` | Pair the workspace with a locally served HuggingFace GGUF model; the ref is persisted so every `start` re-pairs, and `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are injected into the guest. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
+| `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom`; persisted with the workspace |
+| `--model-gpu <mode>` | Model runner GPU intent: `off`, `on`, or `auto`; persisted with the workspace |
+| `--model-runner-model <id>` | Backend model id for runners such as vLLM; persisted with the workspace |
+| `--model-runner-served-model <name>` | OpenAI-compatible served model name for runners such as vLLM |
+| `--model-runner-command <template>` | Custom OpenAI-compatible host runner command template; persisted with the workspace |
+| `--model-runner-arg <arg>` | Extra model runner argument. Repeatable; persisted with the workspace |
+| `--model-runner-env KEY=VALUE` | Extra model runner environment for this invocation. Repeatable; values are not persisted |
+| `--model-mediation <mode>` | Model mediation mode: `off`, `local-allow`, or `policy`; persisted with the workspace |
+| `--model-policy-file <path>` | Structured model mediation policy file for `--model-mediation policy` |
+| `--model-policy-url <url>` | External model mediation policy endpoint for `--model-mediation policy` |
+| `--model-policy-timeout <duration>` | Model mediation policy timeout, such as `250ms` or `2s` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |

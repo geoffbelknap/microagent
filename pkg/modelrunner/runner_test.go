@@ -2,7 +2,11 @@ package modelrunner
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -56,6 +60,21 @@ func TestEnsureSpawnsReusesAndReaps(t *testing.T) {
 		t.Fatalf("expected reuse of PID %d, got %d", r1.PID, r2.PID)
 	}
 
+	o3 := base
+	o3.Holder = "vm3"
+	o3.RunnerConfig = RunnerConfig{Args: []string{"--gpu"}}
+	r3, err := Ensure(context.Background(), o3)
+	if err != nil {
+		t.Fatalf("Ensure vm3: %v", err)
+	}
+	defer stopProcess(r3.PID)
+	if r3.PID == r1.PID {
+		t.Fatal("runner with different config reused the existing process")
+	}
+	if r3.RunnerConfigDigest == "" || !reflect.DeepEqual(r3.RunnerArgs, []string{"--gpu"}) {
+		t.Fatalf("runner config not recorded: %+v", r3)
+	}
+
 	// Releasing one holder keeps it alive.
 	if err := Release(dir, base.ModelRef, "vm1"); err != nil {
 		t.Fatalf("Release vm1: %v", err)
@@ -75,9 +94,53 @@ func TestEnsureSpawnsReusesAndReaps(t *testing.T) {
 		t.Fatal("runner not reaped after last release")
 		_ = stopProcess(r1.PID)
 	}
+	_ = Release(dir, base.ModelRef, "vm3")
 	list, _ := List(dir)
 	if len(list) != 0 {
 		t.Fatalf("expected empty registry, got %+v", list)
+	}
+}
+
+func TestEnsureRecordsRunnerEnvKeysOnly(t *testing.T) {
+	withHealthyProbe(t)
+	dir := t.TempDir()
+	cfg, err := NewRunnerConfig(nil, []string{"RUNNER_SECRET=super-secret", "CUDA_VISIBLE_DEVICES=0"})
+	if err != nil {
+		t.Fatalf("NewRunnerConfig: %v", err)
+	}
+	o := EnsureOptions{
+		StateDir:     dir,
+		ModelRef:     "hf.co/o/r@main/m.gguf",
+		ModelPath:    "/tmp/m.gguf",
+		Engine:       fakeEngine{},
+		Holder:       "vm1",
+		ReadyTimeout: 3 * time.Second,
+		RunnerConfig: cfg,
+	}
+	rec, err := Ensure(context.Background(), o)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	defer func() { _, _ = Stop(dir, o.ModelRef) }()
+	wantKeys := []string{"CUDA_VISIBLE_DEVICES", "RUNNER_SECRET"}
+	if !reflect.DeepEqual(rec.RunnerEnvKeys, wantKeys) {
+		t.Fatalf("runner env keys = %#v, want %#v", rec.RunnerEnvKeys, wantKeys)
+	}
+	encoded, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal record: %v", err)
+	}
+	indexData, err := os.ReadFile(IndexPath(dir))
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	for _, data := range [][]byte{encoded, indexData} {
+		if strings.Contains(string(data), "super-secret") {
+			t.Fatalf("runner record leaked env value: %s", data)
+		}
+		if !strings.Contains(string(data), "RUNNER_SECRET") {
+			t.Fatalf("runner record omitted env key: %s", data)
+		}
 	}
 }
 

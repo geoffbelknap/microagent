@@ -16,12 +16,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
@@ -154,6 +156,12 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"secret", []string{"app", "--secret", "API=env:TOKEN"}, "-secret", "API=env:TOKEN"},
 		{"secrets-env-file", []string{"app", "--image", "img", "--secrets-env-file", "/tmp/app.env"}, "-secrets-env-file", "/tmp/app.env"},
 		{"secret-on-demand", []string{"app", "--secret-on-demand", "DB=env:DB"}, "-secret-on-demand", "DB=env:DB"},
+		{"runner-command", []string{"local/smoke/smoke.gguf", "--runner-command", "runner serve {model} --listen {addr}"}, "-runner-command", "runner serve {model} --listen {addr}"},
+		{"runner-arg", []string{"local/smoke/smoke.gguf", "--runner-arg", "-ngl"}, "-runner-arg", "-ngl"},
+		{"runner-env", []string{"local/smoke/smoke.gguf", "--runner-env", "CUDA_VISIBLE_DEVICES=0"}, "-runner-env", "CUDA_VISIBLE_DEVICES=0"},
+		{"model-runner-command", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-command", "runner serve {model} --listen {addr}"}, "-model-runner-command", "runner serve {model} --listen {addr}"},
+		{"model-runner-arg", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-arg", "-ngl"}, "-model-runner-arg", "-ngl"},
+		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)
@@ -1961,6 +1969,38 @@ func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
 	}
 }
 
+func TestParseWorkspaceOptionsModelRunnerAndMediationFlags(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"demo",
+		"--model", "org/repo/model.gguf",
+		"--model-runner", "vllm",
+		"--model-gpu", "auto",
+		"--model-runner-model", "Qwen/Qwen2.5-0.5B-Instruct",
+		"--model-runner-served-model", "local-chat",
+		"--model-runner-arg", "--max-model-len",
+		"--model-runner-arg", "2048",
+		"--model-runner-env", "CUDA_VISIBLE_DEVICES=0",
+		"--model-mediation", "policy",
+		"--model-policy-file", "/tmp/model-policy.json",
+		"--model-policy-timeout", "250ms",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.ModelRunner.Backend != "vllm" || opts.ModelRunner.GPU != "auto" || opts.ModelRunner.BackendModel != "Qwen/Qwen2.5-0.5B-Instruct" || opts.ModelRunner.ServedModel != "local-chat" {
+		t.Fatalf("model runner = %+v", opts.ModelRunner)
+	}
+	if !reflect.DeepEqual(opts.ModelRunner.Args, []string{"--max-model-len", "2048"}) {
+		t.Fatalf("model runner args = %#v", opts.ModelRunner.Args)
+	}
+	if !reflect.DeepEqual(opts.ModelRunner.Env, []string{"CUDA_VISIBLE_DEVICES=0"}) {
+		t.Fatalf("model runner env = %#v", opts.ModelRunner.Env)
+	}
+	if opts.ModelMediation.Mode != "policy" || opts.ModelMediation.PolicyFile != "/tmp/model-policy.json" || opts.ModelMediation.PolicyTimeout != "250ms" {
+		t.Fatalf("model mediation = %+v", opts.ModelMediation)
+	}
+}
+
 func TestEnsureModelPairingNoModelIsNoOp(t *testing.T) {
 	opts := workspaceOptions{Name: "ws", StateDir: t.TempDir()}
 	release, err := ensureModelPairing(context.Background(), &opts, "", "")
@@ -1985,8 +2025,16 @@ func TestEnsureModelPairingRejectsInvalidRef(t *testing.T) {
 
 func TestPendingModelRelease(t *testing.T) {
 	dir := t.TempDir()
+	var releasedMediators []string
+	prevReleaseMediator := releaseHostWorkerMediator
+	releaseHostWorkerMediator = func(stateDir, workspaceID, capability string) error {
+		releasedMediators = append(releasedMediators, stateDir+"|"+workspaceID+"|"+capability)
+		return nil
+	}
+	t.Cleanup(func() { releaseHostWorkerMediator = prevReleaseMediator })
+
 	// Missing manifest must yield a silent no-op.
-	pendingModelRelease(dir, "ghost")()
+	pendingModelRelease(dir, "ghost", vmkit.BackendFirecracker)()
 
 	opts := workspace.DefaultOptions()
 	opts.Name = "ws"
@@ -2004,9 +2052,19 @@ func TestPendingModelRelease(t *testing.T) {
 	if err := modelrunner.WriteIndex(dir, idx); err != nil {
 		t.Fatalf("write index: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, "ws"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendWorkspaceEvent(filepath.Join(dir, "ws", "events.json"), workspaceEventFile{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "ws", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		State:      vmkit.StateRunning,
+		ObservedAt: "2026-06-15T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// The ref is captured at call time: removing the manifest afterwards (as
 	// delete does) must not stop the release.
-	release := pendingModelRelease(dir, "ws")
+	release := pendingModelRelease(dir, "ws", vmkit.BackendFirecracker)
 	if err := os.RemoveAll(filepath.Join(dir, "workspaces", "ws")); err != nil {
 		t.Fatal(err)
 	}
@@ -2018,6 +2076,82 @@ func TestPendingModelRelease(t *testing.T) {
 	if len(after.Runners) != 0 {
 		t.Fatalf("runner not released: %+v", after.Runners)
 	}
+	if !containsTestString(releasedMediators, dir+"|ws|"+hostworker.DefaultCapability) {
+		t.Fatalf("mediator release not called: %#v", releasedMediators)
+	}
+	events, err := workspace.ReadEvents(dir, "ws")
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 2 || !strings.Contains(events[1].Detail, "model_worker=released") || events[1].State != vmkit.StateRunning {
+		t.Fatalf("events = %+v", events)
+	}
+}
+
+func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := appendModelWorkerEventIfWorkspaceExists(dir, "missing", vmkit.BackendFirecracker, vmkit.StateStarting, "model_worker=attached"); err != nil {
+		t.Fatalf("missing workspace event: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing")); !os.IsNotExist(err) {
+		t.Fatalf("missing workspace event created state: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "ws"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runner := modelrunner.Record{
+		ModelRef:           "hf.co/org/repo@main/m.gguf",
+		Engine:             "runner-x",
+		PID:                1234,
+		RunnerConfigDigest: "digest123",
+	}
+	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendFirecracker}, runner, "http://127.0.0.1:11434/v1", nil); err != nil {
+		t.Fatalf("append attached event: %v", err)
+	}
+	events, err := workspace.ReadEvents(dir, "ws")
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %+v", events)
+	}
+	event := events[0]
+	for _, want := range []string{"model_worker=attached", "model_ref=hf.co/org/repo@main/m.gguf", "engine=runner-x", "runner_config_digest=digest123", "model_url=http://127.0.0.1:11434/v1", "mediation=direct"} {
+		if !strings.Contains(event.Detail, want) {
+			t.Fatalf("event detail %q missing %q", event.Detail, want)
+		}
+	}
+	if event.State != vmkit.StateStarting || event.Identity.RuntimeID != "ws" || event.Identity.Backend != vmkit.BackendFirecracker {
+		t.Fatalf("event = %+v", event)
+	}
+	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendFirecracker}, runner, "http://127.0.0.1:11434/v1", &hostworker.ProcessRecord{
+		Mode:         hostworker.ModeLocalAllow,
+		PID:          5678,
+		Port:         12345,
+		AuditLogPath: "/tmp/mediator.jsonl",
+	}); err != nil {
+		t.Fatalf("append mediated attached event: %v", err)
+	}
+	events, err = workspace.ReadEvents(dir, "ws")
+	if err != nil {
+		t.Fatalf("read mediated events: %v", err)
+	}
+	mediatedDetail := events[len(events)-1].Detail
+	for _, want := range []string{"mediation=host-worker", "mediation_mode=local-allow", "mediator_pid=5678", "mediator_port=12345", "mediator_audit_log=/tmp/mediator.jsonl"} {
+		if !strings.Contains(mediatedDetail, want) {
+			t.Fatalf("mediated event detail %q missing %q", mediatedDetail, want)
+		}
+	}
+}
+
+func containsTestString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestParseWorkspaceOptionsForCreateDefaultsImageAndPositionalName(t *testing.T) {
@@ -4597,8 +4731,9 @@ func TestWriteCreateResultSuppressesSuccessfulSetupLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := workspaceResult{
-		Workspace: "homebridge",
-		Network:   networkSpec{Mode: "user"},
+		Workspace:  "homebridge",
+		FinalState: string(vmkit.StateStopped),
+		Network:    networkSpec{Mode: "user"},
 		Result: &guestResult{
 			ExitCode: 0,
 			Stdout:   "Homebridge Installation Complete!\n",
@@ -4619,7 +4754,7 @@ func TestWriteCreateResultSuppressesSuccessfulSetupLogs(t *testing.T) {
 	if strings.Contains(text, "Homebridge Installation Complete") || strings.Contains(text, "debconf") || strings.Contains(text, "Exit code") {
 		t.Fatalf("create output included setup logs: %q", text)
 	}
-	if !strings.Contains(text, "Workspace: homebridge") || !strings.Contains(text, "Network: user") {
+	if !strings.Contains(text, "Created workspace: homebridge") || !strings.Contains(text, "State: ready (stopped)") || !strings.Contains(text, "Network: user") {
 		t.Fatalf("create output missing summary: %q", text)
 	}
 }
@@ -5503,6 +5638,279 @@ func TestWindowsHyperVNamedNetworkSmoke(t *testing.T) {
 	}
 }
 
+func TestResolveModelRunnerCustomCommandAllowsEnvMetadata(t *testing.T) {
+	t.Setenv(modelrunner.EnvModelRunnerName, "runner-x")
+	t.Setenv(modelrunner.EnvModelRunnerHealthPath, "/ready")
+
+	engine, config, err := resolveModelRunner(modelRunnerOverrides{
+		CommandRaw: "runner serve {model} --listen {addr}",
+		Args:       []string{"--gpu", "auto"},
+	})
+	if err != nil {
+		t.Fatalf("resolveModelRunner: %v", err)
+	}
+	if config.Name != "runner-x" || config.HealthPath != "/ready" {
+		t.Fatalf("config metadata = %q %q", config.Name, config.HealthPath)
+	}
+	got := engine.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"runner", "serve", "/models/m.gguf", "--listen", "127.0.0.1:9999", "--gpu", "auto"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+	if engine.Name() != "runner-x" || engine.HealthPath() != "/ready" {
+		t.Fatalf("engine metadata = %q %q", engine.Name(), engine.HealthPath())
+	}
+}
+
+func TestResolveModelRunnerVLLMBackend(t *testing.T) {
+	python := filepath.Join(t.TempDir(), "python")
+	if err := os.WriteFile(python, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MICROAGENT_VLLM_PYTHON", python)
+
+	engine, config, err := resolveModelRunner(modelRunnerOverrides{
+		Backend:      "vllm",
+		BackendModel: "Qwen/Qwen2.5-0.5B-Instruct",
+		ServedModel:  "local-chat",
+		Args:         []string{"--max-model-len", "2048"},
+	})
+	if err != nil {
+		t.Fatalf("resolveModelRunner: %v", err)
+	}
+	if config.Backend != modelrunner.BackendVLLM || config.GPU != modelrunner.GPUOn {
+		t.Fatalf("config backend/gpu = %q/%q", config.Backend, config.GPU)
+	}
+	got := engine.Argv("/ignored/local.gguf", "127.0.0.1", 9999)
+	want := []string{python, "-m", "vllm.entrypoints.openai.api_server", "--model", "Qwen/Qwen2.5-0.5B-Instruct", "--served-model-name", "local-chat", "--host", "127.0.0.1", "--port", "9999", "--max-model-len", "2048"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestModelMediationConfigFromEnv(t *testing.T) {
+	t.Run("off by default", func(t *testing.T) {
+		cfg, err := modelMediationConfigFromEnv()
+		if err != nil {
+			t.Fatalf("modelMediationConfigFromEnv: %v", err)
+		}
+		if cfg.Enabled {
+			t.Fatalf("cfg = %+v, want disabled", cfg)
+		}
+	})
+	t.Run("local allow", func(t *testing.T) {
+		t.Setenv(envModelMediation, "local-allow")
+		t.Setenv(envModelPolicyTimeout, "250ms")
+		cfg, err := modelMediationConfigFromEnv()
+		if err != nil {
+			t.Fatalf("modelMediationConfigFromEnv: %v", err)
+		}
+		if !cfg.Enabled || cfg.Mode != hostworker.ModeLocalAllow || cfg.PolicyTimeout != 250*time.Millisecond {
+			t.Fatalf("cfg = %+v", cfg)
+		}
+	})
+	t.Run("policy", func(t *testing.T) {
+		t.Setenv(envModelMediation, "policy")
+		t.Setenv(envModelPolicyURL, "http://127.0.0.1:8000/decide")
+		t.Setenv(envModelPolicyTimeout, "2")
+		cfg, err := modelMediationConfigFromEnv()
+		if err != nil {
+			t.Fatalf("modelMediationConfigFromEnv: %v", err)
+		}
+		if !cfg.Enabled || cfg.Mode != hostworker.ModePolicy || cfg.PolicyURL != "http://127.0.0.1:8000/decide" || cfg.PolicyTimeout != 2*time.Second {
+			t.Fatalf("cfg = %+v", cfg)
+		}
+	})
+	t.Run("policy file", func(t *testing.T) {
+		t.Setenv(envModelMediation, "policy")
+		t.Setenv(envModelPolicyFile, "/tmp/model-policy.json")
+		cfg, err := modelMediationConfigFromEnv()
+		if err != nil {
+			t.Fatalf("modelMediationConfigFromEnv: %v", err)
+		}
+		if !cfg.Enabled || cfg.Mode != hostworker.ModePolicy || cfg.PolicyFile != "/tmp/model-policy.json" {
+			t.Fatalf("cfg = %+v", cfg)
+		}
+	})
+	t.Run("policy requires source", func(t *testing.T) {
+		t.Setenv(envModelMediation, "policy")
+		_, err := modelMediationConfigFromEnv()
+		if err == nil || !strings.Contains(err.Error(), envModelPolicyURL) || !strings.Contains(err.Error(), envModelPolicyFile) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("policy rejects multiple sources", func(t *testing.T) {
+		t.Setenv(envModelMediation, "policy")
+		t.Setenv(envModelPolicyURL, "http://127.0.0.1:8000/decide")
+		t.Setenv(envModelPolicyFile, "/tmp/model-policy.json")
+		_, err := modelMediationConfigFromEnv()
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("rejects unsupported mode", func(t *testing.T) {
+		t.Setenv(envModelMediation, "broker")
+		_, err := modelMediationConfigFromEnv()
+		if err == nil || !strings.Contains(err.Error(), envModelMediation) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestModelMediationConfigFromSpec(t *testing.T) {
+	t.Setenv(envModelMediation, "local-allow")
+	cfg, err := modelMediationConfigFromSpec(workspace.ModelMediationSpec{
+		Mode:          "policy",
+		PolicyFile:    "/tmp/model-policy.json",
+		PolicyTimeout: "250ms",
+	})
+	if err != nil {
+		t.Fatalf("modelMediationConfigFromSpec: %v", err)
+	}
+	if !cfg.Enabled || cfg.Mode != hostworker.ModePolicy || cfg.PolicyFile != "/tmp/model-policy.json" || cfg.PolicyTimeout != 250*time.Millisecond {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+}
+
+func TestModelPolicyValidateAndEvaluate(t *testing.T) {
+	policyPath := writeModelPolicyTestFile(t, `{
+		"schema_version": "microagent.model_policy.v1",
+		"default": "deny",
+		"rules": [
+			{
+				"id": "models",
+				"effect": "allow",
+				"match": {"methods": ["GET"], "paths": ["/v1/models"]}
+			},
+			{
+				"id": "chat",
+				"effect": "allow",
+				"match": {"methods": ["POST"], "paths": ["/v1/chat/completions"], "models": ["tiny"]},
+				"limits": {
+					"max_text_bytes": 16,
+					"max_messages": 2,
+					"max_tokens": 16,
+					"stream": false,
+					"allowed_tool_names": ["shell"]
+				}
+			}
+		]
+	}`)
+
+	validateOut, err := runMainForTest(t, "--json", "model", "policy", "validate", policyPath)
+	if err != nil {
+		t.Fatalf("policy validate: %v\n%s", err, validateOut)
+	}
+	var validation modelPolicyValidationOutput
+	if err := json.Unmarshal(validateOut, &validation); err != nil {
+		t.Fatalf("decode validation output: %v\n%s", err, validateOut)
+	}
+	if !validation.OK || validation.Rules != 2 || validation.SHA256 == "" || validation.Path == "" {
+		t.Fatalf("validation = %+v", validation)
+	}
+
+	allowOut, err := runMainForTest(t,
+		"--json", "model", "policy", "evaluate", policyPath,
+		"--method", "POST",
+		"--path", "/v1/chat/completions",
+		"--model", "tiny",
+		"--max-tokens", "8",
+		"--stream", "false",
+		"--tool", "shell",
+		"--text-bytes", "5",
+		"--messages", "1",
+		"--expect", "allow",
+	)
+	if err != nil {
+		t.Fatalf("policy evaluate allow: %v\n%s", err, allowOut)
+	}
+	var allowEval modelPolicyEvaluationOutput
+	if err := json.Unmarshal(allowOut, &allowEval); err != nil {
+		t.Fatalf("decode allow output: %v\n%s", err, allowOut)
+	}
+	if allowEval.Decision != "allow" || allowEval.RuleID != "chat" || !allowEval.MatchedExpect {
+		t.Fatalf("allow evaluation = %+v", allowEval)
+	}
+
+	denyOut, err := runMainForTest(t,
+		"--json", "model", "policy", "evaluate", policyPath,
+		"--method", "POST",
+		"--path", "/v1/chat/completions",
+		"--model", "tiny",
+		"--max-tokens", "8",
+		"--stream", "false",
+		"--tool", "network",
+		"--text-bytes", "5",
+		"--messages", "1",
+		"--expect", "deny",
+	)
+	if err != nil {
+		t.Fatalf("policy evaluate deny: %v\n%s", err, denyOut)
+	}
+	var denyEval modelPolicyEvaluationOutput
+	if err := json.Unmarshal(denyOut, &denyEval); err != nil {
+		t.Fatalf("decode deny output: %v\n%s", err, denyOut)
+	}
+	if denyEval.Decision != "deny" || denyEval.Reason != "file_policy_limit_tool_name" || !denyEval.MatchedExpect {
+		t.Fatalf("deny evaluation = %+v", denyEval)
+	}
+
+	mismatchOut, err := runMainForTest(t,
+		"--json", "model", "policy", "evaluate", policyPath,
+		"--method", "POST",
+		"--path", "/v1/chat/completions",
+		"--model", "tiny",
+		"--max-tokens", "32",
+		"--stream", "false",
+		"--expect", "allow",
+	)
+	if err == nil || !strings.Contains(err.Error(), "did not match expected") {
+		t.Fatalf("expected mismatch error, got err=%v out=%s", err, mismatchOut)
+	}
+	var mismatchEval modelPolicyEvaluationOutput
+	if err := json.Unmarshal(mismatchOut, &mismatchEval); err != nil {
+		t.Fatalf("decode mismatch output: %v\n%s", err, mismatchOut)
+	}
+	if mismatchEval.Decision != "deny" || mismatchEval.MatchedExpect {
+		t.Fatalf("mismatch evaluation = %+v", mismatchEval)
+	}
+}
+
+func TestModelPolicyValidateRejectsInvalidPolicy(t *testing.T) {
+	policyPath := writeModelPolicyTestFile(t, `{"schema_version":"wrong","default":"allow"}`)
+	out, err := runMainForTest(t, "model", "policy", "validate", policyPath)
+	if err == nil || !strings.Contains(err.Error(), "schema_version") {
+		t.Fatalf("expected schema error, got err=%v out=%s", err, out)
+	}
+}
+
+func runMainForTest(t *testing.T, args ...string) ([]byte, error) {
+	t.Helper()
+	stdoutPath := filepath.Join(t.TempDir(), "stdout")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runErr := run(t.Context(), args, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	out, readErr := os.ReadFile(stdoutPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	return out, runErr
+}
+
+func writeModelPolicyTestFile(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "policy.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	return path
+}
+
 // stubEngineSource is a stand-in OpenAI-style model server used by the model
 // bridge smoke: it accepts llama-server's argv shape and serves /health plus
 // /v1/models, so the full `create/start --model` pairing path runs without
@@ -6004,6 +6412,91 @@ func TestRunListCanPrintHumanOutput(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "NAME") || !strings.Contains(string(got), "research") || strings.Contains(string(got), `"workspaces"`) {
 		t.Fatalf("list human output = %s", got)
+	}
+}
+
+func TestRunDispatchesLSAlias(t *testing.T) {
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "research")
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	event := vmkit.Event{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		State:      vmkit.StateStopped,
+		ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "ls.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"ls", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run ls: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "research") {
+		t.Fatalf("ls output = %s", got)
+	}
+}
+
+func TestRunPSFiltersStoppedWorkspaces(t *testing.T) {
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	dir := t.TempDir()
+	writeTestEvent := func(name string, state vmkit.VMState) {
+		t.Helper()
+		eventDir := filepath.Join(dir, name)
+		if err := os.MkdirAll(eventDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		event := vmkit.Event{
+			Identity:   vmkit.Identity{RequestID: "req-" + name, RuntimeID: name, Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+			State:      state,
+			ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
+		}
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTestEvent("live", vmkit.StateRunning)
+	writeTestEvent("parked", vmkit.StateStopped)
+	stdoutPath := filepath.Join(dir, "ps.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runPS([]string{"--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runPS: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "live") || strings.Contains(string(got), "parked") {
+		t.Fatalf("ps output = %s", got)
 	}
 }
 
