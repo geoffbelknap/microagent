@@ -616,6 +616,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	networkMode := fs.String("network", defaultNetworkMode, "Network mode: user, nat, isolated, or bridged")
 	networkInterface := fs.String("network-interface", "", "Host interface for bridged network mode")
+	networkUnsupported := fs.Bool("unsupported", false, "Acknowledge selecting an unsupported, unmediated network mode (bridged)")
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
@@ -628,7 +629,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return vmkit.Request{Command: "host"}, nil
 	case "create":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, publishes)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, *networkUnsupported, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -639,7 +640,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return req, nil
 	case "start":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, publishes)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, *networkUnsupported, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -3794,6 +3795,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: user, nat, isolated, bridged, or named")
 	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
 	fs.StringVar(&opts.Network.Name, "network-name", opts.Network.Name, "Join a user-defined named network by name")
+	fs.BoolVar(&opts.Network.Unsupported, "unsupported", opts.Network.Unsupported, "Acknowledge selecting an unsupported, unmediated network mode (bridged)")
 	mediationMapping := ""
 	fs.StringVar(&mediationMapping, "mediation", "", "Required mediation vsock mapping port=host:port")
 	mediationOptional := false
@@ -6467,7 +6469,7 @@ func stripBracketedPasteMarkers(chunk []byte) []byte {
 	return chunk
 }
 
-func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, networkInterface string, publishes []string) (vmkit.Request, error) {
+func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, networkInterface string, networkUnsupported bool, publishes []string) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
 			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
@@ -6501,7 +6503,7 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 		})
 	}
 	config.VsockListeners = listeners
-	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, Interface: networkInterface, PortForwards: portForwards})
+	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, Interface: networkInterface, Unsupported: networkUnsupported, PortForwards: portForwards})
 	if err := vmkit.ValidateNetworkConfig(network); err != nil {
 		return vmkit.Request{}, err
 	}
@@ -6665,7 +6667,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
 		return true
 	default:
 		return false

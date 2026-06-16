@@ -2,6 +2,7 @@ package vmkit
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -231,6 +232,19 @@ func TestValidateNetworkConfigRejectsInvalidMode(t *testing.T) {
 func TestValidateNetworkConfigAcceptsUserMode(t *testing.T) {
 	if err := ValidateNetworkConfig(NetworkConfig{Mode: "user"}); err != nil {
 		t.Fatalf("ValidateNetworkConfig user: %v", err)
+	}
+}
+
+func TestBridgedRequiresUnsupported(t *testing.T) {
+	err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged"})
+	if err == nil {
+		t.Fatal("ValidateNetworkConfig accepted bridged without unsupported ack")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("ValidateNetworkConfig bridged error = %q, want it to mention unsupported", err)
+	}
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged", Unsupported: true}); err != nil {
+		t.Fatalf("ValidateNetworkConfig bridged with unsupported ack: %v", err)
 	}
 }
 

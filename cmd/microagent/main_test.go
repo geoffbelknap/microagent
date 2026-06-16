@@ -1264,6 +1264,7 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 		"--state-dir", "/tmp/state",
 		"--backend", hostBackend(),
 		"--network", "bridged",
+		"--unsupported",
 		"--network-interface", "en0",
 		"--publish", "127.0.0.1:8080:80/tcp",
 	}))
@@ -1285,6 +1286,33 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 	forward := req.Config.Network.PortForwards[0]
 	if forward.Host != "127.0.0.1" || forward.HostPort != 8080 || forward.GuestPort != 80 || forward.Protocol != "tcp" {
 		t.Fatalf("forward = %#v", forward)
+	}
+}
+
+func TestRequestForCommandBridgedRequiresUnsupported(t *testing.T) {
+	base := []string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--backend", hostBackend(),
+		"--network", "bridged",
+		"--network-interface", "en0",
+	}
+	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs(base))
+	if err == nil {
+		t.Fatal("requestForCommand accepted bridged without --unsupported")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("bridged rejection error = %q, want it to mention unsupported", err)
+	}
+
+	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs(append(base, "--unsupported")))
+	if err != nil {
+		t.Fatalf("requestForCommand bridged with --unsupported: %v", err)
+	}
+	if req.Config.Network == nil || !req.Config.Network.Unsupported {
+		t.Fatalf("network = %#v, want Unsupported true", req.Config.Network)
 	}
 }
 

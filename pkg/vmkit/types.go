@@ -146,6 +146,10 @@ type NetworkConfig struct {
 	// named network resolve each other. Populated by the supervisor at start.
 	Hosts   []string       `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 	Runtime *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
+	// Unsupported acknowledges that the operator knowingly selected an
+	// unsupported, unmediated network mode (currently only "bridged"). It is
+	// set by the CLI --unsupported flag and gates ValidateNetworkConfig.
+	Unsupported bool `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
 }
 
 type PortForward struct {
@@ -480,6 +484,9 @@ func ValidateNetworkConfig(network NetworkConfig) error {
 	case "user", "nat", "isolated", "bridged", "named":
 	default:
 		return fmt.Errorf("network.mode must be user, nat, isolated, bridged, or named")
+	}
+	if mode == "bridged" && !network.Unsupported {
+		return fmt.Errorf("bridged networking is unsupported and unmediated; pass --unsupported to use it anyway")
 	}
 	if mode == "named" && strings.TrimSpace(network.Name) == "" {
 		return fmt.Errorf("network.mode named requires a network name")
