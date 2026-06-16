@@ -29,6 +29,16 @@
 #   MICROAGENT_E2E_MODEL_MEDIATION_PRESSURE_WORKSPACES
 #   MICROAGENT_E2E_MODEL_MEDIATION_PRESSURE_CONCURRENCY
 #   MICROAGENT_E2E_MODEL_MEDIATION_PRESSURE_CASES
+#
+# Outputs:
+#   pressure-decision.txt        compact human read
+#   pressure-decision.tsv        compact row-level comparison
+#   pressure-decision.json       machine-readable decision summary
+#   pressure-profile-summary.tsv raw endpoint p50/p95 summary
+#   pressure-profile-comparison.tsv
+#   pressure-audit-summary.tsv
+#   pressure-gates.tsv
+#   pressure-telemetry-summary.tsv when telemetry is enabled
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -102,6 +112,15 @@ Cases:
   local   local allow mediation
   pf      structured file policy allow
   pa      external policy URL allow
+
+Outputs:
+  pressure-decision.txt
+  pressure-decision.tsv
+  pressure-decision.json
+  pressure-profile-summary.tsv
+  pressure-profile-comparison.tsv
+  pressure-audit-summary.tsv
+  pressure-gates.tsv
 EOF
 }
 
@@ -1046,4 +1065,9 @@ if [ -s "$OUT_DIR/pressure-telemetry-summary.tsv" ]; then
 fi
 echo "microagent-e2e-model-mediation-pressure: pressure gates"
 cat "$OUT_DIR/pressure-gates.tsv"
+"$ROOT/scripts/dev/microagent-model-mediation-pressure-summary.py" "$OUT_DIR" \
+  --out-json "$OUT_DIR/pressure-decision.json" \
+  --out-tsv "$OUT_DIR/pressure-decision.tsv" >"$OUT_DIR/pressure-decision.txt"
+echo "microagent-e2e-model-mediation-pressure: pressure decision"
+cat "$OUT_DIR/pressure-decision.txt"
 echo "PASS microagent-e2e-model-mediation-pressure: pressure matrix passed with $LABEL"

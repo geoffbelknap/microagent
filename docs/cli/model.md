@@ -297,7 +297,11 @@ compares direct bridge traffic with local mediation, file-policy allow, and
 external-policy allow across configurable guest workspaces and per-workspace
 concurrency. It writes `pressure-profiles.tsv`,
 `pressure-profile-comparison.tsv`, `pressure-audit-summary.tsv`, optional
-telemetry summaries, and `pressure-gates.tsv`. Pressure gates default to
+telemetry summaries, `pressure-gates.tsv`, and compact
+`pressure-decision.txt` / `pressure-decision.tsv` / `pressure-decision.json`
+reads. Start with `pressure-decision.txt` for the run status, worst positive
+direct-vs-mediated deltas, policy decision p95, and telemetry read; use the raw
+TSVs when you need endpoint- or audit-level detail. Pressure gates default to
 `warn`, because this path is intended to establish realistic concurrency
 budgets before making them release-blocking. Common knobs are
 `*_PRESSURE_WORKSPACES`, `*_PRESSURE_CONCURRENCY`, `*_PRESSURE_CASES`,
