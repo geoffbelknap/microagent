@@ -1202,7 +1202,7 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 	network.Mode = mode
 	egressPID := 0
 	if config != nil && config.EgressMode == "strict" {
-		pid, port, eerr := startEgressMediator(opts, config.EgressAllow)
+		pid, port, eerr := startEgressMediator(opts, plan.Gateway, config.EgressAllow)
 		if eerr != nil {
 			cleanupTransientFirewallRules(rules)
 			cleanupTransientNetworkDevices(cleanupDevices)
@@ -2072,12 +2072,16 @@ func portForwarderLogPath(opts Options) string {
 	return filepath.Join(opts.StateDir, opts.Name, "port-forward.log")
 }
 
-// startEgressMediator allocates a free local port, spawns a detached
+// startEgressMediator allocates a free port on bindHost, spawns a detached
 // `microagent --egress-mediator` in the CURRENT netns (host for nat, pasta for
 // user mode), waits until it accepts, and returns (pid, port). Uses the same
 // detached-spawn mechanism as the port-forwarder companion.
-func startEgressMediator(opts Options, allow []string) (int, int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+//
+// bindHost must be the tap gateway IP (e.g. "10.43.29.1") because the nftables
+// REDIRECT target rewrites the destination to the primary address of the
+// incoming interface — i.e. the tap host-side IP — not 127.0.0.1.
+func startEgressMediator(opts Options, bindHost string, allow []string) (int, int, error) {
+	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
 		return 0, 0, err
 	}
@@ -2088,7 +2092,7 @@ func startEgressMediator(opts Options, allow []string) (int, int, error) {
 		return 0, 0, err
 	}
 	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
-	args := []string{"--egress-mediator", "--bind-host", "127.0.0.1", "--bind-port", strconv.Itoa(port), "--audit-log", auditPath}
+	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath}
 	for _, h := range allow {
 		args = append(args, "--allow", h)
 	}
@@ -2113,14 +2117,14 @@ func startEgressMediator(opts Options, allow []string) (int, int, error) {
 	_ = logFile.Close()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		c, derr := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 200*time.Millisecond)
+		c, derr := net.DialTimeout("tcp", net.JoinHostPort(bindHost, strconv.Itoa(port)), 200*time.Millisecond)
 		if derr == nil {
 			_ = c.Close()
 			return pid, port, nil
 		}
 		if time.Now().After(deadline) {
 			terminateAuxProcess(pid)
-			return 0, 0, fmt.Errorf("egress mediator did not become ready on 127.0.0.1:%d", port)
+			return 0, 0, fmt.Errorf("egress mediator did not become ready on %s:%d", bindHost, port)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
