@@ -13,6 +13,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"gopkg.in/yaml.v3"
 )
@@ -29,11 +30,15 @@ const (
 	DefaultResultPort          = 1024
 	DefaultSecretsPort         = 1026
 	DefaultSecretsControlPort  = 1028
-	DefaultShellPortBase       = 22000
-	DefaultShellPortSpan       = 20000
-	DefaultExecPortBase        = 42000
-	DefaultExecPortSpan        = 20000
-	DefaultTimeout             = 5 * time.Minute
+	// DefaultCACertPort is the host vsock port the guest connects to at boot to
+	// fetch the per-workspace egress CA certificate. Only allocated when
+	// EgressMode is "strict".
+	DefaultCACertPort    = 1030
+	DefaultShellPortBase = 22000
+	DefaultShellPortSpan = 20000
+	DefaultExecPortBase  = 42000
+	DefaultExecPortSpan  = 20000
+	DefaultTimeout       = 5 * time.Minute
 )
 
 // Model pairing transport defaults. The guest forwarder listens on
@@ -869,6 +874,14 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 	if secretsPort != 0 {
 		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
 	}
+	// CACertPort is only allocated for strict-egress workspaces. The vsock
+	// listener serves the per-workspace CA public cert to the guest at boot so
+	// guestinit can install it into the trust store before any HTTPS traffic.
+	var caCertPort uint32
+	if strings.TrimSpace(opts.EgressMode) == "strict" {
+		caCertPort = DefaultCACertPort
+		listeners = append(listeners, vmkit.VsockListener{Port: caCertPort, Target: secretxfer.CACertTarget})
+	}
 	disks := make([]vmkit.Disk, 0, len(opts.Disks))
 	for _, disk := range opts.Disks {
 		disks = append(disks, vmkit.Disk{
@@ -899,6 +912,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			ShellPort:          ShellPort(opts),
 			ExecPort:           ExecPort(opts),
 			SecretsPort:        secretsPort,
+			CACertPort:         caCertPort,
 			Secrets:            secretRefs,
 			SecretEnvFiles:     opts.SecretEnvFiles,
 			OnDemandSecrets:    onDemandRefsFromOptions(opts),

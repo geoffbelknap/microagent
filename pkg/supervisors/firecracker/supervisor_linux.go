@@ -21,7 +21,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/network"
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
@@ -907,6 +909,9 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	if config != nil && config.SecretsPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_secrets_port=%d", config.SecretsPort))
 	}
+	if config != nil && config.CACertPort != 0 {
+		args = append(args, fmt.Sprintf("microagent_ca_cert_port=%d", config.CACertPort))
+	}
 	if config != nil && len(config.OnDemandSecrets) != 0 {
 		args = append(args, "microagent_secrets_api=1")
 	}
@@ -1211,8 +1216,44 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 	network.Mode = mode
 	egressPID := 0
 	if config != nil && config.EgressMode == "strict" {
-		pid, port, eerr := startEgressMediator(opts, plan.Gateway, config.EgressAllow)
+		// Mint a per-workspace CA. The cert (public) is delivered to the guest over
+		// the cacert vsock listener so guestinit installs it in the trust store.
+		// The key stays on the host and is passed to the mediator for TLS MITM.
+		ca, caErr := egress.NewCA(opts.Name, 720*time.Hour)
+		if caErr != nil {
+			cleanupTransientFirewallRules(rules)
+			cleanupTransientNetworkDevices(cleanupDevices)
+			return nil, nil, nil, 0, fmt.Errorf("mint egress CA for %s: %w", opts.Name, caErr)
+		}
+		caKeyPEM, caErr := ca.KeyPEM()
+		if caErr != nil {
+			cleanupTransientFirewallRules(rules)
+			cleanupTransientNetworkDevices(cleanupDevices)
+			return nil, nil, nil, 0, fmt.Errorf("encode egress CA key for %s: %w", opts.Name, caErr)
+		}
+		wsDir := filepath.Join(opts.StateDir, opts.Name)
+		if caErr = os.MkdirAll(wsDir, 0o700); caErr != nil {
+			cleanupTransientFirewallRules(rules)
+			cleanupTransientNetworkDevices(cleanupDevices)
+			return nil, nil, nil, 0, fmt.Errorf("create workspace dir for egress CA: %w", caErr)
+		}
+		caCertPath := filepath.Join(wsDir, "egress-ca.pem")
+		caKeyPath := filepath.Join(wsDir, "egress-ca-key.pem")
+		if caErr = os.WriteFile(caCertPath, ca.CertPEM(), 0o644); caErr != nil {
+			cleanupTransientFirewallRules(rules)
+			cleanupTransientNetworkDevices(cleanupDevices)
+			return nil, nil, nil, 0, fmt.Errorf("write egress CA cert: %w", caErr)
+		}
+		if caErr = os.WriteFile(caKeyPath, caKeyPEM, 0o600); caErr != nil {
+			_ = os.Remove(caCertPath)
+			cleanupTransientFirewallRules(rules)
+			cleanupTransientNetworkDevices(cleanupDevices)
+			return nil, nil, nil, 0, fmt.Errorf("write egress CA key: %w", caErr)
+		}
+		pid, port, eerr := startEgressMediator(opts, plan.Gateway, config.EgressAllow, config.EgressPassthrough, caCertPath, caKeyPath)
 		if eerr != nil {
+			_ = os.Remove(caCertPath)
+			_ = os.Remove(caKeyPath)
 			cleanupTransientFirewallRules(rules)
 			cleanupTransientNetworkDevices(cleanupDevices)
 			return nil, nil, nil, 0, eerr
@@ -1220,6 +1261,8 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 		redirect, rerr := installEgressRedirectRule(tap, plan.Subnet, uint16(port))
 		if rerr != nil {
 			terminateAuxProcess(pid)
+			_ = os.Remove(caCertPath)
+			_ = os.Remove(caKeyPath)
 			cleanupTransientFirewallRules(rules)
 			cleanupTransientNetworkDevices(cleanupDevices)
 			return nil, nil, nil, 0, rerr
@@ -2091,7 +2134,11 @@ func portForwarderLogPath(opts Options) string {
 // bindHost must be the tap gateway IP (e.g. "10.43.29.1") because the nftables
 // REDIRECT target rewrites the destination to the primary address of the
 // incoming interface — i.e. the tap host-side IP — not 127.0.0.1.
-func startEgressMediator(opts Options, bindHost string, allow []string) (int, int, error) {
+//
+// caCertPath and caKeyPath, when non-empty, enable TLS interception: the
+// mediator loads the per-workspace CA and signs per-SNI leaf certs on the fly.
+// passthrough lists hosts whose TLS is forwarded opaquely (not intercepted).
+func startEgressMediator(opts Options, bindHost string, allow, passthrough []string, caCertPath, caKeyPath string) (int, int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
 		return 0, 0, err
@@ -2106,6 +2153,12 @@ func startEgressMediator(opts Options, bindHost string, allow []string) (int, in
 	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath}
 	for _, h := range allow {
 		args = append(args, "--allow", h)
+	}
+	if caCertPath != "" && caKeyPath != "" {
+		args = append(args, "--ca-cert", caCertPath, "--ca-key", caKeyPath)
+	}
+	for _, h := range passthrough {
+		args = append(args, "--passthrough", h)
 	}
 	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
@@ -2502,6 +2555,28 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 			go serveSecretsListener(unixListener, srv)
 			continue
 		}
+		if listener.Target == secretxfer.CACertTarget {
+			path := firecrackerGuestVsockPath(opts, listener.Port)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				set.Close()
+				return nil, err
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				set.Close()
+				return nil, err
+			}
+			unixListener, err := net.Listen("unix", path)
+			if err != nil {
+				set.Close()
+				return nil, fmt.Errorf("listen cacert vsock port %d: %w", listener.Port, err)
+			}
+			// CA cert is not secret (it is installed in the guest trust store), so
+			// default socket permissions are fine here.
+			caCertPath := filepath.Join(opts.StateDir, opts.Name, "egress-ca.pem")
+			set.listeners = append(set.listeners, unixListener)
+			go serveCACertListener(unixListener, caCertPath)
+			continue
+		}
 		if !isAllowedVsockTarget(opts, listener.Target) {
 			set.Close()
 			return nil, fmt.Errorf("firecracker vsock listener %d target must be host:port or the workspace result path", listener.Port)
@@ -2545,6 +2620,30 @@ func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
 			return
 		}
 		go handleGuestVsockConnection(conn, config.Target)
+	}
+}
+
+// serveCACertListener accepts guest connections and sends the egress CA cert
+// PEM (caCertPath) to each. The cert is written by prepareTAPNATForStart
+// before any listeners are served, so the file exists when connections arrive.
+// If the file is missing or unreadable, the connection is logged and closed.
+func serveCACertListener(listener net.Listener, caCertPath string) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go func(c net.Conn) {
+			defer func() { _ = c.Close() }()
+			pem, err := os.ReadFile(caCertPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "read cacert for vsock guest: %v\n", err)
+				return
+			}
+			if err := secretxfer.ServeCACert(c, pem); err != nil {
+				fmt.Fprintf(os.Stderr, "serve cacert to guest: %v\n", err)
+			}
+		}(conn)
 	}
 }
 
