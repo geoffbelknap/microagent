@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -158,6 +159,9 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"runner-command", []string{"local/smoke/smoke.gguf", "--runner-command", "runner serve {model} --listen {addr}"}, "-runner-command", "runner serve {model} --listen {addr}"},
 		{"runner-arg", []string{"local/smoke/smoke.gguf", "--runner-arg", "-ngl"}, "-runner-arg", "-ngl"},
 		{"runner-env", []string{"local/smoke/smoke.gguf", "--runner-env", "CUDA_VISIBLE_DEVICES=0"}, "-runner-env", "CUDA_VISIBLE_DEVICES=0"},
+		{"model-runner-command", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-command", "runner serve {model} --listen {addr}"}, "-model-runner-command", "runner serve {model} --listen {addr}"},
+		{"model-runner-arg", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-arg", "-ngl"}, "-model-runner-arg", "-ngl"},
+		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)
@@ -1962,6 +1966,38 @@ func TestParseWorkspaceOptionsModelFlagAndSpecPrecedence(t *testing.T) {
 	}
 	if opts.Model != "org/flag-repo/flag.gguf" {
 		t.Fatalf("create --model not parsed: %q", opts.Model)
+	}
+}
+
+func TestParseWorkspaceOptionsModelRunnerAndMediationFlags(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"demo",
+		"--model", "org/repo/model.gguf",
+		"--model-runner", "vllm",
+		"--model-gpu", "auto",
+		"--model-runner-model", "Qwen/Qwen2.5-0.5B-Instruct",
+		"--model-runner-served-model", "local-chat",
+		"--model-runner-arg", "--max-model-len",
+		"--model-runner-arg", "2048",
+		"--model-runner-env", "CUDA_VISIBLE_DEVICES=0",
+		"--model-mediation", "policy",
+		"--model-policy-file", "/tmp/model-policy.json",
+		"--model-policy-timeout", "250ms",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.ModelRunner.Backend != "vllm" || opts.ModelRunner.GPU != "auto" || opts.ModelRunner.BackendModel != "Qwen/Qwen2.5-0.5B-Instruct" || opts.ModelRunner.ServedModel != "local-chat" {
+		t.Fatalf("model runner = %+v", opts.ModelRunner)
+	}
+	if !reflect.DeepEqual(opts.ModelRunner.Args, []string{"--max-model-len", "2048"}) {
+		t.Fatalf("model runner args = %#v", opts.ModelRunner.Args)
+	}
+	if !reflect.DeepEqual(opts.ModelRunner.Env, []string{"CUDA_VISIBLE_DEVICES=0"}) {
+		t.Fatalf("model runner env = %#v", opts.ModelRunner.Env)
+	}
+	if opts.ModelMediation.Mode != "policy" || opts.ModelMediation.PolicyFile != "/tmp/model-policy.json" || opts.ModelMediation.PolicyTimeout != "250ms" {
+		t.Fatalf("model mediation = %+v", opts.ModelMediation)
 	}
 }
 
@@ -5607,8 +5643,8 @@ func TestResolveModelRunnerCustomCommandAllowsEnvMetadata(t *testing.T) {
 	t.Setenv(modelrunner.EnvModelRunnerHealthPath, "/ready")
 
 	engine, config, err := resolveModelRunner(modelRunnerOverrides{
-		Command: "runner serve {model} --listen {addr}",
-		Args:    []string{"--gpu", "auto"},
+		CommandRaw: "runner serve {model} --listen {addr}",
+		Args:       []string{"--gpu", "auto"},
 	})
 	if err != nil {
 		t.Fatalf("resolveModelRunner: %v", err)
@@ -5623,6 +5659,32 @@ func TestResolveModelRunnerCustomCommandAllowsEnvMetadata(t *testing.T) {
 	}
 	if engine.Name() != "runner-x" || engine.HealthPath() != "/ready" {
 		t.Fatalf("engine metadata = %q %q", engine.Name(), engine.HealthPath())
+	}
+}
+
+func TestResolveModelRunnerVLLMBackend(t *testing.T) {
+	python := filepath.Join(t.TempDir(), "python")
+	if err := os.WriteFile(python, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MICROAGENT_VLLM_PYTHON", python)
+
+	engine, config, err := resolveModelRunner(modelRunnerOverrides{
+		Backend:      "vllm",
+		BackendModel: "Qwen/Qwen2.5-0.5B-Instruct",
+		ServedModel:  "local-chat",
+		Args:         []string{"--max-model-len", "2048"},
+	})
+	if err != nil {
+		t.Fatalf("resolveModelRunner: %v", err)
+	}
+	if config.Backend != modelrunner.BackendVLLM || config.GPU != modelrunner.GPUOn {
+		t.Fatalf("config backend/gpu = %q/%q", config.Backend, config.GPU)
+	}
+	got := engine.Argv("/ignored/local.gguf", "127.0.0.1", 9999)
+	want := []string{python, "-m", "vllm.entrypoints.openai.api_server", "--model", "Qwen/Qwen2.5-0.5B-Instruct", "--served-model-name", "local-chat", "--host", "127.0.0.1", "--port", "9999", "--max-model-len", "2048"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
 	}
 }
 
@@ -5693,6 +5755,21 @@ func TestModelMediationConfigFromEnv(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+}
+
+func TestModelMediationConfigFromSpec(t *testing.T) {
+	t.Setenv(envModelMediation, "local-allow")
+	cfg, err := modelMediationConfigFromSpec(workspace.ModelMediationSpec{
+		Mode:          "policy",
+		PolicyFile:    "/tmp/model-policy.json",
+		PolicyTimeout: "250ms",
+	})
+	if err != nil {
+		t.Fatalf("modelMediationConfigFromSpec: %v", err)
+	}
+	if !cfg.Enabled || cfg.Mode != hostworker.ModePolicy || cfg.PolicyFile != "/tmp/model-policy.json" || cfg.PolicyTimeout != 250*time.Millisecond {
+		t.Fatalf("cfg = %+v", cfg)
+	}
 }
 
 func TestModelPolicyValidateAndEvaluate(t *testing.T) {

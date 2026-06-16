@@ -12,6 +12,18 @@ import (
 )
 
 const (
+	// EnvModelRunnerBackend selects the built-in runner backend. Supported
+	// values are llamacpp, vllm, and custom. Empty keeps the default llamacpp
+	// runner unless a custom command is supplied.
+	EnvModelRunnerBackend = "MICROAGENT_MODEL_RUNNER_BACKEND"
+	// EnvModelRunnerGPU selects runner GPU intent: off, on, or auto.
+	EnvModelRunnerGPU = "MICROAGENT_MODEL_RUNNER_GPU"
+	// EnvModelRunnerModel supplies the backend model id for runners such as
+	// vLLM that do not serve the local GGUF path directly.
+	EnvModelRunnerModel = "MICROAGENT_MODEL_RUNNER_MODEL"
+	// EnvModelRunnerServedModel supplies the OpenAI-compatible served model
+	// name for runners that distinguish backend model id from request model id.
+	EnvModelRunnerServedModel = "MICROAGENT_MODEL_RUNNER_SERVED_MODEL"
 	// EnvModelRunnerCommand overrides the built-in runner command. It accepts
 	// shell-like fields or a JSON array of strings. The command must include a
 	// {model} placeholder and either {port} or {addr}; {host} is also available.
@@ -30,12 +42,26 @@ const (
 	EnvModelRunnerEnv = "MICROAGENT_MODEL_RUNNER_ENV"
 )
 
+const (
+	BackendLlamaCPP = "llamacpp"
+	BackendVLLM     = "vllm"
+	BackendCustom   = "custom"
+
+	GPUOff  = "off"
+	GPUOn   = "on"
+	GPUAuto = "auto"
+)
+
 type RunnerConfig struct {
-	Command    []string
-	Name       string
-	HealthPath string
-	Args       []string
-	Env        []string
+	Backend      string
+	GPU          string
+	BackendModel string
+	ServedModel  string
+	Command      []string
+	Name         string
+	HealthPath   string
+	Args         []string
+	Env          []string
 }
 
 func NewRunnerConfig(args, env []string) (RunnerConfig, error) {
@@ -54,8 +80,23 @@ func normalizeRunnerConfig(c RunnerConfig) (RunnerConfig, error) {
 	if err != nil {
 		return RunnerConfig{}, err
 	}
+	backend, err := normalizeRunnerBackend(c.Backend, len(cleanCommand) != 0)
+	if err != nil {
+		return RunnerConfig{}, err
+	}
+	gpu, err := normalizeRunnerGPU(c.GPU, backend)
+	if err != nil {
+		return RunnerConfig{}, err
+	}
+	backendModel := strings.TrimSpace(c.BackendModel)
+	servedModel := strings.TrimSpace(c.ServedModel)
 	name := strings.TrimSpace(c.Name)
 	healthPath := strings.TrimSpace(c.HealthPath)
+	if backend == BackendCustom {
+		if len(cleanCommand) == 0 {
+			return RunnerConfig{}, fmt.Errorf("custom model runner requires %s", EnvModelRunnerCommand)
+		}
+	}
 	if len(cleanCommand) == 0 {
 		if name != "" {
 			return RunnerConfig{}, fmt.Errorf("%s requires %s", EnvModelRunnerName, EnvModelRunnerCommand)
@@ -64,6 +105,9 @@ func normalizeRunnerConfig(c RunnerConfig) (RunnerConfig, error) {
 			return RunnerConfig{}, fmt.Errorf("%s requires %s", EnvModelRunnerHealthPath, EnvModelRunnerCommand)
 		}
 	} else {
+		if backend != BackendCustom {
+			return RunnerConfig{}, fmt.Errorf("model runner command requires backend custom")
+		}
 		if !commandTemplateContains(cleanCommand, "{model}") {
 			return RunnerConfig{}, fmt.Errorf("model runner command must include {model}")
 		}
@@ -80,6 +124,16 @@ func normalizeRunnerConfig(c RunnerConfig) (RunnerConfig, error) {
 			return RunnerConfig{}, fmt.Errorf("model runner health path must start with /")
 		}
 	}
+	if backend == BackendVLLM {
+		if backendModel == "" {
+			return RunnerConfig{}, fmt.Errorf("%s requires %s for backend vllm", EnvModelRunnerBackend, EnvModelRunnerModel)
+		}
+		if servedModel == "" {
+			servedModel = backendModel
+		}
+	} else if backendModel != "" || servedModel != "" {
+		return RunnerConfig{}, fmt.Errorf("%s and %s are only supported for backend vllm", EnvModelRunnerModel, EnvModelRunnerServedModel)
+	}
 	cleanArgs := make([]string, 0, len(c.Args))
 	for _, arg := range c.Args {
 		if strings.ContainsRune(arg, 0) {
@@ -92,11 +146,15 @@ func normalizeRunnerConfig(c RunnerConfig) (RunnerConfig, error) {
 		return RunnerConfig{}, err
 	}
 	return RunnerConfig{
-		Command:    cleanCommand,
-		Name:       name,
-		HealthPath: healthPath,
-		Args:       cleanArgs,
-		Env:        cleanEnv,
+		Backend:      backend,
+		GPU:          gpu,
+		BackendModel: backendModel,
+		ServedModel:  servedModel,
+		Command:      cleanCommand,
+		Name:         name,
+		HealthPath:   healthPath,
+		Args:         cleanArgs,
+		Env:          cleanEnv,
 	}, nil
 }
 
@@ -114,11 +172,15 @@ func RunnerConfigFromEnv() (RunnerConfig, error) {
 		return RunnerConfig{}, fmt.Errorf("%s: %w", EnvModelRunnerEnv, err)
 	}
 	return normalizeRunnerConfig(RunnerConfig{
-		Command:    command,
-		Name:       os.Getenv(EnvModelRunnerName),
-		HealthPath: os.Getenv(EnvModelRunnerHealthPath),
-		Args:       args,
-		Env:        env,
+		Backend:      os.Getenv(EnvModelRunnerBackend),
+		GPU:          os.Getenv(EnvModelRunnerGPU),
+		BackendModel: os.Getenv(EnvModelRunnerModel),
+		ServedModel:  os.Getenv(EnvModelRunnerServedModel),
+		Command:      command,
+		Name:         os.Getenv(EnvModelRunnerName),
+		HealthPath:   os.Getenv(EnvModelRunnerHealthPath),
+		Args:         args,
+		Env:          env,
 	})
 }
 
@@ -131,21 +193,37 @@ func (c RunnerConfig) WithAdditional(args, env []string) (RunnerConfig, error) {
 }
 
 func (c RunnerConfig) Digest() string {
-	if len(c.Command) == 0 && c.Name == "" && c.HealthPath == "" && len(c.Args) == 0 && len(c.Env) == 0 {
+	backend := c.Backend
+	if backend == BackendLlamaCPP {
+		backend = ""
+	}
+	gpu := c.GPU
+	if gpu == GPUOff {
+		gpu = ""
+	}
+	if backend == "" && gpu == "" && c.BackendModel == "" && c.ServedModel == "" && len(c.Command) == 0 && c.Name == "" && c.HealthPath == "" && len(c.Args) == 0 && len(c.Env) == 0 {
 		return ""
 	}
 	data, _ := json.Marshal(struct {
-		Command    []string `json:"command,omitempty"`
-		Name       string   `json:"name,omitempty"`
-		HealthPath string   `json:"health_path,omitempty"`
-		Args       []string `json:"args,omitempty"`
-		Env        []string `json:"env,omitempty"`
+		Backend      string   `json:"backend,omitempty"`
+		GPU          string   `json:"gpu,omitempty"`
+		BackendModel string   `json:"backend_model,omitempty"`
+		ServedModel  string   `json:"served_model,omitempty"`
+		Command      []string `json:"command,omitempty"`
+		Name         string   `json:"name,omitempty"`
+		HealthPath   string   `json:"health_path,omitempty"`
+		Args         []string `json:"args,omitempty"`
+		Env          []string `json:"env,omitempty"`
 	}{
-		Command:    c.Command,
-		Name:       c.Name,
-		HealthPath: c.HealthPath,
-		Args:       c.Args,
-		Env:        c.Env,
+		Backend:      backend,
+		GPU:          gpu,
+		BackendModel: c.BackendModel,
+		ServedModel:  c.ServedModel,
+		Command:      c.Command,
+		Name:         c.Name,
+		HealthPath:   c.HealthPath,
+		Args:         c.Args,
+		Env:          c.Env,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])[:16]
@@ -259,6 +337,50 @@ func normalizeRunnerCommand(command []string) ([]string, error) {
 		return nil, fmt.Errorf("model runner command binary is empty")
 	}
 	return out, nil
+}
+
+func normalizeRunnerBackend(raw string, hasCommand bool) (string, error) {
+	backend := strings.ToLower(strings.TrimSpace(raw))
+	if backend == "" {
+		if hasCommand {
+			return BackendCustom, nil
+		}
+		return BackendLlamaCPP, nil
+	}
+	switch backend {
+	case "llama", "llama.cpp", "llama-cpp", BackendLlamaCPP:
+		return BackendLlamaCPP, nil
+	case BackendVLLM:
+		return BackendVLLM, nil
+	case BackendCustom:
+		return BackendCustom, nil
+	default:
+		return "", fmt.Errorf("%s must be llamacpp, vllm, or custom", EnvModelRunnerBackend)
+	}
+}
+
+func normalizeRunnerGPU(raw, backend string) (string, error) {
+	gpu := strings.ToLower(strings.TrimSpace(raw))
+	if gpu == "" {
+		if backend == BackendVLLM {
+			return GPUOn, nil
+		}
+		return GPUOff, nil
+	}
+	switch gpu {
+	case "0", "false", "disabled", "none", "cpu", GPUOff:
+		gpu = GPUOff
+	case "1", "true", "gpu", GPUOn:
+		gpu = GPUOn
+	case GPUAuto:
+		gpu = GPUAuto
+	default:
+		return "", fmt.Errorf("%s must be off, on, or auto", EnvModelRunnerGPU)
+	}
+	if backend == BackendVLLM && gpu == GPUOff {
+		return "", fmt.Errorf("backend vllm requires %s=on or auto", EnvModelRunnerGPU)
+	}
+	return gpu, nil
 }
 
 func commandTemplateContains(command []string, placeholder string) bool {

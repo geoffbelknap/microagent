@@ -46,6 +46,32 @@ func TestLlamaCPPEngineGPUOptInSkipsCPUDefault(t *testing.T) {
 	}
 }
 
+func TestLlamaCPPEngineNamedGPUOptIn(t *testing.T) {
+	e := LlamaCPP{BinPath: "/usr/bin/llama-server", GPU: GPUOn}
+	got := e.Argv("/models/m.gguf", "127.0.0.1", 9999)
+	want := []string{"/usr/bin/llama-server", "--model", "/models/m.gguf", "--host", "127.0.0.1", "--port", "9999", "--gpu-layers", "all"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestVLLMEngine(t *testing.T) {
+	e := VLLM{
+		PythonPath:  "/venv/bin/python",
+		Model:       "Qwen/Qwen2.5-0.5B-Instruct",
+		ServedModel: "local-chat",
+		ExtraArgs:   []string{"--max-model-len", "2048"},
+	}
+	if e.Name() != "vllm" || e.HealthPath() != "/health" {
+		t.Fatalf("unexpected engine metadata: %s %s", e.Name(), e.HealthPath())
+	}
+	got := e.Argv("/ignored/local.gguf", "127.0.0.1", 9999)
+	want := []string{"/venv/bin/python", "-m", "vllm.entrypoints.openai.api_server", "--model", "Qwen/Qwen2.5-0.5B-Instruct", "--served-model-name", "local-chat", "--host", "127.0.0.1", "--port", "9999", "--max-model-len", "2048"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
 func TestCommandEngine(t *testing.T) {
 	e := CommandEngine{
 		RunnerName: "runner-x",

@@ -49,6 +49,36 @@ func TestRunnerConfigFromEnvCustomCommand(t *testing.T) {
 	}
 }
 
+func TestRunnerConfigFromEnvVLLMBackend(t *testing.T) {
+	t.Setenv(EnvModelRunnerBackend, "vllm")
+	t.Setenv(EnvModelRunnerModel, "Qwen/Qwen2.5-0.5B-Instruct")
+	t.Setenv(EnvModelRunnerArgs, `--max-model-len 2048`)
+
+	got, err := RunnerConfigFromEnv()
+	if err != nil {
+		t.Fatalf("RunnerConfigFromEnv: %v", err)
+	}
+	if got.Backend != BackendVLLM || got.GPU != GPUOn {
+		t.Fatalf("backend/gpu = %q/%q", got.Backend, got.GPU)
+	}
+	if got.BackendModel != "Qwen/Qwen2.5-0.5B-Instruct" || got.ServedModel != got.BackendModel {
+		t.Fatalf("model metadata = %q/%q", got.BackendModel, got.ServedModel)
+	}
+	if !reflect.DeepEqual(got.Args, []string{"--max-model-len", "2048"}) {
+		t.Fatalf("args = %#v", got.Args)
+	}
+	if got.Digest() == "" {
+		t.Fatal("vllm config should have a digest")
+	}
+}
+
+func TestRunnerConfigRejectsVLLMWithoutModel(t *testing.T) {
+	t.Setenv(EnvModelRunnerBackend, "vllm")
+	if _, err := RunnerConfigFromEnv(); err == nil {
+		t.Fatal("expected missing vllm model error")
+	}
+}
+
 func TestRunnerConfigRejectsIncompleteCustomCommand(t *testing.T) {
 	t.Setenv(EnvModelRunnerCommand, `runner serve {model}`)
 	if _, err := RunnerConfigFromEnv(); err == nil {

@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-15_
+_Last updated: 2026-06-16_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -67,6 +67,19 @@ The complete set:
 | `--arch <arch>` | Guest architecture |
 | `--backend <name>` | Backend identity override |
 | `--vsock p=host:port` | Add a vsock mapping for this start. Repeatable |
+| `--model-runner <backend>` | Model runner backend override for this start: `llamacpp`, `vllm`, or `custom` |
+| `--model-gpu <mode>` | Model runner GPU intent override: `off`, `on`, or `auto` |
+| `--model-runner-model <id>` | Backend model id override for runners such as vLLM |
+| `--model-runner-served-model <name>` | OpenAI-compatible served model name override for runners such as vLLM |
+| `--model-runner-command <template>` | Custom model runner command override for this start |
+| `--model-runner-name <name>` | Custom host model runner name override |
+| `--model-runner-health-path <path>` | Custom host model runner health probe path override |
+| `--model-runner-arg <arg>` | Extra model runner argument override. Repeatable |
+| `--model-runner-env KEY=VALUE` | Extra model runner environment for this start. Repeatable; values are not persisted |
+| `--model-mediation <mode>` | Model mediation mode override: `off`, `local-allow`, or `policy` |
+| `--model-policy-file <path>` | Structured model mediation policy file override |
+| `--model-policy-url <url>` | External model mediation policy endpoint override |
+| `--model-policy-timeout <duration>` | Model mediation policy timeout override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
@@ -92,11 +105,13 @@ side-effect paths were severed while the runtime may still exist. Run `halt`,
 ## Paired models
 
 A workspace created with [`create --model`](/cli/create/) stores the model ref,
-and every `start` re-pairs it: the host model runner is re-ensured (a missing
-blob is auto-pulled), the workspace is registered as a holder, and the vsock
-bridge plus `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are wired into the
-guest. `halt`, `stop`, `kill`, and `delete` release the hold; a guest that
-exits on its own keeps it until the next lifecycle verb, and
+model runner config, and model mediation config. Every `start` re-pairs it:
+the host model runner is re-ensured (a missing blob is auto-pulled), the
+workspace is registered as a holder, and the vsock bridge plus
+`MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are wired into the guest. The
+`--model-runner*` and `--model-mediation*` flags override the stored pairing
+for one boot. `halt`, `stop`, `kill`, and `delete` release the hold; a guest
+that exits on its own keeps it until the next lifecycle verb, and
 [`model stop`](/cli/model/) reclaims it immediately. Attach and release
 actions are recorded in the workspace [`events`](/cli/events/) history as
 `model_worker=attached` and `model_worker=released` markers.

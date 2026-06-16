@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -240,6 +241,13 @@ func supervisedOptions(opts SuperviseOptions) (Options, error) {
 	}
 	workspaceOpts.Disks = manifest.Disks
 	workspaceOpts.Mediation = manifest.Mediation
+	workspaceOpts.Model = strings.TrimSpace(manifest.Model)
+	if manifest.ModelRunner != nil {
+		workspaceOpts.ModelRunner = *manifest.ModelRunner
+	}
+	if manifest.ModelMediation != nil {
+		workspaceOpts.ModelMediation = *manifest.ModelMediation
+	}
 	if manifest.Health != nil {
 		workspaceOpts.Health = NormalizeHealthCheck(*manifest.Health)
 	}

@@ -102,6 +102,15 @@ func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions)
 	if strings.TrimSpace(spec.Model) != "" {
 		opts.Model = strings.TrimSpace(spec.Model)
 	}
+	if modelRunnerSpecDeclared(spec.ModelRunner) {
+		opts.ModelRunner = spec.ModelRunner
+	}
+	if modelMediationSpecDeclared(spec.ModelMediation) {
+		if strings.TrimSpace(spec.ModelMediation.PolicyFile) != "" && !filepath.IsAbs(spec.ModelMediation.PolicyFile) {
+			spec.ModelMediation.PolicyFile = filepath.Join(baseDir, spec.ModelMediation.PolicyFile)
+		}
+		opts.ModelMediation = spec.ModelMediation
+	}
 	if len(spec.Setup) != 0 || len(spec.SetupFiles) != 0 {
 		setupCommands, err := SetupCommandsFromSpec(spec.Setup, spec.SetupFiles, baseDir)
 		if err != nil {
@@ -371,4 +380,22 @@ func specHasNetwork(network NetworkSpec) bool {
 		network.IP != "" ||
 		network.Subnet != "" ||
 		network.Gateway != ""
+}
+
+func modelRunnerSpecDeclared(spec ModelRunnerSpec) bool {
+	return strings.TrimSpace(spec.Backend) != "" ||
+		strings.TrimSpace(spec.GPU) != "" ||
+		strings.TrimSpace(spec.BackendModel) != "" ||
+		strings.TrimSpace(spec.ServedModel) != "" ||
+		len(spec.Command) != 0 ||
+		strings.TrimSpace(spec.Name) != "" ||
+		strings.TrimSpace(spec.HealthPath) != "" ||
+		len(spec.Args) != 0
+}
+
+func modelMediationSpecDeclared(spec ModelMediationSpec) bool {
+	return strings.TrimSpace(spec.Mode) != "" ||
+		strings.TrimSpace(spec.PolicyURL) != "" ||
+		strings.TrimSpace(spec.PolicyFile) != "" ||
+		strings.TrimSpace(spec.PolicyTimeout) != ""
 }

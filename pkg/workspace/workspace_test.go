@@ -446,6 +446,19 @@ func TestManifestPersistsModelRef(t *testing.T) {
 	opts.Name = "ws"
 	opts.StateDir = dir
 	opts.Model = "Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+	opts.ModelRunner = ModelRunnerSpec{
+		Backend:      "vllm",
+		GPU:          "on",
+		BackendModel: "Qwen/Qwen2.5-0.5B-Instruct",
+		ServedModel:  "local-chat",
+		Args:         []string{"--max-model-len", "2048"},
+		Env:          []string{"RUNNER_SECRET=must-not-persist"},
+	}
+	opts.ModelMediation = ModelMediationSpec{
+		Mode:          "policy",
+		PolicyFile:    "/tmp/model-policy.json",
+		PolicyTimeout: "250ms",
+	}
 	if err := WriteManifest(opts); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
@@ -456,9 +469,18 @@ func TestManifestPersistsModelRef(t *testing.T) {
 	if manifest.Model != opts.Model {
 		t.Fatalf("model ref not persisted: %q", manifest.Model)
 	}
+	if manifest.ModelRunner == nil || manifest.ModelRunner.Backend != "vllm" || manifest.ModelRunner.BackendModel != "Qwen/Qwen2.5-0.5B-Instruct" || len(manifest.ModelRunner.Env) != 0 {
+		t.Fatalf("model runner manifest = %+v", manifest.ModelRunner)
+	}
+	if manifest.ModelMediation == nil || manifest.ModelMediation.Mode != "policy" || manifest.ModelMediation.PolicyFile != "/tmp/model-policy.json" {
+		t.Fatalf("model mediation manifest = %+v", manifest.ModelMediation)
+	}
 	restored := OptionsFromManifest(opts, manifest)
 	if restored.Model != opts.Model {
 		t.Fatalf("OptionsFromManifest lost model ref: %q", restored.Model)
+	}
+	if restored.ModelRunner.Backend != "vllm" || restored.ModelMediation.Mode != "policy" {
+		t.Fatalf("OptionsFromManifest lost model config: %+v %+v", restored.ModelRunner, restored.ModelMediation)
 	}
 
 	bare := DefaultOptions()

@@ -4,7 +4,7 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-15_
+_Last updated: 2026-06-16_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
@@ -307,6 +307,10 @@ come from the shared workspace exec layer and match CLI AX exec behavior.
 | Flag | Description |
 |---|---|
 | `--dedicated` | Start a dedicated runner for this caller instead of reusing a shared one |
+| `--runner <backend>` | Runner backend: `llamacpp` (default), `vllm`, or `custom` |
+| `--runner-gpu <mode>` | Runner GPU intent: `off`, `on`, or `auto` |
+| `--runner-model <id>` | Backend model id for runners such as vLLM |
+| `--runner-served-model <name>` | OpenAI-compatible served model name for runners such as vLLM |
 | `--runner-command <template>` | Custom host model runner command template |
 | `--runner-name <name>` | Name to record for a custom host model runner |
 | `--runner-health-path <path>` | HTTP health path for a custom host model runner |

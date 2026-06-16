@@ -294,9 +294,37 @@ func mcpTools() []map[string]any {
 			"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "exec": map[string]any{"type": "string"},
 			"state_dir": map[string]any{"type": "string"}, "profile": map[string]any{"type": "string"}, "dry_run": map[string]any{"type": "boolean"},
 			"model": map[string]any{"type": "string"}, "model_token": map[string]any{"type": "string"},
-			"network": map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated", "bridged"}},
+			"model_runner":              map[string]any{"type": "string", "enum": []string{"llamacpp", "vllm", "custom"}},
+			"model_gpu":                 map[string]any{"type": "string", "enum": []string{"off", "on", "auto"}},
+			"model_runner_model":        map[string]any{"type": "string"},
+			"model_runner_served_model": map[string]any{"type": "string"},
+			"model_runner_command":      map[string]any{"type": "string"},
+			"model_runner_name":         map[string]any{"type": "string"},
+			"model_runner_health_path":  map[string]any{"type": "string"},
+			"model_runner_args":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"model_runner_env":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"model_mediation":           map[string]any{"type": "string", "enum": []string{"off", "local-allow", "policy"}},
+			"model_policy_url":          map[string]any{"type": "string"},
+			"model_policy_file":         map[string]any{"type": "string"},
+			"model_policy_timeout":      map[string]any{"type": "string"},
+			"network":                   map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated", "bridged"}},
 		}),
-		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
+		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{
+			"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"},
+			"model_runner":              map[string]any{"type": "string", "enum": []string{"llamacpp", "vllm", "custom"}},
+			"model_gpu":                 map[string]any{"type": "string", "enum": []string{"off", "on", "auto"}},
+			"model_runner_model":        map[string]any{"type": "string"},
+			"model_runner_served_model": map[string]any{"type": "string"},
+			"model_runner_command":      map[string]any{"type": "string"},
+			"model_runner_name":         map[string]any{"type": "string"},
+			"model_runner_health_path":  map[string]any{"type": "string"},
+			"model_runner_args":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"model_runner_env":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"model_mediation":           map[string]any{"type": "string", "enum": []string{"off", "local-allow", "policy"}},
+			"model_policy_url":          map[string]any{"type": "string"},
+			"model_policy_file":         map[string]any{"type": "string"},
+			"model_policy_timeout":      map[string]any{"type": "string"},
+		}),
 		mcpTool("workspace.exec", "Run a structured command in a running workspace.", []string{"name"}, workspaceExecInputSchema()),
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.stop", "Stop a workspace runtime.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -339,15 +367,19 @@ func mcpTools() []map[string]any {
 		mcpTool("models.prune", "Prune local model records whose blobs are missing.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("models.serve", "Start or reuse a local host model server for a stored or pulled model.", []string{"model"},
 			map[string]any{
-				"model":              map[string]any{"type": "string"},
-				"dedicated":          map[string]any{"type": "boolean"},
-				"runner_command":     map[string]any{"type": "string"},
-				"runner_name":        map[string]any{"type": "string"},
-				"runner_health_path": map[string]any{"type": "string"},
-				"runner_args":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"runner_env":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"token":              map[string]any{"type": "string"},
-				"state_dir":          map[string]any{"type": "string"},
+				"model":               map[string]any{"type": "string"},
+				"dedicated":           map[string]any{"type": "boolean"},
+				"runner":              map[string]any{"type": "string", "enum": []string{"llamacpp", "vllm", "custom"}},
+				"runner_gpu":          map[string]any{"type": "string", "enum": []string{"off", "on", "auto"}},
+				"runner_model":        map[string]any{"type": "string"},
+				"runner_served_model": map[string]any{"type": "string"},
+				"runner_command":      map[string]any{"type": "string"},
+				"runner_name":         map[string]any{"type": "string"},
+				"runner_health_path":  map[string]any{"type": "string"},
+				"runner_args":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"runner_env":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"token":               map[string]any{"type": "string"},
+				"state_dir":           map[string]any{"type": "string"},
 			}),
 		mcpTool("models.stop", "Stop local host model server instances for a model.", []string{"model"},
 			map[string]any{"model": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -1170,6 +1202,11 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-network", stringArg(args, "network"))
 		cli = appendOptionalFlag(cli, "-model", stringArg(args, "model"))
 		cli = appendOptionalFlag(cli, "-model-token", stringArg(args, "model_token"))
+		var err error
+		cli, err = appendMCPWorkspaceModelFlags(cli, args)
+		if err != nil {
+			return nil, err
+		}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "dry_run") {
 			cli = append(cli, "-dry-run")
@@ -1179,7 +1216,13 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
 		}
-		return appendOptionalFlag([]string{"--mode=ax", "start", stringArg(args, "name")}, "-state-dir", stateDir), nil
+		cli := []string{"--mode=ax", "start", stringArg(args, "name")}
+		var err error
+		cli, err = appendMCPWorkspaceModelFlags(cli, args)
+		if err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "workspace.exec":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
@@ -1490,6 +1533,10 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if boolArg(args, "dedicated") {
 			cli = append(cli, "-dedicated")
 		}
+		cli = appendOptionalFlag(cli, "-runner", stringArg(args, "runner"))
+		cli = appendOptionalFlag(cli, "-runner-gpu", stringArg(args, "runner_gpu"))
+		cli = appendOptionalFlag(cli, "-runner-model", stringArg(args, "runner_model"))
+		cli = appendOptionalFlag(cli, "-runner-served-model", stringArg(args, "runner_served_model"))
 		cli = appendOptionalFlag(cli, "-runner-command", stringArg(args, "runner_command"))
 		cli = appendOptionalFlag(cli, "-runner-name", stringArg(args, "runner_name"))
 		cli = appendOptionalFlag(cli, "-runner-health-path", stringArg(args, "runner_health_path"))
@@ -1716,6 +1763,35 @@ func appendOptionalFlag(args []string, name, value string) []string {
 		return args
 	}
 	return append(args, name, value)
+}
+
+func appendMCPWorkspaceModelFlags(cli []string, args map[string]any) ([]string, error) {
+	cli = appendOptionalFlag(cli, "-model-runner", stringArg(args, "model_runner"))
+	cli = appendOptionalFlag(cli, "-model-gpu", stringArg(args, "model_gpu"))
+	cli = appendOptionalFlag(cli, "-model-runner-model", stringArg(args, "model_runner_model"))
+	cli = appendOptionalFlag(cli, "-model-runner-served-model", stringArg(args, "model_runner_served_model"))
+	cli = appendOptionalFlag(cli, "-model-runner-command", stringArg(args, "model_runner_command"))
+	cli = appendOptionalFlag(cli, "-model-runner-name", stringArg(args, "model_runner_name"))
+	cli = appendOptionalFlag(cli, "-model-runner-health-path", stringArg(args, "model_runner_health_path"))
+	if runnerArgs, ok, err := stringSliceArg(args, "model_runner_args"); err != nil {
+		return nil, err
+	} else if ok {
+		for _, arg := range runnerArgs {
+			cli = append(cli, "-model-runner-arg", arg)
+		}
+	}
+	if runnerEnv, ok, err := stringSliceArg(args, "model_runner_env"); err != nil {
+		return nil, err
+	} else if ok {
+		for _, entry := range runnerEnv {
+			cli = append(cli, "-model-runner-env", entry)
+		}
+	}
+	cli = appendOptionalFlag(cli, "-model-mediation", stringArg(args, "model_mediation"))
+	cli = appendOptionalFlag(cli, "-model-policy-url", stringArg(args, "model_policy_url"))
+	cli = appendOptionalFlag(cli, "-model-policy-file", stringArg(args, "model_policy_file"))
+	cli = appendOptionalFlag(cli, "-model-policy-timeout", stringArg(args, "model_policy_timeout"))
+	return cli, nil
 }
 
 func requireToolArgs(args map[string]any, tool string, names ...string) error {

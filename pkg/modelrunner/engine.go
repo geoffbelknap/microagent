@@ -23,6 +23,7 @@ type Engine interface {
 // LlamaCPP is the blessed engine: llama.cpp's llama-server.
 type LlamaCPP struct {
 	BinPath   string
+	GPU       string
 	ExtraArgs []string
 }
 
@@ -31,12 +32,57 @@ func (l LlamaCPP) Name() string { return "llama.cpp" }
 func (l LlamaCPP) Argv(modelPath, host string, port int) []string {
 	argv := []string{l.BinPath, "--model", modelPath, "--host", host, "--port", strconv.Itoa(port)}
 	if !llamaArgsOptIntoGPU(l.ExtraArgs) {
-		argv = append(argv, "--device", "none", "--gpu-layers", "0")
+		switch l.GPU {
+		case GPUOn, GPUAuto:
+			argv = append(argv, "--gpu-layers", "all")
+		default:
+			argv = append(argv, "--device", "none", "--gpu-layers", "0")
+		}
 	}
 	return append(argv, l.ExtraArgs...)
 }
 
 func (l LlamaCPP) HealthPath() string { return "/health" }
+
+// VLLM launches vLLM's OpenAI-compatible API server. The local model path is
+// intentionally ignored: vLLM loads a Hugging Face model id, while microagent's
+// current model store records the local pairing ref.
+type VLLM struct {
+	PythonPath  string
+	Model       string
+	ServedModel string
+	ExtraArgs   []string
+}
+
+func (v VLLM) Name() string { return "vllm" }
+
+func (v VLLM) Argv(_ string, host string, port int) []string {
+	served := strings.TrimSpace(v.ServedModel)
+	if served == "" {
+		served = v.Model
+	}
+	argv := []string{
+		v.PythonPath,
+		"-m", "vllm.entrypoints.openai.api_server",
+		"--model", v.Model,
+		"--served-model-name", served,
+		"--host", host,
+		"--port", strconv.Itoa(port),
+	}
+	return append(argv, v.ExtraArgs...)
+}
+
+func (v VLLM) HealthPath() string { return "/health" }
+
+func (v VLLM) validate() error {
+	if strings.TrimSpace(v.Model) == "" {
+		return fmt.Errorf("%s is required for backend vllm", EnvModelRunnerModel)
+	}
+	if strings.TrimSpace(v.PythonPath) == "" {
+		return fmt.Errorf("vLLM python path is required")
+	}
+	return nil
+}
 
 func llamaArgsOptIntoGPU(args []string) bool {
 	for _, arg := range args {
@@ -100,19 +146,38 @@ func ResolveEngine(config RunnerConfig) (Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(config.Command) != 0 {
+	switch config.Backend {
+	case BackendCustom:
 		return CommandEngine{
 			RunnerName: config.Name,
 			Command:    config.Command,
 			ExtraArgs:  config.Args,
 			Health:     config.HealthPath,
 		}, nil
+	case BackendVLLM:
+		pythonPath, err := ResolveVLLMPythonPath()
+		if err != nil {
+			return nil, err
+		}
+		engine := VLLM{
+			PythonPath:  pythonPath,
+			Model:       config.BackendModel,
+			ServedModel: config.ServedModel,
+			ExtraArgs:   config.Args,
+		}
+		if err := engine.validate(); err != nil {
+			return nil, err
+		}
+		return engine, nil
+	case BackendLlamaCPP:
+		binPath, err := ResolveLlamaServerPath()
+		if err != nil {
+			return nil, err
+		}
+		return LlamaCPP{BinPath: binPath, GPU: config.GPU, ExtraArgs: config.Args}, nil
+	default:
+		return nil, fmt.Errorf("%s must be llamacpp, vllm, or custom", EnvModelRunnerBackend)
 	}
-	binPath, err := ResolveLlamaServerPath()
-	if err != nil {
-		return nil, err
-	}
-	return LlamaCPP{BinPath: binPath, ExtraArgs: config.Args}, nil
 }
 
 // ResolveLlamaServerPath finds the llama-server binary: MICROAGENT_LLAMA_SERVER
@@ -146,4 +211,20 @@ func ResolveLlamaServerPath() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("llama-server not found; install llama.cpp or set MICROAGENT_LLAMA_SERVER")
+}
+
+// ResolveVLLMPythonPath finds the Python executable used to launch vLLM. The
+// environment override is intentionally explicit because vLLM is normally
+// installed in a backend-specific virtualenv.
+func ResolveVLLMPythonPath() (string, error) {
+	if p := strings.TrimSpace(os.Getenv("MICROAGENT_VLLM_PYTHON")); p != "" {
+		if _, err := os.Stat(p); err != nil {
+			return "", fmt.Errorf("MICROAGENT_VLLM_PYTHON is not usable: %w", err)
+		}
+		return p, nil
+	}
+	if p, err := exec.LookPath("python3"); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("vLLM python not found; set MICROAGENT_VLLM_PYTHON to a vLLM virtualenv python")
 }

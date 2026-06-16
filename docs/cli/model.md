@@ -11,8 +11,8 @@ microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                
 microagent model list [--state-dir <dir>]                                           List stored models
 microagent model delete <ref> [--keep-files] [--state-dir <dir>]                      Remove a model and its blob
 microagent model prune [--delete-files] [--state-dir <dir>]                       Drop records for missing blobs
-microagent model serve <hf-ref> [--dedicated] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Serve a model on the host
-microagent model serve <hf-ref> [--dedicated] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Alias for model serve
+microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>] [--runner-gpu <off|on|auto>] [--runner-model <id>] [--runner-served-model <name>] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Serve a model on the host
+microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>] [--runner-gpu <off|on|auto>] [--runner-model <id>] [--runner-served-model <name>] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Alias for model serve
 microagent model stop <hf-ref> [--state-dir <dir>]                                Stop a model's runners
 microagent model runners [--state-dir <dir>]                                      List running model servers
 microagent model policy validate <policy.json>                                    Validate a mediation policy file
@@ -113,13 +113,14 @@ With the global `--json` flag, records are returned under `models`:
 | `policy validate` | Validate a structured model mediation policy file |
 | `policy evaluate` | Dry-run a policy file against structured request metadata |
 
-Without a custom command, `serve` uses the built-in `llama-server` runner
-resolver. It requires `llama-server` on PATH or set via the
-`MICROAGENT_LLAMA_SERVER` environment variable. If neither is present, the
-command exits with a clear error message. If the model is not yet in the local
-store, `serve` pulls it automatically before starting the server (equivalent to
-running `model pull` first). The runner is started pinned, so it stays alive
-even when no workspace holds it.
+`serve` supports three runner backends. `llamacpp` is the default and uses
+`llama-server` with CPU execution unless GPU use is explicitly requested.
+`vllm` starts vLLM's OpenAI-compatible API server and requires
+`--runner-model <hf-model-id>` plus `MICROAGENT_VLLM_PYTHON` when vLLM is not
+available through `python3`. `custom` runs an operator-supplied
+OpenAI-compatible command template. If the model is not yet in the local GGUF
+store, `serve` pulls it automatically before starting the server. The runner is
+started pinned, so it stays alive even when no workspace holds it.
 
 For Linux x86_64 hosts with NVIDIA CUDA, the dev build helper can reproduce the
 CUDA `llama-server` build used by microagent model-runner testing:
@@ -132,10 +133,10 @@ export MICROAGENT_MODEL_RUNNER_ARGS='["-ngl","all","--no-ui"]'
 ```
 
 microagent starts the default llama.cpp runner with `--device none
---gpu-layers 0` unless you explicitly pass GPU-related runner args. Pointing
-`MICROAGENT_LLAMA_SERVER` at a CUDA-enabled binary is therefore not enough to opt
-into GPU use; pass args such as `["-ngl","all"]` or `--runner-arg -ngl
---runner-arg all`.
+--gpu-layers 0`. Pointing `MICROAGENT_LLAMA_SERVER` at a CUDA-enabled binary is
+therefore not enough to opt into GPU use. Pass `--runner-gpu on`, `--runner-gpu
+auto`, or explicit llama.cpp GPU args such as `--runner-arg -ngl --runner-arg
+all`.
 
 By default the helper downloads pinned CUDA 13.3 Ubuntu 24.04 debs, verifies
 their SHA256 checksums, extracts them under `/tmp/microagent-cuda13-root`
@@ -146,7 +147,23 @@ to use an existing CUDA toolkit. The script does not install dependencies; if
 `cmake`, `ninja`, `curl`, `dpkg-deb`, `sha256sum`, `g++`, or `git` is missing,
 install it explicitly and rerun the helper.
 
-Set `MICROAGENT_MODEL_RUNNER_COMMAND` or pass `--runner-command` to use another
+Use the named vLLM backend when the host should run vLLM rather than
+llama.cpp:
+
+```bash
+MICROAGENT_VLLM_PYTHON=../vllm/.venv/bin/python \
+  microagent model serve org/stub/stub.gguf \
+  --runner vllm \
+  --runner-model Qwen/Qwen2.5-0.5B-Instruct \
+  --runner-served-model local-chat \
+  --runner-arg --max-model-len --runner-arg 2048
+```
+
+The `<hf-ref>` argument remains the microagent model-store pairing ref. vLLM
+loads the backend model named by `--runner-model`, and clients send the
+`--runner-served-model` value when it is set.
+
+Set `MICROAGENT_MODEL_RUNNER_COMMAND` or pass `--runner-command` to use a custom
 OpenAI-compatible host runner. The command is parsed as argv fields, not shell
 evaluated. It must include `{model}` and either `{port}` or `{addr}`; `{host}`
 is also available. The environment variable accepts shell-like fields or a JSON
@@ -184,12 +201,18 @@ Use repeatable `--runner-env KEY=VALUE` flags for a single `model serve`
 invocation, or `MICROAGENT_MODEL_RUNNER_ENV` for defaults. The environment
 variable accepts shell-like `KEY=VALUE` fields, a JSON string array, or a JSON
 object. Runner env keys, not values, are recorded in the runner registry.
+Workspace `--model-runner-env` values apply only to the current `run`,
+`create`, or `start` invocation and are not persisted in workspace manifests.
 
 Workspaces hold runners. `run --model` holds one for the duration of the run.
 A workspace created with `create --model` re-pairs on every `start` and holds
 until `halt`, `stop`, `kill`, or `delete` releases it - a guest that exits on
 its own keeps its hold until the next lifecycle verb. An unpinned runner stops
 when its last holder releases; a pinned one (`model serve`) stays up.
+Runner backend, GPU intent, command template, args, and model mediation config
+from `create --model` are persisted so `start` and `supervise` replay the same
+pairing. `start` accepts the same `--model-runner*` and `--model-mediation*`
+flags as overrides for a single boot.
 When an existing workspace attaches or releases a model runner, microagent
 appends `model_worker=attached` and `model_worker=released` markers to the
 workspace's [`events`](/cli/events/) history. These markers record the model
@@ -485,6 +508,10 @@ the host runner flags for `serve`.
 | Flag | Description |
 |---|---|
 | `--dedicated` | Start a dedicated runner instead of reusing a shared one |
+| `--runner <backend>` | Runner backend: `llamacpp` (default), `vllm`, or `custom` |
+| `--runner-gpu <mode>` | Runner GPU intent: `off` (llama.cpp default), `on`, or `auto` |
+| `--runner-model <id>` | Backend model id for runners such as vLLM |
+| `--runner-served-model <name>` | OpenAI-compatible served model name for runners such as vLLM |
 | `--runner-command <template>` | Custom host model runner command template |
 | `--runner-name <name>` | Name to record for a custom host model runner |
 | `--runner-health-path <path>` | HTTP health path for a custom host model runner |

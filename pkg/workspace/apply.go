@@ -108,6 +108,16 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 	opts.ConsoleShell = manifest.ConsoleShell
 	opts.Hostname = manifest.Hostname
 	opts.Model = strings.TrimSpace(manifest.Model)
+	if manifest.ModelRunner != nil {
+		opts.ModelRunner = *manifest.ModelRunner
+	} else {
+		opts.ModelRunner = ModelRunnerSpec{}
+	}
+	if manifest.ModelMediation != nil {
+		opts.ModelMediation = *manifest.ModelMediation
+	} else {
+		opts.ModelMediation = ModelMediationSpec{}
+	}
 	opts.Mediation = manifest.Mediation
 	opts.Disks = manifest.Disks
 	if len(manifest.Secrets) > 0 {
