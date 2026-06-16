@@ -32,7 +32,7 @@ func TestNewPolicyRejectsEmptyEntry(t *testing.T) {
 }
 
 func TestNewPolicyRejectsDotOnlyEntry(t *testing.T) {
-	for _, e := range []string{".", " . ", "..", "."} {
+	for _, e := range []string{".", " . ", ".."} {
 		if _, err := NewPolicy([]string{e}); err == nil {
 			t.Errorf("NewPolicy(%q): expected error", e)
 		}

@@ -6,7 +6,9 @@ import (
 	"net/netip"
 )
 
-// parseOriginalDstV4 decodes a struct sockaddr_in (the SO_ORIGINAL_DST result):
+// parseOriginalDstV4 decodes an IPv4 struct sockaddr_in. SO_ORIGINAL_DST is
+// IPv4-only; IPv6 original-destination recovery (IP6T_SO_ORIGINAL_DST) is not
+// supported. It decodes a struct sockaddr_in (the SO_ORIGINAL_DST result):
 // family(2) port(2, big-endian) addr(4). It returns the IPv4 AddrPort.
 func parseOriginalDstV4(b []byte) (netip.AddrPort, error) {
 	if len(b) < 8 {

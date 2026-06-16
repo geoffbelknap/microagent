@@ -30,8 +30,10 @@ func normalizeHost(h string) string {
 	return strings.TrimRight(strings.ToLower(strings.TrimSpace(h)), ".")
 }
 
-// NewPolicy builds a Policy from hostnames. It fails on an entry that is empty
-// or normalizes to a bare "." so misconfiguration cannot silently widen access.
+// NewPolicy builds a Policy from hostnames. An entry that is empty or that
+// normalizes to empty after lowercasing/trimming/trailing-dot removal (e.g. a
+// bare "." or whitespace) is rejected so misconfiguration cannot silently
+// widen access.
 func NewPolicy(allow []string) (*Policy, error) {
 	p := &Policy{exact: map[string]struct{}{}, suffix: map[string]struct{}{}}
 	for _, raw := range allow {

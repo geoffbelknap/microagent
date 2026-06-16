@@ -24,7 +24,9 @@ type Handler struct {
 	SniffTimeout time.Duration
 }
 
-// DefaultOrigDst recovers the original destination for a *net.TCPConn.
+// DefaultOrigDst recovers the original destination for a *net.TCPConn (the
+// concrete type the mediator's TCP listener yields). It panics if conn is not
+// a *net.TCPConn, which would be a wiring error, not a runtime condition.
 func DefaultOrigDst(c net.Conn) (netip.AddrPort, error) {
 	return OriginalDestination(c.(*net.TCPConn))
 }
