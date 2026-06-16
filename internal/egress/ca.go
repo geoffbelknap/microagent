@@ -27,6 +27,12 @@ type CA struct {
 	leaves map[string]*tls.Certificate
 }
 
+// maxCachedLeaves bounds the per-SNI leaf cache so a guest hitting a wildcard
+// allowlist entry (e.g. ".s3.amazonaws.com") across thousands of distinct
+// subdomains cannot grow the cache without limit. Leaves are cheap to re-sign,
+// so eviction (arbitrary, single-entry) trades a rare re-sign for bounded memory.
+const maxCachedLeaves = 1024
+
 func randomSerial() (*big.Int, error) {
 	return rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 }
@@ -147,6 +153,12 @@ func (c *CA) LeafFor(serverName string) (*tls.Certificate, error) {
 		return nil, fmt.Errorf("egress: sign leaf for %q: %w", serverName, err)
 	}
 	tc := &tls.Certificate{Certificate: [][]byte{der, c.cert.Raw}, PrivateKey: key}
+	if len(c.leaves) >= maxCachedLeaves {
+		for k := range c.leaves { // evict one arbitrary entry to stay bounded
+			delete(c.leaves, k)
+			break
+		}
+	}
 	c.leaves[serverName] = tc
 	return tc, nil
 }

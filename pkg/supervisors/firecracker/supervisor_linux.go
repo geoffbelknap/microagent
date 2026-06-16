@@ -372,6 +372,20 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
+	// prepareNetworkForStart may have started the egress mediator — a host-side
+	// companion already bound to the tap gateway. Every failure path below cleans
+	// up the transient firewall rules and network devices, but the mediator is a
+	// separate process and must be reaped too, or it is orphaned with the
+	// workspace gone. Guard it with a deferred reaper that is disarmed only on the
+	// detached-success path (where the mediator is intentionally left running and
+	// recorded in runtime.json for stop/halt to reap later). terminateAuxProcess
+	// is idempotent, so paths that also reap it explicitly stay correct.
+	egressMediatorRunning := egressMediatorPID != 0
+	defer func() {
+		if egressMediatorRunning {
+			terminateAuxProcess(egressMediatorPID)
+		}
+	}()
 	runtimeReq := requestWithRuntimeNetwork(req, runtimeNetwork)
 	// Move the shell/exec host binds off any unbindable port (e.g. a WSL2/Windows
 	// reserved range) before the VM config (boot args) and runtime state are
@@ -586,6 +600,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		_ = serialLog.Close()
 		_ = cmd.Process.Release()
+		// Detached start succeeded: the mediator stays up as a recorded companion
+		// (reaped later by stop/halt/quarantine), so disarm the deferred reaper.
+		egressMediatorRunning = false
 		return eventResponse(req, vmkit.StateRunning, ""), nil
 	}
 	waitErr := waitForeground(ctx, cmd, serialLogPath(opts), opts.Timeout)

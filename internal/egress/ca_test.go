@@ -3,6 +3,7 @@ package egress
 import (
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -62,6 +63,22 @@ func TestLoadCARejectsMismatchedKey(t *testing.T) {
 	}
 	if _, err := LoadCA(ca1.CertPEM(), key2); err == nil {
 		t.Fatal("expected LoadCA to reject cert/key from different CAs")
+	}
+}
+
+func TestLeafCacheBounded(t *testing.T) {
+	ca, _ := NewCA("cn", time.Hour)
+	// Sign well past the cap to force eviction.
+	for i := 0; i < maxCachedLeaves+50; i++ {
+		if _, err := ca.LeafFor(fmt.Sprintf("h%d.example.com", i)); err != nil {
+			t.Fatalf("LeafFor: %v", err)
+		}
+	}
+	ca.mu.Lock()
+	n := len(ca.leaves)
+	ca.mu.Unlock()
+	if n > maxCachedLeaves {
+		t.Fatalf("leaf cache grew unbounded: %d entries (cap %d)", n, maxCachedLeaves)
 	}
 }
 
