@@ -486,7 +486,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			}
 		}
 	}
-	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, networkDevices, firewallRules, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, 0, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 		_ = cmd.Process.Kill()
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -2082,7 +2082,7 @@ func startEgressMediator(opts Options, allow []string) (int, int, error) {
 		return 0, 0, err
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	_ = l.Close()
+	_ = l.Close() // port-allocation race is bounded: mediator readiness probe retries until it accepts
 	exe, err := os.Executable()
 	if err != nil {
 		return 0, 0, err
