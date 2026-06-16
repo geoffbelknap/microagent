@@ -1316,6 +1316,29 @@ func TestRequestForCommandBridgedRequiresUnsupported(t *testing.T) {
 	}
 }
 
+func TestBridgedStartEmitsUnsupportedWarning(t *testing.T) {
+	var buf bytes.Buffer
+	warnIfBridged(&buf, "bridged")
+	got := buf.String()
+	if !strings.Contains(got, "UNSUPPORTED") {
+		t.Fatalf("bridged warning = %q, want it to contain UNSUPPORTED", got)
+	}
+	const want = "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.\n"
+	if got != want {
+		t.Fatalf("bridged warning = %q, want %q", got, want)
+	}
+}
+
+func TestNonBridgedStartEmitsNoWarning(t *testing.T) {
+	for _, mode := range []string{"user", "nat", "isolated", "named", ""} {
+		var buf bytes.Buffer
+		warnIfBridged(&buf, mode)
+		if buf.Len() != 0 {
+			t.Fatalf("mode %q emitted a warning: %q", mode, buf.String())
+		}
+	}
+}
+
 func TestRequestForCommandRejectsIsolatedPublish(t *testing.T) {
 	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",

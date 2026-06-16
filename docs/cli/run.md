@@ -155,8 +155,8 @@ The complete set:
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--file <path>` | Workspace spec file; flags override matching spec fields |
 | `--restart <policy>` | Restart policy for kept/named runs: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, `bridged`, or `named` |
-| `--network-interface <if>` | Host interface identifier or display name for bridged mode |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `named` |
+| `--network-interface <if>` | Host interface identifier or display name (only used by the unsupported `bridged` mode) |
 | `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
 | `--publish <mapping>` | Forward `[host:]hostPort:guestPort[/tcp]` |
 | `-p <mapping>` | Alias for `--publish` |

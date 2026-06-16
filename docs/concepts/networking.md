@@ -13,15 +13,20 @@ For the task-shaped walkthroughs, see
 mediation channel has its own guide at
 [Build agents on the mediation channel](/guides/agents-and-mediation/).
 
-Every workspace declares its network intent. Five modes:
+Every workspace declares its network intent. Four supported modes:
 
 | Mode | What it does |
 |---|---|
 | `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. |
 | `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
 | `isolated` | No guest network device. The guest has no network access at all. |
-| `bridged` | Workspace gets its own L2 presence on an existing host bridge. |
 | `named` | Workspace joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a shared managed bridge so members reach each other, and `/etc/hosts` name resolution. Currently implemented by Firecracker on Linux. |
+
+> **`bridged` is unsupported.** It gives the workspace its own L2 presence on an
+> existing host bridge, but it **bypasses egress mediation** and is not covered
+> by microagent's security model. It is hidden from the advertised modes and
+> requires `--unsupported` to select. It may be broken or removed. The sections
+> below document its mechanics for the operators who knowingly opt in.
 
 The implementation under each mode varies by backend. Quick matrix across all
 three backends:

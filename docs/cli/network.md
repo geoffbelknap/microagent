@@ -13,8 +13,8 @@ microagent network list                                 List named networks
 microagent network delete <name> [--force]                Remove a named network
 ```
 
-With a workspace name, `network` reports the network mode, bridged host
-interface, declared port forwards, DNS servers, routes, and IP information
+With a workspace name, `network` reports the network mode, host interface,
+declared port forwards, DNS servers, routes, and IP information
 recorded for that workspace. The top-level `network` field comes from the
 persistent workspace manifest; when a workspace has a runtime state file,
 `runtime` shows the last network config recorded by the backend supervisor.

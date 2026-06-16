@@ -129,6 +129,32 @@ func TestDefaultOptionsUseUserNetworkMode(t *testing.T) {
 	}
 }
 
+func TestNetworkSpecRoundTripPreservesUnsupportedAck(t *testing.T) {
+	spec := NetworkSpecFromConfig(vmkit.NetworkConfig{Mode: "bridged", Unsupported: true})
+	if !spec.Unsupported {
+		t.Fatalf("NetworkSpecFromConfig dropped the unsupported ack: %#v", spec)
+	}
+	cfg := NetworkConfigFromSpec(spec)
+	if !cfg.Unsupported {
+		t.Fatalf("NetworkConfigFromSpec dropped the unsupported ack: %#v", cfg)
+	}
+	if err := vmkit.ValidateNetworkConfig(cfg); err != nil {
+		t.Fatalf("round-tripped bridged+unsupported config failed validation: %v", err)
+	}
+}
+
+func TestNetworkSpecBridgedWithoutAckStillRejectedAtStart(t *testing.T) {
+	// A persisted or hand-written bridged manifest WITHOUT the ack must still be
+	// rejected — the quarantine holds across the manifest round-trip.
+	cfg := NetworkConfigFromSpec(NetworkSpec{Mode: "bridged"})
+	if cfg.Unsupported {
+		t.Fatalf("bridged spec without ack should not set Unsupported: %#v", cfg)
+	}
+	if err := vmkit.ValidateNetworkConfig(cfg); err == nil {
+		t.Fatal("bridged config without the unsupported ack passed validation")
+	}
+}
+
 func TestDefaultOptionsDoNotSetAppleVFPathForNonAppleVF(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("host default backend is apple-vf on darwin")

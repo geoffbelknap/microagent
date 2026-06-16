@@ -614,7 +614,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.IntVar(&config.CPUCount, "cpus", 2, "CPU count")
 	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
-	networkMode := fs.String("network", defaultNetworkMode, "Network mode: user, nat, isolated, or bridged")
+	networkMode := fs.String("network", defaultNetworkMode, "Network mode: user, nat, or isolated")
 	networkInterface := fs.String("network-interface", "", "Host interface for bridged network mode")
 	networkUnsupported := fs.Bool("unsupported", false, "Acknowledge selecting an unsupported, unmediated network mode (bridged)")
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
@@ -722,6 +722,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	warnIfBridged(os.Stderr, opts.Network.Mode)
 
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
@@ -1792,7 +1793,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	fs.IntVar(&timeoutSeconds, "timeout", timeoutSeconds, "Per-iteration timeout in seconds")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
-	fs.StringVar(&opts.NetworkMode, "network", opts.NetworkMode, "Network mode for measured boots (user, nat, isolated, bridged); empty uses the backend default")
+	fs.StringVar(&opts.NetworkMode, "network", opts.NetworkMode, "Network mode for measured boots (user, nat, isolated); empty uses the backend default")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -3303,6 +3304,18 @@ func parseForkSnapshotRef(ref string) (string, string, error) {
 	return source, tag, nil
 }
 
+// warnIfBridged emits a loud, single-line warning to w when the effective
+// network mode is the unsupported, unmediated "bridged" mode. It is fired once
+// per start/run from the CLI so the operator sees it in their terminal. Bridged
+// still works (behind --unsupported); this only makes the risk impossible to
+// miss. Non-bridged modes emit nothing.
+func warnIfBridged(w io.Writer, mode string) {
+	if strings.TrimSpace(mode) != "bridged" {
+		return
+	}
+	fmt.Fprintln(w, "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.")
+}
+
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	profileExplicit := hasFlagValue(args, "profile")
 	memoryExplicit := hasFlagValue(args, "memory")
@@ -3396,6 +3409,10 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	// (halt/stop/kill/delete). A manifest read error is tolerated;
 	// workspace.Start surfaces it properly.
 	if manifest, err := workspace.ReadManifest(opts.StateDir, opts.Name); err == nil {
+		// The effective network mode on start comes from the persisted manifest,
+		// not a CLI flag; warn off the manifest so a bridged workspace is flagged
+		// on every boot.
+		warnIfBridged(os.Stderr, manifest.Network.Mode)
 		var manifestRunner workspace.ModelRunnerSpec
 		if manifest.ModelRunner != nil {
 			manifestRunner = *manifest.ModelRunner
@@ -3792,7 +3809,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
-	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: user, nat, isolated, bridged, or named")
+	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: user, nat, isolated, or named")
 	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
 	fs.StringVar(&opts.Network.Name, "network-name", opts.Network.Name, "Join a user-defined named network by name")
 	fs.BoolVar(&opts.Network.Unsupported, "unsupported", opts.Network.Unsupported, "Acknowledge selecting an unsupported, unmediated network mode (bridged)")
@@ -7162,7 +7179,7 @@ Commands:
   delete               Delete a workspace
   contract             Show backend-neutral runtime contract
   host                 Report host capabilities
-  host setup-networking  Enable nat/bridged/named networking (Linux; needs root). --check / --revert
+  host setup-networking  Enable nat/named networking (Linux; needs root). --check / --revert
   doctor               Check the host
   rootfs build         Build a rootfs from an OCI image
   version              Print the version
@@ -7197,7 +7214,7 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, bridged, or named
+  -network <mode>       Network mode: user, nat, isolated, or named
   -network-interface <if>
                          Host interface for bridged network mode
   -network-name <name>  Join a user-defined named network by name
@@ -7273,7 +7290,7 @@ Options:
   -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, bridged, or named
+  -network <mode>       Network mode: user, nat, isolated, or named
   -network-interface <if>
                          Host interface for bridged network mode
   -network-name <name>  Join a user-defined named network by name
@@ -7341,7 +7358,7 @@ Options:
   -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, bridged, or named
+  -network <mode>       Network mode: user, nat, isolated, or named
   -network-interface <if>
                          Host interface for bridged network mode
   -network-name <name>  Join a user-defined named network by name

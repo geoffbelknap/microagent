@@ -160,6 +160,11 @@ type NetworkSpec struct {
 	IP           string              `json:"ip,omitempty" yaml:"ip,omitempty"`
 	Subnet       string              `json:"subnet,omitempty" yaml:"subnet,omitempty"`
 	Gateway      string              `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	// Unsupported persists the operator acknowledgement that an unsupported,
+	// unmediated network mode (currently only "bridged") was knowingly selected.
+	// Without it, a bridged manifest is rejected again at start, so the
+	// acknowledgement must survive the create→persist→start round-trip.
+	Unsupported bool `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
 }
 
 type Disk struct {
@@ -619,6 +624,7 @@ func NetworkSpecFromConfig(network vmkit.NetworkConfig) NetworkSpec {
 		IP:           network.IP,
 		Subnet:       network.Subnet,
 		Gateway:      network.Gateway,
+		Unsupported:  network.Unsupported,
 	}
 }
 
@@ -633,6 +639,7 @@ func NetworkConfigFromSpec(spec NetworkSpec) vmkit.NetworkConfig {
 		IP:           spec.IP,
 		Subnet:       spec.Subnet,
 		Gateway:      spec.Gateway,
+		Unsupported:  spec.Unsupported,
 	})
 }
 

@@ -236,8 +236,8 @@ The complete set:
 | `--arch <arch>` | Guest architecture |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always`. Enforced by [`supervise`](/cli/supervise/) |
-| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, `bridged`, or `named`. See the Apple VF `bridged` note below |
-| `--network-interface <if>` | Host interface identifier or display name for bridged mode |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `named` |
+| `--network-interface <if>` | Host interface identifier or display name (only used by the unsupported `bridged` mode) |
 | `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
 | `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 | `-p <mapping>` | Alias for `--publish` |
