@@ -4,7 +4,7 @@ description: Boot a Linux microVM from an OCI image and run a command inside it.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-16_
 
 Boot a Linux microVM from an OCI image, run one command inside it, and tear it
 down. Three commands, start to finish.
@@ -15,8 +15,7 @@ down. Three commands, start to finish.
 brew install geoffbelknap/tap/microagent
 ```
 
-Building from source and developer builds are covered in
-[Install](/getting-started/install/).
+Building from source is covered in [Install](/getting-started/install/).
 
 ## 2. Check the host
 

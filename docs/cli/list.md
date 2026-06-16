@@ -4,7 +4,7 @@ description: List saved workspaces and their current state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 ```text
 microagent list [--state-dir <dir>]

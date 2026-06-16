@@ -4,7 +4,7 @@ description: Map the Docker commands you already know to their microagent equiva
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 If you think in Docker commands, most of your muscle memory carries over. The
 big difference: each "container" is a real microVM with its own kernel, and

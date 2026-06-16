@@ -106,6 +106,49 @@ probe config + boot), `exec-stream` (streaming structured exec),
 `survive-reboot` (boot-unit install/uninstall), and `named-network` (two VMs on
 a managed bridge with `/etc/hosts` resolution).
 
+### Model mediation validation
+
+Model mediation has one required contributor pressure gate that does not need a
+GPU, llama.cpp, vLLM, HuggingFace access, or a real model:
+
+```bash
+scripts/dev/microagent-e2e.sh model-mediation-pressure-ci
+```
+
+Use these opt-in lanes when changing model runner or mediation behavior:
+
+```bash
+# Policy generation/evaluation only; no VM or runner.
+MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 \
+  scripts/dev/microagent-e2e-model-mediation-runner.sh
+
+# Functional fake-runner mediation matrix; no GPU or real model.
+MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
+  scripts/dev/microagent-e2e.sh model-mediation-runner-fake
+
+# llama.cpp, CPU by default.
+MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
+  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
+  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
+
+# llama.cpp with explicit GPU offload.
+MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=1 \
+  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
+  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
+
+# vLLM GPU lane from a local checkout.
+MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
+  scripts/dev/microagent-e2e.sh model-mediation-vllm
+```
+
+For Linux x86_64 NVIDIA hosts, `scripts/dev/build-llama-cuda.sh --llama-dir
+../llama.cpp` builds a reproducible CUDA-enabled `llama-server` without
+installing CUDA packages into the system. Hardware pressure runs are opt-in:
+set the adapter-specific `*_PRESSURE=1` switch and use
+`*_PRESSURE_PRESET=hardware` for bounded warn-gate collection.
+
 ### Validating a new machine (WSL, macOS, Linux)
 
 Run the whole suite — it self-selects what the host supports and **skips with a

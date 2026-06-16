@@ -334,8 +334,8 @@ _ = resp
 
 The CLI contains presentation, flag parsing, build metadata output, and raw
 terminal handling. microVM orchestration and management capabilities are exposed
-through the Go packages, and the mapping below is checked by
-`scripts/dev/docs-parity.py`.
+through the Go packages, and the mapping below shows the equivalent library
+entry points.
 
 ## CLI ↔ library mapping
 

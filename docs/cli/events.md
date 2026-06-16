@@ -4,7 +4,7 @@ description: Show or stream a workspace's event history.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-15_
+_Last updated: 2026-06-16_
 
 ```text
 microagent events <name> [--follow] [--state-dir <dir>]

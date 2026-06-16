@@ -122,30 +122,11 @@ OpenAI-compatible command template. If the model is not yet in the local GGUF
 store, `serve` pulls it automatically before starting the server. The runner is
 started pinned, so it stays alive even when no workspace holds it.
 
-For Linux x86_64 hosts with NVIDIA CUDA, the dev build helper can reproduce the
-CUDA `llama-server` build used by microagent model-runner testing:
-
-```bash
-scripts/dev/build-llama-cuda.sh --llama-dir ../llama.cpp
-
-export MICROAGENT_LLAMA_SERVER=/tmp/llama.cpp-cuda13-ninja-build/bin/llama-server
-export MICROAGENT_MODEL_RUNNER_ARGS='["-ngl","all","--no-ui"]'
-```
-
 microagent starts the default llama.cpp runner with `--device none
 --gpu-layers 0`. Pointing `MICROAGENT_LLAMA_SERVER` at a CUDA-enabled binary is
 therefore not enough to opt into GPU use. Pass `--runner-gpu on`, `--runner-gpu
 auto`, or explicit llama.cpp GPU args such as `--runner-arg -ngl --runner-arg
 all`.
-
-By default the helper downloads pinned CUDA 13.3 Ubuntu 24.04 debs, verifies
-their SHA256 checksums, extracts them under `/tmp/microagent-cuda13-root`
-without installing system packages, builds llama.cpp out of tree with Ninja,
-and verifies `llama-server --list-devices`. Override `--cuda-arch` for GPUs
-other than the RTX 3080 Ti's compute capability `86`, or pass `--cuda-home`
-to use an existing CUDA toolkit. The script does not install dependencies; if
-`cmake`, `ninja`, `curl`, `dpkg-deb`, `sha256sum`, `g++`, or `git` is missing,
-install it explicitly and rerun the helper.
 
 Use the named vLLM backend when the host should run vLLM rather than
 llama.cpp:
@@ -226,143 +207,7 @@ Use it to reclaim a runner whose workspace exited without a lifecycle verb.
 `runners` self-heals the registry: any listed process that is no longer alive
 is silently removed before the list is printed.
 
-## Mediated backend validation
-
-The production model mediation path is still experimental, but the developer
-E2E suite can validate it against the supported external backends without
-making GPU access a default requirement:
-
-```bash
-# Stub OpenAI-compatible runner; no GPU or llama.cpp required.
-MICROAGENT_E2E_MODEL_MEDIATION=1 scripts/dev/microagent-e2e.sh model-mediation
-
-# Runner-neutral matrix for any prepared OpenAI-compatible runner.
-MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF=org/repo/model.gguf \
-  MICROAGENT_MODEL_RUNNER_COMMAND='runner serve {model} --host {host} --port {port}' \
-  MICROAGENT_MODEL_RUNNER_NAME=runner \
-  scripts/dev/microagent-e2e.sh model-mediation-runner
-
-# Policy file generation/validation smoke; no VM or model runner.
-MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 \
-  scripts/dev/microagent-e2e-model-mediation-runner.sh
-
-# Runner-neutral matrix through a fake custom runner; no GPU or real model.
-MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
-  scripts/dev/microagent-e2e.sh model-mediation-runner-fake
-
-# Runner-neutral pressure probe through the fake custom runner.
-MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE=1 \
-  scripts/dev/microagent-e2e.sh model-mediation-runner-fake
-
-# CI-safe fake pressure preset with required gates.
-MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE_PRESET=ci \
-  scripts/dev/microagent-e2e.sh model-mediation-runner-fake
-
-# Same CI-safe fake pressure path as a named E2E scenario.
-scripts/dev/microagent-e2e.sh model-mediation-pressure-ci
-
-# llama.cpp runner, default CPU execution.
-MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
-  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
-  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
-
-# llama.cpp CPU pressure probe.
-MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=0 \
-  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
-  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
-
-# Bounded llama.cpp hardware pressure preset.
-MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE_PRESET=hardware \
-  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
-  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
-
-# llama.cpp runner with explicit GPU offload.
-MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=1 \
-  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
-  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
-
-# vLLM GPU runner from a local checkout.
-MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
-  scripts/dev/microagent-e2e.sh model-mediation-vllm
-
-# vLLM GPU pressure probe.
-MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
-  scripts/dev/microagent-e2e.sh model-mediation-vllm
-
-# Bounded vLLM hardware pressure preset.
-MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE=1 \
-  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE_PRESET=hardware \
-  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
-  scripts/dev/microagent-e2e.sh model-mediation-vllm
-```
-
-The runner-neutral matrix runs direct, local-allow, external policy allow,
-external policy deny, file-policy allow, file-policy deny, and policy
-unavailable cases. It also validates and dry-runs generated file policies with
-`microagent model policy validate` and `microagent model policy evaluate`
-before booting the corresponding guest probes. Set
-`MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1` to run only those
-generated-policy checks without KVM, Firecracker, a guest image, or a model
-runner. Set `MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1` to run the same
-matrix through a tiny fake OpenAI-compatible custom runner; that path still
-boots microVM probes, but it does not need llama.cpp, vLLM, a GPU, a real model,
-or HuggingFace access. For the live runner-neutral matrix, provide a model ref
-plus the same custom runner environment accepted by `model serve`, such as
-`MICROAGENT_MODEL_RUNNER_COMMAND`, `MICROAGENT_MODEL_RUNNER_NAME`,
-`MICROAGENT_MODEL_RUNNER_HEALTH_PATH`, `MICROAGENT_MODEL_RUNNER_ARGS`, and
-`MICROAGENT_MODEL_RUNNER_ENV`.
-
-The fake, llama.cpp, and vLLM scenarios are adapters over that same matrix:
-they handle runner-specific preflight and startup, then delegate the mediated
-request cases to the shared harness. The matrices emit profile summaries,
-direct-vs-mediated comparisons, telemetry summaries, and mediation gate TSVs
-under their output directories. Gates fail the scenario by default when local
-mediation, policy mediation, or decision latency exceeds the configured budget;
-set the scenario-specific `*_GATE_MODE=warn` only when collecting noisy
-experimental data. The model mediation scenarios default to
-`quay.io/curl/curl:latest` for the guest HTTP probe image; use the
-scenario-specific `*_IMAGE` override when a different internal mirror is
-required.
-
-Set the adapter-specific `*_PRESSURE=1` switch to replace the functional
-allow/deny matrix with the runner-neutral pressure probe. The pressure probe
-compares direct bridge traffic with local mediation, file-policy allow, and
-external-policy allow across configurable guest workspaces and per-workspace
-concurrency. It writes `pressure-profiles.tsv`,
-`pressure-profile-comparison.tsv`, `pressure-audit-summary.tsv`, optional
-telemetry summaries, `pressure-gates.tsv`, and compact
-`pressure-decision.txt` / `pressure-decision.tsv` / `pressure-decision.json`
-reads. Start with `pressure-decision.txt` for the run status, worst positive
-direct-vs-mediated deltas, policy decision p95, and telemetry read; use the raw
-TSVs when you need endpoint- or audit-level detail. Pressure gates default to
-`warn`, because this path is intended to establish realistic concurrency
-budgets before making them release-blocking. Common knobs are
-`*_PRESSURE_WORKSPACES`, `*_PRESSURE_CONCURRENCY`, `*_PRESSURE_CASES`,
-`*_PRESSURE_WARMUPS`, and `*_PRESSURE_GATE_MODE`.
-
-The adapters also accept `*_PRESSURE_PRESET=ci|hardware|baseline|default`.
-`ci` is intended for the fake runner: one workspace, concurrency `1`, one
-sample, no warmup, telemetry off, short token caps, and required gates
-(`models <= 100ms`, `chat <= 250ms`, `stream TTFB <= 100ms`,
-`decision <= 50ms`). `hardware` is intended for llama.cpp and vLLM collection:
-one workspace, concurrency `1,2`, one sample, no warmup, short token caps,
-telemetry auto, and warn gates (`models <= 100ms`, `chat <= 500ms`,
-`stream TTFB <= 250ms`, `decision <= 100ms`). `baseline` and `default` keep
-the previous adapter defaults. Explicit `*_PRESSURE_*` env vars always override
-preset values.
+## Model mediation policy files
 
 Set `MICROAGENT_MODEL_MEDIATION=policy` to require a policy source for the
 host-worker mediator. The source can be either an external decision endpoint
@@ -440,7 +285,7 @@ microagent model policy evaluate ./model-policy.json \
 `policy evaluate` exits nonzero only when the policy file is invalid, the
 sample metadata is invalid, or `--expect` does not match the evaluated
 decision. A denied decision is otherwise a successful dry run and is printed as
-`deny` with the policy reason. Use `--json` for CI assertions.
+`deny` with the policy reason. Use `--json` for automation.
 
 ## HuggingFace ref forms
 

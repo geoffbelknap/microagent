@@ -113,7 +113,6 @@ required_features = {
     "supervise",
     "snapshot/pause/resume",
     "model",
-    "host worker GPU",
     "perf",
     "serve mcp",
     "serve mcp lifecycle",

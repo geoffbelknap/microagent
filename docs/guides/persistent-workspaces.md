@@ -4,7 +4,7 @@ description: Create a named workspace and walk its create, start, halt, connect,
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 By the end of this guide you have a named workspace whose disk and state
 survive between starts - the environment you set up today is still there

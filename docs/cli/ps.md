@@ -4,7 +4,7 @@ description: List running workspaces.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 ```text
 microagent ps [--state-dir <dir>]
