@@ -30,3 +30,37 @@ func TestNewPolicyRejectsEmptyEntry(t *testing.T) {
 		t.Fatal("expected error for empty allowlist entry")
 	}
 }
+
+func TestNewPolicyRejectsDotOnlyEntry(t *testing.T) {
+	for _, e := range []string{".", " . ", "..", "."} {
+		if _, err := NewPolicy([]string{e}); err == nil {
+			t.Errorf("NewPolicy(%q): expected error", e)
+		}
+	}
+}
+
+func TestPolicyNormalizesTrailingDot(t *testing.T) {
+	// entry has a trailing dot; lookup host plain — and vice versa
+	p, err := NewPolicy([]string{"api.github.com.", ".example.com."})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	for _, h := range []string{"api.github.com", "api.github.com.", "a.example.com", "a.example.com."} {
+		if !p.AllowHost(h).Allow {
+			t.Errorf("AllowHost(%q) = deny, want allow", h)
+		}
+	}
+}
+
+func TestPolicyDeduplicatesSuffixEntries(t *testing.T) {
+	p, err := NewPolicy([]string{".example.com", ".example.com", ".EXAMPLE.com"})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	if len(p.suffix) != 1 {
+		t.Fatalf("suffix set size = %d, want 1 (deduped)", len(p.suffix))
+	}
+	if !p.AllowHost("a.example.com").Allow {
+		t.Error("AllowHost(a.example.com) = deny, want allow")
+	}
+}
