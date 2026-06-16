@@ -2,6 +2,7 @@ package egress
 
 import (
 	"bufio"
+	"crypto/x509"
 	"io"
 	"net"
 	"net/netip"
@@ -17,11 +18,14 @@ const maxTLSRecord = 1<<14 + 5
 // destination, sniff the host, enforce the allowlist, and forward or deny
 // fail-closed. OrigDst and Dial are injectable for tests.
 type Handler struct {
-	Policy       *Policy
-	Logger       Logger
-	OrigDst      func(net.Conn) (netip.AddrPort, error)
-	Dial         func(network, addr string) (net.Conn, error)
-	SniffTimeout time.Duration
+	Policy        *Policy
+	Passthrough   *Policy
+	CA            *CA
+	UpstreamRoots *x509.CertPool
+	Logger        Logger
+	OrigDst       func(net.Conn) (netip.AddrPort, error)
+	Dial          func(network, addr string) (net.Conn, error)
+	SniffTimeout  time.Duration
 }
 
 // DefaultOrigDst recovers the original destination for a *net.TCPConn (the
@@ -44,12 +48,19 @@ func (h *Handler) Handle(conn net.Conn) {
 		timeout = 2 * time.Second
 	}
 	br := bufio.NewReaderSize(conn, maxTLSRecord)
-	host := sniffHost(br, dst, conn.SetReadDeadline, time.Now().Add(timeout))
+	host, isTLS := sniffHost(br, dst, conn.SetReadDeadline, time.Now().Add(timeout))
 
-	if d := h.Policy.AllowHost(host); !d.Allow {
+	d := h.Policy.AllowHost(host)
+	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(host).Allow
+	if !d.Allow && !passthrough {
 		h.Logger.Log("egress_deny", map[string]any{"host": host, "dst": dst.String(), "reason": d.Reason})
 		return // fail-closed: no upstream dial
 	}
+	if isTLS && h.CA != nil && d.Allow && !passthrough {
+		h.serveMITM(conn, br, host, dst)
+		return
+	}
+	// Non-MITM path: passthrough / plain-HTTP / raw TCP -> L4 splice.
 	up, err := h.Dial("tcp", dst.String())
 	if err != nil {
 		h.Logger.Log("egress_dial_error", map[string]any{"host": host, "dst": dst.String(), "error": err.Error()})

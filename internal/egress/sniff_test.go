@@ -27,7 +27,8 @@ func TestSniffHostHTTPReturnsBeforeDeadline(t *testing.T) {
 	dst := netip.MustParseAddrPort("10.0.0.1:80")
 	gotc := make(chan string, 1)
 	go func() {
-		gotc <- sniffHost(br, dst, server.SetReadDeadline, time.Now().Add(10*time.Second))
+		host, _ := sniffHost(br, dst, server.SetReadDeadline, time.Now().Add(10*time.Second))
+		gotc <- host
 	}()
 	select {
 	case got := <-gotc:
