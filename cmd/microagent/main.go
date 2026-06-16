@@ -980,10 +980,6 @@ func modelMediationConfigFromSpec(spec workspace.ModelMediationSpec) (modelMedia
 	return cfg, nil
 }
 
-func durationEnv(name string, fallback time.Duration) (time.Duration, error) {
-	return durationValue(name, os.Getenv(name), fallback)
-}
-
 func durationValue(name, raw string, fallback time.Duration) (time.Duration, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -2384,7 +2380,7 @@ func runModelPolicy(args []string, stdout *os.File) error {
 	case "evaluate", "eval":
 		return runModelPolicyEvaluate(args[1:], stdout)
 	default:
-		return fmt.Errorf("usage: microagent model policy <validate|evaluate> ...")
+		return fmt.Errorf("usage: microagent model policy <validate|evaluate> args")
 	}
 }
 

@@ -83,7 +83,7 @@ expect_failure_contains() {
 }
 
 assert_stdout_contains top-help "Commands:" "$CLI" help
-assert_stdout_contains top-help-list "list[[:space:]]+List workspaces" "$CLI" help
+assert_stdout_contains top-help-list "list, ls[[:space:]]+List saved workspaces" "$CLI" help
 assert_stdout_contains top-help-image "image[[:space:]]+Manage reusable rootfs baselines" "$CLI" help
 assert_stdout_contains top-help-exec "exec[[:space:]]+Run a structured command" "$CLI" help
 assert_stdout_contains full-help "rootfs build" "$CLI" help all

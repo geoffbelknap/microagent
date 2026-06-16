@@ -236,7 +236,9 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
+	defer func() {
+		_ = listener.Close()
+	}()
 	server := &http.Server{Handler: handler}
 	handler.logger.Log("mediator_start", map[string]any{
 		"listen_host":      host,
