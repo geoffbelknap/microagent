@@ -239,6 +239,9 @@ MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE_PRESET=ci \
   scripts/dev/microagent-e2e.sh model-mediation-runner-fake
 
+# Same CI-safe fake pressure path as a named E2E scenario.
+scripts/dev/microagent-e2e.sh model-mediation-pressure-ci
+
 # llama.cpp runner, default CPU execution.
 MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
   MICROAGENT_LLAMA_SERVER=/path/to/llama-server \

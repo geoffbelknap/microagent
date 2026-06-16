@@ -35,6 +35,7 @@ SCENARIOS=(
   "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm"
   "model-mediation-runner:scripts/dev/microagent-e2e-model-mediation-runner.sh:linux:vm"
   "model-mediation-runner-fake:scripts/dev/microagent-e2e-model-mediation-runner-fake.sh:linux:vm"
+  "model-mediation-pressure-ci:scripts/dev/microagent-e2e-model-mediation-pressure-ci.sh:linux:vm"
   "model-mediation-llamacpp:scripts/dev/microagent-e2e-model-mediation-llamacpp.sh:linux:vm"
   "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm"
   "host-worker-contract:scripts/dev/microagent-e2e-host-worker-contract.sh:all:none"
@@ -86,6 +87,7 @@ SCENARIO_COVERAGE=(
   "model-mediation|host-specific|firecracker|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
   "model-mediation-runner|host-specific|firecracker|Opt-in runner-neutral production run --model mediation matrix for a prepared OpenAI-compatible runner"
   "model-mediation-runner-fake|host-specific|firecracker|Opt-in runner-neutral production run --model mediation matrix through a fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
+  "model-mediation-pressure-ci|host-specific|firecracker|CI-safe required-gate pressure target through the fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
   "model-mediation-llamacpp|host-specific|firecracker|Opt-in production run --model mediation matrix with the llama.cpp runner"
   "model-mediation-vllm|host-specific|firecracker|Opt-in production run --model mediation matrix with a real vLLM GPU runner"
   "host-worker-contract|portable|none|Opt-in OpenAI-compatible host-worker contract conformance"
@@ -139,7 +141,7 @@ E2E_MATRIX=(
   "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
   "supervise|backend-neutral|firecracker,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
   "snapshot/pause/resume|backend-specific|firecracker,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
-  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, llama.cpp, and vLLM opt-in matrices while the mediator remains experimental"
+  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices while the mediator remains experimental"
   "host worker contract|portable|none|host-worker-contract|Opt-in OpenAI-compatible host-worker contract conformance; no GPU or microVM required"
   "host worker GPU|host-specific|firecracker|host-worker-gpu|Opt-in acceptance matrix for a host GPU worker reached by one and two Firecracker microVMs"
   "perf|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
@@ -213,6 +215,10 @@ Scenarios:
                     run --model mediator through the custom runner contract
                     with a fake OpenAI-compatible runner. Set
                     MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1.
+  model-mediation-pressure-ci
+                    CI-safe Linux host backend pressure target for the
+                    experimental run --model mediator through the fake custom
+                    runner. Uses required gates and emits pressure-decision.*.
   model-mediation-llamacpp
                     Opt-in Linux host backend matrix for the experimental
                     run --model mediator against the llama.cpp runner. Set
@@ -288,6 +294,8 @@ Environment:
     functional allow/deny matrix.
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE_PRESET=ci runs a short
     fake-runner pressure profile with required gates for CI-style validation.
+    The named model-mediation-pressure-ci scenario sets these fake-runner
+    pressure env vars automatically.
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_OUT_DIR=<dir> stores fake runner
     mediation reports.
   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 opts into the production run --model
@@ -569,6 +577,7 @@ if [ "$keep" = "1" ]; then
   export MICROAGENT_KEEP_MICROAGENT_E2E_HEALTH=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_EXEC_STREAM=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION=1
+  export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1
   export MICROAGENT_KEEP_MICROAGENT_E2E_HOST_WORKER_GPU=1
