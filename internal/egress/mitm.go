@@ -35,6 +35,7 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 		h.Logger.Log("egress_mitm_handshake_error", map[string]any{"host": sni, "error": err.Error()})
 		return
 	}
+	defer guestTLS.Close()
 	upCfg := &tls.Config{ServerName: sni}
 	if h.UpstreamRoots != nil {
 		upCfg.RootCAs = h.UpstreamRoots

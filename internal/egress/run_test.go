@@ -92,3 +92,21 @@ func TestServeBadCAPathFailsClosed(t *testing.T) {
 		t.Fatal("expected Serve to fail on missing CA files")
 	}
 }
+
+func TestServeRejectsHalfSetCA(t *testing.T) {
+	// Only CACertPath set, no CAKeyPath — must fail closed.
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	err := Serve(context.Background(), ln, Options{
+		Allow:      []string{"x.com"},
+		CACertPath: "/some/ca.pem",
+		// CAKeyPath deliberately omitted
+		Logger:  &BufferLogger{},
+		OrigDst: func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("127.0.0.1:9"), nil },
+	})
+	if err == nil {
+		t.Fatal("expected Serve to fail when only CACertPath is set")
+	}
+	if !strings.Contains(err.Error(), "must be set together") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}

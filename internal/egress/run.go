@@ -59,6 +59,10 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	if orig == nil {
 		orig = DefaultOrigDst
 	}
+	if (opts.CACertPath == "") != (opts.CAKeyPath == "") {
+		_ = ln.Close()
+		return fmt.Errorf("egress: CACertPath and CAKeyPath must be set together")
+	}
 	var ca *CA
 	if opts.CACertPath != "" && opts.CAKeyPath != "" {
 		certPEM, rerr := os.ReadFile(opts.CACertPath)
