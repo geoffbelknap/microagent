@@ -3771,6 +3771,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&egressMode, "egress", "", "Egress mediation: strict (force guest TCP through an audited allowlisting mediator) or open (unmediated)")
 	var egressAllow multiFlag
 	fs.Var(&egressAllow, "egress-allow", "Allowlisted egress destination host (repeatable)")
+	var egressPassthrough multiFlag
+	fs.Var(&egressPassthrough, "egress-passthrough", "Allowed egress host that is not TLS-intercepted (repeatable)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -3889,6 +3891,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	opts.EgressMode = mode
 	opts.EgressAllow = []string(egressAllow)
+	opts.EgressPassthrough = []string(egressPassthrough)
 	volumes, err := parseWorkspaceVolumes(volumeFlags)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -6626,6 +6629,7 @@ func reorderFlagArgs(args []string) []string {
 		"-secret-on-demand":          true,
 		"-egress":                    true,
 		"-egress-allow":              true,
+		"-egress-passthrough":        true,
 	}
 	var flags []string
 	var positional []string

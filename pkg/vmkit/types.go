@@ -79,8 +79,9 @@ type Config struct {
 	// EgressMode controls transparent egress mediation: "strict" forces guest
 	// TCP through the mediator with an allowlist; "open" (or empty) leaves
 	// networking unmediated. EgressAllow is the destination allowlist.
-	EgressMode  string   `json:"egressMode,omitempty"`
-	EgressAllow []string `json:"egressAllow,omitempty"`
+	EgressMode        string   `json:"egressMode,omitempty"`
+	EgressAllow       []string `json:"egressAllow,omitempty"`
+	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
 	// SecretsControlPort is the guest vsock port the host connects to (via the
 	// firecracker CONNECT protocol) to signal purge/rehydrate around snapshots.
 	SecretsControlPort uint32 `json:"secretsControlPort,omitempty"`

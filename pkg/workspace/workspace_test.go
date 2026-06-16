@@ -519,6 +519,7 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 	opts.StateDir = dir
 	opts.EgressMode = "strict"
 	opts.EgressAllow = []string{"api.github.com", ".example.com"}
+	opts.EgressPassthrough = []string{"raw.example.com"}
 
 	if err := WriteManifest(opts); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -533,6 +534,9 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 	if len(manifest.EgressAllow) != 2 || manifest.EgressAllow[0] != "api.github.com" || manifest.EgressAllow[1] != ".example.com" {
 		t.Fatalf("EgressAllow not persisted in manifest: %v", manifest.EgressAllow)
 	}
+	if len(manifest.EgressPassthrough) != 1 || manifest.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("EgressPassthrough not persisted in manifest: %v", manifest.EgressPassthrough)
+	}
 
 	restored := OptionsFromManifest(opts, manifest)
 	if restored.EgressMode != "strict" {
@@ -540,6 +544,9 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 	}
 	if len(restored.EgressAllow) != 2 || restored.EgressAllow[0] != "api.github.com" || restored.EgressAllow[1] != ".example.com" {
 		t.Fatalf("OptionsFromManifest lost EgressAllow: %v", restored.EgressAllow)
+	}
+	if len(restored.EgressPassthrough) != 1 || restored.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("OptionsFromManifest lost EgressPassthrough: %v", restored.EgressPassthrough)
 	}
 
 	raw, err := os.ReadFile(filepath.Join(dir, "workspaces", "ws", "workspace.json"))
@@ -552,13 +559,20 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 	if !strings.Contains(string(raw), `"egress_allow"`) {
 		t.Fatalf("egress_allow missing from manifest JSON: %s", raw)
 	}
+	if !strings.Contains(string(raw), `"egress_passthrough"`) {
+		t.Fatalf("egress_passthrough missing from manifest JSON: %s", raw)
+	}
 }
 
 func TestRequestThreadsEgress(t *testing.T) {
 	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
-		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "strict", EgressAllow: []string{"api.github.com"}}
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "strict", EgressAllow: []string{"api.github.com"},
+		EgressPassthrough: []string{"raw.example.com"}}
 	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if req.Config.EgressMode != "strict" || len(req.Config.EgressAllow) != 1 || req.Config.EgressAllow[0] != "api.github.com" {
 		t.Fatalf("egress not threaded: %+v", req.Config)
+	}
+	if len(req.Config.EgressPassthrough) != 1 || req.Config.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("EgressPassthrough not threaded to vmkit.Config: %+v", req.Config)
 	}
 }
