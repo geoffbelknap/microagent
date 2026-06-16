@@ -33,7 +33,8 @@ func TestHandlerAllowForwards(t *testing.T) {
 	}
 
 	client, server := net.Pipe()
-	go h.Handle(server)
+	done := make(chan struct{})
+	go func() { h.Handle(server); close(done) }()
 	go func() {
 		client.Write([]byte("GET / HTTP/1.1\r\nHost: api.github.com\r\n\r\n"))
 	}()
@@ -44,6 +45,7 @@ func TestHandlerAllowForwards(t *testing.T) {
 		t.Fatalf("echo = %q err=%v", line, err)
 	}
 	client.Close()
+	<-done // wait for Handle to finish writing the audit log before reading it
 	assertEvent(t, log, "egress_allow")
 }
 
