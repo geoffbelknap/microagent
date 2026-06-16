@@ -224,6 +224,10 @@ MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 \
 MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 \
   scripts/dev/microagent-e2e-model-mediation-runner.sh
 
+# Runner-neutral matrix through a fake custom runner; no GPU or real model.
+MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
+  scripts/dev/microagent-e2e.sh model-mediation-runner-fake
+
 # llama.cpp runner, default CPU execution.
 MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
   MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
@@ -248,14 +252,17 @@ unavailable cases. It also validates and dry-runs generated file policies with
 before booting the corresponding guest probes. Set
 `MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1` to run only those
 generated-policy checks without KVM, Firecracker, a guest image, or a model
-runner. For the live runner-neutral matrix, provide a model ref plus the same
-custom runner environment accepted by `model serve`, such as
+runner. Set `MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1` to run the same
+matrix through a tiny fake OpenAI-compatible custom runner; that path still
+boots microVM probes, but it does not need llama.cpp, vLLM, a GPU, a real model,
+or HuggingFace access. For the live runner-neutral matrix, provide a model ref
+plus the same custom runner environment accepted by `model serve`, such as
 `MICROAGENT_MODEL_RUNNER_COMMAND`, `MICROAGENT_MODEL_RUNNER_NAME`,
 `MICROAGENT_MODEL_RUNNER_HEALTH_PATH`, `MICROAGENT_MODEL_RUNNER_ARGS`, and
 `MICROAGENT_MODEL_RUNNER_ENV`.
 
-The llama.cpp and vLLM scenarios are adapters over that same matrix: they
-handle runner-specific preflight and startup, then delegate the mediated
+The fake, llama.cpp, and vLLM scenarios are adapters over that same matrix:
+they handle runner-specific preflight and startup, then delegate the mediated
 request cases to the shared harness. The matrices emit profile summaries,
 direct-vs-mediated comparisons, telemetry summaries, and mediation gate TSVs
 under their output directories. Gates fail the scenario by default when local
