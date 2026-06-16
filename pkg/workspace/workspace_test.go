@@ -512,6 +512,48 @@ func TestApplyManifestRestoresModelRef(t *testing.T) {
 	}
 }
 
+func TestManifestRoundTripPreservesEgress(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.EgressMode = "strict"
+	opts.EgressAllow = []string{"api.github.com", ".example.com"}
+
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if manifest.EgressMode != "strict" {
+		t.Fatalf("EgressMode not persisted in manifest: %q", manifest.EgressMode)
+	}
+	if len(manifest.EgressAllow) != 2 || manifest.EgressAllow[0] != "api.github.com" || manifest.EgressAllow[1] != ".example.com" {
+		t.Fatalf("EgressAllow not persisted in manifest: %v", manifest.EgressAllow)
+	}
+
+	restored := OptionsFromManifest(opts, manifest)
+	if restored.EgressMode != "strict" {
+		t.Fatalf("OptionsFromManifest lost EgressMode: %q", restored.EgressMode)
+	}
+	if len(restored.EgressAllow) != 2 || restored.EgressAllow[0] != "api.github.com" || restored.EgressAllow[1] != ".example.com" {
+		t.Fatalf("OptionsFromManifest lost EgressAllow: %v", restored.EgressAllow)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "workspaces", "ws", "workspace.json"))
+	if err != nil {
+		t.Fatalf("read raw manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), `"egress_mode"`) {
+		t.Fatalf("egress_mode missing from manifest JSON: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"egress_allow"`) {
+		t.Fatalf("egress_allow missing from manifest JSON: %s", raw)
+	}
+}
+
 func TestRequestThreadsEgress(t *testing.T) {
 	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "strict", EgressAllow: []string{"api.github.com"}}
