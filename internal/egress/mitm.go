@@ -20,7 +20,7 @@ func (c readerConn) Read(p []byte) (int, error) { return c.r.Read(p) }
 // serveMITM terminates the guest TLS with a CA-signed leaf for sni, dials the
 // real upstream over TLS (verifying its real certificate), and splices
 // plaintext both ways. r holds the buffered ClientHello bytes.
-func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.AddrPort) {
+func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.AddrPort, unlisted bool) {
 	serverCfg := &tls.Config{
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			name := hello.ServerName
@@ -46,10 +46,16 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 		return
 	}
 	defer up.Close()
-	h.Logger.Log("egress_allow", map[string]any{"host": sni, "dst": dst.String(), "mitm": true})
+	allowFields := map[string]any{"host": sni, "dst": dst.String(), "mitm": true}
+	closeFields := map[string]any{"host": sni, "dst": dst.String(), "mitm": true}
+	if unlisted {
+		allowFields["unlisted"] = true
+		closeFields["unlisted"] = true
+	}
+	h.Logger.Log("egress_allow", allowFields)
 	errc := make(chan error, 2)
 	go func() { _, e := io.Copy(up, guestTLS); errc <- e }()
 	go func() { _, e := io.Copy(guestTLS, up); errc <- e }()
 	<-errc
-	h.Logger.Log("egress_close", map[string]any{"host": sni, "dst": dst.String(), "mitm": true})
+	h.Logger.Log("egress_close", closeFields)
 }

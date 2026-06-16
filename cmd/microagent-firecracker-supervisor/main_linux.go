@@ -60,11 +60,12 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if len(args) > 0 && args[0] == "--egress-mediator" {
 		fs := flag.NewFlagSet("egress-mediator", flag.ContinueOnError)
-		var bindHost, auditLog string
+		var bindHost, auditLog, mode string
 		var bindPort int
 		var allow egressAllowFlag
 		var caCert, caKey string
 		var passthrough egressAllowFlag
+		fs.StringVar(&mode, "mode", "", "Enforcement mode: mediated (allow+audit all) or strict (default-deny allowlist)")
 		fs.StringVar(&bindHost, "bind-host", "127.0.0.1", "Bind host")
 		fs.IntVar(&bindPort, "bind-port", 0, "Bind port")
 		fs.StringVar(&auditLog, "audit-log", "", "JSONL audit log path")
@@ -80,7 +81,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		mctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		return egress.Run(mctx, egress.Options{BindHost: bindHost, BindPort: bindPort, AuditLogPath: auditLog, Allow: []string(allow), CACertPath: caCert, CAKeyPath: caKey, Passthrough: []string(passthrough), Ready: stdout})
+		return egress.Run(mctx, egress.Options{Mode: mode, BindHost: bindHost, BindPort: bindPort, AuditLogPath: auditLog, Allow: []string(allow), CACertPath: caCert, CAKeyPath: caKey, Passthrough: []string(passthrough), Ready: stdout})
 	}
 	req, err := readRequest(args)
 	if err != nil {

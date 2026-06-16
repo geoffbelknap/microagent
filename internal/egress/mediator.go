@@ -18,6 +18,10 @@ const maxTLSRecord = 1<<14 + 5
 // destination, sniff the host, enforce the allowlist, and forward or deny
 // fail-closed. OrigDst and Dial are injectable for tests.
 type Handler struct {
+	// Mode selects enforcement: "mediated" allows + audits every destination
+	// (MITM all TLS, nothing blocked); "strict" (or empty, the safe default)
+	// denies non-allowlisted destinations fail-closed.
+	Mode          string
 	Policy        *Policy
 	Passthrough   *Policy
 	CA            *CA
@@ -52,12 +56,19 @@ func (h *Handler) Handle(conn net.Conn) {
 
 	d := h.Policy.AllowHost(host)
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(host).Allow
-	if !d.Allow && !passthrough {
+	// In mediated mode every destination is allowed (and audited); strict (or
+	// empty) keeps the default-deny allowlist. allowed defaults to d.Allow when
+	// Mode is unset, so an unspecified mode is safe.
+	allowed := d.Allow || h.Mode == "mediated"
+	// unlisted marks a destination permitted only because of mediated mode (it
+	// is not on the allowlist) so the audit trail records the looser grant.
+	unlisted := allowed && !d.Allow
+	if !allowed && !passthrough {
 		h.Logger.Log("egress_deny", map[string]any{"host": host, "dst": dst.String(), "reason": d.Reason})
 		return // fail-closed: no upstream dial
 	}
-	if isTLS && h.CA != nil && d.Allow && !passthrough {
-		h.serveMITM(conn, br, host, dst)
+	if isTLS && h.CA != nil && allowed && !passthrough {
+		h.serveMITM(conn, br, host, dst, unlisted)
 		return
 	}
 	// Non-MITM path: passthrough / plain-HTTP / raw TCP -> L4 splice.
@@ -67,11 +78,17 @@ func (h *Handler) Handle(conn net.Conn) {
 		return
 	}
 	defer up.Close()
-	h.Logger.Log("egress_allow", map[string]any{"host": host, "dst": dst.String()})
+	allowFields := map[string]any{"host": host, "dst": dst.String()}
+	closeFields := map[string]any{"host": host, "dst": dst.String()}
+	if unlisted {
+		allowFields["unlisted"] = true
+		closeFields["unlisted"] = true
+	}
+	h.Logger.Log("egress_allow", allowFields)
 
 	errc := make(chan error, 2)
 	go func() { _, e := io.Copy(up, br); errc <- e }()   // guest -> upstream (buffered bytes first)
 	go func() { _, e := io.Copy(conn, up); errc <- e }() // upstream -> guest
 	<-errc
-	h.Logger.Log("egress_close", map[string]any{"host": host, "dst": dst.String()})
+	h.Logger.Log("egress_close", closeFields)
 }

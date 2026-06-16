@@ -12,6 +12,7 @@ import (
 
 // Options configures the mediator listener.
 type Options struct {
+	Mode         string // "mediated" (allow+audit all) or "strict"/"" (default-deny allowlist)
 	BindHost     string
 	BindPort     int
 	Allow        []string
@@ -89,7 +90,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 			return err
 		}
 	}
-	h := &Handler{Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout}
+	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout}
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
 	if opts.Ready != nil {
 		fmt.Fprintln(opts.Ready, ln.Addr().String())
