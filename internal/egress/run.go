@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"time"
 )
 
@@ -19,6 +20,9 @@ type Options struct {
 	OrigDst      func(net.Conn) (netip.AddrPort, error) // optional; defaults to DefaultOrigDst
 	Ready        io.Writer                               // optional; bound address written here once listening
 	SniffTimeout time.Duration                           // optional; passed to Handler (Handler defaults to 2s when <=0)
+	CACertPath   string                                  // if set with CAKeyPath, enables TLS interception
+	CAKeyPath    string
+	Passthrough  []string // allowed hosts that are NOT intercepted (L4 splice + audit)
 }
 
 // Run binds BindHost:BindPort and serves until ctx is cancelled.
@@ -55,7 +59,33 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	if orig == nil {
 		orig = DefaultOrigDst
 	}
-	h := &Handler{Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, SniffTimeout: opts.SniffTimeout}
+	var ca *CA
+	if opts.CACertPath != "" && opts.CAKeyPath != "" {
+		certPEM, rerr := os.ReadFile(opts.CACertPath)
+		if rerr != nil {
+			_ = ln.Close()
+			return fmt.Errorf("egress: read CA cert: %w", rerr)
+		}
+		keyPEM, rerr := os.ReadFile(opts.CAKeyPath)
+		if rerr != nil {
+			_ = ln.Close()
+			return fmt.Errorf("egress: read CA key: %w", rerr)
+		}
+		ca, rerr = LoadCA(certPEM, keyPEM)
+		if rerr != nil {
+			_ = ln.Close()
+			return rerr
+		}
+	}
+	var passthrough *Policy
+	if len(opts.Passthrough) > 0 {
+		passthrough, err = NewPolicy(opts.Passthrough)
+		if err != nil {
+			_ = ln.Close()
+			return err
+		}
+	}
+	h := &Handler{Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout}
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
 	if opts.Ready != nil {
 		fmt.Fprintln(opts.Ready, ln.Addr().String())
