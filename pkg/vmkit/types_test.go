@@ -284,3 +284,42 @@ func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
 		t.Fatal("ValidateNetworkConfig accepted duplicate host ports")
 	}
 }
+
+func TestNormalizeEgressMode(t *testing.T) {
+	cases := map[string]string{
+		"":         "mediated",
+		"  ":       "mediated",
+		"mediated": "mediated",
+		"MEDIATED": "mediated",
+		" strict ": "strict",
+		"strict":   "strict",
+		"off":      "off",
+		"OFF":      "off",
+	}
+	for in, want := range cases {
+		if got := NormalizeEgressMode(in); got != want {
+			t.Errorf("NormalizeEgressMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestEgressMediationOn(t *testing.T) {
+	on := []string{"", "  ", "mediated", "MEDIATED", "strict", " strict "}
+	for _, m := range on {
+		if !EgressMediationOn(m) {
+			t.Errorf("EgressMediationOn(%q) = false, want true", m)
+		}
+	}
+	// Only an explicit "off" disables mediation. CLI parsing maps synonyms
+	// ("open"/"disabled") to "off" upstream; any unrecognized value reaching
+	// this chokepoint resolves to the secure default (mediation ON).
+	off := []string{"off", "OFF", " off "}
+	for _, m := range off {
+		if EgressMediationOn(m) {
+			t.Errorf("EgressMediationOn(%q) = true, want false", m)
+		}
+	}
+	if !EgressMediationOn("open") {
+		t.Errorf("EgressMediationOn(%q): unrecognized value must default ON (secure default)", "open")
+	}
+}

@@ -456,6 +456,39 @@ func ValidateConfig(config *Config) error {
 	return nil
 }
 
+// Egress mode constants. An empty/unspecified mode is the secure default and
+// resolves to EgressModeMediated.
+const (
+	EgressModeMediated = "mediated"
+	EgressModeStrict   = "strict"
+	EgressModeOff      = "off"
+)
+
+// NormalizeEgressMode collapses an egress mode string to one of the canonical
+// values: "mediated", "strict", or "off". Empty/whitespace resolves to
+// "mediated" — the secure default. This is the single normalization chokepoint:
+// once applied, downstream code only ever sees the three canonical values.
+func NormalizeEgressMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case EgressModeStrict:
+		return EgressModeStrict
+	case EgressModeOff:
+		return EgressModeOff
+	default:
+		// "", "mediated", and any already-validated synonym fall through to the
+		// secure default. CLI parsing rejects unknown values before this point.
+		return EgressModeMediated
+	}
+}
+
+// EgressMediationOn reports whether the given egress mode provisions the
+// mediator (mint CA, spawn mediator, install REDIRECT, allocate the CA-cert
+// vsock listener). Both "mediated" and "strict" are ON; an empty/unspecified
+// mode is ON too (secure default). Only an explicit "off" disables mediation.
+func EgressMediationOn(mode string) bool {
+	return NormalizeEgressMode(mode) != EgressModeOff
+}
+
 func ValidateMediationConfig(mediation MediationConfig) error {
 	if !mediation.Enabled && !mediation.Required && mediation.Port == 0 && strings.TrimSpace(mediation.Target) == "" && !mediation.FailClosed {
 		return nil

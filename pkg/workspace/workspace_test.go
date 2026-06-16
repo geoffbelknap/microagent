@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -601,4 +602,65 @@ func TestRequestThreadsEgress(t *testing.T) {
 	if len(req.Config.EgressPassthrough) != 1 || req.Config.EgressPassthrough[0] != "raw.example.com" {
 		t.Fatalf("EgressPassthrough not threaded to vmkit.Config: %+v", req.Config)
 	}
+}
+
+// TestEgressDefaultsToMediated asserts an empty EgressMode normalizes to
+// "mediated" at the Request chokepoint — the secure default. Both the config
+// passed to the supervisor and the CA-cert vsock listener must reflect it.
+func TestEgressDefaultsToMediated(t *testing.T) {
+	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: ""}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.EgressMode != vmkit.EgressModeMediated {
+		t.Fatalf("empty EgressMode should normalize to %q, got %q", vmkit.EgressModeMediated, req.Config.EgressMode)
+	}
+	if req.Config.CACertPort != DefaultCACertPort {
+		t.Fatalf("mediated workspace should allocate CACertPort %d, got %d", DefaultCACertPort, req.Config.CACertPort)
+	}
+	if !hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("mediated workspace should allocate a CACertTarget vsock listener: %+v", req.Config.VsockListeners)
+	}
+}
+
+// TestRequestAllocatesCACertForMediated mirrors the strict path: a workspace in
+// "mediated" mode must allocate the CA-cert vsock listener and port (previously
+// only "strict" did).
+func TestRequestAllocatesCACertForMediated(t *testing.T) {
+	for _, mode := range []string{vmkit.EgressModeMediated, vmkit.EgressModeStrict} {
+		opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+			Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: mode}
+		req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+		if req.Config.CACertPort != DefaultCACertPort {
+			t.Errorf("mode %q: CACertPort = %d, want %d", mode, req.Config.CACertPort, DefaultCACertPort)
+		}
+		if !hasCACertListener(req.Config.VsockListeners) {
+			t.Errorf("mode %q: missing CACertTarget vsock listener: %+v", mode, req.Config.VsockListeners)
+		}
+	}
+}
+
+// TestRequestNoCACertForOff confirms an explicit "off" workspace gets no CA-cert
+// listener or port — mediation is disabled.
+func TestRequestNoCACertForOff(t *testing.T) {
+	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: vmkit.EgressModeOff}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.EgressMode != vmkit.EgressModeOff {
+		t.Fatalf("EgressMode should stay %q, got %q", vmkit.EgressModeOff, req.Config.EgressMode)
+	}
+	if req.Config.CACertPort != 0 {
+		t.Fatalf("off workspace should not allocate CACertPort, got %d", req.Config.CACertPort)
+	}
+	if hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("off workspace should not allocate a CACertTarget vsock listener: %+v", req.Config.VsockListeners)
+	}
+}
+
+func hasCACertListener(listeners []vmkit.VsockListener) bool {
+	for _, l := range listeners {
+		if l.Target == secretxfer.CACertTarget {
+			return true
+		}
+	}
+	return false
 }

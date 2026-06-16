@@ -294,20 +294,20 @@ type transientFirewallRule struct {
 }
 
 type runtimeState struct {
-	Event              eventFile                `json:"event"`
-	Config             vmkit.Config             `json:"config"`
-	PID                int                      `json:"pid,omitempty"`
-	PortForwardPID     int                      `json:"portForwardPid,omitempty"`
-	VsockListenerPID   int                      `json:"vsockListenerPid,omitempty"`
-	EgressMediatorPID  int                      `json:"egressMediatorPid,omitempty"`
-	NetworkDevices     []transientNetworkDevice `json:"networkDevices,omitempty"`
-	FirewallRules      []transientFirewallRule  `json:"firewallRules,omitempty"`
-	SerialLogPath      string                   `json:"serialLogPath"`
-	SerialInputPath    string                   `json:"serialInputPath,omitempty"`
-	StartedAt          string                   `json:"startedAt,omitempty"`
-	UpdatedAt          string                   `json:"updatedAt"`
-	Readiness          vmkit.RuntimeReadiness   `json:"readiness,omitempty"`
-	Error              string                   `json:"error,omitempty"`
+	Event             eventFile                `json:"event"`
+	Config            vmkit.Config             `json:"config"`
+	PID               int                      `json:"pid,omitempty"`
+	PortForwardPID    int                      `json:"portForwardPid,omitempty"`
+	VsockListenerPID  int                      `json:"vsockListenerPid,omitempty"`
+	EgressMediatorPID int                      `json:"egressMediatorPid,omitempty"`
+	NetworkDevices    []transientNetworkDevice `json:"networkDevices,omitempty"`
+	FirewallRules     []transientFirewallRule  `json:"firewallRules,omitempty"`
+	SerialLogPath     string                   `json:"serialLogPath"`
+	SerialInputPath   string                   `json:"serialInputPath,omitempty"`
+	StartedAt         string                   `json:"startedAt,omitempty"`
+	UpdatedAt         string                   `json:"updatedAt"`
+	Readiness         vmkit.RuntimeReadiness   `json:"readiness,omitempty"`
+	Error             string                   `json:"error,omitempty"`
 }
 
 type guestResult struct {
@@ -1232,7 +1232,7 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 	network := runtimeNetworkConfig(config, plan.Subnet, plan.GuestCIDR, plan.Gateway)
 	network.Mode = mode
 	egressPID := 0
-	if config != nil && config.EgressMode == "strict" {
+	if config != nil && vmkit.EgressMediationOn(config.EgressMode) {
 		// Mint a per-workspace CA. The cert (public) is delivered to the guest over
 		// the cacert vsock listener so guestinit installs it in the trust store.
 		// The key stays on the host and is passed to the mediator for TLS MITM.
@@ -1267,7 +1267,7 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 			cleanupTransientNetworkDevices(cleanupDevices)
 			return nil, nil, nil, 0, fmt.Errorf("write egress CA key: %w", caErr)
 		}
-		pid, port, eerr := startEgressMediator(opts, plan.Gateway, config.EgressAllow, config.EgressPassthrough, caCertPath, caKeyPath)
+		pid, port, eerr := startEgressMediator(opts, plan.Gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, caCertPath, caKeyPath)
 		if eerr != nil {
 			_ = os.Remove(caCertPath)
 			_ = os.Remove(caKeyPath)
@@ -2155,7 +2155,25 @@ func portForwarderLogPath(opts Options) string {
 // caCertPath and caKeyPath, when non-empty, enable TLS interception: the
 // mediator loads the per-workspace CA and signs per-SNI leaf certs on the fly.
 // passthrough lists hosts whose TLS is forwarded opaquely (not intercepted).
-func startEgressMediator(opts Options, bindHost string, allow, passthrough []string, caCertPath, caKeyPath string) (int, int, error) {
+// egressMediatorArgs builds the argv for the detached
+// `microagent-firecracker-supervisor --egress-mediator` child. Pure (no I/O) so
+// it can be unit-tested. The mode ("mediated"/"strict") is threaded to the
+// mediator via --mode; an empty mode is normalized to the secure default.
+func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow, passthrough []string, caCertPath, caKeyPath string) []string {
+	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.NormalizeEgressMode(mode)}
+	for _, h := range allow {
+		args = append(args, "--allow", h)
+	}
+	if caCertPath != "" && caKeyPath != "" {
+		args = append(args, "--ca-cert", caCertPath, "--ca-key", caKeyPath)
+	}
+	for _, h := range passthrough {
+		args = append(args, "--passthrough", h)
+	}
+	return args
+}
+
+func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough []string, caCertPath, caKeyPath string) (int, int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
 		return 0, 0, err
@@ -2167,16 +2185,7 @@ func startEgressMediator(opts Options, bindHost string, allow, passthrough []str
 		return 0, 0, err
 	}
 	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
-	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath}
-	for _, h := range allow {
-		args = append(args, "--allow", h)
-	}
-	if caCertPath != "" && caKeyPath != "" {
-		args = append(args, "--ca-cert", caCertPath, "--ca-key", caKeyPath)
-	}
-	for _, h := range passthrough {
-		args = append(args, "--passthrough", h)
-	}
+	args := egressMediatorArgs(bindHost, port, auditPath, mode, allow, passthrough, caCertPath, caKeyPath)
 	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, 0, err
