@@ -61,8 +61,10 @@ func (h *Handler) Handle(conn net.Conn) {
 	// Mode is unset, so an unspecified mode is safe.
 	allowed := d.Allow || h.Mode == "mediated"
 	// unlisted marks a destination permitted only because of mediated mode (it
-	// is not on the allowlist) so the audit trail records the looser grant.
-	unlisted := allowed && !d.Allow
+	// is not on the allowlist) so the audit trail records the looser grant. A
+	// passthrough host is explicitly listed — and strict would allow it too — so
+	// it is never "unlisted".
+	unlisted := allowed && !d.Allow && !passthrough
 	if !allowed && !passthrough {
 		h.Logger.Log("egress_deny", map[string]any{"host": host, "dst": dst.String(), "reason": d.Reason})
 		return // fail-closed: no upstream dial

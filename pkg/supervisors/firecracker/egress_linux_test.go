@@ -80,8 +80,13 @@ func TestEgressMediatorArgsThreadsAllowPassthroughCA(t *testing.T) {
 }
 
 // TestEgressMediationGatesProvisioning documents the guard that prepareTAPNATForStart
-// uses to decide whether to provision the mediator: mediated and strict (and the
-// empty secure default) provision; off does not.
+// uses to decide whether to provision the mediator: only an EXPLICIT mediated or
+// strict mode provisions. An empty mode does NOT — the high-level workspace
+// chokepoints set the "mediated" default via NormalizeEgressMode before the config
+// reaches the supervisor, while the low-level raw create/start path leaves
+// EgressMode empty (and allocates no CA-cert listener), so the supervisor must not
+// mediate it; otherwise it would MITM the guest's TLS with a CA the guest never
+// receives. off never provisions.
 func TestEgressMediationGatesProvisioning(t *testing.T) {
 	if !vmkit.EgressMediationOn(vmkit.EgressModeMediated) {
 		t.Error("mediated must provision the mediator")
@@ -89,8 +94,8 @@ func TestEgressMediationGatesProvisioning(t *testing.T) {
 	if !vmkit.EgressMediationOn(vmkit.EgressModeStrict) {
 		t.Error("strict must provision the mediator")
 	}
-	if !vmkit.EgressMediationOn("") {
-		t.Error("empty (secure default) must provision the mediator")
+	if vmkit.EgressMediationOn("") {
+		t.Error("empty mode must NOT provision the mediator (raw low-level path is unmediated)")
 	}
 	if vmkit.EgressMediationOn(vmkit.EgressModeOff) {
 		t.Error("off must NOT provision the mediator")

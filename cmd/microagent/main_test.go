@@ -1256,6 +1256,40 @@ func TestRequestForCommandParsesVsock(t *testing.T) {
 	}
 }
 
+// TestRequestForCommandLowLevelUnmediated asserts the raw low-level create/start
+// primitive is NOT force-mediated. It has no --egress flag and does not build the
+// request through workspace.Request(), so EgressMode stays empty and no CA-cert
+// listener is allocated. Mediating it would MITM the guest's TLS with a CA the
+// guest never receives (CACertPort=0 => no boot arg => guestinit installs nothing).
+func TestRequestForCommandLowLevelUnmediated(t *testing.T) {
+	for _, command := range []string{"create", "start"} {
+		req, err := requestForCommand(command, newFlagSet(command), reorderFlagArgs([]string{
+			"--id", "agent-1",
+			"--kernel", "/tmp/kernel",
+			"--rootfs", "/tmp/rootfs.ext4",
+			"--state-dir", "/tmp/state",
+			"--backend", hostBackend(),
+		}))
+		if err != nil {
+			t.Fatalf("%s: requestForCommand: %v", command, err)
+		}
+		if req.Config.EgressMode != "" {
+			t.Errorf("%s: EgressMode = %q, want empty (raw primitive must not set a default)", command, req.Config.EgressMode)
+		}
+		if vmkit.EgressMediationOn(req.Config.EgressMode) {
+			t.Errorf("%s: low-level request must not be mediated", command)
+		}
+		if req.Config.CACertPort != 0 {
+			t.Errorf("%s: CACertPort = %d, want 0", command, req.Config.CACertPort)
+		}
+		for _, l := range req.Config.VsockListeners {
+			if l.Target == "cacert://serve" {
+				t.Errorf("%s: low-level request must not allocate a cacert://serve listener: %#v", command, req.Config.VsockListeners)
+			}
+		}
+	}
+}
+
 func TestRequestForCommandParsesNetwork(t *testing.T) {
 	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",
@@ -1421,14 +1455,25 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		VsockListeners: []vmkit.VsockListener{{Port: 3128, Target: "127.0.0.1:19000"}},
 		Mediation:      &mediation,
 	}, "run", "/tmp/rootfs.ext4")
-	if len(req.Config.VsockListeners) != 3 {
-		t.Fatalf("VsockListeners len = %d, want 3", len(req.Config.VsockListeners))
+	// result + enforcer + mediation listeners, plus the CA-cert listener that
+	// egress mediation (the secure default for an unspecified mode) allocates.
+	if len(req.Config.VsockListeners) != 4 {
+		t.Fatalf("VsockListeners len = %d, want 4: %#v", len(req.Config.VsockListeners), req.Config.VsockListeners)
 	}
 	if req.Config.VsockListeners[1].Port != 3128 || req.Config.VsockListeners[1].Target != "127.0.0.1:19000" {
 		t.Fatalf("enforcer listener = %#v", req.Config.VsockListeners[1])
 	}
 	if req.Config.VsockListeners[2].Port != 2048 || req.Config.VsockListeners[2].Target != "127.0.0.1:9900" {
 		t.Fatalf("mediation listener = %#v", req.Config.VsockListeners[2])
+	}
+	var sawCACert bool
+	for _, l := range req.Config.VsockListeners {
+		if l.Target == "cacert://serve" {
+			sawCACert = true
+		}
+	}
+	if !sawCACert {
+		t.Fatalf("expected a cacert://serve listener (egress mediated by default): %#v", req.Config.VsockListeners)
 	}
 	if req.Config.Mediation == nil || !req.Config.Mediation.Required || !req.Config.Mediation.FailClosed {
 		t.Fatalf("mediation = %#v", req.Config.Mediation)

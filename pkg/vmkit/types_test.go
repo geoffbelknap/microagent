@@ -304,22 +304,24 @@ func TestNormalizeEgressMode(t *testing.T) {
 }
 
 func TestEgressMediationOn(t *testing.T) {
-	on := []string{"", "  ", "mediated", "MEDIATED", "strict", " strict "}
+	// Only an EXPLICIT "mediated" or "strict" provisions the mediator. The
+	// default ("mediated" for an unspecified mode) is set by NormalizeEgressMode
+	// at the high-level workspace chokepoints; EgressMediationOn merely decides
+	// whether to provision. This keeps EgressMediationOn decoupled from the
+	// default so the low-level raw create/start path (empty EgressMode, no
+	// CA-cert listener) is NOT force-mediated.
+	on := []string{"mediated", "MEDIATED", "strict", " strict "}
 	for _, m := range on {
 		if !EgressMediationOn(m) {
 			t.Errorf("EgressMediationOn(%q) = false, want true", m)
 		}
 	}
-	// Only an explicit "off" disables mediation. CLI parsing maps synonyms
-	// ("open"/"disabled") to "off" upstream; any unrecognized value reaching
-	// this chokepoint resolves to the secure default (mediation ON).
-	off := []string{"off", "OFF", " off "}
+	// Empty/whitespace is OFF here (no provisioning) — it is the raw primitive's
+	// state. So is an explicit "off" and any unrecognized value.
+	off := []string{"", "  ", "off", "OFF", " off ", "open"}
 	for _, m := range off {
 		if EgressMediationOn(m) {
 			t.Errorf("EgressMediationOn(%q) = true, want false", m)
 		}
-	}
-	if !EgressMediationOn("open") {
-		t.Errorf("EgressMediationOn(%q): unrecognized value must default ON (secure default)", "open")
 	}
 }

@@ -483,10 +483,16 @@ func NormalizeEgressMode(mode string) string {
 
 // EgressMediationOn reports whether the given egress mode provisions the
 // mediator (mint CA, spawn mediator, install REDIRECT, allocate the CA-cert
-// vsock listener). Both "mediated" and "strict" are ON; an empty/unspecified
-// mode is ON too (secure default). Only an explicit "off" disables mediation.
+// vsock listener). Only an explicit "mediated" or "strict" mode is ON. An
+// empty/unspecified mode is OFF here on purpose: "default" is set by
+// NormalizeEgressMode at the high-level workspace chokepoints, while
+// EgressMediationOn decides whether to *provision*. The low-level raw
+// create/start primitive leaves EgressMode empty and must NOT be force-mediated
+// (it allocates no CA-cert listener, so mediating it would MITM the guest's TLS
+// with a CA the guest never receives).
 func EgressMediationOn(mode string) bool {
-	return NormalizeEgressMode(mode) != EgressModeOff
+	m := strings.ToLower(strings.TrimSpace(mode))
+	return m == EgressModeMediated || m == EgressModeStrict
 }
 
 func ValidateMediationConfig(mediation MediationConfig) error {

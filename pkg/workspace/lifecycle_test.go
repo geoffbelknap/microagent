@@ -1073,3 +1073,61 @@ func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 		t.Fatalf("rootfs verification details missing: %#v", resp.Verification)
 	}
 }
+
+// TestApplyManifestNormalizesEgressModeForStart asserts the start path's
+// manifest-load chokepoint carries the secure default into the request: a
+// manifest with an unspecified egress mode yields a started workspace that is
+// mediated (mediator provisioned + CA-cert vsock listener re-allocated), mirroring
+// create. Start() does applyManifest(&opts) -> Request(opts); this exercises that
+// composition without spinning up a VM. INV1 (start side).
+func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
+	opts := Options{
+		Name:       "agent-1",
+		Backend:    vmkit.BackendFirecracker,
+		KernelPath: "/k",
+		StateDir:   t.TempDir(),
+		MemoryMiB:  512,
+		CPUCount:   2,
+		Network:    vmkit.NetworkConfig{Mode: "user"},
+	}
+	// Manifest with an unspecified egress mode (the pre-flip / default case).
+	applyManifest(&opts, Manifest{Network: NetworkSpec{Mode: "user"}})
+	if opts.EgressMode != vmkit.EgressModeMediated {
+		t.Fatalf("applyManifest left EgressMode = %q, want %q", opts.EgressMode, vmkit.EgressModeMediated)
+	}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if !vmkit.EgressMediationOn(req.Config.EgressMode) {
+		t.Fatalf("started workspace not mediated: EgressMode = %q", req.Config.EgressMode)
+	}
+	if req.Config.CACertPort != DefaultCACertPort {
+		t.Fatalf("started mediated workspace CACertPort = %d, want %d", req.Config.CACertPort, DefaultCACertPort)
+	}
+	if !hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("started mediated workspace missing CA-cert listener: %#v", req.Config.VsockListeners)
+	}
+}
+
+// TestApplyManifestPreservesOffForStart asserts an explicit "off" manifest is not
+// silently promoted to mediated on start. INV2 (start side).
+func TestApplyManifestPreservesOffForStart(t *testing.T) {
+	opts := Options{
+		Name:       "agent-1",
+		Backend:    vmkit.BackendFirecracker,
+		KernelPath: "/k",
+		StateDir:   t.TempDir(),
+		MemoryMiB:  512,
+		CPUCount:   2,
+		Network:    vmkit.NetworkConfig{Mode: "user"},
+	}
+	applyManifest(&opts, Manifest{Network: NetworkSpec{Mode: "user"}, EgressMode: vmkit.EgressModeOff})
+	if opts.EgressMode != vmkit.EgressModeOff {
+		t.Fatalf("applyManifest changed off mode to %q", opts.EgressMode)
+	}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if vmkit.EgressMediationOn(req.Config.EgressMode) {
+		t.Fatalf("off workspace should not be mediated on start")
+	}
+	if req.Config.CACertPort != 0 || hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("off workspace allocated CA-cert listener on start: port=%d listeners=%#v", req.Config.CACertPort, req.Config.VsockListeners)
+	}
+}

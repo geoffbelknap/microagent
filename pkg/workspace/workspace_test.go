@@ -48,11 +48,19 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	if req.Config.RootfsPath != "/tmp/rootfs.ext4" || req.Config.KernelPath != "/kernels/Image" {
 		t.Fatalf("Config paths = %#v", req.Config)
 	}
-	if len(req.Config.VsockListeners) != 2 {
+	// Result listener + the service vsock listener + the CA-cert listener that
+	// egress mediation (the secure default for an unspecified mode) allocates.
+	if len(req.Config.VsockListeners) != 3 {
 		t.Fatalf("VsockListeners = %#v", req.Config.VsockListeners)
 	}
 	if req.Config.VsockListeners[0].Target != filepath.Join(opts.StateDir, opts.Name, "result.json") {
 		t.Fatalf("result listener = %#v", req.Config.VsockListeners[0])
+	}
+	if !hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("expected a %q listener (egress mediated by default); got %#v", secretxfer.CACertTarget, req.Config.VsockListeners)
+	}
+	if req.Config.CACertPort == 0 {
+		t.Fatalf("CACertPort = 0, want non-zero for mediated default")
 	}
 	if len(req.Config.Disks) != 1 || req.Config.Disks[0].Mountpoint != "/work" {
 		t.Fatalf("Disks = %#v", req.Config.Disks)
