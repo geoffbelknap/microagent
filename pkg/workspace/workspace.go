@@ -61,6 +61,8 @@ type Options struct {
 	SecretEnvFiles  []string          // dotenv file paths (plaintext, re-read each start)
 	OnDemandSecrets map[string]string // name -> reference (lazy, never materialized)
 	SecretsAudit    bool              // append every access to the audit log
+	EgressMode      string            // "strict" or "open" (empty = unmediated)
+	EgressAllow     []string          // allowlisted egress destination hosts
 	Files           []File
 	Profile         string
 	RestartPolicy   string
@@ -257,6 +259,8 @@ type Manifest struct {
 	SecretEnvFiles  []string                   `json:"secret_env_files,omitempty"`
 	OnDemandSecrets []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
 	SecretsAudit    bool                       `json:"secrets_audit,omitempty"`
+	EgressMode      string                     `json:"egress_mode,omitempty"`
+	EgressAllow     []string                   `json:"egress_allow,omitempty"`
 }
 
 type ModelRunnerSpec struct {
@@ -897,6 +901,8 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			SecretEnvFiles:     opts.SecretEnvFiles,
 			OnDemandSecrets:    onDemandRefsFromOptions(opts),
 			SecretsAudit:       opts.SecretsAudit,
+			EgressMode:         opts.EgressMode,
+			EgressAllow:        opts.EgressAllow,
 			SecretsControlPort: SecretsControlPort(opts),
 			GuestShellPort:     opts.GuestShellPort,
 			GuestExecPort:      opts.GuestExecPort,

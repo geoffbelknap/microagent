@@ -511,3 +511,12 @@ func TestApplyManifestRestoresModelRef(t *testing.T) {
 		t.Fatalf("applyManifest should clear model when manifest has none: %q", opts.Model)
 	}
 }
+
+func TestRequestThreadsEgress(t *testing.T) {
+	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "strict", EgressAllow: []string{"api.github.com"}}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.EgressMode != "strict" || len(req.Config.EgressAllow) != 1 || req.Config.EgressAllow[0] != "api.github.com" {
+		t.Fatalf("egress not threaded: %+v", req.Config)
+	}
+}

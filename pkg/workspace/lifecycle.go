@@ -908,6 +908,8 @@ func WriteManifest(opts Options) error {
 		SecretEnvFiles:  opts.SecretEnvFiles,
 		OnDemandSecrets: onDemandRefsFromOptions(opts),
 		SecretsAudit:    opts.SecretsAudit,
+		EgressMode:      opts.EgressMode,
+		EgressAllow:     opts.EgressAllow,
 	})
 }
 
@@ -1303,6 +1305,8 @@ func applyManifest(opts *Options, manifest Manifest) {
 		opts.OnDemandSecrets = nil
 	}
 	opts.SecretsAudit = manifest.SecretsAudit
+	opts.EgressMode = manifest.EgressMode
+	opts.EgressAllow = manifest.EgressAllow
 }
 
 func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {

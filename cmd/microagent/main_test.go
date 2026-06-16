@@ -7371,3 +7371,15 @@ func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
 		t.Errorf("expected remediation hint, got:\n%s", out)
 	}
 }
+
+func TestParseEgressMode(t *testing.T) {
+	for in, want := range map[string]string{"": "", "off": "", "strict": "strict", "open": "open", "STRICT": "strict"} {
+		got, err := parseEgressMode(in)
+		if err != nil || got != want {
+			t.Errorf("parseEgressMode(%q) = %q,%v want %q", in, got, err, want)
+		}
+	}
+	if _, err := parseEgressMode("bogus"); err == nil {
+		t.Fatal("expected error for bogus egress mode")
+	}
+}

@@ -3767,6 +3767,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&secretOnDemandFlags, "secret-on-demand", "Declare an on-demand secret NAME=<scheme>:<ref> (fetched at runtime, never written to tmpfs; repeatable)")
 	var secretsAudit bool
 	fs.BoolVar(&secretsAudit, "secrets-audit", false, "Append every secret access to the workspace audit log")
+	var egressMode string
+	fs.StringVar(&egressMode, "egress", "", "Egress mediation: strict (force guest TCP through an audited allowlisting mediator) or open (unmediated)")
+	var egressAllow multiFlag
+	fs.Var(&egressAllow, "egress-allow", "Allowlisted egress destination host (repeatable)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -3879,6 +3883,12 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	opts.OnDemandSecrets = onDemand
 	opts.SecretsAudit = secretsAudit
+	mode, err := parseEgressMode(egressMode)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.EgressMode = mode
+	opts.EgressAllow = []string(egressAllow)
 	volumes, err := parseWorkspaceVolumes(volumeFlags)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -6614,6 +6624,8 @@ func reorderFlagArgs(args []string) []string {
 		"-secret":                    true,
 		"-secrets-env-file":          true,
 		"-secret-on-demand":          true,
+		"-egress":                    true,
+		"-egress-allow":              true,
 	}
 	var flags []string
 	var positional []string
@@ -7008,6 +7020,19 @@ func parseEnvFlags(values []string) (map[string]string, error) {
 		env[key] = value
 	}
 	return env, nil
+}
+
+func parseEgressMode(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "off", "disabled":
+		return "", nil
+	case "strict":
+		return "strict", nil
+	case "open":
+		return "open", nil
+	default:
+		return "", fmt.Errorf("--egress must be strict or open: %q", v)
+	}
 }
 
 func parseSecretFlags(values []string) (map[string]string, error) {
