@@ -57,7 +57,7 @@ def parse_help_commands(help_text: str) -> set[str]:
         stripped = line.strip()
         if not stripped:
             continue
-        name = re.split(r"\s{2,}", stripped, maxsplit=1)[0]
+        name = re.split(r"\s{2,}", stripped, maxsplit=1)[0].split(",", maxsplit=1)[0]
         commands.add(name)
     return commands
 
