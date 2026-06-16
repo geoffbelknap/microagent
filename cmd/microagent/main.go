@@ -23,7 +23,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
@@ -111,9 +110,6 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if len(args) > 0 && args[0] == "--host-worker-mediator" {
 		return runHostWorkerMediator(ctx, args[1:], stdout)
-	}
-	if len(args) > 0 && args[0] == "--egress-mediator" {
-		return runEgressMediator(ctx, args[1:])
 	}
 	if len(args) > 0 && args[0] == "help" {
 		if len(args) > 1 && args[1] == "all" {
@@ -323,28 +319,6 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return hostworker.Run(ctx, opts)
-}
-
-func runEgressMediator(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("egress-mediator", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	var opts egress.Options
-	var allow multiFlag
-	fs.StringVar(&opts.BindHost, "bind-host", "127.0.0.1", "Bind host")
-	fs.IntVar(&opts.BindPort, "bind-port", 0, "Bind port")
-	fs.StringVar(&opts.AuditLogPath, "audit-log", "", "JSONL audit log path")
-	fs.Var(&allow, "allow", "Allowlisted destination host (repeatable)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 0 || opts.BindPort == 0 || strings.TrimSpace(opts.AuditLogPath) == "" {
-		return fmt.Errorf("usage: microagent --egress-mediator --bind-port <port> --audit-log <path> [--bind-host <host>] [--allow <host>]...")
-	}
-	opts.Allow = []string(allow)
-	opts.Ready = os.Stdout
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	return egress.Run(ctx, opts)
 }
 
 type doctorOptions struct {

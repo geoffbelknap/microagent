@@ -835,6 +835,15 @@ func ensureWorkspaceProcessesStopped(opts Options, state runtimeState) error {
 			return fmt.Errorf("firecracker workspace %s vsock listener is running; stop or kill it before delete", opts.Name)
 		}
 	}
+	if state.EgressMediatorPID != 0 {
+		active, err := processActive(state.EgressMediatorPID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return fmt.Errorf("firecracker workspace %s egress mediator is running; stop or kill it before delete", opts.Name)
+		}
+	}
 	if active, err := userNetworkProcessActive(opts); err != nil {
 		return err
 	} else if active {
@@ -2073,9 +2082,11 @@ func portForwarderLogPath(opts Options) string {
 }
 
 // startEgressMediator allocates a free port on bindHost, spawns a detached
-// `microagent --egress-mediator` in the CURRENT netns (host for nat, pasta for
-// user mode), waits until it accepts, and returns (pid, port). Uses the same
-// detached-spawn mechanism as the port-forwarder companion.
+// `microagent-firecracker-supervisor --egress-mediator` in the CURRENT netns
+// (host for nat, pasta for user mode — in user mode the spawning supervisor is
+// the in-netns re-exec, so the child inherits the pasta netns), waits until it
+// accepts, and returns (pid, port). Uses the same detached-spawn mechanism as
+// the port-forwarder companion.
 //
 // bindHost must be the tap gateway IP (e.g. "10.43.29.1") because the nftables
 // REDIRECT target rewrites the destination to the primary address of the
