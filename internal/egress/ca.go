@@ -100,6 +100,9 @@ func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !key.PublicKey.Equal(cert.PublicKey) {
+		return nil, fmt.Errorf("egress: CA key does not match cert public key")
+	}
 	return &CA{
 		cert:    cert,
 		key:     key,
@@ -128,7 +131,9 @@ func (c *CA) LeafFor(serverName string) (*tls.Certificate, error) {
 		SerialNumber: serial,
 		Subject:      pkix.Name{CommonName: serverName},
 		NotBefore:    now.Add(-time.Minute),
-		NotAfter:     now.Add(24 * time.Hour),
+		// Leaf is valid for the CA's lifetime so a cached leaf never expires
+		// before the per-workspace CA (and thus the workspace) does.
+		NotAfter:     c.cert.NotAfter,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}

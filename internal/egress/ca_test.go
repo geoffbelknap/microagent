@@ -52,3 +52,28 @@ func TestCARoundTripPEM(t *testing.T) {
 		t.Fatalf("loaded CA cannot sign: %v", err)
 	}
 }
+
+func TestLoadCARejectsMismatchedKey(t *testing.T) {
+	ca1, _ := NewCA("ca1", time.Hour)
+	ca2, _ := NewCA("ca2", time.Hour)
+	key2, err := ca2.KeyPEM()
+	if err != nil {
+		t.Fatalf("KeyPEM: %v", err)
+	}
+	if _, err := LoadCA(ca1.CertPEM(), key2); err == nil {
+		t.Fatal("expected LoadCA to reject cert/key from different CAs")
+	}
+}
+
+func TestLeafExpiryCappedAtCA(t *testing.T) {
+	ca, _ := NewCA("cn", 2*time.Hour)
+	leaf, err := ca.LeafFor("example.com")
+	if err != nil {
+		t.Fatalf("LeafFor: %v", err)
+	}
+	x, _ := x509.ParseCertificate(leaf.Certificate[0])
+	// leaf must not outlive the CA
+	if x.NotAfter.After(ca.cert.NotAfter) {
+		t.Fatalf("leaf NotAfter %v exceeds CA NotAfter %v", x.NotAfter, ca.cert.NotAfter)
+	}
+}
