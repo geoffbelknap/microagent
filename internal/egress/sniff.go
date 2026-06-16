@@ -30,7 +30,11 @@ func sniffHost(br *bufio.Reader, dst netip.AddrPort, setDeadline func(time.Time)
 		}
 		return dst.Addr().String()
 	}
-	peek, _ := br.Peek(2048) // returns available bytes even on short read
+	// Peek only what the first read already buffered — do NOT block waiting for
+	// more bytes (a short request never reaches a fixed count, which would stall
+	// until the deadline). The Peek(1) above already forced one read, so the
+	// request headers are typically fully buffered here.
+	peek, _ := br.Peek(br.Buffered())
 	if host := httpHostHeader(peek); host != "" {
 		return host
 	}

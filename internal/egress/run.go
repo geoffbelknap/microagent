@@ -18,7 +18,7 @@ type Options struct {
 	Logger       Logger                                  // optional; if nil and AuditLogPath set, a FileLogger is opened
 	OrigDst      func(net.Conn) (netip.AddrPort, error) // optional; defaults to DefaultOrigDst
 	Ready        io.Writer                               // optional; bound address written here once listening
-	SniffTimeout time.Duration                           // optional; defaults to 200ms
+	SniffTimeout time.Duration                           // optional; passed to Handler (Handler defaults to 2s when <=0)
 }
 
 // Run binds BindHost:BindPort and serves until ctx is cancelled.
@@ -55,11 +55,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	if orig == nil {
 		orig = DefaultOrigDst
 	}
-	sniffTimeout := opts.SniffTimeout
-	if sniffTimeout <= 0 {
-		sniffTimeout = 200 * time.Millisecond
-	}
-	h := &Handler{Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, SniffTimeout: sniffTimeout}
+	h := &Handler{Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, SniffTimeout: opts.SniffTimeout}
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
 	if opts.Ready != nil {
 		fmt.Fprintln(opts.Ready, ln.Addr().String())

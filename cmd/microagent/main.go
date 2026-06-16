@@ -337,6 +337,9 @@ func runEgressMediator(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if fs.NArg() != 0 || opts.BindPort == 0 || strings.TrimSpace(opts.AuditLogPath) == "" {
+		return fmt.Errorf("usage: microagent --egress-mediator --bind-port <port> --audit-log <path> [--bind-host <host>] [--allow <host>]...")
+	}
 	opts.Allow = []string(allow)
 	opts.Ready = os.Stdout
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
