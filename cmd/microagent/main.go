@@ -3786,7 +3786,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var secretsAudit bool
 	fs.BoolVar(&secretsAudit, "secrets-audit", false, "Append every secret access to the workspace audit log")
 	var egressMode string
-	fs.StringVar(&egressMode, "egress", "", "Egress mediation: strict (force guest TCP through an audited allowlisting mediator) or open (unmediated)")
+	fs.StringVar(&egressMode, "egress", "", "Egress mediation: mediated (default; audit all guest TCP, allow everything), strict (audit and deny non-allowlisted), or off (unmediated)")
 	var egressAllow multiFlag
 	fs.Var(&egressAllow, "egress-allow", "Allowlisted egress destination host (repeatable)")
 	var egressPassthrough multiFlag
@@ -7047,14 +7047,14 @@ func parseEnvFlags(values []string) (map[string]string, error) {
 
 func parseEgressMode(v string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "", "off", "disabled":
-		return "", nil
+	case "", "mediated":
+		return "mediated", nil
 	case "strict":
 		return "strict", nil
-	case "open":
-		return "open", nil
+	case "off", "open", "disabled":
+		return "off", nil
 	default:
-		return "", fmt.Errorf("--egress must be strict or open: %q", v)
+		return "", fmt.Errorf("--egress must be mediated, strict, or off: %q", v)
 	}
 }
 
