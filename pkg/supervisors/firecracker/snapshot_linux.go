@@ -120,7 +120,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 // writeSnapshotState persists a transient pause/resume around a snapshot while
 // preserving the host-side aux processes so the workspace keeps working.
 func writeSnapshotState(opts Options, req vmkit.Request, state runtimeState, target vmkit.VMState) error {
-	return writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), target, state.PID, state.PortForwardPID, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, "")
+	return writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), target, state.PID, state.PortForwardPID, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, "")
 }
 
 func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string, purged bool) error {
