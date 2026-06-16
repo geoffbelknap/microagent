@@ -66,6 +66,10 @@ type Config struct {
 	// SecretsPort is the host vsock port the guest connects to at boot to fetch
 	// resolved secrets. Zero means no secrets are delivered.
 	SecretsPort uint32 `json:"secretsPort,omitempty"`
+	// CACertPort is the host vsock port the guest connects to at boot to fetch
+	// the per-workspace egress CA certificate (PEM). Zero means no CA cert is
+	// delivered. The CA cert is public; no tmpfs or audit trail is required.
+	CACertPort uint32 `json:"caCertPort,omitempty"`
 	// Secrets are scheme-prefixed references resolved by the host at start.
 	Secrets []SecretRef `json:"secrets,omitempty"`
 	// SecretEnvFiles are dotenv file paths whose KEY=VALUE pairs are loaded by
