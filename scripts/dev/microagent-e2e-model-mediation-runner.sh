@@ -8,9 +8,12 @@
 # already pinned it with `microagent model serve`, or this script can start it
 # directly from MICROAGENT_MODEL_RUNNER_* configuration.
 #
-# Required:
+# Required for the live runner matrix:
 #   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1
 #   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF
+#
+# Required for policy-only smoke:
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1
 #
 # Optional:
 #   MICROAGENT_CLI
@@ -26,6 +29,8 @@
 #   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENGINE
 #   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_REQUEST_MODEL
 #   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_KEEP_STATE
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY
+#   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_OWN_OUT_DIR
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -44,6 +49,8 @@ RUNNER_PID="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PID:-}"
 RUNNER_PORT="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PORT:-}"
 RUNNER_ENGINE="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENGINE:-}"
 REQUEST_MODEL="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_REQUEST_MODEL:-}"
+POLICY_ONLY="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY:-0}"
+OWN_OUT_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_OWN_OUT_DIR:-1}"
 KEEP_FAILED="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_KEEP:-${MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_RUNNER:-0}}"
 KEEP_STATE="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_KEEP_STATE:-0}"
 CHAT_TOKENS="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_CHAT_TOKENS:-64}"
@@ -66,6 +73,44 @@ TELEMETRY_PHASE_FILE=""
 
 skip() { e2e_skip "microagent-e2e-model-mediation-runner: $1"; }
 fail() { echo "FAIL microagent-e2e-model-mediation-runner: $1" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+microagent-e2e-model-mediation-runner.sh
+
+Runner-neutral production model mediation E2E for OpenAI-compatible host
+runners.
+
+Live matrix:
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF=org/repo/model.gguf \
+  MICROAGENT_MODEL_RUNNER_COMMAND='runner serve {model} --host {host} --port {port}' \
+  MICROAGENT_MODEL_RUNNER_NAME=runner \
+  scripts/dev/microagent-e2e-model-mediation-runner.sh
+
+Policy-only smoke, no VM or model runner:
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 \
+  scripts/dev/microagent-e2e-model-mediation-runner.sh
+
+Adapter handoff:
+  An adapter may pre-start a pinned runner and pass
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PID,
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_PORT,
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_RUNNER_ENGINE, and
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_REQUEST_MODEL. The shared harness then
+  owns the direct/local/policy/file-policy/unavailable request matrix. Adapters
+  that pass their own output directory should set
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_OWN_OUT_DIR=0 so they can stop their
+  pinned runner before deleting or preserving state.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+esac
 
 stop_telemetry() {
   if [ -n "$TELEMETRY_PID" ]; then
@@ -95,6 +140,9 @@ cleanup() {
   stop_telemetry
   if [ "$STARTED_RUNNER" = "1" ] && [ -n "$MODEL_REF" ]; then
     "$CLI" model stop "$MODEL_REF" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+  fi
+  if [ "$OWN_OUT_DIR" != "1" ]; then
+    exit "$status"
   fi
   if [ "$KEEP_FAILED" = "1" ]; then
     if [ "$status" -ne 0 ]; then
@@ -698,6 +746,37 @@ validate_file_policy() {
     --text-bytes 24 \
     --messages 1 \
     --expect "$expected" >"$OUT_DIR/policy-$label-chat-evaluate.json"
+  if [ "$expected" = "allow" ]; then
+    "$CLI" --json model policy evaluate "$path" \
+      --method POST \
+      --path /v1/chat/completions \
+      --model "$REQUEST_MODEL" \
+      --max-tokens 4097 \
+      --stream false \
+      --text-bytes 24 \
+      --messages 1 \
+      --expect deny >"$OUT_DIR/policy-$label-chat-over-max-tokens-evaluate.json"
+  fi
+}
+
+run_policy_only_smoke() {
+  if [ ! -x "$CLI" ]; then
+    skip "CLI not found at $CLI (run scripts/dev/build-local.sh)"
+  fi
+  mkdir -p "$OUT_DIR"
+  if [ -z "$REQUEST_MODEL" ]; then
+    REQUEST_MODEL="policy-smoke-model"
+  fi
+  POLICY_FILE="$OUT_DIR/policy-file-allow.json"
+  write_file_policy "$POLICY_FILE" "allow"
+  validate_file_policy "$POLICY_FILE" "allow" "allow"
+
+  POLICY_FILE="$OUT_DIR/policy-file-deny.json"
+  write_file_policy "$POLICY_FILE" "deny"
+  validate_file_policy "$POLICY_FILE" "deny" "deny"
+  POLICY_FILE=""
+
+  echo "PASS microagent-e2e-model-mediation-runner: policy-only smoke passed"
 }
 
 run_case() {
@@ -835,6 +914,18 @@ EOF
   summarize_audit "$label" "$workspace" "$expected_status"
   summarize_profiles "$label" "$expected_status" "$stdout_path"
 }
+
+case "$POLICY_ONLY" in
+  1|true|TRUE|yes|YES|required)
+    run_policy_only_smoke
+    exit 0
+    ;;
+  0|false|FALSE|no|NO|'')
+    ;;
+  *)
+    fail "MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY must be 0/1, true/false, or yes/no"
+    ;;
+esac
 
 case "${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER:-0}" in
   1|true|TRUE|yes|YES|required)

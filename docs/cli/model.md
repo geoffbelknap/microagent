@@ -4,7 +4,7 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-15_
+_Last updated: 2026-06-16_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
@@ -216,7 +216,13 @@ MICROAGENT_E2E_MODEL_MEDIATION=1 scripts/dev/microagent-e2e.sh model-mediation
 # Runner-neutral matrix for any prepared OpenAI-compatible runner.
 MICROAGENT_E2E_MODEL_MEDIATION_RUNNER=1 \
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_MODEL_REF=org/repo/model.gguf \
+  MICROAGENT_MODEL_RUNNER_COMMAND='runner serve {model} --host {host} --port {port}' \
+  MICROAGENT_MODEL_RUNNER_NAME=runner \
   scripts/dev/microagent-e2e.sh model-mediation-runner
+
+# Policy file generation/validation smoke; no VM or model runner.
+MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 \
+  scripts/dev/microagent-e2e-model-mediation-runner.sh
 
 # llama.cpp runner, default CPU execution.
 MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
@@ -239,17 +245,26 @@ The runner-neutral matrix runs direct, local-allow, external policy allow,
 external policy deny, file-policy allow, file-policy deny, and policy
 unavailable cases. It also validates and dry-runs generated file policies with
 `microagent model policy validate` and `microagent model policy evaluate`
-before booting the corresponding guest probes. The llama.cpp and vLLM scenarios
-are adapters over that same matrix: they handle runner-specific preflight and
-startup, then delegate the mediated request cases to the shared harness. The
-matrices emit profile summaries, direct-vs-mediated comparisons, telemetry
-summaries, and mediation gate TSVs under their output directories. Gates fail
-the scenario by default when local mediation, policy mediation, or decision
-latency exceeds the configured budget; set the scenario-specific
-`*_GATE_MODE=warn` only when collecting noisy experimental data. The model
-mediation scenarios default to `quay.io/curl/curl:latest` for the guest HTTP
-probe image; use the scenario-specific `*_IMAGE` override when a different
-internal mirror is required.
+before booting the corresponding guest probes. Set
+`MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1` to run only those
+generated-policy checks without KVM, Firecracker, a guest image, or a model
+runner. For the live runner-neutral matrix, provide a model ref plus the same
+custom runner environment accepted by `model serve`, such as
+`MICROAGENT_MODEL_RUNNER_COMMAND`, `MICROAGENT_MODEL_RUNNER_NAME`,
+`MICROAGENT_MODEL_RUNNER_HEALTH_PATH`, `MICROAGENT_MODEL_RUNNER_ARGS`, and
+`MICROAGENT_MODEL_RUNNER_ENV`.
+
+The llama.cpp and vLLM scenarios are adapters over that same matrix: they
+handle runner-specific preflight and startup, then delegate the mediated
+request cases to the shared harness. The matrices emit profile summaries,
+direct-vs-mediated comparisons, telemetry summaries, and mediation gate TSVs
+under their output directories. Gates fail the scenario by default when local
+mediation, policy mediation, or decision latency exceeds the configured budget;
+set the scenario-specific `*_GATE_MODE=warn` only when collecting noisy
+experimental data. The model mediation scenarios default to
+`quay.io/curl/curl:latest` for the guest HTTP probe image; use the
+scenario-specific `*_IMAGE` override when a different internal mirror is
+required.
 
 Set `MICROAGENT_MODEL_MEDIATION=policy` to require a policy source for the
 host-worker mediator. The source can be either an external decision endpoint
