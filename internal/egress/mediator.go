@@ -30,6 +30,15 @@ type Handler struct {
 	OrigDst       func(net.Conn) (netip.AddrPort, error)
 	Dial          func(network, addr string) (net.Conn, error)
 	SniffTimeout  time.Duration
+
+	// DialUDP opens the upstream leg of a UDP flow to origDst. Injectable for
+	// tests; defaults (when nil) to a plain net.DialUDP to origDst. See udp.go.
+	DialUDP func(origDst netip.AddrPort) (net.Conn, error)
+	// ReplyTo sends an upstream reply back to the guest src spoofing the source
+	// address as origDst (the TPROXY transparent-reply requirement). Injectable
+	// for tests; defaults (when nil) to the platform transparent-socket impl
+	// (transparentReply on Linux; an error stub elsewhere). See udp.go.
+	ReplyTo func(origDst, guestSrc netip.AddrPort, payload []byte) error
 }
 
 // DefaultOrigDst recovers the original destination for a *net.TCPConn (the
