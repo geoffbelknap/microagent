@@ -283,16 +283,23 @@ Environment:
     validation/evaluation without KVM, Firecracker, a guest image, or a model runner.
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 opts into the runner-neutral
     custom runner mediation matrix with a fake OpenAI-compatible runner.
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE=1 runs the fake runner
+    scenario through the runner-neutral mediation pressure probe instead of the
+    functional allow/deny matrix.
   MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_OUT_DIR=<dir> stores fake runner
     mediation reports.
   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 opts into the production run --model
     mediation matrix with llama.cpp. It defaults to CPU execution.
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE=1 runs the llama.cpp scenario
+    through the runner-neutral mediation pressure probe.
   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=1 opts that scenario into llama.cpp
     GPU runner args.
   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_IMAGE=<ref> overrides the guest curl image.
   MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_OUT_DIR=<dir> stores llama.cpp reports.
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 opts into the production run --model
     mediation matrix with a real vLLM GPU runner.
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE=1 runs the vLLM scenario through
+    the runner-neutral mediation pressure probe.
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=<dir> points at a vLLM checkout.
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_IMAGE=<ref> overrides the guest curl image.
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_OUT_DIR=<dir> stores vLLM reports.

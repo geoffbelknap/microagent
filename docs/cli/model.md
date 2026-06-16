@@ -228,8 +228,20 @@ MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_POLICY_ONLY=1 \
 MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
   scripts/dev/microagent-e2e.sh model-mediation-runner-fake
 
+# Runner-neutral pressure probe through the fake custom runner.
+MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_PRESSURE=1 \
+  scripts/dev/microagent-e2e.sh model-mediation-runner-fake
+
 # llama.cpp runner, default CPU execution.
 MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
+  MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
+  scripts/dev/microagent-e2e.sh model-mediation-llamacpp
+
+# llama.cpp CPU pressure probe.
+MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_PRESSURE=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_LLAMA_GPU=0 \
   MICROAGENT_LLAMA_SERVER=/path/to/llama-server \
   scripts/dev/microagent-e2e.sh model-mediation-llamacpp
 
@@ -241,6 +253,12 @@ MICROAGENT_E2E_MODEL_MEDIATION_LLAMA=1 \
 
 # vLLM GPU runner from a local checkout.
 MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
+  scripts/dev/microagent-e2e.sh model-mediation-vllm
+
+# vLLM GPU pressure probe.
+MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1 \
+  MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE=1 \
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=../vllm \
   scripts/dev/microagent-e2e.sh model-mediation-vllm
 ```
@@ -272,6 +290,18 @@ experimental data. The model mediation scenarios default to
 `quay.io/curl/curl:latest` for the guest HTTP probe image; use the
 scenario-specific `*_IMAGE` override when a different internal mirror is
 required.
+
+Set the adapter-specific `*_PRESSURE=1` switch to replace the functional
+allow/deny matrix with the runner-neutral pressure probe. The pressure probe
+compares direct bridge traffic with local mediation, file-policy allow, and
+external-policy allow across configurable guest workspaces and per-workspace
+concurrency. It writes `pressure-profiles.tsv`,
+`pressure-profile-comparison.tsv`, `pressure-audit-summary.tsv`, optional
+telemetry summaries, and `pressure-gates.tsv`. Pressure gates default to
+`warn`, because this path is intended to establish realistic concurrency
+budgets before making them release-blocking. Common knobs are
+`*_PRESSURE_WORKSPACES`, `*_PRESSURE_CONCURRENCY`, `*_PRESSURE_CASES`,
+`*_PRESSURE_WARMUPS`, and `*_PRESSURE_GATE_MODE`.
 
 Set `MICROAGENT_MODEL_MEDIATION=policy` to require a policy source for the
 host-worker mediator. The source can be either an external decision endpoint
