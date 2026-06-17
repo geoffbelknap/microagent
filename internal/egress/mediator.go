@@ -56,6 +56,16 @@ type Handler struct {
 	// tolerated by handleDNS (it simply does not cache); production wiring sets it.
 	NameCache *NameCache
 
+	// Peers is the static name↔IP roster of a named network's members (built from
+	// the network record, excluding this workspace's own entry). East-west VM↔VM
+	// flows are often raw TCP or dialed by peer name → peer IP — no DNS the
+	// mediator can observe — so a bare-IP destination is reverse-resolved here to
+	// the peer's workspace name and policed by name under the same default-deny
+	// allowlist as any external host. Authoritative (no expiry) and tried ahead of
+	// the DNS NameCache for bare-IP destinations. Nil for the nat/user paths (no
+	// roster); peerName nil-guards it.
+	Peers *PeerCache
+
 	// BindAddr is the mediator's own listen address (gateway:port). It is the
 	// loop-guard reference: a captured connection or datagram whose recovered
 	// original destination equals BindAddr is the mediator's own forwarding leg
@@ -97,6 +107,30 @@ func (h *Handler) isOwnBindAddr(dst netip.AddrPort) bool {
 		h.BindAddr.Addr().Unmap() == dst.Addr().Unmap()
 }
 
+// peerName reverse-resolves a destination IP to its named-network peer workspace
+// name via the static PeerCache. It returns false when no roster is configured
+// (the nat/user paths leave Peers nil) or when a is not a known peer.
+func (h *Handler) peerName(a netip.Addr) (string, bool) {
+	if h.Peers == nil {
+		return "", false
+	}
+	return h.Peers.NameByIP(a)
+}
+
+// addPeerFields stamps the resolved named-network peer identity onto an audit
+// field map when the destination resolved to a known peer. A no-op when peer is
+// empty (external host, or no roster), so external-host audit records are
+// byte-identical to before.
+func addPeerFields(fields map[string]any, peer, peerIP string) {
+	if peer == "" {
+		return
+	}
+	fields["peer"] = peer
+	if peerIP != "" {
+		fields["peer_ip"] = peerIP
+	}
+}
+
 // Handle services one captured connection. It always closes conn.
 func (h *Handler) Handle(conn net.Conn) {
 	defer conn.Close()
@@ -124,17 +158,40 @@ func (h *Handler) Handle(conn net.Conn) {
 	host, isTLS := sniffHost(br, dst, conn.SetReadDeadline, time.Now().Add(timeout))
 
 	// Raw-IP fallback: when no SNI/Host was sniffed, sniffHost returns the bare
-	// destination IP. Reverse-resolve it against the DNS name cache so a raw-IP TCP
-	// connection to a previously-resolved allowlisted host is matched by name
-	// (consistent with the UDP path). The SNI/Host path is left untouched: only the
-	// bare-IP fallback gains the lookup. nil-guarded for callers without a cache.
-	if h.NameCache != nil && host == dst.Addr().String() {
+	// destination IP. Reverse-resolve it so a raw-IP TCP connection to a
+	// previously-resolved allowlisted host (or a named-network peer) is matched by
+	// name. Order, for a bare-IP destination only: the static PeerCache first (the
+	// authoritative name↔IP roster of named-network members), then the DNS
+	// NameCache (observed DNS answers). The SNI/Host path is left untouched. Both
+	// lookups are nil-guarded for callers without the respective cache.
+	//
+	// peer/peerIP carry the resolved peer identity (if any) for the audit trail and
+	// for the deny-time IP-literal fallback below. A peer match also satisfies the
+	// reverse lookup, so the DNS NameCache is only consulted when no peer matched.
+	var peer, peerIP string
+	if name, ok := h.peerName(dst.Addr()); ok {
+		peer = name
+		peerIP = dst.Addr().String()
+		if host == dst.Addr().String() {
+			host = name
+		}
+	}
+	if peer == "" && h.NameCache != nil && host == dst.Addr().String() {
 		if name, ok := h.NameCache.HostForIP(dst.Addr()); ok {
 			host = name
 		}
 	}
 
 	d := h.Policy.AllowHost(host)
+	// Peer IP-literal fallback: a known peer that is denied by name may still be
+	// allowed if the operator allowlisted its IP literal. Default-deny stands —
+	// this only widens to an explicit IP entry, never beyond the allowlist. Tried
+	// only when the by-name decision denied.
+	if !d.Allow && peer != "" && peerIP != "" {
+		if ipd := h.Policy.AllowHost(peerIP); ipd.Allow {
+			d = ipd
+		}
+	}
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(host).Allow
 	// In mediated mode every destination is allowed (and audited); strict (or
 	// empty) keeps the default-deny allowlist. allowed defaults to d.Allow when
@@ -146,7 +203,9 @@ func (h *Handler) Handle(conn net.Conn) {
 	// it is never "unlisted".
 	unlisted := allowed && !d.Allow && !passthrough
 	if !allowed && !passthrough {
-		h.Logger.Log("egress_deny", map[string]any{"host": host, "dst": dst.String(), "reason": d.Reason})
+		denyFields := map[string]any{"host": host, "dst": dst.String(), "reason": d.Reason}
+		addPeerFields(denyFields, peer, peerIP)
+		h.Logger.Log("egress_deny", denyFields)
 		return // fail-closed: no upstream dial
 	}
 	if isTLS && h.CA != nil && allowed && !passthrough {
@@ -166,6 +225,8 @@ func (h *Handler) Handle(conn net.Conn) {
 		allowFields["unlisted"] = true
 		closeFields["unlisted"] = true
 	}
+	addPeerFields(allowFields, peer, peerIP)
+	addPeerFields(closeFields, peer, peerIP)
 	h.Logger.Log("egress_allow", allowFields)
 
 	errc := make(chan error, 2)

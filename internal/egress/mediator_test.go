@@ -337,6 +337,144 @@ func TestTCPRawIPByName(t *testing.T) {
 	})
 }
 
+// TestHandlerAllowsPeerByName proves a raw-TCP east-west flow whose original
+// destination IP maps to a named-network peer is policed by the peer's workspace
+// name: the peer is on the allowlist, so the connection is forwarded and audited
+// egress_allow carrying the peer name (and peer_ip). There is no SNI/Host and no
+// DNS NameCache entry — only the static PeerCache resolves the bare IP.
+func TestHandlerAllowsPeerByName(t *testing.T) {
+	up, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer up.Close()
+	go func() {
+		for {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			go func() { io.Copy(c, c); c.Close() }() // echo
+		}
+	}()
+	upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+	// Allowlist the peer by its workspace name; PeerCache maps the dst IP -> name.
+	pol, _ := NewPolicy([]string{"builder"})
+	peers, err := NewPeerCache([]string{"builder=" + upAddr.Addr().String()})
+	if err != nil {
+		t.Fatalf("NewPeerCache: %v", err)
+	}
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:         "strict",
+		Policy:       pol,
+		Peers:        peers,
+		Logger:       log,
+		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+		Dial:         net.Dial,
+		SniffTimeout: 300 * time.Millisecond,
+	}
+
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() { h.Handle(server); close(done) }()
+	// Raw bytes: not a TLS ClientHello, no HTTP Host header -> bare-IP fallback.
+	go func() { client.Write([]byte("RAWPING\n")) }()
+	br := bufio.NewReader(client)
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	line, err := br.ReadString('\n')
+	if err != nil || line != "RAWPING\n" {
+		t.Fatalf("echo = %q err=%v (allowlisted peer raw TCP must be forwarded)", line, err)
+	}
+	client.Close()
+	<-done
+	assertEvent(t, log, "egress_allow")
+	assertEventWithField(t, log, "egress_allow", "peer", "builder")
+	assertEventWithField(t, log, "egress_allow", "peer_ip", upAddr.Addr().String())
+}
+
+// TestHandlerDeniesUnknownPeer proves default-deny stands for east-west: an
+// original destination IP that is neither a known peer nor allowlisted is denied
+// fail-closed (no upstream Dial), audited egress_deny.
+func TestHandlerDeniesUnknownPeer(t *testing.T) {
+	dialed := false
+	pol, _ := NewPolicy([]string{"builder"})
+	peers, err := NewPeerCache([]string{"builder=10.44.1.3"})
+	if err != nil {
+		t.Fatalf("NewPeerCache: %v", err)
+	}
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:         "strict",
+		Policy:       pol,
+		Peers:        peers,
+		Logger:       log,
+		// Not a known peer (10.44.1.99 is not in the roster) and not allowlisted.
+		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.44.1.99:443"), nil },
+		Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
+		SniffTimeout: 300 * time.Millisecond,
+	}
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() { h.Handle(server); close(done) }()
+	go client.Write([]byte("RAWPING\n"))
+	<-done
+	client.Close()
+	if dialed {
+		t.Fatal("upstream dialed for an unknown peer under strict (must fail closed)")
+	}
+	assertEvent(t, log, "egress_deny")
+}
+
+// TestHandlerAllowsPeerByIPLiteral proves an operator may allowlist a peer by its
+// IP literal: the dst resolves to a known peer name that is NOT on the allowlist,
+// but the peer's IP IS, so the connection is forwarded. The audit still carries
+// the resolved peer name and IP.
+func TestHandlerAllowsPeerByIPLiteral(t *testing.T) {
+	up, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer up.Close()
+	go func() {
+		for {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			go func() { io.Copy(c, c); c.Close() }() // echo
+		}
+	}()
+	upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+	// Allowlist the IP literal, NOT the peer name.
+	pol, _ := NewPolicy([]string{upAddr.Addr().String()})
+	peers, err := NewPeerCache([]string{"builder=" + upAddr.Addr().String()})
+	if err != nil {
+		t.Fatalf("NewPeerCache: %v", err)
+	}
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:         "strict",
+		Policy:       pol,
+		Peers:        peers,
+		Logger:       log,
+		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+		Dial:         net.Dial,
+		SniffTimeout: 300 * time.Millisecond,
+	}
+
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() { h.Handle(server); close(done) }()
+	go func() { client.Write([]byte("RAWPING\n")) }()
+	br := bufio.NewReader(client)
+	_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+	line, err := br.ReadString('\n')
+	if err != nil || line != "RAWPING\n" {
+		t.Fatalf("echo = %q err=%v (peer allowlisted by IP literal must be forwarded)", line, err)
+	}
+	client.Close()
+	<-done
+	assertEvent(t, log, "egress_allow")
+	assertEventWithField(t, log, "egress_allow", "peer", "builder")
+}
+
 func assertEvent(t *testing.T, log *BufferLogger, event string) {
 	t.Helper()
 	for _, e := range log.Events {
