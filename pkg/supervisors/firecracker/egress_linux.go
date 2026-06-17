@@ -200,6 +200,150 @@ func installEgressV6DropRule(tap string) (transientFirewallRule, error) {
 	return rule.transientFirewallRule, nil
 }
 
+// egressL4DropNFLogGroup is the nflog group the catch-all drop rule logs to.
+// It is the audit channel for dropped non-tcp/udp guest egress (ICMP, etc.):
+// the packets surface to userspace via NFLOG group <N> rather than the mediator's
+// JSONL access log (those packets never reach the mediator — they are dropped at
+// the firewall). A non-zero group makes the nft `log group` directive emit to
+// NFLOG (vs the bare kernel-log `log`), so an operator can attach an nflog reader
+// to audit the drops. See the recorded-decisions note on buildEgressL4DropRule.
+const egressL4DropNFLogGroup = 5
+
+// buildEgressL4DropRule builds the Tier 5 drop-and-audit for guest IPv4 L4
+// traffic that is neither TCP nor UDP. Under mediation the guest's IPv4 egress is
+// fully covered: TCP is REDIRECTed (nat/prerouting), UDP is TPROXY'd
+// (mangle/prerouting), and EVERYTHING ELSE — ICMP and any other L4 protocol that
+// carries no allowlistable destination identity — is dropped here and audited via
+// nflog. That gives complete IPv4 mediation (tenet 3 — "mediation is complete"):
+// TCP+UDP mediated, the rest contained.
+//
+// Why drop-and-audit, not allow-and-audit (recorded decision): ICMP echo is a
+// covert/exfil + liveness-leak channel with no destination identity the mediator
+// could allowlist. Allowing it — even logged — would be an unmediated egress
+// channel. So we DROP it and surface it via nflog (group egressL4DropNFLogGroup),
+// NOT the mediator's JSONL access log (the dropped packet never reaches the
+// mediator). "Allow-and-audit ICMP" is intentionally NOT shipped.
+//
+// Excluding BOTH tcp and udp: a single &expr.Cmp can only compare one value, so it
+// cannot express "neither tcp nor udp" alone. Rather than introduce an anonymous
+// set (which the comment-tagged transient-rule teardown model does not track and
+// would orphan/leak), we emit THREE precedence rules into one filter chain, in
+// order:
+//
+//	1. l4proto == tcp  -> accept   (egress-l4-accept-tcp)
+//	2. l4proto == udp  -> accept   (egress-l4-accept-udp)
+//	3. iifname == tap, ipv4 saddr in subnet -> nflog + drop  (egress-l4-drop)
+//
+// nft evaluates rules in insertion order, so a tcp/udp packet hits rule 1 or 2
+// and is accepted before the catch-all (rule 3) can see it; only non-tcp/udp
+// reaches the drop. The accepts are belt-and-suspenders: by the time a packet
+// reaches this FILTER chain (priority 0) the nat REDIRECT (priority -100) has
+// already DNAT'd tcp and the mangle TPROXY (priority -150) has already steered
+// udp — the prerouting hook runs chains in ascending priority order:
+//
+//	mangle(-150)  -> TPROXY captures udp
+//	nat(-100)     -> REDIRECT captures tcp
+//	filter(0)     -> THIS chain; only non-tcp/udp (and tcp/udp residue) arrives
+//
+// so tcp/udp are mediated BEFORE this chain. The explicit accepts make the intent
+// self-documenting and robust even if a future reordering changed that, while the
+// catch-all drop closes ICMP and everything else.
+//
+// All three rules live in the plain filter chain (nftFilterPreroutingChain,
+// alongside the v6 drop) because they are verdicts (accept/drop), not NAT/mangle
+// actions. The v6 drop in the same chain matches nfproto==ipv6 only, so it never
+// interferes with these IPv4 rules.
+func buildEgressL4DropRule(tap, subnet string) ([]nftFirewallRule, error) {
+	_, network, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return nil, fmt.Errorf("parse egress subnet %q: %w", subnet, err)
+	}
+	if network.IP.To4() == nil {
+		return nil, fmt.Errorf("egress subnet %q is not IPv4", subnet)
+	}
+	// Precedence accept for tcp: l4proto == tcp -> accept. Matched on the tap so
+	// it cannot accept unrelated host-local traffic that happens to share the
+	// chain; the subnet match is unnecessary here (tcp is already REDIRECTed at
+	// the nat hook) — the accept exists only to keep the catch-all from ever
+	// reaching tcp.
+	acceptTCP := nftFirewallRule{
+		transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftFilterPreroutingChain, Comment: nftRuleComment(tap, "egress-l4-accept-tcp")},
+		Exprs: append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap),
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_TCP}},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		),
+	}
+	// Precedence accept for udp: l4proto == udp -> accept.
+	acceptUDP := nftFirewallRule{
+		transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftFilterPreroutingChain, Comment: nftRuleComment(tap, "egress-l4-accept-udp")},
+		Exprs: append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap),
+			&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_UDP}},
+			&expr.Verdict{Kind: expr.VerdictAccept},
+		),
+	}
+	// Catch-all: iifname == tap, ipv4 saddr in subnet -> nflog + drop. Reuses the
+	// same subnet-match exprs as buildEgressRedirectRule (offset 12 = IPv4 saddr)
+	// so it only contains the guest's own egress, not stray host traffic. The
+	// nflog (expr.Log to NFLOG group egressL4DropNFLogGroup) precedes the drop so
+	// every dropped non-tcp/udp packet is auditable.
+	dropExprs := append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap), ipv4SubnetMatchExprs(12, network)...)
+	dropExprs = append(dropExprs,
+		// `log group N` == NFLOG to group N. Specifying a group selects NFLOG
+		// implicitly, so ONLY the group attribute is set: the kernel rejects the
+		// NFTA_LOG_FLAGS attribute when a group is present (flags are valid only
+		// for the bare kernel-log variant), which otherwise surfaces as a netlink
+		// EINVAL on install.
+		&expr.Log{
+			Key:   1 << unix.NFTA_LOG_GROUP,
+			Group: egressL4DropNFLogGroup,
+		},
+		&expr.Verdict{Kind: expr.VerdictDrop},
+	)
+	catchAllDrop := nftFirewallRule{
+		transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftFilterPreroutingChain, Comment: nftRuleComment(tap, "egress-l4-drop")},
+		Exprs:                 dropExprs,
+	}
+	return []nftFirewallRule{acceptTCP, acceptUDP, catchAllDrop}, nil
+}
+
+// installEgressL4DropRule ensures the filter chain and installs the three L4-drop
+// precedence rules (accept tcp, accept udp, catch-all nflog+drop) in order,
+// returning them as transient rules for teardown. The in-order AddRule sequence is
+// load-bearing: the catch-all drop must be installed AFTER the two accepts so nft
+// evaluates the accepts first (see buildEgressL4DropRule). Mirrors
+// installEgressV6DropRule but installs multiple rules into the shared filter chain.
+func installEgressL4DropRule(tap, subnet string) ([]transientFirewallRule, error) {
+	rules, err := buildEgressL4DropRule(tap, subnet)
+	if err != nil {
+		return nil, err
+	}
+	conn := &nftables.Conn{}
+	if err := ensureEgressFilterChain(conn); err != nil {
+		return nil, err
+	}
+	installed := make([]transientFirewallRule, 0, len(rules))
+	for _, rule := range rules {
+		table := nftRuleTable(rule.transientFirewallRule)
+		chain := &nftables.Chain{Name: rule.Chain, Table: table}
+		exists, err := nftRuleExists(conn, table, chain, rule.Comment)
+		if err != nil {
+			cleanupTransientFirewallRules(installed)
+			return nil, networkPrivilegeError("inspect egress l4 drop rule", err)
+		}
+		if !exists {
+			conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: rule.Exprs, UserData: nftRuleUserData(rule.Comment)})
+			if err := conn.Flush(); err != nil {
+				cleanupTransientFirewallRules(installed)
+				return nil, networkPrivilegeError("install egress l4 drop rule", err)
+			}
+		}
+		installed = append(installed, rule.transientFirewallRule)
+	}
+	return installed, nil
+}
+
 // buildEgressTProxyRule builds a mangle/prerouting rule that TPROXYs guest UDP
 // (arriving on tap, sourced from the guest subnet) to the local mediator's
 // transparent socket at mediator (gateway:port). Unlike TCP REDIRECT (DNAT),

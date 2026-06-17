@@ -236,6 +236,180 @@ func TestProvisionEgressInstallsV6Drop(t *testing.T) {
 	}
 }
 
+// TestBuildEgressL4DropRuleDropsNonTCPUDP proves the Tier 5 drop-and-audit of
+// guest IPv4 L4 traffic that is neither TCP (REDIRECT-mediated) nor UDP
+// (TPROXY-mediated) — i.e. ICMP and other protocols with no allowlistable
+// destination identity. The builder emits three precedence rules in one filter
+// chain: l4proto==tcp -> accept, l4proto==udp -> accept, then a catch-all
+// (iifname==tap, ipv4 saddr in subnet) -> nflog + drop. The two accepts ensure
+// the catch-all NEVER drops tcp/udp (those are already steered by the nat/mangle
+// hooks anyway); the catch-all contains everything else.
+func TestBuildEgressL4DropRuleDropsNonTCPUDP(t *testing.T) {
+	rules, err := buildEgressL4DropRule("microtap0", "10.43.7.0/29")
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(rules) != 3 {
+		t.Fatalf("expected 3 precedence rules (accept tcp, accept udp, drop rest), got %d", len(rules))
+	}
+	for i, r := range rules {
+		if r.Chain != nftFilterPreroutingChain || r.Table != nftMicroagentTable {
+			t.Fatalf("rule %d wrong table/chain: %+v", i, r.transientFirewallRule)
+		}
+	}
+
+	// Rules 0 and 1: the protocol accepts. Each must compare l4proto against
+	// exactly tcp / udp and accept (so the catch-all never sees tcp/udp).
+	acceptProto := func(r nftFirewallRule) (byte, bool) {
+		var proto byte
+		var hasL4, hasAccept bool
+		for _, e := range r.Exprs {
+			switch x := e.(type) {
+			case *expr.Meta:
+				if x.Key == expr.MetaKeyL4PROTO {
+					hasL4 = true
+				}
+			case *expr.Cmp:
+				if x.Op == expr.CmpOpEq && len(x.Data) == 1 {
+					proto = x.Data[0]
+				}
+			case *expr.Verdict:
+				if x.Kind == expr.VerdictAccept {
+					hasAccept = true
+				}
+			}
+		}
+		return proto, hasL4 && hasAccept
+	}
+	tcpProto, tcpOK := acceptProto(rules[0])
+	if !tcpOK || tcpProto != unix.IPPROTO_TCP {
+		t.Errorf("rule 0 must accept l4proto==tcp, got proto=%d ok=%v", tcpProto, tcpOK)
+	}
+	udpProto, udpOK := acceptProto(rules[1])
+	if !udpOK || udpProto != unix.IPPROTO_UDP {
+		t.Errorf("rule 1 must accept l4proto==udp, got proto=%d ok=%v", udpProto, udpOK)
+	}
+
+	// Rule 2: the catch-all. Must match iifname==tap + ipv4 saddr-in-subnet,
+	// nflog (expr.Log) before the drop verdict, and DROP.
+	drop := rules[2]
+	var hasIIF, hasNFProtoV4, hasLog, hasDrop bool
+	logBeforeDrop := false
+	sawLog := false
+	for _, e := range drop.Exprs {
+		switch x := e.(type) {
+		case *expr.Meta:
+			switch x.Key {
+			case expr.MetaKeyIIFNAME:
+				hasIIF = true
+			case expr.MetaKeyNFPROTO:
+				hasNFProtoV4 = true
+			}
+		case *expr.Cmp:
+			if len(x.Data) == 1 && x.Data[0] == unix.NFPROTO_IPV4 {
+				hasNFProtoV4 = hasNFProtoV4 && true
+			}
+		case *expr.Log:
+			hasLog = true
+			sawLog = true
+		case *expr.Verdict:
+			if x.Kind == expr.VerdictDrop {
+				hasDrop = true
+				if sawLog {
+					logBeforeDrop = true
+				}
+			}
+		}
+	}
+	if !hasIIF {
+		t.Error("catch-all drop rule does not match iifname (guest tap)")
+	}
+	if !hasNFProtoV4 {
+		t.Error("catch-all drop rule does not match nfproto ipv4 (subnet match)")
+	}
+	if !hasLog {
+		t.Error("catch-all drop rule has no expr.Log (nflog) for audit")
+	}
+	if !hasDrop {
+		t.Error("catch-all drop rule has no expr.Verdict drop")
+	}
+	if !logBeforeDrop {
+		t.Error("nflog must precede the drop verdict so dropped packets are audited")
+	}
+}
+
+func TestBuildEgressL4DropRuleRejectsBadSubnet(t *testing.T) {
+	if _, err := buildEgressL4DropRule("t", "not-a-cidr"); err == nil {
+		t.Fatal("expected error for bad subnet")
+	}
+}
+
+func TestBuildEgressL4DropRuleRejectsIPv6Subnet(t *testing.T) {
+	if _, err := buildEgressL4DropRule("t", "fd00::/64"); err == nil {
+		t.Fatal("expected error for non-IPv4 subnet")
+	}
+}
+
+// TestEgressL4DropRulesAcceptedByCleanupAllowlist guards that every L4-drop
+// precedence rule's table/chain/comment passes validMicroagentFirewallRule, so
+// the standard transient firewall teardown removes them rather than orphaning
+// the drop/accept rules on the host after the workspace is gone.
+func TestEgressL4DropRulesAcceptedByCleanupAllowlist(t *testing.T) {
+	rules, err := buildEgressL4DropRule("magtap0badc0de", "10.43.7.0/29")
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	for i, r := range rules {
+		if !validMicroagentFirewallRule(r.transientFirewallRule) {
+			t.Fatalf("L4-drop rule %d rejected by cleanup allowlist: %+v", i, r.transientFirewallRule)
+		}
+	}
+}
+
+// TestProvisionEgressInstallsL4Drop documents that the Tier 5 non-tcp/udp
+// drop-and-audit is part of the mediated egress steering set. provisionEgressMediation
+// needs root + a netns to install rules, so this asserts the wiring
+// deterministically without touching host state: the L4-drop rules the
+// provisioner installs (built from the same tap+subnet) carry the expected tagged
+// comments, live in the filter chain, and are accepted by the teardown allowlist
+// — i.e. they are appended to the returned transient rules and torn down with the
+// workspace, exactly like the REDIRECT, TPROXY, and v6-drop rules.
+func TestProvisionEgressInstallsL4Drop(t *testing.T) {
+	const tap = "magtap0badc0de"
+	const subnet = "10.43.7.0/29"
+	rules, err := buildEgressL4DropRule(tap, subnet)
+	if err != nil {
+		t.Fatalf("build L4 drop: %v", err)
+	}
+	if len(rules) != 3 {
+		t.Fatalf("expected 3 L4-drop precedence rules, got %d", len(rules))
+	}
+	wantKinds := []string{"egress-l4-accept-tcp", "egress-l4-accept-udp", "egress-l4-drop"}
+	for i, r := range rules {
+		if got, want := r.Comment, nftRuleComment(tap, wantKinds[i]); got != want {
+			t.Fatalf("L4-drop rule %d comment = %q, want %q", i, got, want)
+		}
+		if r.Chain != nftFilterPreroutingChain {
+			t.Fatalf("L4-drop rule %d chain = %q, want %q (filter, not nat/mangle)", i, r.Chain, nftFilterPreroutingChain)
+		}
+		if !validMicroagentFirewallRule(r.transientFirewallRule) {
+			t.Fatalf("L4-drop rule %d not accepted by teardown allowlist: %+v", i, r.transientFirewallRule)
+		}
+	}
+	// The L4-drop set must be distinct from the v6-drop and REDIRECT rules — a
+	// different comment kind — so all the steering rules coexist in the returned
+	// rule slice rather than colliding.
+	v6drop, err := buildEgressV6DropRule(tap)
+	if err != nil {
+		t.Fatalf("build v6 drop: %v", err)
+	}
+	for i, r := range rules {
+		if r.Comment == v6drop.Comment {
+			t.Fatalf("L4-drop rule %d collides with v6 drop comment %q", i, v6drop.Comment)
+		}
+	}
+}
+
 func TestBuildEgressTProxyRuleRejectsBadSubnet(t *testing.T) {
 	mediator := netip.AddrPortFrom(netip.MustParseAddr("10.43.7.1"), 41000)
 	if _, err := buildEgressTProxyRule("t", "not-a-cidr", egressTProxyMark, mediator); err == nil {

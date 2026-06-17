@@ -1363,6 +1363,26 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gat
 		return 0, nil, fmt.Errorf("egress: IPv6 fail-closed drop unavailable for workspace %s: %w", opts.Name, v6err)
 	}
 	rules = append(rules, v6drop)
+
+	// Tier 5: drop-and-audit guest IPv4 L4 traffic that is neither TCP
+	// (REDIRECT-mediated above) nor UDP (TPROXY-mediated above) — ICMP and any
+	// other protocol with no allowlistable destination identity. With TCP and UDP
+	// already mediated, dropping the rest at the firewall completes IPv4 mediation
+	// ("mediation is complete"): allowing ICMP echo etc. would be an unmediated
+	// covert/exfil + liveness-leak channel. The three precedence rules (accept
+	// tcp, accept udp, catch-all nflog+drop) share the filter chain with the v6
+	// drop and audit drops via nflog, not the mediator JSONL. Same fail-closed
+	// discipline: on failure tear down everything this helper provisioned and
+	// abort the start.
+	l4drops, l4err := installEgressL4DropRule(tap, subnet)
+	if l4err != nil {
+		undoRouting()
+		terminateAuxProcess(pid)
+		cleanupCA()
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: non-TCP/UDP fail-closed drop unavailable for workspace %s: %w", opts.Name, l4err)
+	}
+	rules = append(rules, l4drops...)
 	return pid, rules, nil
 }
 
