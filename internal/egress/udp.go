@@ -287,6 +287,20 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 	p.mu.Unlock()
 
 	flow.touch(now)
+	// Volume cap (ASK tenet 8): charge this datagram against the SAME process-wide
+	// cumulative counter the TCP splice uses, so MaxTotalBytes bounds total egress
+	// across tcp+udp. Once exceeded, tear the breaching flow down (drop the
+	// datagram, close the upstream socket) and audit egress_cap_exceeded volume.
+	// The mediator keeps serving other flows; no NEW bytes escape this flow. A
+	// zero cap (unlimited) never trips, so the path is byte-identical to today.
+	if p.h.addBytesOverCap(int64(len(payload))) {
+		p.h.Logger.Log("egress_cap_exceeded", map[string]any{
+			"host": host, "dst": dst, "proto": "udp", "reason": "volume",
+			"limit": p.h.Limits.MaxTotalBytes,
+		})
+		p.removeFlow(flow)
+		return
+	}
 	if _, err := flow.upstream.Write(payload); err != nil {
 		// Upstream write failure: tear the flow down so a fresh one is created
 		// on the next datagram (and the reader goroutine is reclaimed).

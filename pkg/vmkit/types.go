@@ -86,6 +86,22 @@ type Config struct {
 	EgressMode        string   `json:"egressMode,omitempty"`
 	EgressAllow       []string `json:"egressAllow,omitempty"`
 	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
+	// Bounded-operations caps for the egress mediator (ASK tenet 8). All are
+	// per-mediator-process (= per-workspace) and reset on restart; a zero value
+	// means unlimited (the current, uncapped behavior).
+	//   EgressMaxBytesPerSec     rate-limits the upstream-bound copy of each flow.
+	//   EgressMaxTotalBytes      caps cumulative egress bytes across tcp+udp; once
+	//                            exceeded, the breaching flow is torn down (the
+	//                            mediator keeps serving).
+	//   EgressMaxConcurrentConns caps concurrently mediated TCP connections
+	//                            (refused fail-closed beyond the cap).
+	//   EgressAuditMaxBytes      rotates the audit log at this size per active file.
+	//   EgressAuditMaxBackups    number of rotated audit-log backups to retain.
+	EgressMaxBytesPerSec     int64 `json:"egressMaxBytesPerSec,omitempty"`
+	EgressMaxTotalBytes      int64 `json:"egressMaxTotalBytes,omitempty"`
+	EgressMaxConcurrentConns int32 `json:"egressMaxConcurrentConns,omitempty"`
+	EgressAuditMaxBytes      int64 `json:"egressAuditMaxBytes,omitempty"`
+	EgressAuditMaxBackups    int   `json:"egressAuditMaxBackups,omitempty"`
 	// SecretsControlPort is the guest vsock port the host connects to (via the
 	// firecracker CONNECT protocol) to signal purge/rehydrate around snapshots.
 	SecretsControlPort uint32 `json:"secretsControlPort,omitempty"`

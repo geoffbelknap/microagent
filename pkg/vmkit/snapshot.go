@@ -64,6 +64,15 @@ type SnapshotManifest struct {
 	EgressAllow       []string `json:"egressAllow,omitempty"`
 	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
 	EgressCASHA256    string   `json:"egressCASHA256,omitempty"`
+	// Bounded-operations caps (ASK tenet 8) captured at snapshot time so a restored
+	// workspace keeps the SAME bounds it was running under. All are per-mediator-
+	// process and reset on restart; a zero value means unlimited. Re-applied on
+	// restore by threading them back through the mediator flags.
+	EgressMaxBytesPerSec     int64 `json:"egressMaxBytesPerSec,omitempty"`
+	EgressMaxTotalBytes      int64 `json:"egressMaxTotalBytes,omitempty"`
+	EgressMaxConcurrentConns int32 `json:"egressMaxConcurrentConns,omitempty"`
+	EgressAuditMaxBytes      int64 `json:"egressAuditMaxBytes,omitempty"`
+	EgressAuditMaxBackups    int   `json:"egressAuditMaxBackups,omitempty"`
 }
 
 // SnapshotInfo is a manifest plus the on-disk size of its snapshot directory,

@@ -17,11 +17,11 @@ type Options struct {
 	BindPort     int
 	Allow        []string
 	AuditLogPath string
-	Logger       Logger                                  // optional; if nil and AuditLogPath set, a FileLogger is opened
+	Logger       Logger                                 // optional; if nil and AuditLogPath set, a FileLogger is opened
 	OrigDst      func(net.Conn) (netip.AddrPort, error) // optional; defaults to DefaultOrigDst
-	Ready        io.Writer                               // optional; bound address written here once listening
-	SniffTimeout time.Duration                           // optional; passed to Handler (Handler defaults to 2s when <=0)
-	CACertPath   string                                  // if set with CAKeyPath, enables TLS interception
+	Ready        io.Writer                              // optional; bound address written here once listening
+	SniffTimeout time.Duration                          // optional; passed to Handler (Handler defaults to 2s when <=0)
+	CACertPath   string                                 // if set with CAKeyPath, enables TLS interception
 	CAKeyPath    string
 	Passthrough  []string // allowed hosts that are NOT intercepted (L4 splice + audit)
 
@@ -41,6 +41,19 @@ type Options struct {
 	// UDPListen opens the transparent UDP socket the mediator serves. Defaults to
 	// transparentUDPListener (IP_TRANSPARENT + IP_RECVORIGDSTADDR). Injectable for tests.
 	UDPListen func(addr netip.AddrPort) (*net.UDPConn, error)
+
+	// Limits bounds this mediator process's egress per ASK tenet 8 (rate, total
+	// volume, and concurrent connections). The zero value is unlimited — the
+	// current, uncapped behavior. Plumbed onto the Handler by Serve.
+	Limits Limits
+
+	// AuditMaxBytes and AuditMaxBackups configure the size-bounded rotating audit
+	// log. When AuditMaxBytes > 0 (and Logger is nil and AuditLogPath is set),
+	// Serve builds a RotatingFileLogger that caps each active file at AuditMaxBytes
+	// and keeps at most AuditMaxBackups rotated files. AuditMaxBytes <= 0 keeps the
+	// unbounded FileLogger (current behavior).
+	AuditMaxBytes   int64
+	AuditMaxBackups int
 }
 
 // Run binds BindHost:BindPort and serves until ctx is cancelled.
@@ -65,13 +78,25 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 			_ = ln.Close()
 			return fmt.Errorf("egress: a logger or audit log path is required")
 		}
-		fl, err := NewFileLogger(opts.AuditLogPath)
-		if err != nil {
-			_ = ln.Close()
-			return err
+		// Size-bounded rotating audit log when AuditMaxBytes > 0 (ASK tenet 8 —
+		// bounded retention); otherwise the unbounded FileLogger (current behavior).
+		if opts.AuditMaxBytes > 0 {
+			rl, err := NewRotatingFileLogger(opts.AuditLogPath, opts.AuditMaxBytes, opts.AuditMaxBackups)
+			if err != nil {
+				_ = ln.Close()
+				return err
+			}
+			defer rl.Close()
+			logger = rl
+		} else {
+			fl, err := NewFileLogger(opts.AuditLogPath)
+			if err != nil {
+				_ = ln.Close()
+				return err
+			}
+			defer fl.Close()
+			logger = fl
 		}
-		defer fl.Close()
-		logger = fl
 	}
 	orig := opts.OrigDst
 	if orig == nil {
@@ -145,7 +170,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// merely disables the loop guard (the nft rules still prevent the loop), so it
 	// is not fatal here.
 	bindAP, _ := netip.ParseAddrPort(ln.Addr().String())
-	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps}
+	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
 	// Build the token cache and the real secret resolver only when a swap table
 	// is loaded. KeyResolver wraps microagent's standard secret registry (env /
 	// file / dotenv / vault) so a swap's key_ref resolves host-side identically

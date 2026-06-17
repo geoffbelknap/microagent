@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -403,10 +404,10 @@ func TestHandlerDeniesUnknownPeer(t *testing.T) {
 	}
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:         "strict",
-		Policy:       pol,
-		Peers:        peers,
-		Logger:       log,
+		Mode:   "strict",
+		Policy: pol,
+		Peers:  peers,
+		Logger: log,
 		// Not a known peer (10.44.1.99 is not in the roster) and not allowlisted.
 		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.44.1.99:443"), nil },
 		Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
@@ -473,6 +474,129 @@ func TestHandlerAllowsPeerByIPLiteral(t *testing.T) {
 	<-done
 	assertEvent(t, log, "egress_allow")
 	assertEventWithField(t, log, "egress_allow", "peer", "builder")
+}
+
+// TestHandlerEnforcesByteCap proves the process-wide volume cap (ASK tenet 8):
+// with MaxTotalBytes set low, pushing more than the cap through a passthrough L4
+// splice tears the breaching flow down and audits egress_cap_exceeded reason
+// volume. The mediator does NOT crash; the cap only degrades the breaching flow.
+func TestHandlerEnforcesByteCap(t *testing.T) {
+	// Upstream sink that reads (and discards) everything the guest sends.
+	up, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer up.Close()
+	go func() {
+		for {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			go func() { io.Copy(io.Discard, c); c.Close() }()
+		}
+	}()
+	upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+	pol, _ := NewPolicy([]string{"api.github.com"})
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:         "mediated",
+		Policy:       pol,
+		Logger:       log,
+		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+		Dial:         net.Dial,
+		SniffTimeout: 300 * time.Millisecond,
+		Limits:       Limits{MaxTotalBytes: 1024},
+	}
+
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	go func() { h.Handle(server); close(done) }()
+	// Send well past the 1024-byte cap; the splice must tear down once exceeded.
+	go func() {
+		buf := make([]byte, 4096)
+		for i := 0; i < 16; i++ {
+			if _, err := client.Write(buf); err != nil {
+				return
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle did not return after byte cap exceeded — flow not torn down")
+	}
+	client.Close()
+	assertEvent(t, log, "egress_cap_exceeded")
+	assertEventWithField(t, log, "egress_cap_exceeded", "reason", "volume")
+}
+
+// TestHandlerEnforcesConcurrencyCap proves the TCP concurrency cap fails closed:
+// with MaxConcurrentConns=1, a second concurrent Handle is refused BEFORE dialing
+// upstream (no dial), audited egress_cap_exceeded reason concurrency. ASK tenet 8.
+func TestHandlerEnforcesConcurrencyCap(t *testing.T) {
+	// Upstream that accepts and holds the first connection open so the gauge stays
+	// at 1 while the second Handle runs.
+	up, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer up.Close()
+	hold := make(chan struct{})
+	go func() {
+		for {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) { <-hold; c.Close() }(c)
+		}
+	}()
+	upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+	pol, _ := NewPolicy([]string{"api.github.com"})
+	log := &BufferLogger{}
+	var dials int32
+	h := &Handler{
+		Mode:    "mediated",
+		Policy:  pol,
+		Logger:  log,
+		OrigDst: func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+		Dial: func(network, addr string) (net.Conn, error) {
+			atomic.AddInt32(&dials, 1)
+			return net.Dial(network, addr)
+		},
+		SniffTimeout: 300 * time.Millisecond,
+		Limits:       Limits{MaxConcurrentConns: 1},
+	}
+
+	// First connection: occupies the single concurrency slot. It is a raw flow that
+	// blocks on the held upstream, so the gauge stays at 1.
+	client1, server1 := net.Pipe()
+	done1 := make(chan struct{})
+	go func() { h.Handle(server1); close(done1) }()
+	go func() { client1.Write([]byte("RAWPING\n")) }()
+	// Wait until the first flow has been admitted (gauge incremented + dialed).
+	waitForEvent(t, log, "egress_allow", 2*time.Second)
+
+	// Second concurrent connection: must be refused fail-closed (no dial).
+	dialsBefore := atomic.LoadInt32(&dials)
+	client2, server2 := net.Pipe()
+	done2 := make(chan struct{})
+	go func() { h.Handle(server2); close(done2) }()
+	go func() { client2.Write([]byte("RAWPING2\n")) }()
+	select {
+	case <-done2:
+	case <-time.After(3 * time.Second):
+		t.Fatal("second Handle did not return — concurrency cap not enforced")
+	}
+	client2.Close()
+	if atomic.LoadInt32(&dials) != dialsBefore {
+		t.Fatalf("second flow dialed upstream despite concurrency cap (dials %d -> %d, must fail closed)", dialsBefore, atomic.LoadInt32(&dials))
+	}
+	assertEvent(t, log, "egress_cap_exceeded")
+	assertEventWithField(t, log, "egress_cap_exceeded", "reason", "concurrency")
+
+	// Release the first flow and clean up.
+	close(hold)
+	client1.Close()
+	<-done1
+	<-done2
 }
 
 func assertEvent(t *testing.T, log *BufferLogger, event string) {

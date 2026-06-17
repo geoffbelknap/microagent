@@ -28,7 +28,13 @@ func plainUDPListen(t *testing.T) func(netip.AddrPort) (*net.UDPConn, error) {
 func TestRunMediatesAcceptedConn(t *testing.T) {
 	up, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer up.Close()
-	go func() { c, err := up.Accept(); if err == nil { io.Copy(c, c); c.Close() } }()
+	go func() {
+		c, err := up.Accept()
+		if err == nil {
+			io.Copy(c, c)
+			c.Close()
+		}
+	}()
 	upAddr := netip.MustParseAddrPort(up.Addr().String())
 
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
@@ -45,7 +51,9 @@ func TestRunMediatesAcceptedConn(t *testing.T) {
 		})
 	}()
 	conn, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil { t.Fatalf("dial mediator: %v", err) }
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
 	conn.Write([]byte("GET / HTTP/1.1\r\nHost: api.github.com\r\n\r\n"))
 	br := bufio.NewReader(conn)
 	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
@@ -53,7 +61,9 @@ func TestRunMediatesAcceptedConn(t *testing.T) {
 	if err != nil || line != "GET / HTTP/1.1\r\n" {
 		t.Fatalf("echo = %q err=%v", line, err)
 	}
-	conn.Close(); cancel(); <-done
+	conn.Close()
+	cancel()
+	<-done
 }
 
 // TestServePoliciesPeerRoster proves Serve plumbs Options.Peers into the
@@ -63,7 +73,13 @@ func TestRunMediatesAcceptedConn(t *testing.T) {
 func TestServePoliciesPeerRoster(t *testing.T) {
 	up, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer up.Close()
-	go func() { c, err := up.Accept(); if err == nil { io.Copy(c, c); c.Close() } }()
+	go func() {
+		c, err := up.Accept()
+		if err == nil {
+			io.Copy(c, c)
+			c.Close()
+		}
+	}()
 	upAddr := netip.MustParseAddrPort(up.Addr().String())
 
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
@@ -351,6 +367,82 @@ func TestServeFailsClosedOnUDPListenError(t *testing.T) {
 		t.Fatalf("TCP listener leaked (addr %s still bound): %v", addr, rerr)
 	}
 	_ = relisten.Close()
+}
+
+// TestServeFailsClosedWhenCapsExhausted is the bounded-operations contract test
+// (ASK tenet 8): with MaxTotalBytes:1, the first byte-exceeding flow is dropped
+// (torn down + audited egress_cap_exceeded reason volume) and the mediator KEEPS
+// serving — the cap degrades the breaching flow, it does not crash the mediator,
+// and no new bytes escape once exceeded.
+//
+// Recorded decision: caps are per-mediator-process (= per-workspace, since each
+// mediated workspace runs its own mediator) and reset on restart. Persistent
+// cross-restart volume accounting is intentionally out of scope.
+func TestServeFailsClosedWhenCapsExhausted(t *testing.T) {
+	// Upstream sink that drains whatever it receives.
+	up, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer up.Close()
+	go func() {
+		for {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			go func() { io.Copy(io.Discard, c); c.Close() }()
+		}
+	}()
+	upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	log := &BufferLogger{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Serve(ctx, ln, Options{
+			Mode:      "mediated",
+			Logger:    log,
+			OrigDst:   func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+			Ready:     &strings.Builder{},
+			UDPListen: plainUDPListen(t),
+			Limits:    Limits{MaxTotalBytes: 1}, // any forwarded byte exceeds the cap
+		})
+	}()
+
+	// First flow: push more than 1 byte; the splice must tear down (cap volume).
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	go func() {
+		buf := make([]byte, 2048)
+		for i := 0; i < 8; i++ {
+			if _, werr := conn.Write(buf); werr != nil {
+				return
+			}
+		}
+	}()
+	waitForEvent(t, log, "egress_cap_exceeded", 3*time.Second)
+	_ = conn.Close()
+
+	// Mediator KEEPS serving: a fresh connection is still accepted (it will itself
+	// be capped, but the listener is alive — proving no crash).
+	conn2, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("mediator stopped serving after cap exhaustion (second dial failed): %v", err)
+	}
+	_ = conn2.Close()
+
+	// Confirm the cap event carried reason volume.
+	ev := waitForEvent(t, log, "egress_cap_exceeded", 2*time.Second)
+	if ev["reason"] != "volume" {
+		t.Fatalf("egress_cap_exceeded reason = %v, want volume", ev["reason"])
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
 }
 
 func TestServeRejectsHalfSetCA(t *testing.T) {

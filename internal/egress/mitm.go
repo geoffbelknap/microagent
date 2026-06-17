@@ -64,15 +64,39 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 			swapRelevant = true
 		}
 	}
-	errc := make(chan error, 2)
-	if swapRelevant {
-		go func() {
-			errc <- injectRequests(guestTLS, up, sni, &Swapper{Resolver: h.Resolver, Cache: h.tokenCache}, h.Swaps, h.Logger)
-		}()
-	} else {
-		go func() { _, e := io.Copy(up, guestTLS); errc <- e }()
+	// Non-swap MITM is the common case: run the standard capped bidirectional
+	// splice (volume + rate caps on the upstream-bound copy, fail-closed teardown
+	// on a volume trip). With zero Limits this is byte-identical to the prior
+	// io.Copy splice.
+	if !swapRelevant {
+		if h.cappedSplice(guestTLS, up, nil, dst, sni) {
+			return // cap teardown already audited egress_cap_exceeded; skip egress_close
+		}
+		h.Logger.Log("egress_close", closeFields)
+		return
 	}
+	// Swap path: the request stream is HTTP-parsed for credential injection, so it
+	// is not a plain splice. The volume cap still applies — wrap the upstream
+	// writer so injected requests are charged against the process-wide counter and
+	// the rate limiter throttles them. A volume trip closes both ends so the flow
+	// tears down; the reason is audited egress_cap_exceeded volume.
+	var tripped bool
+	upCapped := capWriter{h: h, w: up, limiter: h.newCapLimiter(), tripped: &tripped}
+	errc := make(chan error, 2)
+	go func() {
+		errc <- injectRequests(guestTLS, upCapped, sni, &Swapper{Resolver: h.Resolver, Cache: h.tokenCache}, h.Swaps, h.Logger)
+	}()
 	go func() { _, e := io.Copy(guestTLS, up); errc <- e }()
 	<-errc
+	_ = up.Close()
+	_ = guestTLS.Close()
+	<-errc
+	if tripped {
+		h.Logger.Log("egress_cap_exceeded", map[string]any{
+			"host": sni, "dst": dst.String(), "proto": "tcp", "reason": "volume",
+			"limit": h.Limits.MaxTotalBytes,
+		})
+		return
+	}
 	h.Logger.Log("egress_close", closeFields)
 }

@@ -545,7 +545,7 @@ func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 		"":         "mediated", // secure default normalization
 	}
 	for in, want := range cases {
-		args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", in, nil, nil, nil, "", "")
+		args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", in, nil, nil, nil, "", "", egressCaps{})
 		got, ok := argValue(args, "--mode")
 		if !ok {
 			t.Fatalf("mode %q: --mode missing from args: %v", in, args)
@@ -558,7 +558,7 @@ func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 
 func TestEgressMediatorArgsThreadsAllowPassthroughCA(t *testing.T) {
 	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "strict",
-		[]string{"api.github.com"}, []string{"raw.example.com"}, nil, "/state/ws/ca.pem", "/state/ws/ca-key.pem")
+		[]string{"api.github.com"}, []string{"raw.example.com"}, nil, "/state/ws/ca.pem", "/state/ws/ca-key.pem", egressCaps{})
 	if v, _ := argValue(args, "--allow"); v != "api.github.com" {
 		t.Errorf("--allow = %q, want api.github.com", v)
 	}
@@ -578,11 +578,50 @@ func TestEgressMediatorArgsThreadsAllowPassthroughCA(t *testing.T) {
 // supervisor half of plumbing the named-network roster into the mediator.
 func TestEgressMediatorArgsThreadsPeers(t *testing.T) {
 	args := egressMediatorArgs("10.44.1.1", 41000, "/state/ws/egress-access.jsonl", "strict",
-		nil, nil, []string{"builder=10.44.1.3", "db=10.44.1.4"}, "", "")
+		nil, nil, []string{"builder=10.44.1.3", "db=10.44.1.4"}, "", "", egressCaps{})
 	got := argValues(args, "--peer")
 	want := []string{"builder=10.44.1.3", "db=10.44.1.4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("--peer args = %v, want %v", got, want)
+	}
+}
+
+// TestEgressMediatorArgsThreadsCaps proves the bounded-operations caps (ASK
+// tenet 8) are threaded into the mediator argv when set, and omitted when zero
+// (so an uncapped workspace's argv is byte-identical to the pre-caps one).
+func TestEgressMediatorArgsThreadsCaps(t *testing.T) {
+	caps := egressCaps{
+		maxBytesPerSec:  1048576,
+		maxTotalBytes:   10485760,
+		maxConns:        8,
+		auditMaxBytes:   5242880,
+		auditMaxBackups: 3,
+	}
+	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "strict",
+		nil, nil, nil, "", "", caps)
+	if v, _ := argValue(args, "--max-bps"); v != "1048576" {
+		t.Errorf("--max-bps = %q, want 1048576", v)
+	}
+	if v, _ := argValue(args, "--max-bytes"); v != "10485760" {
+		t.Errorf("--max-bytes = %q, want 10485760", v)
+	}
+	if v, _ := argValue(args, "--max-conns"); v != "8" {
+		t.Errorf("--max-conns = %q, want 8", v)
+	}
+	if v, _ := argValue(args, "--audit-max-bytes"); v != "5242880" {
+		t.Errorf("--audit-max-bytes = %q, want 5242880", v)
+	}
+	if v, _ := argValue(args, "--audit-max-backups"); v != "3" {
+		t.Errorf("--audit-max-backups = %q, want 3", v)
+	}
+
+	// Zero caps: none of the cap flags appear.
+	bare := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "strict",
+		nil, nil, nil, "", "", egressCaps{})
+	for _, flag := range []string{"--max-bps", "--max-bytes", "--max-conns", "--audit-max-bytes", "--audit-max-backups"} {
+		if _, ok := argValue(bare, flag); ok {
+			t.Errorf("zero caps emitted %s: %v", flag, bare)
+		}
 	}
 }
 

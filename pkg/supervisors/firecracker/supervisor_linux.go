@@ -383,6 +383,12 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return failedResponse(req, merr.Error()), merr
 		}
 		expectedCASHA = manifest.EgressCASHA256
+		// Re-apply the persisted bounded-operations caps (ASK tenet 8) so a restored
+		// workspace keeps the SAME bounds it was snapshotted under, just as the CA is
+		// reused. Threaded onto req.Config here so provisionEgressMediation hands them
+		// to the mediator flags via egressCapsFromConfig. Idempotent: if the restore
+		// request already carries caps, the manifest reproduces the same values.
+		applyManifestEgressCaps(req.Config, manifest)
 	}
 	networkDevices, firewallRules, runtimeNetwork, egressMediatorPID, err := prepareNetworkForStart(opts, req.Config, restore, expectedCASHA)
 	if err != nil {
@@ -1294,7 +1300,7 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gat
 	if caErr != nil {
 		return 0, nil, caErr
 	}
-	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, peers, caCertPath, caKeyPath)
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, peers, caCertPath, caKeyPath, egressCapsFromConfig(config))
 	if eerr != nil {
 		cleanupCA()
 		return 0, nil, eerr
@@ -2358,7 +2364,50 @@ func portForwarderLogPath(opts Options) string {
 // `microagent-firecracker-supervisor --egress-mediator` child. Pure (no I/O) so
 // it can be unit-tested. The mode ("mediated"/"strict") is threaded to the
 // mediator via --mode; an empty mode is normalized to the secure default.
-func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow, passthrough, peers []string, caCertPath, caKeyPath string) []string {
+// egressCaps carries the bounded-operations caps (ASK tenet 8) from the workspace
+// Config into egressMediatorArgs. All fields default to zero = unlimited (current
+// behavior), so an unset config produces argv byte-identical to the pre-caps one.
+type egressCaps struct {
+	maxBytesPerSec  int64
+	maxTotalBytes   int64
+	maxConns        int32
+	auditMaxBytes   int64
+	auditMaxBackups int
+}
+
+// applyManifestEgressCaps re-applies the bounded-operations caps recorded in a
+// snapshot manifest onto the restore request's Config (ASK tenet 8), so a
+// restored/forked workspace keeps the SAME bounds it was snapshotted under —
+// mirroring how the persisted CA is reused. A no-op when config is nil. Manifest
+// values overwrite the config's so the snapshot is authoritative for the restored
+// posture (the manifest reproduces what the workspace was actually running).
+func applyManifestEgressCaps(config *vmkit.Config, manifest vmkit.SnapshotManifest) {
+	if config == nil {
+		return
+	}
+	config.EgressMaxBytesPerSec = manifest.EgressMaxBytesPerSec
+	config.EgressMaxTotalBytes = manifest.EgressMaxTotalBytes
+	config.EgressMaxConcurrentConns = manifest.EgressMaxConcurrentConns
+	config.EgressAuditMaxBytes = manifest.EgressAuditMaxBytes
+	config.EgressAuditMaxBackups = manifest.EgressAuditMaxBackups
+}
+
+// egressCapsFromConfig extracts the caps from a workspace Config. Nil config (or
+// all-zero caps) yields a zero egressCaps (unlimited).
+func egressCapsFromConfig(config *vmkit.Config) egressCaps {
+	if config == nil {
+		return egressCaps{}
+	}
+	return egressCaps{
+		maxBytesPerSec:  config.EgressMaxBytesPerSec,
+		maxTotalBytes:   config.EgressMaxTotalBytes,
+		maxConns:        config.EgressMaxConcurrentConns,
+		auditMaxBytes:   config.EgressAuditMaxBytes,
+		auditMaxBackups: config.EgressAuditMaxBackups,
+	}
+}
+
+func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow, passthrough, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
 	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.NormalizeEgressMode(mode)}
 	for _, h := range allow {
 		args = append(args, "--allow", h)
@@ -2375,10 +2424,27 @@ func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow
 	for _, p := range peers {
 		args = append(args, "--peer", p)
 	}
+	// Bounded-operations caps (ASK tenet 8). Each is emitted only when non-zero so
+	// an uncapped workspace's argv is byte-identical to the pre-caps one.
+	if caps.maxBytesPerSec > 0 {
+		args = append(args, "--max-bps", strconv.FormatInt(caps.maxBytesPerSec, 10))
+	}
+	if caps.maxTotalBytes > 0 {
+		args = append(args, "--max-bytes", strconv.FormatInt(caps.maxTotalBytes, 10))
+	}
+	if caps.maxConns > 0 {
+		args = append(args, "--max-conns", strconv.Itoa(int(caps.maxConns)))
+	}
+	if caps.auditMaxBytes > 0 {
+		args = append(args, "--audit-max-bytes", strconv.FormatInt(caps.auditMaxBytes, 10))
+		if caps.auditMaxBackups > 0 {
+			args = append(args, "--audit-max-backups", strconv.Itoa(caps.auditMaxBackups))
+		}
+	}
 	return args
 }
 
-func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough, peers []string, caCertPath, caKeyPath string) (int, int, error) {
+func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
 		return 0, 0, err
@@ -2390,7 +2456,7 @@ func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough
 		return 0, 0, err
 	}
 	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
-	args := egressMediatorArgs(bindHost, port, auditPath, mode, allow, passthrough, peers, caCertPath, caKeyPath)
+	args := egressMediatorArgs(bindHost, port, auditPath, mode, allow, passthrough, peers, caCertPath, caKeyPath, caps)
 	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, 0, err

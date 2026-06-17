@@ -2,12 +2,39 @@ package egress
 
 import (
 	"bufio"
+	"context"
 	"crypto/x509"
 	"io"
 	"net"
 	"net/netip"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/time/rate"
 )
+
+// Limits bounds a mediator process's egress per ASK tenet 8 (operations are
+// bounded). All caps are per-mediator-process — i.e. per-workspace, since each
+// mediated workspace runs its own mediator — and reset on restart. A zero value
+// for any field means unlimited (the current, uncapped behavior), so the zero
+// Limits is byte-identical to today.
+//
+// Recorded decision: caps are per-mediator-process and reset on restart;
+// persistent cross-restart volume accounting is intentionally out of scope.
+type Limits struct {
+	// MaxBytesPerSec rate-limits the upstream-bound (guest->upstream) copy of each
+	// flow. 0 = unlimited.
+	MaxBytesPerSec int64
+	// MaxTotalBytes caps the cumulative bytes the process forwards upstream across
+	// BOTH the TCP splice AND the UDP forward (one process-wide counter). Once the
+	// counter exceeds this, the breaching flow is torn down and audited
+	// egress_cap_exceeded reason "volume"; the mediator keeps serving. 0 = unlimited.
+	MaxTotalBytes int64
+	// MaxConcurrentConns caps the number of concurrently mediated TCP connections.
+	// A connection that would exceed it is refused fail-closed before dialing
+	// upstream (egress_cap_exceeded reason "concurrency"). 0 = unlimited.
+	MaxConcurrentConns int32
+}
 
 // maxTLSRecord is the largest TLS record (2^14 plaintext + 5-byte header). The
 // capture reader is sized to it so sniffHost can peek a full ClientHello and
@@ -85,6 +112,121 @@ type Handler struct {
 	// for tests; defaults (when nil) to the platform transparent-socket impl
 	// (transparentReply on Linux; an error stub elsewhere). See udp.go.
 	ReplyTo func(origDst, guestSrc netip.AddrPort, payload []byte) error
+
+	// Limits bounds this process's egress per ASK tenet 8. The zero value (all
+	// fields 0) is unlimited — byte-identical to the pre-caps behavior.
+	Limits Limits
+
+	// bytesUsed is the process-wide cumulative byte counter covering BOTH the TCP
+	// splice (guest->upstream copy) AND the UDP forward, so MaxTotalBytes bounds
+	// total egress across tcp+udp. activeConns is the live mediated-TCP-connection
+	// gauge for MaxConcurrentConns. Both are zero-valued and only consulted when
+	// the corresponding Limits field is set, so an uncapped Handler never gates on
+	// them beyond an unconditional cheap atomic Add.
+	bytesUsed   atomic.Int64
+	activeConns atomic.Int32
+}
+
+// addBytesOverCap adds n to the process-wide cumulative byte counter (shared by
+// the TCP splice and the UDP forward) and reports whether the cumulative total
+// has now exceeded MaxTotalBytes. When the cap is 0 (unlimited) it still tracks
+// the count but never reports an overage, so the hot path stays a single atomic
+// Add and a cheap compare.
+func (h *Handler) addBytesOverCap(n int64) bool {
+	total := h.bytesUsed.Add(n)
+	limit := h.Limits.MaxTotalBytes
+	return limit > 0 && total > limit
+}
+
+// errVolumeCap is returned by capWriter.Write once the process-wide byte cap is
+// exceeded, so the splice tears the breaching flow down. It is a sentinel, never
+// surfaced to the guest.
+type errVolumeCap struct{}
+
+func (errVolumeCap) Error() string { return "egress: total byte cap exceeded" }
+
+// capWriter wraps the upstream-bound leg of a flow with two ASK-tenet-8 controls:
+// it (1) charges every byte against the process-wide cumulative counter and
+// returns errVolumeCap once MaxTotalBytes is exceeded (so io.Copy stops and the
+// caller tears the flow down), and (2) when a rate limiter is set, blocks each
+// write until the token bucket admits it (MaxBytesPerSec). With no cap and no
+// limiter it is a thin passthrough, so an uncapped flow is byte-identical to a
+// bare io.Copy aside from one atomic Add per write.
+type capWriter struct {
+	h       *Handler
+	w       io.Writer
+	limiter *rate.Limiter
+	tripped *bool // set true when the cap trips, so the caller distinguishes a cap teardown from a normal close
+}
+
+func (cw capWriter) Write(p []byte) (int, error) {
+	if cw.limiter != nil && len(p) > 0 {
+		// Reserve/wait for the bytes about to be written. WaitN blocks until the
+		// bucket has len(p) tokens (or returns on context). A best-effort
+		// background wait is fine here: the flow is torn down on any write error.
+		_ = cw.limiter.WaitN(context.Background(), len(p))
+	}
+	n, err := cw.w.Write(p)
+	if n > 0 && cw.h.addBytesOverCap(int64(n)) {
+		if cw.tripped != nil {
+			*cw.tripped = true
+		}
+		// Return the bytes actually written plus the sentinel so io.Copy stops.
+		if err == nil {
+			err = errVolumeCap{}
+		}
+	}
+	return n, err
+}
+
+// newCapLimiter builds the per-flow rate limiter for the upstream-bound copy when
+// MaxBytesPerSec is set, or nil (unlimited) otherwise. The burst is one limit's
+// worth of bytes (at least one max-size record) so a single large write is not
+// permanently rejected by a too-small burst.
+func (h *Handler) newCapLimiter() *rate.Limiter {
+	bps := h.Limits.MaxBytesPerSec
+	if bps <= 0 {
+		return nil
+	}
+	burst := int(bps)
+	if burst < maxTLSRecord {
+		burst = maxTLSRecord
+	}
+	return rate.NewLimiter(rate.Limit(bps), burst)
+}
+
+// cappedSplice runs the bidirectional copy for a forwarded flow with the volume
+// and rate caps applied to the upstream-bound (guest->upstream) direction. guest
+// and upstream are the two ends; guestRead is the guest-side reader to copy FROM
+// (the buffered bufio.Reader on the L4 path so peeked bytes are forwarded first,
+// or nil to read directly from guest). On a volume-cap trip it closes BOTH ends
+// so the opposite copy unblocks and the flow is fully torn down, then audits
+// egress_cap_exceeded reason "volume". It returns whether the cap tripped so the
+// caller can choose its close-event audit. A nil/zero Limits makes this a plain
+// bidirectional io.Copy (byte-identical to the prior splice) apart from the
+// counter Add.
+func (h *Handler) cappedSplice(guest, upstream net.Conn, guestRead io.Reader, dst netip.AddrPort, host string) bool {
+	if guestRead == nil {
+		guestRead = guest
+	}
+	var tripped bool
+	cw := capWriter{h: h, w: upstream, limiter: h.newCapLimiter(), tripped: &tripped}
+	errc := make(chan error, 2)
+	go func() { _, e := io.Copy(cw, guestRead); errc <- e }()   // guest -> upstream (capped)
+	go func() { _, e := io.Copy(guest, upstream); errc <- e }() // upstream -> guest
+	<-errc
+	// Tear the flow down: close both ends so the second copy unblocks. This is
+	// what bounds the breach — no NEW bytes escape once the cap is hit.
+	_ = upstream.Close()
+	_ = guest.Close()
+	<-errc
+	if tripped {
+		h.Logger.Log("egress_cap_exceeded", map[string]any{
+			"host": host, "dst": dst.String(), "proto": "tcp", "reason": "volume",
+			"limit": h.Limits.MaxTotalBytes,
+		})
+	}
+	return tripped
 }
 
 // DefaultOrigDst recovers the original destination for a *net.TCPConn (the
@@ -160,6 +302,21 @@ func (h *Handler) Handle(conn net.Conn) {
 	if h.isOwnBindAddr(dst) {
 		h.Logger.Log("egress_loop_guard", map[string]any{"dst": dst.String(), "proto": "tcp"})
 		return
+	}
+	// Concurrency cap (ASK tenet 8): admit this connection into the live gauge and
+	// refuse fail-closed if it would exceed MaxConcurrentConns — BEFORE any
+	// upstream dial on either the MITM or L4 path. The increment is unconditional
+	// (so the gauge is always accurate); the refusal is gated on the cap, so an
+	// uncapped Handler (MaxConcurrentConns==0) admits everything exactly as before.
+	// Decrement on every return via defer, so the slot frees when the flow closes.
+	active := h.activeConns.Add(1)
+	defer h.activeConns.Add(-1)
+	if h.Limits.MaxConcurrentConns > 0 && active > h.Limits.MaxConcurrentConns {
+		h.Logger.Log("egress_cap_exceeded", map[string]any{
+			"dst": dst.String(), "proto": "tcp", "reason": "concurrency",
+			"limit": h.Limits.MaxConcurrentConns,
+		})
+		return // fail-closed: no upstream dial
 	}
 	timeout := h.SniffTimeout
 	if timeout <= 0 {
@@ -283,9 +440,12 @@ func (h *Handler) Handle(conn net.Conn) {
 	addPeerFields(closeFields, peer, peerIP)
 	h.Logger.Log("egress_allow", allowFields)
 
-	errc := make(chan error, 2)
-	go func() { _, e := io.Copy(up, br); errc <- e }()   // guest -> upstream (buffered bytes first)
-	go func() { _, e := io.Copy(conn, up); errc <- e }() // upstream -> guest
-	<-errc
+	// L4 splice with the volume/rate caps applied to the upstream-bound copy. The
+	// buffered ClientHello/HTTP bytes in br are forwarded first (guestRead=br). On
+	// a volume-cap trip the flow is torn down (both ends closed) and audited
+	// egress_cap_exceeded; otherwise this is byte-identical to the prior splice.
+	if h.cappedSplice(conn, up, br, dst, host) {
+		return // cap teardown already audited egress_cap_exceeded; skip egress_close
+	}
 	h.Logger.Log("egress_close", closeFields)
 }

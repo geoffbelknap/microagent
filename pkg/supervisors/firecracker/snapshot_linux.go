@@ -194,6 +194,13 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 		EgressAllow:       state.Config.EgressAllow,
 		EgressPassthrough: state.Config.EgressPassthrough,
 		EgressCASHA256:    caSHA,
+		// Bounded-operations caps (ASK tenet 8): persist so a restore re-applies the
+		// SAME bounds the workspace ran under.
+		EgressMaxBytesPerSec:     state.Config.EgressMaxBytesPerSec,
+		EgressMaxTotalBytes:      state.Config.EgressMaxTotalBytes,
+		EgressMaxConcurrentConns: state.Config.EgressMaxConcurrentConns,
+		EgressAuditMaxBytes:      state.Config.EgressAuditMaxBytes,
+		EgressAuditMaxBackups:    state.Config.EgressAuditMaxBackups,
 	}, nil
 }
 

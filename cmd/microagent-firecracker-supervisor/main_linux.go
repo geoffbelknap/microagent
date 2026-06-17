@@ -94,6 +94,12 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	var swapConfig string
 	var passthrough egressAllowFlag
 	var peer egressAllowFlag
+	// Bounded-operations caps (ASK tenet 8). Zero/default = unlimited (current
+	// behavior). These are per-mediator-process (= per-workspace) and reset on
+	// restart.
+	var maxBPS, maxBytes, auditMaxBytes int64
+	var maxConns int
+	var auditMaxBackups int
 	fs.StringVar(&mode, "mode", "", "Enforcement mode: mediated (allow+audit all) or strict (default-deny allowlist)")
 	fs.StringVar(&bindHost, "bind-host", "127.0.0.1", "Bind host")
 	fs.IntVar(&bindPort, "bind-port", 0, "Bind port")
@@ -104,13 +110,32 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	fs.StringVar(&swapConfig, "swap-config", "", "credential-swaps.yaml path")
 	fs.Var(&passthrough, "passthrough", "Passthrough destination host (allowed, not intercepted; repeatable)")
 	fs.Var(&peer, "peer", "Named-network peer roster entry name=ip (repeatable)")
+	fs.Int64Var(&maxBPS, "max-bps", 0, "Max egress bytes/sec on the upstream-bound copy (0=unlimited)")
+	fs.Int64Var(&maxBytes, "max-bytes", 0, "Max cumulative egress bytes across tcp+udp before the breaching flow is torn down (0=unlimited)")
+	fs.IntVar(&maxConns, "max-conns", 0, "Max concurrent mediated TCP connections (0=unlimited)")
+	fs.Int64Var(&auditMaxBytes, "audit-max-bytes", 0, "Rotate the audit log when an active file would exceed this many bytes (0=unbounded)")
+	fs.IntVar(&auditMaxBackups, "audit-max-backups", 0, "Number of rotated audit-log backups to keep (with --audit-max-bytes)")
 	if err := fs.Parse(args); err != nil {
 		return egress.Options{}, err
 	}
 	if bindPort == 0 || strings.TrimSpace(auditLog) == "" {
 		return egress.Options{}, fmt.Errorf("usage: microagent-firecracker-supervisor --egress-mediator --bind-port <port> --audit-log <path> [--bind-host <host>] [--allow <host>]...")
 	}
-	return egress.Options{Mode: mode, BindHost: bindHost, BindPort: bindPort, AuditLogPath: auditLog, Allow: []string(allow), CACertPath: caCert, CAKeyPath: caKey, SwapConfigPath: swapConfig, Passthrough: []string(passthrough), Peers: []string(peer)}, nil
+	return egress.Options{
+		Mode:            mode,
+		BindHost:        bindHost,
+		BindPort:        bindPort,
+		AuditLogPath:    auditLog,
+		Allow:           []string(allow),
+		CACertPath:      caCert,
+		CAKeyPath:       caKey,
+		SwapConfigPath:  swapConfig,
+		Passthrough:     []string(passthrough),
+		Peers:           []string(peer),
+		Limits:          egress.Limits{MaxBytesPerSec: maxBPS, MaxTotalBytes: maxBytes, MaxConcurrentConns: int32(maxConns)},
+		AuditMaxBytes:   auditMaxBytes,
+		AuditMaxBackups: auditMaxBackups,
+	}, nil
 }
 
 func readRequest(args []string) (vmkit.Request, error) {

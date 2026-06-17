@@ -62,6 +62,18 @@ func mediatedRuntimeState(mode string, allow, passthrough []string) runtimeState
 	}
 }
 
+// mediatedRuntimeStateWithCaps is mediatedRuntimeState plus the bounded-operations
+// caps (ASK tenet 8), so the cap round-trip through the manifest is exercised.
+func mediatedRuntimeStateWithCaps(mode string, allow, passthrough []string, caps vmkit.Config) runtimeState {
+	st := mediatedRuntimeState(mode, allow, passthrough)
+	st.Config.EgressMaxBytesPerSec = caps.EgressMaxBytesPerSec
+	st.Config.EgressMaxTotalBytes = caps.EgressMaxTotalBytes
+	st.Config.EgressMaxConcurrentConns = caps.EgressMaxConcurrentConns
+	st.Config.EgressAuditMaxBytes = caps.EgressAuditMaxBytes
+	st.Config.EgressAuditMaxBackups = caps.EgressAuditMaxBackups
+	return st
+}
+
 // TestSnapshotManifestFromStateRecordsEgressCA proves that snapshotting a
 // mediated workspace records the egress mode/allow/passthrough AND the SHA-256 of
 // the persisted CA cert DER — the fingerprint a restore verifies before reusing
@@ -87,6 +99,67 @@ func TestSnapshotManifestFromStateRecordsEgressCA(t *testing.T) {
 	}
 	if manifest.EgressCASHA256 != wantSHA {
 		t.Errorf("EgressCASHA256 = %q, want %q", manifest.EgressCASHA256, wantSHA)
+	}
+}
+
+// TestSnapshotManifestRoundTripsEgressCaps proves the bounded-operations caps
+// (ASK tenet 8) are recorded in the manifest, survive a write/read round trip,
+// and are re-applied onto a restore Config so a restored workspace keeps the SAME
+// bounds it was snapshotted under.
+func TestSnapshotManifestRoundTripsEgressCaps(t *testing.T) {
+	stateDir := t.TempDir()
+	opts := Options{Name: "ws", StateDir: stateDir}
+	writePersistedCA(t, filepath.Join(stateDir, opts.Name))
+
+	caps := vmkit.Config{
+		EgressMaxBytesPerSec:     1048576,
+		EgressMaxTotalBytes:      10485760,
+		EgressMaxConcurrentConns: 8,
+		EgressAuditMaxBytes:      5242880,
+		EgressAuditMaxBackups:    3,
+	}
+	state := mediatedRuntimeStateWithCaps(vmkit.EgressModeStrict, []string{"api.github.com"}, nil, caps)
+	manifest, err := snapshotManifestFromState("snap-caps", state, opts, false)
+	if err != nil {
+		t.Fatalf("snapshotManifestFromState: %v", err)
+	}
+	if manifest.EgressMaxBytesPerSec != 1048576 || manifest.EgressMaxTotalBytes != 10485760 ||
+		manifest.EgressMaxConcurrentConns != 8 || manifest.EgressAuditMaxBytes != 5242880 ||
+		manifest.EgressAuditMaxBackups != 3 {
+		t.Fatalf("manifest caps not recorded: %+v", manifest)
+	}
+
+	// Write + read back: the JSON round trip preserves the caps.
+	dir := vmkit.SnapshotDir(stateDir, opts.Name, "snap-caps")
+	if err := vmkit.WriteSnapshotManifest(dir, manifest); err != nil {
+		t.Fatalf("WriteSnapshotManifest: %v", err)
+	}
+	got, err := vmkit.ReadSnapshotManifest(dir)
+	if err != nil {
+		t.Fatalf("ReadSnapshotManifest: %v", err)
+	}
+	if got.EgressMaxBytesPerSec != manifest.EgressMaxBytesPerSec ||
+		got.EgressMaxTotalBytes != manifest.EgressMaxTotalBytes ||
+		got.EgressMaxConcurrentConns != manifest.EgressMaxConcurrentConns ||
+		got.EgressAuditMaxBytes != manifest.EgressAuditMaxBytes ||
+		got.EgressAuditMaxBackups != manifest.EgressAuditMaxBackups {
+		t.Fatalf("cap fields did not survive round trip: got %+v want %+v", got, manifest)
+	}
+
+	// Re-apply onto a restore Config that carries NO caps: the manifest is
+	// authoritative and the restored posture inherits the snapshotted bounds.
+	restoreCfg := &vmkit.Config{EgressMode: vmkit.EgressModeStrict}
+	applyManifestEgressCaps(restoreCfg, got)
+	if restoreCfg.EgressMaxBytesPerSec != 1048576 || restoreCfg.EgressMaxTotalBytes != 10485760 ||
+		restoreCfg.EgressMaxConcurrentConns != 8 || restoreCfg.EgressAuditMaxBytes != 5242880 ||
+		restoreCfg.EgressAuditMaxBackups != 3 {
+		t.Fatalf("restore Config did not inherit persisted caps: %+v", restoreCfg)
+	}
+	// And those flow into the mediator argv on the restore path.
+	gotCaps := egressCapsFromConfig(restoreCfg)
+	wantCaps := egressCaps{maxBytesPerSec: 1048576, maxTotalBytes: 10485760, maxConns: 8, auditMaxBytes: 5242880, auditMaxBackups: 3}
+	if gotCaps != wantCaps {
+		t.Fatalf("egressCapsFromConfig = %+v, want %+v", gotCaps, wantCaps)
 	}
 }
 
