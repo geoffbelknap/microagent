@@ -81,6 +81,10 @@ type udpProxy struct {
 	flows    map[udpFlowKey]*udpFlow
 	stopOnce sync.Once
 	stopped  chan struct{}
+	// dnsWG tracks in-flight DNS-forward goroutines so closeAll can wait for them
+	// to drain (each one owns a transient resolver socket and a transparent reply
+	// socket); it keeps shutdown clean and lets tests observe completion.
+	dnsWG sync.WaitGroup
 }
 
 // newUDPProxy builds a proxy with default idle/sweep timings, wiring the
@@ -204,13 +208,22 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 	// has already audited the outcome. We reply with the spoofed source = the
 	// resolver the guest targeted (origDst) so its stub resolver accepts the answer.
 	if origDst.Port() == 53 {
-		resp, err := p.h.handleDNS(payload, origDst, p.dnsForward)
-		if err != nil {
-			return // handleDNS already audited egress_dns_error; drop fail-closed
-		}
-		if resp != nil {
-			_ = p.replyTo(origDst, src, resp)
-		}
+		// Forward the query in its own goroutine: handleDNS does a blocking resolver
+		// round-trip (up to dnsForwardTimeout), and the serveUDP receive loop is
+		// single-threaded. Doing it inline stalls the loop for the duration of every
+		// query — and because a guest's resolver fires several queries back to back
+		// (A + AAAA, often to multiple resolvers in resolv.conf), serializing them in
+		// the loop holds the host's network stack busy long enough that the guest's
+		// concurrent upstream TCP connection (the actual fetch) never receives its
+		// response and times out at 0 bytes. Per-datagram goroutines decouple each
+		// query so DNS forwarding never stalls other UDP datagrams or the wider
+		// egress path. payload is already a per-datagram copy (serveUDP) so the
+		// goroutine owns it safely; dnsWG lets closeAll drain in-flight forwards.
+		p.dnsWG.Add(1)
+		go func() {
+			defer p.dnsWG.Done()
+			p.serveDNS(src, origDst, payload)
+		}()
 		return
 	}
 	// Resolve the destination IP back to the hostname the guest looked up (reverse
@@ -278,6 +291,23 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		// Upstream write failure: tear the flow down so a fresh one is created
 		// on the next datagram (and the reader goroutine is reclaimed).
 		p.removeFlow(flow)
+	}
+}
+
+// serveDNS forwards one guest DNS query (UDP:53) through the filtering resolver
+// and replies to the guest. It is run in its own goroutine (handleUDPDatagram
+// dispatches it) so the blocking resolver round-trip in handleDNS never stalls
+// the single-threaded serveUDP receive loop. handleDNS enforces the strict
+// hostname allowlist, forwards permitted queries, caches name->IP mappings, and
+// has already audited the outcome. The reply is sent with the spoofed source =
+// the resolver the guest targeted (origDst) so its stub resolver accepts it.
+func (p *udpProxy) serveDNS(src, origDst netip.AddrPort, query []byte) {
+	resp, err := p.h.handleDNS(query, origDst, p.dnsForward)
+	if err != nil {
+		return // handleDNS already audited egress_dns_error; drop fail-closed
+	}
+	if resp != nil {
+		_ = p.replyTo(origDst, src, resp)
 	}
 }
 
@@ -390,6 +420,9 @@ func (p *udpProxy) closeAll() {
 	for _, flow := range flows {
 		p.closeFlow(flow, "shutdown")
 	}
+	// Drain in-flight DNS-forward goroutines so their transient sockets are closed
+	// before the proxy is considered shut down.
+	p.dnsWG.Wait()
 }
 
 // flowCount returns the number of live flows (test helper).

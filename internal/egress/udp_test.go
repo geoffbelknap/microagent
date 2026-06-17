@@ -403,9 +403,10 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 		query := buildQuery(t, 0x0101, "allowed.example.com.", dnsmessage.TypeA)
 		p.handleUDPDatagram(guestSrc, resolver, query)
 
-		if !forwardCalled {
-			t.Fatal("dnsForward not called for an allowlisted query")
-		}
+		// DNS is forwarded in its own goroutine (so a blocking resolver round-trip
+		// never stalls the serveUDP loop), so wait for the reply before asserting:
+		// the reply is sent last (after forward + cache), so its arrival establishes
+		// a happens-before for forwardCalled and the NameCache below.
 		select {
 		case r := <-replies:
 			if string(r.payload) != string(want) {
@@ -420,6 +421,9 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 			}
 		case <-time.After(time.Second):
 			t.Fatal("DNS response not delivered via replyTo")
+		}
+		if !forwardCalled {
+			t.Fatal("dnsForward not called for an allowlisted query")
 		}
 		// Name cache now resolves the answer IP back to the queried name.
 		if host, ok := h.NameCache.HostForIP(netip.AddrFrom4([4]byte{203, 0, 113, 7})); !ok || host != "allowed.example.com" {
@@ -461,9 +465,9 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 		query := buildQuery(t, 0x0102, "blocked.example.com.", dnsmessage.TypeA)
 		p.handleUDPDatagram(guestSrc, resolver, query)
 
-		if forwardCalled {
-			t.Error("dnsForward called for a strict-denied query; must not forward")
-		}
+		// DNS handling is async (its own goroutine); wait for the synthesized reply
+		// before asserting forwardCalled (the reply's arrival happens-after the
+		// handler decided not to forward).
 		select {
 		case r := <-replies:
 			// The reply is a synthesized REFUSED response.
@@ -478,11 +482,111 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("REFUSED response not delivered via replyTo")
 		}
+		if forwardCalled {
+			t.Error("dnsForward called for a strict-denied query; must not forward")
+		}
 		if p.flowCount() != 0 {
 			t.Fatalf("DNS deny created %d flow(s); must create none", p.flowCount())
 		}
 		assertEvent(t, log, "egress_dns_deny")
 	})
+}
+
+// TestDNSForwardDoesNotStallOtherDatagrams is the regression guard for the Phase 4
+// bug where DNS (UDP:53) was forwarded synchronously inside handleUDPDatagram and
+// the single-threaded serveUDP receive loop blocked for the whole resolver
+// round-trip. A slow resolver (here: a dnsForward that blocks until released)
+// would then wedge every other UDP datagram — and, because the host's stack was
+// kept busy, the guest's concurrent upstream TCP fetch returned 0 bytes. DNS is
+// now dispatched in its own goroutine, so a blocking forward must not delay a
+// concurrent non-DNS datagram. We assert the non-DNS reply arrives while the DNS
+// forward is still blocked, then release it.
+func TestDNSForwardDoesNotStallOtherDatagrams(t *testing.T) {
+	echoAddr, cleanup := udpEchoServer(t)
+	defer cleanup()
+
+	resolver := netip.MustParseAddrPort("203.0.113.53:53")
+	dataDst := netip.MustParseAddrPort("203.0.113.9:443") // non-DNS port -> generic flow
+	guestSrc := netip.MustParseAddrPort("10.0.0.5:53000")
+
+	replies := make(chan capturedReply, 4)
+	h := &Handler{
+		Mode:      "mediated",
+		Policy:    mustPolicy(t),
+		Logger:    &BufferLogger{},
+		NameCache: NewNameCache(),
+		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+			return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
+		},
+		ReplyTo: func(od, gs netip.AddrPort, payload []byte) error {
+			cp := make([]byte, len(payload))
+			copy(cp, payload)
+			replies <- capturedReply{origDst: od, guestSrc: gs, payload: cp}
+			return nil
+		},
+	}
+	p := newUDPProxy(h)
+	defer p.closeAll()
+
+	// dnsForward blocks until released — simulating a slow/silent resolver. If DNS
+	// were handled inline in the receive loop (the regression), the non-DNS
+	// datagram below would never be processed until release.
+	release := make(chan struct{})
+	dnsEntered := make(chan struct{})
+	p.dnsForward = func(netip.AddrPort, []byte) ([]byte, error) {
+		close(dnsEntered)
+		<-release
+		return buildResponseWithA(t, 0x0303, "allowed.example.com.", "allowed.example.com.",
+			[4]byte{203, 0, 113, 7}, 300), nil
+	}
+
+	// Fire the DNS query. handleUDPDatagram must return promptly (the forward runs
+	// in its own goroutine); we drive it from a helper goroutine and require it to
+	// return so a regression that forwards inline — blocking the caller until
+	// release — fails this assertion instead of only hanging.
+	dnsDispatched := make(chan struct{})
+	go func() {
+		p.handleUDPDatagram(guestSrc, resolver, buildQuery(t, 0x0303, "allowed.example.com.", dnsmessage.TypeA))
+		close(dnsDispatched)
+	}()
+	select {
+	case <-dnsEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dnsForward was never entered")
+	}
+	select {
+	case <-dnsDispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleUDPDatagram did not return while the DNS forward was blocked: DNS is being forwarded inline and stalls the receive loop")
+	}
+
+	// While DNS is still blocked, a non-DNS datagram must be forwarded and echoed
+	// back promptly.
+	p.handleUDPDatagram(guestSrc, dataDst, []byte("ping"))
+
+	select {
+	case r := <-replies:
+		// The first reply must be the non-DNS echo, proving DNS did not stall it.
+		if string(r.payload) != "ping" {
+			t.Fatalf("first reply payload = %q, want the non-DNS echo \"ping\" (DNS forward stalled the loop)", r.payload)
+		}
+		if r.origDst != dataDst {
+			t.Fatalf("first reply spoofed-source = %v, want non-DNS origDst %v", r.origDst, dataDst)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("non-DNS datagram was not forwarded while DNS forward was blocked (loop stalled)")
+	}
+
+	// Release the DNS forward; its reply (the synthesized A answer) must now arrive.
+	close(release)
+	select {
+	case r := <-replies:
+		if r.origDst != resolver {
+			t.Fatalf("DNS reply spoofed-source = %v, want resolver %v", r.origDst, resolver)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("DNS reply not delivered after release")
+	}
 }
 
 // TestStrictUDPByName proves a non-DNS UDP flow is policed by the hostname the
