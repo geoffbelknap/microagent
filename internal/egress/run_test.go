@@ -56,6 +56,75 @@ func TestRunMediatesAcceptedConn(t *testing.T) {
 	conn.Close(); cancel(); <-done
 }
 
+// TestServePoliciesPeerRoster proves Serve plumbs Options.Peers into the
+// Handler: a raw-TCP connection whose origdst maps to an allowlisted peer name is
+// forwarded (egress_allow carrying peer), confirming the static roster police
+// east-west by name under default-deny.
+func TestServePoliciesPeerRoster(t *testing.T) {
+	up, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer up.Close()
+	go func() { c, err := up.Accept(); if err == nil { io.Copy(c, c); c.Close() } }()
+	upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	log := &BufferLogger{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Serve(ctx, ln, Options{
+			Mode:      "strict",
+			Allow:     []string{"builder"},
+			Peers:     []string{"builder=" + upAddr.Addr().String()},
+			Logger:    log,
+			OrigDst:   func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+			Ready:     &strings.Builder{},
+			UDPListen: plainUDPListen(t),
+		})
+	}()
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	conn.Write([]byte("RAWPING\n"))
+	br := bufio.NewReader(conn)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	line, err := br.ReadString('\n')
+	if err != nil || line != "RAWPING\n" {
+		t.Fatalf("echo = %q err=%v (allowlisted peer must be forwarded)", line, err)
+	}
+	conn.Close()
+	ev := waitForEvent(t, log, "egress_allow", 2*time.Second)
+	if ev["peer"] != "builder" {
+		t.Fatalf("egress_allow peer = %v, want builder", ev["peer"])
+	}
+	cancel()
+	<-done
+}
+
+// TestServeBadPeerRosterFailsClosed proves a malformed peer roster aborts startup
+// (fail-closed): Serve returns an error and does not leak the TCP listener.
+func TestServeBadPeerRosterFailsClosed(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	addr := ln.Addr().String()
+	err := Serve(context.Background(), ln, Options{
+		Allow:     []string{"x.com"},
+		Peers:     []string{"builder"}, // missing '=' -> NewPeerCache rejects
+		Logger:    &BufferLogger{},
+		OrigDst:   func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("127.0.0.1:9"), nil },
+		UDPListen: plainUDPListen(t),
+	})
+	if err == nil {
+		t.Fatal("expected Serve to fail on malformed peer roster")
+	}
+	// TCP listener must not be leaked.
+	relisten, rerr := net.Listen("tcp", addr)
+	if rerr != nil {
+		t.Fatalf("TCP listener leaked (addr %s still bound): %v", addr, rerr)
+	}
+	_ = relisten.Close()
+}
+
 func TestServeLoadsCA(t *testing.T) {
 	ca, err := NewCA("test-ca", time.Hour)
 	if err != nil {

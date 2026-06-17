@@ -1231,7 +1231,7 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 	}
 	network := runtimeNetworkConfig(config, plan.Subnet, plan.GuestCIDR, plan.Gateway)
 	network.Mode = mode
-	egressPID, egressRules, err := provisionEgressMediation(opts, config, mode, tap, plan.Gateway, plan.Subnet)
+	egressPID, egressRules, err := provisionEgressMediation(opts, config, mode, tap, plan.Gateway, plan.Subnet, nil)
 	if err != nil {
 		cleanupTransientFirewallRules(rules)
 		cleanupTransientNetworkDevices(cleanupDevices)
@@ -1263,7 +1263,7 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 //     `host setup-networking`; we only VERIFY them (fail-closed if absent) and
 //     install just the per-workspace nft tproxy rule. Anything other than "user"
 //     takes this verify-only path.
-func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gateway, subnet string) (int, []transientFirewallRule, error) {
+func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gateway, subnet string, peers []string) (int, []transientFirewallRule, error) {
 	if config == nil || !vmkit.EgressMediationOn(config.EgressMode) {
 		return 0, nil, nil
 	}
@@ -1292,7 +1292,7 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gat
 		_ = os.Remove(caCertPath)
 		return 0, nil, fmt.Errorf("write egress CA key: %w", caErr)
 	}
-	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, caCertPath, caKeyPath)
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, peers, caCertPath, caKeyPath)
 	if eerr != nil {
 		_ = os.Remove(caCertPath)
 		_ = os.Remove(caKeyPath)
@@ -1401,7 +1401,11 @@ func prepareNamedNetworkForStart(opts Options, config *vmkit.Config) ([]transien
 	// nat, not pasta), so the helper takes the host-global verify-only TPROXY path.
 	// Fail-closed: the helper unwinds its own provisioning on error; we still tear
 	// down the tap and base NAT rules we created above, mirroring the nat path.
-	egressPID, egressRules, err := provisionEgressMediation(opts, config, "named", tap, record.Gateway, record.Subnet)
+	//
+	// Hand the mediator the named-network peer roster (every OTHER member's
+	// name↔IP) so it reverse-resolves a bare-IP east-west destination to the peer's
+	// workspace name and polices it by name under the same default-deny allowlist.
+	egressPID, egressRules, err := provisionEgressMediation(opts, config, "named", tap, record.Gateway, record.Subnet, namedNetworkPeers(record, opts.Name))
 	if err != nil {
 		cleanupTransientFirewallRules(rules)
 		cleanupTransientNetworkDevices(cleanupDevices)
@@ -1434,6 +1438,22 @@ func namedNetworkHosts(record network.Record) []string {
 		hosts = append(hosts, m.Workspace+":"+m.IP)
 	}
 	return hosts
+}
+
+// namedNetworkPeers renders the egress mediator's peer roster as "name=ip" pairs,
+// one per OTHER member of the network (this workspace's own entry is excluded —
+// the mediator never reverse-resolves a flow to "self"). The mediator uses it to
+// police east-west VM↔VM traffic by the peer's workspace name under the same
+// default-deny allowlist as external hosts.
+func namedNetworkPeers(record network.Record, self string) []string {
+	peers := make([]string, 0, len(record.Members))
+	for _, m := range record.Members {
+		if m.Workspace == self {
+			continue
+		}
+		peers = append(peers, m.Workspace+"="+m.IP)
+	}
+	return peers
 }
 
 // bridgeName derives a stable, valid (<=15 char) Linux bridge name for a named
@@ -2233,7 +2253,7 @@ func portForwarderLogPath(opts Options) string {
 // `microagent-firecracker-supervisor --egress-mediator` child. Pure (no I/O) so
 // it can be unit-tested. The mode ("mediated"/"strict") is threaded to the
 // mediator via --mode; an empty mode is normalized to the secure default.
-func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow, passthrough []string, caCertPath, caKeyPath string) []string {
+func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow, passthrough, peers []string, caCertPath, caKeyPath string) []string {
 	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.NormalizeEgressMode(mode)}
 	for _, h := range allow {
 		args = append(args, "--allow", h)
@@ -2244,10 +2264,16 @@ func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow
 	for _, h := range passthrough {
 		args = append(args, "--passthrough", h)
 	}
+	// Named-network peer roster (name=ip). Empty for nat/user (no roster). The
+	// mediator reverse-resolves a bare-IP east-west destination to the peer's
+	// workspace name and polices it by name under the same default-deny allowlist.
+	for _, p := range peers {
+		args = append(args, "--peer", p)
+	}
 	return args
 }
 
-func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough []string, caCertPath, caKeyPath string) (int, int, error) {
+func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough, peers []string, caCertPath, caKeyPath string) (int, int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
 		return 0, 0, err
@@ -2259,7 +2285,7 @@ func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough
 		return 0, 0, err
 	}
 	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
-	args := egressMediatorArgs(bindHost, port, auditPath, mode, allow, passthrough, caCertPath, caKeyPath)
+	args := egressMediatorArgs(bindHost, port, auditPath, mode, allow, passthrough, peers, caCertPath, caKeyPath)
 	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, 0, err

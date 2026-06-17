@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/egressprereq"
+	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/google/nftables/expr"
 	"github.com/vishvananda/netlink"
@@ -227,7 +228,7 @@ func TestProvisionEgressMediationOffIsNoOp(t *testing.T) {
 	}
 	for _, cfg := range cases {
 		for _, mode := range []string{"nat", "user", "named"} {
-			pid, rules, err := provisionEgressMediation(opts, cfg, mode, "microtap0", "10.44.1.1", "10.44.1.0/24")
+			pid, rules, err := provisionEgressMediation(opts, cfg, mode, "microtap0", "10.44.1.1", "10.44.1.0/24", nil)
 			if err != nil {
 				t.Fatalf("mode %q cfg %+v: unexpected error: %v", mode, cfg, err)
 			}
@@ -251,6 +252,18 @@ func argValue(args []string, flag string) (string, bool) {
 	return "", false
 }
 
+// argValues returns every value following an occurrence of flag in args (for
+// repeatable flags like --peer).
+func argValues(args []string, flag string) []string {
+	var vals []string
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag {
+			vals = append(vals, args[i+1])
+		}
+	}
+	return vals
+}
+
 func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 	cases := map[string]string{
 		"mediated": "mediated",
@@ -258,7 +271,7 @@ func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 		"":         "mediated", // secure default normalization
 	}
 	for in, want := range cases {
-		args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", in, nil, nil, "", "")
+		args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", in, nil, nil, nil, "", "")
 		got, ok := argValue(args, "--mode")
 		if !ok {
 			t.Fatalf("mode %q: --mode missing from args: %v", in, args)
@@ -271,7 +284,7 @@ func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 
 func TestEgressMediatorArgsThreadsAllowPassthroughCA(t *testing.T) {
 	args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", "strict",
-		[]string{"api.github.com"}, []string{"raw.example.com"}, "/state/ws/ca.pem", "/state/ws/ca-key.pem")
+		[]string{"api.github.com"}, []string{"raw.example.com"}, nil, "/state/ws/ca.pem", "/state/ws/ca-key.pem")
 	if v, _ := argValue(args, "--allow"); v != "api.github.com" {
 		t.Errorf("--allow = %q, want api.github.com", v)
 	}
@@ -283,6 +296,40 @@ func TestEgressMediatorArgsThreadsAllowPassthroughCA(t *testing.T) {
 	}
 	if v, _ := argValue(args, "--ca-key"); v != "/state/ws/ca-key.pem" {
 		t.Errorf("--ca-key = %q, want /state/ws/ca-key.pem", v)
+	}
+}
+
+// TestEgressMediatorArgsThreadsPeers proves the repeatable --peer name=ip roster
+// is threaded into the mediator argv (one --peer per entry, in order). This is the
+// supervisor half of plumbing the named-network roster into the mediator.
+func TestEgressMediatorArgsThreadsPeers(t *testing.T) {
+	args := egressMediatorArgs("10.44.1.1", 41000, "/state/ws/egress-access.jsonl", "strict",
+		nil, nil, []string{"builder=10.44.1.3", "db=10.44.1.4"}, "", "")
+	got := argValues(args, "--peer")
+	want := []string{"builder=10.44.1.3", "db=10.44.1.4"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("--peer args = %v, want %v", got, want)
+	}
+}
+
+// TestNamedNetworkPeersExcludesSelf proves the roster handed to the mediator
+// contains every OTHER member as name=ip and omits this workspace's own entry —
+// the mediator never reverse-resolves a flow to "self".
+func TestNamedNetworkPeersExcludesSelf(t *testing.T) {
+	record := network.Record{
+		Name:    "team",
+		Subnet:  "10.44.1.0/24",
+		Gateway: "10.44.1.1",
+		Members: []network.Member{
+			{Workspace: "self", IP: "10.44.1.2"},
+			{Workspace: "builder", IP: "10.44.1.3"},
+			{Workspace: "db", IP: "10.44.1.4"},
+		},
+	}
+	got := namedNetworkPeers(record, "self")
+	want := []string{"builder=10.44.1.3", "db=10.44.1.4"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("namedNetworkPeers = %v, want %v (self must be excluded)", got, want)
 	}
 }
 

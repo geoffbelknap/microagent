@@ -25,6 +25,14 @@ type Options struct {
 	CAKeyPath    string
 	Passthrough  []string // allowed hosts that are NOT intercepted (L4 splice + audit)
 
+	// Peers is the named-network member roster as "name=ip" pairs (this
+	// workspace's own entry excluded). When non-empty, Serve builds a PeerCache and
+	// hands it to the Handler so east-west VM↔VM flows whose bare destination IP
+	// maps to a member are policed by the member's workspace name under the same
+	// default-deny allowlist. A malformed entry aborts startup (fail-closed). Empty
+	// for the nat/user paths (no roster), leaving the request path unchanged.
+	Peers []string
+
 	// SwapConfigPath, if set, points at a credential-swaps YAML file. Serve
 	// reads + loads it into a SwapTable and stores it on the Handler. A load
 	// error is fatal (fail-closed). UNUSED beyond loading this phase.
@@ -99,6 +107,19 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 			return err
 		}
 	}
+	// Named-network peer roster: build the static name↔IP PeerCache when a roster
+	// is supplied. Fail closed — a malformed entry aborts startup so the mediator
+	// never runs with a partially-resolvable roster that would silently police some
+	// peers by bare IP. peers stays nil for the nat/user paths (no roster), leaving
+	// the request path unchanged.
+	var peers *PeerCache
+	if len(opts.Peers) > 0 {
+		peers, err = NewPeerCache(opts.Peers)
+		if err != nil {
+			_ = ln.Close()
+			return err
+		}
+	}
 	// Credential-swap config: load the host-indexed swap table if a path is set.
 	// Fail closed — a read or parse error aborts startup so a later injection
 	// phase never runs against a misconfigured (or absent) table that was
@@ -124,7 +145,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// merely disables the loop guard (the nft rules still prevent the loop), so it
 	// is not fatal here.
 	bindAP, _ := netip.ParseAddrPort(ln.Addr().String())
-	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps}
+	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps}
 	// Build the token cache and the real secret resolver only when a swap table
 	// is loaded. KeyResolver wraps microagent's standard secret registry (env /
 	// file / dotenv / vault) so a swap's key_ref resolves host-side identically
