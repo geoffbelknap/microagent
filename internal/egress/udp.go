@@ -70,6 +70,9 @@ type udpProxy struct {
 	h       *Handler
 	dialUDP func(origDst netip.AddrPort) (net.Conn, error)
 	replyTo func(origDst, guestSrc netip.AddrPort, payload []byte) error
+	// dnsForward performs the resolver round-trip for a guest DNS query (UDP:53).
+	// Injectable for tests; defaults (when nil) to defaultDNSForward.
+	dnsForward func(resolver netip.AddrPort, query []byte) ([]byte, error)
 
 	idle  time.Duration
 	sweep time.Duration
@@ -98,13 +101,14 @@ func newUDPProxyWithIdle(h *Handler, idle, sweep time.Duration) *udpProxy {
 		reply = transparentReply // platform impl (Linux real, others error stub)
 	}
 	p := &udpProxy{
-		h:       h,
-		dialUDP: dial,
-		replyTo: reply,
-		idle:    idle,
-		sweep:   sweep,
-		flows:   make(map[udpFlowKey]*udpFlow),
-		stopped: make(chan struct{}),
+		h:          h,
+		dialUDP:    dial,
+		replyTo:    reply,
+		dnsForward: defaultDNSForward,
+		idle:       idle,
+		sweep:      sweep,
+		flows:      make(map[udpFlowKey]*udpFlow),
+		stopped:    make(chan struct{}),
 	}
 	go p.sweeper()
 	return p
@@ -114,6 +118,35 @@ func newUDPProxyWithIdle(h *Handler, idle, sweep time.Duration) *udpProxy {
 // the upstream leg when no DialUDP is injected).
 func defaultDialUDP(origDst netip.AddrPort) (net.Conn, error) {
 	return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(origDst))
+}
+
+// dnsForwardTimeout bounds the synchronous resolver round-trip so a slow or
+// silent resolver cannot wedge the DNS handling of one datagram indefinitely.
+const dnsForwardTimeout = 5 * time.Second
+
+// defaultDNSForward is the production resolver round-trip used by handleDNS: dial
+// the resolver the guest targeted, write the query, and read the single response
+// within dnsForwardTimeout. The mediator dialing the real resolver is
+// host-originated, so it is not re-captured by the tap REDIRECT, and the loop
+// guard covers the self-addr case before we ever get here.
+func defaultDNSForward(resolver netip.AddrPort, query []byte) ([]byte, error) {
+	conn, err := net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(resolver))
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(dnsForwardTimeout)); err != nil {
+		return nil, err
+	}
+	if _, err := conn.Write(query); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, maxUDPDatagram)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
 }
 
 // serveUDP runs the TPROXY receive loop on a transparent UDP socket: it decodes
@@ -163,11 +196,33 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		p.h.Logger.Log("egress_loop_guard", map[string]any{"dst": origDst.String(), "proto": "udp"})
 		return
 	}
-	// Phase 4 seam: resolve host from a DNS name cache (reverse lookup of
-	// origDst.Addr() against names the mediator's DNS proxy has vended) so the
-	// allowlist can match on hostnames. For now host == the bare destination IP.
-	// TODO(phase4): replace with name-cache reverse lookup.
+	// DNS (UDP:53) is a one-shot request/response handled by the filtering
+	// resolver-forwarder, never a flow: forwarding it through the normal flow path
+	// would let DNS tunnel out unfiltered and leak a flow per query. handleDNS
+	// enforces the strict hostname allowlist, forwards permitted queries, caches
+	// name->IP mappings (so later UDP/raw-IP flows can be policed by hostname), and
+	// has already audited the outcome. We reply with the spoofed source = the
+	// resolver the guest targeted (origDst) so its stub resolver accepts the answer.
+	if origDst.Port() == 53 {
+		resp, err := p.h.handleDNS(payload, origDst, p.dnsForward)
+		if err != nil {
+			return // handleDNS already audited egress_dns_error; drop fail-closed
+		}
+		if resp != nil {
+			_ = p.replyTo(origDst, src, resp)
+		}
+		return
+	}
+	// Resolve the destination IP back to the hostname the guest looked up (reverse
+	// lookup against names the mediator's DNS forwarder has vended) so the allowlist
+	// can match by hostname. An uncached/unlisted IP keeps the bare-IP host, which
+	// strict denies. nil-guarded: callers without a NameCache fall back to the IP.
 	host := origDst.Addr().String()
+	if p.h.NameCache != nil {
+		if name, ok := p.h.NameCache.HostForIP(origDst.Addr()); ok {
+			host = name
+		}
+	}
 
 	d := p.h.Policy.AllowHost(host)
 	mediated := p.h.Mode == "mediated"

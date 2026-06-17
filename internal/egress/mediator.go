@@ -105,6 +105,17 @@ func (h *Handler) Handle(conn net.Conn) {
 	br := bufio.NewReaderSize(conn, maxTLSRecord)
 	host, isTLS := sniffHost(br, dst, conn.SetReadDeadline, time.Now().Add(timeout))
 
+	// Raw-IP fallback: when no SNI/Host was sniffed, sniffHost returns the bare
+	// destination IP. Reverse-resolve it against the DNS name cache so a raw-IP TCP
+	// connection to a previously-resolved allowlisted host is matched by name
+	// (consistent with the UDP path). The SNI/Host path is left untouched: only the
+	// bare-IP fallback gains the lookup. nil-guarded for callers without a cache.
+	if h.NameCache != nil && host == dst.Addr().String() {
+		if name, ok := h.NameCache.HostForIP(dst.Addr()); ok {
+			host = name
+		}
+	}
+
 	d := h.Policy.AllowHost(host)
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(host).Allow
 	// In mediated mode every destination is allowed (and audited); strict (or

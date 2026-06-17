@@ -256,6 +256,87 @@ func TestHandlerLoopGuardDisabledWhenBindUnset(t *testing.T) {
 	}
 }
 
+// TestTCPRawIPByName proves a raw-TCP connection with no SNI/Host (sniffHost
+// falls back to the bare destination IP) is policed by the hostname the guest
+// resolved (NameCache reverse lookup): a connection to a cached, allowlisted IP
+// is allowed by name; a connection to an uncached IP is denied fail-closed.
+func TestTCPRawIPByName(t *testing.T) {
+	up, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer up.Close()
+	go func() {
+		for {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			go func() { io.Copy(c, c); c.Close() }() // echo
+		}
+	}()
+	upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+	pol, _ := NewPolicy([]string{"allowed.example.com"})
+
+	t.Run("cached allowlisted IP allowed by name", func(t *testing.T) {
+		log := &BufferLogger{}
+		nc := NewNameCache()
+		nc.Put("allowed.example.com", upAddr.Addr(), time.Minute)
+		h := &Handler{
+			Mode:         "strict",
+			Policy:       pol,
+			Logger:       log,
+			NameCache:    nc,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+			Dial:         net.Dial,
+			SniffTimeout: 300 * time.Millisecond,
+		}
+
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		// Raw bytes: not a TLS ClientHello (no 0x16) and no HTTP Host header, so
+		// sniffHost falls back to the bare destination IP.
+		go func() { client.Write([]byte("RAWPING\n")) }()
+		br := bufio.NewReader(client)
+		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+		line, err := br.ReadString('\n')
+		if err != nil || line != "RAWPING\n" {
+			t.Fatalf("echo = %q err=%v (allowlisted-by-name raw TCP must be forwarded)", line, err)
+		}
+		client.Close()
+		<-done
+		assertEvent(t, log, "egress_allow")
+		// Matched by hostname, not mediated mode: not "unlisted".
+		assertEventFieldAbsent(t, log, "egress_allow", "unlisted")
+	})
+
+	t.Run("uncached IP denied", func(t *testing.T) {
+		dialed := false
+		uncached := netip.MustParseAddrPort("198.51.100.9:443")
+		log := &BufferLogger{}
+		nc := NewNameCache()
+		nc.Put("allowed.example.com", upAddr.Addr(), time.Minute)
+		h := &Handler{
+			Mode:         "strict",
+			Policy:       pol,
+			Logger:       log,
+			NameCache:    nc,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return uncached, nil },
+			Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
+			SniffTimeout: 300 * time.Millisecond,
+		}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go client.Write([]byte("RAWPING\n"))
+		<-done
+		client.Close()
+		if dialed {
+			t.Fatal("upstream dialed for an uncached IP under strict (must fail closed)")
+		}
+		assertEvent(t, log, "egress_deny")
+	})
+}
+
 func assertEvent(t *testing.T, log *BufferLogger, event string) {
 	t.Helper()
 	for _, e := range log.Events {

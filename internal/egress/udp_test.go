@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
 )
 
 // udpEchoServer stands up a local UDP "upstream" that echoes every datagram
@@ -47,7 +49,9 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 	defer cleanup()
 
 	guestSrc := netip.MustParseAddrPort("10.0.0.5:51000")
-	origDst := netip.MustParseAddrPort("203.0.113.9:53")
+	// Non-DNS port: :53 routes to the DNS resolver-filter (one-shot, no flow),
+	// which is exercised separately; this test drives the generic flow path.
+	origDst := netip.MustParseAddrPort("203.0.113.9:443")
 
 	replies := make(chan capturedReply, 4)
 	log := &BufferLogger{}
@@ -93,8 +97,10 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 // non-allowlisted origDst (no DialUDP call) and audits egress_udp_deny, while
 // mediated mode forwards it (egress_udp_allow, unlisted:true).
 func TestUDPStrictDeniesUnlisted(t *testing.T) {
-	allowed := netip.MustParseAddrPort("203.0.113.9:53")
-	denied := netip.MustParseAddrPort("198.51.100.7:53")
+	// Non-DNS ports: :53 routes to the DNS resolver-filter (covered by
+	// TestUDPRoutesDNSToHandler); these drive the generic UDP flow policy path.
+	allowed := netip.MustParseAddrPort("203.0.113.9:443")
+	denied := netip.MustParseAddrPort("198.51.100.7:443")
 	guestSrc := netip.MustParseAddrPort("10.0.0.5:51001")
 
 	t.Run("strict denies unlisted", func(t *testing.T) {
@@ -288,7 +294,7 @@ func TestUDPFlowIdleClose(t *testing.T) {
 	defer p.closeAll()
 
 	src := netip.MustParseAddrPort("10.0.0.5:51010")
-	od := netip.MustParseAddrPort("203.0.113.9:53")
+	od := netip.MustParseAddrPort("203.0.113.9:443") // non-DNS: drive the flow path, not the DNS one-shot
 	p.handleUDPDatagram(src, od, []byte("ping"))
 
 	select {
@@ -350,6 +356,198 @@ func TestUDPProxyLoopGuardDropsOwnBindAddr(t *testing.T) {
 		t.Fatalf("loop-guard datagram created a flow (count=%d), must be dropped", p.flowCount())
 	}
 	assertEvent(t, log, "egress_loop_guard")
+}
+
+// TestUDPRoutesDNSToHandler proves a UDP:53 datagram is handled by the filtering
+// DNS forwarder (one-shot, no flow), not the normal flow path:
+//   - an allowlisted name is forwarded (via injected dnsForward), the answer is
+//     delivered to the guest with spoofed source = the resolver (origDst), the
+//     name->IP mapping is cached, and NO flow is created;
+//   - a non-allowlisted name in strict mode is REFUSED without forwarding.
+func TestUDPRoutesDNSToHandler(t *testing.T) {
+	resolver := netip.MustParseAddrPort("203.0.113.53:53")
+	guestSrc := netip.MustParseAddrPort("10.0.0.5:52000")
+	pol, _ := NewPolicy([]string{"allowed.example.com"})
+
+	t.Run("allowlisted name forwarded, cached, no flow", func(t *testing.T) {
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:      "strict",
+			Policy:    pol,
+			Logger:    log,
+			NameCache: NewNameCache(),
+			ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+			DialUDP:   func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS (must be one-shot, no flow)"); return nil, nil },
+		}
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		want := buildResponseWithA(t, 0x0101, "allowed.example.com.", "allowed.example.com.",
+			[4]byte{203, 0, 113, 7}, 300)
+		forwardCalled := false
+		replies := make(chan capturedReply, 1)
+		p.dnsForward = func(r netip.AddrPort, q []byte) ([]byte, error) {
+			forwardCalled = true
+			if r != resolver {
+				t.Errorf("dnsForward resolver = %v, want %v", r, resolver)
+			}
+			return want, nil
+		}
+		p.replyTo = func(od, gs netip.AddrPort, payload []byte) error {
+			cp := make([]byte, len(payload))
+			copy(cp, payload)
+			replies <- capturedReply{origDst: od, guestSrc: gs, payload: cp}
+			return nil
+		}
+
+		query := buildQuery(t, 0x0101, "allowed.example.com.", dnsmessage.TypeA)
+		p.handleUDPDatagram(guestSrc, resolver, query)
+
+		if !forwardCalled {
+			t.Fatal("dnsForward not called for an allowlisted query")
+		}
+		select {
+		case r := <-replies:
+			if string(r.payload) != string(want) {
+				t.Error("reply payload != forwarded DNS response")
+			}
+			// Spoofed source must be the resolver the guest targeted (origDst).
+			if r.origDst != resolver {
+				t.Errorf("reply spoofed-source = %v, want resolver %v", r.origDst, resolver)
+			}
+			if r.guestSrc != guestSrc {
+				t.Errorf("reply guestSrc = %v, want %v", r.guestSrc, guestSrc)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("DNS response not delivered via replyTo")
+		}
+		// Name cache now resolves the answer IP back to the queried name.
+		if host, ok := h.NameCache.HostForIP(netip.AddrFrom4([4]byte{203, 0, 113, 7})); !ok || host != "allowed.example.com" {
+			t.Errorf("NameCache HostForIP = (%q,%v), want (allowed.example.com,true)", host, ok)
+		}
+		// One-shot: a DNS datagram must NOT create a flow.
+		if p.flowCount() != 0 {
+			t.Fatalf("DNS datagram created %d flow(s); must be one-shot with no flow", p.flowCount())
+		}
+		assertEvent(t, log, "egress_dns_allow")
+	})
+
+	t.Run("non-allowlisted name refused without forwarding", func(t *testing.T) {
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:      "strict",
+			Policy:    pol,
+			Logger:    log,
+			NameCache: NewNameCache(),
+			ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+			DialUDP:   func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS deny"); return nil, nil },
+		}
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		forwardCalled := false
+		replies := make(chan capturedReply, 1)
+		p.dnsForward = func(netip.AddrPort, []byte) ([]byte, error) {
+			forwardCalled = true
+			return nil, nil
+		}
+		p.replyTo = func(od, gs netip.AddrPort, payload []byte) error {
+			cp := make([]byte, len(payload))
+			copy(cp, payload)
+			replies <- capturedReply{origDst: od, guestSrc: gs, payload: cp}
+			return nil
+		}
+
+		query := buildQuery(t, 0x0102, "blocked.example.com.", dnsmessage.TypeA)
+		p.handleUDPDatagram(guestSrc, resolver, query)
+
+		if forwardCalled {
+			t.Error("dnsForward called for a strict-denied query; must not forward")
+		}
+		select {
+		case r := <-replies:
+			// The reply is a synthesized REFUSED response.
+			var dp dnsmessage.Parser
+			hdr, err := dp.Start(r.payload)
+			if err != nil {
+				t.Fatalf("parse refused reply: %v", err)
+			}
+			if hdr.RCode != dnsmessage.RCodeRefused {
+				t.Errorf("reply RCode = %v, want %v", hdr.RCode, dnsmessage.RCodeRefused)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("REFUSED response not delivered via replyTo")
+		}
+		if p.flowCount() != 0 {
+			t.Fatalf("DNS deny created %d flow(s); must create none", p.flowCount())
+		}
+		assertEvent(t, log, "egress_dns_deny")
+	})
+}
+
+// TestStrictUDPByName proves a non-DNS UDP flow is policed by the hostname the
+// guest resolved (NameCache reverse lookup), not by bare IP: a datagram to a
+// cached, allowlisted IP is allowed; a datagram to an uncached IP is denied
+// fail-closed with no upstream dial.
+func TestStrictUDPByName(t *testing.T) {
+	allowedIP := netip.AddrFrom4([4]byte{203, 0, 113, 7})
+	pol, _ := NewPolicy([]string{"allowed.example.com"})
+
+	t.Run("cached allowlisted IP allowed by name", func(t *testing.T) {
+		echoAddr, cleanup := udpEchoServer(t)
+		defer cleanup()
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:      "strict",
+			Policy:    pol,
+			Logger:    log,
+			NameCache: NewNameCache(),
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
+				return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
+			},
+			ReplyTo: func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+		}
+		h.NameCache.Put("allowed.example.com", allowedIP, time.Minute)
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		dst := netip.AddrPortFrom(allowedIP, 443)
+		p.handleUDPDatagram(netip.MustParseAddrPort("10.0.0.5:52100"), dst, []byte("ping"))
+
+		assertEvent(t, log, "egress_udp_allow")
+		// Allowed by hostname match, not mediated mode: not "unlisted".
+		assertEventFieldAbsent(t, log, "egress_udp_allow", "unlisted")
+		if p.flowCount() != 1 {
+			t.Fatalf("flowCount = %d, want 1 (flow created for allowed UDP)", p.flowCount())
+		}
+	})
+
+	t.Run("uncached IP denied with no dial", func(t *testing.T) {
+		dialed := false
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:      "strict",
+			Policy:    pol,
+			Logger:    log,
+			NameCache: NewNameCache(),
+			DialUDP:   func(netip.AddrPort) (net.Conn, error) { dialed = true; return nil, nil },
+			ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+		}
+		h.NameCache.Put("allowed.example.com", allowedIP, time.Minute)
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		uncached := netip.MustParseAddrPort("198.51.100.9:443")
+		p.handleUDPDatagram(netip.MustParseAddrPort("10.0.0.5:52101"), uncached, []byte("ping"))
+
+		if dialed {
+			t.Fatal("DialUDP called for an uncached/unlisted IP (must fail closed)")
+		}
+		if p.flowCount() != 0 {
+			t.Fatalf("flowCount = %d, want 0 (denied UDP must create no flow)", p.flowCount())
+		}
+		assertEvent(t, log, "egress_udp_deny")
+	})
 }
 
 func mustPolicy(t *testing.T) *Policy {
