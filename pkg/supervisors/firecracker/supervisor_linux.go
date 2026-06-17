@@ -1157,8 +1157,7 @@ func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetw
 	case "nat":
 		return prepareNATForStart(opts, config)
 	case "named":
-		devices, rules, network, err := prepareNamedNetworkForStart(opts, config)
-		return devices, rules, network, 0, err
+		return prepareNamedNetworkForStart(opts, config)
 	case "bridged":
 	default:
 		return nil, nil, nil, 0, fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, bridged, or named", networkMode(config))
@@ -1232,106 +1231,123 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 	}
 	network := runtimeNetworkConfig(config, plan.Subnet, plan.GuestCIDR, plan.Gateway)
 	network.Mode = mode
-	egressPID := 0
-	if config != nil && vmkit.EgressMediationOn(config.EgressMode) {
-		// Mint a per-workspace CA. The cert (public) is delivered to the guest over
-		// the cacert vsock listener so guestinit installs it in the trust store.
-		// The key stays on the host and is passed to the mediator for TLS MITM.
-		ca, caErr := egress.NewCA(opts.Name, 720*time.Hour)
-		if caErr != nil {
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, fmt.Errorf("mint egress CA for %s: %w", opts.Name, caErr)
-		}
-		caKeyPEM, caErr := ca.KeyPEM()
-		if caErr != nil {
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, fmt.Errorf("encode egress CA key for %s: %w", opts.Name, caErr)
-		}
-		wsDir := filepath.Join(opts.StateDir, opts.Name)
-		if caErr = os.MkdirAll(wsDir, 0o700); caErr != nil {
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, fmt.Errorf("create workspace dir for egress CA: %w", caErr)
-		}
-		caCertPath := filepath.Join(wsDir, "egress-ca.pem")
-		caKeyPath := filepath.Join(wsDir, "egress-ca-key.pem")
-		if caErr = os.WriteFile(caCertPath, ca.CertPEM(), 0o644); caErr != nil {
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, fmt.Errorf("write egress CA cert: %w", caErr)
-		}
-		if caErr = os.WriteFile(caKeyPath, caKeyPEM, 0o600); caErr != nil {
-			_ = os.Remove(caCertPath)
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, fmt.Errorf("write egress CA key: %w", caErr)
-		}
-		pid, port, eerr := startEgressMediator(opts, plan.Gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, caCertPath, caKeyPath)
-		if eerr != nil {
-			_ = os.Remove(caCertPath)
-			_ = os.Remove(caKeyPath)
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, eerr
-		}
-		redirect, rerr := installEgressRedirectRule(tap, plan.Subnet, uint16(port))
-		if rerr != nil {
-			terminateAuxProcess(pid)
-			_ = os.Remove(caCertPath)
-			_ = os.Remove(caKeyPath)
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, rerr
-		}
-		rules = append(rules, redirect)
-		egressPID = pid
-
-		// UDP mediation via TPROXY. The mediator already binds a transparent UDP
-		// socket on plan.Gateway:port (same addr:port as its TCP listener); the
-		// supervisor steers guest UDP there. This is fail-closed: any failure here
-		// (TPROXY modules absent, missing host prerequisites, etc.) tears down
-		// EVERYTHING already provisioned for this workspace and returns the guiding
-		// error so the start aborts rather than booting a guest whose UDP escapes
-		// the mediator.
-		//
-		// netnsLocal distinguishes the two prerequisite ownership models:
-		//   - user (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
-		//     reaped with the ephemeral netns; we provision them here.
-		//   - nat (host) mode: those are host-global infra owned by `host
-		//     setup-networking`; we only VERIFY them (fail-closed if absent) and
-		//     install just the per-workspace nft tproxy rule.
-		netnsLocal := mode == "user"
-		undoRouting, perr := prepareEgressTProxyNetns(netnsLocal, egressTProxyMark, egressTProxyTable)
-		if perr != nil {
-			terminateAuxProcess(pid)
-			_ = os.Remove(caCertPath)
-			_ = os.Remove(caKeyPath)
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, perr)
-		}
-		mediatorAddr := netip.AddrPortFrom(netip.MustParseAddr(plan.Gateway), uint16(port))
-		tproxy, terr := installEgressTProxyRule(tap, plan.Subnet, egressTProxyMark, mediatorAddr)
-		if terr != nil {
-			undoRouting()
-			terminateAuxProcess(pid)
-			_ = os.Remove(caCertPath)
-			_ = os.Remove(caKeyPath)
-			cleanupTransientFirewallRules(rules)
-			cleanupTransientNetworkDevices(cleanupDevices)
-			return nil, nil, nil, 0, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, terr)
-		}
-		// The nft tproxy rule joins the transient rules slice so the standard
-		// firewall teardown (stop/quarantine/failed-start) removes it. The ip
-		// rule/local route are NOT firewall rules: in user mode they vanish with the
-		// ephemeral pasta netns (no per-stop teardown needed); in nat mode they are
-		// host infra we did not create here (undoRouting is a no-op). undoRouting is
-		// therefore only meaningful on the failure paths above.
-		rules = append(rules, tproxy)
+	egressPID, egressRules, err := provisionEgressMediation(opts, config, mode, tap, plan.Gateway, plan.Subnet)
+	if err != nil {
+		cleanupTransientFirewallRules(rules)
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, 0, err
 	}
+	rules = append(rules, egressRules...)
 	return cleanupDevices, rules, &network, egressPID, nil
+}
+
+// provisionEgressMediation provisions the egress mediator and its steering rules
+// (per-workspace CA, mediator process, TCP REDIRECT, UDP TPROXY) for a guest
+// reachable on the given tap, gateway, and subnet. It returns the mediator PID
+// and the nft rules the caller must append to its transient-firewall slice (so
+// the standard stop/quarantine/failed-start teardown removes them).
+//
+// When egress mediation is off (EgressMediationOn(config.EgressMode) is false)
+// it is a no-op: it returns (0, nil, nil) and the guest's egress is unmediated.
+//
+// Fail-closed: on ANY failure it tears down everything IT started (CA files,
+// mediator process, TPROXY ip rule/route in user mode) and returns the error.
+// It does NOT touch the caller's tap or base NAT rules — the caller unwinds those
+// with its own cleanupTransient* discipline, exactly as the inline path did.
+//
+// mode selects the TPROXY prerequisite ownership model and must be "user" or a
+// host-netns mode ("nat", "named"):
+//   - "user" (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
+//     reaped with the ephemeral netns; we provision them here.
+//   - host-netns modes ("nat", "named"): those are host-global infra owned by
+//     `host setup-networking`; we only VERIFY them (fail-closed if absent) and
+//     install just the per-workspace nft tproxy rule. Anything other than "user"
+//     takes this verify-only path.
+func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gateway, subnet string) (int, []transientFirewallRule, error) {
+	if config == nil || !vmkit.EgressMediationOn(config.EgressMode) {
+		return 0, nil, nil
+	}
+	var rules []transientFirewallRule
+	// Mint a per-workspace CA. The cert (public) is delivered to the guest over
+	// the cacert vsock listener so guestinit installs it in the trust store.
+	// The key stays on the host and is passed to the mediator for TLS MITM.
+	ca, caErr := egress.NewCA(opts.Name, 720*time.Hour)
+	if caErr != nil {
+		return 0, nil, fmt.Errorf("mint egress CA for %s: %w", opts.Name, caErr)
+	}
+	caKeyPEM, caErr := ca.KeyPEM()
+	if caErr != nil {
+		return 0, nil, fmt.Errorf("encode egress CA key for %s: %w", opts.Name, caErr)
+	}
+	wsDir := filepath.Join(opts.StateDir, opts.Name)
+	if caErr = os.MkdirAll(wsDir, 0o700); caErr != nil {
+		return 0, nil, fmt.Errorf("create workspace dir for egress CA: %w", caErr)
+	}
+	caCertPath := filepath.Join(wsDir, "egress-ca.pem")
+	caKeyPath := filepath.Join(wsDir, "egress-ca-key.pem")
+	if caErr = os.WriteFile(caCertPath, ca.CertPEM(), 0o644); caErr != nil {
+		return 0, nil, fmt.Errorf("write egress CA cert: %w", caErr)
+	}
+	if caErr = os.WriteFile(caKeyPath, caKeyPEM, 0o600); caErr != nil {
+		_ = os.Remove(caCertPath)
+		return 0, nil, fmt.Errorf("write egress CA key: %w", caErr)
+	}
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, caCertPath, caKeyPath)
+	if eerr != nil {
+		_ = os.Remove(caCertPath)
+		_ = os.Remove(caKeyPath)
+		return 0, nil, eerr
+	}
+	redirect, rerr := installEgressRedirectRule(tap, subnet, uint16(port))
+	if rerr != nil {
+		terminateAuxProcess(pid)
+		_ = os.Remove(caCertPath)
+		_ = os.Remove(caKeyPath)
+		return 0, nil, rerr
+	}
+	rules = append(rules, redirect)
+
+	// UDP mediation via TPROXY. The mediator already binds a transparent UDP
+	// socket on gateway:port (same addr:port as its TCP listener); the supervisor
+	// steers guest UDP there. This is fail-closed: any failure here (TPROXY
+	// modules absent, missing host prerequisites, etc.) tears down EVERYTHING this
+	// helper already provisioned for the workspace and returns the guiding error
+	// so the start aborts rather than booting a guest whose UDP escapes the
+	// mediator.
+	//
+	// netnsLocal distinguishes the two prerequisite ownership models:
+	//   - user (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
+	//     reaped with the ephemeral netns; we provision them here.
+	//   - host-netns modes (nat, named): those are host-global infra owned by
+	//     `host setup-networking`; we only VERIFY them (fail-closed if absent) and
+	//     install just the per-workspace nft tproxy rule.
+	netnsLocal := mode == "user"
+	undoRouting, perr := prepareEgressTProxyNetns(netnsLocal, egressTProxyMark, egressTProxyTable)
+	if perr != nil {
+		terminateAuxProcess(pid)
+		_ = os.Remove(caCertPath)
+		_ = os.Remove(caKeyPath)
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, perr)
+	}
+	mediatorAddr := netip.AddrPortFrom(netip.MustParseAddr(gateway), uint16(port))
+	tproxy, terr := installEgressTProxyRule(tap, subnet, egressTProxyMark, mediatorAddr)
+	if terr != nil {
+		undoRouting()
+		terminateAuxProcess(pid)
+		_ = os.Remove(caCertPath)
+		_ = os.Remove(caKeyPath)
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, terr)
+	}
+	// The nft tproxy rule joins the returned rules slice so the standard firewall
+	// teardown (stop/quarantine/failed-start) removes it. The ip rule/local route
+	// are NOT firewall rules: in user mode they vanish with the ephemeral pasta
+	// netns (no per-stop teardown needed); in host-netns modes they are host infra
+	// we did not create here (undoRouting is a no-op). undoRouting is therefore
+	// only meaningful on the failure paths above.
+	rules = append(rules, tproxy)
+	return pid, rules, nil
 }
 
 // prepareNamedNetworkForStart joins a workspace to a user-defined named network:
@@ -1339,45 +1355,59 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 // Linux bridge exists with the gateway address, attaches a TAP to the bridge,
 // installs masquerade rules for outbound traffic, and returns a runtime network
 // config carrying /etc/hosts entries for every member so they resolve by name.
-func prepareNamedNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+func prepareNamedNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
 	if err := requireIPv4Forwarding(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	name := strings.TrimSpace(config.Network.Name)
 	record, err := network.Get(opts.StateDir, name)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("join named network: %w", err)
+		return nil, nil, nil, 0, fmt.Errorf("join named network: %w", err)
 	}
 	ip, err := network.Join(opts.StateDir, name, opts.Name)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("allocate address on network %q: %w", name, err)
+		return nil, nil, nil, 0, fmt.Errorf("allocate address on network %q: %w", name, err)
 	}
 	// Refresh the record so the /etc/hosts entries include this member.
 	record, err = network.Get(opts.StateDir, name)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	prefix, err := subnetPrefixLen(record.Subnet)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 
 	bridge := bridgeName(name)
 	if err := ensureNetworkBridge(bridge, record.Gateway, prefix); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	tap := tapName(opts)
 	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: bridge, Created: true}
 	if err := createBridgeTap(tap, bridge); err != nil {
-		return nil, nil, nil, networkPrivilegeError("attach firecracker tap to network bridge "+bridge, err)
+		return nil, nil, nil, 0, networkPrivilegeError("attach firecracker tap to network bridge "+bridge, err)
 	}
 	cleanupDevices := []transientNetworkDevice{device}
 	rules, err := installNATFirewallRules(tap, record.Subnet)
 	if err != nil {
 		cleanupTransientFirewallRules(rules)
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
+
+	// Full egress mediation (CA + mediator + TCP REDIRECT + UDP TPROXY) so all
+	// guest egress — including east-west VM↔VM traffic within the named bridge —
+	// is captured by the mediator. A named network runs in the HOST netns (like
+	// nat, not pasta), so the helper takes the host-global verify-only TPROXY path.
+	// Fail-closed: the helper unwinds its own provisioning on error; we still tear
+	// down the tap and base NAT rules we created above, mirroring the nat path.
+	egressPID, egressRules, err := provisionEgressMediation(opts, config, "named", tap, record.Gateway, record.Subnet)
+	if err != nil {
+		cleanupTransientFirewallRules(rules)
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, 0, err
+	}
+	rules = append(rules, egressRules...)
 
 	runtime := vmkit.NetworkConfig{
 		Mode:    "named",
@@ -1393,7 +1423,7 @@ func prepareNamedNetworkForStart(opts Options, config *vmkit.Config) ([]transien
 	} else {
 		runtime.DNS = []string{"1.1.1.1", "8.8.8.8"}
 	}
-	return cleanupDevices, rules, &runtime, nil
+	return cleanupDevices, rules, &runtime, egressPID, nil
 }
 
 // namedNetworkHosts renders one "name:ip" entry per member for the guest

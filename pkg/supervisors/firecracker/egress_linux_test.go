@@ -56,6 +56,51 @@ func TestBuildEgressRedirectRuleRejectsBadSubnet(t *testing.T) {
 	}
 }
 
+// TestBuildEgressRedirectRuleNamedSubnet proves the egress steering rules build
+// for a named-network subnet shape (a /24 like 10.44.1.0/24), not just the small
+// tap /29s the nat/user paths use. Named mode reuses the SAME REDIRECT + TPROXY
+// rule builders via provisionEgressMediation, so the wiring that captures
+// east-west VM↔VM egress depends on both rules accepting the /24.
+func TestBuildEgressRedirectRuleNamedSubnet(t *testing.T) {
+	const namedSubnet = "10.44.1.0/24"
+	const namedGateway = "10.44.1.1"
+
+	redirect, err := buildEgressRedirectRule("microtap0", namedSubnet, 41000)
+	if err != nil {
+		t.Fatalf("build redirect for named /24: %v", err)
+	}
+	if redirect.Chain != nftNATPreroutingChain || redirect.Table != nftMicroagentTable {
+		t.Fatalf("redirect wrong table/chain: %+v", redirect.transientFirewallRule)
+	}
+	var hasRedirect bool
+	for _, e := range redirect.Exprs {
+		if _, ok := e.(*expr.Redir); ok {
+			hasRedirect = true
+		}
+	}
+	if !hasRedirect {
+		t.Error("named /24 redirect rule has no expr.Redir")
+	}
+
+	mediator := netip.AddrPortFrom(netip.MustParseAddr(namedGateway), 41000)
+	tproxy, err := buildEgressTProxyRule("microtap0", namedSubnet, egressTProxyMark, mediator)
+	if err != nil {
+		t.Fatalf("build tproxy for named /24: %v", err)
+	}
+	if tproxy.Chain != nftManglePreroutingChain || tproxy.Table != nftMicroagentTable {
+		t.Fatalf("tproxy wrong table/chain: %+v", tproxy.transientFirewallRule)
+	}
+	var hasTProxy bool
+	for _, e := range tproxy.Exprs {
+		if _, ok := e.(*expr.TProxy); ok {
+			hasTProxy = true
+		}
+	}
+	if !hasTProxy {
+		t.Error("named /24 tproxy rule has no expr.TProxy")
+	}
+}
+
 func TestBuildEgressTProxyRule(t *testing.T) {
 	mediator := netip.AddrPortFrom(netip.MustParseAddr("10.43.7.1"), 41000)
 	rule, err := buildEgressTProxyRule("microtap0", "10.43.7.0/29", egressTProxyMark, mediator)
@@ -163,6 +208,36 @@ func TestVerifyEgressTProxyPrereqsFailClosed(t *testing.T) {
 	noRule := func() ([]netlink.Rule, error) { return nil, nil }
 	if err := verifyEgressTProxyPrereqs(egressTProxyMark, egressTProxyTable, allSysctlsPresent(), noRule); err == nil {
 		t.Error("absent fwmark ip rule: expected fail-closed error")
+	}
+}
+
+// TestProvisionEgressMediationOffIsNoOp documents the gate the shared helper uses
+// before touching any host state: when egress mediation is off it returns
+// (0, nil, nil) without minting a CA, spawning a mediator, or installing any
+// rule. Both prepareTAPNATForStart (nat/user) and prepareNamedNetworkForStart
+// (named) call the helper unconditionally and rely on this early return for the
+// unmediated/off path — so it is safe to exercise without root or a netns. A nil
+// config (the low-level raw create/start path) takes the same no-op path.
+func TestProvisionEgressMediationOffIsNoOp(t *testing.T) {
+	opts := Options{Name: "ws", StateDir: t.TempDir()}
+	cases := []*vmkit.Config{
+		nil,
+		{EgressMode: vmkit.EgressModeOff},
+		{EgressMode: ""},
+	}
+	for _, cfg := range cases {
+		for _, mode := range []string{"nat", "user", "named"} {
+			pid, rules, err := provisionEgressMediation(opts, cfg, mode, "microtap0", "10.44.1.1", "10.44.1.0/24")
+			if err != nil {
+				t.Fatalf("mode %q cfg %+v: unexpected error: %v", mode, cfg, err)
+			}
+			if pid != 0 {
+				t.Errorf("mode %q cfg %+v: pid = %d, want 0 (no mediator spawned)", mode, cfg, pid)
+			}
+			if rules != nil {
+				t.Errorf("mode %q cfg %+v: rules = %+v, want nil (no rules installed)", mode, cfg, rules)
+			}
+		}
 	}
 }
 
