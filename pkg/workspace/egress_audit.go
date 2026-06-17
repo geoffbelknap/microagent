@@ -51,7 +51,7 @@ func ReadEgressAudit(stateDir, name string) ([]EgressEvent, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	events := []EgressEvent{}
 	scanner := bufio.NewScanner(f)

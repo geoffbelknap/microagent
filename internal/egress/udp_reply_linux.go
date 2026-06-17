@@ -42,7 +42,7 @@ func transparentReply(origDst, guestSrc netip.AddrPort, payload []byte) error {
 	if err != nil {
 		return fmt.Errorf("egress: bind transparent reply socket to %s: %w", origDst, err)
 	}
-	defer pc.Close()
+	defer func() { _ = pc.Close() }()
 	if _, err := pc.WriteTo(payload, net.UDPAddrFromAddrPort(guestSrc)); err != nil {
 		return fmt.Errorf("egress: spoofed-source reply to %s: %w", guestSrc, err)
 	}

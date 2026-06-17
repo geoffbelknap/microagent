@@ -95,7 +95,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 				_ = ln.Close()
 				return err
 			}
-			defer rl.Close()
+			defer func() { _ = rl.Close() }()
 			logger = rl
 		} else {
 			fl, err := NewFileLogger(opts.AuditLogPath)
@@ -103,7 +103,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 				_ = ln.Close()
 				return err
 			}
-			defer fl.Close()
+			defer func() { _ = fl.Close() }()
 			logger = fl
 		}
 	}
@@ -220,7 +220,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// where ctx is still live). The ctx.Done goroutine also closes it to unblock
 	// serveUDP's ReadMsgUDP promptly on cancellation; the redundant close is a
 	// harmless no-op (returns ErrClosed, ignored).
-	defer udpConn.Close()
+	defer func() { _ = udpConn.Close() }()
 	logger.Log("egress_udp_listen", map[string]any{"addr": udpConn.LocalAddr().String()})
 	go serveUDP(udpConn, h)
 

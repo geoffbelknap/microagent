@@ -35,7 +35,7 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 		h.Logger.Log("egress_mitm_handshake_error", map[string]any{"host": sni, "error": err.Error()})
 		return
 	}
-	defer guestTLS.Close()
+	defer func() { _ = guestTLS.Close() }()
 	upCfg := &tls.Config{ServerName: sni}
 	if h.UpstreamRoots != nil {
 		upCfg.RootCAs = h.UpstreamRoots
@@ -45,7 +45,7 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 		h.Logger.Log("egress_mitm_upstream_error", map[string]any{"host": sni, "dst": dst.String(), "error": err.Error()})
 		return
 	}
-	defer up.Close()
+	defer func() { _ = up.Close() }()
 	allowFields := map[string]any{"host": sni, "dst": dst.String(), "mitm": true}
 	closeFields := map[string]any{"host": sni, "dst": dst.String(), "mitm": true}
 	if unlisted {

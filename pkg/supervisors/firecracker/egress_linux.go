@@ -230,9 +230,9 @@ const egressL4DropNFLogGroup = 5
 // would orphan/leak), we emit THREE precedence rules into one filter chain, in
 // order:
 //
-//	1. l4proto == tcp  -> accept   (egress-l4-accept-tcp)
-//	2. l4proto == udp  -> accept   (egress-l4-accept-udp)
-//	3. iifname == tap, ipv4 saddr in subnet -> nflog + drop  (egress-l4-drop)
+//  1. l4proto == tcp  -> accept   (egress-l4-accept-tcp)
+//  2. l4proto == udp  -> accept   (egress-l4-accept-udp)
+//  3. iifname == tap, ipv4 saddr in subnet -> nflog + drop  (egress-l4-drop)
 //
 // nft evaluates rules in insertion order, so a tcp/udp packet hits rule 1 or 2
 // and is accepted before the catch-all (rule 3) can see it; only non-tcp/udp

@@ -138,7 +138,7 @@ func defaultDNSForward(resolver netip.AddrPort, query []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if err := conn.SetDeadline(time.Now().Add(dnsForwardTimeout)); err != nil {
 		return nil, err
 	}

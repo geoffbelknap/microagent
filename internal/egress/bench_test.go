@@ -452,18 +452,18 @@ func (discardLogger) Log(string, map[string]any) {}
 // under -short (it runs the benchmarks, which take a few seconds).
 //
 // Asserted invariants:
-//   1. MITM throughput >= 45% of passthrough throughput on the same box. The two
-//      paths measured COMPARABLE here (both ~70–116 MB/s; see the Recorded
-//      decisions header), so 45% is a regression floor set below the worst
-//      observed ~0.60 ratio with headroom for scheduling jitter. A real regression
-//      (an extra per-byte copy/alloc that genuinely halves MITM vs passthrough)
-//      drops the ratio below 45%. Each path is measured as the MAX of a few runs
-//      (capacity, not a jittery single sample) to keep the gate from flaking.
-//   2. Warm-cache handshake < 2x cold-cache handshake (sanity: the leaf-cache map
-//      hit is faster than a cold sign; a loose 2x bound survives noise).
-//   3. Warm-cache LeafFor performs ZERO new signs across its iterations (after the
-//      first), proven directly via CA.SignCount() — the load-bearing cache-hit
-//      proof, independent of timing noise.
+//  1. MITM throughput >= 45% of passthrough throughput on the same box. The two
+//     paths measured COMPARABLE here (both ~70–116 MB/s; see the Recorded
+//     decisions header), so 45% is a regression floor set below the worst
+//     observed ~0.60 ratio with headroom for scheduling jitter. A real regression
+//     (an extra per-byte copy/alloc that genuinely halves MITM vs passthrough)
+//     drops the ratio below 45%. Each path is measured as the MAX of a few runs
+//     (capacity, not a jittery single sample) to keep the gate from flaking.
+//  2. Warm-cache handshake < 2x cold-cache handshake (sanity: the leaf-cache map
+//     hit is faster than a cold sign; a loose 2x bound survives noise).
+//  3. Warm-cache LeafFor performs ZERO new signs across its iterations (after the
+//     first), proven directly via CA.SignCount() — the load-bearing cache-hit
+//     proof, independent of timing noise.
 func TestEgressPerformanceThresholds(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping performance threshold test under -short")

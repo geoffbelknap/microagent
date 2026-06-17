@@ -377,7 +377,10 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 			Logger:    log,
 			NameCache: NewNameCache(),
 			ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
-			DialUDP:   func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS (must be one-shot, no flow)"); return nil, nil },
+			DialUDP: func(netip.AddrPort) (net.Conn, error) {
+				t.Fatal("DialUDP called for DNS (must be one-shot, no flow)")
+				return nil, nil
+			},
 		}
 		p := newUDPProxy(h)
 		defer p.closeAll()

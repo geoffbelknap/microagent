@@ -119,7 +119,7 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 		return egress.Options{}, err
 	}
 	if bindPort == 0 || strings.TrimSpace(auditLog) == "" {
-		return egress.Options{}, fmt.Errorf("usage: microagent-firecracker-supervisor --egress-mediator --bind-port <port> --audit-log <path> [--bind-host <host>] [--allow <host>]...")
+		return egress.Options{}, fmt.Errorf("usage: microagent-firecracker-supervisor --egress-mediator --bind-port <port> --audit-log <path> [--bind-host <host>] [--allow <host> ...]")
 	}
 	return egress.Options{
 		Mode:            mode,

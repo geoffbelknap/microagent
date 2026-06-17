@@ -151,9 +151,9 @@ func (c *CA) LeafFor(serverName string) (*tls.Certificate, error) {
 		NotBefore:    now.Add(-time.Minute),
 		// Leaf is valid for the CA's lifetime so a cached leaf never expires
 		// before the per-workspace CA (and thus the workspace) does.
-		NotAfter:     c.cert.NotAfter,
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		NotAfter:    c.cert.NotAfter,
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 	if ip := net.ParseIP(serverName); ip != nil {
 		tmpl.IPAddresses = []net.IP{ip}

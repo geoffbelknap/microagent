@@ -31,7 +31,7 @@ func TestEgressTProxyConstantsTrackSharedPackage(t *testing.T) {
 	if egressTProxyTable != egressprereq.TProxyTable {
 		t.Errorf("egressTProxyTable %d != egressprereq.TProxyTable %d", egressTProxyTable, egressprereq.TProxyTable)
 	}
-	if !reflect.DeepEqual(map[string]string(egressTProxySysctls), egressprereq.TProxySysctls) {
+	if !reflect.DeepEqual(egressTProxySysctls, egressprereq.TProxySysctls) {
 		t.Errorf("egressTProxySysctls %v != egressprereq.TProxySysctls %v", egressTProxySysctls, egressprereq.TProxySysctls)
 	}
 }
@@ -711,7 +711,7 @@ func TestEgressMediatorLoggedReady(t *testing.T) {
 	}
 
 	// This run's marker appended after the offset → ready.
-	if _, err := f.WriteString(fmt.Sprintf("%s 10.43.7.1:41000\n", egress.ReadyMarker)); err != nil {
+	if _, err := fmt.Fprintf(f, "%s 10.43.7.1:41000\n", egress.ReadyMarker); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Close()

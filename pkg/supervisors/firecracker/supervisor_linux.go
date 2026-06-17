@@ -2521,7 +2521,7 @@ func egressMediatorLoggedReady(logPath string, startOffset int64) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if startOffset > 0 {
 		if _, err := f.Seek(startOffset, io.SeekStart); err != nil {
 			return false

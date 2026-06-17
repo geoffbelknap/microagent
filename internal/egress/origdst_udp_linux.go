@@ -70,7 +70,7 @@ func transparentUDPListener(addr netip.AddrPort) (*net.UDPConn, error) {
 	}
 	uc, ok := pc.(*net.UDPConn)
 	if !ok {
-		pc.Close()
+		_ = pc.Close()
 		return nil, fmt.Errorf("egress: transparent udp listener is %T, not *net.UDPConn", pc)
 	}
 	return uc, nil

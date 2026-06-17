@@ -286,7 +286,7 @@ func isEastWestAddr(a netip.Addr) bool {
 
 // Handle services one captured connection. It always closes conn.
 func (h *Handler) Handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	dst, err := h.OrigDst(conn)
 	if err != nil {
 		h.Logger.Log("egress_origdst_error", map[string]any{"error": err.Error()})
@@ -421,7 +421,7 @@ func (h *Handler) Handle(conn net.Conn) {
 		h.Logger.Log("egress_dial_error", map[string]any{"host": host, "dst": dst.String(), "error": err.Error()})
 		return
 	}
-	defer up.Close()
+	defer func() { _ = up.Close() }()
 	allowFields := map[string]any{"host": host, "dst": dst.String()}
 	closeFields := map[string]any{"host": host, "dst": dst.String()}
 	if unlisted {
