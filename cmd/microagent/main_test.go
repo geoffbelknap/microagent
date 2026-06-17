@@ -1353,7 +1353,7 @@ func TestRequestForCommandBridgedRequiresUnsupported(t *testing.T) {
 
 func TestBridgedStartEmitsUnsupportedWarning(t *testing.T) {
 	var buf bytes.Buffer
-	warnIfBridged(&buf, "bridged")
+	warnIfUnmediatedNetwork(&buf, "bridged")
 	got := buf.String()
 	if !strings.Contains(got, "UNSUPPORTED") {
 		t.Fatalf("bridged warning = %q, want it to contain UNSUPPORTED", got)
@@ -1364,10 +1364,24 @@ func TestBridgedStartEmitsUnsupportedWarning(t *testing.T) {
 	}
 }
 
-func TestNonBridgedStartEmitsNoWarning(t *testing.T) {
-	for _, mode := range []string{"user", "nat", "isolated", "named", ""} {
+func TestNatNamedStartEmitsUnsupportedWarning(t *testing.T) {
+	for _, mode := range []string{"nat", "named"} {
 		var buf bytes.Buffer
-		warnIfBridged(&buf, mode)
+		warnIfUnmediatedNetwork(&buf, mode)
+		got := buf.String()
+		if !strings.Contains(got, "UNSUPPORTED") {
+			t.Fatalf("%s warning = %q, want it to contain UNSUPPORTED", mode, got)
+		}
+		if !strings.Contains(got, mode) {
+			t.Fatalf("%s warning = %q, want it to name the mode", mode, got)
+		}
+	}
+}
+
+func TestMediatedModesEmitNoWarning(t *testing.T) {
+	for _, mode := range []string{"user", "isolated", ""} {
+		var buf bytes.Buffer
+		warnIfUnmediatedNetwork(&buf, mode)
 		if buf.Len() != 0 {
 			t.Fatalf("mode %q emitted a warning: %q", mode, buf.String())
 		}
@@ -2600,6 +2614,7 @@ func TestParseWorkspaceOptionsNetworkNameImpliesNamedMode(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
 		"--network-name", "devnet",
+		"--unsupported", // named is gated as not-reliably-mediated
 	})
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -2717,6 +2732,7 @@ resources:
   sizeMiB: 12288
 network:
   mode: nat
+  unsupported: true
   forwards:
     - host: 127.0.0.1
       hostPort: 8080
@@ -5022,7 +5038,7 @@ func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T
 		"homebridge",
 		"--image", "homebridge/homebridge:latest",
 		"--image-command",
-		"--network", "nat",
+		"--network", "user",
 		"--publish", "8581:8581",
 		"--size-mib", "4096",
 		"--restart", "always",
@@ -5043,7 +5059,7 @@ func TestParseWorkspaceOptionsAcceptsServiceCommand(t *testing.T) {
 		"homebridge",
 		"--image", "homebridge/homebridge:latest",
 		"--service-command", "/opt/homebridge/start.sh --allow-root",
-		"--network", "nat",
+		"--network", "user",
 		"--publish", "8581:8581",
 		"--size-mib", "4096",
 		"--restart", "always",

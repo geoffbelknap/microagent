@@ -633,7 +633,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	networkMode := fs.String("network", defaultNetworkMode, networkModeFlagHelp)
 	networkInterface := fs.String("network-interface", "", "Host interface for bridged network mode")
-	networkUnsupported := fs.Bool("unsupported", false, "Acknowledge selecting an unsupported, unmediated network mode (bridged)")
+	networkUnsupported := fs.Bool("unsupported", false, "Acknowledge selecting an unsupported, not-reliably-mediated network mode (bridged, nat, named)")
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
@@ -739,7 +739,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
-	warnIfBridged(os.Stderr, opts.Network.Mode)
+	warnIfUnmediatedNetwork(os.Stderr, opts.Network.Mode)
 
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
@@ -3423,16 +3423,19 @@ func parseForkSnapshotRef(ref string) (string, string, error) {
 	return source, tag, nil
 }
 
-// warnIfBridged emits a loud, single-line warning to w when the effective
-// network mode is the unsupported, unmediated "bridged" mode. It is fired once
-// per start/run from the CLI so the operator sees it in their terminal. Bridged
-// still works (behind --unsupported); this only makes the risk impossible to
-// miss. Non-bridged modes emit nothing.
-func warnIfBridged(w io.Writer, mode string) {
-	if strings.TrimSpace(mode) != "bridged" {
-		return
+// warnIfUnmediatedNetwork emits a loud, single-line warning to w when the
+// effective network mode is one of the unsupported, not-reliably-mediated modes
+// (bridged, nat, named). It is fired once per start/run from the CLI so the
+// operator sees it in their terminal. These modes still work (behind
+// --unsupported); this only makes the risk impossible to miss. The supported,
+// mediated modes (user, isolated) emit nothing.
+func warnIfUnmediatedNetwork(w io.Writer, mode string) {
+	switch strings.TrimSpace(mode) {
+	case "bridged":
+		fmt.Fprintln(w, "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.")
+	case "nat", "named":
+		fmt.Fprintf(w, "⚠ %s networking is UNSUPPORTED — egress mediation is not reliable in this mode; use the default user mode for mediated egress. Not covered by microagent's security model.\n", strings.TrimSpace(mode))
 	}
-	fmt.Fprintln(w, "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.")
 }
 
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
@@ -3531,7 +3534,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		// The effective network mode on start comes from the persisted manifest,
 		// not a CLI flag; warn off the manifest so a bridged workspace is flagged
 		// on every boot.
-		warnIfBridged(os.Stderr, manifest.Network.Mode)
+		warnIfUnmediatedNetwork(os.Stderr, manifest.Network.Mode)
 		var manifestRunner workspace.ModelRunnerSpec
 		if manifest.ModelRunner != nil {
 			manifestRunner = *manifest.ModelRunner
@@ -3933,7 +3936,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, networkModeFlagHelp)
 	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
 	fs.StringVar(&opts.Network.Name, "network-name", opts.Network.Name, "Join a user-defined named network by name")
-	fs.BoolVar(&opts.Network.Unsupported, "unsupported", opts.Network.Unsupported, "Acknowledge selecting an unsupported, unmediated network mode (bridged)")
+	fs.BoolVar(&opts.Network.Unsupported, "unsupported", opts.Network.Unsupported, "Acknowledge selecting an unsupported, not-reliably-mediated network mode (bridged, nat, named)")
 	mediationMapping := ""
 	fs.StringVar(&mediationMapping, "mediation", "", "Required mediation vsock mapping port=host:port")
 	mediationOptional := false

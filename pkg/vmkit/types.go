@@ -564,8 +564,18 @@ func ValidateNetworkConfig(network NetworkConfig) error {
 	default:
 		return fmt.Errorf("network.mode must be user, nat, isolated, bridged, or named")
 	}
-	if mode == "bridged" && !network.Unsupported {
-		return fmt.Errorf("bridged networking is unsupported and unmediated; pass --unsupported to use it anyway")
+	// nat/named/bridged are gated behind an explicit --unsupported acknowledgement:
+	// transparent egress mediation is only reliable in the per-netns user/pasta path,
+	// so the host-netns modes are not guaranteed-mediated and default to fail-closed
+	// (refused) rather than silently running unmediated. bridged additionally bypasses
+	// mediation by design.
+	if !network.Unsupported {
+		switch mode {
+		case "bridged":
+			return fmt.Errorf("bridged networking is unsupported and unmediated; pass --unsupported to use it anyway")
+		case "nat", "named":
+			return fmt.Errorf("%s networking is unsupported and not reliably egress-mediated (only user mode is); pass --unsupported to use it anyway", mode)
+		}
 	}
 	if mode == "named" && strings.TrimSpace(network.Name) == "" {
 		return fmt.Errorf("network.mode named requires a network name")
