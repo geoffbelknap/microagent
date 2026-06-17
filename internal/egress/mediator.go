@@ -28,15 +28,26 @@ type Handler struct {
 	UpstreamRoots *x509.CertPool
 
 	// Swaps is the host-indexed credential-swap table loaded from
-	// Options.SwapConfigPath. It is plumbed through but UNUSED this phase (a
-	// later phase injects the swapped credential into the intercepted plaintext
-	// request). Nil when no swap config is configured, in which case the request
-	// path is byte-identical to today.
+	// Options.SwapConfigPath. When non-nil, serveMITM HTTP-parses any
+	// intercepted connection whose SNI matches an entry and injects the acquired
+	// credential into each request (fail-closed). Nil when no swap config is
+	// configured, in which case the request path is byte-identical to today.
 	Swaps *SwapTable
-	Logger        Logger
-	OrigDst       func(net.Conn) (netip.AddrPort, error)
-	Dial          func(network, addr string) (net.Conn, error)
-	SniffTimeout  time.Duration
+
+	// Resolver dereferences secret refs ("env:EXAMPLE_KEY") for credential
+	// swaps. Phase 3 wires the real KeyResolver; until then it is nil and any
+	// live swap fails closed in Swapper.acquire (the static unit test injects a
+	// fake resolver directly). Carried so serveMITM can build a Swapper.
+	Resolver resolver
+	// tokenCache backs the (later-phase) expiring credential strategies. Built by
+	// Serve when a swap table is loaded; nil otherwise. The static strategy does
+	// not use it.
+	tokenCache *tokenCache
+
+	Logger       Logger
+	OrigDst      func(net.Conn) (netip.AddrPort, error)
+	Dial         func(network, addr string) (net.Conn, error)
+	SniffTimeout time.Duration
 
 	// NameCache records DNS answer name->IP mappings observed by handleDNS (the
 	// filtering DNS forwarder) so later UDP/raw-IP flows can be policed by the

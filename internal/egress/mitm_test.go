@@ -169,6 +169,122 @@ func TestMITMInterceptsTLS(t *testing.T) {
 	assertEventWithField(t, log, "egress_allow", "mitm", true)
 }
 
+// TestMITMSwapInjectsCredential proves the end-to-end SNI-scoped credential
+// swap through serveMITM: the guest sends Authorization: Bearer PLACEHOLDER,
+// the upstream receives Authorization: Bearer REALSECRET, and the swap is
+// audited without the secret appearing in any audit field.
+func TestMITMSwapInjectsCredential(t *testing.T) {
+	// Upstream captures the Authorization header it actually receives.
+	gotAuth := make(chan string, 1)
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case gotAuth <- r.Header.Get("Authorization"):
+		default:
+		}
+		fmt.Fprint(w, "ok")
+	}))
+	defer upstream.Close()
+	upstreamRoots := upstream.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	upstreamAddrPort := netip.MustParseAddrPort(upstream.Listener.Addr().String())
+
+	testCA, err := NewCA("test-workspace-ca", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("NewCA: %v", err)
+	}
+	pol, err := NewPolicy([]string{"example.com"})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	tbl, err := LoadSwapTable([]byte(`swaps:
+  example:
+    type: static
+    domains: ["example.com"]
+    header: Authorization
+    format: "Bearer {key}"
+    key_ref: "env:K"
+`))
+	if err != nil {
+		t.Fatalf("LoadSwapTable: %v", err)
+	}
+	log := &BufferLogger{}
+	h := &Handler{
+		Policy:        pol,
+		CA:            testCA,
+		UpstreamRoots: upstreamRoots,
+		Logger:        log,
+		OrigDst:       func(net.Conn) (netip.AddrPort, error) { return upstreamAddrPort, nil },
+		Dial:          net.Dial,
+		SniffTimeout:  2 * time.Second,
+		Swaps:         tbl,
+		Resolver:      fakeResolver{"env:K": "REALSECRET"},
+		tokenCache:    newTokenCache(),
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	handleDone := make(chan struct{})
+	go func() {
+		defer close(handleDone)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		h.Handle(conn)
+	}()
+
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(testCA.CertPEM()) {
+		t.Fatal("failed to append CA cert to pool")
+	}
+	rawConn, err := net.DialTimeout("tcp", ln.Addr().String(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	defer rawConn.Close()
+	clientTLS := tls.Client(rawConn, &tls.Config{ServerName: "example.com", RootCAs: caCertPool})
+	if err := clientTLS.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake: %v", err)
+	}
+	req := "GET / HTTP/1.1\r\nHost: example.com\r\nAuthorization: Bearer PLACEHOLDER\r\nConnection: close\r\n\r\n"
+	if _, err := io.WriteString(clientTLS, req); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	// Read response so the upstream handler runs before we assert.
+	io.Copy(io.Discard, clientTLS)
+
+	select {
+	case auth := <-gotAuth:
+		if auth != "Bearer REALSECRET" {
+			t.Fatalf("upstream Authorization = %q, want %q", auth, "Bearer REALSECRET")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream never received the request")
+	}
+
+	clientTLS.Close()
+	select {
+	case <-handleDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle did not return after client close")
+	}
+
+	assertEvent(t, log, "egress_swap")
+	// No audit field may carry the secret or the rendered value.
+	for _, ev := range log.Events {
+		for k, v := range ev {
+			if s, ok := v.(string); ok && (s == "REALSECRET" || s == "Bearer REALSECRET" || s == "Bearer PLACEHOLDER") {
+				t.Fatalf("credential leaked into audit field %q=%q", k, s)
+			}
+		}
+	}
+}
+
 // assertEventWithField checks that at least one logged event matches the given
 // event name AND has the expected field value.
 func assertEventWithField(t *testing.T, log *BufferLogger, event string, field string, value any) {

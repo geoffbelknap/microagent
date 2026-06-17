@@ -125,6 +125,12 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// is not fatal here.
 	bindAP, _ := netip.ParseAddrPort(ln.Addr().String())
 	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps}
+	// Build the token cache only when a swap table is loaded. Resolver stays nil
+	// this phase (Phase 3 wires the real KeyResolver); a live swap therefore
+	// fails closed in Swapper.acquire rather than injecting a blank credential.
+	if swaps != nil {
+		h.tokenCache = newTokenCache()
+	}
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
 
 	// Mediation always includes UDP: open the transparent UDP socket on the same

@@ -53,8 +53,25 @@ func (h *Handler) serveMITM(raw net.Conn, r io.Reader, sni string, dst netip.Add
 		closeFields["unlisted"] = true
 	}
 	h.Logger.Log("egress_allow", allowFields)
+	// Swap-scoping: only HTTP-parse the guest->upstream stream when this
+	// connection's SNI matches a swap entry. Non-matching connections (and the
+	// h.Swaps==nil case) keep the byte-identical io.Copy splice, so gRPC,
+	// websockets, and raw TLS to non-swap hosts are unaffected. The
+	// upstream->guest direction is always a plain splice.
+	swapRelevant := false
+	if h.Swaps != nil {
+		if _, ok := h.Swaps.Match(sni); ok {
+			swapRelevant = true
+		}
+	}
 	errc := make(chan error, 2)
-	go func() { _, e := io.Copy(up, guestTLS); errc <- e }()
+	if swapRelevant {
+		go func() {
+			errc <- injectRequests(guestTLS, up, sni, &Swapper{Resolver: h.Resolver, Cache: h.tokenCache}, h.Swaps, h.Logger)
+		}()
+	} else {
+		go func() { _, e := io.Copy(up, guestTLS); errc <- e }()
+	}
 	go func() { _, e := io.Copy(guestTLS, up); errc <- e }()
 	<-errc
 	h.Logger.Log("egress_close", closeFields)
