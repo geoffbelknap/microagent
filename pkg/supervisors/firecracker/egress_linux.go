@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 
+	"github.com/geoffbelknap/microagent/pkg/egressprereq"
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
@@ -22,16 +23,15 @@ const nftNATPreroutingChain = "MICROAGENT-NAT-PREROUTING"
 // cannot run from a nat chain), so it is kept separate from the REDIRECT chain.
 const nftManglePreroutingChain = "MICROAGENT-MANGLE-PREROUTING"
 
-// egressTProxyMark is the fwmark stamped on TPROXY-steered datagrams. The ip rule
-// (fwmark egressTProxyMark -> table egressTProxyTable) plus the local route in
-// that table deliver the marked packet to the mediator's transparent socket on lo
-// rather than routing it out. Fixed (not per-workspace): in the user (pasta)
-// netns it is netns-local, and in host (nat) mode the rule/route/sysctls are
-// host-global infrastructure provisioned once by `host setup-networking`, so a
-// single stable value is correct and collision-free across workspaces.
+// egressTProxyMark / egressTProxyTable are the fwmark stamped on TPROXY-steered
+// datagrams and the policy routing table the local route lives in. They alias
+// the authoritative values in pkg/egressprereq, which `host setup-networking`
+// also provisions and `doctor` reports against — sharing the constants is what
+// keeps the supervisor's verify and the provisioner from ever drifting apart.
+// See egressprereq.TProxyMark for why a single fixed value is correct.
 const (
-	egressTProxyMark  uint32 = 0x1
-	egressTProxyTable        = 100
+	egressTProxyMark  = egressprereq.TProxyMark
+	egressTProxyTable = egressprereq.TProxyTable
 )
 
 // buildEgressRedirectRule builds a nat/prerouting rule that REDIRECTs guest TCP
@@ -207,18 +207,15 @@ func installEgressTProxyRule(tap, subnet string, mark uint32, mediator netip.Add
 }
 
 // egressTProxySysctls are the per-namespace knobs TPROXY delivery to a local
-// transparent socket on lo requires (proven by the rootless spike):
+// transparent socket on lo requires (proven by the rootless spike). They alias
+// the authoritative map in pkg/egressprereq so the supervisor verifies exactly
+// the sysctl keys/values `host setup-networking` provisions:
 //   - route_localnet: allow routing of 0.0.0.0/8 (the local TPROXY route on lo)
 //   - rp_filter=0: the spoofed-source reply leg would otherwise be dropped by
 //     reverse-path filtering
 //   - accept_local: accept packets whose source is a local address
 //   - ip_forward: guest egress is forwarded through the host
-var egressTProxySysctls = map[string]string{
-	"/proc/sys/net/ipv4/conf/all/route_localnet": "1",
-	"/proc/sys/net/ipv4/conf/all/rp_filter":      "0",
-	"/proc/sys/net/ipv4/conf/all/accept_local":   "1",
-	"/proc/sys/net/ipv4/ip_forward":              "1",
-}
+var egressTProxySysctls = egressprereq.TProxySysctls
 
 // setEgressTProxySysctls writes the TPROXY sysctls. In the user (pasta) netns
 // these are namespace-local and reaped with the netns; in host (nat) mode they

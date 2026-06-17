@@ -26,6 +26,7 @@ func runHostSetupNetworking(args []string, stdout *os.File) error {
 	if *check {
 		resp, _ := doctorResponse(context.Background(), opts)
 		printNetworkingSection(stdout, resp.Host)
+		printTProxyNATCheck(stdout)
 		if resp.Host == nil || !resp.Host.PrivilegedNetworkReady {
 			return fmt.Errorf("privileged networking is not ready")
 		}
@@ -48,6 +49,7 @@ func runHostSetupNetworking(args []string, stdout *os.File) error {
 		return err
 	}
 	fmt.Fprintln(stdout, "host networking enabled: ip_forward persisted and CAP_NET_ADMIN granted to the supervisor")
+	fmt.Fprintln(stdout, "egress TPROXY ready: kernel modules loaded and nat-mode routing provisioned")
 	fmt.Fprintln(stdout, "run `microagent doctor` to confirm")
 	return nil
 }

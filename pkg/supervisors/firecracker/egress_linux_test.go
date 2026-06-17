@@ -5,12 +5,31 @@ package firecracker
 import (
 	"net/netip"
 	"os"
+	"reflect"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/egressprereq"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/google/nftables/expr"
 	"github.com/vishvananda/netlink"
 )
+
+// TestEgressTProxyConstantsTrackSharedPackage is the anti-drift guard from the
+// supervisor side: the values the supervisor verifies fail-closed must be the
+// SAME values `microagent host setup-networking` provisions. Both read them from
+// pkg/egressprereq; this test fails if anyone reintroduces a local literal that
+// could diverge from the provisioner.
+func TestEgressTProxyConstantsTrackSharedPackage(t *testing.T) {
+	if egressTProxyMark != egressprereq.TProxyMark {
+		t.Errorf("egressTProxyMark %#x != egressprereq.TProxyMark %#x", egressTProxyMark, egressprereq.TProxyMark)
+	}
+	if egressTProxyTable != egressprereq.TProxyTable {
+		t.Errorf("egressTProxyTable %d != egressprereq.TProxyTable %d", egressTProxyTable, egressprereq.TProxyTable)
+	}
+	if !reflect.DeepEqual(map[string]string(egressTProxySysctls), egressprereq.TProxySysctls) {
+		t.Errorf("egressTProxySysctls %v != egressprereq.TProxySysctls %v", egressTProxySysctls, egressprereq.TProxySysctls)
+	}
+}
 
 func TestBuildEgressRedirectRule(t *testing.T) {
 	rule, err := buildEgressRedirectRule("microtap0", "10.43.7.0/29", 41000)

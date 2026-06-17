@@ -4924,6 +4924,20 @@ func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
 	if hint := diagnostics.NetworkRemediation(host); hint != "" {
 		fmt.Fprintf(stdout, "  %s\n", hint)
 	}
+	if host.Backend == vmkit.BackendFirecracker {
+		status := "PASS"
+		if !host.EgressTProxyReady {
+			status = "WARN"
+		}
+		fmt.Fprintf(stdout, "Egress TPROXY modules: %s", status)
+		if len(host.EgressTProxyMissingModules) > 0 {
+			fmt.Fprintf(stdout, " (missing: %s)", strings.Join(host.EgressTProxyMissingModules, ", "))
+		}
+		fmt.Fprintln(stdout)
+		if hint := diagnostics.EgressTProxyRemediation(host); hint != "" {
+			fmt.Fprintf(stdout, "  %s\n", hint)
+		}
+	}
 }
 
 func writeRuntimeContract(stdout *os.File, contract vmkit.RuntimeContract) error {

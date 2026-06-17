@@ -203,6 +203,13 @@ type HostSupport struct {
 	IsolatedNetworkReady      bool `json:"isolatedNetworkReady,omitempty"`
 	UserNetworkReady          bool `json:"userNetworkReady,omitempty"`
 	PrivilegedNetworkReady    bool `json:"privilegedNetworkReady,omitempty"`
+
+	// EgressTProxyReady reports whether the kernel modules UDP egress mediation
+	// (TPROXY) needs are loaded or built-in. Needed for both user and nat egress
+	// modes. When false, EgressTProxyMissingModules lists what is absent so
+	// `host setup-networking` can load them.
+	EgressTProxyReady          bool     `json:"egressTProxyReady,omitempty"`
+	EgressTProxyMissingModules []string `json:"egressTProxyMissingModules,omitempty"`
 }
 
 type KernelSupport struct {
