@@ -118,17 +118,28 @@ func (h *Handler) peerName(a netip.Addr) (string, bool) {
 }
 
 // addPeerFields stamps the resolved named-network peer identity onto an audit
-// field map when the destination resolved to a known peer. A no-op when peer is
-// empty (external host, or no roster), so external-host audit records are
-// byte-identical to before.
+// field map. The peer name is stamped only when known; peer_ip is stamped
+// whenever set, which includes an IP-only peer (a private/internal destination on
+// a named network with no resolvable name) so a denied east-west flow remains
+// legible. A no-op when both are empty (external host, or no roster), so
+// external-host audit records are byte-identical to before.
 func addPeerFields(fields map[string]any, peer, peerIP string) {
-	if peer == "" {
-		return
+	if peer != "" {
+		fields["peer"] = peer
 	}
-	fields["peer"] = peer
 	if peerIP != "" {
 		fields["peer_ip"] = peerIP
 	}
+}
+
+// isEastWestAddr reports whether a destination address is internal/east-west: a
+// private (RFC1918 / ULA), link-local, or loopback address — the addressing space
+// a named network's peers occupy. Public/external destinations return false. It is
+// the discriminator for surfacing peer_ip on an IP-only peer's audit (a peer not
+// in the roster by name) without leaking the destination IP onto external-host
+// audit records.
+func isEastWestAddr(a netip.Addr) bool {
+	return a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLoopback()
 }
 
 // Handle services one captured connection. It always closes conn.
@@ -169,12 +180,31 @@ func (h *Handler) Handle(conn net.Conn) {
 	// for the deny-time IP-literal fallback below. A peer match also satisfies the
 	// reverse lookup, so the DNS NameCache is only consulted when no peer matched.
 	var peer, peerIP string
+	// isPeer classifies the destination as an internal named-network peer (east-west)
+	// vs an external/public host. It gates the MITM guard below: a peer destination
+	// NEVER takes serveMITM — east-west TLS is L4-spliced (splice + audit + allowlist
+	// + fail-closed, NO MITM) so a self-signed/internal peer cert is not broken by
+	// interception (and verification is never silently disabled — ASK tenet 6). MITM
+	// applies only to external/public TLS. Nil-guarded via peerName.
+	isPeer := false
 	if name, ok := h.peerName(dst.Addr()); ok {
+		isPeer = true
 		peer = name
 		peerIP = dst.Addr().String()
 		if host == dst.Addr().String() {
 			host = name
 		}
+	}
+	// Audit legibility for an IP-only peer: a private/internal destination on a
+	// named network whose IP is NOT in the roster has no resolvable name, but its
+	// egress_deny (and any allow) should still surface the destination IP so the
+	// east-west flow is legible in the audit. peerIP is set from the destination IP
+	// for any private/internal address even without a name match; a public/external
+	// destination leaves peerIP empty so its audit records stay byte-identical.
+	// Only meaningful when a roster is configured (a named network); the nat/user
+	// paths leave Peers nil and so never enter this branch.
+	if peerIP == "" && h.Peers != nil && isEastWestAddr(dst.Addr()) {
+		peerIP = dst.Addr().String()
 	}
 	if peer == "" && h.NameCache != nil && host == dst.Addr().String() {
 		if name, ok := h.NameCache.HostForIP(dst.Addr()); ok {
@@ -183,7 +213,19 @@ func (h *Handler) Handle(conn net.Conn) {
 	}
 
 	d := h.Policy.AllowHost(host)
-	// Peer IP-literal fallback: a known peer that is denied by name may still be
+	// Peer identity fallback: for a known east-west peer the authoritative identity
+	// is its workspace name from the roster, not a guest-supplied SNI/Host (an
+	// internal peer presents whatever internal cert/SNI it likes). When the
+	// host-based decision denied, re-evaluate against the peer name — so an operator
+	// who allowlisted the peer by name ("builder") permits the flow even when the
+	// guest's SNI differs. This is what makes a peer flow that LOOKS like TLS (SNI
+	// present) reach the L4-splice path instead of being denied on the SNI.
+	if !d.Allow && peer != "" && host != peer {
+		if nd := h.Policy.AllowHost(peer); nd.Allow {
+			d = nd
+		}
+	}
+	// Peer IP-literal fallback: a known peer that is still denied by name may be
 	// allowed if the operator allowlisted its IP literal. Default-deny stands —
 	// this only widens to an explicit IP entry, never beyond the allowlist. Tried
 	// only when the by-name decision denied.
@@ -208,7 +250,11 @@ func (h *Handler) Handle(conn net.Conn) {
 		h.Logger.Log("egress_deny", denyFields)
 		return // fail-closed: no upstream dial
 	}
-	if isTLS && h.CA != nil && allowed && !passthrough {
+	// MITM applies only to external/public TLS. A named-network peer destination
+	// (isPeer) is excluded: east-west TLS is L4-spliced below (splice + audit +
+	// allowlist + fail-closed) so a peer's self-signed/internal cert is not broken
+	// by interception, and upstream verification is never silently disabled.
+	if isTLS && h.CA != nil && allowed && !passthrough && !isPeer {
 		h.serveMITM(conn, br, host, dst, unlisted)
 		return
 	}
@@ -224,6 +270,14 @@ func (h *Handler) Handle(conn net.Conn) {
 	if unlisted {
 		allowFields["unlisted"] = true
 		closeFields["unlisted"] = true
+	}
+	// East-west legibility: a peer flow takes this L4-splice path (NO MITM), so
+	// stamp mitm:false to make the external-vs-peer split explicit in the audit —
+	// external MITM flows log mitm:true. Only on a peer flow; plain external
+	// HTTP/passthrough L4 records stay byte-identical (no mitm key).
+	if isPeer {
+		allowFields["mitm"] = false
+		closeFields["mitm"] = false
 	}
 	addPeerFields(allowFields, peer, peerIP)
 	addPeerFields(closeFields, peer, peerIP)

@@ -285,6 +285,316 @@ func TestMITMSwapInjectsCredential(t *testing.T) {
 	}
 }
 
+// TestHandlerSplicesPeerTLSWithoutMITM proves east-west (peer) TLS is L4-spliced,
+// NOT MITM'd: the upstream is a peer presenting a self-signed cert that is NOT in
+// UpstreamRoots, so MITM (which re-dials the upstream verifying against
+// UpstreamRoots/system roots) would FAIL upstream verification and break a
+// connection that worked before. The classifier marks the destination a peer, so
+// serveMITM is skipped and the connection L4-splices end to end. We assert: (a)
+// the connection completes (the client speaks TLS straight to the self-signed
+// upstream and bytes echo through), (b) egress_allow carries mitm=false + the peer
+// field, (c) NO egress_mitm_upstream_error was logged.
+func TestHandlerSplicesPeerTLSWithoutMITM(t *testing.T) {
+	// Upstream TLS server with a self-signed cert NOT trusted by UpstreamRoots.
+	// httptest mints its own self-signed CA; we deliberately do NOT give that CA
+	// to the mediator's UpstreamRoots, so a MITM re-dial would fail verification.
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "hello-peer")
+	}))
+	defer upstream.Close()
+	upstreamAddrPort := netip.MustParseAddrPort(upstream.Listener.Addr().String())
+
+	// The client (guest) trusts the upstream's self-signed cert directly — this is
+	// the east-west trust model: the guest verifies the peer's internal cert
+	// itself, end to end, because the mediator does NOT intercept.
+	clientRoots := upstream.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+
+	// A CA IS configured (so the only reason MITM is skipped is the peer
+	// classification, not a missing CA) and UpstreamRoots is set but does NOT
+	// contain the upstream's self-signed CA — proving MITM would break this flow.
+	testCA, err := NewCA("test-workspace-ca", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("NewCA: %v", err)
+	}
+	publicRoots := x509.NewCertPool()
+	if !publicRoots.AppendCertsFromPEM(testCA.CertPEM()) {
+		t.Fatal("seed UpstreamRoots")
+	}
+
+	// Allowlist the peer by its workspace name; PeerCache maps dst IP -> name.
+	pol, err := NewPolicy([]string{"builder"})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	peers, err := NewPeerCache([]string{"builder=" + upstreamAddrPort.Addr().String()})
+	if err != nil {
+		t.Fatalf("NewPeerCache: %v", err)
+	}
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:          "strict",
+		Policy:        pol,
+		CA:            testCA,
+		UpstreamRoots: publicRoots, // does NOT trust the self-signed upstream
+		Peers:         peers,
+		Logger:        log,
+		OrigDst:       func(net.Conn) (netip.AddrPort, error) { return upstreamAddrPort, nil },
+		Dial:          net.Dial,
+		SniffTimeout:  2 * time.Second,
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	handleDone := make(chan struct{})
+	go func() {
+		defer close(handleDone)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		h.Handle(conn)
+	}()
+
+	// Client connects to the mediator and speaks a real ClientHello (SNI present),
+	// so sniffHost sees isTLS=true with an SNI. The peer classification is keyed on
+	// the destination IP (PeerCache), independent of SNI, so the mediator L4-splices
+	// (peer), letting the TLS terminate end-to-end at the self-signed upstream which
+	// the client trusts directly. SNI is "example.com" because, being a true
+	// L4-splice, the client itself verifies the upstream's cert (valid for
+	// example.com) — proving NO interception. If the mediator MITM'd, the upstream
+	// re-dial would fail verification (self-signed not in UpstreamRoots) and no bytes
+	// would flow.
+	rawConn, err := net.DialTimeout("tcp", ln.Addr().String(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	defer rawConn.Close()
+	clientTLS := tls.Client(rawConn, &tls.Config{ServerName: "example.com", RootCAs: clientRoots})
+	if err := clientTLS.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake (peer L4-splice should reach self-signed upstream): %v", err)
+	}
+
+	// Confirm NO MITM: the leaf the client saw is the upstream's self-signed cert,
+	// issued for example.com by the httptest CA — NOT a CA-signed leaf for "builder".
+	leaf := clientTLS.ConnectionState().PeerCertificates[0]
+	if leaf.Issuer.CommonName == "test-workspace-ca" {
+		t.Fatalf("peer TLS was MITM'd: leaf issued by workspace CA %q", leaf.Issuer.CommonName)
+	}
+
+	if _, err := io.WriteString(clientTLS, "GET / HTTP/1.1\r\nHost: builder\r\nConnection: close\r\n\r\n"); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	body, err := io.ReadAll(clientTLS)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if !strings.Contains(string(body), "hello-peer") {
+		t.Errorf("response missing 'hello-peer'; got:\n%s", body)
+	}
+
+	clientTLS.Close()
+	select {
+	case <-handleDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle did not return after client close")
+	}
+
+	// (b) egress_allow carries mitm=false + the peer field.
+	assertEventWithField(t, log, "egress_allow", "mitm", false)
+	assertEventWithField(t, log, "egress_allow", "peer", "builder")
+	// (c) MITM was never attempted: no upstream-verification error.
+	for _, e := range log.Events {
+		if e["event"] == "egress_mitm_upstream_error" || e["event"] == "egress_mitm_handshake_error" {
+			t.Fatalf("peer TLS unexpectedly took the MITM path: %+v", e)
+		}
+	}
+}
+
+// TestHandlerMITMsExternalTLS proves a NON-peer (external/public) TLS destination
+// is still MITM'd when a CA + trusted UpstreamRoots are present. The PeerCache is
+// non-nil but does NOT contain the destination, so isPeer is false and the MITM
+// guard still fires. The client sees a workspace-CA-signed leaf and the audit
+// carries mitm=true.
+func TestHandlerMITMsExternalTLS(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "hello-external")
+	}))
+	defer upstream.Close()
+	upstreamRoots := upstream.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs
+	upstreamAddrPort := netip.MustParseAddrPort(upstream.Listener.Addr().String())
+
+	testCA, err := NewCA("test-workspace-ca", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("NewCA: %v", err)
+	}
+	pol, err := NewPolicy([]string{"example.com"})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
+	// A PeerCache exists with an unrelated peer; the external dst is NOT in it.
+	peers, err := NewPeerCache([]string{"builder=10.44.1.3"})
+	if err != nil {
+		t.Fatalf("NewPeerCache: %v", err)
+	}
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:          "strict",
+		Policy:        pol,
+		CA:            testCA,
+		UpstreamRoots: upstreamRoots,
+		Peers:         peers,
+		Logger:        log,
+		OrigDst:       func(net.Conn) (netip.AddrPort, error) { return upstreamAddrPort, nil },
+		Dial:          net.Dial,
+		SniffTimeout:  2 * time.Second,
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	handleDone := make(chan struct{})
+	go func() {
+		defer close(handleDone)
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		h.Handle(conn)
+	}()
+
+	caCertPool := x509.NewCertPool()
+	if !caCertPool.AppendCertsFromPEM(testCA.CertPEM()) {
+		t.Fatal("append CA cert")
+	}
+	rawConn, err := net.DialTimeout("tcp", ln.Addr().String(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	defer rawConn.Close()
+	// Client trusts ONLY the workspace CA: a successful handshake proves the
+	// mediator presented a CA-signed leaf (i.e. it MITM'd).
+	clientTLS := tls.Client(rawConn, &tls.Config{ServerName: "example.com", RootCAs: caCertPool})
+	if err := clientTLS.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake (external should be MITM'd): %v", err)
+	}
+	leaf := clientTLS.ConnectionState().PeerCertificates[0]
+	if leaf.Issuer.CommonName != "test-workspace-ca" {
+		t.Fatalf("external TLS was NOT MITM'd: leaf issuer %q", leaf.Issuer.CommonName)
+	}
+
+	if _, err := io.WriteString(clientTLS, "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n"); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	body, err := io.ReadAll(clientTLS)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	if !strings.Contains(string(body), "hello-external") {
+		t.Errorf("response missing 'hello-external'; got:\n%s", body)
+	}
+
+	clientTLS.Close()
+	select {
+	case <-handleDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle did not return after client close")
+	}
+
+	assertEventWithField(t, log, "egress_allow", "mitm", true)
+}
+
+// TestPeerAuditFieldsPresent verifies east-west audit legibility across allow and
+// deny: an allowed peer flow's egress_allow carries peer+peer_ip (and mitm=false on
+// the L4 path), and a denied peer flow's egress_deny carries peer_ip even when the
+// peer name is unknown (IP-only peer not on the allowlist).
+func TestPeerAuditFieldsPresent(t *testing.T) {
+	t.Run("allowed peer carries peer+peer_ip+mitm:false", func(t *testing.T) {
+		up, _ := net.Listen("tcp", "127.0.0.1:0")
+		defer up.Close()
+		go func() {
+			for {
+				c, err := up.Accept()
+				if err != nil {
+					return
+				}
+				go func() { io.Copy(c, c); c.Close() }() // echo
+			}
+		}()
+		upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+		pol, _ := NewPolicy([]string{"builder"})
+		peers, err := NewPeerCache([]string{"builder=" + upAddr.Addr().String()})
+		if err != nil {
+			t.Fatalf("NewPeerCache: %v", err)
+		}
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:         "strict",
+			Policy:       pol,
+			Peers:        peers,
+			Logger:       log,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+			Dial:         net.Dial,
+			SniffTimeout: 300 * time.Millisecond,
+		}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go func() { client.Write([]byte("RAWPING\n")) }()
+		br := bufio.NewReader(client)
+		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+		line, err := br.ReadString('\n')
+		if err != nil || line != "RAWPING\n" {
+			t.Fatalf("echo = %q err=%v", line, err)
+		}
+		client.Close()
+		<-done
+		assertEventWithField(t, log, "egress_allow", "peer", "builder")
+		assertEventWithField(t, log, "egress_allow", "peer_ip", upAddr.Addr().String())
+		assertEventWithField(t, log, "egress_allow", "mitm", false)
+	})
+
+	t.Run("denied IP-only peer carries peer_ip", func(t *testing.T) {
+		// An IP not in the PeerCache and not on the allowlist: name unknown, but the
+		// egress_deny must still carry peer_ip (the bare destination IP) for the
+		// east-west audit trail.
+		dst := netip.MustParseAddrPort("10.44.1.99:443")
+		pol, _ := NewPolicy([]string{"builder"})
+		peers, err := NewPeerCache([]string{"builder=10.44.1.3"})
+		if err != nil {
+			t.Fatalf("NewPeerCache: %v", err)
+		}
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:         "strict",
+			Policy:       pol,
+			Peers:        peers,
+			Logger:       log,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return dst, nil },
+			Dial:         func(string, string) (net.Conn, error) { t.Fatal("must not dial denied peer"); return nil, nil },
+			SniffTimeout: 300 * time.Millisecond,
+		}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go client.Write([]byte("RAWPING\n"))
+		<-done
+		client.Close()
+		assertEventWithField(t, log, "egress_deny", "peer_ip", dst.Addr().String())
+	})
+}
+
 // assertEventWithField checks that at least one logged event matches the given
 // event name AND has the expected field value.
 func assertEventWithField(t *testing.T, log *BufferLogger, event string, field string, value any) {
