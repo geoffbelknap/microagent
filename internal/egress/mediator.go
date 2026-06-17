@@ -31,6 +31,13 @@ type Handler struct {
 	Dial          func(network, addr string) (net.Conn, error)
 	SniffTimeout  time.Duration
 
+	// NameCache records DNS answer name->IP mappings observed by handleDNS (the
+	// filtering DNS forwarder) so later UDP/raw-IP flows can be policed by the
+	// hostname the guest resolved (reverse lookup of the flow's destination IP).
+	// handleDNS and the future reverse-lookup policy share this one cache. Nil is
+	// tolerated by handleDNS (it simply does not cache); production wiring sets it.
+	NameCache *NameCache
+
 	// BindAddr is the mediator's own listen address (gateway:port). It is the
 	// loop-guard reference: a captured connection or datagram whose recovered
 	// original destination equals BindAddr is the mediator's own forwarding leg
