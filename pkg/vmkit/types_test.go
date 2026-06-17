@@ -325,3 +325,22 @@ func TestEgressMediationOn(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkModeMediates(t *testing.T) {
+	// Modes that route guest egress through the mediator (plus the empty default,
+	// which resolves to "user").
+	mediates := []string{"", "  ", "user", "USER", " nat ", "named"}
+	for _, m := range mediates {
+		if !NetworkModeMediates(m) {
+			t.Errorf("NetworkModeMediates(%q) = false, want true", m)
+		}
+	}
+	// "bridged" (quarantined, unmediated) and "isolated" (no egress) never run a
+	// mediator, so they must NOT be considered mediatable.
+	notMediates := []string{"bridged", "BRIDGED", " bridged ", "isolated", "ISOLATED"}
+	for _, m := range notMediates {
+		if NetworkModeMediates(m) {
+			t.Errorf("NetworkModeMediates(%q) = true, want false", m)
+		}
+	}
+}

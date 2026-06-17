@@ -3,11 +3,14 @@
 package firecracker
 
 import (
+	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/egressprereq"
 	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -666,5 +669,53 @@ func TestEgressMediationGatesProvisioning(t *testing.T) {
 	}
 	if vmkit.EgressMediationOn(vmkit.EgressModeOff) {
 		t.Error("off must NOT provision the mediator")
+	}
+}
+
+// TestEgressMediatorLoggedReady exercises the readiness-marker scan used by
+// startEgressMediator to gate readiness on the post-UDP signal. The marker is
+// only emitted by egress.Run AFTER the transparent UDP socket opens, so its
+// presence (after the pre-spawn offset) is the supervisor's proof the mediator
+// is fully up — not merely TCP-bound.
+func TestEgressMediatorLoggedReady(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "egress-mediator.log")
+
+	// No file yet → not ready (keep polling).
+	if egressMediatorLoggedReady(logPath, 0) {
+		t.Fatal("missing logfile reported ready")
+	}
+
+	// A stale marker from a PRIOR run (the logfile is append-mode/reused). The
+	// scan must ignore everything before the recorded offset, so a marker that
+	// lives entirely below the offset must NOT count as this run's readiness.
+	stale := fmt.Sprintf("%s 10.43.7.1:41000\n", egress.ReadyMarker)
+	if err := os.WriteFile(logPath, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staleSize := int64(len(stale))
+	if egressMediatorLoggedReady(logPath, staleSize) {
+		t.Fatal("stale marker before the offset was treated as ready")
+	}
+
+	// Some non-marker startup chatter appended after the offset → still not ready.
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("egress_listen addr=10.43.7.1:41000\n"); err != nil {
+		t.Fatal(err)
+	}
+	if egressMediatorLoggedReady(logPath, staleSize) {
+		t.Fatal("non-marker chatter was treated as ready")
+	}
+
+	// This run's marker appended after the offset → ready.
+	if _, err := f.WriteString(fmt.Sprintf("%s 10.43.7.1:41000\n", egress.ReadyMarker)); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	if !egressMediatorLoggedReady(logPath, staleSize) {
+		t.Fatal("post-offset readiness marker was not detected")
 	}
 }

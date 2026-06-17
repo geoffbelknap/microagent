@@ -2465,6 +2465,15 @@ func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough
 	if err != nil {
 		return 0, 0, err
 	}
+	// The logfile is opened O_APPEND and reused across mediator restarts, so a
+	// stale readiness marker from a PRIOR run may already be present. Record the
+	// current size and scan only bytes written AFTER this offset, so the marker
+	// check observes this child's signal and never a stale one (which would be a
+	// false-positive ready).
+	var logStart int64
+	if info, serr := logFile.Stat(); serr == nil {
+		logStart = info.Size()
+	}
 	cmd := exec.Command(exe, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -2476,12 +2485,23 @@ func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough
 	pid := cmd.Process.Pid
 	_ = cmd.Process.Release()
 	_ = logFile.Close()
+	// Readiness requires BOTH the TCP listener to accept AND the mediator to have
+	// emitted its post-UDP readiness marker to its logfile. The TCP listener
+	// binds (in egress.Run) before the transparent UDP socket opens, so a
+	// TCP-dial-only probe can pass during the window where UDP has not yet come
+	// up — and if the UDP open then fails the mediator exits, leaving a confusing
+	// half-provisioned start. Gating on the marker (written only after UDP is up)
+	// closes that window. Fail-closed is preserved: a mediator that never signals
+	// ready (never opens UDP) → the marker never appears → the deadline trips and
+	// the start aborts after terminating the child.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		c, derr := net.DialTimeout("tcp", net.JoinHostPort(bindHost, strconv.Itoa(port)), 200*time.Millisecond)
 		if derr == nil {
 			_ = c.Close()
-			return pid, port, nil
+			if egressMediatorLoggedReady(logPath, logStart) {
+				return pid, port, nil
+			}
 		}
 		if time.Now().After(deadline) {
 			terminateAuxProcess(pid)
@@ -2489,6 +2509,31 @@ func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// egressMediatorLoggedReady reports whether the mediator's logfile contains the
+// post-UDP readiness marker (egress.ReadyMarker) in the bytes written at or
+// after startOffset. The offset scoping ignores any stale marker from a prior
+// run that shares this append-mode logfile. A read error (e.g. the file not yet
+// created) reports false so the caller keeps polling until the deadline.
+func egressMediatorLoggedReady(logPath string, startOffset int64) bool {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if startOffset > 0 {
+		if _, err := f.Seek(startOffset, io.SeekStart); err != nil {
+			return false
+		}
+	}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		if strings.HasPrefix(sc.Text(), egress.ReadyMarker) {
+			return true
+		}
+	}
+	return false
 }
 
 func startReadyPortForwarderProcess(ctx context.Context, opts Options, config vmkit.Config) (int, error) {

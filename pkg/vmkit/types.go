@@ -518,6 +518,23 @@ func EgressMediationOn(mode string) bool {
 	return m == EgressModeMediated || m == EgressModeStrict
 }
 
+// NetworkModeMediates reports whether the given network mode actually runs the
+// egress mediator. Only "user", "nat", and "named" route guest egress through
+// the mediator (provisionEgressMediation runs for those modes). "bridged"
+// (quarantined, explicitly unmediated) and "isolated" (no egress at all) never
+// start a mediator, so even with EgressMode=mediated/strict there is no mediator
+// to install a CA for. An empty mode resolves to the "user" default — which
+// mediates. Used to avoid telling the guest to trust a CA for a mediator that
+// will never exist (dead state).
+func NetworkModeMediates(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "user", "nat", "named":
+		return true
+	default:
+		return false
+	}
+}
+
 func ValidateMediationConfig(mediation MediationConfig) error {
 	if !mediation.Enabled && !mediation.Required && mediation.Port == 0 && strings.TrimSpace(mediation.Target) == "" && !mediation.FailClosed {
 		return nil

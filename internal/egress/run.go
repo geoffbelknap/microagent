@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// ReadyMarker is the prefix of the readiness line written to Options.Ready once
+// the mediator is FULLY up — specifically AFTER the transparent UDP socket has
+// opened, not merely after the TCP listener bound. The supervisor scans the
+// mediator child's stdout/logfile for this marker so it never treats the
+// mediator as ready during the window where the TCP listener accepts but the
+// UDP socket has not yet opened (and could still fail, exiting the mediator).
+// The bound TCP address follows the marker on the same line.
+const ReadyMarker = "egress_ready"
+
 // Options configures the mediator listener.
 type Options struct {
 	Mode         string // "mediated" (allow+audit all) or "strict"/"" (default-deny allowlist)
@@ -215,8 +224,13 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	logger.Log("egress_udp_listen", map[string]any{"addr": udpConn.LocalAddr().String()})
 	go serveUDP(udpConn, h)
 
+	// Signal readiness ONLY now — after both the TCP listener bound and the
+	// transparent UDP socket opened. Emitting an unambiguous marker (rather than
+	// a bare address) lets the supervisor scan the child's logfile for a
+	// post-UDP signal, closing the window where a TCP-only probe would pass
+	// before UDP came up. The bound address follows for diagnostics.
 	if opts.Ready != nil {
-		fmt.Fprintln(opts.Ready, ln.Addr().String())
+		fmt.Fprintf(opts.Ready, "%s %s\n", ReadyMarker, ln.Addr().String())
 	}
 	go func() {
 		<-ctx.Done()

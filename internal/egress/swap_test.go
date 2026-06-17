@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -156,6 +157,77 @@ func TestAcquireJWTBearer_SignsAssertion(t *testing.T) {
 	digest := sha256.Sum256([]byte(signingInput))
 	if err := rsa.VerifyPKCS1v15(&pk.PublicKey, crypto.SHA256, digest[:], sig); err != nil {
 		t.Fatalf("signature verify: %v", err)
+	}
+}
+
+func TestInjectRequests_POSTWithBodyForwardsBodyIntact(t *testing.T) {
+	tbl, err := LoadSwapTable([]byte(`swaps:
+  example:
+    type: static
+    domains: ["api.example.com"]
+    header: Authorization
+    format: "Bearer {key}"
+    key_ref: "env:K"
+`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	sw := &Swapper{Resolver: fakeResolver{"env:K": "REALSECRET"}, Cache: newTokenCache()}
+	log := &BufferLogger{}
+
+	const body = `{"hello":"world","n":42}`
+
+	// guest writes a POST carrying a body; injectRequests reads it from guestR
+	// and writes the rewritten request to upW; the test reads it back from upR.
+	guestR, guestW := net.Pipe()
+	upR, upW := net.Pipe()
+
+	done := make(chan error, 1)
+	go func() { done <- injectRequests(guestR, upW, "api.example.com", sw, tbl, log) }()
+
+	go func() {
+		req, _ := http.NewRequest("POST", "https://api.example.com/v1/thing", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer PLACEHOLDER")
+		req.Header.Set("Content-Type", "application/json")
+		_ = req.Write(guestW)
+		// Close the guest side so injectRequests returns (io.EOF) after the
+		// request has been forwarded.
+		_ = guestW.Close()
+	}()
+
+	got, err := http.ReadRequest(bufio.NewReader(upR))
+	if err != nil {
+		t.Fatalf("read upstream request: %v", err)
+	}
+	if got.Method != "POST" {
+		t.Fatalf("Method = %q, want POST", got.Method)
+	}
+	if h := got.Header.Get("Authorization"); h != "Bearer REALSECRET" {
+		t.Fatalf("Authorization = %q, want %q", h, "Bearer REALSECRET")
+	}
+	// The body must be forwarded byte-for-byte to upstream (http.ReadRequest +
+	// header rewrite + req.Write must not drop or corrupt it).
+	gotBody, err := io.ReadAll(got.Body)
+	if err != nil {
+		t.Fatalf("read upstream body: %v", err)
+	}
+	_ = got.Body.Close()
+	if string(gotBody) != body {
+		t.Fatalf("upstream body = %q, want %q", string(gotBody), body)
+	}
+
+	// Drain injectRequests; closing the pipes lets it finish if still writing.
+	_ = upR.Close()
+	_ = upW.Close()
+	<-done
+
+	// The real secret must never leak into the audit log.
+	for _, ev := range log.Events {
+		for k, v := range ev {
+			if s, ok := v.(string); ok && (s == "REALSECRET" || s == "Bearer REALSECRET") {
+				t.Fatalf("secret leaked into audit field %q=%q", k, s)
+			}
+		}
 	}
 }
 

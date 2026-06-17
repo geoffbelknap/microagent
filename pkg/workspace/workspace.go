@@ -887,11 +887,15 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
 	}
 	// CACertPort is allocated whenever egress mediation is on ("mediated" or
-	// "strict"; empty already normalized to "mediated" above). The vsock
-	// listener serves the per-workspace CA public cert to the guest at boot so
-	// guestinit can install it into the trust store before any HTTPS traffic.
+	// "strict"; empty already normalized to "mediated" above) AND the network
+	// mode actually runs the mediator. The vsock listener serves the
+	// per-workspace CA public cert to the guest at boot so guestinit can install
+	// it into the trust store before any HTTPS traffic. "bridged" (quarantined,
+	// unmediated) and "isolated" (no egress) never start a mediator — even with
+	// EgressMode=mediated/strict — so allocating the CA listener there would tell
+	// the guest to trust a CA for a mediator that will never exist (dead state).
 	var caCertPort uint32
-	if vmkit.EgressMediationOn(opts.EgressMode) {
+	if vmkit.EgressMediationOn(opts.EgressMode) && vmkit.NetworkModeMediates(opts.Network.Mode) {
 		caCertPort = DefaultCACertPort
 		listeners = append(listeners, vmkit.VsockListener{Port: caCertPort, Target: secretxfer.CACertTarget})
 	}

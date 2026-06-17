@@ -664,6 +664,56 @@ func TestRequestNoCACertForOff(t *testing.T) {
 	}
 }
 
+// TestRequestNoCACertForNonMediatedNetworkMode asserts that network modes which
+// never run the mediator (bridged — quarantined/unmediated; isolated — no
+// egress) do NOT allocate the CA-cert vsock listener or port even when
+// EgressMode is mediated/strict. Otherwise the guest would be told to install
+// (and trust) a CA for a mediator that will never exist — dead state.
+func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
+	cases := []struct {
+		name       string
+		network    vmkit.NetworkConfig
+		egressMode string
+	}{
+		{"bridged-mediated", vmkit.NetworkConfig{Mode: "bridged", Unsupported: true}, vmkit.EgressModeMediated},
+		{"bridged-strict", vmkit.NetworkConfig{Mode: "bridged", Unsupported: true}, vmkit.EgressModeStrict},
+		{"isolated-mediated", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeMediated},
+		{"isolated-strict", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeStrict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+				Network: tc.network, EgressMode: tc.egressMode}
+			req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+			if req.Config.CACertPort != 0 {
+				t.Errorf("%s: CACertPort = %d, want 0 (non-mediated network mode)", tc.name, req.Config.CACertPort)
+			}
+			if hasCACertListener(req.Config.VsockListeners) {
+				t.Errorf("%s: should not allocate a CACertTarget vsock listener: %+v", tc.name, req.Config.VsockListeners)
+			}
+		})
+	}
+}
+
+// TestRequestAllocatesCACertForMediatedNetworkModes confirms the mediatable
+// network modes (user, nat, named, and the empty default) DO allocate the
+// CA-cert listener when egress mediation is on — guarding that the new
+// network-mode gate did not over-tighten and suppress the listener for modes
+// that actually run the mediator.
+func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
+	for _, mode := range []string{"", "user", "nat", "named"} {
+		opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeMediated}
+		req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+		if req.Config.CACertPort != DefaultCACertPort {
+			t.Errorf("network mode %q: CACertPort = %d, want %d", mode, req.Config.CACertPort, DefaultCACertPort)
+		}
+		if !hasCACertListener(req.Config.VsockListeners) {
+			t.Errorf("network mode %q: missing CACertTarget vsock listener: %+v", mode, req.Config.VsockListeners)
+		}
+	}
+}
+
 func hasCACertListener(listeners []vmkit.VsockListener) bool {
 	for _, l := range listeners {
 		if l.Target == secretxfer.CACertTarget {
