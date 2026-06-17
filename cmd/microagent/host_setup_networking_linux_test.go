@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // withElevationStubs swaps the interactivity + elevation seams for the test and
@@ -25,6 +27,21 @@ func withElevationStubs(t *testing.T) (*bool, *[]string) {
 		return nil
 	}
 	return &called, &gotArgs
+}
+
+// TestSetupNetworkingResolvesFirecrackerSupervisorPath is a regression guard for
+// the empty-supervisor-path bug: runHostSetupNetworking used defaultSupervisorPath,
+// which returns an empty string for firecracker, so applyHostNetworking ran setcap
+// against an empty path and failed to set capabilities on a missing file, making
+// host setup-networking unusable on Linux/firecracker. The apply and revert paths
+// must receive a concrete supervisor path.
+func TestSetupNetworkingResolvesFirecrackerSupervisorPath(t *testing.T) {
+	if got := defaultSupervisorPath(vmkit.BackendFirecracker); got != "" {
+		t.Skipf("precondition changed: defaultSupervisorPath(firecracker) = %q, no longer empty", got)
+	}
+	if got := setupNetworkingSupervisorPath(vmkit.BackendFirecracker); got == "" {
+		t.Fatal("setupNetworkingSupervisorPath(firecracker) = \"\"; setcap needs a concrete path")
+	}
 }
 
 func TestSetupNetworkingConfirmThenElevates(t *testing.T) {
