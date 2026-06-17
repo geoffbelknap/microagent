@@ -196,6 +196,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "events" {
 		return runEvents(ctx, args[1:], stdout)
 	}
+	if args[0] == "egress" {
+		return runEgress(ctx, args[1:], stdout)
+	}
 	if args[0] == "stats" {
 		return runStats(ctx, args[1:], stdout)
 	}
@@ -2093,6 +2096,108 @@ func eventFollowComplete(events []workspace.EventFile) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// runEgress surfaces the egress mediator's audit log for a workspace — the
+// per-decision allow/deny/MITM/DNS/UDP record written to egress-access.jsonl. It
+// mirrors runEvents: a one-shot snapshot by default, or a live tail with
+// --follow. An absent audit file is not an error (mediation may be off, or no
+// decision has been recorded yet) — it reports as an empty list.
+func runEgress(ctx context.Context, args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	follow := false
+	fs := flag.NewFlagSet("egress", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.BoolVar(&follow, "follow", false, "Stream new egress decisions until the workspace stops or interrupted")
+	fs.BoolVar(&follow, "f", false, "Alias for --follow")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent egress <name> [--follow] [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	events, err := workspace.ReadEgressAudit(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	if follow {
+		if outputStructured() {
+			return fmt.Errorf("egress --follow is not supported with --json/--output json; omit --follow for a one-shot snapshot")
+		}
+		return followEgress(ctx, opts.StateDir, name, events, stdout)
+	}
+	if outputStructured() {
+		return writeJSON(stdout, map[string]any{"workspace": name, "egress": events})
+	}
+	for _, event := range events {
+		writeEgressLine(stdout, event)
+	}
+	return nil
+}
+
+// writeEgressLine renders one egress decision as a compact human line:
+// "<ts>  <event>  <host>  <reason-or-dst>". The trailing column prefers the
+// reason (why a decision was made) and falls back to the destination so a row
+// with neither still aligns.
+func writeEgressLine(stdout *os.File, event workspace.EgressEvent) {
+	host := event.Host
+	if host == "" {
+		host = "-"
+	}
+	detail := event.Reason
+	if detail == "" {
+		detail = event.Dst
+	}
+	line := fmt.Sprintf("%s  %s  %s", event.TS, event.Event, host)
+	if detail != "" {
+		line += "  " + detail
+	}
+	fmt.Fprintln(stdout, line)
+}
+
+// followEgress prints the recorded egress decisions, then streams newly
+// appended decisions, returning when the workspace reaches a terminal lifecycle
+// state or the caller interrupts. Unlike events.json (rewritten wholesale),
+// egress-access.jsonl is append-only, so new records are detected by a growing
+// record count. The terminal-state check reads the lifecycle event history,
+// since the audit log itself carries no lifecycle signal.
+func followEgress(ctx context.Context, stateDir, name string, seen []workspace.EgressEvent, stdout *os.File) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	for _, event := range seen {
+		writeEgressLine(stdout, event)
+	}
+	count := len(seen)
+	if lifecycle, err := workspace.ReadEvents(stateDir, name); err == nil && eventFollowComplete(lifecycle) {
+		return nil
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		events, err := workspace.ReadEgressAudit(stateDir, name)
+		if err != nil {
+			return err
+		}
+		if len(events) > count {
+			for _, event := range events[count:] {
+				writeEgressLine(stdout, event)
+			}
+			count = len(events)
+		}
+		if lifecycle, err := workspace.ReadEvents(stateDir, name); err == nil && eventFollowComplete(lifecycle) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -7178,6 +7283,7 @@ Commands:
   result               Show structured workspace result
   logs                 Show workspace logs
   events               Show or stream the lifecycle event history
+  egress               Show or stream the egress mediator's audit decisions
   stats                Show or stream workspace resource usage
   snapshot             Create, list, or remove workspace snapshots
   secret check         Resolve and validate secret references

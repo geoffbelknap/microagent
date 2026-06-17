@@ -6765,6 +6765,125 @@ func TestReadEventsMissingAndMalformed(t *testing.T) {
 	}
 }
 
+// setTextOutputForTest forces human (non-structured) output and restores the
+// global output state afterward, so a prior --json invocation in the same
+// package cannot leak into outputStructured().
+func setTextOutputForTest(t *testing.T) {
+	t.Helper()
+	prevFormat := outputFormat
+	prevMode := globalOutputMode
+	outputFormat = "text"
+	globalOutputMode = ""
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	t.Cleanup(func() {
+		outputFormat = prevFormat
+		globalOutputMode = prevMode
+	})
+}
+
+func TestRunEgressSnapshotHumanAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	name := "research"
+	wsDir := filepath.Join(dir, name)
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"event":"egress_listen","ts":"2026-06-16T00:00:00Z","addr":"127.0.0.1:0"}` + "\n" +
+		`{"event":"egress_allow","ts":"2026-06-16T00:00:01Z","host":"api.github.com","dst":"140.82.0.1:443"}` + "\n" +
+		`{"event":"egress_deny","ts":"2026-06-16T00:00:02Z","host":"evil.example","reason":"not allowlisted"}` + "\n"
+	if err := os.WriteFile(filepath.Join(wsDir, "egress-access.jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Human output: one line per decision.
+	t.Run("human", func(t *testing.T) {
+		setTextOutputForTest(t)
+		outPath := filepath.Join(dir, "egress-human.txt")
+		out, err := os.Create(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runEgress(context.Background(), []string{name, "--state-dir", dir}, out); err != nil {
+			t.Fatalf("runEgress human: %v", err)
+		}
+		if err := out.Close(); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(got)
+		if !strings.Contains(text, "egress_allow") || !strings.Contains(text, "api.github.com") ||
+			!strings.Contains(text, "egress_deny") || !strings.Contains(text, "not allowlisted") {
+			t.Fatalf("human output = %q", text)
+		}
+		if lines := strings.Count(strings.TrimRight(text, "\n"), "\n") + 1; lines != 3 {
+			t.Fatalf("expected 3 decision lines, got %d: %q", lines, text)
+		}
+	})
+
+	// Structured JSON via the global --json dispatch path.
+	t.Run("json", func(t *testing.T) {
+		outPath := filepath.Join(dir, "egress-json.txt")
+		out, err := os.Create(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := run(context.Background(), []string{"--json", "egress", name, "--state-dir", dir}, out); err != nil {
+			t.Fatalf("run --json egress: %v", err)
+		}
+		if err := out.Close(); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Workspace string `json:"workspace"`
+			Egress    []struct {
+				Event  string `json:"event"`
+				Host   string `json:"host"`
+				Reason string `json:"reason"`
+			} `json:"egress"`
+		}
+		if err := json.Unmarshal(got, &payload); err != nil {
+			t.Fatalf("unmarshal egress JSON: %v (%q)", err, got)
+		}
+		if payload.Workspace != name || len(payload.Egress) != 3 {
+			t.Fatalf("payload = %#v", payload)
+		}
+		if payload.Egress[1].Event != "egress_allow" || payload.Egress[1].Host != "api.github.com" {
+			t.Fatalf("egress[1] = %#v", payload.Egress[1])
+		}
+	})
+}
+
+func TestRunEgressAbsentAuditIsEmptyAndSucceeds(t *testing.T) {
+	setTextOutputForTest(t)
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "out.txt")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Workspace name with no audit log: mediation off / no decision yet.
+	if err := runEgress(context.Background(), []string{"never-mediated", "--state-dir", dir}, out); err != nil {
+		t.Fatalf("runEgress absent: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "" {
+		t.Fatalf("absent audit should produce no output, got %q", got)
+	}
+}
+
 func TestHighLevelCreateDetection(t *testing.T) {
 	if !hasFlagValue([]string{"--image", "ubuntu:24.04"}, "image") {
 		t.Fatal("expected --image to be detected")

@@ -339,6 +339,7 @@ func mcpTools() []map[string]any {
 		mcpTool("workspace.stats", "Sample current workspace resource usage.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.logs", "Read workspace serial logs. Defaults to a compact tail summary; pass format=full for the complete log buffer.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}, "tail_lines": map[string]any{"type": "integer"}}),
 		mcpTool("workspace.events", "Read workspace lifecycle events. Defaults to a compact recent-event summary; pass format=full for all events.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "format": map[string]any{"type": "string", "enum": []string{"summary", "full"}}, "limit": map[string]any{"type": "integer"}, "after_index": map[string]any{"type": "integer"}}),
+		mcpTool("workspace.egress", "Read the egress mediator's audit decisions (allow/deny/MITM/DNS/UDP) for a workspace. Egress mediation is on by default; an absent audit log returns an empty list, not an error.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.clone", "Clone a stopped workspace to a new workspace name.", []string{"source", "target"}, map[string]any{"source": map[string]any{"type": "string"}, "target": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.apply", "Apply supported changes from a workspace spec file.", []string{"file"}, map[string]any{"file": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
 		mcpTool("workspace.commit", "Commit a stopped workspace rootfs into a local OCI image, optionally pushing it.", []string{"name", "image"}, map[string]any{"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "push": map[string]any{"type": "boolean"}}),
@@ -652,7 +653,7 @@ func mcpToolIdempotency(name string) string {
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
 	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
-	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -661,7 +662,7 @@ func mcpToolIdempotency(name string) string {
 
 func mcpToolPrincipalScope(name string) []string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.clone", "workspace.apply", "workspace.commit":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit":
 		return []string{"workspace.lifecycle"}
 	case "snapshot.create", "snapshot.list", "snapshot.delete":
 		return []string{"workspace.snapshot"}
@@ -764,7 +765,11 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		result = summarizeWorkspaceLifecycle(result, "created")
 	}
 	if cliErr == nil && name == "workspace.inspect" && !strings.EqualFold(stringArg(args, "format"), "full") {
-		result = summarizeWorkspaceInspect(result)
+		inspectStateDir := stringArg(args, "state_dir")
+		if inspectStateDir == "" {
+			inspectStateDir = defaultStateDir()
+		}
+		result = summarizeWorkspaceInspect(result, inspectStateDir, stringArg(args, "name"))
 	}
 	if cliErr == nil && name == "workspace.logs" && !strings.EqualFold(stringArg(args, "format"), "full") {
 		result = summarizeWorkspaceLogs(result, intArg(args, "tail_lines"))
@@ -989,7 +994,7 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 	}
 }
 
-func summarizeWorkspaceInspect(result any) any {
+func summarizeWorkspaceInspect(result any, stateDir, name string) any {
 	resp, ok := result.(map[string]any)
 	if !ok {
 		return result
@@ -1008,9 +1013,65 @@ func summarizeWorkspaceInspect(result any) any {
 		summary["state"] = event["state"]
 		if identity, ok := event["identity"].(map[string]any); ok {
 			summary["workspace"] = identity["runtimeID"]
+			if name == "" {
+				if id, ok := identity["runtimeID"].(string); ok {
+					name = id
+				}
+			}
 		}
 	}
+	if eg := egressSummary(stateDir, name); eg != nil {
+		summary["egress_summary"] = eg
+	}
 	summary["next_decision_points"] = workspaceNextDecisionPoints(fmt.Sprint(summary["state"]))
+	return summary
+}
+
+// egressSummary reads the egress mediator's audit log and folds it into a
+// compact overview: a total decision count, a count for each event type, and a
+// per-host allow-vs-deny tally. It returns nil when the audit log is absent or
+// empty (mediation off / no decision yet) so the inspect summary omits the
+// egress_summary key cleanly rather than carrying an empty object. The counts
+// stay generic over the mediator's open-ended event vocabulary — every event
+// type the log contains is tallied under by_event, allow/deny are recognized by
+// suffix so DNS/UDP allow/deny variants fold into the per-host verdict view.
+func egressSummary(stateDir, name string) map[string]any {
+	if name == "" {
+		return nil
+	}
+	events, err := workspace.ReadEgressAudit(stateDir, name)
+	if err != nil || len(events) == 0 {
+		return nil
+	}
+	byEvent := map[string]int{}
+	allowByHost := map[string]int{}
+	denyByHost := map[string]int{}
+	for _, ev := range events {
+		byEvent[ev.Event]++
+		host := ev.Host
+		if host == "" {
+			host = ev.Dst
+		}
+		if host == "" {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(ev.Event, "_allow"):
+			allowByHost[host]++
+		case strings.HasSuffix(ev.Event, "_deny"):
+			denyByHost[host]++
+		}
+	}
+	summary := map[string]any{
+		"decision_count": len(events),
+		"by_event":       byEvent,
+	}
+	if len(allowByHost) > 0 {
+		summary["allow_by_host"] = allowByHost
+	}
+	if len(denyByHost) > 0 {
+		summary["deny_by_host"] = denyByHost
+	}
 	return summary
 }
 
@@ -1302,6 +1363,11 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag([]string{"--mode=ax", "events", stringArg(args, "name")}, "-state-dir", stateDir), nil
+	case "workspace.egress":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag([]string{"--mode=ax", "egress", stringArg(args, "name")}, "-state-dir", stateDir), nil
 	case "workspace.clone":
 		if err := requireToolArgs(args, name, "source", "target"); err != nil {
 			return nil, err

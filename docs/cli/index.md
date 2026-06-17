@@ -56,6 +56,7 @@ _Last updated: 2026-06-16_
 | [`ps`](/cli/ps/) | List running workspaces |
 | [`logs`](/cli/logs/) | Show boot/serial output |
 | [`events`](/cli/events/) | Show or stream the lifecycle event history |
+| [`egress`](/cli/egress/) | Show or stream the egress mediator's audit decisions |
 | [`stats`](/cli/stats/) | Show or stream workspace resource usage |
 | [`snapshot`](/cli/snapshot/) | Create, list, or remove workspace snapshots |
 | [`secret`](/cli/secret/) | Resolve and validate secret references |
