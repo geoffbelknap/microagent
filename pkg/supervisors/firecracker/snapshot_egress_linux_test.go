@@ -42,6 +42,7 @@ func writePersistedCA(t *testing.T, wsDir string) (certPEM, keyPEM []byte, certS
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
 		t.Fatal("minted CA cert PEM did not decode")
+		return
 	}
 	sum := sha256.Sum256(block.Bytes)
 	return certPEM, keyPEM, hex.EncodeToString(sum[:])
@@ -386,6 +387,7 @@ func TestForkReusesSourceCA(t *testing.T) {
 	block, _ := pem.Decode(sourceCertPEM)
 	if block == nil {
 		t.Fatal("source CA cert did not decode")
+		return
 	}
 	sum := sha256.Sum256(block.Bytes)
 	sourceSHA := hex.EncodeToString(sum[:])
