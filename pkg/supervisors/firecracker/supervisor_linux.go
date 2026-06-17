@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1286,6 +1287,49 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 		}
 		rules = append(rules, redirect)
 		egressPID = pid
+
+		// UDP mediation via TPROXY. The mediator already binds a transparent UDP
+		// socket on plan.Gateway:port (same addr:port as its TCP listener); the
+		// supervisor steers guest UDP there. This is fail-closed: any failure here
+		// (TPROXY modules absent, missing host prerequisites, etc.) tears down
+		// EVERYTHING already provisioned for this workspace and returns the guiding
+		// error so the start aborts rather than booting a guest whose UDP escapes
+		// the mediator.
+		//
+		// netnsLocal distinguishes the two prerequisite ownership models:
+		//   - user (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
+		//     reaped with the ephemeral netns; we provision them here.
+		//   - nat (host) mode: those are host-global infra owned by `host
+		//     setup-networking`; we only VERIFY them (fail-closed if absent) and
+		//     install just the per-workspace nft tproxy rule.
+		netnsLocal := mode == "user"
+		undoRouting, perr := prepareEgressTProxyNetns(netnsLocal, egressTProxyMark, egressTProxyTable)
+		if perr != nil {
+			terminateAuxProcess(pid)
+			_ = os.Remove(caCertPath)
+			_ = os.Remove(caKeyPath)
+			cleanupTransientFirewallRules(rules)
+			cleanupTransientNetworkDevices(cleanupDevices)
+			return nil, nil, nil, 0, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, perr)
+		}
+		mediatorAddr := netip.AddrPortFrom(netip.MustParseAddr(plan.Gateway), uint16(port))
+		tproxy, terr := installEgressTProxyRule(tap, plan.Subnet, egressTProxyMark, mediatorAddr)
+		if terr != nil {
+			undoRouting()
+			terminateAuxProcess(pid)
+			_ = os.Remove(caCertPath)
+			_ = os.Remove(caKeyPath)
+			cleanupTransientFirewallRules(rules)
+			cleanupTransientNetworkDevices(cleanupDevices)
+			return nil, nil, nil, 0, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, terr)
+		}
+		// The nft tproxy rule joins the transient rules slice so the standard
+		// firewall teardown (stop/quarantine/failed-start) removes it. The ip
+		// rule/local route are NOT firewall rules: in user mode they vanish with the
+		// ephemeral pasta netns (no per-stop teardown needed); in nat mode they are
+		// host infra we did not create here (undoRouting is a no-op). undoRouting is
+		// therefore only meaningful on the failure paths above.
+		rules = append(rules, tproxy)
 	}
 	return cleanupDevices, rules, &network, egressPID, nil
 }
@@ -1842,7 +1886,7 @@ func validMicroagentFirewallRule(rule transientFirewallRule) bool {
 		return false
 	}
 	if rule.Table == nftMicroagentTable {
-		if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain && rule.Chain != nftNATPreroutingChain {
+		if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain && rule.Chain != nftNATPreroutingChain && rule.Chain != nftManglePreroutingChain {
 			return false
 		}
 	} else if rule.Family == "ip" && rule.Table == nftUFWFilterTable && rule.Chain == nftUFWUserForwardChain {

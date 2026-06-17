@@ -3,10 +3,13 @@
 package firecracker
 
 import (
+	"net/netip"
+	"os"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/google/nftables/expr"
+	"github.com/vishvananda/netlink"
 )
 
 func TestBuildEgressRedirectRule(t *testing.T) {
@@ -31,6 +34,116 @@ func TestBuildEgressRedirectRule(t *testing.T) {
 func TestBuildEgressRedirectRuleRejectsBadSubnet(t *testing.T) {
 	if _, err := buildEgressRedirectRule("t", "not-a-cidr", 41000); err == nil {
 		t.Fatal("expected error for bad subnet")
+	}
+}
+
+func TestBuildEgressTProxyRule(t *testing.T) {
+	mediator := netip.AddrPortFrom(netip.MustParseAddr("10.43.7.1"), 41000)
+	rule, err := buildEgressTProxyRule("microtap0", "10.43.7.0/29", egressTProxyMark, mediator)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if rule.Chain != nftManglePreroutingChain || rule.Table != nftMicroagentTable {
+		t.Fatalf("wrong table/chain: %+v", rule.transientFirewallRule)
+	}
+	// The TPROXY rule must carry an expr.TProxy steering to the mediator's
+	// addr:port (registers), and must stamp the fwmark (a MetaKeyMARK source-
+	// register write) so the policy route delivers the datagram locally.
+	var hasTProxy, hasMarkSet bool
+	for _, e := range rule.Exprs {
+		switch x := e.(type) {
+		case *expr.TProxy:
+			hasTProxy = true
+			if x.RegAddr == 0 || x.RegPort == 0 {
+				t.Errorf("TProxy must steer via addr+port registers: %+v", x)
+			}
+		case *expr.Meta:
+			if x.Key == expr.MetaKeyMARK && x.SourceRegister {
+				hasMarkSet = true
+			}
+		}
+	}
+	if !hasTProxy {
+		t.Error("rule has no expr.TProxy")
+	}
+	if !hasMarkSet {
+		t.Error("rule does not set the fwmark (MetaKeyMARK source-register write)")
+	}
+}
+
+func TestBuildEgressTProxyRuleRejectsBadSubnet(t *testing.T) {
+	mediator := netip.AddrPortFrom(netip.MustParseAddr("10.43.7.1"), 41000)
+	if _, err := buildEgressTProxyRule("t", "not-a-cidr", egressTProxyMark, mediator); err == nil {
+		t.Fatal("expected error for bad subnet")
+	}
+}
+
+func TestBuildEgressTProxyRuleRejectsIPv6Mediator(t *testing.T) {
+	mediator := netip.AddrPortFrom(netip.MustParseAddr("fd00::1"), 41000)
+	if _, err := buildEgressTProxyRule("t", "10.43.7.0/29", egressTProxyMark, mediator); err == nil {
+		t.Fatal("expected error for non-IPv4 mediator addr")
+	}
+}
+
+// TestEgressTProxyRuleAcceptedByCleanupAllowlist guards that the TPROXY rule's
+// table/chain/comment pass validMicroagentFirewallRule, so the standard transient
+// firewall teardown (stop/quarantine/failed-start) will actually remove it rather
+// than silently skip it (which would orphan the steering rule).
+func TestEgressTProxyRuleAcceptedByCleanupAllowlist(t *testing.T) {
+	mediator := netip.AddrPortFrom(netip.MustParseAddr("10.43.7.1"), 41000)
+	rule, err := buildEgressTProxyRule("magtap0badc0de", "10.43.7.0/29", egressTProxyMark, mediator)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !validMicroagentFirewallRule(rule.transientFirewallRule) {
+		t.Fatalf("tproxy rule rejected by cleanup allowlist: %+v", rule.transientFirewallRule)
+	}
+}
+
+// allSysctlsPresent returns a readFile seam reporting every TPROXY sysctl at its
+// desired value, so a test can then knock one out to assert the fail-closed path.
+func allSysctlsPresent() func(string) ([]byte, error) {
+	return func(path string) ([]byte, error) {
+		if want, ok := egressTProxySysctls[path]; ok {
+			return []byte(want + "\n"), nil
+		}
+		return nil, os.ErrNotExist
+	}
+}
+
+func presentRule() func() ([]netlink.Rule, error) {
+	return func() ([]netlink.Rule, error) {
+		return []netlink.Rule{{Mark: egressTProxyMark, Table: egressTProxyTable}}, nil
+	}
+}
+
+// TestVerifyEgressTProxyPrereqsFailClosed documents the fail-closed gate that nat
+// mode relies on: when the host-global prerequisites (sysctls + fwmark ip rule)
+// are all present the verification passes; if ANY sysctl is wrong or the ip rule
+// is absent it returns an error. That error is what prepareTAPNATForStart wraps
+// with the "run 'microagent host setup-networking' or use --egress off" hint and
+// then tears everything down — so a misconfigured host fails the start instead of
+// booting a guest whose UDP escapes mediation.
+func TestVerifyEgressTProxyPrereqsFailClosed(t *testing.T) {
+	if err := verifyEgressTProxyPrereqs(egressTProxyMark, egressTProxyTable, allSysctlsPresent(), presentRule()); err != nil {
+		t.Fatalf("all prereqs present: unexpected error: %v", err)
+	}
+
+	// A wrong sysctl value must fail closed.
+	badSysctl := func(path string) ([]byte, error) {
+		if path == "/proc/sys/net/ipv4/ip_forward" {
+			return []byte("0\n"), nil
+		}
+		return allSysctlsPresent()(path)
+	}
+	if err := verifyEgressTProxyPrereqs(egressTProxyMark, egressTProxyTable, badSysctl, presentRule()); err == nil {
+		t.Error("wrong ip_forward sysctl: expected fail-closed error")
+	}
+
+	// An absent ip rule must fail closed.
+	noRule := func() ([]netlink.Rule, error) { return nil, nil }
+	if err := verifyEgressTProxyPrereqs(egressTProxyMark, egressTProxyTable, allSysctlsPresent(), noRule); err == nil {
+		t.Error("absent fwmark ip rule: expected fail-closed error")
 	}
 }
 
