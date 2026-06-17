@@ -306,24 +306,11 @@ func userNetworkStartErrorWithHint(message string) error {
 	return userNetworkStartError(trimmed)
 }
 
-// procRoot (and its alias usernsProcRoot) is concatenated in front of the
-// absolute "/proc/sys/..." gate paths to locate the user-namespace sysctl
-// files. It is "" in production (so the real /proc/sys is read) and is
-// overridden in tests with a tempdir so the proc reads are table-testable
-// against synthetic files. Both names are exported to the package's tests so
-// the test harness can override either; effectiveProcRoot resolves whichever is
-// set.
-var (
-	procRoot       = ""
-	usernsProcRoot = ""
-)
-
-func effectiveProcRoot() string {
-	if usernsProcRoot != "" {
-		return usernsProcRoot
-	}
-	return procRoot
-}
+// procRoot is concatenated in front of the absolute "/proc/sys/..." gate paths
+// to locate the user-namespace sysctl files. It is "" in production (so the
+// real /proc/sys is read) and is overridden in tests with a tempdir so the proc
+// reads are table-testable against synthetic files.
+var procRoot = ""
 
 const (
 	procUnprivilegedUserNSClone = "/proc/sys/kernel/unprivileged_userns_clone"
@@ -336,9 +323,8 @@ const (
 // gate that was tripped. Hardened hosts disable these with
 // kernel.unprivileged_userns_clone=0 or user.max_user_namespaces=0.
 func unprivilegedUserNSEnabled() (bool, string) {
-	root := effectiveProcRoot()
-	clone, clonePresent := readSysctlGate(root + procUnprivilegedUserNSClone)
-	maxNS, maxNSPresent := readSysctlGate(root + procMaxUserNamespaces)
+	clone, clonePresent := readSysctlGate(procRoot + procUnprivilegedUserNSClone)
+	maxNS, maxNSPresent := readSysctlGate(procRoot + procMaxUserNamespaces)
 	return userNSDecision(clone, clonePresent, maxNS, maxNSPresent)
 }
 
