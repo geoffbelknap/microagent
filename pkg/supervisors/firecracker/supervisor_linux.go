@@ -1345,6 +1345,24 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gat
 	// we did not create here (undoRouting is a no-op). undoRouting is therefore
 	// only meaningful on the failure paths above.
 	rules = append(rules, tproxy)
+
+	// Fail-closed IPv6 drop. The REDIRECT/TPROXY steering above is IPv4-only
+	// (nfproto ipv4) and the tap plan hands the guest an IPv4-only address, so v6
+	// is not a live leak today. But a guest that ever acquired a v6 address while
+	// mediated would have its v6 egress slip past the v4-only capture — an
+	// unmediated channel. We drop ALL guest v6 egress at the firewall so the
+	// "mediation is complete" invariant holds for the not-yet-mediated v6 path.
+	// Same fail-closed discipline as the steering rules: on failure tear down
+	// everything this helper provisioned and abort the start.
+	v6drop, v6err := installEgressV6DropRule(tap)
+	if v6err != nil {
+		undoRouting()
+		terminateAuxProcess(pid)
+		cleanupCA()
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: IPv6 fail-closed drop unavailable for workspace %s: %w", opts.Name, v6err)
+	}
+	rules = append(rules, v6drop)
 	return pid, rules, nil
 }
 
@@ -2003,7 +2021,7 @@ func validMicroagentFirewallRule(rule transientFirewallRule) bool {
 		return false
 	}
 	if rule.Table == nftMicroagentTable {
-		if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain && rule.Chain != nftNATPreroutingChain && rule.Chain != nftManglePreroutingChain {
+		if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain && rule.Chain != nftNATPreroutingChain && rule.Chain != nftManglePreroutingChain && rule.Chain != nftFilterPreroutingChain {
 			return false
 		}
 	} else if rule.Family == "ip" && rule.Table == nftUFWFilterTable && rule.Chain == nftUFWUserForwardChain {

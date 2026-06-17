@@ -23,6 +23,15 @@ const nftNATPreroutingChain = "MICROAGENT-NAT-PREROUTING"
 // cannot run from a nat chain), so it is kept separate from the REDIRECT chain.
 const nftManglePreroutingChain = "MICROAGENT-MANGLE-PREROUTING"
 
+// nftFilterPreroutingChain is the type-filter / hook-prerouting / priority-filter
+// chain the fail-closed IPv6 drop rule lives in. The v6 drop is a verdict (DROP),
+// not a NAT/mangle action, so it belongs in a plain filter chain rather than the
+// nat REDIRECT chain or the mangle TPROXY chain. Prerouting is the earliest hook
+// that sees guest-sourced packets arriving on the tap, so a v6 datagram is dropped
+// before any forwarding/NAT decision — fail-closed for the not-yet-mediated v6
+// path (see buildEgressV6DropRule).
+const nftFilterPreroutingChain = "MICROAGENT-FILTER-PREROUTING"
+
 // egressTProxyMark / egressTProxyTable are the fwmark stamped on TPROXY-steered
 // datagrams and the policy routing table the local route lives in. They alias
 // the authoritative values in pkg/egressprereq, which `host setup-networking`
@@ -104,6 +113,88 @@ func installEgressRedirectRule(tap, subnet string, port uint16) (transientFirewa
 		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: rule.Exprs, UserData: nftRuleUserData(rule.Comment)})
 		if err := conn.Flush(); err != nil {
 			return transientFirewallRule{}, networkPrivilegeError("install egress redirect rule", err)
+		}
+	}
+	return rule.transientFirewallRule, nil
+}
+
+// buildEgressV6DropRule builds a filter/prerouting rule that DROPs ALL guest
+// IPv6 egress arriving on the tap. It is the fail-closed half of "ship v4-only
+// mediation now": the steering rules (REDIRECT/TPROXY) match nfproto ipv4 only,
+// and the tap plan hands the guest an IPv4-only address, so there is no live v6
+// leak today. But if a guest ever acquired an IPv6 address while mediated, its
+// v6 egress would slip past the v4-only capture — an unmediated channel that
+// violates "mediation is complete". Dropping every guest v6 packet at the
+// firewall closes that channel until real v6 mediation (a v6 REDIRECT/TPROXY
+// path + a v6 tap plan) lands. See the "Future: IPv6 mediation" block in
+// internal/egress/origdst_linux.go for the deferred enable path.
+//
+// The match is deliberately coarse — iifname == tap AND nfproto == ipv6 — so it
+// catches TCP, UDP, ICMPv6, and anything else the guest emits over v6. It lives
+// in a plain filter chain (a DROP verdict, not NAT/mangle) at the prerouting
+// hook so the packet is dropped before any forward/NAT decision.
+func buildEgressV6DropRule(tap string) (nftFirewallRule, error) {
+	exprs := append(ifNameMatchExprs(expr.MetaKeyIIFNAME, tap),
+		// nfproto == ipv6
+		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV6}},
+		&expr.Verdict{Kind: expr.VerdictDrop},
+	)
+	return nftFirewallRule{
+		transientFirewallRule: transientFirewallRule{Table: nftMicroagentTable, Chain: nftFilterPreroutingChain, Comment: nftRuleComment(tap, "egress-v6-drop")},
+		Exprs:                 exprs,
+	}, nil
+}
+
+// ensureEgressFilterChain creates the filter/prerouting chain the IPv6 drop rule
+// lives in (type filter, hook prerouting, priority filter (0)). It mirrors
+// ensureEgressNATChain/ensureEgressMangleChain but uses ChainTypeFilter so a plain
+// DROP verdict is valid (NAT/mangle chains constrain the verdicts available).
+func ensureEgressFilterChain(conn *nftables.Conn) error {
+	table := microagentNFTTable()
+	conn.AddTable(table)
+	if err := conn.Flush(); err != nil {
+		return networkPrivilegeError("create firecracker nftables table "+nftMicroagentTable, err)
+	}
+	chain := &nftables.Chain{
+		Name:     nftFilterPreroutingChain,
+		Table:    table,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookPrerouting,
+		Priority: nftables.ChainPriorityFilter,
+	}
+	if _, err := conn.ListChain(table, chain.Name); err == nil {
+		return nil
+	}
+	conn.AddChain(chain)
+	if err := conn.Flush(); err != nil {
+		return networkPrivilegeError("create firecracker nftables chain "+chain.Name, err)
+	}
+	return nil
+}
+
+// installEgressV6DropRule ensures the filter chain and installs the IPv6 drop
+// rule, returning it as a transient rule for teardown (mirrors
+// installEgressRedirectRule / installEgressTProxyRule).
+func installEgressV6DropRule(tap string) (transientFirewallRule, error) {
+	rule, err := buildEgressV6DropRule(tap)
+	if err != nil {
+		return transientFirewallRule{}, err
+	}
+	conn := &nftables.Conn{}
+	if err := ensureEgressFilterChain(conn); err != nil {
+		return transientFirewallRule{}, err
+	}
+	table := nftRuleTable(rule.transientFirewallRule)
+	chain := &nftables.Chain{Name: rule.Chain, Table: table}
+	exists, err := nftRuleExists(conn, table, chain, rule.Comment)
+	if err != nil {
+		return transientFirewallRule{}, networkPrivilegeError("inspect egress v6 drop rule", err)
+	}
+	if !exists {
+		conn.AddRule(&nftables.Rule{Table: table, Chain: chain, Exprs: rule.Exprs, UserData: nftRuleUserData(rule.Comment)})
+		if err := conn.Flush(); err != nil {
+			return transientFirewallRule{}, networkPrivilegeError("install egress v6 drop rule", err)
 		}
 	}
 	return rule.transientFirewallRule, nil

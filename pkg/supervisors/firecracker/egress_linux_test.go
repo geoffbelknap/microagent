@@ -13,6 +13,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/google/nftables/expr"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 // TestEgressTProxyConstantsTrackSharedPackage is the anti-drift guard from the
@@ -133,6 +134,105 @@ func TestBuildEgressTProxyRule(t *testing.T) {
 	}
 	if !hasMarkSet {
 		t.Error("rule does not set the fwmark (MetaKeyMARK source-register write)")
+	}
+}
+
+// TestBuildEgressV6DropRuleMatchesTapV6 proves the fail-closed IPv6 drop rule:
+// for a mediated workspace it matches guest IPv6 egress arriving on the tap
+// (iifname == tap, nfproto == ipv6) and DROPs it. The guest is IPv4-only today,
+// so this is defense in depth — but if a guest ever acquired a v6 address while
+// mediated, its v6 egress would NOT be captured by the v4-only REDIRECT/TPROXY
+// rules, an unmediated channel. Dropping it at the firewall fails closed until
+// v6 mediation lands. The rule lives in a FILTER chain (not the nat chain), and
+// must carry the standard tagged comment so teardown removes it.
+func TestBuildEgressV6DropRuleMatchesTapV6(t *testing.T) {
+	rule, err := buildEgressV6DropRule("microtap0")
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if rule.Chain != nftFilterPreroutingChain || rule.Table != nftMicroagentTable {
+		t.Fatalf("wrong table/chain: %+v", rule.transientFirewallRule)
+	}
+	var hasIIF, hasNFProtoV6, hasDrop bool
+	for _, e := range rule.Exprs {
+		switch x := e.(type) {
+		case *expr.Meta:
+			switch x.Key {
+			case expr.MetaKeyIIFNAME:
+				hasIIF = true
+			case expr.MetaKeyNFPROTO:
+				hasNFProtoV6 = true
+			}
+		case *expr.Cmp:
+			// the nfproto comparison data must be the IPv6 protocol family
+			if len(x.Data) == 1 && x.Data[0] == unix.NFPROTO_IPV6 {
+				hasNFProtoV6 = hasNFProtoV6 && true
+			}
+		case *expr.Verdict:
+			if x.Kind == expr.VerdictDrop {
+				hasDrop = true
+			}
+		}
+	}
+	if !hasIIF {
+		t.Error("v6 drop rule does not match iifname (guest tap)")
+	}
+	if !hasNFProtoV6 {
+		t.Error("v6 drop rule does not match nfproto ipv6")
+	}
+	if !hasDrop {
+		t.Error("v6 drop rule has no expr.Verdict drop")
+	}
+}
+
+// TestEgressV6DropRuleAcceptedByCleanupAllowlist guards that the v6-drop rule's
+// table/chain/comment pass validMicroagentFirewallRule, so the standard transient
+// firewall teardown (stop/quarantine/failed-start) removes it rather than orphan
+// the drop rule on the host after the workspace is gone.
+func TestEgressV6DropRuleAcceptedByCleanupAllowlist(t *testing.T) {
+	rule, err := buildEgressV6DropRule("magtap0badc0de")
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if !validMicroagentFirewallRule(rule.transientFirewallRule) {
+		t.Fatalf("v6 drop rule rejected by cleanup allowlist: %+v", rule.transientFirewallRule)
+	}
+}
+
+// TestProvisionEgressInstallsV6Drop documents that the v6 fail-closed drop is part
+// of the mediated egress steering set. provisionEgressMediation needs root + a
+// netns to install rules, so this asserts the wiring deterministically without
+// touching host state: the v6-drop rule the provisioner installs (built from the
+// same tap) carries the expected tagged comment kind, lives in the filter chain,
+// and is accepted by the teardown allowlist — i.e. it is appended to the returned
+// transient rules and will be torn down with the workspace, exactly like the
+// REDIRECT and TPROXY rules.
+func TestProvisionEgressInstallsV6Drop(t *testing.T) {
+	const tap = "magtap0badc0de"
+	v6drop, err := buildEgressV6DropRule(tap)
+	if err != nil {
+		t.Fatalf("build v6 drop: %v", err)
+	}
+	// The provisioner tags every steering rule with nftRuleComment(tap, kind); the
+	// v6-drop's kind is the stable identifier teardown matches on.
+	if got, want := v6drop.Comment, nftRuleComment(tap, "egress-v6-drop"); got != want {
+		t.Fatalf("v6 drop comment = %q, want %q", got, want)
+	}
+	if v6drop.Chain != nftFilterPreroutingChain {
+		t.Fatalf("v6 drop chain = %q, want %q (filter, not nat/mangle)", v6drop.Chain, nftFilterPreroutingChain)
+	}
+	if !validMicroagentFirewallRule(v6drop.transientFirewallRule) {
+		t.Fatalf("v6 drop rule not accepted by teardown allowlist: %+v", v6drop.transientFirewallRule)
+	}
+	// And it is distinct from the v4 REDIRECT rule (a different chain and a
+	// different comment kind), so all the steering rules coexist in the returned
+	// rule slice rather than colliding.
+	redirect, err := buildEgressRedirectRule(tap, "10.43.7.0/29", 41000)
+	if err != nil {
+		t.Fatalf("build redirect: %v", err)
+	}
+	if v6drop.Chain == redirect.Chain || v6drop.Comment == redirect.Comment {
+		t.Fatalf("v6 drop must be distinct from redirect: v6=%+v redirect=%+v", v6drop.transientFirewallRule, redirect.transientFirewallRule)
 	}
 }
 
