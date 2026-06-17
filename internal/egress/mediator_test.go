@@ -195,6 +195,67 @@ func TestMediatedPassthroughNotUnlisted(t *testing.T) {
 	assertEventFieldAbsent(t, log, "egress_allow", "unlisted")
 }
 
+// TestHandlerLoopGuardDropsOwnBindAddr proves the loop guard: a captured TCP
+// connection whose recovered original destination equals the mediator's own bind
+// address (the mediator dialing itself — a readiness probe or residual self-dial)
+// is dropped and audited egress_loop_guard, and NO upstream Dial is attempted.
+// Without the guard, in mediated mode this would be forwarded to the listener and
+// spin into an unbounded self-loop. Guards against the observed TPROXY self-loop.
+func TestHandlerLoopGuardDropsOwnBindAddr(t *testing.T) {
+	bind := netip.MustParseAddrPort("10.43.7.1:43517")
+	dialed := false
+	pol, _ := NewPolicy(nil)
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:     "mediated", // mediated allows everything: only the guard can stop the self-loop
+		Policy:   pol,
+		Logger:   log,
+		BindAddr: bind,
+		// OrigDst returns the mediator's OWN bind address — the self-loop condition.
+		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return bind, nil },
+		Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
+		SniffTimeout: 200 * time.Millisecond,
+	}
+
+	_, server := net.Pipe()
+	done := make(chan struct{})
+	go func() { h.Handle(server); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Handle did not return; loop guard should drop immediately without sniffing")
+	}
+	if dialed {
+		t.Fatal("upstream dialed for the mediator's own bind address (self-loop not guarded)")
+	}
+	assertEvent(t, log, "egress_loop_guard")
+	// And it must NOT be audited as an allow (which is what produced the flood).
+	for _, e := range log.Events {
+		if e["event"] == "egress_allow" {
+			t.Fatalf("self-loop destination wrongly audited egress_allow: %+v", e)
+		}
+	}
+}
+
+// TestHandlerLoopGuardDisabledWhenBindUnset proves the guard is opt-in: with a
+// zero BindAddr (the default in tests that do not exercise it) a connection is
+// handled normally, so existing forwarding behavior is unchanged.
+func TestHandlerLoopGuardDisabledWhenBindUnset(t *testing.T) {
+	if (&Handler{}).isOwnBindAddr(netip.MustParseAddrPort("10.43.7.1:43517")) {
+		t.Fatal("zero BindAddr must disable the loop guard")
+	}
+	h := &Handler{BindAddr: netip.MustParseAddrPort("10.43.7.1:43517")}
+	if !h.isOwnBindAddr(netip.MustParseAddrPort("10.43.7.1:43517")) {
+		t.Fatal("matching bind address must trip the guard")
+	}
+	if h.isOwnBindAddr(netip.MustParseAddrPort("10.43.7.1:80")) {
+		t.Fatal("same IP different port must not trip the guard")
+	}
+	if h.isOwnBindAddr(netip.MustParseAddrPort("104.20.23.154:43517")) {
+		t.Fatal("different IP same port must not trip the guard")
+	}
+}
+
 func assertEvent(t *testing.T, log *BufferLogger, event string) {
 	t.Helper()
 	for _, e := range log.Events {

@@ -321,6 +321,37 @@ func eventLogged(log *BufferLogger, event string) bool {
 	return false
 }
 
+// TestUDPProxyLoopGuardDropsOwnBindAddr proves the UDP loop guard: a datagram
+// whose recovered original destination equals the mediator's own bind address is
+// dropped and audited egress_loop_guard, with NO upstream DialUDP attempted — the
+// UDP analogue of the TCP self-loop break.
+func TestUDPProxyLoopGuardDropsOwnBindAddr(t *testing.T) {
+	bind := netip.MustParseAddrPort("10.43.7.1:43517")
+	dialed := false
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:     "mediated",
+		Policy:   mustPolicy(t),
+		Logger:   log,
+		BindAddr: bind,
+		DialUDP:  func(netip.AddrPort) (net.Conn, error) { dialed = true; return nil, nil },
+		ReplyTo:  func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+	}
+	p := newUDPProxy(h)
+	defer p.closeAll()
+
+	// origDst == the mediator's own bind address: the self-loop condition.
+	p.handleUDPDatagram(netip.MustParseAddrPort("10.0.0.5:51000"), bind, []byte("ping"))
+
+	if dialed {
+		t.Fatal("upstream UDP dialed for the mediator's own bind address (self-loop not guarded)")
+	}
+	if p.flowCount() != 0 {
+		t.Fatalf("loop-guard datagram created a flow (count=%d), must be dropped", p.flowCount())
+	}
+	assertEvent(t, log, "egress_loop_guard")
+}
+
 func mustPolicy(t *testing.T) *Policy {
 	t.Helper()
 	p, err := NewPolicy([]string{"example.com"})

@@ -156,6 +156,13 @@ func serveUDP(conn *net.UDPConn, h *Handler) {
 // ReadMsgUDP loop so the proxy can be unit-tested with synthesized
 // (src, origDst, payload) tuples — no TPROXY, no cmsg delivery, no root.
 func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte) {
+	// Loop guard (mirrors the TCP path): a datagram whose recovered original
+	// destination is the mediator's own bind address is the mediator folding back
+	// on itself. Drop + audit instead of opening an upstream socket to ourselves.
+	if p.h.isOwnBindAddr(origDst) {
+		p.h.Logger.Log("egress_loop_guard", map[string]any{"dst": origDst.String(), "proto": "udp"})
+		return
+	}
 	// Phase 4 seam: resolve host from a DNS name cache (reverse lookup of
 	// origDst.Addr() against names the mediator's DNS proxy has vended) so the
 	// allowlist can match on hostnames. For now host == the bare destination IP.

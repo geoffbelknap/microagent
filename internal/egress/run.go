@@ -94,7 +94,14 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 			return err
 		}
 	}
-	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout}
+	// BindAddr is the mediator's own listen address; the Handler's loop guard
+	// drops any captured connection/datagram whose recovered original destination
+	// equals it (the mediator dialing itself). Derived from the actual listener so
+	// a :0 auto-assigned port is captured. A parse failure leaves it zero, which
+	// merely disables the loop guard (the nft rules still prevent the loop), so it
+	// is not fatal here.
+	bindAP, _ := netip.ParseAddrPort(ln.Addr().String())
+	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP}
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
 
 	// Mediation always includes UDP: open the transparent UDP socket on the same

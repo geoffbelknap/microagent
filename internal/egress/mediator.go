@@ -31,6 +31,17 @@ type Handler struct {
 	Dial          func(network, addr string) (net.Conn, error)
 	SniffTimeout  time.Duration
 
+	// BindAddr is the mediator's own listen address (gateway:port). It is the
+	// loop-guard reference: a captured connection or datagram whose recovered
+	// original destination equals BindAddr is the mediator's own forwarding leg
+	// (or a probe to the listener) folding back on itself — never genuine guest
+	// egress. Forwarding it would make the mediator dial itself, accept, recover
+	// the same address, and dial again, an unbounded self-loop. When BindAddr is
+	// set (non-zero) such a destination is dropped and audited egress_loop_guard
+	// instead of dialed. The zero value disables the guard (unit tests that do not
+	// exercise it leave it unset).
+	BindAddr netip.AddrPort
+
 	// DialUDP opens the upstream leg of a UDP flow to origDst. Injectable for
 	// tests; defaults (when nil) to a plain net.DialUDP to origDst. See udp.go.
 	DialUDP func(origDst netip.AddrPort) (net.Conn, error)
@@ -48,12 +59,36 @@ func DefaultOrigDst(c net.Conn) (netip.AddrPort, error) {
 	return OriginalDestination(c.(*net.TCPConn))
 }
 
+// isOwnBindAddr reports whether dst is the mediator's own listen address — the
+// loop-guard condition. The comparison is on the unmapped form so an IPv4 dst
+// and an IPv4-in-IPv6 BindAddr (or vice versa) still match. A zero BindAddr
+// disables the guard (returns false), so unit tests that do not set it are
+// unaffected.
+func (h *Handler) isOwnBindAddr(dst netip.AddrPort) bool {
+	if !h.BindAddr.IsValid() {
+		return false
+	}
+	return h.BindAddr.Port() == dst.Port() &&
+		h.BindAddr.Addr().Unmap() == dst.Addr().Unmap()
+}
+
 // Handle services one captured connection. It always closes conn.
 func (h *Handler) Handle(conn net.Conn) {
 	defer conn.Close()
 	dst, err := h.OrigDst(conn)
 	if err != nil {
 		h.Logger.Log("egress_origdst_error", map[string]any{"error": err.Error()})
+		return
+	}
+	// Loop guard: a connection whose recovered destination is the mediator's own
+	// bind address is the mediator folding back on itself (a readiness probe to
+	// the listener, or a residual self-dial). Forwarding it would dial the
+	// listener, accept, recover the same address, and dial again forever. Drop +
+	// audit instead of dialing. This is defense-in-depth: the supervisor's nft
+	// rules also keep the mediator's own traffic out of the capture path, but this
+	// breaks any residual loop cheaply and unconditionally.
+	if h.isOwnBindAddr(dst) {
+		h.Logger.Log("egress_loop_guard", map[string]any{"dst": dst.String(), "proto": "tcp"})
 		return
 	}
 	timeout := h.SniffTimeout
