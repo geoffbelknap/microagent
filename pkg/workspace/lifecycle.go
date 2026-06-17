@@ -693,8 +693,46 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err != nil {
 		return Result{}, err
 	}
+	// A mediated source baked its per-workspace egress CA into the guest's trust
+	// store. The fork resumes that exact guest, so it must re-arm the mediator with
+	// the SAME CA — the fork's restore path reuses the persisted CA from its own
+	// workspace dir and fails closed if it is absent. The CA lives in the source
+	// workspace dir (not the snapshot), so copy it into the fork's workspace dir.
+	// Keyed on the snapshot's recorded egress posture so a non-mediated source
+	// stays untouched.
+	if manifest.EgressCASHA256 != "" {
+		if err := copyForkEgressCA(opts.StateDir, sourceWorkspace, opts.Name); err != nil {
+			return Result{}, err
+		}
+	}
 	opts.FromSnapshot = tag
 	return Start(ctx, opts)
+}
+
+// copyForkEgressCA copies the source workspace's persisted egress CA cert and key
+// into the fork's workspace dir so the fork's restore path can reuse them (the
+// guest's baked trust store anchors on this CA). It fails closed if the source CA
+// is missing — a mediated fork must not boot with a re-minted or absent CA. The
+// fingerprint match against the snapshot manifest is enforced later by the
+// supervisor's acquireEgressCA on the restore path.
+func copyForkEgressCA(stateDir, sourceWorkspace, forkName string) error {
+	srcWsDir := filepath.Join(stateDir, sourceWorkspace)
+	dstWsDir := filepath.Join(stateDir, forkName)
+	if err := os.MkdirAll(dstWsDir, 0o700); err != nil {
+		return err
+	}
+	for _, f := range []struct {
+		name string
+		mode os.FileMode
+	}{
+		{"egress-ca.pem", 0o644},
+		{"egress-ca-key.pem", 0o600},
+	} {
+		if err := CopyFile(filepath.Join(srcWsDir, f.name), filepath.Join(dstWsDir, f.name), f.mode); err != nil {
+			return fmt.Errorf("copy source egress CA %s into fork: %w", f.name, err)
+		}
+	}
+	return nil
 }
 
 func copySnapshotInto(srcDir, dstDir string) error {

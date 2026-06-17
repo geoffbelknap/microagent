@@ -1131,3 +1131,55 @@ func TestApplyManifestPreservesOffForStart(t *testing.T) {
 		t.Fatalf("off workspace allocated CA-cert listener on start: port=%d listeners=%#v", req.Config.CACertPort, req.Config.VsockListeners)
 	}
 }
+
+// TestCopyForkEgressCABringsCAIntoForkDir proves that forking a mediated
+// workspace copies the source's persisted egress CA cert+key into the fork's
+// workspace dir (with the correct perms), so the fork's restore path can reuse
+// the SAME CA the guest's baked trust store was built against rather than
+// failing closed or re-minting.
+func TestCopyForkEgressCABringsCAIntoForkDir(t *testing.T) {
+	stateDir := t.TempDir()
+	srcDir := filepath.Join(stateDir, "source")
+	if err := os.MkdirAll(srcDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	certBytes := []byte("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
+	keyBytes := []byte("-----BEGIN EC PRIVATE KEY-----\nfake\n-----END EC PRIVATE KEY-----\n")
+	if err := os.WriteFile(filepath.Join(srcDir, "egress-ca.pem"), certBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "egress-ca-key.pem"), keyBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyForkEgressCA(stateDir, "source", "fork"); err != nil {
+		t.Fatalf("copyForkEgressCA: %v", err)
+	}
+	forkDir := filepath.Join(stateDir, "fork")
+	gotCert, err := os.ReadFile(filepath.Join(forkDir, "egress-ca.pem"))
+	if err != nil {
+		t.Fatalf("fork CA cert not copied: %v", err)
+	}
+	if string(gotCert) != string(certBytes) {
+		t.Error("fork CA cert bytes differ from source")
+	}
+	keyInfo, err := os.Stat(filepath.Join(forkDir, "egress-ca-key.pem"))
+	if err != nil {
+		t.Fatalf("fork CA key not copied: %v", err)
+	}
+	if keyInfo.Mode().Perm() != 0o600 {
+		t.Errorf("fork CA key perm = %o, want 0600", keyInfo.Mode().Perm())
+	}
+}
+
+// TestCopyForkEgressCAFailsClosedWhenSourceMissing proves a mediated fork whose
+// source CA is gone is refused rather than booting with no reusable CA.
+func TestCopyForkEgressCAFailsClosedWhenSourceMissing(t *testing.T) {
+	stateDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(stateDir, "source"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyForkEgressCA(stateDir, "source", "fork"); err == nil {
+		t.Fatal("expected error forking mediated workspace with missing source CA, got nil")
+	}
+}

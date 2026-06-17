@@ -228,7 +228,7 @@ func TestProvisionEgressMediationOffIsNoOp(t *testing.T) {
 	}
 	for _, cfg := range cases {
 		for _, mode := range []string{"nat", "user", "named"} {
-			pid, rules, err := provisionEgressMediation(opts, cfg, mode, "microtap0", "10.44.1.1", "10.44.1.0/24", nil)
+			pid, rules, err := provisionEgressMediation(opts, cfg, mode, "microtap0", "10.44.1.1", "10.44.1.0/24", nil, false, "")
 			if err != nil {
 				t.Fatalf("mode %q cfg %+v: unexpected error: %v", mode, cfg, err)
 			}
