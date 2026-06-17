@@ -5,6 +5,8 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -42,6 +44,56 @@ func TestStaticAcquire_FailsClosedOnNilResolver(t *testing.T) {
 	sw := &Swapper{Resolver: nil, Cache: newTokenCache()}
 	if _, _, err := sw.acquire(context.Background(), e); err == nil {
 		t.Fatal("expected fail-closed error when resolver is nil")
+	}
+}
+
+func TestAcquireOAuth2CC_FetchesAndCaches(t *testing.T) {
+	var hits int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+		}
+		if got := r.PostFormValue("grant_type"); got != "client_credentials" {
+			t.Errorf("grant_type = %q, want client_credentials", got)
+		}
+		if got := r.PostFormValue("client_id"); got != "cid" {
+			t.Errorf("client_id = %q, want cid", got)
+		}
+		if got := r.PostFormValue("client_secret"); got != "csec" {
+			t.Errorf("client_secret = %q, want csec", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"AT","expires_in":3600}`))
+	}))
+	defer ts.Close()
+
+	sw := &Swapper{
+		Resolver: fakeResolver{"env:CID": "cid", "env:CSEC": "csec"},
+		Cache:    newTokenCache(),
+		HTTP:     ts.Client(),
+	}
+	e := SwapEntry{
+		Name:            "svc",
+		Type:            "oauth2-cc",
+		TokenURL:        ts.URL,
+		ClientIDRef:     "env:CID",
+		ClientSecretRef: "env:CSEC",
+		Scopes:          []string{"read"},
+	}
+
+	for i := 0; i < 2; i++ {
+		hdr, val, err := sw.acquire(context.Background(), e)
+		if err != nil {
+			t.Fatalf("acquire #%d: %v", i, err)
+		}
+		if hdr != "Authorization" || val != "Bearer AT" {
+			t.Fatalf("acquire #%d = %q=%q, want Authorization=Bearer AT", i, hdr, val)
+		}
+	}
+
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Fatalf("token endpoint hit %d times, want 1 (second acquire must be a cache hit)", got)
 	}
 }
 

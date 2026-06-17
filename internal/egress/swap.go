@@ -25,11 +25,14 @@ type resolver interface {
 
 // Swapper acquires the real credential for a swap entry and renders the header
 // value to inject. Resolver dereferences secret refs; Cache holds acquired
-// tokens for the (later-phase) expiring strategies. The static strategy does
-// not use Cache. A Swapper with a nil Resolver fails closed on acquire.
+// tokens for the expiring strategies (oauth2-cc, jwt-bearer); the static
+// strategy does not use Cache. HTTP performs token-endpoint exchanges and is
+// injectable for tests; a nil HTTP defaults to a 10s-timeout client. A Swapper
+// with a nil Resolver fails closed on acquire.
 type Swapper struct {
 	Resolver resolver
 	Cache    *tokenCache
+	HTTP     *http.Client
 }
 
 // acquire resolves and renders the credential header for entry e, returning the
@@ -50,18 +53,16 @@ func (sw *Swapper) acquire(ctx context.Context, e SwapEntry) (header, value stri
 		}
 		return headerOrDefault(e.Header), render(e.Format, "key", key, key), nil
 	case "oauth2-cc":
-		return sw.acquireOAuth2CC(ctx, e)
+		tok, err := sw.acquireOAuth2CC(ctx, e)
+		if err != nil {
+			return "", "", err
+		}
+		return headerOrDefault(e.Header), render(e.Format, "token", tok, "Bearer "+tok), nil
 	case "jwt-bearer":
 		return sw.acquireJWTBearer(ctx, e)
 	default:
 		return "", "", fmt.Errorf("egress: swap %q: unknown type %q", e.Name, e.Type)
 	}
-}
-
-// acquireOAuth2CC is a Phase 4 stub: it always errors so acquire's switch is
-// total without yet performing an OAuth2 client-credentials exchange.
-func (sw *Swapper) acquireOAuth2CC(_ context.Context, _ SwapEntry) (string, string, error) {
-	return "", "", errors.New("not implemented")
 }
 
 // acquireJWTBearer is a Phase 5 stub: it always errors so acquire's switch is
