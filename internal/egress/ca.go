@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,7 +26,18 @@ type CA struct {
 
 	mu     sync.Mutex
 	leaves map[string]*tls.Certificate
+
+	// signs counts how many leaf certificates have actually been signed (cache
+	// misses only); a cache hit does not increment it. It is observability for
+	// the leaf-cache benefit — the warm-cache benchmark asserts zero new signs
+	// across its iterations. Test-supporting; never read on the hot path.
+	signs atomic.Int64
 }
+
+// SignCount returns the number of leaf certificates the CA has signed (cache
+// misses). It is used by benchmarks/tests to prove the per-SNI leaf cache is
+// hit (a warm-cache run signs nothing new). Safe for concurrent use.
+func (c *CA) SignCount() int64 { return c.signs.Load() }
 
 // maxCachedLeaves bounds the per-SNI leaf cache so a guest hitting a wildcard
 // allowlist entry (e.g. ".s3.amazonaws.com") across thousands of distinct
@@ -152,6 +164,7 @@ func (c *CA) LeafFor(serverName string) (*tls.Certificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("egress: sign leaf for %q: %w", serverName, err)
 	}
+	c.signs.Add(1) // a real sign (cache miss); cache hits return above without incrementing
 	tc := &tls.Certificate{Certificate: [][]byte{der, c.cert.Raw}, PrivateKey: key}
 	if len(c.leaves) >= maxCachedLeaves {
 		for k := range c.leaves { // evict one arbitrary entry to stay bounded
