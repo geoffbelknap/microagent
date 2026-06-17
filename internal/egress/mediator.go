@@ -26,6 +26,13 @@ type Handler struct {
 	Passthrough   *Policy
 	CA            *CA
 	UpstreamRoots *x509.CertPool
+
+	// Swaps is the host-indexed credential-swap table loaded from
+	// Options.SwapConfigPath. It is plumbed through but UNUSED this phase (a
+	// later phase injects the swapped credential into the intercepted plaintext
+	// request). Nil when no swap config is configured, in which case the request
+	// path is byte-identical to today.
+	Swaps *SwapTable
 	Logger        Logger
 	OrigDst       func(net.Conn) (netip.AddrPort, error)
 	Dial          func(network, addr string) (net.Conn, error)

@@ -95,6 +95,63 @@ func TestServeLoadsCA(t *testing.T) {
 	}
 }
 
+// TestServeLoadsSwapConfig verifies the Phase-1 wiring: Serve reads the
+// SwapConfigPath file, loads it into a SwapTable, and starts serving with no
+// error. No injection happens this phase — this only proves the config path is
+// plumbed through and a valid file does not break startup.
+func TestServeLoadsSwapConfig(t *testing.T) {
+	dir := t.TempDir()
+	swapPath := filepath.Join(dir, "swaps.yaml")
+	swapYAML := `swaps:
+  example:
+    type: static
+    domains: ["api.example.com"]
+    header: Authorization
+    format: "Bearer {key}"
+    key_ref: "env:EXAMPLE_KEY"
+`
+	if err := os.WriteFile(swapPath, []byte(swapYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Serve(ctx, ln, Options{
+			Allow:          []string{"api.example.com"},
+			SwapConfigPath: swapPath,
+			Logger:         &BufferLogger{},
+			OrigDst:        func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("127.0.0.1:9"), nil },
+			Ready:          &strings.Builder{},
+			UDPListen:      plainUDPListen(t),
+		})
+	}()
+	// Connect once so we know it is serving, then shut down.
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	_ = c.Close()
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Serve returned error: %v", err)
+	}
+}
+
+func TestServeBadSwapConfigFailsClosed(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	err := Serve(context.Background(), ln, Options{
+		Allow:          []string{"x.com"},
+		SwapConfigPath: "/nonexistent/swaps.yaml",
+		Logger:         &BufferLogger{},
+		OrigDst:        func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("127.0.0.1:9"), nil },
+		UDPListen:      plainUDPListen(t),
+	})
+	if err == nil {
+		t.Fatal("expected Serve to fail on missing swap config file")
+	}
+}
+
 func TestServeBadCAPathFailsClosed(t *testing.T) {
 	ln, _ := net.Listen("tcp", "127.0.0.1:0")
 	err := Serve(context.Background(), ln, Options{

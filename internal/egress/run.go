@@ -25,6 +25,11 @@ type Options struct {
 	CAKeyPath    string
 	Passthrough  []string // allowed hosts that are NOT intercepted (L4 splice + audit)
 
+	// SwapConfigPath, if set, points at a credential-swaps YAML file. Serve
+	// reads + loads it into a SwapTable and stores it on the Handler. A load
+	// error is fatal (fail-closed). UNUSED beyond loading this phase.
+	SwapConfigPath string
+
 	// UDPListen opens the transparent UDP socket the mediator serves. Defaults to
 	// transparentUDPListener (IP_TRANSPARENT + IP_RECVORIGDSTADDR). Injectable for tests.
 	UDPListen func(addr netip.AddrPort) (*net.UDPConn, error)
@@ -94,6 +99,24 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 			return err
 		}
 	}
+	// Credential-swap config: load the host-indexed swap table if a path is set.
+	// Fail closed — a read or parse error aborts startup so a later injection
+	// phase never runs against a misconfigured (or absent) table that was
+	// expected. swaps stays nil when no path is configured, leaving the request
+	// path byte-identical to today.
+	var swaps *SwapTable
+	if opts.SwapConfigPath != "" {
+		data, rerr := os.ReadFile(opts.SwapConfigPath)
+		if rerr != nil {
+			_ = ln.Close()
+			return fmt.Errorf("egress: read swap config: %w", rerr)
+		}
+		swaps, rerr = LoadSwapTable(data)
+		if rerr != nil {
+			_ = ln.Close()
+			return rerr
+		}
+	}
 	// BindAddr is the mediator's own listen address; the Handler's loop guard
 	// drops any captured connection/datagram whose recovered original destination
 	// equals it (the mediator dialing itself). Derived from the actual listener so
@@ -101,7 +124,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// merely disables the loop guard (the nft rules still prevent the loop), so it
 	// is not fatal here.
 	bindAP, _ := netip.ParseAddrPort(ln.Addr().String())
-	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP}
+	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps}
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
 
 	// Mediation always includes UDP: open the transparent UDP socket on the same

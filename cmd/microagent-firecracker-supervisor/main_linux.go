@@ -64,6 +64,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		var bindPort int
 		var allow egressAllowFlag
 		var caCert, caKey string
+		var swapConfig string
 		var passthrough egressAllowFlag
 		fs.StringVar(&mode, "mode", "", "Enforcement mode: mediated (allow+audit all) or strict (default-deny allowlist)")
 		fs.StringVar(&bindHost, "bind-host", "127.0.0.1", "Bind host")
@@ -72,6 +73,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		fs.Var(&allow, "allow", "Allowlisted destination host (repeatable)")
 		fs.StringVar(&caCert, "ca-cert", "", "CA cert PEM path (enables TLS interception)")
 		fs.StringVar(&caKey, "ca-key", "", "CA key PEM path")
+		fs.StringVar(&swapConfig, "swap-config", "", "credential-swaps.yaml path")
 		fs.Var(&passthrough, "passthrough", "Passthrough destination host (allowed, not intercepted; repeatable)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
@@ -81,7 +83,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		mctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		return egress.Run(mctx, egress.Options{Mode: mode, BindHost: bindHost, BindPort: bindPort, AuditLogPath: auditLog, Allow: []string(allow), CACertPath: caCert, CAKeyPath: caKey, Passthrough: []string(passthrough), Ready: stdout})
+		return egress.Run(mctx, egress.Options{Mode: mode, BindHost: bindHost, BindPort: bindPort, AuditLogPath: auditLog, Allow: []string(allow), CACertPath: caCert, CAKeyPath: caKey, SwapConfigPath: swapConfig, Passthrough: []string(passthrough), Ready: stdout})
 	}
 	req, err := readRequest(args)
 	if err != nil {
