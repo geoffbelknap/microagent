@@ -59,16 +59,14 @@ func (sw *Swapper) acquire(ctx context.Context, e SwapEntry) (header, value stri
 		}
 		return headerOrDefault(e.Header), render(e.Format, "token", tok, "Bearer "+tok), nil
 	case "jwt-bearer":
-		return sw.acquireJWTBearer(ctx, e)
+		tok, err := sw.acquireJWTBearer(ctx, e)
+		if err != nil {
+			return "", "", err
+		}
+		return headerOrDefault(e.Header), render(e.Format, "token", tok, "Bearer "+tok), nil
 	default:
 		return "", "", fmt.Errorf("egress: swap %q: unknown type %q", e.Name, e.Type)
 	}
-}
-
-// acquireJWTBearer is a Phase 5 stub: it always errors so acquire's switch is
-// total without yet minting a signed JWT bearer assertion.
-func (sw *Swapper) acquireJWTBearer(_ context.Context, _ SwapEntry) (string, string, error) {
-	return "", "", errors.New("not implemented")
 }
 
 // resolveStr resolves ref to a non-empty string secret. An empty ref, a nil

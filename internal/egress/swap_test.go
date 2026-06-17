@@ -3,9 +3,17 @@ package egress
 import (
 	"bufio"
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -94,6 +102,60 @@ func TestAcquireOAuth2CC_FetchesAndCaches(t *testing.T) {
 
 	if got := atomic.LoadInt32(&hits); got != 1 {
 		t.Fatalf("token endpoint hit %d times, want 1 (second acquire must be a cache hit)", got)
+	}
+}
+
+func TestAcquireJWTBearer_SignsAssertion(t *testing.T) {
+	pk, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pkPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(pk),
+	})
+
+	sw := &Swapper{
+		Resolver: fakeResolver{"env:PK": string(pkPEM)},
+		Cache:    newTokenCache(),
+	}
+	e := SwapEntry{
+		Name:          "partner",
+		Type:          "jwt-bearer",
+		Algorithm:     "RS256",
+		SigningKeyRef: "env:PK",
+		Claims: map[string]string{
+			"iss": "app-1",
+			"aud": "https://api.partner.com",
+		},
+		TokenTTLSeconds: 600,
+	}
+
+	hdr, val, err := sw.acquire(context.Background(), e)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if hdr != "Authorization" {
+		t.Fatalf("header = %q, want Authorization", hdr)
+	}
+	if !strings.HasPrefix(val, "Bearer ") {
+		t.Fatalf("value = %q, want Bearer prefix", val)
+	}
+	jwt := strings.TrimPrefix(val, "Bearer ")
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 {
+		t.Fatalf("jwt has %d segments, want 3", len(parts))
+	}
+
+	// Verify the RS256 signature over header.payload with the public key.
+	signingInput := parts[0] + "." + parts[1]
+	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("decode signature: %v", err)
+	}
+	digest := sha256.Sum256([]byte(signingInput))
+	if err := rsa.VerifyPKCS1v15(&pk.PublicKey, crypto.SHA256, digest[:], sig); err != nil {
+		t.Fatalf("signature verify: %v", err)
 	}
 }
 
