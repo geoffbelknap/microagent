@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-17_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -226,6 +226,65 @@ Fixes:
 
 - **Stand up the mediation listener** at the declared `host:port` before `microagent start`.
 - **For development only**, pass `--mediation-optional` on `microagent create` to allow startup without the channel. Don't ship this - the channel is fail-closed for a reason ([security](/security/)).
+
+## Egress mediation
+
+### A `mediated` or `strict` workspace fails to start with a TPROXY error
+
+```text
+egress: UDP mediation (TPROXY) unavailable for workspace research — run 'microagent host setup-networking' or use --egress off
+```
+
+[Egress mediation](/concepts/egress-mediation/) mediates UDP and DNS via Linux
+TPROXY, which needs kernel modules (`nft_tproxy`, `nf_tproxy_ipv4`, `xt_socket`,
+`nf_socket_ipv4`) and a few sysctls that a rootless workspace can't load itself.
+When they're missing, a `mediated` or `strict` workspace **fails closed** - it
+refuses to start rather than run with an unmediated UDP/DNS channel.
+
+Fixes:
+
+- **Provision the host once, as root:** `microagent host setup-networking` loads
+  the modules and sets the sysctls. `microagent doctor` reports whether they're
+  in place.
+- **Drop mediation** if you genuinely don't want it: `--egress off`.
+
+This is the intended fail-closed behavior - an enforcement gap never silently
+widens what the agent can reach. See [`host`](/cli/host/) and
+[`doctor`](/cli/doctor/).
+
+### An allowed host's TLS connection fails
+
+A destination you allowlisted (`--egress-allow`) still fails its TLS handshake,
+typically surfacing as a client-side certificate error in the guest, or an
+`egress_mitm_handshake_error` / `egress_mitm_upstream_error` record in
+`microagent egress <name>`.
+
+Cause: under the default `mediated` mode (and for any allowed host under
+`strict`), microagent **MITMs the TLS** with a per-workspace CA. Some clients
+reject the injected CA's leaf certificate:
+
+- **Certificate pinning** - the client only trusts a specific certificate or key,
+  not the per-workspace CA.
+- **Mutual TLS** - the upstream demands a client certificate the mediator can't
+  present.
+- **A client with its own root store** - it ignores the CA microagent installed
+  in the system trust store, so the mediator's leaf is untrusted.
+
+Fix: mark the host **passthrough** so it is allowed and audited but **not
+intercepted** - the original server certificate reaches the client untouched:
+
+```bash
+microagent create research --egress strict \
+  --egress-allow api.openai.com \
+  --egress-passthrough pinned.example.com
+```
+
+The trade-off: a passthrough connection is forwarded as an opaque L4 byte stream,
+so microagent records *that* the connection happened (and how much data crossed
+it) but **cannot inspect the payload.** You're trading content visibility for
+compatibility. See [allow vs passthrough](/concepts/egress-mediation/#allow-vs-passthrough)
+for the full discussion and [`microagent egress`](/cli/egress/) for the audit
+records.
 
 ## Console
 

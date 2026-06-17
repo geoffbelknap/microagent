@@ -4,7 +4,7 @@ description: Inspect workspace networking and manage named networks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 ```text
 microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's network

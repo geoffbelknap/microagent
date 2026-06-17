@@ -4,7 +4,7 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-17_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
@@ -74,6 +74,8 @@ written as a structured error envelope.
 
 ## Related
 
+- [Egress mediation](/concepts/egress-mediation/) - the concepts: modes, the MITM CA, UDP/DNS, allow vs passthrough
+- [Allowlist and passthrough how-to](/guides/egress-allowlist/) - the flags and the policy file
 - [`events`](/cli/events/) - the lifecycle event history
 - [`status`](/cli/status/) - the current state and readiness
 - [`logs`](/cli/logs/) - serial console output
