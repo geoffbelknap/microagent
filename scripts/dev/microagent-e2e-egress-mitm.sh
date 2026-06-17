@@ -6,7 +6,9 @@
 #     delivered over vsock; the mediator presents a CA-signed leaf (issuer = our CA).
 #   - passthrough HTTPS host  -> NOT intercepted: the guest sees the real upstream
 #     cert (issuer != our CA), trusted via the combined CA bundle (system + our CA).
-#   - non-allowlisted HTTPS   -> blocked fail-closed.
+#   - non-allowlisted HTTPS   -> blocked fail-closed at the DNS layer: strict
+#     REFUSES the name (egress_dns_deny), so the guest never resolves it and no
+#     TCP is attempted (no egress_deny).
 #   - the mediator is torn down with the workspace (no orphan).
 #
 # Runs in --network user (pasta): no host CAP_NET_ADMIN / root needed.
@@ -184,12 +186,16 @@ if not has("egress_allow", allow, mitm=True):
     raise SystemExit(f"missing intercepted egress_allow (mitm=true) for {allow}: {events}")
 if not any(e.get("event") == "egress_allow" and e.get("host") == passt and not e.get("mitm") for e in events):
     raise SystemExit(f"missing non-intercepted egress_allow for {passt}: {events}")
-if not has("egress_deny", deny):
-    raise SystemExit(f"missing egress_deny for {deny}: {events}")
+# Strict blocks the non-allowlisted host at the DNS layer (egress_dns_deny): the
+# guest never learns an IP, so no TCP is attempted and NO egress_deny is emitted.
+if not any(e.get("event") == "egress_dns_deny" and e.get("qname") == deny for e in events):
+    raise SystemExit(f"missing egress_dns_deny for {deny} (strict blocks at the DNS layer): {events}")
+if any(e.get("event") == "egress_deny" and e.get("host") == deny for e in events):
+    raise SystemExit(f"unexpected egress_deny for {deny}: strict must block at the DNS layer, before any TCP: {events}")
 
 if teardown != "clean":
     raise SystemExit("egress mediator was orphaned after halt")
-print(f"egress-mitm: {allow} intercepted (our CA), {passt} passthrough (real cert), {deny} blocked, teardown clean")
+print(f"egress-mitm: {allow} intercepted (our CA), {passt} passthrough (real cert), {deny} blocked at DNS layer, teardown clean")
 PY
 
 echo "microagent E2E egress-mitm passed"
