@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
@@ -3896,6 +3897,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&egressAllow, "egress-allow", "Allowlisted egress destination host (repeatable)")
 	var egressPassthrough multiFlag
 	fs.Var(&egressPassthrough, "egress-passthrough", "Allowed egress host that is not TLS-intercepted (repeatable)")
+	var egressPolicy string
+	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress mediated or strict)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -4014,8 +4017,28 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.EgressMode = mode
-	opts.EgressAllow = []string(egressAllow)
-	opts.EgressPassthrough = []string(egressPassthrough)
+	allowHosts := []string(egressAllow)
+	passthroughHosts := []string(egressPassthrough)
+	if strings.TrimSpace(egressPolicy) != "" {
+		// A policy file only enforces against a running mediator; with mediation
+		// off there is nothing to apply it to, so reject rather than silently
+		// ignore (which would mislead the operator into believing it took effect).
+		if mode == vmkit.EgressModeOff {
+			return workspaceOptions{}, fmt.Errorf("--egress-policy: an egress policy file requires --egress mediated or strict")
+		}
+		pf, err := egress.LoadPolicyFile(egressPolicy)
+		if err != nil {
+			return workspaceOptions{}, err
+		}
+		// Precedence is additive/union: default-deny means a policy file can only
+		// ADD reachability, never remove it, so flags + file + manifest combine by
+		// union. Append the file's hosts to the flag-supplied hosts; they later
+		// union with the manifest in OptionsFromManifest/applyManifest.
+		allowHosts = append(allowHosts, pf.Allow...)
+		passthroughHosts = append(passthroughHosts, pf.Passthrough...)
+	}
+	opts.EgressAllow = egress.DedupeHosts(allowHosts)
+	opts.EgressPassthrough = egress.DedupeHosts(passthroughHosts)
 	volumes, err := parseWorkspaceVolumes(volumeFlags)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -6768,6 +6791,7 @@ func reorderFlagArgs(args []string) []string {
 		"-egress":                    true,
 		"-egress-allow":              true,
 		"-egress-passthrough":        true,
+		"-egress-policy":             true,
 	}
 	var flags []string
 	var positional []string

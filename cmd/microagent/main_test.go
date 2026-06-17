@@ -162,6 +162,7 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"model-runner-command", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-command", "runner serve {model} --listen {addr}"}, "-model-runner-command", "runner serve {model} --listen {addr}"},
 		{"model-runner-arg", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-arg", "-ngl"}, "-model-runner-arg", "-ngl"},
 		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
+		{"egress-policy", []string{"demo", "--egress", "strict", "--egress-policy", "/tmp/egress.yaml"}, "-egress-policy", "/tmp/egress.yaml"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)
@@ -7601,5 +7602,132 @@ func TestParseEgressMode(t *testing.T) {
 	}
 	if _, err := parseEgressMode("bogus"); err == nil {
 		t.Fatal("expected error for bogus mode")
+	}
+}
+
+func writeEgressPolicyFile(t *testing.T, name, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return path
+}
+
+// TestEgressPolicyFileMergesWithFlags asserts the policy file's allow/passthrough
+// lists are unioned with --egress-allow/--egress-passthrough and deduped
+// case-insensitively. Precedence is additive (default-deny means a file can only
+// ADD reachability), so order-independent union with dedupe is correct.
+func TestEgressPolicyFileMergesWithFlags(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.yaml", `
+allow:
+  - api.github.com
+  - .example.com
+passthrough:
+  - raw.example.com
+`)
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "strict",
+		"--egress-allow", "API.GitHub.com", // dup of file entry, different case
+		"--egress-allow", "extra.com",
+		"--egress-passthrough", "raw.example.com", // dup of file entry
+		"--egress-policy", policy,
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	// Union of flag {api.github.com, extra.com} and file {api.github.com,
+	// .example.com}, deduped case-insensitively -> 3 entries.
+	if len(opts.EgressAllow) != 3 {
+		t.Fatalf("EgressAllow = %v, want 3 deduped entries", opts.EgressAllow)
+	}
+	wantAllow := map[string]bool{"api.github.com": false, "extra.com": false, ".example.com": false}
+	for _, h := range opts.EgressAllow {
+		if _, ok := wantAllow[strings.ToLower(h)]; !ok {
+			t.Fatalf("unexpected allow entry %q in %v", h, opts.EgressAllow)
+		}
+		wantAllow[strings.ToLower(h)] = true
+	}
+	for h, seen := range wantAllow {
+		if !seen {
+			t.Fatalf("missing allow entry %q in %v", h, opts.EgressAllow)
+		}
+	}
+	if len(opts.EgressPassthrough) != 1 || opts.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("EgressPassthrough = %v, want [raw.example.com] (deduped)", opts.EgressPassthrough)
+	}
+}
+
+func TestEgressPolicyFileJSON(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.json", `{"allow":["api.github.com"],"passthrough":["raw.example.com"]}`)
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "mediated",
+		"--egress-policy", policy,
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if len(opts.EgressAllow) != 1 || opts.EgressAllow[0] != "api.github.com" {
+		t.Fatalf("EgressAllow = %v", opts.EgressAllow)
+	}
+	if len(opts.EgressPassthrough) != 1 || opts.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("EgressPassthrough = %v", opts.EgressPassthrough)
+	}
+}
+
+// TestEgressPolicyFileRejectedWhenOff asserts a policy file is rejected when
+// mediation is off — a policy is meaningless without a mediator to enforce it.
+func TestEgressPolicyFileRejectedWhenOff(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.yaml", "allow: [api.github.com]\n")
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "off",
+		"--egress-policy", policy,
+	})
+	if err == nil {
+		t.Fatal("expected error for --egress-policy with --egress off")
+	}
+	if !strings.Contains(err.Error(), "mediated or strict") {
+		t.Fatalf("error %q should explain mediated/strict requirement", err)
+	}
+}
+
+func TestEgressPolicyFileLoadErrorPropagates(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.yaml", "allowed: [api.github.com]\n") // typo -> unknown key
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "strict",
+		"--egress-policy", policy,
+	})
+	if err == nil {
+		t.Fatal("expected error for policy file with unknown key")
+	}
+}
+
+// TestEgressPolicyFileUnionWithManifest confirms the file/flag union (resolved
+// CLI-side into opts) further unions with a manifest's egress lists through
+// OptionsFromManifest, and the manifest's entries survive. This is the
+// create-then-start path: flags+file produce a manifest, which on start unions
+// into Config. Here we assert the manifest-side union directly.
+func TestEgressPolicyFileUnionWithManifest(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.yaml", "allow: [file.example.com]\n")
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "strict",
+		"--egress-allow", "flag.example.com",
+		"--egress-policy", policy,
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	// The CLI-resolved union (flag + file) must contain both.
+	got := map[string]bool{}
+	for _, h := range opts.EgressAllow {
+		got[strings.ToLower(h)] = true
+	}
+	if !got["flag.example.com"] || !got["file.example.com"] {
+		t.Fatalf("CLI union missing entries: %v", opts.EgressAllow)
 	}
 }
