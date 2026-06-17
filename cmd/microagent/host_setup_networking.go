@@ -5,6 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
 
 func runHostSetupNetworking(args []string, stdout *os.File) error {
@@ -21,7 +23,7 @@ func runHostSetupNetworking(args []string, stdout *os.File) error {
 	}
 
 	opts := doctorOptions{Backend: hostBackend(), Arch: defaultGuestArch()}
-	opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	opts.SupervisorPath = setupNetworkingSupervisorPath(opts.Backend)
 
 	if *check {
 		resp, _ := doctorResponse(context.Background(), opts)
@@ -52,4 +54,18 @@ func runHostSetupNetworking(args []string, stdout *os.File) error {
 	fmt.Fprintln(stdout, "egress TPROXY ready: kernel modules loaded and nat-mode routing provisioned")
 	fmt.Fprintln(stdout, "run `microagent doctor` to confirm")
 	return nil
+}
+
+// setupNetworkingSupervisorPath resolves the supervisor binary that the apply and
+// revert paths grant CAP_NET_ADMIN to via setcap. defaultSupervisorPath returns an
+// empty string for the firecracker backend (its supervisor is normally resolved at
+// spawn time, relative to the executable), so host setup-networking previously ran
+// setcap against an empty path and failed to set capabilities on a missing file.
+// Resolve a concrete firecracker supervisor path here so setcap operates on the
+// real binary.
+func setupNetworkingSupervisorPath(backend string) string {
+	if path := defaultSupervisorPath(backend); path != "" {
+		return path
+	}
+	return workspace.FirecrackerSupervisorPath(workspace.Options{Backend: backend})
 }
