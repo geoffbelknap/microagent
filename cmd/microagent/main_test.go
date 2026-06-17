@@ -1374,6 +1374,134 @@ func TestNonBridgedStartEmitsNoWarning(t *testing.T) {
 	}
 }
 
+// captureHelp runs a help printer that writes to an *os.File and returns what
+// it printed, so the heredoc help text can be asserted against the --network
+// flag help constants.
+func captureHelp(t *testing.T, print func(*os.File)) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	done := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(r)
+		done <- string(data)
+	}()
+	print(w)
+	_ = w.Close()
+	out := <-done
+	_ = r.Close()
+	return out
+}
+
+// TestNetworkFlagHelpAgreesOnModeSet guards the drift that existed before this
+// change: the several --network help strings disagreed on which modes they
+// advertised. Every workspace-facing --network help must advertise exactly
+// {user, nat, isolated, named}, name the user-vs-nat trade-off, and never
+// re-advertise the quarantined bridged mode.
+func TestNetworkFlagHelpAgreesOnModeSet(t *testing.T) {
+	workspaceModes := []string{"user", "nat", "isolated", "named"}
+
+	// Flag help constants used by requestForCommand and parseWorkspaceOptions.
+	for _, c := range []struct {
+		name string
+		help string
+	}{
+		{"networkModeFlagHelp", networkModeFlagHelp},
+	} {
+		assertAdvertisesModes(t, c.name, c.help, workspaceModes)
+		assertTradeoffNamed(t, c.name, c.help)
+		assertExcludesBridged(t, c.name, c.help)
+	}
+
+	// Heredoc help text printed by the workspace-facing help commands.
+	for _, c := range []struct {
+		name  string
+		print func(*os.File)
+	}{
+		{"printFullHelp", printFullHelp},
+		{"printRunHelp", printRunHelp},
+		{"printCreateHelp", printCreateHelp},
+	} {
+		help := networkHelpBlock(captureHelp(t, c.print))
+		if help == "" {
+			t.Fatalf("%s: no -network help block found", c.name)
+		}
+		assertAdvertisesModes(t, c.name, help, workspaceModes)
+		assertTradeoffNamed(t, c.name, help)
+		assertExcludesBridged(t, c.name, help)
+	}
+
+	// The perf/measured-boot help advertises the disposable-workspace subset
+	// (no named), but must still name the user-vs-nat trade-off and exclude
+	// bridged so the modes stay consistent with the workspace help.
+	perfModes := []string{"user", "nat", "isolated"}
+	assertAdvertisesModes(t, "networkModePerfFlagHelp", networkModePerfFlagHelp, perfModes)
+	assertTradeoffNamed(t, "networkModePerfFlagHelp", networkModePerfFlagHelp)
+	assertExcludesBridged(t, "networkModePerfFlagHelp", networkModePerfFlagHelp)
+	if strings.Contains(networkModePerfFlagHelp, "named") {
+		t.Fatalf("networkModePerfFlagHelp advertises named; measured boots run disposable workspaces: %q", networkModePerfFlagHelp)
+	}
+	perfHelp := networkHelpBlock(captureHelp(t, printPerfHelp))
+	if perfHelp == "" {
+		t.Fatal("printPerfHelp: no -network help block found")
+	}
+	assertAdvertisesModes(t, "printPerfHelp", perfHelp, perfModes)
+	assertTradeoffNamed(t, "printPerfHelp", perfHelp)
+	assertExcludesBridged(t, "printPerfHelp", perfHelp)
+}
+
+// networkHelpBlock extracts the -network option help (its line plus any
+// indented continuation lines) from a heredoc help body.
+func networkHelpBlock(help string) string {
+	lines := strings.Split(help, "\n")
+	var block []string
+	collecting := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "-network ") {
+			collecting = true
+			block = append(block, trimmed)
+			continue
+		}
+		if collecting {
+			// Continuation lines are indented and do not start a new -flag.
+			if strings.HasPrefix(strings.TrimLeft(line, " \t"), "-") || trimmed == "" {
+				break
+			}
+			block = append(block, trimmed)
+		}
+	}
+	return strings.Join(block, " ")
+}
+
+func assertAdvertisesModes(t *testing.T, name, help string, modes []string) {
+	t.Helper()
+	for _, mode := range modes {
+		if !strings.Contains(help, mode) {
+			t.Fatalf("%s does not advertise %q mode: %q", name, mode, help)
+		}
+	}
+}
+
+func assertTradeoffNamed(t *testing.T, name, help string) {
+	t.Helper()
+	if !strings.Contains(help, "rootless") {
+		t.Fatalf("%s does not name the user (rootless) trade-off: %q", name, help)
+	}
+	if !strings.Contains(help, "kernel-speed") {
+		t.Fatalf("%s does not name the nat (kernel-speed) trade-off: %q", name, help)
+	}
+}
+
+func assertExcludesBridged(t *testing.T, name, help string) {
+	t.Helper()
+	if strings.Contains(help, "bridged") {
+		t.Fatalf("%s re-advertises the quarantined bridged mode: %q", name, help)
+	}
+}
+
 func TestRequestForCommandRejectsIsolatedPublish(t *testing.T) {
 	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",

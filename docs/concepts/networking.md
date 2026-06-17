@@ -139,6 +139,11 @@ Host requirements:
 
 `microagent doctor` checks all three and tells you which is missing.
 
+On hardened hosts that disable unprivileged user namespaces (`kernel.unprivileged_userns_clone=0`, `user.max_user_namespaces=0`, or an AppArmor userns restriction), `pasta` cannot create its namespace and the rootless `user` mode fails to start. Rather than surfacing the raw `pasta` error, the supervisor detects this case - either from those sysctl gates or from a namespace-creation failure signature in `pasta`'s stderr - and returns a guiding error that names the disabled gate, preserves the original `pasta` output, and points at the two fixes:
+
+- Enable unprivileged user namespaces: `sudo sysctl -w kernel.unprivileged_userns_clone=1`.
+- Or switch to the privileged kernel-speed alternative: `--network nat` (needs `CAP_NET_ADMIN`; run as root). microagent does not auto-escalate to `nat` for you - the privileged mode is always an explicit choice.
+
 ## NAT on Firecracker
 
 `nat` is the kernel-speed alternative to `user`. The supervisor creates a host-side TAP, assigns a `10.43.x.0/29` subnet, installs nftables MASQUERADE rules, and attaches the TAP as the guest's `eth0`. Guest-init configures the static IP, default route, and DNS resolvers from kernel command-line parameters. Outbound TCP and DNS work without a host bridge. Inbound stays closed unless you declare a `--publish` forward.

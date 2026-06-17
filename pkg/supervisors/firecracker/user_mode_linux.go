@@ -52,7 +52,7 @@ func startUserNetworkProcess(ctx context.Context, opts Options, req vmkit.Reques
 		if message == "" {
 			message = err.Error()
 		}
-		wrapped := fmt.Errorf("start firecracker user networking with pasta: %s", message)
+		wrapped := userNetworkStartErrorWithHint(message)
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, wrapped.Error())
 		return failedResponse(req, wrapped.Error()), wrapped
 	}
@@ -113,7 +113,7 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 					message = err.Error()
 				}
 				_ = cmd.Process.Release()
-				wrapped := userNetworkStartError(message)
+				wrapped := userNetworkStartErrorWithHint(message)
 				_ = writeProcessState(opts, req, vmkit.StateFailed, 0, wrapped.Error())
 				return failedResponse(req, wrapped.Error()), wrapped
 			}
@@ -289,6 +289,102 @@ func userNetworkStderrLog(opts Options) string {
 
 func userNetworkStartError(message string) error {
 	return fmt.Errorf("start firecracker user networking with pasta: %s", strings.TrimSpace(message))
+}
+
+// userNetworkStartErrorWithHint wraps a pasta start failure. When the host's
+// unprivileged-user-namespace gates are disabled (or pasta's stderr carries a
+// namespace-creation failure signature), it returns a guiding error that points
+// the operator at the privileged NAT alternative (--network nat) while
+// preserving the original pasta stderr. Otherwise it falls back to the plain
+// wrap so unrelated failures are not misattributed to userns.
+func userNetworkStartErrorWithHint(message string) error {
+	trimmed := strings.TrimSpace(message)
+	enabled, _ := unprivilegedUserNSEnabled()
+	if !enabled || pastaStderrIndicatesUserNSFailure(trimmed) {
+		return fmt.Errorf("firecracker user (rootless) networking needs unprivileged user namespaces, which appear to be disabled on this host (kernel.unprivileged_userns_clone=0 or user.max_user_namespaces=0). Enable them (sudo sysctl -w kernel.unprivileged_userns_clone=1), or run privileged NAT networking instead: --network nat (requires CAP_NET_ADMIN; run as root). Original error: %s", trimmed)
+	}
+	return userNetworkStartError(trimmed)
+}
+
+// procRoot (and its alias usernsProcRoot) is concatenated in front of the
+// absolute "/proc/sys/..." gate paths to locate the user-namespace sysctl
+// files. It is "" in production (so the real /proc/sys is read) and is
+// overridden in tests with a tempdir so the proc reads are table-testable
+// against synthetic files. Both names are exported to the package's tests so
+// the test harness can override either; effectiveProcRoot resolves whichever is
+// set.
+var (
+	procRoot       = ""
+	usernsProcRoot = ""
+)
+
+func effectiveProcRoot() string {
+	if usernsProcRoot != "" {
+		return usernsProcRoot
+	}
+	return procRoot
+}
+
+const (
+	procUnprivilegedUserNSClone = "/proc/sys/kernel/unprivileged_userns_clone"
+	procMaxUserNamespaces       = "/proc/sys/user/max_user_namespaces"
+)
+
+// unprivilegedUserNSEnabled probes the known kernel gates that govern whether
+// an unprivileged process may create a new user namespace. It returns whether
+// the gates allow it and, when disabled, a human-readable reason naming the
+// gate that was tripped. Hardened hosts disable these with
+// kernel.unprivileged_userns_clone=0 or user.max_user_namespaces=0.
+func unprivilegedUserNSEnabled() (bool, string) {
+	root := effectiveProcRoot()
+	clone, clonePresent := readSysctlGate(root + procUnprivilegedUserNSClone)
+	maxNS, maxNSPresent := readSysctlGate(root + procMaxUserNamespaces)
+	return userNSDecision(clone, clonePresent, maxNS, maxNSPresent)
+}
+
+// readSysctlGate reads a single-value sysctl-style proc file, returning its
+// trimmed contents and whether the file was present and readable. A missing
+// file (present=false) means the gate does not apply on this kernel.
+func readSysctlGate(path string) (string, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(data)), true
+}
+
+// userNSDecision is the pure decision over the two known gates, split out so it
+// can be table-tested against synthetic proc contents. A gate that is present
+// and reads "0" (or empty, which the kernel never writes but which signals a
+// disabled/unreadable value) is treated as disabled; an absent gate does not
+// apply.
+func userNSDecision(clone string, clonePresent bool, maxNS string, maxNSPresent bool) (bool, string) {
+	if clonePresent && (clone == "0" || clone == "") {
+		return false, "kernel.unprivileged_userns_clone=0"
+	}
+	if maxNSPresent && (maxNS == "0" || maxNS == "") {
+		return false, "user.max_user_namespaces=0"
+	}
+	return true, ""
+}
+
+// pastaStderrIndicatesUserNSFailure recognizes the stderr signatures pasta (and
+// the supervisor it spawns) emit when new-user-namespace creation is denied,
+// independent of the sysctl probe, so the guiding error fires even when the
+// gate read is inconclusive. Matching is case-insensitive.
+func pastaStderrIndicatesUserNSFailure(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	for _, sig := range []string{
+		"clone_newuser",
+		"unshare",
+		"clone",
+		"operation not permitted",
+	} {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 func readTextFile(path string) string {
