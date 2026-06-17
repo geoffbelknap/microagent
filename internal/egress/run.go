@@ -24,6 +24,10 @@ type Options struct {
 	CACertPath   string                                  // if set with CAKeyPath, enables TLS interception
 	CAKeyPath    string
 	Passthrough  []string // allowed hosts that are NOT intercepted (L4 splice + audit)
+
+	// UDPListen opens the transparent UDP socket the mediator serves. Defaults to
+	// transparentUDPListener (IP_TRANSPARENT + IP_RECVORIGDSTADDR). Injectable for tests.
+	UDPListen func(addr netip.AddrPort) (*net.UDPConn, error)
 }
 
 // Run binds BindHost:BindPort and serves until ctx is cancelled.
@@ -92,10 +96,44 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	}
 	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, SniffTimeout: opts.SniffTimeout}
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
+
+	// Mediation always includes UDP: open the transparent UDP socket on the same
+	// host:port as the TCP listener (different protocol). Deriving the bind from
+	// the actual TCP listener address picks up a :0 auto-assigned port. Fail
+	// closed: if the transparent socket cannot be opened (no TPROXY capability),
+	// return the error so the supervisor's readiness check fails — no TCP-only
+	// fallback.
+	lnAP, err := netip.ParseAddrPort(ln.Addr().String())
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("egress: parse listener addr %q: %w", ln.Addr().String(), err)
+	}
+	udpListen := opts.UDPListen
+	if udpListen == nil {
+		udpListen = transparentUDPListener
+	}
+	udpConn, err := udpListen(lnAP)
+	if err != nil {
+		logger.Log("egress_udp_listen_error", map[string]any{"addr": lnAP.String(), "error": err.Error()})
+		_ = ln.Close()
+		return fmt.Errorf("egress: listen udp: %w", err)
+	}
+	// Close udpConn on every Serve return (e.g. the accept-error path below,
+	// where ctx is still live). The ctx.Done goroutine also closes it to unblock
+	// serveUDP's ReadMsgUDP promptly on cancellation; the redundant close is a
+	// harmless no-op (returns ErrClosed, ignored).
+	defer udpConn.Close()
+	logger.Log("egress_udp_listen", map[string]any{"addr": udpConn.LocalAddr().String()})
+	go serveUDP(udpConn, h)
+
 	if opts.Ready != nil {
 		fmt.Fprintln(opts.Ready, ln.Addr().String())
 	}
-	go func() { <-ctx.Done(); _ = ln.Close() }()
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+		_ = udpConn.Close()
+	}()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
