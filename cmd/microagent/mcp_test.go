@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -53,7 +54,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	}
 	for _, name := range []string{
 		"microagent.ping", "microagent.describe",
-		"workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.estimate_cost",
+		"workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.estimate_cost",
 		"artifacts.list", "artifacts.get",
 		"snapshot.create", "snapshot.list", "snapshot.delete",
 		"network.inspect", "network.create", "network.list", "network.delete",
@@ -272,6 +273,11 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			name: "workspace.events",
 			args: map[string]any{"name": "demo"},
 			want: []string{"--mode=ax", "events", "demo"},
+		},
+		{
+			name: "workspace.egress",
+			args: map[string]any{"name": "demo", "state_dir": "/tmp/state"},
+			want: []string{"--mode=ax", "egress", "demo", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "workspace.result",
@@ -517,6 +523,7 @@ func TestMCPHostMutationPreviewAndConfirmation(t *testing.T) {
 }
 
 func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
+	// No egress audit log under this state dir, so egress_summary is omitted.
 	summary, ok := summarizeWorkspaceInspect(map[string]any{
 		"ok":      true,
 		"backend": "firecracker",
@@ -524,16 +531,65 @@ func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
 			"state":    "running",
 			"identity": map[string]any{"runtimeID": "demo"},
 		},
-	}).(map[string]any)
+	}, t.TempDir(), "demo").(map[string]any)
 	if !ok {
 		t.Fatalf("summary type = %T", summary)
 	}
 	if summary["format"] != "summary" || summary["workspace"] != "demo" || summary["state"] != "running" {
 		t.Fatalf("summary = %#v", summary)
 	}
+	if _, present := summary["egress_summary"]; present {
+		t.Fatalf("egress_summary should be omitted when no audit log exists: %#v", summary)
+	}
 	points, ok := summary["next_decision_points"].([]string)
 	if !ok || len(points) == 0 {
 		t.Fatalf("next_decision_points = %#v", summary["next_decision_points"])
+	}
+}
+
+func TestMCPSummarizeWorkspaceInspectIncludesEgressSummary(t *testing.T) {
+	stateDir := t.TempDir()
+	dir := filepath.Join(stateDir, "demo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"event":"egress_allow","ts":"2026-06-16T00:00:00Z","host":"api.github.com"}` + "\n" +
+		`{"event":"egress_allow","ts":"2026-06-16T00:00:01Z","host":"api.github.com"}` + "\n" +
+		`{"event":"egress_deny","ts":"2026-06-16T00:00:02Z","host":"evil.example","reason":"blocked"}` + "\n" +
+		`{"event":"egress_dns_deny","ts":"2026-06-16T00:00:03Z","qname":"tracker.example"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "egress-access.jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	summary, ok := summarizeWorkspaceInspect(map[string]any{
+		"ok":      true,
+		"backend": "firecracker",
+		"event": map[string]any{
+			"state":    "running",
+			"identity": map[string]any{"runtimeID": "demo"},
+		},
+	}, stateDir, "demo").(map[string]any)
+	if !ok {
+		t.Fatalf("summary type = %T", summary)
+	}
+	eg, ok := summary["egress_summary"].(map[string]any)
+	if !ok {
+		t.Fatalf("egress_summary missing or wrong type: %#v", summary["egress_summary"])
+	}
+	if eg["decision_count"] != 4 {
+		t.Fatalf("decision_count = %#v, want 4", eg["decision_count"])
+	}
+	byEvent, ok := eg["by_event"].(map[string]int)
+	if !ok || byEvent["egress_allow"] != 2 || byEvent["egress_deny"] != 1 || byEvent["egress_dns_deny"] != 1 {
+		t.Fatalf("by_event = %#v", eg["by_event"])
+	}
+	allow, ok := eg["allow_by_host"].(map[string]int)
+	if !ok || allow["api.github.com"] != 2 {
+		t.Fatalf("allow_by_host = %#v", eg["allow_by_host"])
+	}
+	deny, ok := eg["deny_by_host"].(map[string]int)
+	if !ok || deny["evil.example"] != 1 {
+		t.Fatalf("deny_by_host = %#v", eg["deny_by_host"])
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -47,11 +48,19 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	if req.Config.RootfsPath != "/tmp/rootfs.ext4" || req.Config.KernelPath != "/kernels/Image" {
 		t.Fatalf("Config paths = %#v", req.Config)
 	}
-	if len(req.Config.VsockListeners) != 2 {
+	// Result listener + the service vsock listener + the CA-cert listener that
+	// egress mediation (the secure default for an unspecified mode) allocates.
+	if len(req.Config.VsockListeners) != 3 {
 		t.Fatalf("VsockListeners = %#v", req.Config.VsockListeners)
 	}
 	if req.Config.VsockListeners[0].Target != filepath.Join(opts.StateDir, opts.Name, "result.json") {
 		t.Fatalf("result listener = %#v", req.Config.VsockListeners[0])
+	}
+	if !hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("expected a %q listener (egress mediated by default); got %#v", secretxfer.CACertTarget, req.Config.VsockListeners)
+	}
+	if req.Config.CACertPort == 0 {
+		t.Fatalf("CACertPort = 0, want non-zero for mediated default")
 	}
 	if len(req.Config.Disks) != 1 || req.Config.Disks[0].Mountpoint != "/work" {
 		t.Fatalf("Disks = %#v", req.Config.Disks)
@@ -126,6 +135,32 @@ func TestDefaultOptionsUseUserNetworkMode(t *testing.T) {
 	opts := DefaultOptions()
 	if opts.Network.Mode != "user" {
 		t.Fatalf("default network mode = %q", opts.Network.Mode)
+	}
+}
+
+func TestNetworkSpecRoundTripPreservesUnsupportedAck(t *testing.T) {
+	spec := NetworkSpecFromConfig(vmkit.NetworkConfig{Mode: "bridged", Unsupported: true})
+	if !spec.Unsupported {
+		t.Fatalf("NetworkSpecFromConfig dropped the unsupported ack: %#v", spec)
+	}
+	cfg := NetworkConfigFromSpec(spec)
+	if !cfg.Unsupported {
+		t.Fatalf("NetworkConfigFromSpec dropped the unsupported ack: %#v", cfg)
+	}
+	if err := vmkit.ValidateNetworkConfig(cfg); err != nil {
+		t.Fatalf("round-tripped bridged+unsupported config failed validation: %v", err)
+	}
+}
+
+func TestNetworkSpecBridgedWithoutAckStillRejectedAtStart(t *testing.T) {
+	// A persisted or hand-written bridged manifest WITHOUT the ack must still be
+	// rejected — the quarantine holds across the manifest round-trip.
+	cfg := NetworkConfigFromSpec(NetworkSpec{Mode: "bridged"})
+	if cfg.Unsupported {
+		t.Fatalf("bridged spec without ack should not set Unsupported: %#v", cfg)
+	}
+	if err := vmkit.ValidateNetworkConfig(cfg); err == nil {
+		t.Fatal("bridged config without the unsupported ack passed validation")
 	}
 }
 
@@ -510,4 +545,180 @@ func TestApplyManifestRestoresModelRef(t *testing.T) {
 	if opts.Model != "" {
 		t.Fatalf("applyManifest should clear model when manifest has none: %q", opts.Model)
 	}
+}
+
+func TestManifestRoundTripPreservesEgress(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.EgressMode = "strict"
+	opts.EgressAllow = []string{"api.github.com", ".example.com"}
+	opts.EgressPassthrough = []string{"raw.example.com"}
+
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	manifest, err := ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if manifest.EgressMode != "strict" {
+		t.Fatalf("EgressMode not persisted in manifest: %q", manifest.EgressMode)
+	}
+	if len(manifest.EgressAllow) != 2 || manifest.EgressAllow[0] != "api.github.com" || manifest.EgressAllow[1] != ".example.com" {
+		t.Fatalf("EgressAllow not persisted in manifest: %v", manifest.EgressAllow)
+	}
+	if len(manifest.EgressPassthrough) != 1 || manifest.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("EgressPassthrough not persisted in manifest: %v", manifest.EgressPassthrough)
+	}
+
+	restored := OptionsFromManifest(opts, manifest)
+	if restored.EgressMode != "strict" {
+		t.Fatalf("OptionsFromManifest lost EgressMode: %q", restored.EgressMode)
+	}
+	if len(restored.EgressAllow) != 2 || restored.EgressAllow[0] != "api.github.com" || restored.EgressAllow[1] != ".example.com" {
+		t.Fatalf("OptionsFromManifest lost EgressAllow: %v", restored.EgressAllow)
+	}
+	if len(restored.EgressPassthrough) != 1 || restored.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("OptionsFromManifest lost EgressPassthrough: %v", restored.EgressPassthrough)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, "workspaces", "ws", "workspace.json"))
+	if err != nil {
+		t.Fatalf("read raw manifest: %v", err)
+	}
+	if !strings.Contains(string(raw), `"egress_mode"`) {
+		t.Fatalf("egress_mode missing from manifest JSON: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"egress_allow"`) {
+		t.Fatalf("egress_allow missing from manifest JSON: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"egress_passthrough"`) {
+		t.Fatalf("egress_passthrough missing from manifest JSON: %s", raw)
+	}
+}
+
+func TestRequestThreadsEgress(t *testing.T) {
+	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "strict", EgressAllow: []string{"api.github.com"},
+		EgressPassthrough: []string{"raw.example.com"}}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.EgressMode != "strict" || len(req.Config.EgressAllow) != 1 || req.Config.EgressAllow[0] != "api.github.com" {
+		t.Fatalf("egress not threaded: %+v", req.Config)
+	}
+	if len(req.Config.EgressPassthrough) != 1 || req.Config.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("EgressPassthrough not threaded to vmkit.Config: %+v", req.Config)
+	}
+}
+
+// TestEgressDefaultsToMediated asserts an empty EgressMode normalizes to
+// "mediated" at the Request chokepoint — the secure default. Both the config
+// passed to the supervisor and the CA-cert vsock listener must reflect it.
+func TestEgressDefaultsToMediated(t *testing.T) {
+	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: ""}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.EgressMode != vmkit.EgressModeMediated {
+		t.Fatalf("empty EgressMode should normalize to %q, got %q", vmkit.EgressModeMediated, req.Config.EgressMode)
+	}
+	if req.Config.CACertPort != DefaultCACertPort {
+		t.Fatalf("mediated workspace should allocate CACertPort %d, got %d", DefaultCACertPort, req.Config.CACertPort)
+	}
+	if !hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("mediated workspace should allocate a CACertTarget vsock listener: %+v", req.Config.VsockListeners)
+	}
+}
+
+// TestRequestAllocatesCACertForMediated mirrors the strict path: a workspace in
+// "mediated" mode must allocate the CA-cert vsock listener and port (previously
+// only "strict" did).
+func TestRequestAllocatesCACertForMediated(t *testing.T) {
+	for _, mode := range []string{vmkit.EgressModeMediated, vmkit.EgressModeStrict} {
+		opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+			Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: mode}
+		req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+		if req.Config.CACertPort != DefaultCACertPort {
+			t.Errorf("mode %q: CACertPort = %d, want %d", mode, req.Config.CACertPort, DefaultCACertPort)
+		}
+		if !hasCACertListener(req.Config.VsockListeners) {
+			t.Errorf("mode %q: missing CACertTarget vsock listener: %+v", mode, req.Config.VsockListeners)
+		}
+	}
+}
+
+// TestRequestNoCACertForOff confirms an explicit "off" workspace gets no CA-cert
+// listener or port — mediation is disabled.
+func TestRequestNoCACertForOff(t *testing.T) {
+	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: vmkit.EgressModeOff}
+	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if req.Config.EgressMode != vmkit.EgressModeOff {
+		t.Fatalf("EgressMode should stay %q, got %q", vmkit.EgressModeOff, req.Config.EgressMode)
+	}
+	if req.Config.CACertPort != 0 {
+		t.Fatalf("off workspace should not allocate CACertPort, got %d", req.Config.CACertPort)
+	}
+	if hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("off workspace should not allocate a CACertTarget vsock listener: %+v", req.Config.VsockListeners)
+	}
+}
+
+// TestRequestNoCACertForNonMediatedNetworkMode asserts that network modes which
+// never run the mediator (bridged — quarantined/unmediated; isolated — no
+// egress) do NOT allocate the CA-cert vsock listener or port even when
+// EgressMode is mediated/strict. Otherwise the guest would be told to install
+// (and trust) a CA for a mediator that will never exist — dead state.
+func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
+	cases := []struct {
+		name       string
+		network    vmkit.NetworkConfig
+		egressMode string
+	}{
+		{"bridged-mediated", vmkit.NetworkConfig{Mode: "bridged", Unsupported: true}, vmkit.EgressModeMediated},
+		{"bridged-strict", vmkit.NetworkConfig{Mode: "bridged", Unsupported: true}, vmkit.EgressModeStrict},
+		{"isolated-mediated", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeMediated},
+		{"isolated-strict", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeStrict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+				Network: tc.network, EgressMode: tc.egressMode}
+			req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+			if req.Config.CACertPort != 0 {
+				t.Errorf("%s: CACertPort = %d, want 0 (non-mediated network mode)", tc.name, req.Config.CACertPort)
+			}
+			if hasCACertListener(req.Config.VsockListeners) {
+				t.Errorf("%s: should not allocate a CACertTarget vsock listener: %+v", tc.name, req.Config.VsockListeners)
+			}
+		})
+	}
+}
+
+// TestRequestAllocatesCACertForMediatedNetworkModes confirms the mediatable
+// network modes (user, nat, named, and the empty default) DO allocate the
+// CA-cert listener when egress mediation is on — guarding that the new
+// network-mode gate did not over-tighten and suppress the listener for modes
+// that actually run the mediator.
+func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
+	for _, mode := range []string{"", "user", "nat", "named"} {
+		opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeMediated}
+		req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+		if req.Config.CACertPort != DefaultCACertPort {
+			t.Errorf("network mode %q: CACertPort = %d, want %d", mode, req.Config.CACertPort, DefaultCACertPort)
+		}
+		if !hasCACertListener(req.Config.VsockListeners) {
+			t.Errorf("network mode %q: missing CACertTarget vsock listener: %+v", mode, req.Config.VsockListeners)
+		}
+	}
+}
+
+func hasCACertListener(listeners []vmkit.VsockListener) bool {
+	for _, l := range listeners {
+		if l.Target == secretxfer.CACertTarget {
+			return true
+		}
+	}
+	return false
 }

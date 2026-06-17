@@ -3,6 +3,7 @@ package vmkit
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -48,7 +49,37 @@ func TestSnapshotManifestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != manifest {
+	if !reflect.DeepEqual(got, manifest) {
+		t.Fatalf("round-trip = %#v, want %#v", got, manifest)
+	}
+}
+
+// TestSnapshotManifestRoundTripsEgress proves the egress posture fields
+// (mode/allow/passthrough and the CA cert DER fingerprint) survive the
+// write→read cycle intact, so a restore/fork can re-arm the mediator with the
+// recorded policy and verify the persisted CA against the recorded fingerprint.
+func TestSnapshotManifestRoundTripsEgress(t *testing.T) {
+	dir := SnapshotDir(t.TempDir(), "agent-1", "snap-egress")
+	manifest := SnapshotManifest{
+		Tag:               "snap-egress",
+		NetworkMode:       "nat",
+		KernelSHA256:      "abc123",
+		VCPUCount:         2,
+		MemoryMiB:         512,
+		CreatedAt:         "2026-06-01T00:00:00Z",
+		EgressMode:        EgressModeStrict,
+		EgressAllow:       []string{"api.github.com", ".example.com"},
+		EgressPassthrough: []string{"raw.example.com"},
+		EgressCASHA256:    "deadbeefcafebabe0011223344556677889900aabbccddeeff00112233445566",
+	}
+	if err := WriteSnapshotManifest(dir, manifest); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadSnapshotManifest(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, manifest) {
 		t.Fatalf("round-trip = %#v, want %#v", got, manifest)
 	}
 }

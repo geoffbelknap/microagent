@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]   Report host backend capabilities
@@ -59,11 +59,12 @@ kernel under `kernel`). A trimmed Firecracker example:
 
 ## `setup-networking`
 
-On Linux, the `nat`, `bridged`, and `named` network modes need the host to have
+On Linux, the `nat` and `named` network modes need the host to have
 IPv4 forwarding enabled and the Firecracker supervisor to hold `CAP_NET_ADMIN`.
 `isolated` and `user` (passt) modes work without any setup. This subcommand
 prepares the host for the privileged modes; run [`doctor`](/cli/doctor/) to see
-which modes are currently available.
+which modes are currently available. (The unsupported `bridged` mode shares the
+same `CAP_NET_ADMIN` requirement.)
 
 Enable the privileged network modes (it mutates host state):
 

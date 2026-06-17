@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -120,7 +121,7 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 // writeSnapshotState persists a transient pause/resume around a snapshot while
 // preserving the host-side aux processes so the workspace keeps working.
 func writeSnapshotState(opts Options, req vmkit.Request, state runtimeState, target vmkit.VMState) error {
-	return writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), target, state.PID, state.PortForwardPID, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, "")
+	return writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), target, state.PID, state.PortForwardPID, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, "")
 }
 
 func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string, purged bool) error {
@@ -159,22 +160,66 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 	if needsVsock(&state.Config) {
 		vsockPath = vsockSocketPath(opts)
 	}
+	// Capture the egress posture so a restore/fork re-arms the mediator with the
+	// recorded policy AND reuses the SAME per-workspace CA the guest's baked trust
+	// store was built against. For a mediated workspace the persisted CA cert MUST
+	// exist; record its DER SHA-256 as the restore-time integrity check. Fail
+	// closed if the cert is gone — never snapshot a mediated workspace whose CA
+	// cannot be reproduced, because restoring it would silently break every MITM
+	// handshake of the guest.
+	caSHA := ""
+	if vmkit.EgressMediationOn(state.Config.EgressMode) {
+		sha, err := egressCACertSHA256(filepath.Join(opts.StateDir, opts.Name))
+		if err != nil {
+			return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot of mediated workspace %s requires its persisted egress CA: %w", opts.Name, err)
+		}
+		caSHA = sha
+	}
 	return vmkit.SnapshotManifest{
-		Tag:            tag,
-		NetworkMode:    mode,
-		GuestIP:        guestIP,
-		KernelSHA256:   kernelSHA,
-		VCPUCount:      state.Config.CPUCount,
-		MemoryMiB:      state.Config.MemoryMiB,
-		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
-		VsockUDSPath:   vsockPath,
-		ShellPort:      state.Config.ShellPort,
-		ExecPort:       state.Config.ExecPort,
-		NetworkIP:      netIP,
-		NetworkGateway: netGateway,
-		NetworkSubnet:  netSubnet,
-		SecretsPurged:  purged,
+		Tag:               tag,
+		NetworkMode:       mode,
+		GuestIP:           guestIP,
+		KernelSHA256:      kernelSHA,
+		VCPUCount:         state.Config.CPUCount,
+		MemoryMiB:         state.Config.MemoryMiB,
+		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
+		VsockUDSPath:      vsockPath,
+		ShellPort:         state.Config.ShellPort,
+		ExecPort:          state.Config.ExecPort,
+		NetworkIP:         netIP,
+		NetworkGateway:    netGateway,
+		NetworkSubnet:     netSubnet,
+		SecretsPurged:     purged,
+		EgressMode:        state.Config.EgressMode,
+		EgressAllow:       state.Config.EgressAllow,
+		EgressPassthrough: state.Config.EgressPassthrough,
+		EgressCASHA256:    caSHA,
+		// Bounded-operations caps (ASK tenet 8): persist so a restore re-applies the
+		// SAME bounds the workspace ran under.
+		EgressMaxBytesPerSec:     state.Config.EgressMaxBytesPerSec,
+		EgressMaxTotalBytes:      state.Config.EgressMaxTotalBytes,
+		EgressMaxConcurrentConns: state.Config.EgressMaxConcurrentConns,
+		EgressAuditMaxBytes:      state.Config.EgressAuditMaxBytes,
+		EgressAuditMaxBackups:    state.Config.EgressAuditMaxBackups,
 	}, nil
+}
+
+// egressCACertSHA256 reads the persisted per-workspace egress CA certificate
+// (egress-ca.pem) from the workspace directory, PEM-decodes it, and returns the
+// hex SHA-256 of the certificate's DER bytes. This is the stable fingerprint
+// snapshot records and restore verifies before reusing the CA. It errors if the
+// cert file is absent or not a well-formed CERTIFICATE PEM block.
+func egressCACertSHA256(wsDir string) (string, error) {
+	pemBytes, err := os.ReadFile(filepath.Join(wsDir, "egress-ca.pem"))
+	if err != nil {
+		return "", fmt.Errorf("read egress CA cert: %w", err)
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("egress CA cert at %s is not a valid CERTIFICATE PEM", wsDir)
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 // firecrackerLaunchCommand builds the command that launches Firecracker. A

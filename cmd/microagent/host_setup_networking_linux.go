@@ -29,6 +29,13 @@ func applyHostNetworking(supervisorPath string) error {
 	if out, err := exec.Command("setcap", "cap_net_admin+eip", supervisorPath).CombinedOutput(); err != nil {
 		return fmt.Errorf("grant CAP_NET_ADMIN to %s: %w: %s", supervisorPath, err, out)
 	}
+	// Egress (UDP mediation) prerequisites: load the TPROXY kernel modules and
+	// provision the nat-mode host-global routing (ip rule + local route +
+	// sysctls) that the supervisor verifies fail-closed before starting a
+	// nat-mode mediated workspace.
+	if err := applyTProxyPrereqs(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -38,6 +45,11 @@ func revertHostNetworking(supervisorPath string) error {
 	}
 	if _, err := exec.LookPath("setcap"); err == nil {
 		_ = exec.Command("setcap", "-r", supervisorPath).Run() // best-effort
+	}
+	// Remove the TPROXY ip rule + local route and restore the sysctls. The
+	// kernel modules are intentionally left loaded (other things may use them).
+	if err := revertTProxyPrereqs(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -70,11 +82,13 @@ func maybeSelfElevate(revert, assumeYes bool, stdout *os.File) error {
 		if revert {
 			fmt.Fprintf(stdout, "Reverting host networking setup needs root to:\n")
 			fmt.Fprintf(stdout, "  - remove %s\n", sysctlDropIn)
-			fmt.Fprintf(stdout, "  - drop CAP_NET_ADMIN from the supervisor (setcap -r)\n\n")
+			fmt.Fprintf(stdout, "  - drop CAP_NET_ADMIN from the supervisor (setcap -r)\n")
+			fmt.Fprintf(stdout, "  - remove the egress TPROXY ip rule + local route and restore its sysctls\n\n")
 		} else {
 			fmt.Fprintf(stdout, "Enabling nat/bridged/named networking needs root to:\n")
 			fmt.Fprintf(stdout, "  - set net.ipv4.ip_forward=1 (persisted in %s)\n", sysctlDropIn)
-			fmt.Fprintf(stdout, "  - grant CAP_NET_ADMIN to the supervisor (setcap)\n\n")
+			fmt.Fprintf(stdout, "  - grant CAP_NET_ADMIN to the supervisor (setcap)\n")
+			fmt.Fprintf(stdout, "  - load the egress TPROXY kernel modules and provision its nat-mode routing\n\n")
 		}
 		fmt.Fprintf(stdout, "About to run:\n  %s\n\n", manualCmd)
 		ok, err := readConfirmation("Proceed?")

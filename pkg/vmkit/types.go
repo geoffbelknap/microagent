@@ -66,6 +66,10 @@ type Config struct {
 	// SecretsPort is the host vsock port the guest connects to at boot to fetch
 	// resolved secrets. Zero means no secrets are delivered.
 	SecretsPort uint32 `json:"secretsPort,omitempty"`
+	// CACertPort is the host vsock port the guest connects to at boot to fetch
+	// the per-workspace egress CA certificate (PEM). Zero means no CA cert is
+	// delivered. The CA cert is public; no tmpfs or audit trail is required.
+	CACertPort uint32 `json:"caCertPort,omitempty"`
 	// Secrets are scheme-prefixed references resolved by the host at start.
 	Secrets []SecretRef `json:"secrets,omitempty"`
 	// SecretEnvFiles are dotenv file paths whose KEY=VALUE pairs are loaded by
@@ -76,6 +80,28 @@ type Config struct {
 	OnDemandSecrets []SecretRef `json:"onDemandSecrets,omitempty"`
 	// SecretsAudit enables the per-workspace secret-access audit log.
 	SecretsAudit bool `json:"secretsAudit,omitempty"`
+	// EgressMode controls transparent egress mediation: "strict" forces guest
+	// TCP through the mediator with an allowlist; "open" (or empty) leaves
+	// networking unmediated. EgressAllow is the destination allowlist.
+	EgressMode        string   `json:"egressMode,omitempty"`
+	EgressAllow       []string `json:"egressAllow,omitempty"`
+	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
+	// Bounded-operations caps for the egress mediator (ASK tenet 8). All are
+	// per-mediator-process (= per-workspace) and reset on restart; a zero value
+	// means unlimited (the current, uncapped behavior).
+	//   EgressMaxBytesPerSec     rate-limits the upstream-bound copy of each flow.
+	//   EgressMaxTotalBytes      caps cumulative egress bytes across tcp+udp; once
+	//                            exceeded, the breaching flow is torn down (the
+	//                            mediator keeps serving).
+	//   EgressMaxConcurrentConns caps concurrently mediated TCP connections
+	//                            (refused fail-closed beyond the cap).
+	//   EgressAuditMaxBytes      rotates the audit log at this size per active file.
+	//   EgressAuditMaxBackups    number of rotated audit-log backups to retain.
+	EgressMaxBytesPerSec     int64 `json:"egressMaxBytesPerSec,omitempty"`
+	EgressMaxTotalBytes      int64 `json:"egressMaxTotalBytes,omitempty"`
+	EgressMaxConcurrentConns int32 `json:"egressMaxConcurrentConns,omitempty"`
+	EgressAuditMaxBytes      int64 `json:"egressAuditMaxBytes,omitempty"`
+	EgressAuditMaxBackups    int   `json:"egressAuditMaxBackups,omitempty"`
 	// SecretsControlPort is the guest vsock port the host connects to (via the
 	// firecracker CONNECT protocol) to signal purge/rehydrate around snapshots.
 	SecretsControlPort uint32 `json:"secretsControlPort,omitempty"`
@@ -136,6 +162,10 @@ type NetworkConfig struct {
 	// named network resolve each other. Populated by the supervisor at start.
 	Hosts   []string       `json:"hosts,omitempty" yaml:"hosts,omitempty"`
 	Runtime *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
+	// Unsupported acknowledges that the operator knowingly selected an
+	// unsupported, unmediated network mode (currently only "bridged"). It is
+	// set by the CLI --unsupported flag and gates ValidateNetworkConfig.
+	Unsupported bool `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
 }
 
 type PortForward struct {
@@ -189,6 +219,13 @@ type HostSupport struct {
 	IsolatedNetworkReady      bool `json:"isolatedNetworkReady,omitempty"`
 	UserNetworkReady          bool `json:"userNetworkReady,omitempty"`
 	PrivilegedNetworkReady    bool `json:"privilegedNetworkReady,omitempty"`
+
+	// EgressTProxyReady reports whether the kernel modules UDP egress mediation
+	// (TPROXY) needs are loaded or built-in. Needed for both user and nat egress
+	// modes. When false, EgressTProxyMissingModules lists what is absent so
+	// `host setup-networking` can load them.
+	EgressTProxyReady          bool     `json:"egressTProxyReady,omitempty"`
+	EgressTProxyMissingModules []string `json:"egressTProxyMissingModules,omitempty"`
 }
 
 type KernelSupport struct {
@@ -442,6 +479,62 @@ func ValidateConfig(config *Config) error {
 	return nil
 }
 
+// Egress mode constants. An empty/unspecified mode is the secure default and
+// resolves to EgressModeMediated.
+const (
+	EgressModeMediated = "mediated"
+	EgressModeStrict   = "strict"
+	EgressModeOff      = "off"
+)
+
+// NormalizeEgressMode collapses an egress mode string to one of the canonical
+// values: "mediated", "strict", or "off". Empty/whitespace resolves to
+// "mediated" — the secure default. This is the single normalization chokepoint:
+// once applied, downstream code only ever sees the three canonical values.
+func NormalizeEgressMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case EgressModeStrict:
+		return EgressModeStrict
+	case EgressModeOff:
+		return EgressModeOff
+	default:
+		// "", "mediated", and any already-validated synonym fall through to the
+		// secure default. CLI parsing rejects unknown values before this point.
+		return EgressModeMediated
+	}
+}
+
+// EgressMediationOn reports whether the given egress mode provisions the
+// mediator (mint CA, spawn mediator, install REDIRECT, allocate the CA-cert
+// vsock listener). Only an explicit "mediated" or "strict" mode is ON. An
+// empty/unspecified mode is OFF here on purpose: "default" is set by
+// NormalizeEgressMode at the high-level workspace chokepoints, while
+// EgressMediationOn decides whether to *provision*. The low-level raw
+// create/start primitive leaves EgressMode empty and must NOT be force-mediated
+// (it allocates no CA-cert listener, so mediating it would MITM the guest's TLS
+// with a CA the guest never receives).
+func EgressMediationOn(mode string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	return m == EgressModeMediated || m == EgressModeStrict
+}
+
+// NetworkModeMediates reports whether the given network mode actually runs the
+// egress mediator. Only "user", "nat", and "named" route guest egress through
+// the mediator (provisionEgressMediation runs for those modes). "bridged"
+// (quarantined, explicitly unmediated) and "isolated" (no egress at all) never
+// start a mediator, so even with EgressMode=mediated/strict there is no mediator
+// to install a CA for. An empty mode resolves to the "user" default — which
+// mediates. Used to avoid telling the guest to trust a CA for a mediator that
+// will never exist (dead state).
+func NetworkModeMediates(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "user", "nat", "named":
+		return true
+	default:
+		return false
+	}
+}
+
 func ValidateMediationConfig(mediation MediationConfig) error {
 	if !mediation.Enabled && !mediation.Required && mediation.Port == 0 && strings.TrimSpace(mediation.Target) == "" && !mediation.FailClosed {
 		return nil
@@ -470,6 +563,9 @@ func ValidateNetworkConfig(network NetworkConfig) error {
 	case "user", "nat", "isolated", "bridged", "named":
 	default:
 		return fmt.Errorf("network.mode must be user, nat, isolated, bridged, or named")
+	}
+	if mode == "bridged" && !network.Unsupported {
+		return fmt.Errorf("bridged networking is unsupported and unmediated; pass --unsupported to use it anyway")
 	}
 	if mode == "named" && strings.TrimSpace(network.Name) == "" {
 		return fmt.Errorf("network.mode named requires a network name")

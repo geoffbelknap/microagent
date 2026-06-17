@@ -31,6 +31,10 @@ type FirecrackerProbe struct {
 	ReadFile               func(string) ([]byte, error)
 	ReadBinaryCapabilities func(path string) (bool, error)
 	ProbeUserNamespaces    func() error
+	// StatModule reports whether a /sys/module/<name> path exists, used to detect
+	// a TPROXY module that is built into the kernel rather than loaded. Defaults
+	// to an os.Stat-based check.
+	StatModule func(path string) bool
 }
 
 type WindowsHyperVProbe struct {
@@ -206,6 +210,15 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if probe.ProbeUserNamespaces == nil {
 		probe.ProbeUserNamespaces = defaultUserNamespaceProbe
 	}
+	if probe.StatModule == nil {
+		probe.StatModule = func(path string) bool {
+			if probe.Stat == nil {
+				return false
+			}
+			_, err := probe.Stat(path)
+			return err == nil
+		}
+	}
 	host := &vmkit.HostSupport{
 		Backend:      opts.Backend,
 		Architecture: opts.Arch,
@@ -271,6 +284,7 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 		}
 	}
 	DeriveNetworkReadiness(host)
+	deriveTProxyModuleReadiness(host, tproxyModuleProbe{readFile: probe.ReadFile, statDir: probe.StatModule})
 	host.ConsoleAvailable = true
 	host.ConsoleMode = "interactive"
 	host.PauseResumeAvailable = true

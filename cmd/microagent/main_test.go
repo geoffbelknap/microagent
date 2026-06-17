@@ -162,6 +162,7 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"model-runner-command", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-command", "runner serve {model} --listen {addr}"}, "-model-runner-command", "runner serve {model} --listen {addr}"},
 		{"model-runner-arg", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-arg", "-ngl"}, "-model-runner-arg", "-ngl"},
 		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
+		{"egress-policy", []string{"demo", "--egress", "strict", "--egress-policy", "/tmp/egress.yaml"}, "-egress-policy", "/tmp/egress.yaml"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)
@@ -1256,6 +1257,40 @@ func TestRequestForCommandParsesVsock(t *testing.T) {
 	}
 }
 
+// TestRequestForCommandLowLevelUnmediated asserts the raw low-level create/start
+// primitive is NOT force-mediated. It has no --egress flag and does not build the
+// request through workspace.Request(), so EgressMode stays empty and no CA-cert
+// listener is allocated. Mediating it would MITM the guest's TLS with a CA the
+// guest never receives (CACertPort=0 => no boot arg => guestinit installs nothing).
+func TestRequestForCommandLowLevelUnmediated(t *testing.T) {
+	for _, command := range []string{"create", "start"} {
+		req, err := requestForCommand(command, newFlagSet(command), reorderFlagArgs([]string{
+			"--id", "agent-1",
+			"--kernel", "/tmp/kernel",
+			"--rootfs", "/tmp/rootfs.ext4",
+			"--state-dir", "/tmp/state",
+			"--backend", hostBackend(),
+		}))
+		if err != nil {
+			t.Fatalf("%s: requestForCommand: %v", command, err)
+		}
+		if req.Config.EgressMode != "" {
+			t.Errorf("%s: EgressMode = %q, want empty (raw primitive must not set a default)", command, req.Config.EgressMode)
+		}
+		if vmkit.EgressMediationOn(req.Config.EgressMode) {
+			t.Errorf("%s: low-level request must not be mediated", command)
+		}
+		if req.Config.CACertPort != 0 {
+			t.Errorf("%s: CACertPort = %d, want 0", command, req.Config.CACertPort)
+		}
+		for _, l := range req.Config.VsockListeners {
+			if l.Target == "cacert://serve" {
+				t.Errorf("%s: low-level request must not allocate a cacert://serve listener: %#v", command, req.Config.VsockListeners)
+			}
+		}
+	}
+}
+
 func TestRequestForCommandParsesNetwork(t *testing.T) {
 	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",
@@ -1264,6 +1299,7 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 		"--state-dir", "/tmp/state",
 		"--backend", hostBackend(),
 		"--network", "bridged",
+		"--unsupported",
 		"--network-interface", "en0",
 		"--publish", "127.0.0.1:8080:80/tcp",
 	}))
@@ -1285,6 +1321,184 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 	forward := req.Config.Network.PortForwards[0]
 	if forward.Host != "127.0.0.1" || forward.HostPort != 8080 || forward.GuestPort != 80 || forward.Protocol != "tcp" {
 		t.Fatalf("forward = %#v", forward)
+	}
+}
+
+func TestRequestForCommandBridgedRequiresUnsupported(t *testing.T) {
+	base := []string{
+		"--id", "agent-1",
+		"--kernel", "/tmp/kernel",
+		"--rootfs", "/tmp/rootfs.ext4",
+		"--state-dir", "/tmp/state",
+		"--backend", hostBackend(),
+		"--network", "bridged",
+		"--network-interface", "en0",
+	}
+	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs(base))
+	if err == nil {
+		t.Fatal("requestForCommand accepted bridged without --unsupported")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("bridged rejection error = %q, want it to mention unsupported", err)
+	}
+
+	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs(append(base, "--unsupported")))
+	if err != nil {
+		t.Fatalf("requestForCommand bridged with --unsupported: %v", err)
+	}
+	if req.Config.Network == nil || !req.Config.Network.Unsupported {
+		t.Fatalf("network = %#v, want Unsupported true", req.Config.Network)
+	}
+}
+
+func TestBridgedStartEmitsUnsupportedWarning(t *testing.T) {
+	var buf bytes.Buffer
+	warnIfBridged(&buf, "bridged")
+	got := buf.String()
+	if !strings.Contains(got, "UNSUPPORTED") {
+		t.Fatalf("bridged warning = %q, want it to contain UNSUPPORTED", got)
+	}
+	const want = "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.\n"
+	if got != want {
+		t.Fatalf("bridged warning = %q, want %q", got, want)
+	}
+}
+
+func TestNonBridgedStartEmitsNoWarning(t *testing.T) {
+	for _, mode := range []string{"user", "nat", "isolated", "named", ""} {
+		var buf bytes.Buffer
+		warnIfBridged(&buf, mode)
+		if buf.Len() != 0 {
+			t.Fatalf("mode %q emitted a warning: %q", mode, buf.String())
+		}
+	}
+}
+
+// captureHelp runs a help printer that writes to an *os.File and returns what
+// it printed, so the heredoc help text can be asserted against the --network
+// flag help constants.
+func captureHelp(t *testing.T, print func(*os.File)) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	done := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(r)
+		done <- string(data)
+	}()
+	print(w)
+	_ = w.Close()
+	out := <-done
+	_ = r.Close()
+	return out
+}
+
+// TestNetworkFlagHelpAgreesOnModeSet guards the drift that existed before this
+// change: the several --network help strings disagreed on which modes they
+// advertised. Every workspace-facing --network help must advertise exactly
+// {user, nat, isolated, named}, name the user-vs-nat trade-off, and never
+// re-advertise the quarantined bridged mode.
+func TestNetworkFlagHelpAgreesOnModeSet(t *testing.T) {
+	workspaceModes := []string{"user", "nat", "isolated", "named"}
+
+	// Flag help constants used by requestForCommand and parseWorkspaceOptions.
+	for _, c := range []struct {
+		name string
+		help string
+	}{
+		{"networkModeFlagHelp", networkModeFlagHelp},
+	} {
+		assertAdvertisesModes(t, c.name, c.help, workspaceModes)
+		assertTradeoffNamed(t, c.name, c.help)
+		assertExcludesBridged(t, c.name, c.help)
+	}
+
+	// Heredoc help text printed by the workspace-facing help commands.
+	for _, c := range []struct {
+		name  string
+		print func(*os.File)
+	}{
+		{"printFullHelp", printFullHelp},
+		{"printRunHelp", printRunHelp},
+		{"printCreateHelp", printCreateHelp},
+	} {
+		help := networkHelpBlock(captureHelp(t, c.print))
+		if help == "" {
+			t.Fatalf("%s: no -network help block found", c.name)
+		}
+		assertAdvertisesModes(t, c.name, help, workspaceModes)
+		assertTradeoffNamed(t, c.name, help)
+		assertExcludesBridged(t, c.name, help)
+	}
+
+	// The perf/measured-boot help advertises the disposable-workspace subset
+	// (no named), but must still name the user-vs-nat trade-off and exclude
+	// bridged so the modes stay consistent with the workspace help.
+	perfModes := []string{"user", "nat", "isolated"}
+	assertAdvertisesModes(t, "networkModePerfFlagHelp", networkModePerfFlagHelp, perfModes)
+	assertTradeoffNamed(t, "networkModePerfFlagHelp", networkModePerfFlagHelp)
+	assertExcludesBridged(t, "networkModePerfFlagHelp", networkModePerfFlagHelp)
+	if strings.Contains(networkModePerfFlagHelp, "named") {
+		t.Fatalf("networkModePerfFlagHelp advertises named; measured boots run disposable workspaces: %q", networkModePerfFlagHelp)
+	}
+	perfHelp := networkHelpBlock(captureHelp(t, printPerfHelp))
+	if perfHelp == "" {
+		t.Fatal("printPerfHelp: no -network help block found")
+	}
+	assertAdvertisesModes(t, "printPerfHelp", perfHelp, perfModes)
+	assertTradeoffNamed(t, "printPerfHelp", perfHelp)
+	assertExcludesBridged(t, "printPerfHelp", perfHelp)
+}
+
+// networkHelpBlock extracts the -network option help (its line plus any
+// indented continuation lines) from a heredoc help body.
+func networkHelpBlock(help string) string {
+	lines := strings.Split(help, "\n")
+	var block []string
+	collecting := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "-network ") {
+			collecting = true
+			block = append(block, trimmed)
+			continue
+		}
+		if collecting {
+			// Continuation lines are indented and do not start a new -flag.
+			if strings.HasPrefix(strings.TrimLeft(line, " \t"), "-") || trimmed == "" {
+				break
+			}
+			block = append(block, trimmed)
+		}
+	}
+	return strings.Join(block, " ")
+}
+
+func assertAdvertisesModes(t *testing.T, name, help string, modes []string) {
+	t.Helper()
+	for _, mode := range modes {
+		if !strings.Contains(help, mode) {
+			t.Fatalf("%s does not advertise %q mode: %q", name, mode, help)
+		}
+	}
+}
+
+func assertTradeoffNamed(t *testing.T, name, help string) {
+	t.Helper()
+	if !strings.Contains(help, "rootless") {
+		t.Fatalf("%s does not name the user (rootless) trade-off: %q", name, help)
+	}
+	if !strings.Contains(help, "kernel-speed") {
+		t.Fatalf("%s does not name the nat (kernel-speed) trade-off: %q", name, help)
+	}
+}
+
+func assertExcludesBridged(t *testing.T, name, help string) {
+	t.Helper()
+	if strings.Contains(help, "bridged") {
+		t.Fatalf("%s re-advertises the quarantined bridged mode: %q", name, help)
 	}
 }
 
@@ -1370,14 +1584,25 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		VsockListeners: []vmkit.VsockListener{{Port: 3128, Target: "127.0.0.1:19000"}},
 		Mediation:      &mediation,
 	}, "run", "/tmp/rootfs.ext4")
-	if len(req.Config.VsockListeners) != 3 {
-		t.Fatalf("VsockListeners len = %d, want 3", len(req.Config.VsockListeners))
+	// result + enforcer + mediation listeners, plus the CA-cert listener that
+	// egress mediation (the secure default for an unspecified mode) allocates.
+	if len(req.Config.VsockListeners) != 4 {
+		t.Fatalf("VsockListeners len = %d, want 4: %#v", len(req.Config.VsockListeners), req.Config.VsockListeners)
 	}
 	if req.Config.VsockListeners[1].Port != 3128 || req.Config.VsockListeners[1].Target != "127.0.0.1:19000" {
 		t.Fatalf("enforcer listener = %#v", req.Config.VsockListeners[1])
 	}
 	if req.Config.VsockListeners[2].Port != 2048 || req.Config.VsockListeners[2].Target != "127.0.0.1:9900" {
 		t.Fatalf("mediation listener = %#v", req.Config.VsockListeners[2])
+	}
+	var sawCACert bool
+	for _, l := range req.Config.VsockListeners {
+		if l.Target == "cacert://serve" {
+			sawCACert = true
+		}
+	}
+	if !sawCACert {
+		t.Fatalf("expected a cacert://serve listener (egress mediated by default): %#v", req.Config.VsockListeners)
 	}
 	if req.Config.Mediation == nil || !req.Config.Mediation.Required || !req.Config.Mediation.FailClosed {
 		t.Fatalf("mediation = %#v", req.Config.Mediation)
@@ -6669,6 +6894,125 @@ func TestReadEventsMissingAndMalformed(t *testing.T) {
 	}
 }
 
+// setTextOutputForTest forces human (non-structured) output and restores the
+// global output state afterward, so a prior --json invocation in the same
+// package cannot leak into outputStructured().
+func setTextOutputForTest(t *testing.T) {
+	t.Helper()
+	prevFormat := outputFormat
+	prevMode := globalOutputMode
+	outputFormat = "text"
+	globalOutputMode = ""
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	t.Cleanup(func() {
+		outputFormat = prevFormat
+		globalOutputMode = prevMode
+	})
+}
+
+func TestRunEgressSnapshotHumanAndJSON(t *testing.T) {
+	dir := t.TempDir()
+	name := "research"
+	wsDir := filepath.Join(dir, name)
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"event":"egress_listen","ts":"2026-06-16T00:00:00Z","addr":"127.0.0.1:0"}` + "\n" +
+		`{"event":"egress_allow","ts":"2026-06-16T00:00:01Z","host":"api.github.com","dst":"140.82.0.1:443"}` + "\n" +
+		`{"event":"egress_deny","ts":"2026-06-16T00:00:02Z","host":"evil.example","reason":"not allowlisted"}` + "\n"
+	if err := os.WriteFile(filepath.Join(wsDir, "egress-access.jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Human output: one line per decision.
+	t.Run("human", func(t *testing.T) {
+		setTextOutputForTest(t)
+		outPath := filepath.Join(dir, "egress-human.txt")
+		out, err := os.Create(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := runEgress(context.Background(), []string{name, "--state-dir", dir}, out); err != nil {
+			t.Fatalf("runEgress human: %v", err)
+		}
+		if err := out.Close(); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(got)
+		if !strings.Contains(text, "egress_allow") || !strings.Contains(text, "api.github.com") ||
+			!strings.Contains(text, "egress_deny") || !strings.Contains(text, "not allowlisted") {
+			t.Fatalf("human output = %q", text)
+		}
+		if lines := strings.Count(strings.TrimRight(text, "\n"), "\n") + 1; lines != 3 {
+			t.Fatalf("expected 3 decision lines, got %d: %q", lines, text)
+		}
+	})
+
+	// Structured JSON via the global --json dispatch path.
+	t.Run("json", func(t *testing.T) {
+		outPath := filepath.Join(dir, "egress-json.txt")
+		out, err := os.Create(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := run(context.Background(), []string{"--json", "egress", name, "--state-dir", dir}, out); err != nil {
+			t.Fatalf("run --json egress: %v", err)
+		}
+		if err := out.Close(); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(outPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			Workspace string `json:"workspace"`
+			Egress    []struct {
+				Event  string `json:"event"`
+				Host   string `json:"host"`
+				Reason string `json:"reason"`
+			} `json:"egress"`
+		}
+		if err := json.Unmarshal(got, &payload); err != nil {
+			t.Fatalf("unmarshal egress JSON: %v (%q)", err, got)
+		}
+		if payload.Workspace != name || len(payload.Egress) != 3 {
+			t.Fatalf("payload = %#v", payload)
+		}
+		if payload.Egress[1].Event != "egress_allow" || payload.Egress[1].Host != "api.github.com" {
+			t.Fatalf("egress[1] = %#v", payload.Egress[1])
+		}
+	})
+}
+
+func TestRunEgressAbsentAuditIsEmptyAndSucceeds(t *testing.T) {
+	setTextOutputForTest(t)
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "out.txt")
+	out, err := os.Create(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Workspace name with no audit log: mediation off / no decision yet.
+	if err := runEgress(context.Background(), []string{"never-mediated", "--state-dir", dir}, out); err != nil {
+		t.Fatalf("runEgress absent: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "" {
+		t.Fatalf("absent audit should produce no output, got %q", got)
+	}
+}
+
 func TestHighLevelCreateDetection(t *testing.T) {
 	if !hasFlagValue([]string{"--image", "ubuntu:24.04"}, "image") {
 		t.Fatal("expected --image to be detected")
@@ -7369,5 +7713,149 @@ func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
 	}
 	if !strings.Contains(out, "setup-networking") {
 		t.Errorf("expected remediation hint, got:\n%s", out)
+	}
+}
+
+func TestParseEgressMode(t *testing.T) {
+	cases := map[string]string{
+		"": "mediated", "mediated": "mediated",
+		"strict": "strict", "STRICT": "strict",
+		"off": "off", "open": "off", "disabled": "off",
+	}
+	for in, want := range cases {
+		got, err := parseEgressMode(in)
+		if err != nil || got != want {
+			t.Fatalf("parseEgressMode(%q)=%q,%v want %q", in, got, err, want)
+		}
+	}
+	if _, err := parseEgressMode("bogus"); err == nil {
+		t.Fatal("expected error for bogus mode")
+	}
+}
+
+func writeEgressPolicyFile(t *testing.T, name, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	return path
+}
+
+// TestEgressPolicyFileMergesWithFlags asserts the policy file's allow/passthrough
+// lists are unioned with --egress-allow/--egress-passthrough and deduped
+// case-insensitively. Precedence is additive (default-deny means a file can only
+// ADD reachability), so order-independent union with dedupe is correct.
+func TestEgressPolicyFileMergesWithFlags(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.yaml", `
+allow:
+  - api.github.com
+  - .example.com
+passthrough:
+  - raw.example.com
+`)
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "strict",
+		"--egress-allow", "API.GitHub.com", // dup of file entry, different case
+		"--egress-allow", "extra.com",
+		"--egress-passthrough", "raw.example.com", // dup of file entry
+		"--egress-policy", policy,
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	// Union of flag {api.github.com, extra.com} and file {api.github.com,
+	// .example.com}, deduped case-insensitively -> 3 entries.
+	if len(opts.EgressAllow) != 3 {
+		t.Fatalf("EgressAllow = %v, want 3 deduped entries", opts.EgressAllow)
+	}
+	wantAllow := map[string]bool{"api.github.com": false, "extra.com": false, ".example.com": false}
+	for _, h := range opts.EgressAllow {
+		if _, ok := wantAllow[strings.ToLower(h)]; !ok {
+			t.Fatalf("unexpected allow entry %q in %v", h, opts.EgressAllow)
+		}
+		wantAllow[strings.ToLower(h)] = true
+	}
+	for h, seen := range wantAllow {
+		if !seen {
+			t.Fatalf("missing allow entry %q in %v", h, opts.EgressAllow)
+		}
+	}
+	if len(opts.EgressPassthrough) != 1 || opts.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("EgressPassthrough = %v, want [raw.example.com] (deduped)", opts.EgressPassthrough)
+	}
+}
+
+func TestEgressPolicyFileJSON(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.json", `{"allow":["api.github.com"],"passthrough":["raw.example.com"]}`)
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "mediated",
+		"--egress-policy", policy,
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if len(opts.EgressAllow) != 1 || opts.EgressAllow[0] != "api.github.com" {
+		t.Fatalf("EgressAllow = %v", opts.EgressAllow)
+	}
+	if len(opts.EgressPassthrough) != 1 || opts.EgressPassthrough[0] != "raw.example.com" {
+		t.Fatalf("EgressPassthrough = %v", opts.EgressPassthrough)
+	}
+}
+
+// TestEgressPolicyFileRejectedWhenOff asserts a policy file is rejected when
+// mediation is off — a policy is meaningless without a mediator to enforce it.
+func TestEgressPolicyFileRejectedWhenOff(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.yaml", "allow: [api.github.com]\n")
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "off",
+		"--egress-policy", policy,
+	})
+	if err == nil {
+		t.Fatal("expected error for --egress-policy with --egress off")
+	}
+	if !strings.Contains(err.Error(), "mediated or strict") {
+		t.Fatalf("error %q should explain mediated/strict requirement", err)
+	}
+}
+
+func TestEgressPolicyFileLoadErrorPropagates(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.yaml", "allowed: [api.github.com]\n") // typo -> unknown key
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "strict",
+		"--egress-policy", policy,
+	})
+	if err == nil {
+		t.Fatal("expected error for policy file with unknown key")
+	}
+}
+
+// TestEgressPolicyFileUnionWithManifest confirms the file/flag union (resolved
+// CLI-side into opts) further unions with a manifest's egress lists through
+// OptionsFromManifest, and the manifest's entries survive. This is the
+// create-then-start path: flags+file produce a manifest, which on start unions
+// into Config. Here we assert the manifest-side union directly.
+func TestEgressPolicyFileUnionWithManifest(t *testing.T) {
+	policy := writeEgressPolicyFile(t, "policy.yaml", "allow: [file.example.com]\n")
+	opts, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--egress", "strict",
+		"--egress-allow", "flag.example.com",
+		"--egress-policy", policy,
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	// The CLI-resolved union (flag + file) must contain both.
+	got := map[string]bool{}
+	for _, h := range opts.EgressAllow {
+		got[strings.ToLower(h)] = true
+	}
+	if !got["flag.example.com"] || !got["file.example.com"] {
+		t.Fatalf("CLI union missing entries: %v", opts.EgressAllow)
 	}
 }

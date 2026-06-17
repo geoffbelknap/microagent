@@ -1098,7 +1098,7 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 	if err := os.WriteFile(vsockSocketPath(opts), []byte("socket placeholder"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, 0, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	quarantineReq := vmkit.Request{
@@ -1360,7 +1360,7 @@ func TestPausePatchesVMStateAndPreservesAuxProcesses(t *testing.T) {
 	vmProcess := startSleepProcess(t)
 	forwarder := startSleepProcess(t)
 	vsockListener := startSleepProcess(t)
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, 0, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	fake := &fakeVMController{}
@@ -1399,7 +1399,7 @@ func TestResumePatchesVMStateBackToRunning(t *testing.T) {
 	vmProcess := startSleepProcess(t)
 	forwarder := startSleepProcess(t)
 	vsockListener := startSleepProcess(t)
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StatePaused, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StatePaused, vmProcess.Process.Pid, forwarder.Process.Pid, vsockListener.Process.Pid, 0, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	fake := &fakeVMController{}
@@ -1667,7 +1667,7 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	req := snapshotSourceRequest(t, dir)
 	vmProcess := startSleepProcess(t)
 	forwarder := startSleepProcess(t)
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, 0, nil, nil, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, forwarder.Process.Pid, 0, 0, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	fake := &fakeVMController{}
@@ -2181,7 +2181,7 @@ func TestForegroundExitTerminatesRecordedCompanions(t *testing.T) {
 		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
 		Config:   &vmkit.Config{StateDir: dir},
 	}
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, 0, forwarder.Process.Pid, vsockListener.Process.Pid, nil, nil, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, 0, forwarder.Process.Pid, vsockListener.Process.Pid, 0, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	terminateRecordedCompanions(opts)
@@ -2202,7 +2202,7 @@ func TestEnsureCanDeleteRejectsDeadVMWithLiveCompanions(t *testing.T) {
 		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
 		Config:   &vmkit.Config{StateDir: dir},
 	}
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, deadProcessPID(t), forwarder.Process.Pid, 0, nil, nil, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, deadProcessPID(t), forwarder.Process.Pid, 0, 0, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	err := ensureCanDelete(opts)

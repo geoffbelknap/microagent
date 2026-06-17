@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-17_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -155,8 +155,8 @@ The complete set:
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--file <path>` | Workspace spec file; flags override matching spec fields |
 | `--restart <policy>` | Restart policy for kept/named runs: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, `bridged`, or `named` |
-| `--network-interface <if>` | Host interface identifier or display name for bridged mode |
+| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `named` |
+| `--network-interface <if>` | Host interface identifier or display name (only used by the unsupported `bridged` mode) |
 | `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
 | `--publish <mapping>` | Forward `[host:]hostPort:guestPort[/tcp]` |
 | `-p <mapping>` | Alias for `--publish` |
@@ -169,6 +169,10 @@ The complete set:
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
+| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `mediated` (default; capture and audit everything, block nothing), `strict` (deny non-allowlisted), or `off` |
+| `--egress-allow <host>` | Allowlisted egress destination (TLS-intercepted). Repeatable; an exact host or a `.suffix` matching the apex and subdomains. See the [allowlist how-to](/guides/egress-allowlist/) |
+| `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted (forwarded opaquely). Repeatable. For cert-pinned / mTLS endpoints |
+| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress mediated` or `strict` |
 | `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model and inject `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL`; with `--keep`, the ref persists and later `start`s re-pair. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
 | `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom` |

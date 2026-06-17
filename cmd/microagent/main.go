@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
@@ -75,6 +76,19 @@ const (
 	envModelPolicyURL     = "MICROAGENT_MODEL_POLICY_URL"
 	envModelPolicyFile    = "MICROAGENT_MODEL_POLICY_FILE"
 	envModelPolicyTimeout = "MICROAGENT_MODEL_POLICY_TIMEOUT"
+)
+
+const (
+	// networkModeFlagHelp is the single source of truth for the --network flag
+	// help shown by every command that exposes a workspace network mode. It
+	// names the user-vs-nat trade-off so the rootless default and the
+	// privileged kernel-speed alternative are both obvious. bridged is
+	// quarantined and intentionally absent from the advertised set.
+	networkModeFlagHelp = "Network mode: user (rootless, unprivileged user namespace; default), nat (kernel-speed, needs CAP_NET_ADMIN/root), isolated (no network), or named (shared bridge)"
+	// networkModePerfFlagHelp mirrors networkModeFlagHelp for measured boots,
+	// which run disposable workspaces and so omit named (shared bridge); an
+	// empty value falls back to the backend default.
+	networkModePerfFlagHelp = "Network mode for measured boots: user (rootless, unprivileged user namespace), nat (kernel-speed, needs CAP_NET_ADMIN/root), or isolated (no network); empty uses the backend default"
 )
 
 func main() {
@@ -195,6 +209,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	if args[0] == "events" {
 		return runEvents(ctx, args[1:], stdout)
+	}
+	if args[0] == "egress" {
+		return runEgress(ctx, args[1:], stdout)
 	}
 	if args[0] == "stats" {
 		return runStats(ctx, args[1:], stdout)
@@ -614,8 +631,9 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.IntVar(&config.CPUCount, "cpus", 2, "CPU count")
 	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
-	networkMode := fs.String("network", defaultNetworkMode, "Network mode: user, nat, isolated, or bridged")
+	networkMode := fs.String("network", defaultNetworkMode, networkModeFlagHelp)
 	networkInterface := fs.String("network-interface", "", "Host interface for bridged network mode")
+	networkUnsupported := fs.Bool("unsupported", false, "Acknowledge selecting an unsupported, unmediated network mode (bridged)")
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
@@ -628,7 +646,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return vmkit.Request{Command: "host"}, nil
 	case "create":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, publishes)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, *networkUnsupported, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -639,7 +657,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return req, nil
 	case "start":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, publishes)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, *networkUnsupported, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -721,6 +739,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	warnIfBridged(os.Stderr, opts.Network.Mode)
 
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
@@ -1791,7 +1810,7 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	fs.IntVar(&timeoutSeconds, "timeout", timeoutSeconds, "Per-iteration timeout in seconds")
 	fs.StringVar(&opts.Mke2fsPath, "mke2fs", opts.Mke2fsPath, "mke2fs binary path")
 	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "Supervisor path")
-	fs.StringVar(&opts.NetworkMode, "network", opts.NetworkMode, "Network mode for measured boots (user, nat, isolated, bridged); empty uses the backend default")
+	fs.StringVar(&opts.NetworkMode, "network", opts.NetworkMode, networkModePerfFlagHelp)
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -2091,6 +2110,108 @@ func eventFollowComplete(events []workspace.EventFile) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// runEgress surfaces the egress mediator's audit log for a workspace — the
+// per-decision allow/deny/MITM/DNS/UDP record written to egress-access.jsonl. It
+// mirrors runEvents: a one-shot snapshot by default, or a live tail with
+// --follow. An absent audit file is not an error (mediation may be off, or no
+// decision has been recorded yet) — it reports as an empty list.
+func runEgress(ctx context.Context, args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	follow := false
+	fs := flag.NewFlagSet("egress", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.BoolVar(&follow, "follow", false, "Stream new egress decisions until the workspace stops or interrupted")
+	fs.BoolVar(&follow, "f", false, "Alias for --follow")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent egress <name> [--follow] [--state-dir <dir>]")
+	}
+	name := fs.Arg(0)
+	if err := validateWorkspaceName(name); err != nil {
+		return err
+	}
+	events, err := workspace.ReadEgressAudit(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	if follow {
+		if outputStructured() {
+			return fmt.Errorf("egress --follow is not supported with --json/--output json; omit --follow for a one-shot snapshot")
+		}
+		return followEgress(ctx, opts.StateDir, name, events, stdout)
+	}
+	if outputStructured() {
+		return writeJSON(stdout, map[string]any{"workspace": name, "egress": events})
+	}
+	for _, event := range events {
+		writeEgressLine(stdout, event)
+	}
+	return nil
+}
+
+// writeEgressLine renders one egress decision as a compact human line:
+// "<ts>  <event>  <host>  <reason-or-dst>". The trailing column prefers the
+// reason (why a decision was made) and falls back to the destination so a row
+// with neither still aligns.
+func writeEgressLine(stdout *os.File, event workspace.EgressEvent) {
+	host := event.Host
+	if host == "" {
+		host = "-"
+	}
+	detail := event.Reason
+	if detail == "" {
+		detail = event.Dst
+	}
+	line := fmt.Sprintf("%s  %s  %s", event.TS, event.Event, host)
+	if detail != "" {
+		line += "  " + detail
+	}
+	fmt.Fprintln(stdout, line)
+}
+
+// followEgress prints the recorded egress decisions, then streams newly
+// appended decisions, returning when the workspace reaches a terminal lifecycle
+// state or the caller interrupts. Unlike events.json (rewritten wholesale),
+// egress-access.jsonl is append-only, so new records are detected by a growing
+// record count. The terminal-state check reads the lifecycle event history,
+// since the audit log itself carries no lifecycle signal.
+func followEgress(ctx context.Context, stateDir, name string, seen []workspace.EgressEvent, stdout *os.File) error {
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	for _, event := range seen {
+		writeEgressLine(stdout, event)
+	}
+	count := len(seen)
+	if lifecycle, err := workspace.ReadEvents(stateDir, name); err == nil && eventFollowComplete(lifecycle) {
+		return nil
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		events, err := workspace.ReadEgressAudit(stateDir, name)
+		if err != nil {
+			return err
+		}
+		if len(events) > count {
+			for _, event := range events[count:] {
+				writeEgressLine(stdout, event)
+			}
+			count = len(events)
+		}
+		if lifecycle, err := workspace.ReadEvents(stateDir, name); err == nil && eventFollowComplete(lifecycle) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -3302,6 +3423,18 @@ func parseForkSnapshotRef(ref string) (string, string, error) {
 	return source, tag, nil
 }
 
+// warnIfBridged emits a loud, single-line warning to w when the effective
+// network mode is the unsupported, unmediated "bridged" mode. It is fired once
+// per start/run from the CLI so the operator sees it in their terminal. Bridged
+// still works (behind --unsupported); this only makes the risk impossible to
+// miss. Non-bridged modes emit nothing.
+func warnIfBridged(w io.Writer, mode string) {
+	if strings.TrimSpace(mode) != "bridged" {
+		return
+	}
+	fmt.Fprintln(w, "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.")
+}
+
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	profileExplicit := hasFlagValue(args, "profile")
 	memoryExplicit := hasFlagValue(args, "memory")
@@ -3395,6 +3528,10 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	// (halt/stop/kill/delete). A manifest read error is tolerated;
 	// workspace.Start surfaces it properly.
 	if manifest, err := workspace.ReadManifest(opts.StateDir, opts.Name); err == nil {
+		// The effective network mode on start comes from the persisted manifest,
+		// not a CLI flag; warn off the manifest so a bridged workspace is flagged
+		// on every boot.
+		warnIfBridged(os.Stderr, manifest.Network.Mode)
 		var manifestRunner workspace.ModelRunnerSpec
 		if manifest.ModelRunner != nil {
 			manifestRunner = *manifest.ModelRunner
@@ -3767,6 +3904,14 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&secretOnDemandFlags, "secret-on-demand", "Declare an on-demand secret NAME=<scheme>:<ref> (fetched at runtime, never written to tmpfs; repeatable)")
 	var secretsAudit bool
 	fs.BoolVar(&secretsAudit, "secrets-audit", false, "Append every secret access to the workspace audit log")
+	var egressMode string
+	fs.StringVar(&egressMode, "egress", "", "Egress mediation: mediated (default; audit all guest TCP, allow everything), strict (audit and deny non-allowlisted), or off (unmediated)")
+	var egressAllow multiFlag
+	fs.Var(&egressAllow, "egress-allow", "Allowlisted egress destination host (repeatable)")
+	var egressPassthrough multiFlag
+	fs.Var(&egressPassthrough, "egress-passthrough", "Allowed egress host that is not TLS-intercepted (repeatable)")
+	var egressPolicy string
+	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress mediated or strict)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -3785,9 +3930,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
-	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, "Network mode: user, nat, isolated, bridged, or named")
+	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, networkModeFlagHelp)
 	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
 	fs.StringVar(&opts.Network.Name, "network-name", opts.Network.Name, "Join a user-defined named network by name")
+	fs.BoolVar(&opts.Network.Unsupported, "unsupported", opts.Network.Unsupported, "Acknowledge selecting an unsupported, unmediated network mode (bridged)")
 	mediationMapping := ""
 	fs.StringVar(&mediationMapping, "mediation", "", "Required mediation vsock mapping port=host:port")
 	mediationOptional := false
@@ -3879,6 +4025,33 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	opts.OnDemandSecrets = onDemand
 	opts.SecretsAudit = secretsAudit
+	mode, err := parseEgressMode(egressMode)
+	if err != nil {
+		return workspaceOptions{}, err
+	}
+	opts.EgressMode = mode
+	allowHosts := []string(egressAllow)
+	passthroughHosts := []string(egressPassthrough)
+	if strings.TrimSpace(egressPolicy) != "" {
+		// A policy file only enforces against a running mediator; with mediation
+		// off there is nothing to apply it to, so reject rather than silently
+		// ignore (which would mislead the operator into believing it took effect).
+		if mode == vmkit.EgressModeOff {
+			return workspaceOptions{}, fmt.Errorf("--egress-policy: an egress policy file requires --egress mediated or strict")
+		}
+		pf, err := egress.LoadPolicyFile(egressPolicy)
+		if err != nil {
+			return workspaceOptions{}, err
+		}
+		// Precedence is additive/union: default-deny means a policy file can only
+		// ADD reachability, never remove it, so flags + file + manifest combine by
+		// union. Append the file's hosts to the flag-supplied hosts; they later
+		// union with the manifest in OptionsFromManifest/applyManifest.
+		allowHosts = append(allowHosts, pf.Allow...)
+		passthroughHosts = append(passthroughHosts, pf.Passthrough...)
+	}
+	opts.EgressAllow = egress.DedupeHosts(allowHosts)
+	opts.EgressPassthrough = egress.DedupeHosts(passthroughHosts)
 	volumes, err := parseWorkspaceVolumes(volumeFlags)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -4891,6 +5064,20 @@ func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
 		ready(host.PrivilegedNetworkReady))
 	if hint := diagnostics.NetworkRemediation(host); hint != "" {
 		fmt.Fprintf(stdout, "  %s\n", hint)
+	}
+	if host.Backend == vmkit.BackendFirecracker {
+		status := "PASS"
+		if !host.EgressTProxyReady {
+			status = "WARN"
+		}
+		fmt.Fprintf(stdout, "Egress TPROXY modules: %s", status)
+		if len(host.EgressTProxyMissingModules) > 0 {
+			fmt.Fprintf(stdout, " (missing: %s)", strings.Join(host.EgressTProxyMissingModules, ", "))
+		}
+		fmt.Fprintln(stdout)
+		if hint := diagnostics.EgressTProxyRemediation(host); hint != "" {
+			fmt.Fprintf(stdout, "  %s\n", hint)
+		}
 	}
 }
 
@@ -6454,7 +6641,7 @@ func stripBracketedPasteMarkers(chunk []byte) []byte {
 	return chunk
 }
 
-func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, networkInterface string, publishes []string) (vmkit.Request, error) {
+func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, networkInterface string, networkUnsupported bool, publishes []string) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
 			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
@@ -6488,7 +6675,7 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 		})
 	}
 	config.VsockListeners = listeners
-	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, Interface: networkInterface, PortForwards: portForwards})
+	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, Interface: networkInterface, Unsupported: networkUnsupported, PortForwards: portForwards})
 	if err := vmkit.ValidateNetworkConfig(network); err != nil {
 		return vmkit.Request{}, err
 	}
@@ -6614,6 +6801,10 @@ func reorderFlagArgs(args []string) []string {
 		"-secret":                    true,
 		"-secrets-env-file":          true,
 		"-secret-on-demand":          true,
+		"-egress":                    true,
+		"-egress-allow":              true,
+		"-egress-passthrough":        true,
+		"-egress-policy":             true,
 	}
 	var flags []string
 	var positional []string
@@ -6649,7 +6840,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
 		return true
 	default:
 		return false
@@ -7010,6 +7201,19 @@ func parseEnvFlags(values []string) (map[string]string, error) {
 	return env, nil
 }
 
+func parseEgressMode(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "mediated":
+		return "mediated", nil
+	case "strict":
+		return "strict", nil
+	case "off", "open", "disabled":
+		return "off", nil
+	default:
+		return "", fmt.Errorf("--egress must be mediated, strict, or off: %q", v)
+	}
+}
+
 func parseSecretFlags(values []string) (map[string]string, error) {
 	if len(values) == 0 {
 		return nil, nil
@@ -7116,6 +7320,7 @@ Commands:
   result               Show structured workspace result
   logs                 Show workspace logs
   events               Show or stream the lifecycle event history
+  egress               Show or stream the egress mediator's audit decisions
   stats                Show or stream workspace resource usage
   snapshot             Create, list, or remove workspace snapshots
   secret check         Resolve and validate secret references
@@ -7131,7 +7336,7 @@ Commands:
   delete               Delete a workspace
   contract             Show backend-neutral runtime contract
   host                 Report host capabilities
-  host setup-networking  Enable nat/bridged/named networking (Linux; needs root). --check / --revert
+  host setup-networking  Enable nat/named networking (Linux; needs root). --check / --revert
   doctor               Check the host
   rootfs build         Build a rootfs from an OCI image
   version              Print the version
@@ -7166,7 +7371,10 @@ Options:
   -state-dir <dir>      State directory
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, bridged, or named
+  -network <mode>       Network mode:
+                         user (rootless, unprivileged user namespace; default),
+                         nat (kernel-speed, needs CAP_NET_ADMIN/root),
+                         isolated (no network), or named (shared bridge)
   -network-interface <if>
                          Host interface for bridged network mode
   -network-name <name>  Join a user-defined named network by name
@@ -7195,7 +7403,10 @@ Boot options:
   -timeout <seconds>    Per-iteration timeout
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
-  -network <mode>       Network mode for measured boots; empty uses the backend default
+  -network <mode>       Network mode for measured boots:
+                         user (rootless, unprivileged user namespace),
+                         nat (kernel-speed, needs CAP_NET_ADMIN/root), or
+                         isolated (no network); empty uses the backend default
 
 Footprint options:
   -state-dir <dir>      State directory
@@ -7242,7 +7453,10 @@ Options:
   -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, bridged, or named
+  -network <mode>       Network mode:
+                         user (rootless, unprivileged user namespace; default),
+                         nat (kernel-speed, needs CAP_NET_ADMIN/root),
+                         isolated (no network), or named (shared bridge)
   -network-interface <if>
                          Host interface for bridged network mode
   -network-name <name>  Join a user-defined named network by name
@@ -7310,7 +7524,10 @@ Options:
   -arch <arch>          Guest architecture
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
-  -network <mode>       Network mode: user, nat, isolated, bridged, or named
+  -network <mode>       Network mode:
+                         user (rootless, unprivileged user namespace; default),
+                         nat (kernel-speed, needs CAP_NET_ADMIN/root),
+                         isolated (no network), or named (shared bridge)
   -network-interface <if>
                          Host interface for bridged network mode
   -network-name <name>  Join a user-defined named network by name

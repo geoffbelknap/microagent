@@ -4,7 +4,7 @@ description: Choose a network mode and see what each one does under the hood on 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-17_
 
 This is the internals page for workspace networking: read it to choose a
 network mode and to understand what each mode actually does on each backend.
@@ -13,15 +13,28 @@ For the task-shaped walkthroughs, see
 mediation channel has its own guide at
 [Build agents on the mediation channel](/guides/agents-and-mediation/).
 
-Every workspace declares its network intent. Five modes:
+Every workspace declares its network intent. Four supported modes:
 
 | Mode | What it does |
 |---|---|
 | `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. |
 | `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
 | `isolated` | No guest network device. The guest has no network access at all. |
-| `bridged` | Workspace gets its own L2 presence on an existing host bridge. |
 | `named` | Workspace joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a shared managed bridge so members reach each other, and `/etc/hosts` name resolution. Currently implemented by Firecracker on Linux. |
+
+> **`bridged` is unsupported.** It gives the workspace its own L2 presence on an
+> existing host bridge, but it **bypasses [egress mediation](/concepts/egress-mediation/)**
+> and is not covered by microagent's security model. It is hidden from the
+> advertised modes and requires `--unsupported` to select. It may be broken or
+> removed. The sections below document its mechanics for the operators who
+> knowingly opt in.
+
+This page is about *which network device a workspace gets and how it is wired*.
+What the workspace is allowed to send over that device - capture, allowlists,
+TLS interception, and the audit trail - is a separate layer:
+[egress mediation](/concepts/egress-mediation/), on by default. Two distinct
+things share the word "mediation" here; see [Mediation channel](#mediation-channel)
+below for the disambiguation.
 
 The implementation under each mode varies by backend. Quick matrix across all
 three backends:
@@ -125,6 +138,11 @@ Host requirements:
 - `/dev/net/tun` readable by the user.
 
 `microagent doctor` checks all three and tells you which is missing.
+
+On hardened hosts that disable unprivileged user namespaces (`kernel.unprivileged_userns_clone=0`, `user.max_user_namespaces=0`, or an AppArmor userns restriction), `pasta` cannot create its namespace and the rootless `user` mode fails to start. Rather than surfacing the raw `pasta` error, the supervisor detects this case - either from those sysctl gates or from a namespace-creation failure signature in `pasta`'s stderr - and returns a guiding error that names the disabled gate, preserves the original `pasta` output, and points at the two fixes:
+
+- Enable unprivileged user namespaces: `sudo sysctl -w kernel.unprivileged_userns_clone=1`.
+- Or switch to the privileged kernel-speed alternative: `--network nat` (needs `CAP_NET_ADMIN`; run as root). microagent does not auto-escalate to `nat` for you - the privileged mode is always an explicit choice.
 
 ## NAT on Firecracker
 
@@ -254,7 +272,9 @@ the supervisor (run as root, or grant `cap_net_admin,cap_setpcap+ep`).
 
 ## Mediation channel
 
-Mediation is a separate guest-to-host vsock contract for the guest's calls into the host control plane - distinct from ordinary networking, and required and fail-closed by default. Declaration syntax, the host listener pattern, and the failure semantics all live in [build agents on the mediation channel](/guides/agents-and-mediation/).
+The **mediation channel** is a guest-to-host **vsock** contract for the guest's calls into the host control plane - distinct from ordinary networking, and required and fail-closed by default. Declaration syntax, the host listener pattern, and the failure semantics all live in [build agents on the mediation channel](/guides/agents-and-mediation/).
+
+> **Don't confuse the two "mediations."** The *mediation channel* (this section) is a vsock side channel into your control plane. *[Egress mediation](/concepts/egress-mediation/)* is the capture-and-control layer over the guest's ordinary network egress - the TCP/UDP/DNS it sends out of its network device, intercepted, allowlisted, and audited. Different mechanisms, different purposes.
 
 ## What's visible
 

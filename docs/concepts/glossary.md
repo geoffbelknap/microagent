@@ -4,7 +4,7 @@ description: Terms used throughout the microagent docs and what they actually me
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-17_
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse - and the distinctions matter for what you can do next.
 
@@ -36,7 +36,8 @@ A handful of terms come up often enough that it's worth pinning them down before
 ## Control surface
 
 - **supervisor** - a small JSON-in / JSON-out executable that owns lifecycle for one backend (`microagent-firecracker-supervisor`, `microagent-applevf-supervisor`, plus a Windows Hyper-V supervisor). Anything that can spawn a subprocess and parse JSON can drive it.
-- **mediation channel** - a guest-to-host vsock contract for the agent's calls into your host control plane. Declared, required by default, and fail-closed unless you explicitly opt out. See [Build agents on the mediation channel](/guides/agents-and-mediation/).
+- **mediation channel** - a guest-to-host vsock contract for the agent's calls into your host control plane. Declared, required by default, and fail-closed unless you explicitly opt out. **Not the same as egress mediation** (below); they only share the word "mediation". See [Build agents on the mediation channel](/guides/agents-and-mediation/).
+- **egress mediation** - the capture-and-control layer over the guest's *ordinary network egress* (the TCP/UDP/DNS it sends out of its network device). On by default (`mediated`), with `strict` and `off` modes. Intercepts TLS with a per-workspace CA, allowlists destinations, and audits every decision. Distinct from the vsock mediation channel above. See [Egress mediation](/concepts/egress-mediation/).
 - **state directory** - where workspace records live on the host (default `~/.microagent/`).
 - **AX mode** - the agent-experience output mode (`--mode=ax`). stdout is structured JSON for agent clients; UX mode is the human-readable default. The [MCP endpoint](/guides/mcp-server/) always uses AX output.
 - **readiness** - structured signals on a status response (`guestReady`, `shellReady`, `execReady`, `resultReady`, `mediationReady`) so callers can sequence work without polling files or serial logs. See [State and identity](/concepts/state-and-identity/#readiness).

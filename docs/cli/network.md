@@ -4,7 +4,7 @@ description: Inspect workspace networking and manage named networks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-16_
 
 ```text
 microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's network
@@ -13,8 +13,8 @@ microagent network list                                 List named networks
 microagent network delete <name> [--force]                Remove a named network
 ```
 
-With a workspace name, `network` reports the network mode, bridged host
-interface, declared port forwards, DNS servers, routes, and IP information
+With a workspace name, `network` reports the network mode, host interface,
+declared port forwards, DNS servers, routes, and IP information
 recorded for that workspace. The top-level `network` field comes from the
 persistent workspace manifest; when a workspace has a runtime state file,
 `runtime` shows the last network config recorded by the backend supervisor.

@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-17_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -85,11 +85,11 @@ symbols should be added to this page when they are introduced.
 
 | Package | Documented symbols |
 |---|---|
-| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `Capabilities`, `BackendCapabilities`, `SnapshotManifest`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotsDir`, `SnapshotDir`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot` |
-| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `ModelRunnerSpec`, `ModelMediationSpec`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `DefaultModelGuestPort`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecMaxTransientRetries`, `ExecPort`, `ExecPortForName`, `ExecRetryExhaustedError`, `ExecRetryMetadata`, `ExecReadinessSignal`, `Create`, `CreateFromSnapshot`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `GuestRootfsLayerTar`, `Clone`, `ReadLogs`, `ReadEvents`, `EventsPath`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `Snapshot`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `ExecWithMetadata`, `ExecStream`, `IsRetryableExecTransient`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
+| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `Capabilities`, `BackendCapabilities`, `SnapshotManifest`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotsDir`, `SnapshotDir`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot`, `EgressModeMediated`, `EgressMediationOn`, `NetworkModeMediates`, `NormalizeEgressMode` |
+| `pkg/workspace` | `Options`, `OptionsFromRequest`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `ModelRunnerSpec`, `ModelMediationSpec`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `DefaultModelGuestPort`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecMaxTransientRetries`, `ExecPort`, `ExecPortForName`, `ExecRetryExhaustedError`, `ExecRetryMetadata`, `ExecReadinessSignal`, `Create`, `CreateFromSnapshot`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `GuestRootfsLayerTar`, `Clone`, `ReadLogs`, `ReadEvents`, `EventsPath`, `ReadEgressAudit`, `EgressAuditPath`, `EgressEvent`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `Snapshot`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `ExecWithMetadata`, `ExecStream`, `IsRetryableExecTransient`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
-| `pkg/diagnostics` | `Options`, `Check` |
+| `pkg/diagnostics` | `Options`, `Check`, `EgressTProxyRemediation` |
 | `pkg/perf` | `BootOptions`, `BootReport`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `Boot`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeRSSSamples` |
 | `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platfodelete`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
@@ -219,6 +219,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Clone` | Clone a stopped/prepared workspace |
 | `workspace.ReadLogs` | Read a workspace serial log |
 | `workspace.ReadEvents` | Read the recorded lifecycle event history |
+| `workspace.ReadEgressAudit` | Read the egress mediator's recorded allow/deny/MITM/DNS/UDP decisions (`EgressEvent`, from `EgressAuditPath`) |
 | `workspace.SampleStats` | Sample CPU, memory, and I/O for a running workspace |
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
@@ -359,6 +360,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent exec` | `workspace.Exec` |
 | `microagent logs` | `workspace.ReadLogs` |
 | `microagent events` | `workspace.ReadEvents` |
+| `microagent egress` | `workspace.ReadEgressAudit` |
 | `microagent stats` | `workspace.SampleStats` |
 | `microagent cp` | `workspace.Copy` |
 | `microagent clone` | `workspace.Clone` |

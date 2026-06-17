@@ -134,6 +134,12 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 		}
 	}
 	opts.SecretsAudit = manifest.SecretsAudit
+	// Normalize the egress mode loaded from the manifest so an unspecified mode
+	// carries the explicit secure default ("mediated") into Request(), which
+	// then provisions the mediator and the CA-cert vsock listener.
+	opts.EgressMode = vmkit.NormalizeEgressMode(manifest.EgressMode)
+	opts.EgressAllow = manifest.EgressAllow
+	opts.EgressPassthrough = manifest.EgressPassthrough
 	opts.Outputs = manifest.Artifacts.Egress
 	if opts.KernelPath == "" {
 		opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)

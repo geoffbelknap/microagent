@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/network"
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
@@ -292,19 +295,20 @@ type transientFirewallRule struct {
 }
 
 type runtimeState struct {
-	Event            eventFile                `json:"event"`
-	Config           vmkit.Config             `json:"config"`
-	PID              int                      `json:"pid,omitempty"`
-	PortForwardPID   int                      `json:"portForwardPid,omitempty"`
-	VsockListenerPID int                      `json:"vsockListenerPid,omitempty"`
-	NetworkDevices   []transientNetworkDevice `json:"networkDevices,omitempty"`
-	FirewallRules    []transientFirewallRule  `json:"firewallRules,omitempty"`
-	SerialLogPath    string                   `json:"serialLogPath"`
-	SerialInputPath  string                   `json:"serialInputPath,omitempty"`
-	StartedAt        string                   `json:"startedAt,omitempty"`
-	UpdatedAt        string                   `json:"updatedAt"`
-	Readiness        vmkit.RuntimeReadiness   `json:"readiness,omitempty"`
-	Error            string                   `json:"error,omitempty"`
+	Event             eventFile                `json:"event"`
+	Config            vmkit.Config             `json:"config"`
+	PID               int                      `json:"pid,omitempty"`
+	PortForwardPID    int                      `json:"portForwardPid,omitempty"`
+	VsockListenerPID  int                      `json:"vsockListenerPid,omitempty"`
+	EgressMediatorPID int                      `json:"egressMediatorPid,omitempty"`
+	NetworkDevices    []transientNetworkDevice `json:"networkDevices,omitempty"`
+	FirewallRules     []transientFirewallRule  `json:"firewallRules,omitempty"`
+	SerialLogPath     string                   `json:"serialLogPath"`
+	SerialInputPath   string                   `json:"serialInputPath,omitempty"`
+	StartedAt         string                   `json:"startedAt,omitempty"`
+	UpdatedAt         string                   `json:"updatedAt"`
+	Readiness         vmkit.RuntimeReadiness   `json:"readiness,omitempty"`
+	Error             string                   `json:"error,omitempty"`
 }
 
 type guestResult struct {
@@ -364,11 +368,47 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return failedResponse(req, err.Error()), err
 		}
 	}
-	networkDevices, firewallRules, runtimeNetwork, err := prepareNetworkForStart(opts, req.Config)
+	// On a snapshot restore/fork (req.Tag != "") the egress mediator must be
+	// re-armed with the SAME per-workspace CA the guest's baked trust store was
+	// built against, NOT a freshly minted one. Read the recorded CA fingerprint
+	// from the snapshot manifest so prepareNetworkForStart can reuse-and-verify
+	// the persisted CA instead of re-minting. Fail closed if the manifest is
+	// unreadable during a restore.
+	restore := req.Tag != ""
+	expectedCASHA := ""
+	if restore {
+		manifest, merr := vmkit.ReadSnapshotManifest(vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag))
+		if merr != nil {
+			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, merr.Error())
+			return failedResponse(req, merr.Error()), merr
+		}
+		expectedCASHA = manifest.EgressCASHA256
+		// Re-apply the persisted bounded-operations caps (ASK tenet 8) so a restored
+		// workspace keeps the SAME bounds it was snapshotted under, just as the CA is
+		// reused. Threaded onto req.Config here so provisionEgressMediation hands them
+		// to the mediator flags via egressCapsFromConfig. Idempotent: if the restore
+		// request already carries caps, the manifest reproduces the same values.
+		applyManifestEgressCaps(req.Config, manifest)
+	}
+	networkDevices, firewallRules, runtimeNetwork, egressMediatorPID, err := prepareNetworkForStart(opts, req.Config, restore, expectedCASHA)
 	if err != nil {
 		_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 		return failedResponse(req, err.Error()), err
 	}
+	// prepareNetworkForStart may have started the egress mediator — a host-side
+	// companion already bound to the tap gateway. Every failure path below cleans
+	// up the transient firewall rules and network devices, but the mediator is a
+	// separate process and must be reaped too, or it is orphaned with the
+	// workspace gone. Guard it with a deferred reaper that is disarmed only on the
+	// detached-success path (where the mediator is intentionally left running and
+	// recorded in runtime.json for stop/halt to reap later). terminateAuxProcess
+	// is idempotent, so paths that also reap it explicitly stay correct.
+	egressMediatorRunning := egressMediatorPID != 0
+	defer func() {
+		if egressMediatorRunning {
+			terminateAuxProcess(egressMediatorPID)
+		}
+	}()
 	runtimeReq := requestWithRuntimeNetwork(req, runtimeNetwork)
 	// Move the shell/exec host binds off any unbindable port (e.g. a WSL2/Windows
 	// reserved range) before the VM config (boot args) and runtime state are
@@ -485,7 +525,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			}
 		}
 	}
-	if err := writeProcessStateWithForwarderAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, networkDevices, firewallRules, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, 0, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 		_ = cmd.Process.Kill()
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -511,7 +551,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return failedResponse(req, err.Error()), err
 		}
 		vsockListenerPID = pid
-		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, networkDevices, firewallRules, ""); err != nil {
+		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 			_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
 			_ = cmd.Process.Kill()
 			cleanupTransientFirewallRules(firewallRules)
@@ -525,7 +565,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	}
 	if detached && needsPortForwarder(req.Config) {
 		pid, err := startReadyPortForwarderProcessWithManagementPortRetry(ctx, opts, runtimeReq.Config, func() error {
-			return writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, vsockListenerPID, networkDevices, firewallRules, "")
+			return writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, 0, vsockListenerPID, egressMediatorPID, networkDevices, firewallRules, "")
 		})
 		if err != nil {
 			if vsockListenerPID != 0 {
@@ -542,7 +582,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			return failedResponse(req, err.Error()), err
 		}
 		portForwardPID = pid
-		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, networkDevices, firewallRules, ""); err != nil {
+		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, cmd.Process.Pid, portForwardPID, vsockListenerPID, egressMediatorPID, networkDevices, firewallRules, ""); err != nil {
 			_ = signalProcessGroup(portForwardPID, syscall.SIGTERM)
 			if vsockListenerPID != 0 {
 				_ = signalProcessGroup(vsockListenerPID, syscall.SIGTERM)
@@ -565,6 +605,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			if vsockListenerPID != 0 {
 				terminateAuxProcess(vsockListenerPID)
 			}
+			if egressMediatorPID != 0 {
+				terminateAuxProcess(egressMediatorPID)
+			}
 			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
 			if serialInput != nil {
@@ -580,6 +623,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		_ = serialLog.Close()
 		_ = cmd.Process.Release()
+		// Detached start succeeded: the mediator stays up as a recorded companion
+		// (reaped later by stop/halt/quarantine), so disarm the deferred reaper.
+		egressMediatorRunning = false
 		return eventResponse(req, vmkit.StateRunning, ""), nil
 	}
 	waitErr := waitForeground(ctx, cmd, serialLogPath(opts), opts.Timeout)
@@ -589,6 +635,9 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	// VM exit. Reap those host-side companions before the final state write
 	// below discards the recorded PIDs.
 	terminateRecordedCompanions(opts)
+	if egressMediatorPID != 0 {
+		terminateAuxProcess(egressMediatorPID)
+	}
 	inputCloseErr := error(nil)
 	if serialInput != nil {
 		inputCloseErr = serialInput.Close()
@@ -653,6 +702,9 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 		if state.VsockListenerPID != 0 {
 			terminateAuxProcess(state.VsockListenerPID)
 		}
+		if state.EgressMediatorPID != 0 {
+			terminateAuxProcess(state.EgressMediatorPID)
+		}
 		cleanupTransientFirewallRules(state.FirewallRules)
 		cleanupTransientNetworkDevices(state.NetworkDevices)
 		cleanupUserNetworkProcess(opts)
@@ -683,6 +735,9 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	if state.VsockListenerPID != 0 {
 		terminateAuxProcess(state.VsockListenerPID)
 	}
+	if state.EgressMediatorPID != 0 {
+		terminateAuxProcess(state.EgressMediatorPID)
+	}
 	cleanupTransientFirewallRules(state.FirewallRules)
 	cleanupTransientNetworkDevices(state.NetworkDevices)
 	cleanupUserNetworkProcess(opts)
@@ -702,6 +757,9 @@ func quarantineWorkspace(opts Options, req vmkit.Request) (vmkit.Response, error
 	}
 	if state.VsockListenerPID != 0 {
 		terminateAuxProcess(state.VsockListenerPID)
+	}
+	if state.EgressMediatorPID != 0 {
+		terminateAuxProcess(state.EgressMediatorPID)
 	}
 	cleanupTransientFirewallRules(state.FirewallRules)
 	cleanupTransientNetworkDevices(state.NetworkDevices)
@@ -766,7 +824,7 @@ func transitionVMState(ctx context.Context, opts Options, req vmkit.Request, api
 		// persisted state untouched rather than recording a spurious failure.
 		return failedResponse(req, err.Error()), err
 	}
-	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), toState, state.PID, state.PortForwardPID, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), toState, state.PID, state.PortForwardPID, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
 		return vmkit.Response{}, err
 	}
 	return eventResponse(req, toState, ""), nil
@@ -817,6 +875,15 @@ func ensureWorkspaceProcessesStopped(opts Options, state runtimeState) error {
 		}
 		if active {
 			return fmt.Errorf("firecracker workspace %s vsock listener is running; stop or kill it before delete", opts.Name)
+		}
+	}
+	if state.EgressMediatorPID != 0 {
+		active, err := processActive(state.EgressMediatorPID)
+		if err != nil {
+			return err
+		}
+		if active {
+			return fmt.Errorf("firecracker workspace %s egress mediator is running; stop or kill it before delete", opts.Name)
 		}
 	}
 	if active, err := userNetworkProcessActive(opts); err != nil {
@@ -881,6 +948,9 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	}
 	if config != nil && config.SecretsPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_secrets_port=%d", config.SecretsPort))
+	}
+	if config != nil && config.CACertPort != 0 {
+		args = append(args, fmt.Sprintf("microagent_ca_cert_port=%d", config.CACertPort))
 	}
 	if config != nil && len(config.OnDemandSecrets) != 0 {
 		args = append(args, "microagent_secrets_api=1")
@@ -1005,19 +1075,19 @@ func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, erro
 	}
 	state.Config.Network = req.Config.Network
 	runtimeReq := runtimeStateRequest(req, state)
-	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
 		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 	}
 	if needsPortForwarder(req.Config) {
 		pid, err := startReadyPortForwarderProcessWithManagementPortRetry(context.Background(), opts, runtimeReq.Config, func() error {
-			return writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, "")
+			return writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, "")
 		})
 		if err != nil {
-			_ = writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, err.Error())
+			_ = writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, err.Error())
 			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 		}
 		state.PortForwardPID = pid
-		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, pid, state.VsockListenerPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
+		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, pid, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
 			_ = signalProcessGroup(pid, syscall.SIGTERM)
 			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
 		}
@@ -1100,90 +1170,295 @@ func networkMode(config *vmkit.Config) string {
 	return strings.TrimSpace(config.Network.Mode)
 }
 
-func prepareNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+func prepareNetworkForStart(opts Options, config *vmkit.Config, restore bool, expectedCASHA string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
 	switch networkMode(config) {
 	case "isolated":
-		return nil, nil, nil, nil
+		return nil, nil, nil, 0, nil
 	case "user":
-		return prepareUserNetworkForStart(opts, config)
+		return prepareUserNetworkForStart(opts, config, restore, expectedCASHA)
 	case "nat":
-		return prepareNATForStart(opts, config)
+		return prepareNATForStart(opts, config, restore, expectedCASHA)
 	case "named":
-		return prepareNamedNetworkForStart(opts, config)
+		return prepareNamedNetworkForStart(opts, config, restore, expectedCASHA)
 	case "bridged":
 	default:
-		return nil, nil, nil, fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, bridged, or named", networkMode(config))
+		return nil, nil, nil, 0, fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, bridged, or named", networkMode(config))
 	}
 	bridge := strings.TrimSpace(config.Network.Interface)
 	if err := validateLinuxBridge(bridge); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	device := transientNetworkDevice{Name: tapName(opts), Mode: "tap", Interface: bridge, Created: true}
 	if err := createBridgeTap(device.Name, bridge); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
-	return []transientNetworkDevice{device}, nil, nil, nil
+	return []transientNetworkDevice{device}, nil, nil, 0, nil
 }
 
-func prepareNATForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+func prepareNATForStart(opts Options, config *vmkit.Config, restore bool, expectedCASHA string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
 	if err := requireIPv4Forwarding(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
-	return prepareTAPNATForStart(opts, config, "nat")
+	return prepareTAPNATForStart(opts, config, "nat", restore, expectedCASHA)
 }
 
-func prepareUserNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+func prepareUserNetworkForStart(opts Options, config *vmkit.Config, restore bool, expectedCASHA string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
 	if !insideUserNetworkNamespace() {
-		return nil, nil, nil, fmt.Errorf("firecracker user networking must run inside a pasta user network namespace")
+		return nil, nil, nil, 0, fmt.Errorf("firecracker user networking must run inside a pasta user network namespace")
 	}
 	if err := enableNamespaceIPv4Forwarding(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
-	devices, rules, network, err := prepareTAPNATForStart(opts, config, "user")
+	devices, rules, network, egressPID, err := prepareTAPNATForStart(opts, config, "user", restore, expectedCASHA)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
-	return attachUserNetworkPID(devices), rules, network, nil
+	return attachUserNetworkPID(devices), rules, network, egressPID, nil
 }
 
-func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string, restore bool, expectedCASHA string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
 	plan, err := tapNATAddressPlan(opts, config)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	tap := tapName(opts)
 	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: plan.Subnet, Created: true}
 	if err := createTap(tap); err != nil {
-		return nil, nil, nil, networkPrivilegeError("create firecracker nat tap "+tap, err)
+		return nil, nil, nil, 0, networkPrivilegeError("create firecracker nat tap "+tap, err)
 	}
 	cleanupDevices := []transientNetworkDevice{device}
 	link, err := netlink.LinkByName(tap)
 	if err != nil {
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, networkPrivilegeError("inspect firecracker nat tap "+tap, err)
+		return nil, nil, nil, 0, networkPrivilegeError("inspect firecracker nat tap "+tap, err)
 	}
 	addr, err := netlink.ParseAddr(plan.HostCIDR)
 	if err != nil {
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, fmt.Errorf("parse firecracker nat tap address %s: %w", plan.HostCIDR, err)
+		return nil, nil, nil, 0, fmt.Errorf("parse firecracker nat tap address %s: %w", plan.HostCIDR, err)
 	}
 	if err := netlink.AddrAdd(link, addr); err != nil && !alreadyExistsError(err) {
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, networkPrivilegeError("assign firecracker nat tap address "+plan.HostCIDR, err)
+		return nil, nil, nil, 0, networkPrivilegeError("assign firecracker nat tap address "+plan.HostCIDR, err)
 	}
 	if err := netlink.LinkSetUp(link); err != nil {
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, networkPrivilegeError("bring firecracker nat tap up", err)
+		return nil, nil, nil, 0, networkPrivilegeError("bring firecracker nat tap up", err)
 	}
 	rules, err := installNATFirewallRules(tap, plan.Subnet)
 	if err != nil {
 		cleanupTransientFirewallRules(rules)
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	network := runtimeNetworkConfig(config, plan.Subnet, plan.GuestCIDR, plan.Gateway)
 	network.Mode = mode
-	return cleanupDevices, rules, &network, nil
+	egressPID, egressRules, err := provisionEgressMediation(opts, config, mode, tap, plan.Gateway, plan.Subnet, nil, restore, expectedCASHA)
+	if err != nil {
+		cleanupTransientFirewallRules(rules)
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, 0, err
+	}
+	rules = append(rules, egressRules...)
+	return cleanupDevices, rules, &network, egressPID, nil
+}
+
+// provisionEgressMediation provisions the egress mediator and its steering rules
+// (per-workspace CA, mediator process, TCP REDIRECT, UDP TPROXY) for a guest
+// reachable on the given tap, gateway, and subnet. It returns the mediator PID
+// and the nft rules the caller must append to its transient-firewall slice (so
+// the standard stop/quarantine/failed-start teardown removes them).
+//
+// When egress mediation is off (EgressMediationOn(config.EgressMode) is false)
+// it is a no-op: it returns (0, nil, nil) and the guest's egress is unmediated.
+//
+// Fail-closed: on ANY failure it tears down everything IT started (CA files,
+// mediator process, TPROXY ip rule/route in user mode) and returns the error.
+// It does NOT touch the caller's tap or base NAT rules — the caller unwinds those
+// with its own cleanupTransient* discipline, exactly as the inline path did.
+//
+// mode selects the TPROXY prerequisite ownership model and must be "user" or a
+// host-netns mode ("nat", "named"):
+//   - "user" (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
+//     reaped with the ephemeral netns; we provision them here.
+//   - host-netns modes ("nat", "named"): those are host-global infra owned by
+//     `host setup-networking`; we only VERIFY them (fail-closed if absent) and
+//     install just the per-workspace nft tproxy rule. Anything other than "user"
+//     takes this verify-only path.
+func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gateway, subnet string, peers []string, restore bool, expectedCASHA string) (int, []transientFirewallRule, error) {
+	if config == nil || !vmkit.EgressMediationOn(config.EgressMode) {
+		return 0, nil, nil
+	}
+	var rules []transientFirewallRule
+	// Acquire the per-workspace CA. On a fresh start we mint one and persist it;
+	// on a snapshot restore/fork we REUSE the persisted CA the guest's baked trust
+	// store was built against (re-minting would silently break every MITM
+	// handshake of the restored guest). cleanupCA removes the CA files only when
+	// we minted them this call — on reuse it is a no-op so a downstream failure
+	// never deletes the workspace's persistent CA.
+	caCertPath, caKeyPath, cleanupCA, caErr := acquireEgressCA(opts, restore, expectedCASHA)
+	if caErr != nil {
+		return 0, nil, caErr
+	}
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, peers, caCertPath, caKeyPath, egressCapsFromConfig(config))
+	if eerr != nil {
+		cleanupCA()
+		return 0, nil, eerr
+	}
+	redirect, rerr := installEgressRedirectRule(tap, subnet, uint16(port))
+	if rerr != nil {
+		terminateAuxProcess(pid)
+		cleanupCA()
+		return 0, nil, rerr
+	}
+	rules = append(rules, redirect)
+
+	// UDP mediation via TPROXY. The mediator already binds a transparent UDP
+	// socket on gateway:port (same addr:port as its TCP listener); the supervisor
+	// steers guest UDP there. This is fail-closed: any failure here (TPROXY
+	// modules absent, missing host prerequisites, etc.) tears down EVERYTHING this
+	// helper already provisioned for the workspace and returns the guiding error
+	// so the start aborts rather than booting a guest whose UDP escapes the
+	// mediator.
+	//
+	// netnsLocal distinguishes the two prerequisite ownership models:
+	//   - user (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
+	//     reaped with the ephemeral netns; we provision them here.
+	//   - host-netns modes (nat, named): those are host-global infra owned by
+	//     `host setup-networking`; we only VERIFY them (fail-closed if absent) and
+	//     install just the per-workspace nft tproxy rule.
+	netnsLocal := mode == "user"
+	undoRouting, perr := prepareEgressTProxyNetns(netnsLocal, egressTProxyMark, egressTProxyTable)
+	if perr != nil {
+		terminateAuxProcess(pid)
+		cleanupCA()
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, perr)
+	}
+	mediatorAddr := netip.AddrPortFrom(netip.MustParseAddr(gateway), uint16(port))
+	tproxy, terr := installEgressTProxyRule(tap, subnet, egressTProxyMark, mediatorAddr)
+	if terr != nil {
+		undoRouting()
+		terminateAuxProcess(pid)
+		cleanupCA()
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, terr)
+	}
+	// The nft tproxy rule joins the returned rules slice so the standard firewall
+	// teardown (stop/quarantine/failed-start) removes it. The ip rule/local route
+	// are NOT firewall rules: in user mode they vanish with the ephemeral pasta
+	// netns (no per-stop teardown needed); in host-netns modes they are host infra
+	// we did not create here (undoRouting is a no-op). undoRouting is therefore
+	// only meaningful on the failure paths above.
+	rules = append(rules, tproxy)
+
+	// Fail-closed IPv6 drop. The REDIRECT/TPROXY steering above is IPv4-only
+	// (nfproto ipv4) and the tap plan hands the guest an IPv4-only address, so v6
+	// is not a live leak today. But a guest that ever acquired a v6 address while
+	// mediated would have its v6 egress slip past the v4-only capture — an
+	// unmediated channel. We drop ALL guest v6 egress at the firewall so the
+	// "mediation is complete" invariant holds for the not-yet-mediated v6 path.
+	// Same fail-closed discipline as the steering rules: on failure tear down
+	// everything this helper provisioned and abort the start.
+	v6drop, v6err := installEgressV6DropRule(tap)
+	if v6err != nil {
+		undoRouting()
+		terminateAuxProcess(pid)
+		cleanupCA()
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: IPv6 fail-closed drop unavailable for workspace %s: %w", opts.Name, v6err)
+	}
+	rules = append(rules, v6drop)
+
+	// Tier 5: drop-and-audit guest IPv4 L4 traffic that is neither TCP
+	// (REDIRECT-mediated above) nor UDP (TPROXY-mediated above) — ICMP and any
+	// other protocol with no allowlistable destination identity. With TCP and UDP
+	// already mediated, dropping the rest at the firewall completes IPv4 mediation
+	// ("mediation is complete"): allowing ICMP echo etc. would be an unmediated
+	// covert/exfil + liveness-leak channel. The three precedence rules (accept
+	// tcp, accept udp, catch-all nflog+drop) share the filter chain with the v6
+	// drop and audit drops via nflog, not the mediator JSONL. Same fail-closed
+	// discipline: on failure tear down everything this helper provisioned and
+	// abort the start.
+	l4drops, l4err := installEgressL4DropRule(tap, subnet)
+	if l4err != nil {
+		undoRouting()
+		terminateAuxProcess(pid)
+		cleanupCA()
+		cleanupTransientFirewallRules(rules)
+		return 0, nil, fmt.Errorf("egress: non-TCP/UDP fail-closed drop unavailable for workspace %s: %w", opts.Name, l4err)
+	}
+	rules = append(rules, l4drops...)
+	return pid, rules, nil
+}
+
+// acquireEgressCA returns the on-disk paths to the per-workspace egress CA cert
+// and key for the mediator, plus a cleanup closure to invoke on a downstream
+// failure. It has two clearly separated branches:
+//
+//   - Fresh start (restore=false): mint a new ECDSA CA, persist egress-ca.pem
+//     (0644, public — delivered to the guest) and egress-ca-key.pem (0600, host
+//     only), and return a cleanup that removes BOTH files (we created them).
+//     This path is byte-identical to the pre-restore implementation.
+//
+//   - Restore/fork (restore=true): REUSE the persisted CA the guest's baked trust
+//     store was built against. Read egress-ca.pem + egress-ca-key.pem, compute the
+//     cert DER SHA-256, and fail closed if either file is missing or the
+//     fingerprint differs from the snapshot manifest's expectedCASHA — a mismatch
+//     means the on-disk CA is not the one the guest trusts, so minting/serving any
+//     other CA would silently break MITM. No egress.NewCA call, no write. The
+//     returned cleanup is a NO-OP so a downstream failure never deletes the
+//     workspace's persistent CA.
+func acquireEgressCA(opts Options, restore bool, expectedCASHA string) (caCertPath, caKeyPath string, cleanup func(), err error) {
+	wsDir := filepath.Join(opts.StateDir, opts.Name)
+	caCertPath = filepath.Join(wsDir, "egress-ca.pem")
+	caKeyPath = filepath.Join(wsDir, "egress-ca-key.pem")
+	noop := func() {}
+
+	if restore {
+		// Reuse the persisted CA. Fail closed on any divergence from the manifest.
+		if expectedCASHA == "" {
+			return "", "", noop, fmt.Errorf("egress: restore of mediated workspace %s has no recorded CA fingerprint; refusing to re-arm the mediator", opts.Name)
+		}
+		if _, statErr := os.Stat(caKeyPath); statErr != nil {
+			return "", "", noop, fmt.Errorf("egress: restore of workspace %s cannot reuse CA key: %w", opts.Name, statErr)
+		}
+		gotSHA, shaErr := egressCACertSHA256(wsDir)
+		if shaErr != nil {
+			return "", "", noop, fmt.Errorf("egress: restore of workspace %s cannot reuse CA cert: %w", opts.Name, shaErr)
+		}
+		if gotSHA != expectedCASHA {
+			return "", "", noop, fmt.Errorf("egress: restore of workspace %s refused — persisted CA fingerprint %s does not match snapshot fingerprint %s; the guest's baked trust store would reject the mediator", opts.Name, gotSHA, expectedCASHA)
+		}
+		return caCertPath, caKeyPath, noop, nil
+	}
+
+	// Fresh start: mint a per-workspace CA. The cert (public) is delivered to the
+	// guest over the cacert vsock listener so guestinit installs it in the trust
+	// store. The key stays on the host and is passed to the mediator for TLS MITM.
+	ca, caErr := egress.NewCA(opts.Name, 720*time.Hour)
+	if caErr != nil {
+		return "", "", noop, fmt.Errorf("mint egress CA for %s: %w", opts.Name, caErr)
+	}
+	caKeyPEM, caErr := ca.KeyPEM()
+	if caErr != nil {
+		return "", "", noop, fmt.Errorf("encode egress CA key for %s: %w", opts.Name, caErr)
+	}
+	if caErr = os.MkdirAll(wsDir, 0o700); caErr != nil {
+		return "", "", noop, fmt.Errorf("create workspace dir for egress CA: %w", caErr)
+	}
+	if caErr = os.WriteFile(caCertPath, ca.CertPEM(), 0o644); caErr != nil {
+		return "", "", noop, fmt.Errorf("write egress CA cert: %w", caErr)
+	}
+	if caErr = os.WriteFile(caKeyPath, caKeyPEM, 0o600); caErr != nil {
+		_ = os.Remove(caCertPath)
+		return "", "", noop, fmt.Errorf("write egress CA key: %w", caErr)
+	}
+	cleanup = func() {
+		_ = os.Remove(caCertPath)
+		_ = os.Remove(caKeyPath)
+	}
+	return caCertPath, caKeyPath, cleanup, nil
 }
 
 // prepareNamedNetworkForStart joins a workspace to a user-defined named network:
@@ -1191,45 +1466,63 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string) ([]t
 // Linux bridge exists with the gateway address, attaches a TAP to the bridge,
 // installs masquerade rules for outbound traffic, and returns a runtime network
 // config carrying /etc/hosts entries for every member so they resolve by name.
-func prepareNamedNetworkForStart(opts Options, config *vmkit.Config) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, error) {
+func prepareNamedNetworkForStart(opts Options, config *vmkit.Config, restore bool, expectedCASHA string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
 	if err := requireIPv4Forwarding(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	name := strings.TrimSpace(config.Network.Name)
 	record, err := network.Get(opts.StateDir, name)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("join named network: %w", err)
+		return nil, nil, nil, 0, fmt.Errorf("join named network: %w", err)
 	}
 	ip, err := network.Join(opts.StateDir, name, opts.Name)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("allocate address on network %q: %w", name, err)
+		return nil, nil, nil, 0, fmt.Errorf("allocate address on network %q: %w", name, err)
 	}
 	// Refresh the record so the /etc/hosts entries include this member.
 	record, err = network.Get(opts.StateDir, name)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	prefix, err := subnetPrefixLen(record.Subnet)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 
 	bridge := bridgeName(name)
 	if err := ensureNetworkBridge(bridge, record.Gateway, prefix); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	tap := tapName(opts)
 	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: bridge, Created: true}
 	if err := createBridgeTap(tap, bridge); err != nil {
-		return nil, nil, nil, networkPrivilegeError("attach firecracker tap to network bridge "+bridge, err)
+		return nil, nil, nil, 0, networkPrivilegeError("attach firecracker tap to network bridge "+bridge, err)
 	}
 	cleanupDevices := []transientNetworkDevice{device}
 	rules, err := installNATFirewallRules(tap, record.Subnet)
 	if err != nil {
 		cleanupTransientFirewallRules(rules)
 		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
+
+	// Full egress mediation (CA + mediator + TCP REDIRECT + UDP TPROXY) so all
+	// guest egress — including east-west VM↔VM traffic within the named bridge —
+	// is captured by the mediator. A named network runs in the HOST netns (like
+	// nat, not pasta), so the helper takes the host-global verify-only TPROXY path.
+	// Fail-closed: the helper unwinds its own provisioning on error; we still tear
+	// down the tap and base NAT rules we created above, mirroring the nat path.
+	//
+	// Hand the mediator the named-network peer roster (every OTHER member's
+	// name↔IP) so it reverse-resolves a bare-IP east-west destination to the peer's
+	// workspace name and polices it by name under the same default-deny allowlist.
+	egressPID, egressRules, err := provisionEgressMediation(opts, config, "named", tap, record.Gateway, record.Subnet, namedNetworkPeers(record, opts.Name), restore, expectedCASHA)
+	if err != nil {
+		cleanupTransientFirewallRules(rules)
+		cleanupTransientNetworkDevices(cleanupDevices)
+		return nil, nil, nil, 0, err
+	}
+	rules = append(rules, egressRules...)
 
 	runtime := vmkit.NetworkConfig{
 		Mode:    "named",
@@ -1245,7 +1538,7 @@ func prepareNamedNetworkForStart(opts Options, config *vmkit.Config) ([]transien
 	} else {
 		runtime.DNS = []string{"1.1.1.1", "8.8.8.8"}
 	}
-	return cleanupDevices, rules, &runtime, nil
+	return cleanupDevices, rules, &runtime, egressPID, nil
 }
 
 // namedNetworkHosts renders one "name:ip" entry per member for the guest
@@ -1256,6 +1549,22 @@ func namedNetworkHosts(record network.Record) []string {
 		hosts = append(hosts, m.Workspace+":"+m.IP)
 	}
 	return hosts
+}
+
+// namedNetworkPeers renders the egress mediator's peer roster as "name=ip" pairs,
+// one per OTHER member of the network (this workspace's own entry is excluded —
+// the mediator never reverse-resolves a flow to "self"). The mediator uses it to
+// police east-west VM↔VM traffic by the peer's workspace name under the same
+// default-deny allowlist as external hosts.
+func namedNetworkPeers(record network.Record, self string) []string {
+	peers := make([]string, 0, len(record.Members))
+	for _, m := range record.Members {
+		if m.Workspace == self {
+			continue
+		}
+		peers = append(peers, m.Workspace+"="+m.IP)
+	}
+	return peers
 }
 
 // bridgeName derives a stable, valid (<=15 char) Linux bridge name for a named
@@ -1738,7 +2047,7 @@ func validMicroagentFirewallRule(rule transientFirewallRule) bool {
 		return false
 	}
 	if rule.Table == nftMicroagentTable {
-		if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain {
+		if rule.Chain != nftNATPostroutingChain && rule.Chain != nftForwardChain && rule.Chain != nftNATPreroutingChain && rule.Chain != nftManglePreroutingChain && rule.Chain != nftFilterPreroutingChain {
 			return false
 		}
 	} else if rule.Family == "ip" && rule.Table == nftUFWFilterTable && rule.Chain == nftUFWUserForwardChain {
@@ -2035,6 +2344,196 @@ func startPortForwarderProcess(opts Options) (int, error) {
 
 func portForwarderLogPath(opts Options) string {
 	return filepath.Join(opts.StateDir, opts.Name, "port-forward.log")
+}
+
+// startEgressMediator allocates a free port on bindHost, spawns a detached
+// `microagent-firecracker-supervisor --egress-mediator` in the CURRENT netns
+// (host for nat, pasta for user mode — in user mode the spawning supervisor is
+// the in-netns re-exec, so the child inherits the pasta netns), waits until it
+// accepts, and returns (pid, port). Uses the same detached-spawn mechanism as
+// the port-forwarder companion.
+//
+// bindHost must be the tap gateway IP (e.g. "10.43.29.1") because the nftables
+// REDIRECT target rewrites the destination to the primary address of the
+// incoming interface — i.e. the tap host-side IP — not 127.0.0.1.
+//
+// caCertPath and caKeyPath, when non-empty, enable TLS interception: the
+// mediator loads the per-workspace CA and signs per-SNI leaf certs on the fly.
+// passthrough lists hosts whose TLS is forwarded opaquely (not intercepted).
+// egressMediatorArgs builds the argv for the detached
+// `microagent-firecracker-supervisor --egress-mediator` child. Pure (no I/O) so
+// it can be unit-tested. The mode ("mediated"/"strict") is threaded to the
+// mediator via --mode; an empty mode is normalized to the secure default.
+// egressCaps carries the bounded-operations caps (ASK tenet 8) from the workspace
+// Config into egressMediatorArgs. All fields default to zero = unlimited (current
+// behavior), so an unset config produces argv byte-identical to the pre-caps one.
+type egressCaps struct {
+	maxBytesPerSec  int64
+	maxTotalBytes   int64
+	maxConns        int32
+	auditMaxBytes   int64
+	auditMaxBackups int
+}
+
+// applyManifestEgressCaps re-applies the bounded-operations caps recorded in a
+// snapshot manifest onto the restore request's Config (ASK tenet 8), so a
+// restored/forked workspace keeps the SAME bounds it was snapshotted under —
+// mirroring how the persisted CA is reused. A no-op when config is nil. Manifest
+// values overwrite the config's so the snapshot is authoritative for the restored
+// posture (the manifest reproduces what the workspace was actually running).
+func applyManifestEgressCaps(config *vmkit.Config, manifest vmkit.SnapshotManifest) {
+	if config == nil {
+		return
+	}
+	config.EgressMaxBytesPerSec = manifest.EgressMaxBytesPerSec
+	config.EgressMaxTotalBytes = manifest.EgressMaxTotalBytes
+	config.EgressMaxConcurrentConns = manifest.EgressMaxConcurrentConns
+	config.EgressAuditMaxBytes = manifest.EgressAuditMaxBytes
+	config.EgressAuditMaxBackups = manifest.EgressAuditMaxBackups
+}
+
+// egressCapsFromConfig extracts the caps from a workspace Config. Nil config (or
+// all-zero caps) yields a zero egressCaps (unlimited).
+func egressCapsFromConfig(config *vmkit.Config) egressCaps {
+	if config == nil {
+		return egressCaps{}
+	}
+	return egressCaps{
+		maxBytesPerSec:  config.EgressMaxBytesPerSec,
+		maxTotalBytes:   config.EgressMaxTotalBytes,
+		maxConns:        config.EgressMaxConcurrentConns,
+		auditMaxBytes:   config.EgressAuditMaxBytes,
+		auditMaxBackups: config.EgressAuditMaxBackups,
+	}
+}
+
+func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow, passthrough, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
+	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.NormalizeEgressMode(mode)}
+	for _, h := range allow {
+		args = append(args, "--allow", h)
+	}
+	if caCertPath != "" && caKeyPath != "" {
+		args = append(args, "--ca-cert", caCertPath, "--ca-key", caKeyPath)
+	}
+	for _, h := range passthrough {
+		args = append(args, "--passthrough", h)
+	}
+	// Named-network peer roster (name=ip). Empty for nat/user (no roster). The
+	// mediator reverse-resolves a bare-IP east-west destination to the peer's
+	// workspace name and polices it by name under the same default-deny allowlist.
+	for _, p := range peers {
+		args = append(args, "--peer", p)
+	}
+	// Bounded-operations caps (ASK tenet 8). Each is emitted only when non-zero so
+	// an uncapped workspace's argv is byte-identical to the pre-caps one.
+	if caps.maxBytesPerSec > 0 {
+		args = append(args, "--max-bps", strconv.FormatInt(caps.maxBytesPerSec, 10))
+	}
+	if caps.maxTotalBytes > 0 {
+		args = append(args, "--max-bytes", strconv.FormatInt(caps.maxTotalBytes, 10))
+	}
+	if caps.maxConns > 0 {
+		args = append(args, "--max-conns", strconv.Itoa(int(caps.maxConns)))
+	}
+	if caps.auditMaxBytes > 0 {
+		args = append(args, "--audit-max-bytes", strconv.FormatInt(caps.auditMaxBytes, 10))
+		if caps.auditMaxBackups > 0 {
+			args = append(args, "--audit-max-backups", strconv.Itoa(caps.auditMaxBackups))
+		}
+	}
+	return args
+}
+
+func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
+	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
+	if err != nil {
+		return 0, 0, err
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	_ = l.Close() // port-allocation race is bounded: mediator readiness probe retries until it accepts
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, 0, err
+	}
+	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
+	args := egressMediatorArgs(bindHost, port, auditPath, mode, allow, passthrough, peers, caCertPath, caKeyPath, caps)
+	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return 0, 0, err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 0, 0, err
+	}
+	// The logfile is opened O_APPEND and reused across mediator restarts, so a
+	// stale readiness marker from a PRIOR run may already be present. Record the
+	// current size and scan only bytes written AFTER this offset, so the marker
+	// check observes this child's signal and never a stale one (which would be a
+	// false-positive ready).
+	var logStart int64
+	if info, serr := logFile.Stat(); serr == nil {
+		logStart = info.Size()
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return 0, 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	_ = logFile.Close()
+	// Readiness requires BOTH the TCP listener to accept AND the mediator to have
+	// emitted its post-UDP readiness marker to its logfile. The TCP listener
+	// binds (in egress.Run) before the transparent UDP socket opens, so a
+	// TCP-dial-only probe can pass during the window where UDP has not yet come
+	// up — and if the UDP open then fails the mediator exits, leaving a confusing
+	// half-provisioned start. Gating on the marker (written only after UDP is up)
+	// closes that window. Fail-closed is preserved: a mediator that never signals
+	// ready (never opens UDP) → the marker never appears → the deadline trips and
+	// the start aborts after terminating the child.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		c, derr := net.DialTimeout("tcp", net.JoinHostPort(bindHost, strconv.Itoa(port)), 200*time.Millisecond)
+		if derr == nil {
+			_ = c.Close()
+			if egressMediatorLoggedReady(logPath, logStart) {
+				return pid, port, nil
+			}
+		}
+		if time.Now().After(deadline) {
+			terminateAuxProcess(pid)
+			return 0, 0, fmt.Errorf("egress mediator did not become ready on %s:%d", bindHost, port)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// egressMediatorLoggedReady reports whether the mediator's logfile contains the
+// post-UDP readiness marker (egress.ReadyMarker) in the bytes written at or
+// after startOffset. The offset scoping ignores any stale marker from a prior
+// run that shares this append-mode logfile. A read error (e.g. the file not yet
+// created) reports false so the caller keeps polling until the deadline.
+func egressMediatorLoggedReady(logPath string, startOffset int64) bool {
+	f, err := os.Open(logPath)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	if startOffset > 0 {
+		if _, err := f.Seek(startOffset, io.SeekStart); err != nil {
+			return false
+		}
+	}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		if strings.HasPrefix(sc.Text(), egress.ReadyMarker) {
+			return true
+		}
+	}
+	return false
 }
 
 func startReadyPortForwarderProcess(ctx context.Context, opts Options, config vmkit.Config) (int, error) {
@@ -2398,6 +2897,28 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 			go serveSecretsListener(unixListener, srv)
 			continue
 		}
+		if listener.Target == secretxfer.CACertTarget {
+			path := firecrackerGuestVsockPath(opts, listener.Port)
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				set.Close()
+				return nil, err
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				set.Close()
+				return nil, err
+			}
+			unixListener, err := net.Listen("unix", path)
+			if err != nil {
+				set.Close()
+				return nil, fmt.Errorf("listen cacert vsock port %d: %w", listener.Port, err)
+			}
+			// CA cert is not secret (it is installed in the guest trust store), so
+			// default socket permissions are fine here.
+			caCertPath := filepath.Join(opts.StateDir, opts.Name, "egress-ca.pem")
+			set.listeners = append(set.listeners, unixListener)
+			go serveCACertListener(unixListener, caCertPath)
+			continue
+		}
 		if !isAllowedVsockTarget(opts, listener.Target) {
 			set.Close()
 			return nil, fmt.Errorf("firecracker vsock listener %d target must be host:port or the workspace result path", listener.Port)
@@ -2441,6 +2962,30 @@ func serveVsockListener(listener net.Listener, config vmkit.VsockListener) {
 			return
 		}
 		go handleGuestVsockConnection(conn, config.Target)
+	}
+}
+
+// serveCACertListener accepts guest connections and sends the egress CA cert
+// PEM (caCertPath) to each. The cert is written by prepareTAPNATForStart
+// before any listeners are served, so the file exists when connections arrive.
+// If the file is missing or unreadable, the connection is logged and closed.
+func serveCACertListener(listener net.Listener, caCertPath string) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		go func(c net.Conn) {
+			defer func() { _ = c.Close() }()
+			pem, err := os.ReadFile(caCertPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "read cacert for vsock guest: %v\n", err)
+				return
+			}
+			if err := secretxfer.ServeCACert(c, pem); err != nil {
+				fmt.Fprintf(os.Stderr, "serve cacert to guest: %v\n", err)
+			}
+		}(conn)
 	}
 }
 
@@ -2590,11 +3135,14 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		if state.VsockListenerPID != 0 {
 			terminateAuxProcess(state.VsockListenerPID)
 		}
+		if state.EgressMediatorPID != 0 {
+			terminateAuxProcess(state.EgressMediatorPID)
+		}
 		cleanupTransientFirewallRules(state.FirewallRules)
 		cleanupTransientNetworkDevices(state.NetworkDevices)
 		cleanupUserNetworkProcess(opts)
 		req := runtimeStateRequest(vmkit.Request{}, state)
-		if err := writeProcessStateWithProcessesAndNetwork(opts, req, finalState, 0, 0, 0, nil, nil, errorText); err != nil {
+		if err := writeProcessStateWithProcessesAndNetwork(opts, req, finalState, 0, 0, 0, 0, nil, nil, errorText); err != nil {
 			return vmkit.Response{}, err
 		}
 		state, err = readRuntimeState(opts)
@@ -2707,10 +3255,10 @@ func writeProcessStateWithForwarder(opts Options, req vmkit.Request, state vmkit
 }
 
 func writeProcessStateWithForwarderAndNetwork(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID int, networkDevices []transientNetworkDevice, firewallRules []transientFirewallRule, errorText string) error {
-	return writeProcessStateWithProcessesAndNetwork(opts, req, state, pid, portForwardPID, 0, networkDevices, firewallRules, errorText)
+	return writeProcessStateWithProcessesAndNetwork(opts, req, state, pid, portForwardPID, 0, 0, networkDevices, firewallRules, errorText)
 }
 
-func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID, vsockListenerPID int, networkDevices []transientNetworkDevice, firewallRules []transientFirewallRule, errorText string) error {
+func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, state vmkit.VMState, pid, portForwardPID, vsockListenerPID, egressMediatorPID int, networkDevices []transientNetworkDevice, firewallRules []transientFirewallRule, errorText string) error {
 	if req.Identity == nil || req.Config == nil {
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
@@ -2732,17 +3280,18 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 		return err
 	}
 	runtime := runtimeState{
-		Event:            fileEvent,
-		Config:           *req.Config,
-		PID:              pid,
-		PortForwardPID:   portForwardPID,
-		VsockListenerPID: vsockListenerPID,
-		NetworkDevices:   append([]transientNetworkDevice{}, networkDevices...),
-		FirewallRules:    append([]transientFirewallRule{}, firewallRules...),
-		SerialLogPath:    serialLogPath(opts),
-		SerialInputPath:  serialInputPath(opts),
-		UpdatedAt:        now.Format(time.RFC3339),
-		Error:            errorText,
+		Event:             fileEvent,
+		Config:            *req.Config,
+		PID:               pid,
+		PortForwardPID:    portForwardPID,
+		VsockListenerPID:  vsockListenerPID,
+		EgressMediatorPID: egressMediatorPID,
+		NetworkDevices:    append([]transientNetworkDevice{}, networkDevices...),
+		FirewallRules:     append([]transientFirewallRule{}, firewallRules...),
+		SerialLogPath:     serialLogPath(opts),
+		SerialInputPath:   serialInputPath(opts),
+		UpdatedAt:         now.Format(time.RFC3339),
+		Error:             errorText,
 	}
 	if state == vmkit.StateStarting || state == vmkit.StateRunning {
 		runtime.StartedAt = now.Format(time.RFC3339)
@@ -3135,6 +3684,9 @@ func terminateRecordedCompanions(opts Options) {
 	}
 	if state.VsockListenerPID != 0 {
 		terminateAuxProcess(state.VsockListenerPID)
+	}
+	if state.EgressMediatorPID != 0 {
+		terminateAuxProcess(state.EgressMediatorPID)
 	}
 }
 

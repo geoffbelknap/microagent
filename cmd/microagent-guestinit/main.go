@@ -41,6 +41,7 @@ type config struct {
 	ShellPort          uint16        `json:"shellPort,omitempty"`
 	ExecPort           uint16        `json:"execPort,omitempty"`
 	SecretsPort        uint16        `json:"secretsPort,omitempty"`
+	CACertPort         uint16        `json:"caCertPort,omitempty"`
 	SecretsAPI         bool          `json:"secretsApi,omitempty"`
 	SecretsControlPort uint16        `json:"secretsControlPort,omitempty"`
 	ModelGuestPort     uint16        `json:"modelGuestPort,omitempty"`
@@ -146,6 +147,14 @@ func run() int {
 			fmt.Fprintln(os.Stderr, err)
 			return 127
 		}
+	}
+	if cfg.CACertPort != 0 && !cfg.Maintenance {
+		caCertEnv, err := fetchAndInstallCACert(cfg.CACertPort)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 127
+		}
+		cfg.Env = append(cfg.Env, caCertEnv...)
 	}
 	res := result{StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	code := 0
@@ -1250,6 +1259,13 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 			return fmt.Errorf("microagent_secrets_port must be a positive uint16")
 		}
 		cfg.SecretsPort = port
+	}
+	if raw := values["microagent_ca_cert_port"]; strings.TrimSpace(raw) != "" {
+		port, err := parseUint16(raw)
+		if err != nil || port == 0 {
+			return fmt.Errorf("microagent_ca_cert_port must be a positive uint16")
+		}
+		cfg.CACertPort = port
 	}
 	if values["microagent_secrets_api"] == "1" {
 		cfg.SecretsAPI = true

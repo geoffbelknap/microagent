@@ -2,6 +2,7 @@ package vmkit
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -234,6 +235,19 @@ func TestValidateNetworkConfigAcceptsUserMode(t *testing.T) {
 	}
 }
 
+func TestBridgedRequiresUnsupported(t *testing.T) {
+	err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged"})
+	if err == nil {
+		t.Fatal("ValidateNetworkConfig accepted bridged without unsupported ack")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("ValidateNetworkConfig bridged error = %q, want it to mention unsupported", err)
+	}
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged", Unsupported: true}); err != nil {
+		t.Fatalf("ValidateNetworkConfig bridged with unsupported ack: %v", err)
+	}
+}
+
 func TestValidateNetworkConfigRejectsIsolatedPortForwards(t *testing.T) {
 	cfg := NetworkConfig{
 		Mode: "isolated",
@@ -268,5 +282,65 @@ func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
 	}
 	if err := ValidateNetworkConfig(cfg); err == nil {
 		t.Fatal("ValidateNetworkConfig accepted duplicate host ports")
+	}
+}
+
+func TestNormalizeEgressMode(t *testing.T) {
+	cases := map[string]string{
+		"":         "mediated",
+		"  ":       "mediated",
+		"mediated": "mediated",
+		"MEDIATED": "mediated",
+		" strict ": "strict",
+		"strict":   "strict",
+		"off":      "off",
+		"OFF":      "off",
+	}
+	for in, want := range cases {
+		if got := NormalizeEgressMode(in); got != want {
+			t.Errorf("NormalizeEgressMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestEgressMediationOn(t *testing.T) {
+	// Only an EXPLICIT "mediated" or "strict" provisions the mediator. The
+	// default ("mediated" for an unspecified mode) is set by NormalizeEgressMode
+	// at the high-level workspace chokepoints; EgressMediationOn merely decides
+	// whether to provision. This keeps EgressMediationOn decoupled from the
+	// default so the low-level raw create/start path (empty EgressMode, no
+	// CA-cert listener) is NOT force-mediated.
+	on := []string{"mediated", "MEDIATED", "strict", " strict "}
+	for _, m := range on {
+		if !EgressMediationOn(m) {
+			t.Errorf("EgressMediationOn(%q) = false, want true", m)
+		}
+	}
+	// Empty/whitespace is OFF here (no provisioning) — it is the raw primitive's
+	// state. So is an explicit "off" and any unrecognized value.
+	off := []string{"", "  ", "off", "OFF", " off ", "open"}
+	for _, m := range off {
+		if EgressMediationOn(m) {
+			t.Errorf("EgressMediationOn(%q) = true, want false", m)
+		}
+	}
+}
+
+func TestNetworkModeMediates(t *testing.T) {
+	// Modes that route guest egress through the mediator (plus the empty default,
+	// which resolves to "user").
+	mediates := []string{"", "  ", "user", "USER", " nat ", "named"}
+	for _, m := range mediates {
+		if !NetworkModeMediates(m) {
+			t.Errorf("NetworkModeMediates(%q) = false, want true", m)
+		}
+	}
+	// "bridged" (quarantined, unmediated) and "isolated" (no egress) never run a
+	// mediator, so they must NOT be considered mediatable.
+	notMediates := []string{"bridged", "BRIDGED", " bridged ", "isolated", "ISOLATED"}
+	for _, m := range notMediates {
+		if NetworkModeMediates(m) {
+			t.Errorf("NetworkModeMediates(%q) = true, want false", m)
+		}
 	}
 }

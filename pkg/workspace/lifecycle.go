@@ -693,8 +693,46 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err != nil {
 		return Result{}, err
 	}
+	// A mediated source baked its per-workspace egress CA into the guest's trust
+	// store. The fork resumes that exact guest, so it must re-arm the mediator with
+	// the SAME CA — the fork's restore path reuses the persisted CA from its own
+	// workspace dir and fails closed if it is absent. The CA lives in the source
+	// workspace dir (not the snapshot), so copy it into the fork's workspace dir.
+	// Keyed on the snapshot's recorded egress posture so a non-mediated source
+	// stays untouched.
+	if manifest.EgressCASHA256 != "" {
+		if err := copyForkEgressCA(opts.StateDir, sourceWorkspace, opts.Name); err != nil {
+			return Result{}, err
+		}
+	}
 	opts.FromSnapshot = tag
 	return Start(ctx, opts)
+}
+
+// copyForkEgressCA copies the source workspace's persisted egress CA cert and key
+// into the fork's workspace dir so the fork's restore path can reuse them (the
+// guest's baked trust store anchors on this CA). It fails closed if the source CA
+// is missing — a mediated fork must not boot with a re-minted or absent CA. The
+// fingerprint match against the snapshot manifest is enforced later by the
+// supervisor's acquireEgressCA on the restore path.
+func copyForkEgressCA(stateDir, sourceWorkspace, forkName string) error {
+	srcWsDir := filepath.Join(stateDir, sourceWorkspace)
+	dstWsDir := filepath.Join(stateDir, forkName)
+	if err := os.MkdirAll(dstWsDir, 0o700); err != nil {
+		return err
+	}
+	for _, f := range []struct {
+		name string
+		mode os.FileMode
+	}{
+		{"egress-ca.pem", 0o644},
+		{"egress-ca-key.pem", 0o600},
+	} {
+		if err := CopyFile(filepath.Join(srcWsDir, f.name), filepath.Join(dstWsDir, f.name), f.mode); err != nil {
+			return fmt.Errorf("copy source egress CA %s into fork: %w", f.name, err)
+		}
+	}
+	return nil
 }
 
 func copySnapshotInto(srcDir, dstDir string) error {
@@ -888,26 +926,29 @@ func WriteManifest(opts Options) error {
 		return err
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), Manifest{
-		Name:            opts.Name,
-		Profile:         opts.Profile,
-		Restart:         NormalizeRestartPolicy(opts.RestartPolicy),
-		Resources:       ResourcesFromOptions(opts),
-		Network:         NetworkSpecFromConfig(opts.Network),
-		Service:         strings.TrimSpace(opts.ServiceCommand),
-		ConsoleShell:    strings.TrimSpace(opts.ConsoleShell),
-		Hostname:        strings.TrimSpace(opts.Hostname),
-		Model:           strings.TrimSpace(opts.Model),
-		ModelRunner:     modelRunnerManifest(opts.ModelRunner),
-		ModelMediation:  modelMediationManifest(opts.ModelMediation),
-		Mediation:       opts.Mediation,
-		Health:          healthManifest(opts.Health),
-		Disks:           opts.Disks,
-		Artifacts:       ArtifactsFromOptions(opts),
-		Verification:    opts.Verification,
-		Secrets:         secretRefsFromOptions(opts),
-		SecretEnvFiles:  opts.SecretEnvFiles,
-		OnDemandSecrets: onDemandRefsFromOptions(opts),
-		SecretsAudit:    opts.SecretsAudit,
+		Name:              opts.Name,
+		Profile:           opts.Profile,
+		Restart:           NormalizeRestartPolicy(opts.RestartPolicy),
+		Resources:         ResourcesFromOptions(opts),
+		Network:           NetworkSpecFromConfig(opts.Network),
+		Service:           strings.TrimSpace(opts.ServiceCommand),
+		ConsoleShell:      strings.TrimSpace(opts.ConsoleShell),
+		Hostname:          strings.TrimSpace(opts.Hostname),
+		Model:             strings.TrimSpace(opts.Model),
+		ModelRunner:       modelRunnerManifest(opts.ModelRunner),
+		ModelMediation:    modelMediationManifest(opts.ModelMediation),
+		Mediation:         opts.Mediation,
+		Health:            healthManifest(opts.Health),
+		Disks:             opts.Disks,
+		Artifacts:         ArtifactsFromOptions(opts),
+		Verification:      opts.Verification,
+		Secrets:           secretRefsFromOptions(opts),
+		SecretEnvFiles:    opts.SecretEnvFiles,
+		OnDemandSecrets:   onDemandRefsFromOptions(opts),
+		SecretsAudit:      opts.SecretsAudit,
+		EgressMode:        opts.EgressMode,
+		EgressAllow:       opts.EgressAllow,
+		EgressPassthrough: opts.EgressPassthrough,
 	})
 }
 
@@ -1303,6 +1344,13 @@ func applyManifest(opts *Options, manifest Manifest) {
 		opts.OnDemandSecrets = nil
 	}
 	opts.SecretsAudit = manifest.SecretsAudit
+	// Normalize the egress mode loaded from the manifest so a workspace whose
+	// manifest carries an unspecified mode is started with the explicit secure
+	// default ("mediated"); Request() then re-allocates the CA-cert vsock
+	// listener on start, mirroring create.
+	opts.EgressMode = vmkit.NormalizeEgressMode(manifest.EgressMode)
+	opts.EgressAllow = manifest.EgressAllow
+	opts.EgressPassthrough = manifest.EgressPassthrough
 }
 
 func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {

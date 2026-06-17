@@ -53,6 +53,26 @@ type SnapshotManifest struct {
 	// SecretsPurged records that the guest tmpfs secrets were scrubbed before
 	// the memory image was captured.
 	SecretsPurged bool `json:"secretsPurged,omitempty"`
+	// Egress posture captured at snapshot time so a restore/fork re-arms the
+	// mediator with the SAME per-workspace CA the guest's baked trust store was
+	// built against. EgressMode/EgressAllow/EgressPassthrough reproduce the
+	// mediator's policy; EgressCASHA256 is the hex SHA-256 of the persisted CA
+	// cert's DER, used at restore as a fail-closed integrity check before the CA
+	// is reused (a fresh-minted CA would silently break every MITM handshake of
+	// the restored guest).
+	EgressMode        string   `json:"egressMode,omitempty"`
+	EgressAllow       []string `json:"egressAllow,omitempty"`
+	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
+	EgressCASHA256    string   `json:"egressCASHA256,omitempty"`
+	// Bounded-operations caps (ASK tenet 8) captured at snapshot time so a restored
+	// workspace keeps the SAME bounds it was running under. All are per-mediator-
+	// process and reset on restart; a zero value means unlimited. Re-applied on
+	// restore by threading them back through the mediator flags.
+	EgressMaxBytesPerSec     int64 `json:"egressMaxBytesPerSec,omitempty"`
+	EgressMaxTotalBytes      int64 `json:"egressMaxTotalBytes,omitempty"`
+	EgressMaxConcurrentConns int32 `json:"egressMaxConcurrentConns,omitempty"`
+	EgressAuditMaxBytes      int64 `json:"egressAuditMaxBytes,omitempty"`
+	EgressAuditMaxBackups    int   `json:"egressAuditMaxBackups,omitempty"`
 }
 
 // SnapshotInfo is a manifest plus the on-disk size of its snapshot directory,

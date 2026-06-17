@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"gopkg.in/yaml.v3"
@@ -29,11 +30,15 @@ const (
 	DefaultResultPort          = 1024
 	DefaultSecretsPort         = 1026
 	DefaultSecretsControlPort  = 1028
-	DefaultShellPortBase       = 22000
-	DefaultShellPortSpan       = 20000
-	DefaultExecPortBase        = 42000
-	DefaultExecPortSpan        = 20000
-	DefaultTimeout             = 5 * time.Minute
+	// DefaultCACertPort is the host vsock port the guest connects to at boot to
+	// fetch the per-workspace egress CA certificate. Allocated whenever egress
+	// mediation is on ("mediated" or "strict").
+	DefaultCACertPort    = 1030
+	DefaultShellPortBase = 22000
+	DefaultShellPortSpan = 20000
+	DefaultExecPortBase  = 42000
+	DefaultExecPortSpan  = 20000
+	DefaultTimeout       = 5 * time.Minute
 )
 
 // Model pairing transport defaults. The guest forwarder listens on
@@ -48,44 +53,47 @@ const (
 const secretsListenerTarget = "secrets://serve"
 
 type Options struct {
-	Name            string
-	ImageRef        string
-	ExecCommand     string
-	ServiceCommand  string
-	Entrypoint      string
-	ConsoleShell    string
-	Hostname        string
-	SetupCommands   []string
-	Env             map[string]string
-	Secrets         map[string]string // name -> scheme-prefixed reference
-	SecretEnvFiles  []string          // dotenv file paths (plaintext, re-read each start)
-	OnDemandSecrets map[string]string // name -> reference (lazy, never materialized)
-	SecretsAudit    bool              // append every access to the audit log
-	Files           []File
-	Profile         string
-	RestartPolicy   string
-	Backend         string
-	KernelPath      string
-	StateDir        string
-	SupervisorPath  string
-	GuestInitPath   string
-	Mke2fsPath      string
-	Architecture    string
-	MemoryMiB       int
-	CPUCount        int
-	SizeMiB         int64
-	Network         vmkit.NetworkConfig
-	Mediation       *vmkit.MediationConfig
-	Health          Health
-	Timeout         time.Duration
-	ResultPort      uint32
-	ShellPort       uint16
-	ExecPort        uint16
-	GuestShellPort  uint16
-	GuestExecPort   uint16
-	Disks           []Disk
-	Outputs         []Output
-	VsockListeners  []vmkit.VsockListener
+	Name              string
+	ImageRef          string
+	ExecCommand       string
+	ServiceCommand    string
+	Entrypoint        string
+	ConsoleShell      string
+	Hostname          string
+	SetupCommands     []string
+	Env               map[string]string
+	Secrets           map[string]string // name -> scheme-prefixed reference
+	SecretEnvFiles    []string          // dotenv file paths (plaintext, re-read each start)
+	OnDemandSecrets   map[string]string // name -> reference (lazy, never materialized)
+	SecretsAudit      bool              // append every access to the audit log
+	EgressMode        string            // "mediated", "strict", or "off" (empty = mediated, the secure default)
+	EgressAllow       []string          // allowlisted egress destination hosts
+	EgressPassthrough []string          // allowed hosts that are NOT TLS-intercepted
+	Files             []File
+	Profile           string
+	RestartPolicy     string
+	Backend           string
+	KernelPath        string
+	StateDir          string
+	SupervisorPath    string
+	GuestInitPath     string
+	Mke2fsPath        string
+	Architecture      string
+	MemoryMiB         int
+	CPUCount          int
+	SizeMiB           int64
+	Network           vmkit.NetworkConfig
+	Mediation         *vmkit.MediationConfig
+	Health            Health
+	Timeout           time.Duration
+	ResultPort        uint32
+	ShellPort         uint16
+	ExecPort          uint16
+	GuestShellPort    uint16
+	GuestExecPort     uint16
+	Disks             []Disk
+	Outputs           []Output
+	VsockListeners    []vmkit.VsockListener
 	// ModelTarget, when non-empty, is the host TCP address (host:port) of a paired
 	// model server. It is realized as a guest→host vsock channel and a guest
 	// forwarder. Orchestration (starting the runner) happens in the CLI layer.
@@ -152,6 +160,11 @@ type NetworkSpec struct {
 	IP           string              `json:"ip,omitempty" yaml:"ip,omitempty"`
 	Subnet       string              `json:"subnet,omitempty" yaml:"subnet,omitempty"`
 	Gateway      string              `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	// Unsupported persists the operator acknowledgement that an unsupported,
+	// unmediated network mode (currently only "bridged") was knowingly selected.
+	// Without it, a bridged manifest is rejected again at start, so the
+	// acknowledgement must survive the create→persist→start round-trip.
+	Unsupported bool `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
 }
 
 type Disk struct {
@@ -237,26 +250,29 @@ type Artifacts struct {
 }
 
 type Manifest struct {
-	Name            string                     `json:"name"`
-	Profile         string                     `json:"profile,omitempty"`
-	Restart         string                     `json:"restart"`
-	Resources       Resources                  `json:"resources"`
-	Network         NetworkSpec                `json:"network,omitempty"`
-	Service         string                     `json:"service_command,omitempty"`
-	ConsoleShell    string                     `json:"shell,omitempty"`
-	Hostname        string                     `json:"hostname,omitempty"`
-	Model           string                     `json:"model,omitempty"`
-	ModelRunner     *ModelRunnerSpec           `json:"model_runner,omitempty"`
-	ModelMediation  *ModelMediationSpec        `json:"model_mediation,omitempty"`
-	Mediation       *vmkit.MediationConfig     `json:"mediation,omitempty"`
-	Health          *Health                    `json:"health,omitempty"`
-	Disks           []Disk                     `json:"disks,omitempty"`
-	Artifacts       Artifacts                  `json:"artifacts,omitempty"`
-	Verification    *vmkit.RuntimeVerification `json:"verification,omitempty"`
-	Secrets         []vmkit.SecretRef          `json:"secrets,omitempty"`
-	SecretEnvFiles  []string                   `json:"secret_env_files,omitempty"`
-	OnDemandSecrets []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
-	SecretsAudit    bool                       `json:"secrets_audit,omitempty"`
+	Name              string                     `json:"name"`
+	Profile           string                     `json:"profile,omitempty"`
+	Restart           string                     `json:"restart"`
+	Resources         Resources                  `json:"resources"`
+	Network           NetworkSpec                `json:"network,omitempty"`
+	Service           string                     `json:"service_command,omitempty"`
+	ConsoleShell      string                     `json:"shell,omitempty"`
+	Hostname          string                     `json:"hostname,omitempty"`
+	Model             string                     `json:"model,omitempty"`
+	ModelRunner       *ModelRunnerSpec           `json:"model_runner,omitempty"`
+	ModelMediation    *ModelMediationSpec        `json:"model_mediation,omitempty"`
+	Mediation         *vmkit.MediationConfig     `json:"mediation,omitempty"`
+	Health            *Health                    `json:"health,omitempty"`
+	Disks             []Disk                     `json:"disks,omitempty"`
+	Artifacts         Artifacts                  `json:"artifacts,omitempty"`
+	Verification      *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	Secrets           []vmkit.SecretRef          `json:"secrets,omitempty"`
+	SecretEnvFiles    []string                   `json:"secret_env_files,omitempty"`
+	OnDemandSecrets   []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
+	SecretsAudit      bool                       `json:"secrets_audit,omitempty"`
+	EgressMode        string                     `json:"egress_mode,omitempty"`
+	EgressAllow       []string                   `json:"egress_allow,omitempty"`
+	EgressPassthrough []string                   `json:"egress_passthrough,omitempty"`
 }
 
 type ModelRunnerSpec struct {
@@ -608,6 +624,7 @@ func NetworkSpecFromConfig(network vmkit.NetworkConfig) NetworkSpec {
 		IP:           network.IP,
 		Subnet:       network.Subnet,
 		Gateway:      network.Gateway,
+		Unsupported:  network.Unsupported,
 	}
 }
 
@@ -622,6 +639,7 @@ func NetworkConfigFromSpec(spec NetworkSpec) vmkit.NetworkConfig {
 		IP:           spec.IP,
 		Subnet:       spec.Subnet,
 		Gateway:      spec.Gateway,
+		Unsupported:  spec.Unsupported,
 	})
 }
 
@@ -843,6 +861,11 @@ func secretRefsFromOptions(opts Options) []vmkit.SecretRef {
 }
 
 func Request(opts Options, command, rootfsPath string, requestID string) vmkit.Request {
+	// Normalize the egress mode at this single chokepoint. An empty/unspecified
+	// mode resolves to "mediated" — the secure default — so downstream (the
+	// supervisor reading config.EgressMode, and the CA-cert listener decision
+	// below) only ever sees "mediated", "strict", or "off".
+	opts.EgressMode = vmkit.NormalizeEgressMode(opts.EgressMode)
 	var listeners []vmkit.VsockListener
 	if opts.ResultPort != 0 {
 		listeners = []vmkit.VsockListener{{Port: opts.ResultPort, Target: ResultPath(opts.StateDir, opts.Name)}}
@@ -862,6 +885,19 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 	secretsPort := SecretsPort(opts)
 	if secretsPort != 0 {
 		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
+	}
+	// CACertPort is allocated whenever egress mediation is on ("mediated" or
+	// "strict"; empty already normalized to "mediated" above) AND the network
+	// mode actually runs the mediator. The vsock listener serves the
+	// per-workspace CA public cert to the guest at boot so guestinit can install
+	// it into the trust store before any HTTPS traffic. "bridged" (quarantined,
+	// unmediated) and "isolated" (no egress) never start a mediator — even with
+	// EgressMode=mediated/strict — so allocating the CA listener there would tell
+	// the guest to trust a CA for a mediator that will never exist (dead state).
+	var caCertPort uint32
+	if vmkit.EgressMediationOn(opts.EgressMode) && vmkit.NetworkModeMediates(opts.Network.Mode) {
+		caCertPort = DefaultCACertPort
+		listeners = append(listeners, vmkit.VsockListener{Port: caCertPort, Target: secretxfer.CACertTarget})
 	}
 	disks := make([]vmkit.Disk, 0, len(opts.Disks))
 	for _, disk := range opts.Disks {
@@ -893,10 +929,14 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			ShellPort:          ShellPort(opts),
 			ExecPort:           ExecPort(opts),
 			SecretsPort:        secretsPort,
+			CACertPort:         caCertPort,
 			Secrets:            secretRefs,
 			SecretEnvFiles:     opts.SecretEnvFiles,
 			OnDemandSecrets:    onDemandRefsFromOptions(opts),
 			SecretsAudit:       opts.SecretsAudit,
+			EgressMode:         opts.EgressMode,
+			EgressAllow:        opts.EgressAllow,
+			EgressPassthrough:  opts.EgressPassthrough,
 			SecretsControlPort: SecretsControlPort(opts),
 			GuestShellPort:     opts.GuestShellPort,
 			GuestExecPort:      opts.GuestExecPort,

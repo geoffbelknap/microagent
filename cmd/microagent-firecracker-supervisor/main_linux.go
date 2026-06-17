@@ -9,10 +9,19 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	firecrackersupervisor "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+type egressAllowFlag []string
+
+func (f *egressAllowFlag) String() string     { return strings.Join(*f, ",") }
+func (f *egressAllowFlag) Set(v string) error { *f = append(*f, v); return nil }
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
@@ -49,6 +58,16 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		return firecrackersupervisor.RunVsockListener(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
 	}
+	if len(args) > 0 && args[0] == "--egress-mediator" {
+		opts, err := parseEgressMediatorOptions(args[1:])
+		if err != nil {
+			return err
+		}
+		opts.Ready = stdout
+		mctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return egress.Run(mctx, opts)
+	}
 	req, err := readRequest(args)
 	if err != nil {
 		resp := vmkit.Response{OK: false, Backend: vmkit.BackendFirecracker, Error: err.Error()}
@@ -60,6 +79,63 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return writeErr
 	}
 	return err
+}
+
+// parseEgressMediatorOptions parses the `--egress-mediator` subcommand flags
+// (args excluding the leading "--egress-mediator") into egress.Options. Pure (no
+// I/O, no signal wiring) so the flag plumbing — including the repeatable --peer
+// roster — is unit-testable without starting the blocking mediator.
+func parseEgressMediatorOptions(args []string) (egress.Options, error) {
+	fs := flag.NewFlagSet("egress-mediator", flag.ContinueOnError)
+	var bindHost, auditLog, mode string
+	var bindPort int
+	var allow egressAllowFlag
+	var caCert, caKey string
+	var swapConfig string
+	var passthrough egressAllowFlag
+	var peer egressAllowFlag
+	// Bounded-operations caps (ASK tenet 8). Zero/default = unlimited (current
+	// behavior). These are per-mediator-process (= per-workspace) and reset on
+	// restart.
+	var maxBPS, maxBytes, auditMaxBytes int64
+	var maxConns int
+	var auditMaxBackups int
+	fs.StringVar(&mode, "mode", "", "Enforcement mode: mediated (allow+audit all) or strict (default-deny allowlist)")
+	fs.StringVar(&bindHost, "bind-host", "127.0.0.1", "Bind host")
+	fs.IntVar(&bindPort, "bind-port", 0, "Bind port")
+	fs.StringVar(&auditLog, "audit-log", "", "JSONL audit log path")
+	fs.Var(&allow, "allow", "Allowlisted destination host (repeatable)")
+	fs.StringVar(&caCert, "ca-cert", "", "CA cert PEM path (enables TLS interception)")
+	fs.StringVar(&caKey, "ca-key", "", "CA key PEM path")
+	fs.StringVar(&swapConfig, "swap-config", "", "credential-swaps.yaml path")
+	fs.Var(&passthrough, "passthrough", "Passthrough destination host (allowed, not intercepted; repeatable)")
+	fs.Var(&peer, "peer", "Named-network peer roster entry name=ip (repeatable)")
+	fs.Int64Var(&maxBPS, "max-bps", 0, "Max egress bytes/sec on the upstream-bound copy (0=unlimited)")
+	fs.Int64Var(&maxBytes, "max-bytes", 0, "Max cumulative egress bytes across tcp+udp before the breaching flow is torn down (0=unlimited)")
+	fs.IntVar(&maxConns, "max-conns", 0, "Max concurrent mediated TCP connections (0=unlimited)")
+	fs.Int64Var(&auditMaxBytes, "audit-max-bytes", 0, "Rotate the audit log when an active file would exceed this many bytes (0=unbounded)")
+	fs.IntVar(&auditMaxBackups, "audit-max-backups", 0, "Number of rotated audit-log backups to keep (with --audit-max-bytes)")
+	if err := fs.Parse(args); err != nil {
+		return egress.Options{}, err
+	}
+	if bindPort == 0 || strings.TrimSpace(auditLog) == "" {
+		return egress.Options{}, fmt.Errorf("usage: microagent-firecracker-supervisor --egress-mediator --bind-port <port> --audit-log <path> [--bind-host <host>] [--allow <host> ...]")
+	}
+	return egress.Options{
+		Mode:            mode,
+		BindHost:        bindHost,
+		BindPort:        bindPort,
+		AuditLogPath:    auditLog,
+		Allow:           []string(allow),
+		CACertPath:      caCert,
+		CAKeyPath:       caKey,
+		SwapConfigPath:  swapConfig,
+		Passthrough:     []string(passthrough),
+		Peers:           []string(peer),
+		Limits:          egress.Limits{MaxBytesPerSec: maxBPS, MaxTotalBytes: maxBytes, MaxConcurrentConns: int32(maxConns)},
+		AuditMaxBytes:   auditMaxBytes,
+		AuditMaxBackups: auditMaxBackups,
+	}, nil
 }
 
 func readRequest(args []string) (vmkit.Request, error) {
