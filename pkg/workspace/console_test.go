@@ -23,11 +23,14 @@ func TestDialConsoleRejectsPausedWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent"
 	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
-	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteProcessState(opts, req, vmkit.StatePaused, 123, ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err := DialConsole(context.Background(), ConsoleOptions{StateDir: dir, Name: name})
+	_, err = DialConsole(context.Background(), ConsoleOptions{StateDir: dir, Name: name})
 	if err == nil || !strings.Contains(err.Error(), "paused; resume it first") {
 		t.Fatalf("err = %v, want paused; resume it first", err)
 	}
@@ -37,7 +40,10 @@ func TestSendConsoleCommandReturnsTimeoutWithPartialOutput(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent"
 	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
-	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Config.ShellPort = 24279
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
 		t.Fatal(err)
@@ -94,7 +100,10 @@ func TestSendConsoleCommandCompletionMarkerIsSuccess(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent"
 	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
-	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Config.ShellPort = 24279
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
 		t.Fatal(err)
@@ -256,7 +265,10 @@ func TestCommandReadinessRejectsAcceptThenClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
-	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Config.ShellPort = uint16(port)
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
 		t.Fatal(err)
@@ -301,7 +313,10 @@ func writeRunningConsoleState(t *testing.T) (string, string) {
 	dir := t.TempDir()
 	name := "agent"
 	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
-	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Config.ShellPort = 24279
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
 		t.Fatal(err)

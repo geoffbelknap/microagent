@@ -4512,7 +4512,7 @@ func readWorkspaceManifest(stateDir, name string) (workspaceManifest, error) {
 	return manifest, nil
 }
 
-func workspaceRequest(opts workspaceOptions, command, rootfsPath string) vmkit.Request {
+func workspaceRequest(opts workspaceOptions, command, rootfsPath string) (vmkit.Request, error) {
 	return workspace.Request(opts, command, rootfsPath, newRequestID())
 }
 

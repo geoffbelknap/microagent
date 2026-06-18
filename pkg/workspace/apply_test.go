@@ -38,7 +38,10 @@ func TestOptionsFromManifestThreadsEgressToConfig(t *testing.T) {
 		t.Fatalf("OptionsFromManifest dropped EgressPassthrough: %v", opts.EgressPassthrough)
 	}
 
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.EgressMode != vmkit.EgressModeStrict {
 		t.Fatalf("Config dropped EgressMode: %q", req.Config.EgressMode)
 	}

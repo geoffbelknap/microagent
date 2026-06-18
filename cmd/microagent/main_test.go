@@ -1588,7 +1588,7 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		Target:     "127.0.0.1:9900",
 		FailClosed: true,
 	}
-	req := workspaceRequest(workspaceOptions{
+	req, err := workspaceRequest(workspaceOptions{
 		Name:           "agent-1",
 		Backend:        "apple-vf",
 		KernelPath:     "/tmp/kernel",
@@ -1598,6 +1598,9 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		VsockListeners: []vmkit.VsockListener{{Port: 3128, Target: "127.0.0.1:19000"}},
 		Mediation:      &mediation,
 	}, "run", "/tmp/rootfs.ext4")
+	if err != nil {
+		t.Fatalf("workspaceRequest: %v", err)
+	}
 	// result + enforcer + mediation listeners, plus the CA-cert listener that
 	// egress mediation (the secure default for an unspecified mode) allocates.
 	if len(req.Config.VsockListeners) != 4 {
@@ -1624,7 +1627,7 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 }
 
 func TestWorkspaceRequestIncludesDisks(t *testing.T) {
-	req := workspaceRequest(workspaceOptions{
+	req, err := workspaceRequest(workspaceOptions{
 		Name:       "agent-1",
 		Backend:    "apple-vf",
 		KernelPath: "/tmp/kernel",
@@ -1637,6 +1640,9 @@ func TestWorkspaceRequestIncludesDisks(t *testing.T) {
 			Mode:       "rw",
 		}},
 	}, "run", "/tmp/rootfs.ext4")
+	if err != nil {
+		t.Fatalf("workspaceRequest: %v", err)
+	}
 	if len(req.Config.Disks) != 1 {
 		t.Fatalf("Disks len = %d, want 1", len(req.Config.Disks))
 	}
@@ -7671,7 +7677,10 @@ func writeCommandExecRuntimeState(t *testing.T, name string, state vmkit.VMState
 	t.Helper()
 	dir := t.TempDir()
 	opts := workspace.Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker, ExecPort: execPort}
-	req := workspace.Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := workspace.Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatalf("workspace.Request: %v", err)
+	}
 	if err := workspace.WriteProcessState(opts, req, state, 1234, ""); err != nil {
 		t.Fatalf("WriteProcessState: %v", err)
 	}
