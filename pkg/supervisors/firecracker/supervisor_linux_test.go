@@ -1870,6 +1870,15 @@ func TestFirecrackerBootArgsIncludesSecretsPort(t *testing.T) {
 	}
 }
 
+func TestFirecrackerBootArgsRequestsResetShutdown(t *testing.T) {
+	// Firecracker guests must shut down via RESTART (reboot=k) so a modern kernel
+	// with no power-off handler still exits the VMM. The marker is always present.
+	args := firecrackerBootArgs(&vmkit.Config{})
+	if !strings.Contains(args, "microagent_shutdown=reset") {
+		t.Fatalf("boot args missing shutdown marker: %q", args)
+	}
+}
+
 func TestFirecrackerBootArgsIncludesSecretsAPI(t *testing.T) {
 	args := firecrackerBootArgs(&vmkit.Config{
 		SecretsPort:     1026,

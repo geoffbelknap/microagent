@@ -936,7 +936,12 @@ func writeConfig(opts Options, req vmkit.Request) error {
 }
 
 func firecrackerBootArgs(config *vmkit.Config) string {
-	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init"}
+	// microagent_shutdown=reset tells the guest init to RESTART (reboot=k -> i8042
+	// reset, which reliably exits Firecracker) before trying POWER_OFF. A modern
+	// guest kernel under Firecracker has no power-off handler, so a POWER_OFF-first
+	// shutdown halts the CPU without returning and the VMM is never told to exit.
+	// Only the Firecracker supervisor sets this; other backends keep POWER_OFF-first.
+	args := []string{"console=ttyS0", "reboot=k", "panic=1", "pci=off", "root=/dev/vda", "rw", "init=/sbin/microagent-init", "microagent_shutdown=reset"}
 	// The guest listens on its own vsock ports, which differ from the host bind
 	// ports when a fork or a host-port fallback (ensureBindableManagementPorts)
 	// has moved the host side. Tell the guest its own ports, not the host ports.

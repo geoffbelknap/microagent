@@ -1971,9 +1971,29 @@ func exitCode(err error) int {
 	return 1
 }
 
+// shutdownResetFirst reports whether to issue RESTART before POWER_OFF, gated on
+// the microagent_shutdown=reset cmdline marker that only the Firecracker
+// supervisor sets. A modern guest kernel under Firecracker has no power-off
+// handler: a POWER_OFF then prints "Power off not available" and halts the CPU
+// *without returning*, so the VMM is never told to exit and the run is killed.
+// A RESTART (reboot=k -> i8042 reset) reliably exits Firecracker. Backends that
+// omit the marker keep POWER_OFF-first, unchanged.
+func shutdownResetFirst(cmdline string) bool {
+	return microagentCmdlineValues(cmdline)["microagent_shutdown"] == "reset"
+}
+
 func poweroff() {
 	unix.Sync()
 	time.Sleep(250 * time.Millisecond)
+	resetFirst := false
+	if data, err := os.ReadFile("/proc/cmdline"); err == nil {
+		resetFirst = shutdownResetFirst(string(data))
+	}
+	if resetFirst {
+		_ = unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
+		_ = unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF)
+		return
+	}
 	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_POWER_OFF)
 	_ = unix.Reboot(unix.LINUX_REBOOT_CMD_RESTART)
 }
