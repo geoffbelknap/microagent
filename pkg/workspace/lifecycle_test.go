@@ -111,7 +111,10 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 		t.Fatalf("manifest Service = %q", manifest.Service)
 	}
 
-	req := Request(opts, "run", filepath.Join(dir, "workspaces", "agency-task", "rootfs.ext4"), "req-1")
+	req, err := Request(opts, "run", filepath.Join(dir, "workspaces", "agency-task", "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
 		t.Fatalf("WriteProcessState: %v", err)
 	}
@@ -269,7 +272,10 @@ func TestStatusNonLiveStatesUseFastReadinessAndRecordedRootfs(t *testing.T) {
 			if err := WriteManifest(opts); err != nil {
 				t.Fatalf("WriteManifest: %v", err)
 			}
-			req := Request(opts, "inspect", missingRootfs, "req-1")
+			req, err := Request(opts, "inspect", missingRootfs, "req-1")
+			if err != nil {
+				t.Fatalf("Request: %v", err)
+			}
 			req.Config.KernelPath = kernelPath
 			req.Config.RootfsPath = missingRootfs
 			if err := WriteProcessState(opts, req, state, 0, ""); err != nil {
@@ -357,7 +363,10 @@ func TestStatusRunningWorkspaceStillChecksCurrentRootfs(t *testing.T) {
 	if err := WriteManifest(opts); err != nil {
 		t.Fatalf("WriteManifest: %v", err)
 	}
-	req := Request(opts, "inspect", missingRootfs, "req-1")
+	req, err := Request(opts, "inspect", missingRootfs, "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	req.Config.KernelPath = kernelPath
 	req.Config.RootfsPath = missingRootfs
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 0, ""); err != nil {
@@ -680,12 +689,15 @@ func TestApplyRejectsLiveNonHostNetworkChange(t *testing.T) {
 	if err := WriteManifest(opts); err != nil {
 		t.Fatal(err)
 	}
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	req.Config.Network = &originalNetwork
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Apply(t.Context(), Options{StateDir: dir, Backend: vmkit.BackendFirecracker}, Spec{
+	_, err = Apply(t.Context(), Options{StateDir: dir, Backend: vmkit.BackendFirecracker}, Spec{
 		Name: "homebridge",
 		Network: NetworkSpec{
 			Mode:         "user",
@@ -926,11 +938,14 @@ func TestBuildRootfsRequestRunsSetupBeforeManagedService(t *testing.T) {
 func TestEnsureCanCreateRejectsRunningWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{StateDir: dir, Name: "homebridge"}
-	req := Request(opts, "start", filepath.Join(dir, "rootfs.ext4"), NewRequestID())
+	req, err := Request(opts, "start", filepath.Join(dir, "rootfs.ext4"), NewRequestID())
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
 		t.Fatalf("WriteProcessState: %v", err)
 	}
-	err := EnsureCanCreate(opts)
+	err = EnsureCanCreate(opts)
 	if err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("EnsureCanCreate err = %v", err)
 	}
@@ -971,8 +986,11 @@ func TestAppleVFStartFailsBeforeDetachedRunWhenKernelMissing(t *testing.T) {
 		t.Fatalf("write rootfs: %v", err)
 	}
 
-	req := Request(opts, "run", rootfsPath, "req-missing-kernel")
-	_, err := startDetached(opts, req)
+	req, err := Request(opts, "run", rootfsPath, "req-missing-kernel")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	_, err = startDetached(opts, req)
 	if err == nil || !strings.Contains(err.Error(), "kernel is not readable") {
 		t.Fatalf("Start err = %v, want missing kernel preflight", err)
 	}
@@ -1054,7 +1072,10 @@ func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 	if err := WriteManifest(opts); err != nil {
 		t.Fatal(err)
 	}
-	req := Request(opts, "run", rootfsPath, "req-1")
+	req, err := Request(opts, "run", rootfsPath, "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	req.Config.KernelPath = kernelPath
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
 		t.Fatal(err)
@@ -1095,7 +1116,10 @@ func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
 	if opts.EgressMode != vmkit.EgressModeMediated {
 		t.Fatalf("applyManifest left EgressMode = %q, want %q", opts.EgressMode, vmkit.EgressModeMediated)
 	}
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if !vmkit.EgressMediationOn(req.Config.EgressMode) {
 		t.Fatalf("started workspace not mediated: EgressMode = %q", req.Config.EgressMode)
 	}
@@ -1123,7 +1147,10 @@ func TestApplyManifestPreservesOffForStart(t *testing.T) {
 	if opts.EgressMode != vmkit.EgressModeOff {
 		t.Fatalf("applyManifest changed off mode to %q", opts.EgressMode)
 	}
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if vmkit.EgressMediationOn(req.Config.EgressMode) {
 		t.Fatalf("off workspace should not be mediated on start")
 	}

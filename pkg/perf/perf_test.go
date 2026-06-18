@@ -67,11 +67,14 @@ func TestParseRSSKiB(t *testing.T) {
 func TestFootprintRequiresRunningPID(t *testing.T) {
 	dir := t.TempDir()
 	opts := workspace.Options{StateDir: dir, Name: "research"}
-	req := workspace.Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := workspace.Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := workspace.WriteProcessState(opts, req, vmkit.StateStopped, 0, ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Footprint(dir, "research")
+	_, err = Footprint(dir, "research")
 	if err == nil || !strings.Contains(err.Error(), "does not have a running process pid") {
 		t.Fatalf("Footprint err = %v", err)
 	}

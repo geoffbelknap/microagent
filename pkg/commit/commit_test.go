@@ -26,7 +26,10 @@ func stopWorkspaceFixture(t *testing.T, state vmkit.VMState) (string, string) {
 	if err := os.WriteFile(rootfsPath, []byte("placeholder ext4"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	req := workspace.Request(opts, "run", rootfsPath, "req-1")
+	req, err := workspace.Request(opts, "run", rootfsPath, "req-1")
+	if err != nil {
+		t.Fatalf("workspace.Request: %v", err)
+	}
 	if err := workspace.WriteProcessState(opts, req, state, 0, ""); err != nil {
 		t.Fatalf("WriteProcessState: %v", err)
 	}

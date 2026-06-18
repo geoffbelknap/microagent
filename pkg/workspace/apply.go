@@ -76,7 +76,11 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 	if state == vmkit.StateRunning && containsString(applied, "network") {
 		applyOpts := OptionsFromManifest(opts, next)
 		rootfsPath := WorkspaceRootfsPath(opts.StateDir, name, opts.Backend)
-		resp, err := Dispatch(ctx, applyOpts, Request(applyOpts, "apply", rootfsPath, NewRequestID()))
+		applyReq, err := Request(applyOpts, "apply", rootfsPath, NewRequestID())
+		if err != nil {
+			return result, fmt.Errorf("egress policy: %w", err)
+		}
+		resp, err := Dispatch(ctx, applyOpts, applyReq)
 		result.Reloaded = resp.OK
 		result.Response = &resp
 		if err == nil {

@@ -860,12 +860,28 @@ func secretRefsFromOptions(opts Options) []vmkit.SecretRef {
 	return refs
 }
 
-func Request(opts Options, command, rootfsPath string, requestID string) vmkit.Request {
-	// Normalize the egress mode at this single chokepoint. An empty/unspecified
-	// mode resolves to "mediated" — the secure default — so downstream (the
-	// supervisor reading config.EgressMode, and the CA-cert listener decision
-	// below) only ever sees "mediated", "strict", or "off".
-	opts.EgressMode = vmkit.NormalizeEgressMode(opts.EgressMode)
+// EgressPolicyFromOptions maps the egress-related fields of Options into an
+// EgressPolicy bundle. Fields with no corresponding Options source (SwapConfigPath,
+// Caps, DNS) are left at their zero values.
+func EgressPolicyFromOptions(opts Options) vmkit.EgressPolicy {
+	return vmkit.EgressPolicy{
+		Mode:        opts.EgressMode,
+		Allow:       opts.EgressAllow,
+		Passthrough: opts.EgressPassthrough,
+		// SwapConfigPath, Caps, and DNS have no source on Options; callers
+		// that need them must build the EgressPolicy directly.
+	}
+}
+
+func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.Request, error) {
+	// Build, normalize, and validate the egress policy at this single
+	// chokepoint before any other egress-dependent work (CA-cert listener
+	// allocation, etc.) so an invalid policy fails the start early.
+	pol := vmkit.NormalizeEgressPolicy(EgressPolicyFromOptions(opts))
+	if err := pol.Validate(); err != nil {
+		return vmkit.Request{}, fmt.Errorf("egress policy: %w", err)
+	}
+	opts.EgressMode = pol.Mode
 	var listeners []vmkit.VsockListener
 	if opts.ResultPort != 0 {
 		listeners = []vmkit.VsockListener{{Port: opts.ResultPort, Target: ResultPath(opts.StateDir, opts.Name)}}
@@ -934,9 +950,9 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			SecretEnvFiles:     opts.SecretEnvFiles,
 			OnDemandSecrets:    onDemandRefsFromOptions(opts),
 			SecretsAudit:       opts.SecretsAudit,
-			EgressMode:         opts.EgressMode,
-			EgressAllow:        opts.EgressAllow,
-			EgressPassthrough:  opts.EgressPassthrough,
+			EgressMode:         pol.Mode,
+			EgressAllow:        pol.Allow,
+			EgressPassthrough:  pol.Passthrough,
 			SecretsControlPort: SecretsControlPort(opts),
 			GuestShellPort:     opts.GuestShellPort,
 			GuestExecPort:      opts.GuestExecPort,
@@ -946,7 +962,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) vmkit.R
 			ModelGuestPort:     modelGuestPort,
 			ModelVsockPort:     modelVsockPort,
 		},
-	}
+	}, nil
 }
 
 func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, error) {

@@ -97,7 +97,10 @@ func Supervise(ctx context.Context, opts SuperviseOptions) (SuperviseResult, err
 
 func writeSuperviseStartFailure(opts Options, startErr error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
-	req := Request(opts, "run", rootfsPath, NewRequestID())
+	req, err := Request(opts, "run", rootfsPath, NewRequestID())
+	if err != nil {
+		return
+	}
 	_ = WriteProcessState(opts, req, vmkit.StateFailed, 0, startErr.Error())
 }
 

@@ -34,7 +34,10 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 		}},
 	}
 
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 
 	if req.Command != "run" {
 		t.Fatalf("Command = %q", req.Command)
@@ -199,7 +202,10 @@ func TestDispatchAddsLifecycleFailureContext(t *testing.T) {
 		StateDir:       stateDir,
 		SupervisorPath: supervisorPath,
 	}
-	req := Request(opts, "halt", "", "req-1")
+	req, err := Request(opts, "halt", "", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 
 	resp, err := Dispatch(context.Background(), opts, req)
 	if err == nil {
@@ -328,7 +334,10 @@ func TestRequestSetsSecretsControlPort(t *testing.T) {
 	opts.StateDir = t.TempDir()
 	opts.Backend = vmkit.BackendFirecracker
 	opts.Secrets = map[string]string{"API": "env:X"}
-	req := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.SecretsControlPort != DefaultSecretsControlPort {
 		t.Fatalf("SecretsControlPort = %d, want %d", req.Config.SecretsControlPort, DefaultSecretsControlPort)
 	}
@@ -337,7 +346,11 @@ func TestRequestSetsSecretsControlPort(t *testing.T) {
 	bare.Name = "ws2"
 	bare.StateDir = t.TempDir()
 	bare.Backend = vmkit.BackendFirecracker
-	if got := Request(bare, "", "/tmp/rootfs.ext4", "req-2").Config.SecretsControlPort; got != 0 {
+	bareReq, err := Request(bare, "", "/tmp/rootfs.ext4", "req-2")
+	if err != nil {
+		t.Fatalf("Request bare: %v", err)
+	}
+	if got := bareReq.Config.SecretsControlPort; got != 0 {
 		t.Fatalf("SecretsControlPort = %d, want 0 when no secrets declared", got)
 	}
 }
@@ -377,7 +390,10 @@ func TestApplyManifestRestoresSecretsForStartRequest(t *testing.T) {
 		SecretsAudit:    true,
 	}
 	applyManifest(&opts, manifest)
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.SecretsPort != DefaultSecretsPort || req.Config.SecretsControlPort != DefaultSecretsControlPort {
 		t.Fatalf("secrets ports not restored into request: %+v", req.Config)
 	}
@@ -408,7 +424,10 @@ func TestRequestThreadsOnDemandAndAudit(t *testing.T) {
 	opts.Backend = vmkit.BackendFirecracker
 	opts.OnDemandSecrets = map[string]string{"DB": "env:X"}
 	opts.SecretsAudit = true
-	req := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.SecretsPort != DefaultSecretsPort {
 		t.Fatalf("SecretsPort = %d, want %d (on-demand should enable the port)", req.Config.SecretsPort, DefaultSecretsPort)
 	}
@@ -432,7 +451,10 @@ func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
 	opts.StateDir = t.TempDir()
 	opts.Backend = vmkit.BackendFirecracker
 	opts.Secrets = map[string]string{"API": "env:CI_TOKEN"}
-	req := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.SecretsPort != DefaultSecretsPort {
 		t.Fatalf("SecretsPort = %d, want %d", req.Config.SecretsPort, DefaultSecretsPort)
 	}
@@ -452,7 +474,10 @@ func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
 
 func TestRequestWiresModelTarget(t *testing.T) {
 	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "firecracker", ModelTarget: "127.0.0.1:38001"}
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	found := false
 	for _, l := range req.Config.VsockListeners {
 		if l.Port == DefaultModelVsockPort && l.Target == "127.0.0.1:38001" {
@@ -469,7 +494,10 @@ func TestRequestWiresModelTarget(t *testing.T) {
 
 func TestRequestNoModelTarget(t *testing.T) {
 	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "firecracker"}
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.ModelGuestPort != 0 || req.Config.ModelVsockPort != 0 {
 		t.Fatalf("model ports should be zero when unpaired")
 	}
@@ -603,7 +631,10 @@ func TestRequestThreadsEgress(t *testing.T) {
 	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "strict", EgressAllow: []string{"api.github.com"},
 		EgressPassthrough: []string{"raw.example.com"}}
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.EgressMode != "strict" || len(req.Config.EgressAllow) != 1 || req.Config.EgressAllow[0] != "api.github.com" {
 		t.Fatalf("egress not threaded: %+v", req.Config)
 	}
@@ -618,7 +649,10 @@ func TestRequestThreadsEgress(t *testing.T) {
 func TestEgressDefaultsToMediated(t *testing.T) {
 	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: ""}
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.EgressMode != vmkit.EgressModeMediated {
 		t.Fatalf("empty EgressMode should normalize to %q, got %q", vmkit.EgressModeMediated, req.Config.EgressMode)
 	}
@@ -637,7 +671,10 @@ func TestRequestAllocatesCACertForMediated(t *testing.T) {
 	for _, mode := range []string{vmkit.EgressModeMediated, vmkit.EgressModeStrict} {
 		opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
 			Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: mode}
-		req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+		if err != nil {
+			t.Fatalf("mode %q: Request: %v", mode, err)
+		}
 		if req.Config.CACertPort != DefaultCACertPort {
 			t.Errorf("mode %q: CACertPort = %d, want %d", mode, req.Config.CACertPort, DefaultCACertPort)
 		}
@@ -652,7 +689,10 @@ func TestRequestAllocatesCACertForMediated(t *testing.T) {
 func TestRequestNoCACertForOff(t *testing.T) {
 	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: vmkit.EgressModeOff}
-	req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if req.Config.EgressMode != vmkit.EgressModeOff {
 		t.Fatalf("EgressMode should stay %q, got %q", vmkit.EgressModeOff, req.Config.EgressMode)
 	}
@@ -684,7 +724,10 @@ func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
 				Network: tc.network, EgressMode: tc.egressMode}
-			req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+			req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+			if err != nil {
+				t.Fatalf("Request: %v", err)
+			}
 			if req.Config.CACertPort != 0 {
 				t.Errorf("%s: CACertPort = %d, want 0 (non-mediated network mode)", tc.name, req.Config.CACertPort)
 			}
@@ -704,7 +747,10 @@ func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
 	for _, mode := range []string{"", "user", "nat", "named"} {
 		opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
 			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeMediated}
-		req := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+		if err != nil {
+			t.Fatalf("network mode %q: Request: %v", mode, err)
+		}
 		if req.Config.CACertPort != DefaultCACertPort {
 			t.Errorf("network mode %q: CACertPort = %d, want %d", mode, req.Config.CACertPort, DefaultCACertPort)
 		}
@@ -721,4 +767,53 @@ func hasCACertListener(listeners []vmkit.VsockListener) bool {
 		}
 	}
 	return false
+}
+
+// TestEgressPolicyFromOptionsMapsFields verifies that EgressPolicyFromOptions
+// maps the three Options egress fields into an EgressPolicy, and that
+// NormalizeEgressPolicy trims/deduplicates Allow and resolves an empty Mode to
+// the secure default ("mediated").
+func TestEgressPolicyFromOptionsMapsFields(t *testing.T) {
+	opts := Options{
+		EgressMode:        "",
+		EgressAllow:       []string{" api.example.com ", "api.example.com"},
+		EgressPassthrough: []string{"raw.example.com"},
+	}
+	pol := vmkit.NormalizeEgressPolicy(EgressPolicyFromOptions(opts))
+	if pol.Mode != vmkit.EgressModeMediated {
+		t.Fatalf("Mode = %q, want %q", pol.Mode, vmkit.EgressModeMediated)
+	}
+	if len(pol.Allow) != 1 || pol.Allow[0] != "api.example.com" {
+		t.Fatalf("Allow = %v, want [api.example.com] (trimmed and deduped)", pol.Allow)
+	}
+	if len(pol.Passthrough) != 1 || pol.Passthrough[0] != "raw.example.com" {
+		t.Fatalf("Passthrough = %v, want [raw.example.com]", pol.Passthrough)
+	}
+}
+
+// TestRequestFlatFieldsEqualNormalizedPolicy verifies that the flat Config
+// egress fields produced by Request equal the normalized policy — i.e. the
+// deduplication and normalization applied by EgressPolicyFromOptions is
+// reflected end-to-end in the wire config.
+func TestRequestFlatFieldsEqualNormalizedPolicy(t *testing.T) {
+	opts := Options{
+		Name:              "a",
+		Backend:           vmkit.BackendFirecracker,
+		KernelPath:        "/k",
+		StateDir:          t.TempDir(),
+		Network:           vmkit.NetworkConfig{Mode: "user"},
+		EgressMode:        "",
+		EgressAllow:       []string{" api.example.com ", "api.example.com"},
+		EgressPassthrough: []string{"raw.example.com"},
+	}
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if req.Config.EgressMode != vmkit.EgressModeMediated {
+		t.Fatalf("Config.EgressMode = %q, want %q", req.Config.EgressMode, vmkit.EgressModeMediated)
+	}
+	if len(req.Config.EgressAllow) != 1 || req.Config.EgressAllow[0] != "api.example.com" {
+		t.Fatalf("Config.EgressAllow = %v, want [api.example.com] (trimmed and deduped)", req.Config.EgressAllow)
+	}
 }
