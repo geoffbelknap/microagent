@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-18_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -173,6 +173,7 @@ The complete set:
 | `--egress-allow <host>` | Allowlisted egress destination (TLS-intercepted). Repeatable; an exact host or a `.suffix` matching the apex and subdomains. See the [allowlist how-to](/guides/egress-allowlist/) |
 | `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted (forwarded opaquely). Repeatable. For cert-pinned / mTLS endpoints |
 | `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress mediated` or `strict` |
+| `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mediated` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
 | `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model and inject `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL`; with `--keep`, the ref persists and later `start`s re-pair. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
 | `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom` |

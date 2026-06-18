@@ -144,6 +144,7 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 	opts.EgressMode = vmkit.NormalizeEgressMode(manifest.EgressMode)
 	opts.EgressAllow = manifest.EgressAllow
 	opts.EgressPassthrough = manifest.EgressPassthrough
+	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
 	opts.Outputs = manifest.Artifacts.Egress
 	if opts.KernelPath == "" {
 		opts.KernelPath = KernelPath(opts.Backend, opts.Architecture)
