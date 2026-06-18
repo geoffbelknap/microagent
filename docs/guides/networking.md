@@ -4,12 +4,18 @@ description: Put an app and a database on one named network so they reach and re
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-17_
 
 Two workspaces, one subnet: an app called `web` that reaches a database
 called `db` by name. That's where this guide ends up. A named network is
 microagent's managed analog of a Docker user-defined network: declare it once,
 join workspaces by name.
+
+> **Named networks are currently unsupported and not reliably egress-mediated.**
+> They run in the host network namespace, where transparent egress capture does
+> not work reliably, so they are gated behind `--unsupported` and are not covered
+> by microagent's security model. For mediated egress, use the default `user`
+> mode. See [networking concepts](/concepts/networking/).
 
 Named-network attachment is currently implemented by the Firecracker/Linux
 backend and needs the same host setup as `nat` mode: `net.ipv4.ip_forward=1`
@@ -42,9 +48,9 @@ This is a registry record - no host devices exist until a member starts. Omit
 
 ```bash
 microagent create db  --image docker.io/library/postgres:16 \
-  --network-name devnet --publish 127.0.0.1:5432:5432/tcp
+  --network-name devnet --publish 127.0.0.1:5432:5432/tcp --unsupported
 microagent create web --image docker.io/library/python:3.12 \
-  --network-name devnet
+  --network-name devnet --unsupported
 microagent start db
 microagent start web
 ```

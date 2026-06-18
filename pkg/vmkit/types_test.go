@@ -248,6 +248,27 @@ func TestBridgedRequiresUnsupported(t *testing.T) {
 	}
 }
 
+func TestNatNamedRequireUnsupported(t *testing.T) {
+	for _, mode := range []string{"nat", "named"} {
+		cfg := NetworkConfig{Mode: mode}
+		if mode == "named" {
+			cfg.Name = "netA"
+		}
+		if err := ValidateNetworkConfig(cfg); err == nil {
+			t.Fatalf("ValidateNetworkConfig accepted %s without unsupported ack", mode)
+		} else if !strings.Contains(err.Error(), "unsupported") {
+			t.Fatalf("ValidateNetworkConfig %s error = %q, want it to mention unsupported", mode, err)
+		}
+		ack := NetworkConfig{Mode: mode, Unsupported: true}
+		if mode == "named" {
+			ack.Name = "netA"
+		}
+		if err := ValidateNetworkConfig(ack); err != nil {
+			t.Fatalf("ValidateNetworkConfig %s with unsupported ack: %v", mode, err)
+		}
+	}
+}
+
 func TestValidateNetworkConfigRejectsIsolatedPortForwards(t *testing.T) {
 	cfg := NetworkConfig{
 		Mode: "isolated",
@@ -262,7 +283,8 @@ func TestValidateNetworkConfigRejectsIsolatedPortForwards(t *testing.T) {
 
 func TestValidateNetworkConfigRejectsUnsupportedPortForwardProtocol(t *testing.T) {
 	cfg := NetworkConfig{
-		Mode: "nat",
+		Mode:        "nat",
+		Unsupported: true,
 		PortForwards: []PortForward{
 			{Protocol: "udp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
 		},
@@ -274,7 +296,8 @@ func TestValidateNetworkConfigRejectsUnsupportedPortForwardProtocol(t *testing.T
 
 func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
 	cfg := NetworkConfig{
-		Mode: "nat",
+		Mode:        "nat",
+		Unsupported: true,
 		PortForwards: []PortForward{
 			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
 			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 8080},

@@ -87,7 +87,7 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 		MemoryMiB:      512,
 		CPUCount:       2,
 		SizeMiB:        1024,
-		Network:        vmkit.NetworkConfig{Mode: "nat"},
+		Network:        vmkit.NetworkConfig{Mode: "user"},
 		ServiceCommand: "/opt/homebridge/start.sh --allow-root",
 		Disks: []Disk{{
 			Name:       "work",
