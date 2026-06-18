@@ -419,7 +419,11 @@ func (h *namedE2EHarness) startPeerServices() {
 		fmt.Sprintf("openssl req -x509 -newkey rsa:2048 -keyout vmb.key -out vmb.crt -days 1 -nodes -subj /CN=%s -addext subjectAltName=IP:%s >/dev/null 2>&1", namedE2EVMB, h.vmBIP),
 		// Serve the cert content over the TLS port: s_server returns it to any client
 		// after handshake. -www makes it answer HTTP-over-TLS with a small page.
-		fmt.Sprintf("setsid sh -c 'while true; do openssl s_server -quiet -accept %d -cert vmb.crt -key vmb.key -www >/dev/null 2>&1; done' >/dev/null 2>&1 &", namedE2EPeerPort),
+		// Wrap the backgrounded server in a subshell so the "; " join below does not
+		// produce "&; sleep 1" — a bare "&;" is a POSIX shell syntax error (busybox
+		// /bin/sh rejects it with `syntax error: unexpected ";"`). "( ... & )" keeps
+		// the detachment while letting the next "; " separator be valid.
+		fmt.Sprintf("( setsid sh -c 'while true; do openssl s_server -quiet -accept %d -cert vmb.crt -key vmb.key -www >/dev/null 2>&1; done' >/dev/null 2>&1 & )", namedE2EPeerPort),
 		"sleep 1",
 		"echo PEER_TLS_UP=yes",
 		"echo PEER_CERT_BEGIN",
