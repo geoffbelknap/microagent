@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -811,6 +812,63 @@ func TestEgressPolicyFromOptionsMapsFields(t *testing.T) {
 	}
 	if len(pol.Passthrough) != 1 || pol.Passthrough[0] != "raw.example.com" {
 		t.Fatalf("Passthrough = %v, want [raw.example.com]", pol.Passthrough)
+	}
+}
+
+// TestEgressPolicyIsHostSourcedNotAgentInfluenceable is a regression lock that
+// codifies ASK Tenets 1 & 18: the egress policy is host-sourced and cannot be
+// influenced or changed by guest-controlled inputs. This test is expected to
+// PASS on the first run — EgressPolicyFromOptions only reads the three egress
+// fields (EgressMode, EgressAllow, EgressPassthrough) and is blind to all other
+// Options fields. It guards against a future change that wires a
+// guest-controllable field into the policy derivation.
+func TestEgressPolicyIsHostSourcedNotAgentInfluenceable(t *testing.T) {
+	optsBase := Options{
+		EgressMode:        "strict",
+		EgressAllow:       []string{"api.example.com"},
+		EgressPassthrough: []string{"passthrough.example.com"},
+		// benign non-egress fields
+		Name:    "base-agent",
+		Backend: vmkit.BackendFirecracker,
+	}
+
+	optsAdversarial := Options{
+		// identical host egress fields
+		EgressMode:        "strict",
+		EgressAllow:       []string{"api.example.com"},
+		EgressPassthrough: []string{"passthrough.example.com"},
+		// guest-controlled fields set to subversion attempts
+		Env: map[string]string{
+			"EGRESS_MODE":  "off",
+			"EGRESS_ALLOW": "evil.example.com",
+		},
+		Files: []File{
+			{SourcePath: "/etc/egress.conf", Path: "/etc/egress-policy.conf"},
+		},
+		ServiceCommand: "EGRESS_MODE=off /usr/bin/service",
+		Entrypoint:     "EGRESS_ALLOW=evil.example.com /usr/bin/entrypoint",
+		SetupCommands:  []string{"echo EGRESS_MODE=off > /etc/egress.conf"},
+		Hostname:       "evil-egress-override",
+		Network: vmkit.NetworkConfig{
+			Mode: "user",
+			DNS:  []string{"8.8.8.8"},
+		},
+	}
+
+	polBase := vmkit.NormalizeEgressPolicy(EgressPolicyFromOptions(optsBase))
+	polAdversarial := vmkit.NormalizeEgressPolicy(EgressPolicyFromOptions(optsAdversarial))
+
+	if !reflect.DeepEqual(polBase, polAdversarial) {
+		t.Fatalf("egress policy differs between base and adversarial opts: base=%+v adversarial=%+v", polBase, polAdversarial)
+	}
+
+	// also assert the policy reflects the host-set fields — the DeepEqual above
+	// must not be vacuously comparing two zero-value policies.
+	if polBase.Mode != "strict" {
+		t.Fatalf("Mode = %q, want %q (host field not reflected)", polBase.Mode, "strict")
+	}
+	if len(polBase.Allow) != 1 || polBase.Allow[0] != "api.example.com" {
+		t.Fatalf("Allow = %v, want [api.example.com] (host field not reflected)", polBase.Allow)
 	}
 }
 

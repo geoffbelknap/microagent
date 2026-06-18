@@ -16,7 +16,10 @@ type EgressCaps struct {
 }
 
 // EgressPolicy is the launch-time egress policy bundle the host sets for a
-// workspace. It is host-sourced and never derived from guest-controlled input.
+// workspace. It is host-sourced and never derived from guest-controlled input;
+// the agent or guest cannot influence or change it at runtime (ASK Tenets 1 &
+// 18: enforcement is external and inviolable; the governance hierarchy is
+// inviolable from below).
 type EgressPolicy struct {
 	Mode           string   // "mediated" | "strict" | "off"
 	Allow          []string // allowlisted egress destination hosts
