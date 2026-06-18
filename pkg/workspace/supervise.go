@@ -99,7 +99,11 @@ func writeSuperviseStartFailure(opts Options, startErr error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
 	req, err := Request(opts, "run", rootfsPath, NewRequestID())
 	if err != nil {
-		return
+		// A permanently-invalid egress policy means we cannot construct a valid
+		// request; propagate so the state record reflects the root cause rather
+		// than silently dropping the failure.
+		startErr = fmt.Errorf("%w; egress policy invalid: %v", startErr, err)
+		req = vmkit.Request{}
 	}
 	_ = WriteProcessState(opts, req, vmkit.StateFailed, 0, startErr.Error())
 }
