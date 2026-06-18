@@ -28,8 +28,10 @@ This repository owns the VM pieces:
 - Do not implement orchestration, planning, LLM calls, agent-side tools, or
   memory. MCP tool wrappers are allowed only as adapters over microagent-owned
   substrate operations.
-- Do not implement policy, audit meaning, credential mediation, or enforcement
-  decisions. Other projects own those.
+- Do not implement policy, audit meaning, credential decisions, or enforcement
+  decisions. Other projects own those. microagent performs the deterministic
+  credential-protection mechanism (swap from operator config; the real secret
+  never enters the guest); it does not broker or decide credentials.
 - Do not turn the MCP endpoint into a planner, policy engine, or agent
   framework. It is an adapter over microagent's existing substrate APIs.
 - Do not become a general-purpose Mac VM manager. Lima, Tart, vfkit, and Lume
