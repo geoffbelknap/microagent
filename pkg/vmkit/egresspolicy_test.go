@@ -105,6 +105,7 @@ func TestEgressPolicyValidateForNetworkMode(t *testing.T) {
 		{"mediated", "", false},
 		{"strict", "nat", false},
 		{"off", "bridged", false},
+		{"mediated", "Isolated", false}, // case-insensitive isolated check (defense-in-depth)
 	}
 	for _, tc := range cases {
 		p := EgressPolicy{Mode: tc.mode}
