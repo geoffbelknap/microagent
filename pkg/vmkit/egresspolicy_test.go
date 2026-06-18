@@ -92,3 +92,28 @@ func TestEgressPolicyValidateRejectsBadMode(t *testing.T) {
 		t.Fatal("Validate() returned nil, want error for unknown mode")
 	}
 }
+
+func TestEgressPolicyValidateForNetworkMode(t *testing.T) {
+	cases := []struct {
+		mode        string
+		networkMode string
+		wantErr     bool
+	}{
+		{"mediated", "bridged", true},
+		{"mediated", "isolated", false},
+		{"mediated", "user", false},
+		{"mediated", "", false},
+		{"strict", "nat", false},
+		{"off", "bridged", false},
+	}
+	for _, tc := range cases {
+		p := EgressPolicy{Mode: tc.mode}
+		err := p.ValidateForNetworkMode(tc.networkMode)
+		if tc.wantErr && err == nil {
+			t.Errorf("ValidateForNetworkMode(mode=%q, network=%q) = nil, want error", tc.mode, tc.networkMode)
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("ValidateForNetworkMode(mode=%q, network=%q) = %v, want nil", tc.mode, tc.networkMode, err)
+		}
+	}
+}

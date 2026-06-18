@@ -54,6 +54,17 @@ func cleanList(in []string) []string {
 	return out
 }
 
+// ValidateForNetworkMode rejects a policy that claims mediation on a network mode
+// that cannot mediate. Mediation on (mediated/strict) requires a mediating network
+// mode (user/nat/named) unless the workspace is isolated (no egress at all). Off
+// egress, isolated, and mediating modes all pass.
+func (p EgressPolicy) ValidateForNetworkMode(networkMode string) error {
+	if EgressMediationOn(p.Mode) && !NetworkModeMediates(networkMode) && strings.TrimSpace(networkMode) != "isolated" {
+		return fmt.Errorf("vmkit: egress mode %q requires a mediating network mode (user/nat/named) or isolated; network mode %q cannot mediate; use a mediating mode or set egress off", p.Mode, networkMode)
+	}
+	return nil
+}
+
 // Validate reports a policy that cannot be enforced. It returns an error when:
 //   - Mode is not one of mediated/strict/off (call NormalizeEgressPolicy first)
 //   - any Caps field is negative

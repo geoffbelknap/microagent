@@ -881,6 +881,9 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if err := pol.Validate(); err != nil {
 		return vmkit.Request{}, fmt.Errorf("egress policy: %w", err)
 	}
+	if err := pol.ValidateForNetworkMode(opts.Network.Mode); err != nil {
+		return vmkit.Request{}, fmt.Errorf("egress policy: %w", err)
+	}
 	opts.EgressMode = pol.Mode
 	var listeners []vmkit.VsockListener
 	if opts.ResultPort != 0 {
