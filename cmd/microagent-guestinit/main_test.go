@@ -374,3 +374,15 @@ func TestApplyKernelConfigModelFwd(t *testing.T) {
 		t.Fatal("expected error for malformed model_fwd")
 	}
 }
+
+func TestShutdownResetFirst(t *testing.T) {
+	if !shutdownResetFirst("console=ttyS0 microagent_shutdown=reset root=/dev/vda") {
+		t.Fatal("expected reset-first when microagent_shutdown=reset is present")
+	}
+	if shutdownResetFirst("console=ttyS0 root=/dev/vda") {
+		t.Fatal("expected power-off-first when marker absent")
+	}
+	if shutdownResetFirst("microagent_shutdown=poweroff") {
+		t.Fatal("expected power-off-first for a non-reset marker value")
+	}
+}
