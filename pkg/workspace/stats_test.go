@@ -12,11 +12,14 @@ import (
 func TestSampleStatsRejectsPausedWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir, Backend: vmkit.BackendFirecracker}
-	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteProcessState(opts, req, vmkit.StatePaused, 1234, ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err := SampleStats(dir, "agent-1")
+	_, err = SampleStats(dir, "agent-1")
 	if err == nil || !strings.Contains(err.Error(), "paused; resume it first") {
 		t.Fatalf("err = %v, want paused; resume it first", err)
 	}

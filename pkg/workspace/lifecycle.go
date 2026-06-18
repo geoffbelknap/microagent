@@ -130,7 +130,12 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 		defer cancel()
 		stopProgress := startIndeterminateProgress(opts.Progress, "guest-setup", "running guest setup")
-		resp, runErr := runForeground(runCtx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
+		runReq, reqErr := Request(opts, "run", result.RootfsPath, NewRequestID())
+		if reqErr != nil {
+			stopProgress("egress policy invalid")
+			return result, reqErr
+		}
+		resp, runErr := runForeground(runCtx, opts, runReq)
 		result.Response = resp
 		if runErr != nil {
 			stopProgress("guest setup failed")
@@ -149,7 +154,11 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		fillRunResult(&result, opts)
 		return result, waitErr
 	}
-	resp, err := Dispatch(ctx, opts, Request(opts, "prepare", result.RootfsPath, NewRequestID()))
+	prepReq, err := Request(opts, "prepare", result.RootfsPath, NewRequestID())
+	if err != nil {
+		return result, err
+	}
+	resp, err := Dispatch(ctx, opts, prepReq)
 	result.Response = resp
 	return result, err
 }
@@ -267,7 +276,11 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
-	resp, err := runForeground(runCtx, opts, Request(opts, "run", result.RootfsPath, NewRequestID()))
+	runReq, err := Request(opts, "run", result.RootfsPath, NewRequestID())
+	if err != nil {
+		return result, err
+	}
+	resp, err := runForeground(runCtx, opts, runReq)
 	result.Response = resp
 	result.SerialPath = SerialLogPath(opts.StateDir, opts.Name)
 	if err == nil && resp.OK {
@@ -339,7 +352,10 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := os.Remove(ResultPath(opts.StateDir, opts.Name)); err != nil && !os.IsNotExist(err) {
 		return Result{}, err
 	}
-	startReq := Request(opts, "run", rootfsPath, NewRequestID())
+	startReq, err := Request(opts, "run", rootfsPath, NewRequestID())
+	if err != nil {
+		return Result{}, err
+	}
 	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
 		if !vmkit.BackendCapabilities(opts.Backend).Snapshot {
 			return Result{}, fmt.Errorf("snapshot restore (--from-snapshot) is not supported on the %s backend", opts.Backend)
@@ -370,7 +386,10 @@ func Inspect(ctx context.Context, opts Options) (vmkit.Response, error) {
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return vmkit.Response{}, err
 	}
-	req := Request(opts, "inspect", "", NewRequestID())
+	req, err := Request(opts, "inspect", "", NewRequestID())
+	if err != nil {
+		return vmkit.Response{}, err
+	}
 	return Dispatch(ctx, opts, req)
 }
 

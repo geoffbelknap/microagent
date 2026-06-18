@@ -331,7 +331,10 @@ func writeExecRuntimeState(t *testing.T, backend string, state vmkit.VMState, ex
 	t.Helper()
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir, Backend: backend, ExecPort: execPort}
-	req := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
 	if err := WriteProcessState(opts, req, state, 1234, ""); err != nil {
 		t.Fatalf("WriteProcessState: %v", err)
 	}
