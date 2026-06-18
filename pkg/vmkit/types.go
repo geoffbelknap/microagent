@@ -86,6 +86,10 @@ type Config struct {
 	EgressMode        string   `json:"egressMode,omitempty"`
 	EgressAllow       []string `json:"egressAllow,omitempty"`
 	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
+	// EgressSwapConfigPath points at the operator credential-swap config the
+	// mediator loads (--swap-config). The real secret is injected host-side and
+	// never enters the guest; empty disables swap.
+	EgressSwapConfigPath string `json:"egressSwapConfigPath,omitempty"`
 	// Bounded-operations caps for the egress mediator (ASK tenet 8). All are
 	// per-mediator-process (= per-workspace) and reset on restart; a zero value
 	// means unlimited (the current, uncapped behavior).

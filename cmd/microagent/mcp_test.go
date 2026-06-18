@@ -254,6 +254,23 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "create", "demo", "-model", "org/repo/model.gguf", "-model-runner", "vllm", "-model-gpu", "auto", "-model-runner-model", "Qwen/Qwen2.5-0.5B-Instruct", "-model-runner-served-model", "local-chat", "-model-runner-arg", "--max-model-len", "-model-runner-arg", "2048", "-model-runner-env", "CUDA_VISIBLE_DEVICES=0", "-model-mediation", "policy", "-model-policy-file", "/tmp/model-policy.json", "-model-policy-timeout", "250ms"},
 		},
 		{
+			// egress + secret config maps through to create (t.Run disambiguates duplicate names)
+			name: "workspace.create",
+			args: map[string]any{
+				"name":               "demo",
+				"egress":             "strict",
+				"egress_allow":       []any{"api.anthropic.com", ".pypi.org"},
+				"egress_passthrough": []any{"pinned.example.com"},
+				"egress_policy":      "/tmp/egress.yaml",
+				"egress_swap_config": "/tmp/swaps.yaml",
+				"secret":             []any{"ANTHROPIC_API_KEY=env:KEY"},
+				"secret_on_demand":   []any{"DB=dotenv:/tmp/app.env#DB"},
+				"secrets_env_file":   "/tmp/app.env",
+				"secrets_audit":      true,
+			},
+			want: []string{"--mode=ax", "create", "demo", "-egress", "strict", "-egress-policy", "/tmp/egress.yaml", "-egress-swap-config", "/tmp/swaps.yaml", "-secrets-env-file", "/tmp/app.env", "-secrets-audit", "-egress-allow", "api.anthropic.com", "-egress-allow", ".pypi.org", "-egress-passthrough", "pinned.example.com", "-secret", "ANTHROPIC_API_KEY=env:KEY", "-secret-on-demand", "DB=dotenv:/tmp/app.env#DB"},
+		},
+		{
 			name: "workspace.start",
 			args: map[string]any{
 				"name":            "demo",

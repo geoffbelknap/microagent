@@ -60,10 +60,11 @@ type SnapshotManifest struct {
 	// cert's DER, used at restore as a fail-closed integrity check before the CA
 	// is reused (a fresh-minted CA would silently break every MITM handshake of
 	// the restored guest).
-	EgressMode        string   `json:"egressMode,omitempty"`
-	EgressAllow       []string `json:"egressAllow,omitempty"`
-	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
-	EgressCASHA256    string   `json:"egressCASHA256,omitempty"`
+	EgressMode           string   `json:"egressMode,omitempty"`
+	EgressAllow          []string `json:"egressAllow,omitempty"`
+	EgressPassthrough    []string `json:"egressPassthrough,omitempty"`
+	EgressSwapConfigPath string   `json:"egressSwapConfigPath,omitempty"`
+	EgressCASHA256       string   `json:"egressCASHA256,omitempty"`
 	// Bounded-operations caps (ASK tenet 8) captured at snapshot time so a restored
 	// workspace keeps the SAME bounds it was running under. All are per-mediator-
 	// process and reset on restart; a zero value means unlimited. Re-applied on

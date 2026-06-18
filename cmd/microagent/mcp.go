@@ -307,7 +307,16 @@ func mcpTools() []map[string]any {
 			"model_policy_url":          map[string]any{"type": "string"},
 			"model_policy_file":         map[string]any{"type": "string"},
 			"model_policy_timeout":      map[string]any{"type": "string"},
-			"network":                   map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated", "bridged"}},
+			"network":                   map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated"}},
+			"egress":                    map[string]any{"type": "string", "enum": []string{"mediated", "strict", "off"}, "description": "Egress mediation mode (default mediated)"},
+			"egress_allow":              map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Allowlisted egress hosts (strict mode); .suffix matches subdomains"},
+			"egress_passthrough":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Egress hosts allowed without TLS interception"},
+			"egress_policy":             map[string]any{"type": "string", "description": "Path to an egress policy file (.yaml/.yml/.json)"},
+			"egress_swap_config":        map[string]any{"type": "string", "description": "Credential-swap config path; mediator injects the real secret host-side so the guest never holds it"},
+			"secret":                    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Secrets delivered to tmpfs /run/secrets, each NAME=scheme:ref"},
+			"secret_on_demand":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; fetched at runtime, never written to tmpfs"},
+			"secrets_env_file":          map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
+			"secrets_audit":             map[string]any{"type": "boolean", "description": "Append every secret access to the workspace audit log"},
 		}),
 		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{
 			"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"},
@@ -1268,6 +1277,10 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		cli, err = appendMCPWorkspaceEgressSecretFlags(cli, args)
+		if err != nil {
+			return nil, err
+		}
 		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
 		if boolArg(args, "dry_run") {
 			cli = append(cli, "-dry-run")
@@ -1857,6 +1870,37 @@ func appendMCPWorkspaceModelFlags(cli []string, args map[string]any) ([]string, 
 	cli = appendOptionalFlag(cli, "-model-policy-url", stringArg(args, "model_policy_url"))
 	cli = appendOptionalFlag(cli, "-model-policy-file", stringArg(args, "model_policy_file"))
 	cli = appendOptionalFlag(cli, "-model-policy-timeout", stringArg(args, "model_policy_timeout"))
+	return cli, nil
+}
+
+func appendMCPWorkspaceEgressSecretFlags(cli []string, args map[string]any) ([]string, error) {
+	cli = appendOptionalFlag(cli, "-egress", stringArg(args, "egress"))
+	cli = appendOptionalFlag(cli, "-egress-policy", stringArg(args, "egress_policy"))
+	cli = appendOptionalFlag(cli, "-egress-swap-config", stringArg(args, "egress_swap_config"))
+	cli = appendOptionalFlag(cli, "-secrets-env-file", stringArg(args, "secrets_env_file"))
+	if boolArg(args, "secrets_audit") {
+		cli = append(cli, "-secrets-audit")
+	}
+	for _, spec := range []struct {
+		arg  string
+		flag string
+	}{
+		{"egress_allow", "-egress-allow"},
+		{"egress_passthrough", "-egress-passthrough"},
+		{"secret", "-secret"},
+		{"secret_on_demand", "-secret-on-demand"},
+	} {
+		values, ok, err := stringSliceArg(args, spec.arg)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		for _, value := range values {
+			cli = append(cli, spec.flag, value)
+		}
+	}
 	return cli, nil
 }
 

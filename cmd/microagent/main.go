@@ -3915,6 +3915,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&egressPassthrough, "egress-passthrough", "Allowed egress host that is not TLS-intercepted (repeatable)")
 	var egressPolicy string
 	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress mediated or strict)")
+	var egressSwapConfig string
+	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress mediated or strict)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -4055,6 +4057,15 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	opts.EgressAllow = egress.DedupeHosts(allowHosts)
 	opts.EgressPassthrough = egress.DedupeHosts(passthroughHosts)
+	if trimmed := strings.TrimSpace(egressSwapConfig); trimmed != "" {
+		// Credential swap injects a real secret host-side at the mediator; with
+		// mediation off there is no mediator to inject it, so reject rather than
+		// silently ignore (mirroring --egress-policy).
+		if mode == vmkit.EgressModeOff {
+			return workspaceOptions{}, fmt.Errorf("--egress-swap-config: credential swap requires --egress mediated or strict")
+		}
+		opts.EgressSwapConfigPath = trimmed
+	}
 	volumes, err := parseWorkspaceVolumes(volumeFlags)
 	if err != nil {
 		return workspaceOptions{}, err
@@ -7466,6 +7477,21 @@ Options:
   -p host:guest[/tcp]   Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
+  -egress <mode>        Egress mediation: mediated (default, audit all),
+                         strict (deny non-allowlisted), or off
+  -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
+  -egress-passthrough <host>
+                         Allowed egress host that is not TLS-intercepted (repeatable)
+  -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
+  -egress-swap-config <path>
+                         Credential-swap config; mediator injects the real secret host-side (guest never holds it)
+  -secret NAME=<scheme>:<ref>
+                         Deliver a secret to tmpfs /run/secrets (repeatable)
+  -secret-on-demand NAME=<scheme>:<ref>
+                         On-demand secret, fetched at runtime, never written to tmpfs
+  -secrets-env-file <path>
+                         Deliver every key in a dotenv file as a secret
+  -secrets-audit        Append every secret access to the workspace audit log
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size
@@ -7539,6 +7565,21 @@ Options:
                          Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
+  -egress <mode>        Egress mediation: mediated (default, audit all),
+                         strict (deny non-allowlisted), or off
+  -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
+  -egress-passthrough <host>
+                         Allowed egress host that is not TLS-intercepted (repeatable)
+  -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
+  -egress-swap-config <path>
+                         Credential-swap config; mediator injects the real secret host-side (guest never holds it)
+  -secret NAME=<scheme>:<ref>
+                         Deliver a secret to tmpfs /run/secrets (repeatable)
+  -secret-on-demand NAME=<scheme>:<ref>
+                         On-demand secret, fetched at runtime, never written to tmpfs
+  -secrets-env-file <path>
+                         Deliver every key in a dotenv file as a secret
+  -secrets-audit        Append every secret access to the workspace audit log
   -memory <MiB>         Memory in MiB; defaults to 512
   -cpus <n>             CPU count
   -size-mib <MiB>       Disk size

@@ -4,7 +4,7 @@ description: How microagent captures, audits, and controls everything a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-18_
 
 Egress mediation is microagent's transparent control point for **everything a
 workspace sends to the network**. The host captures the guest's outbound
@@ -174,6 +174,21 @@ it upstream. The secret stays on the host, out of the guest's filesystem and
 memory. This is related to, but distinct from, [delivering secrets into the
 guest](/guides/secrets/); reach for credential swap when you want the agent to
 use a credential it should never be able to read.
+
+Enable it with `--egress-swap-config <path>` on [`run`](/cli/run/) or
+[`create`](/cli/create/) — it requires `--egress mediated` or `strict`, and the
+target host must be allowlisted. The file declares named swap entries:
+
+```yaml
+# swaps.yaml
+swaps:
+  openai:
+    type: static                 # static | oauth2-cc | jwt-bearer
+    domains: [api.openai.com]     # exact host, or .suffix for subdomains
+    header: Authorization
+    format: "Bearer {key}"        # {key} is replaced by the acquired credential
+    key_ref: env:OPENAI_API_KEY   # resolved on the host; never enters the guest
+```
 
 ## Bounded operations
 
