@@ -4,7 +4,7 @@ description: Inspect workspace networking and manage named networks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-19_
 
 ```text
 microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's network
@@ -33,7 +33,7 @@ microagent --json network research
 {
   "workspace": "research",
   "state": "running",
-  "backend": "firecracker",
+  "backend": "linux-kvm",
   "network": {
     "mode": "nat",
     "portForwards": [

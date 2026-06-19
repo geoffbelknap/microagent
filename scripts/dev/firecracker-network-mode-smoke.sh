@@ -86,7 +86,7 @@ if [ "$(id -u)" -ne 0 ] && command -v getcap >/dev/null 2>&1; then
   fi
 fi
 
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
+"$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
 import sys
@@ -101,7 +101,7 @@ PY
 
 if [ "$(id -u)" -ne 0 ]; then
   "$CLI" run \
-    --backend firecracker \
+    --backend linux-kvm \
     --image "$IMAGE" \
     --arch amd64 \
     --exec "wget -qO- -T 10 http://example.com >/tmp/user.out && echo USER_OUTBOUND_READY || echo USER_OUTBOUND_FAILED" \
@@ -138,7 +138,7 @@ PY
 fi
 
 "$CLI" run \
-  --backend firecracker \
+  --backend linux-kvm \
   --image "$IMAGE" \
   --arch amd64 \
   --exec "wget -qO- -T 10 http://example.com >/tmp/nat.out && echo NAT_OUTBOUND_READY || echo NAT_OUTBOUND_FAILED" \
@@ -258,7 +258,7 @@ BRIDGE_RESULT="host-prerequisite-not-configured"
 if [ -n "${MICROAGENT_FIRECRACKER_BRIDGE_INTERFACE:-}" ]; then
   bridge="$MICROAGENT_FIRECRACKER_BRIDGE_INTERFACE"
   "$CLI" run \
-    --backend firecracker \
+    --backend linux-kvm \
     --image "$IMAGE" \
     --arch amd64 \
     --exec "echo BRIDGED_READY" \

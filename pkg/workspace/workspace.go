@@ -350,7 +350,7 @@ func HostBackend() string {
 }
 
 func ValidateHostBackend(backend string) error {
-	backend = vmkit.NormalizeBackend(backend)
+	backend = strings.TrimSpace(backend)
 	hostBackend := HostBackend()
 	if hostBackend == "" {
 		return fmt.Errorf("microagent does not support a backend on %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -416,7 +416,6 @@ func KernelPath(backend, arch string) string {
 }
 
 func WritableKernelPath(backend, arch string) string {
-	backend = vmkit.NormalizeBackend(backend)
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
@@ -425,7 +424,6 @@ func WritableKernelPath(backend, arch string) string {
 }
 
 func LegacyKernelPath(backend string) string {
-	backend = vmkit.NormalizeBackend(backend)
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
@@ -442,7 +440,6 @@ func PackagedKernelPath(backend, arch string) string {
 }
 
 func PackagedKernelPathFromExecutable(executable, backend, arch string) string {
-	backend = vmkit.NormalizeBackend(backend)
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
@@ -526,7 +523,6 @@ func GuestInitPathFromExecutable(executable, arch string) string {
 }
 
 func BackendSupportsConsoleInput(backend string) bool {
-	backend = vmkit.NormalizeBackend(backend)
 	return backend == vmkit.BackendAppleVF || backend == vmkit.BackendLinuxKVM || backend == vmkit.BackendWindowsHyperV
 }
 
@@ -988,7 +984,6 @@ func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, erro
 	if req.Config == nil {
 		return Options{}, fmt.Errorf("config is required")
 	}
-	req.Identity.Backend = vmkit.NormalizeBackend(req.Identity.Backend)
 	if err := ValidateHostBackend(req.Identity.Backend); err != nil {
 		return Options{}, err
 	}
@@ -1136,7 +1131,7 @@ func contextualDispatchError(opts Options, req vmkit.Request, cause error) error
 		backend = "unknown"
 	}
 	supervisorPath := strings.TrimSpace(opts.SupervisorPath)
-	if vmkit.NormalizeBackend(opts.Backend) == vmkit.BackendLinuxKVM {
+	if opts.Backend == vmkit.BackendLinuxKVM {
 		supervisorPath = FirecrackerSupervisorPath(opts)
 	}
 	fields := []string{

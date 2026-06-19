@@ -4,7 +4,7 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-19_
 
 microagent installs with one backend per host OS: Firecracker on Linux,
 Apple Virtualization.framework on macOS, and Hyper-V on Windows.
@@ -16,7 +16,7 @@ OS, microagent fails before it builds a rootfs or talks to a supervisor.
 
 | Backend | Host OS | Maturity | Networking modes | Requirements | Notes |
 |---|---|---|---|---|---|
-| `firecracker` | Linux | Production | `user`, `nat`, `isolated`, `bridged`, `named`, TCP `--publish` | `/dev/kvm`, `firecracker` binary | Full feature surface; importable as a Go package |
+| `linux-kvm` | Linux | Production | `user`, `nat`, `isolated`, `bridged`, `named`, TCP `--publish` | `/dev/kvm`, `firecracker` binary | Full feature surface; importable as a Go package |
 | `apple-vf` | macOS (Apple silicon) | Production | `user`, `nat`, `isolated`, TCP `--publish`; `bridged` entitlement-gated | Virtualization.framework, Swift supervisor binary | NAT is macOS-managed; no `named` networks yet |
 | `windows-hyperv` | Windows | Supported | `user`/`nat` (HNS NAT), `isolated`, `bridged` (named HNS network/switch), TCP `--publish` | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
 
@@ -29,6 +29,7 @@ covered in [Networking](/concepts/networking/).
 
 ## Firecracker (Linux)
 
+- Backend id: `linux-kvm` (the Linux/KVM backend, implemented with Firecracker).
 - Uses `microagent-firecracker-supervisor` around the Firecracker process.
   Override the supervisor with `--supervisor` or
   `MICROAGENT_FIRECRACKER_SUPERVISOR`.
@@ -38,7 +39,7 @@ covered in [Networking](/concepts/networking/).
   running. Use `stop` or `kill` first.
 - Supports interactive [`connect`](/cli/connect/) and `connect --send`. Use
   [`logs`](/cli/logs/) when you only need captured serial output.
-- The default kernel path is `~/.microagent/kernels/firecracker/<arch>/Image`.
+- The default kernel path is `~/.microagent/kernels/linux-kvm/<arch>/Image`.
 
 ## Apple VF (macOS)
 

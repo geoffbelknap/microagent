@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-18_
+_Last updated: 2026-06-19_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -57,7 +57,7 @@ trimmed example:
   "restart": "never",
   "resources": { "memory_mib": 512, "cpu_count": 2, "size_mib": 4096 },
   "rootfs_path": "/home/user/.microagent/workspaces/run-.../rootfs.ext4",
-  "kernel_path": "/home/user/.microagent/kernels/firecracker/amd64/vmlinux",
+  "kernel_path": "/home/user/.microagent/kernels/linux-kvm/amd64/vmlinux",
   "final_state": "stopped",
   "result": {
     "started_at": "2026-06-01T12:00:00Z",
@@ -65,7 +65,7 @@ trimmed example:
     "exit_code": 0,
     "stdout": "Linux 6.1.0 ...\n"
   },
-  "response": { "ok": true, "backend": "firecracker" }
+  "response": { "ok": true, "backend": "linux-kvm" }
 }
 ```
 

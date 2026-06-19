@@ -208,7 +208,7 @@ if [ -f "$default_kernel" ] && [ "$(sha256sum "$default_kernel" | awk '{print $1
     "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$kernel_path")" \
     "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$EXPECTED_KERNEL_SHA")" >"$STATE_DIR/kernel-install.json"
 else
-  "$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
+  "$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
   kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
 import sys

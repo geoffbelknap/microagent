@@ -43,7 +43,7 @@ NETWORK_MODE=""
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
     ARCH=amd64
-    KERNEL_BACKEND=firecracker
+    KERNEL_BACKEND=linux-kvm
     MICROAGENT_FIRECRACKER="$(e2e_resolve_firecracker)"
     export MICROAGENT_FIRECRACKER
     ;;
@@ -81,12 +81,12 @@ e2e_step "build dev CLI, supervisor, and guest init"
 (
   cd "$ROOT"
   go build -buildvcs=false -o "$CLI" ./cmd/microagent
-  if [ "$KERNEL_BACKEND" = "firecracker" ]; then
+  if [ "$KERNEL_BACKEND" = "linux-kvm" ]; then
     go build -buildvcs=false -o "$STATE_DIR/microagent-firecracker-supervisor" ./cmd/microagent-firecracker-supervisor
   fi
   GOOS=linux GOARCH="$ARCH" CGO_ENABLED=0 go build -buildvcs=false -o "$STATE_DIR/microagent-guestinit-$ARCH" ./cmd/microagent-guestinit
 )
-if [ "$KERNEL_BACKEND" = "firecracker" ]; then
+if [ "$KERNEL_BACKEND" = "linux-kvm" ]; then
   export MICROAGENT_FIRECRACKER_SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
 fi
 

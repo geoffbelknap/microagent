@@ -4,7 +4,7 @@ description: Install or verify a custom kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-19_
 
 ```text
 microagent kernel install [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]   Install a kernel
@@ -36,7 +36,7 @@ Verify an existing kernel:
 
 ```bash
 microagent kernel verify \
-  --path ~/.microagent/kernels/firecracker/amd64/Image \
+  --path ~/.microagent/kernels/linux-kvm/amd64/Image \
   --sha256 4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0
 ```
 
@@ -70,7 +70,7 @@ backend and architecture.
 | Host | Default kernel path |
 |---|---|
 | Apple VF, arm64 | `~/.microagent/kernels/apple-vf/arm64/Image` |
-| Firecracker, amd64 | `~/.microagent/kernels/firecracker/amd64/Image` |
+| Firecracker, amd64 | `~/.microagent/kernels/linux-kvm/amd64/Image` |
 
 ## Exit status
 

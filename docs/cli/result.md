@@ -4,7 +4,7 @@ description: Show the structured result for a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-19_
 
 ```text
 microagent result <name> [--state-dir <dir>]
@@ -30,9 +30,9 @@ When a result is ready, the response carries it under `result`:
 ```json
 {
   "ok": true,
-  "backend": "firecracker",
+  "backend": "linux-kvm",
   "result": {
-    "identity": { "runtimeID": "research", "role": "workload", "backend": "firecracker" },
+    "identity": { "runtimeID": "research", "role": "workload", "backend": "linux-kvm" },
     "resultPath": "/home/user/.microagent/workspaces/research/result.json",
     "startedAt": "2026-06-01T12:00:00Z",
     "completedAt": "2026-06-01T12:00:03Z",

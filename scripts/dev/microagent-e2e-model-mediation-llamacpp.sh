@@ -77,7 +77,7 @@ RUNNER_PID=""
 RUNNER_PORT=""
 REQUEST_MODEL=""
 CANONICAL_REF=""
-CTRL_FLAGS=(--backend firecracker --state-dir "$STATE_DIR")
+CTRL_FLAGS=(--backend linux-kvm --state-dir "$STATE_DIR")
 
 skip() { e2e_skip "microagent-e2e-model-mediation-llamacpp: $1"; }
 fail() { echo "FAIL microagent-e2e-model-mediation-llamacpp: $1" >&2; exit 1; }

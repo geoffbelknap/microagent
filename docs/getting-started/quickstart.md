@@ -4,7 +4,7 @@ description: Boot a Linux microVM from an OCI image and run a command inside it.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-19_
 
 Boot a Linux microVM from an OCI image, run one command inside it, and tear it
 down. Three commands, start to finish.
@@ -47,7 +47,7 @@ Restart: never
 Network: user
 Hostname: run-1781164526178302845
 Resources: memory=512MiB cpus=2 disk=1024MiB
-Kernel: /home/agency/.microagent/kernels/firecracker/amd64/Image
+Kernel: /home/agency/.microagent/kernels/linux-kvm/amd64/Image
 Exit code: 0
 
 Linux run-1781164526178302845 6.1.155 #2 SMP PREEMPT_DYNAMIC Sat May  2 18:32:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux

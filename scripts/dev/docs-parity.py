@@ -111,7 +111,6 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "ContractState",
         "HostSupport",
         "KernelSupport",
-        "NormalizeBackend",
         "NormalizeConfig",
         "ReadinessSignal",
         "RuntimeContract",

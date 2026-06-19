@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-19_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -27,11 +27,11 @@ microagent --json doctor
 Text output is a short health summary:
 
 ```text
-Backend: firecracker
+Backend: linux-kvm
 Status: ok
 Host: amd64, supervisor=/usr/local/lib/microagent/firecracker-supervisor, supervisor available, virtualization supported, KVM available, vsock available
 Console: available (interactive)
-Kernel: installed (/home/user/.microagent/kernels/firecracker/amd64/vmlinux)
+Kernel: installed (/home/user/.microagent/kernels/linux-kvm/amd64/vmlinux)
 ```
 
 `doctor` shares the structured shape with [`host`](/cli/host/): `microagent
@@ -69,7 +69,7 @@ detected one, `--arch` when you plan to run non-native guests.
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend override (`apple-vf`, `firecracker`, or `windows-hyperv`) |
+| `--backend <name>` | Backend override (`apple-vf`, `linux-kvm`, or `windows-hyperv`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--json` | Global flag before `doctor`; print structured JSON output |

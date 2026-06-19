@@ -19,7 +19,7 @@
 # Required env:
 #   MICROAGENT_LLAMA_SERVER            path to llama.cpp's llama-server binary
 # Optional env:
-#   MICROAGENT_E2E_BACKEND             firecracker|applevf
+#   MICROAGENT_E2E_BACKEND             linux-kvm|applevf
 #   MICROAGENT_FIRECRACKER             path to the firecracker binary
 #   MICROAGENT_FIRECRACKER_SUPERVISOR  path to a prepared firecracker supervisor
 #   MICROAGENT_APPLEVF_SUPERVISOR      path to a prepared Apple VF supervisor
@@ -132,7 +132,7 @@ configure_gpu_check
 default_backend() {
   case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64)
-      printf '%s\n' firecracker
+      printf '%s\n' linux-kvm
       ;;
     Darwin:arm64)
       printf '%s\n' applevf
@@ -150,17 +150,17 @@ BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
 RUN_FLAGS=(--model "$MODEL_REF" --rm "$IMAGE")
 
 case "$BACKEND" in
-  firecracker)
+  linux-kvm)
     if [ -z "${MICROAGENT_FIRECRACKER:-}" ] || [ ! -x "${MICROAGENT_FIRECRACKER:-/nonexistent}" ]; then
       skip "MICROAGENT_FIRECRACKER not set/executable"
     fi
     if [ ! -e /dev/kvm ]; then
       skip "/dev/kvm not available"
     fi
-    RUN_FLAGS=(--backend firecracker "${RUN_FLAGS[@]}")
-    CREATE_FLAGS=(--backend firecracker)
-    START_FLAGS=(--backend firecracker)
-    CTRL_FLAGS=(--backend firecracker)
+    RUN_FLAGS=(--backend linux-kvm "${RUN_FLAGS[@]}")
+    CREATE_FLAGS=(--backend linux-kvm)
+    START_FLAGS=(--backend linux-kvm)
+    CTRL_FLAGS=(--backend linux-kvm)
     ;;
   applevf)
     case "$(uname -s):$(uname -m)" in

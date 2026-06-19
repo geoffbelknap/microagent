@@ -4,7 +4,7 @@ description: Boot a microVM, run a command, and tear it down - with setup, env v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-19_
 
 By the end of this guide you can run any command in a disposable microVM:
 image plus command, setup steps before it, environment variables into it, and
@@ -125,7 +125,7 @@ microagent run --timeout 5 docker.io/library/alpine:3.20 sleep 60
 ```
 
 ```text
-Error: run workspace "run-1781167843059951259" failed (backend=firecracker ...): signal: killed
+Error: run workspace "run-1781167843059951259" failed (backend=linux-kvm ...): signal: killed
 ```
 
 The CLI exits nonzero and the workspace record is left behind in state

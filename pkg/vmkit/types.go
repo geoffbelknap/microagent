@@ -13,22 +13,6 @@ const (
 	BackendWindowsHyperV = "windows-hyperv"
 )
 
-// NormalizeBackend collapses a backend identifier to its canonical value.
-// "firecracker" is accepted as a deprecated alias for BackendLinuxKVM: the
-// Linux/KVM backend id was renamed from the VMM product name ("firecracker")
-// to the OS+virtualization-tech name ("linux-kvm"), and the alias keeps
-// existing scripts and saved workspace state working. This is the single
-// normalization chokepoint - once applied, downstream code (paths, capability
-// lookup, validation, kernel manifest matching) only ever sees canonical ids.
-func NormalizeBackend(backend string) string {
-	switch strings.ToLower(strings.TrimSpace(backend)) {
-	case "firecracker", BackendLinuxKVM:
-		return BackendLinuxKVM
-	default:
-		return strings.TrimSpace(backend)
-	}
-}
-
 type ComponentRole string
 
 const (

@@ -49,7 +49,7 @@ cd "$ROOT"
 export GOCACHE="${GOCACHE:-$STATE_DIR/gocache}"
 export GOMODCACHE="${GOMODCACHE:-$STATE_DIR/gomodcache}"
 e2e_build_firecracker_stack "$CLI" "$SUPERVISOR" "$GUEST_INIT"
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json" 2>/dev/null || e2e_fail "kernel install"
+"$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json" 2>/dev/null || e2e_fail "kernel install"
 kernel_path="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["path"])' "$STATE_DIR/kernel-install.json")"
 
 run_cli() { "$CLI" "$@" --state-dir "$STATE_DIR" --supervisor "$SUPERVISOR"; }

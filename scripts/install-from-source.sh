@@ -62,7 +62,7 @@ default_arch() {
 host_backend() {
   case "$(uname -s)" in
     Linux)
-      printf '%s\n' firecracker
+      printf '%s\n' linux-kvm
       ;;
     Darwin)
       printf '%s\n' apple-vf
@@ -205,7 +205,7 @@ print_install_summary() {
   echo "Install:"
   echo "  CLI: $prefix/bin/microagent"
   case "$backend" in
-    firecracker)
+    linux-kvm)
       echo "  VMM supervisor: $prefix/bin/microagent-firecracker-supervisor"
       if [ -x "$prefix/libexec/firecracker" ]; then
         echo "  Host VMM: $prefix/libexec/firecracker"
@@ -227,7 +227,7 @@ print_install_summary() {
 }
 
 install_host_packages() {
-  if [ "$backend" = "firecracker" ]; then
+  if [ "$backend" = "linux-kvm" ]; then
     local missing_linux_packages=()
     if ! command -v pasta >/dev/null 2>&1; then
       missing_linux_packages+=("passt")
@@ -300,7 +300,7 @@ run_privileged() {
 
 validate_host_tools() {
   local pasta_path mke2fs_path
-  if [ "$backend" = "firecracker" ]; then
+  if [ "$backend" = "linux-kvm" ]; then
     if ! pasta_path="$(command -v pasta 2>/dev/null)"; then
       echo "passt installation did not provide the required pasta command on PATH" >&2
       echo "Install passt/pasta with your system package manager, then rerun microagent doctor." >&2
@@ -312,7 +312,7 @@ validate_host_tools() {
     fi
   fi
 
-  if [ "$backend" = "firecracker" ] || [ "$backend" = "apple-vf" ]; then
+  if [ "$backend" = "linux-kvm" ] || [ "$backend" = "apple-vf" ]; then
     if mke2fs_path="$(command -v mke2fs 2>/dev/null)"; then
       :
     fi
@@ -320,7 +320,7 @@ validate_host_tools() {
       mke2fs_path="/opt/homebrew/opt/e2fsprogs/sbin/mke2fs"
     fi
     if [ -n "${mke2fs_path:-}" ]; then
-      if [ "$backend" = "firecracker" ]; then
+      if [ "$backend" = "linux-kvm" ]; then
         host_tools_summary="pasta=$pasta_path, mke2fs=$mke2fs_path"
       else
         host_tools_summary="mke2fs=$mke2fs_path"
@@ -518,7 +518,7 @@ install -m 0755 "$cli" "$prefix/bin/microagent"
 install -m 0755 "$stage/bin/microagent-guestinit-$arch" "$prefix/libexec/microagent-guestinit-$arch"
 
 case "$backend" in
-  firecracker)
+  linux-kvm)
     install -m 0755 "$stage/bin/microagent-firecracker-supervisor" "$prefix/libexec/microagent-firecracker-supervisor"
     ln -sf ../libexec/microagent-firecracker-supervisor "$prefix/bin/microagent-firecracker-supervisor"
     ln -sf microagent-firecracker-supervisor "$prefix/bin/microagent-supervisor"
@@ -561,7 +561,7 @@ fi
 
 print_install_summary
 
-if [ "$backend" = "firecracker" ]; then
+if [ "$backend" = "linux-kvm" ]; then
   if [ -z "$firecracker" ] && ! command -v firecracker >/dev/null 2>&1 && [ ! -x "$prefix/libexec/firecracker" ]; then
     echo
     echo "Firecracker is still required: install it on PATH, set MICROAGENT_FIRECRACKER, or rerun with --firecracker PATH."

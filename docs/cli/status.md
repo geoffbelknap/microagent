@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-19_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -36,9 +36,9 @@ the readiness, verification, and network blocks:
 ```json
 {
   "ok": true,
-  "backend": "firecracker",
+  "backend": "linux-kvm",
   "event": {
-    "identity": { "runtimeID": "research", "role": "workload", "backend": "firecracker" },
+    "identity": { "runtimeID": "research", "role": "workload", "backend": "linux-kvm" },
     "state": "running",
     "observedAt": "2026-06-01T12:00:00Z"
   },

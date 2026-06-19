@@ -556,7 +556,6 @@ type kernelManifestEntry = kernel.ManifestEntry
 var defaultKernels = kernel.Defaults
 
 func defaultKernel(backend, arch string) (kernelManifestEntry, bool) {
-	backend = vmkit.NormalizeBackend(backend)
 	for _, kernel := range defaultKernels {
 		if kernel.Backend == backend && kernel.Architecture == arch {
 			return kernel, true

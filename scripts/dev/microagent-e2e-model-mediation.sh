@@ -31,8 +31,8 @@ CANONICAL_REF="hf.co/stub/stub-model-GGUF@main/stub.gguf"
 POLICY_PID=""
 POLICY_URL=""
 POLICY_FILE=""
-RUN_FLAGS=(--backend firecracker --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF" --rm "$IMAGE")
-CTRL_FLAGS=(--backend firecracker --state-dir "$STATE_DIR")
+RUN_FLAGS=(--backend linux-kvm --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF" --rm "$IMAGE")
+CTRL_FLAGS=(--backend linux-kvm --state-dir "$STATE_DIR")
 
 skip() { e2e_skip "microagent-e2e-model-mediation: $1"; }
 fail() { echo "FAIL microagent-e2e-model-mediation: $1" >&2; exit 1; }

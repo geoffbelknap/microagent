@@ -517,7 +517,7 @@ event = {
         "requestID": f"{name}-prepared",
         "runtimeID": name,
         "role": "workload",
-        "backend": "firecracker",
+        "backend": "linux-kvm",
     },
     "state": "prepared",
     "detail": "prepared from cached E2E image rootfs",
@@ -534,7 +534,7 @@ result = {
     "artifacts": artifacts,
     "response": {
         "ok": True,
-        "backend": "firecracker",
+        "backend": "linux-kvm",
         "event": event,
     },
 }
@@ -666,7 +666,7 @@ else
   fi
 fi
 
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
+"$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
 import sys
@@ -727,7 +727,7 @@ wait_for_status_ready "$APPLY_WORKSPACE" "$STATE_DIR/apply-stopped-status-runnin
 
 if "$CLI" create \
   --id publish-collision \
-  --backend firecracker \
+  --backend linux-kvm \
   --kernel "$kernel_path" \
   --rootfs "$(cached_image_rootfs_path)" \
   --state-dir "$STATE_DIR/publish-collision" \
@@ -741,7 +741,7 @@ grep -qi "duplicate published host port" "$STATE_DIR/publish-collision.err"
 
 if "$CLI" create \
   --id publish-udp \
-  --backend firecracker \
+  --backend linux-kvm \
   --kernel "$kernel_path" \
   --rootfs "$(cached_image_rootfs_path)" \
   --state-dir "$STATE_DIR/publish-udp" \
@@ -754,7 +754,7 @@ grep -qi "protocol must be tcp" "$STATE_DIR/publish-udp.err"
 
 if "$CLI" create \
   --id publish-ipv6 \
-  --backend firecracker \
+  --backend linux-kvm \
   --kernel "$kernel_path" \
   --rootfs "$(cached_image_rootfs_path)" \
   --state-dir "$STATE_DIR/publish-ipv6" \
@@ -767,7 +767,7 @@ grep -qi "publish mapping must be" "$STATE_DIR/publish-ipv6.err"
 
 if "$CLI" create \
   --id isolated-publish \
-  --backend firecracker \
+  --backend linux-kvm \
   --kernel "$kernel_path" \
   --rootfs "$(cached_image_rootfs_path)" \
   --state-dir "$STATE_DIR/isolated-publish" \
@@ -851,7 +851,7 @@ PY
 
 if "$CLI" create \
   --id bridged-missing-interface \
-  --backend firecracker \
+  --backend linux-kvm \
   --kernel "$kernel_path" \
   --rootfs "$(cached_image_rootfs_path)" \
   --state-dir "$STATE_DIR/bridged-missing-interface" \
@@ -875,7 +875,7 @@ PY
 
 if "$CLI" create \
   --id bridged-nonbridge \
-  --backend firecracker \
+  --backend linux-kvm \
   --kernel "$kernel_path" \
   --rootfs "$(cached_image_rootfs_path)" \
   --state-dir "$STATE_DIR/bridged-nonbridge" \
@@ -1066,7 +1066,7 @@ nats_roundtrip_resumed = read_json("nats-roundtrip-resumed.json")
 artifact_running = read_json("artifact-running.json")
 artifact_resumed = read_json("artifact-resumed.json")
 
-if doctor["ok"] is not True or doctor["backend"] != "firecracker":
+if doctor["ok"] is not True or doctor["backend"] != "linux-kvm":
     raise SystemExit(doctor)
 if doctor["host"]["kvmAvailable"] is not True or doctor["host"]["userNetworkingAvailable"] is not True:
     raise SystemExit(doctor)

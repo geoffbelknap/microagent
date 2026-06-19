@@ -162,8 +162,8 @@ cleanup() {
     echo "microagent-e2e-model-mediation-pressure: preserved workspace state under $STATE_DIR" >&2
   else
     for workspace in "${WORKSPACE_NAMES[@]}"; do
-      "$CLI" kill "$workspace" --backend firecracker --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$workspace" --force --yes --backend firecracker --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" kill "$workspace" --backend linux-kvm --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
+      "$CLI" delete "$workspace" --force --yes --backend linux-kvm --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     done
   fi
   if [ "$STARTED_RUNNER" = "1" ] && [ -n "$MODEL_REF" ]; then
@@ -883,7 +883,7 @@ mkdir -p "$OUT_DIR" "$STATE_DIR"
 printf 'case\tlevel\tworkspace\tendpoint\tsample\tstatus\tttfb_s\ttotal_s\tbytes\tchunks\n' >"$OUT_DIR/pressure-profiles.tsv"
 : >"$OUT_DIR/pressure-audit-index.tsv"
 
-RUN_FLAGS=(--backend firecracker --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF")
+RUN_FLAGS=(--backend linux-kvm --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF")
 if [ "$KEEP_STATE" = "0" ]; then
   RUN_FLAGS+=(--rm)
 fi
