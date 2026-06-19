@@ -431,8 +431,8 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		},
 		{
 			name: "doctor.check",
-			args: map[string]any{"backend": "firecracker"},
-			want: []string{"--mode=ax", "doctor", "-backend", "firecracker"},
+			args: map[string]any{"backend": "linux-kvm"},
+			want: []string{"--mode=ax", "doctor", "-backend", "linux-kvm"},
 		},
 		{
 			name: "host.networking.setup",
@@ -446,13 +446,13 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 		},
 		{
 			name: "kernel.verify",
-			args: map[string]any{"path": "/tmp/vmlinux", "sha256": "abc", "backend": "firecracker", "arch": "amd64"},
-			want: []string{"--mode=ax", "kernel", "verify", "-path", "/tmp/vmlinux", "-sha256", "abc", "-backend", "firecracker", "-arch", "amd64"},
+			args: map[string]any{"path": "/tmp/vmlinux", "sha256": "abc", "backend": "linux-kvm", "arch": "amd64"},
+			want: []string{"--mode=ax", "kernel", "verify", "-path", "/tmp/vmlinux", "-sha256", "abc", "-backend", "linux-kvm", "-arch", "amd64"},
 		},
 		{
 			name: "kernel.install",
-			args: map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "out": "/tmp/vmlinux", "backend": "firecracker", "arch": "amd64"},
-			want: []string{"--mode=ax", "kernel", "install", "-url", "https://example.test/vmlinux", "-sha256", "abc", "-out", "/tmp/vmlinux", "-backend", "firecracker", "-arch", "amd64"},
+			args: map[string]any{"url": "https://example.test/vmlinux", "sha256": "abc", "out": "/tmp/vmlinux", "backend": "linux-kvm", "arch": "amd64"},
+			want: []string{"--mode=ax", "kernel", "install", "-url", "https://example.test/vmlinux", "-sha256", "abc", "-out", "/tmp/vmlinux", "-backend", "linux-kvm", "-arch", "amd64"},
 		},
 		{
 			name: "rootfs.build",
@@ -543,7 +543,7 @@ func TestMCPSummarizeWorkspaceInspect(t *testing.T) {
 	// No egress audit log under this state dir, so egress_summary is omitted.
 	summary, ok := summarizeWorkspaceInspect(map[string]any{
 		"ok":      true,
-		"backend": "firecracker",
+		"backend": "linux-kvm",
 		"event": map[string]any{
 			"state":    "running",
 			"identity": map[string]any{"runtimeID": "demo"},
@@ -580,7 +580,7 @@ func TestMCPSummarizeWorkspaceInspectIncludesEgressSummary(t *testing.T) {
 
 	summary, ok := summarizeWorkspaceInspect(map[string]any{
 		"ok":      true,
-		"backend": "firecracker",
+		"backend": "linux-kvm",
 		"event": map[string]any{
 			"state":    "running",
 			"identity": map[string]any{"runtimeID": "demo"},
@@ -616,7 +616,7 @@ func TestMCPSummarizeWorkspaceCreateLifecycle(t *testing.T) {
 		"rootfs_path": "/tmp/rootfs.ext4",
 		"response": map[string]any{
 			"ok":      true,
-			"backend": "firecracker",
+			"backend": "linux-kvm",
 			"event": map[string]any{
 				"state":  "stopped",
 				"detail": "workspace created",

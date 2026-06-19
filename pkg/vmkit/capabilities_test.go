@@ -8,7 +8,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 		want    Capabilities
 	}{
 		{
-			backend: BackendFirecracker,
+			backend: BackendLinuxKVM,
 			want: Capabilities{
 				StructuredExec:       true,
 				LiveNetworkApply:     true,

@@ -14,7 +14,7 @@ import (
 
 func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
 	resp, err := CheckFirecracker(
-		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
+		Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"},
 		FirecrackerProbe{
 			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
 			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
@@ -62,7 +62,7 @@ func TestCheckFirecrackerReportsHostSupport(t *testing.T) {
 
 func TestCheckFirecrackerReportsMissingSupport(t *testing.T) {
 	resp, err := CheckFirecracker(
-		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
+		Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"},
 		FirecrackerProbe{
 			ResolveBinary:       func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
 			ResolveSupervisor:   func(Options) (string, error) { return "", fmt.Errorf("microagent Firecracker supervisor not found") },
@@ -89,7 +89,7 @@ func TestCheckFirecrackerReportsMissingSupport(t *testing.T) {
 
 func TestCheckFirecrackerReportsMissingPasta(t *testing.T) {
 	resp, err := CheckFirecracker(
-		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
+		Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"},
 		FirecrackerProbe{
 			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
 			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
@@ -115,7 +115,7 @@ func TestCheckFirecrackerReportsMissingPasta(t *testing.T) {
 
 func TestCheckFirecrackerReportsAppArmorRestrictedUserNamespaces(t *testing.T) {
 	resp, err := CheckFirecracker(
-		Options{Backend: vmkit.BackendFirecracker, Arch: "amd64"},
+		Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"},
 		FirecrackerProbe{
 			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
 			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
@@ -378,7 +378,7 @@ func TestCheckFirecrackerGathersNetworkingFacts(t *testing.T) {
 		ReadBinaryCapabilities: func(path string) (bool, error) { return true, nil },
 		ProbeUserNamespaces:    func() error { return nil },
 	}
-	resp, err := CheckFirecracker(Options{Backend: "firecracker", Arch: "amd64"}, probe)
+	resp, err := CheckFirecracker(Options{Backend: "linux-kvm", Arch: "amd64"}, probe)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

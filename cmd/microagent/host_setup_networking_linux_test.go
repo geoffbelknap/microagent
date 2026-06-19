@@ -36,10 +36,10 @@ func withElevationStubs(t *testing.T) (*bool, *[]string) {
 // host setup-networking unusable on Linux/firecracker. The apply and revert paths
 // must receive a concrete supervisor path.
 func TestSetupNetworkingResolvesFirecrackerSupervisorPath(t *testing.T) {
-	if got := defaultSupervisorPath(vmkit.BackendFirecracker); got != "" {
+	if got := defaultSupervisorPath(vmkit.BackendLinuxKVM); got != "" {
 		t.Skipf("precondition changed: defaultSupervisorPath(firecracker) = %q, no longer empty", got)
 	}
-	if got := setupNetworkingSupervisorPath(vmkit.BackendFirecracker); got == "" {
+	if got := setupNetworkingSupervisorPath(vmkit.BackendLinuxKVM); got == "" {
 		t.Fatal("setupNetworkingSupervisorPath(firecracker) = \"\"; setcap needs a concrete path")
 	}
 }

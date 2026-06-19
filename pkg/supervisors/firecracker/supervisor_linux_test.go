@@ -117,7 +117,7 @@ printf 'got:%s\n' "$line"
 			RequestID: "req-1",
 			RuntimeID: "research",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath:  filepath.Join(dir, "Image"),
@@ -314,7 +314,7 @@ func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath:  "/tmp/kernel",
@@ -428,7 +428,7 @@ func TestSupervisorCheckAcceptsIsolatedFirecrackerNetworkMode(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -441,7 +441,7 @@ func TestSupervisorCheckAcceptsIsolatedFirecrackerNetworkMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Supervisor.Do rejected isolated network mode: resp=%+v err=%v", resp, err)
 	}
-	if !resp.OK || resp.Backend != vmkit.BackendFirecracker {
+	if !resp.OK || resp.Backend != vmkit.BackendLinuxKVM {
 		t.Fatalf("response = %+v err = %v", resp, err)
 	}
 }
@@ -453,7 +453,7 @@ func TestWriteConfigAddsBridgedNetworkInterface(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -490,7 +490,7 @@ func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -743,7 +743,7 @@ func TestDetachedUserNetworkRequestPreservesConfiguredTimeout(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "research",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{TimeoutSeconds: 300},
 	}
@@ -797,7 +797,7 @@ func TestRunPortForwarderOpensAndClosesExecPort(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: dir}
 	req := vmkit.Request{
 		Command:  "run",
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		Config:   &vmkit.Config{StateDir: dir, ExecPort: port},
 	}
 	if err := writeProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
@@ -869,7 +869,7 @@ func TestFirecrackerShellReadinessRequiresLiveShellTarget(t *testing.T) {
 	}
 	state := runtimeState{
 		Event: eventFile{
-			Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendFirecracker},
+			Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendLinuxKVM},
 			State:      vmkit.StateRunning,
 			ObservedAt: time.Now().UTC().Format(time.RFC3339),
 		},
@@ -920,7 +920,7 @@ func TestFirecrackerReadinessReportsDeadPortForwarder(t *testing.T) {
 	}
 	state := runtimeState{
 		Event: eventFile{
-			Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendFirecracker},
+			Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendLinuxKVM},
 			State:      vmkit.StateRunning,
 			ObservedAt: time.Now().UTC().Format(time.RFC3339),
 		},
@@ -947,7 +947,7 @@ func TestUserNetworkDisableRunTimeoutEnvOnlyDisablesRunTimeout(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "research",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{TimeoutSeconds: 300},
 	}
@@ -1009,7 +1009,7 @@ func TestWriteConfigAddsVsockForMediation(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -1051,7 +1051,7 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -1147,7 +1147,7 @@ func TestEnsureCanDeleteRejectsRunningStateWithoutPID(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -1174,7 +1174,7 @@ func TestEnsureCanDeleteRejectsActiveUserNetworkProcess(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -1235,7 +1235,7 @@ func TestWriteConfigOmitsNetworkInterfaceForIsolated(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -1341,7 +1341,7 @@ func pauseResumeRequest(dir string) vmkit.Request {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -1570,7 +1570,7 @@ func TestPrepareSnapshotRestoreRollsBackRootfs(t *testing.T) {
 	}
 
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		Config:   &vmkit.Config{KernelPath: kernel, RootfsPath: rootfs, StateDir: dir, Network: &vmkit.NetworkConfig{Mode: "isolated"}},
 		Tag:      "base",
 	}
@@ -1601,7 +1601,7 @@ func TestPrepareSnapshotRestoreRejectsKernelSkew(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		Config:   &vmkit.Config{KernelPath: kernel, RootfsPath: filepath.Join(dir, "rootfs.ext4"), StateDir: dir},
 		Tag:      "base",
 	}
@@ -1622,7 +1622,7 @@ func TestPrepareSnapshotRestoreRejectsBridged(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		Config:   &vmkit.Config{KernelPath: filepath.Join(dir, "k"), RootfsPath: filepath.Join(dir, "rootfs.ext4"), StateDir: dir, Network: &vmkit.NetworkConfig{Mode: "bridged", Interface: "br0"}},
 		Tag:      "base",
 	}
@@ -1648,7 +1648,7 @@ func snapshotSourceRequest(t *testing.T, dir string) vmkit.Request {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: kernel,
@@ -2074,7 +2074,7 @@ func TestCompanionShouldExitConditions(t *testing.T) {
 			opts := Options{Name: "agent-1", StateDir: dir}
 			req := vmkit.Request{
 				Command:  "run",
-				Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+				Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 				Config:   &vmkit.Config{StateDir: dir},
 			}
 			if err := writeProcessState(opts, req, tc.state, tc.pid, ""); err != nil {
@@ -2100,7 +2100,7 @@ func TestRunPortForwarderExitsWhenVMProcessDies(t *testing.T) {
 	vm := startSleepProcess(t)
 	req := vmkit.Request{
 		Command:  "run",
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		Config:   &vmkit.Config{StateDir: dir, ExecPort: port},
 	}
 	if err := writeProcessState(opts, req, vmkit.StateRunning, vm.Process.Pid, ""); err != nil {
@@ -2146,7 +2146,7 @@ func TestRunVsockListenerExitsWhenWorkspaceStateRemoved(t *testing.T) {
 	resultPath := filepath.Join(dir, "agent-1", "result.json")
 	req := vmkit.Request{
 		Command:  "run",
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		Config: &vmkit.Config{
 			StateDir:       dir,
 			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: resultPath}},
@@ -2187,7 +2187,7 @@ func TestForegroundExitTerminatesRecordedCompanions(t *testing.T) {
 	vsockListener := startSleepProcess(t)
 	req := vmkit.Request{
 		Command:  "run",
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		Config:   &vmkit.Config{StateDir: dir},
 	}
 	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, 0, forwarder.Process.Pid, vsockListener.Process.Pid, 0, nil, nil, ""); err != nil {
@@ -2208,7 +2208,7 @@ func TestEnsureCanDeleteRejectsDeadVMWithLiveCompanions(t *testing.T) {
 	forwarder := startSleepProcess(t)
 	req := vmkit.Request{
 		Command:  "run",
-		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		Config:   &vmkit.Config{StateDir: dir},
 	}
 	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateRunning, deadProcessPID(t), forwarder.Process.Pid, 0, 0, nil, nil, ""); err != nil {

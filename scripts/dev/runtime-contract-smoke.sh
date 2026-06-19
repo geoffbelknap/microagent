@@ -220,7 +220,7 @@ import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     contract = json.load(f)
 assert contract["version"] == "agent-runtime.v1"
-assert {"firecracker", "apple-vf"} <= set(contract["backends"])
+assert {"linux-kvm", "apple-vf"} <= set(contract["backends"])
 assert "quarantine" in {item["name"] for item in contract["commands"]}
 assert "mediationReady" in {item["name"] for item in contract["readinessSignals"]}
 assert "egress" in {item["name"] for item in contract["artifactChannels"]}

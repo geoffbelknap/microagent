@@ -37,7 +37,7 @@ func TestInstallFromPathAndVerify(t *testing.T) {
 }
 
 func TestSupportReportsDownloadableDefault(t *testing.T) {
-	support := SupportForPath(vmkit.BackendFirecracker, "amd64", filepath.Join(t.TempDir(), "missing"))
+	support := SupportForPath(vmkit.BackendLinuxKVM, "amd64", filepath.Join(t.TempDir(), "missing"))
 	if support.Status != "downloadable" || support.SHA256 == "" {
 		t.Fatalf("support = %#v", support)
 	}

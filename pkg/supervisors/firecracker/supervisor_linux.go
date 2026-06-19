@@ -53,14 +53,14 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return vmkit.Response{}, err
 	}
 	if err := validateFirecrackerRequest(req); err != nil {
-		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 	}
 	opts := s.normalizedOptions(req)
 	switch req.Command {
 	case "host":
 		return hostResponse(opts)
 	case "check":
-		return vmkit.Response{OK: true, Backend: vmkit.BackendFirecracker}, nil
+		return vmkit.Response{OK: true, Backend: vmkit.BackendLinuxKVM}, nil
 	case "prepare":
 		if err := prepareWorkspace(opts, req); err != nil {
 			return failedResponse(req, err.Error()), err
@@ -90,16 +90,16 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return stopWorkspace(ctx, opts, req, syscall.SIGKILL, vmkit.StateStopped)
 	case "delete":
 		if err := ensureCanDelete(opts); err != nil {
-			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+			return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 		}
 		cleanupWorkspaceState(opts)
 		return eventResponse(req, vmkit.StateStopped, ""), nil
 	case "console":
 		err := fmt.Errorf("firecracker supervisor console command is unsupported; use serial input FIFO")
-		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 	default:
 		err := fmt.Errorf("unknown firecracker command %q", req.Command)
-		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 	}
 }
 
@@ -146,9 +146,9 @@ func hostResponse(opts Options) (vmkit.Response, error) {
 	}
 	resp := vmkit.Response{
 		OK:      resolveErr == nil,
-		Backend: vmkit.BackendFirecracker,
+		Backend: vmkit.BackendLinuxKVM,
 		Host: &vmkit.HostSupport{
-			Backend:                 vmkit.BackendFirecracker,
+			Backend:                 vmkit.BackendLinuxKVM,
 			Architecture:            runtime.GOARCH,
 			BinaryPath:              path,
 			BinaryVersion:           binaryVersion(path),
@@ -159,7 +159,7 @@ func hostResponse(opts Options) (vmkit.Response, error) {
 			ConsoleMode:             "interactive",
 		},
 		Kernel: &vmkit.KernelSupport{
-			Backend:      vmkit.BackendFirecracker,
+			Backend:      vmkit.BackendLinuxKVM,
 			Architecture: runtime.GOARCH,
 			Status:       "unknown",
 		},
@@ -1064,15 +1064,15 @@ func ensureBindableManagementPorts(config *vmkit.Config) {
 func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	state, err := readRuntimeState(opts)
 	if err != nil {
-		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 	}
 	if state.Event.State != vmkit.StateRunning {
 		err := fmt.Errorf("firecracker apply only live-reloads running workspaces")
-		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 	}
 	if !sameGuestPortForwardShape(networkPortForwards(state.Config.Network), networkPortForwards(req.Config.Network)) {
 		err := fmt.Errorf("firecracker apply can only live-reload host bind changes for existing port forwards; stop and start the workspace for port, guest port, protocol, or network mode changes")
-		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 	}
 	if state.PortForwardPID != 0 {
 		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGTERM)
@@ -1081,7 +1081,7 @@ func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, erro
 	state.Config.Network = req.Config.Network
 	runtimeReq := runtimeStateRequest(req, state)
 	if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
-		return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+		return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 	}
 	if needsPortForwarder(req.Config) {
 		pid, err := startReadyPortForwarderProcessWithManagementPortRetry(context.Background(), opts, runtimeReq.Config, func() error {
@@ -1089,12 +1089,12 @@ func applyWorkspaceConfig(opts Options, req vmkit.Request) (vmkit.Response, erro
 		})
 		if err != nil {
 			_ = writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, 0, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, err.Error())
-			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+			return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 		}
 		state.PortForwardPID = pid
 		if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, state.PID, pid, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
 			_ = signalProcessGroup(pid, syscall.SIGTERM)
-			return vmkit.Response{Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+			return vmkit.Response{Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 		}
 		state.Config = *runtimeReq.Config
 	}
@@ -3208,7 +3208,7 @@ func responseFromEvent(file eventFile, errorText string) vmkit.Response {
 	if parsed, err := time.Parse(time.RFC3339, file.ObservedAt); err == nil {
 		event.ObservedAt = parsed
 	}
-	resp := vmkit.Response{OK: file.State != vmkit.StateFailed, Backend: vmkit.BackendFirecracker, Event: &event}
+	resp := vmkit.Response{OK: file.State != vmkit.StateFailed, Backend: vmkit.BackendLinuxKVM, Event: &event}
 	if errorText != "" {
 		resp.Error = errorText
 	}
@@ -3243,7 +3243,7 @@ func runtimeResultFromState(opts Options, state runtimeState) (vmkit.RuntimeResu
 	}
 	return vmkit.RuntimeResult{
 		Identity:    state.Event.Identity,
-		Backend:     vmkit.BackendFirecracker,
+		Backend:     vmkit.BackendLinuxKVM,
 		ResultPath:  path,
 		StartedAt:   guest.StartedAt,
 		CompletedAt: guest.ExitedAt,
@@ -3730,7 +3730,7 @@ func eventResponse(req vmkit.Request, state vmkit.VMState, errorText string) vmk
 	if req.Config != nil && req.Identity != nil {
 		event.Detail = "serial=" + filepath.Join(req.Config.StateDir, req.Identity.RuntimeID, "serial.log")
 	}
-	resp := vmkit.Response{OK: state != vmkit.StateFailed, Backend: vmkit.BackendFirecracker, Event: event}
+	resp := vmkit.Response{OK: state != vmkit.StateFailed, Backend: vmkit.BackendLinuxKVM, Event: event}
 	if errorText != "" {
 		resp.Error = errorText
 	}

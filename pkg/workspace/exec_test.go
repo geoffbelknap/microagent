@@ -37,7 +37,7 @@ func TestExecSuccessfulRunningWorkspace(t *testing.T) {
 	})
 	_ = addr
 	defer stop()
-	opts := writeExecRuntimeState(t, vmkit.BackendFirecracker, vmkit.StateRunning, port)
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
 
 	result, err := Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"uname", "-a"}))
 	if err != nil {
@@ -71,7 +71,7 @@ func TestExecWithMetadataRetriesConnectionRefused(t *testing.T) {
 	execRetrySleep = func(context.Context, time.Duration) error { return nil }
 	execRetryJitter = func() time.Duration { return 0 }
 
-	opts := writeExecRuntimeState(t, vmkit.BackendFirecracker, vmkit.StateRunning, unusedTCPPort(t))
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, unusedTCPPort(t))
 	_, meta, err := ExecWithMetadata(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
 	if err == nil {
 		t.Fatal("ExecWithMetadata err = nil, want retry exhaustion")
@@ -98,7 +98,7 @@ func TestIsRetryableExecTransientClassifiesTransportErrors(t *testing.T) {
 }
 
 func TestExecWorkspaceNotRunning(t *testing.T) {
-	opts := writeExecRuntimeState(t, vmkit.BackendFirecracker, vmkit.StateStopped, 45000)
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateStopped, 45000)
 	_, err := Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
 	if err == nil || !strings.Contains(err.Error(), "not running") {
 		t.Fatalf("err = %v, want not running", err)
@@ -106,7 +106,7 @@ func TestExecWorkspaceNotRunning(t *testing.T) {
 }
 
 func TestExecRejectsPausedWorkspace(t *testing.T) {
-	opts := writeExecRuntimeState(t, vmkit.BackendFirecracker, vmkit.StatePaused, 45000)
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StatePaused, 45000)
 	_, err := Exec(context.Background(), opts, execprotocol.NewExecRequest([]string{"true"}))
 	if err == nil || !strings.Contains(err.Error(), "paused; resume it first") {
 		t.Fatalf("err = %v, want paused; resume it first", err)
@@ -158,7 +158,7 @@ func TestExecRejectsMissingExecPort(t *testing.T) {
 }
 
 func TestExecReadySignalFalseBeforeReachable(t *testing.T) {
-	state := execRuntimeState(vmkit.BackendFirecracker, vmkit.StateRunning, 45000)
+	state := execRuntimeState(vmkit.BackendLinuxKVM, vmkit.StateRunning, 45000)
 	signal, ok := ExecReadinessSignal(context.Background(), state, 25*time.Millisecond)
 	if !ok {
 		t.Fatal("ExecReadinessSignal ok = false, want true")
@@ -183,7 +183,7 @@ func TestExecReadySignalTrueAfterNoopExec(t *testing.T) {
 		}
 	})
 	defer stop()
-	state := execRuntimeState(vmkit.BackendFirecracker, vmkit.StateRunning, port)
+	state := execRuntimeState(vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
 	signal, ok := ExecReadinessSignal(context.Background(), state, time.Second)
 	if !ok {
 		t.Fatal("ExecReadinessSignal ok = false, want true")
@@ -200,7 +200,7 @@ func TestExecReadySignalFalseOnProbeTimeout(t *testing.T) {
 		time.Sleep(time.Second)
 	})
 	defer stop()
-	state := execRuntimeState(vmkit.BackendFirecracker, vmkit.StateRunning, port)
+	state := execRuntimeState(vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
 	signal, ok := ExecReadinessSignal(context.Background(), state, 25*time.Millisecond)
 	if !ok {
 		t.Fatal("ExecReadinessSignal ok = false, want true")
@@ -220,7 +220,7 @@ func TestExecReadySignalFalseOnNonzeroProbe(t *testing.T) {
 		_ = execprotocol.EncodeMessage(conn, result)
 	})
 	defer stop()
-	state := execRuntimeState(vmkit.BackendFirecracker, vmkit.StateRunning, port)
+	state := execRuntimeState(vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
 	signal, ok := ExecReadinessSignal(context.Background(), state, time.Second)
 	if !ok {
 		t.Fatal("ExecReadinessSignal ok = false, want true")
@@ -239,7 +239,7 @@ func TestExecReadySignalFalseOnServiceError(t *testing.T) {
 		_ = execprotocol.EncodeMessage(conn, result)
 	})
 	defer stop()
-	state := execRuntimeState(vmkit.BackendFirecracker, vmkit.StateRunning, port)
+	state := execRuntimeState(vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
 	signal, ok := ExecReadinessSignal(context.Background(), state, time.Second)
 	if !ok {
 		t.Fatal("ExecReadinessSignal ok = false, want true")
@@ -259,7 +259,7 @@ func TestExecReadySignalIndependentOfShellReady(t *testing.T) {
 		_ = execprotocol.EncodeMessage(conn, result)
 	})
 	defer stop()
-	state := execRuntimeState(vmkit.BackendFirecracker, vmkit.StateRunning, port)
+	state := execRuntimeState(vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
 	state.SerialInputPath = ""
 	readiness := readinessFromRuntime(state)
 	if !readiness.ExecReady.Ready {

@@ -18,7 +18,7 @@ import (
 func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	opts := Options{
 		Name:           "agent-1",
-		Backend:        vmkit.BackendFirecracker,
+		Backend:        vmkit.BackendLinuxKVM,
 		KernelPath:     "/kernels/Image",
 		StateDir:       t.TempDir(),
 		MemoryMiB:      512,
@@ -185,7 +185,7 @@ func TestDispatchAddsLifecycleFailureContext(t *testing.T) {
 	backend := ""
 	switch runtime.GOOS {
 	case "linux":
-		backend = vmkit.BackendFirecracker
+		backend = vmkit.BackendLinuxKVM
 	case "darwin":
 		backend = vmkit.BackendAppleVF
 	default:
@@ -333,7 +333,7 @@ func TestRequestSetsSecretsControlPort(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"
 	opts.StateDir = t.TempDir()
-	opts.Backend = vmkit.BackendFirecracker
+	opts.Backend = vmkit.BackendLinuxKVM
 	opts.Secrets = map[string]string{"API": "env:X"}
 	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
@@ -346,7 +346,7 @@ func TestRequestSetsSecretsControlPort(t *testing.T) {
 	bare := DefaultOptions()
 	bare.Name = "ws2"
 	bare.StateDir = t.TempDir()
-	bare.Backend = vmkit.BackendFirecracker
+	bare.Backend = vmkit.BackendLinuxKVM
 	bareReq, err := Request(bare, "", "/tmp/rootfs.ext4", "req-2")
 	if err != nil {
 		t.Fatalf("Request bare: %v", err)
@@ -422,7 +422,7 @@ func TestRequestThreadsOnDemandAndAudit(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"
 	opts.StateDir = t.TempDir()
-	opts.Backend = vmkit.BackendFirecracker
+	opts.Backend = vmkit.BackendLinuxKVM
 	opts.OnDemandSecrets = map[string]string{"DB": "env:X"}
 	opts.SecretsAudit = true
 	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
@@ -450,7 +450,7 @@ func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"
 	opts.StateDir = t.TempDir()
-	opts.Backend = vmkit.BackendFirecracker
+	opts.Backend = vmkit.BackendLinuxKVM
 	opts.Secrets = map[string]string{"API": "env:CI_TOKEN"}
 	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
@@ -474,7 +474,7 @@ func TestRequestAddsSecretsListenerAndPort(t *testing.T) {
 }
 
 func TestRequestWiresModelTarget(t *testing.T) {
-	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "firecracker", ModelTarget: "127.0.0.1:38001"}
+	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm", ModelTarget: "127.0.0.1:38001"}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
@@ -494,7 +494,7 @@ func TestRequestWiresModelTarget(t *testing.T) {
 }
 
 func TestRequestNoModelTarget(t *testing.T) {
-	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "firecracker"}
+	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm"}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
@@ -629,7 +629,7 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 }
 
 func TestRequestThreadsEgress(t *testing.T) {
-	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+	opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "strict", EgressAllow: []string{"api.github.com"},
 		EgressPassthrough: []string{"raw.example.com"}}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
@@ -648,7 +648,7 @@ func TestRequestThreadsEgress(t *testing.T) {
 // "mediated" at the Request chokepoint — the secure default. Both the config
 // passed to the supervisor and the CA-cert vsock listener must reflect it.
 func TestEgressDefaultsToMediated(t *testing.T) {
-	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+	opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: ""}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
@@ -670,7 +670,7 @@ func TestEgressDefaultsToMediated(t *testing.T) {
 // only "strict" did).
 func TestRequestAllocatesCACertForMediated(t *testing.T) {
 	for _, mode := range []string{vmkit.EgressModeMediated, vmkit.EgressModeStrict} {
-		opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+		opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 			Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: mode}
 		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 		if err != nil {
@@ -688,7 +688,7 @@ func TestRequestAllocatesCACertForMediated(t *testing.T) {
 // TestRequestNoCACertForOff confirms an explicit "off" workspace gets no CA-cert
 // listener or port — mediation is disabled.
 func TestRequestNoCACertForOff(t *testing.T) {
-	opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+	opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: vmkit.EgressModeOff}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
@@ -724,7 +724,7 @@ func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+			opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 				Network: tc.network, EgressMode: tc.egressMode}
 			req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 			if err != nil {
@@ -747,7 +747,7 @@ func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
 // that actually run the mediator.
 func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
 	for _, mode := range []string{"", "user", "nat", "named"} {
-		opts := Options{Name: "a", Backend: vmkit.BackendFirecracker, KernelPath: "/k", StateDir: t.TempDir(),
+		opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeMediated}
 		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 		if err != nil {
@@ -771,7 +771,7 @@ func TestRequestFailsClosedMediatedOnBridged(t *testing.T) {
 	for _, egressMode := range []string{"", "mediated", "strict"} {
 		opts := Options{
 			Name:       "a",
-			Backend:    vmkit.BackendFirecracker,
+			Backend:    vmkit.BackendLinuxKVM,
 			KernelPath: "/k",
 			StateDir:   t.TempDir(),
 			Network:    vmkit.NetworkConfig{Mode: "bridged", Unsupported: true},
@@ -829,7 +829,7 @@ func TestEgressPolicyIsHostSourcedNotAgentInfluenceable(t *testing.T) {
 		EgressPassthrough: []string{"passthrough.example.com"},
 		// benign non-egress fields
 		Name:    "base-agent",
-		Backend: vmkit.BackendFirecracker,
+		Backend: vmkit.BackendLinuxKVM,
 	}
 
 	optsAdversarial := Options{
@@ -879,7 +879,7 @@ func TestEgressPolicyIsHostSourcedNotAgentInfluenceable(t *testing.T) {
 func TestRequestFlatFieldsEqualNormalizedPolicy(t *testing.T) {
 	opts := Options{
 		Name:              "a",
-		Backend:           vmkit.BackendFirecracker,
+		Backend:           vmkit.BackendLinuxKVM,
 		KernelPath:        "/k",
 		StateDir:          t.TempDir(),
 		Network:           vmkit.NetworkConfig{Mode: "user"},

@@ -556,6 +556,7 @@ type kernelManifestEntry = kernel.ManifestEntry
 var defaultKernels = kernel.Defaults
 
 func defaultKernel(backend, arch string) (kernelManifestEntry, bool) {
+	backend = vmkit.NormalizeBackend(backend)
 	for _, kernel := range defaultKernels {
 		if kernel.Backend == backend && kernel.Architecture == arch {
 			return kernel, true
@@ -5079,7 +5080,7 @@ func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
 	if hint := diagnostics.NetworkRemediation(host); hint != "" {
 		fmt.Fprintf(stdout, "  %s\n", hint)
 	}
-	if host.Backend == vmkit.BackendFirecracker {
+	if host.Backend == vmkit.BackendLinuxKVM {
 		status := "PASS"
 		if !host.EgressTProxyReady {
 			status = "WARN"

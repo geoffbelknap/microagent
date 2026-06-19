@@ -82,7 +82,7 @@ func TestValidateRequestAcceptsHaltWithStateDir(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      RoleWorkload,
-			Backend:   BackendFirecracker,
+			Backend:   BackendLinuxKVM,
 		},
 		Config: &Config{StateDir: "/tmp/state"},
 	}
@@ -98,7 +98,7 @@ func TestValidateRequestAcceptsQuarantineWithStateDir(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "agent-1",
 			Role:      RoleWorkload,
-			Backend:   BackendFirecracker,
+			Backend:   BackendLinuxKVM,
 		},
 		Config: &Config{StateDir: "/tmp/state"},
 	}
@@ -115,7 +115,7 @@ func TestValidateRequestAcceptsPauseAndResumeWithStateDir(t *testing.T) {
 				RequestID: "req-1",
 				RuntimeID: "agent-1",
 				Role:      RoleWorkload,
-				Backend:   BackendFirecracker,
+				Backend:   BackendLinuxKVM,
 			},
 			Config: &Config{StateDir: "/tmp/state"},
 		}

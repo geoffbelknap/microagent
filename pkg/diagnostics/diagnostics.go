@@ -75,7 +75,7 @@ func Check(ctx context.Context, opts Options) (vmkit.Response, error) {
 		}
 		AugmentHostSupport(&resp, opts)
 		return resp, err
-	case vmkit.BackendFirecracker:
+	case vmkit.BackendLinuxKVM:
 		resp, err := CheckFirecracker(opts, FirecrackerProbe{
 			ResolveBinary:          ResolveFirecrackerPath,
 			Stat:                   os.Stat,
@@ -373,7 +373,7 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 		resp.Host.SupervisorAvailable = resp.Error == ""
 		resp.Host.ConsoleAvailable = true
 		resp.Host.ConsoleMode = "interactive"
-	case vmkit.BackendFirecracker:
+	case vmkit.BackendLinuxKVM:
 		if resp.Host.SupervisorPath == "" {
 			resp.Host.SupervisorPath = workspace.FirecrackerSupervisorPath(workspace.Options{SupervisorPath: opts.SupervisorPath})
 		}

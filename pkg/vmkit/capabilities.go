@@ -52,8 +52,9 @@ type Capabilities struct {
 // BackendCapabilities returns the capability table entry for a backend.
 // Unknown backends return the zero value, which grants nothing.
 func BackendCapabilities(backend string) Capabilities {
+	backend = NormalizeBackend(backend)
 	switch backend {
-	case BackendFirecracker:
+	case BackendLinuxKVM:
 		return Capabilities{
 			StructuredExec:       true,
 			LiveNetworkApply:     true,
