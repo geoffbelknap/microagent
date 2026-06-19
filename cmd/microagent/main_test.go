@@ -7466,7 +7466,7 @@ func TestDefaultKernelManifestHasFirecrackerAMD64(t *testing.T) {
 	if !ok {
 		t.Fatal("missing firecracker amd64 kernel")
 	}
-	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r2/microagent-kernel-6.1.155-firecracker-amd64" {
+	if kernel.URL != "https://kernels.microagent.sh/linux-kvm/amd64/6.1.155/vmlinux" {
 		t.Fatalf("url = %q", kernel.URL)
 	}
 	if kernel.SHA256 != "4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0" {
@@ -7479,7 +7479,7 @@ func TestDefaultKernelManifestHasFirecrackerARM64(t *testing.T) {
 	if !ok {
 		t.Fatal("missing firecracker arm64 kernel")
 	}
-	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.1.155-r3/microagent-kernel-6.1.155-firecracker-arm64" {
+	if kernel.URL != "https://kernels.microagent.sh/linux-kvm/arm64/6.1.155/Image" {
 		t.Fatalf("url = %q", kernel.URL)
 	}
 	if kernel.SHA256 != "bd91c4f5c15e497b99ac0c96977a92e68a0c11d3c72267104f5fb968994c4a71" {
@@ -7492,7 +7492,7 @@ func TestDefaultKernelManifestHasWindowsHyperVAMD64(t *testing.T) {
 	if !ok {
 		t.Fatal("missing windows-hyperv amd64 kernel")
 	}
-	if kernel.URL != "https://github.com/geoffbelknap/microagent-kernels/releases/download/kernels-6.12.22-r2/microagent-kernel-6.12.22-windows-hyperv-amd64" {
+	if kernel.URL != "https://kernels.microagent.sh/windows-hyperv/amd64/6.12.22/vmlinux" {
 		t.Fatalf("url = %q", kernel.URL)
 	}
 	if kernel.SHA256 != "2a30b65ccd2095d5e22d2bbb611ec56a99bebc4c1fe9f4a533f2c5615b3cd684" {
