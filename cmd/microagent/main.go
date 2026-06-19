@@ -592,25 +592,6 @@ func runKernelCheck(args []string, stdout *os.File) error {
 	return enc.Encode(kernel.CheckUpdate(targets, backend, arch, installedVersion))
 }
 
-func defaultKernelSupportForPath(backend, arch, path string) *vmkit.KernelSupport {
-	support := &vmkit.KernelSupport{
-		Backend:      backend,
-		Architecture: arch,
-		Path:         path,
-		Status:       "unavailable",
-	}
-	if support.Path != "" {
-		if _, err := os.Stat(support.Path); err == nil {
-			support.Status = "present"
-		} else if !os.IsNotExist(err) {
-			support.Status = "error"
-			support.Error = err.Error()
-			return support
-		}
-	}
-	return support
-}
-
 func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		printRootFSHelp(stdout)
