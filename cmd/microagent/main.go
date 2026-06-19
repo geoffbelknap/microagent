@@ -467,6 +467,10 @@ func runKernel(ctx context.Context, args []string, stdout *os.File) error {
 		return runKernelInstall(ctx, args[1:], stdout)
 	case "verify":
 		return runKernelVerify(args[1:], stdout)
+	case "list":
+		return runKernelList(args[1:], stdout)
+	case "check":
+		return runKernelCheck(args[1:], stdout)
 	default:
 		return fmt.Errorf("unknown kernel command: %s", args[0])
 	}
@@ -524,6 +528,67 @@ func runKernelVerify(args []string, stdout *os.File) error {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(result)
+}
+
+// runKernelList fetches the signed kernel manifest and lists the available
+// kernels for the host backend/arch (or all of them with --all).
+func runKernelList(args []string, stdout *os.File) error {
+	backend := hostBackend()
+	arch := defaultGuestArch()
+	all := false
+	fs := flag.NewFlagSet("kernel list", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&backend, "backend", backend, "Backend identity")
+	fs.StringVar(&arch, "arch", arch, "Guest architecture")
+	fs.BoolVar(&all, "all", false, "List kernels for all backends/architectures")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	targets, err := kernel.FetchTargets(kernel.DefaultSource())
+	if err != nil {
+		return fmt.Errorf("fetch signed kernel manifest: %w", err)
+	}
+	out := make([]kernel.KernelTarget, 0, len(targets))
+	for _, t := range targets {
+		if all || (t.Backend == backend && t.Arch == arch) {
+			out = append(out, t)
+		}
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
+// runKernelCheck reports whether the installed kernel is current, behind but
+// safe (optional), or behind a security floor — driven by the signed manifest.
+func runKernelCheck(args []string, stdout *os.File) error {
+	backend := hostBackend()
+	arch := defaultGuestArch()
+	fs := flag.NewFlagSet("kernel check", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&backend, "backend", backend, "Backend identity")
+	fs.StringVar(&arch, "arch", arch, "Guest architecture")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		return err
+	}
+	targets, err := kernel.FetchTargets(kernel.DefaultSource())
+	if err != nil {
+		return fmt.Errorf("fetch signed kernel manifest: %w", err)
+	}
+	// Resolve the installed version by matching the local kernel's SHA-256
+	// against the verified manifest (the install path is not version-stamped).
+	installedVersion := ""
+	if sum, err := workspace.FileSHA256(workspace.KernelPath(backend, arch)); err == nil {
+		for _, t := range targets {
+			if t.Backend == backend && t.Arch == arch && strings.EqualFold(t.SHA256, sum) {
+				installedVersion = t.Version
+				break
+			}
+		}
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(kernel.CheckUpdate(targets, backend, arch, installedVersion))
 }
 
 func defaultKernelSupportForPath(backend, arch, path string) *vmkit.KernelSupport {
@@ -7607,6 +7672,8 @@ Advanced kernel commands. Most users can start with microagent run IMAGE ...
 and skip this.
 
 Commands:
+  list                 List available kernels from the signed manifest
+  check                Report whether the installed kernel is current or behind
   install              Install a custom kernel
   verify               Verify a custom kernel
 
@@ -7620,6 +7687,12 @@ Install options:
 Verify options:
   -path <path>         Kernel path
   -sha256 <sha256>     Expected SHA-256
+
+List options:
+  -all                 List kernels for all backends/architectures
+
+list and check read the cryptographically signed manifest from
+kernels.microagent.sh and verify it against the embedded TUF root before use.
 `)
 }
 
