@@ -9,7 +9,7 @@ _Last updated: 2026-06-19_
 ```text
 microagent kernel list    [--all] [--backend <name>] [--arch <arch>]                                       List available kernels
 microagent kernel check   [--backend <name>] [--arch <arch>]                                               Check the installed kernel
-microagent kernel install [--version <ver>] [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]  Install a kernel
+microagent kernel install [--channel <ch>] [--version <ver>] [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]  Install a kernel
 microagent kernel verify  --path <path> --sha256 <sum>                                                     Verify a kernel checksum
 ```
 
@@ -38,12 +38,15 @@ security-relevant:
 microagent kernel check
 ```
 
-Install the latest signed kernel, or a specific version:
+Install the latest signed kernel, or a specific version or channel:
 
 ```bash
 microagent kernel install
 microagent kernel install --version 6.1.155
+microagent kernel install --channel lts
 ```
+
+Kernels are published on channels (default `lts`); `--channel` selects one.
 
 Install from a URL with an explicit checksum (custom kernel outside the manifest):
 

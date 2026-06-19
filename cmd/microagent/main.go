@@ -489,6 +489,7 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	fs.StringVar(&opts.OutputPath, "out", opts.OutputPath, "Output path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
 	fs.StringVar(&opts.Architecture, "arch", opts.Architecture, "Guest architecture")
+	fs.StringVar(&opts.Channel, "channel", "lts", "Kernel channel (e.g. lts)")
 	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
 		return err
 	}
@@ -589,7 +590,7 @@ func runKernelCheck(args []string, stdout *os.File) error {
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(kernel.CheckUpdate(targets, backend, arch, installedVersion))
+	return enc.Encode(kernel.CheckUpdate(kernel.FilterChannel(targets, "lts"), backend, arch, installedVersion))
 }
 
 func runRootFS(ctx context.Context, args []string, stdout *os.File) error {

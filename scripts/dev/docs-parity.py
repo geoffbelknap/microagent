@@ -93,6 +93,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "DefaultSource",
         "DefaultTargetsURL",
         "FetchTargets",
+        "FilterChannel",
         "KernelTarget",
         "LatestTarget",
         "ManifestSource",

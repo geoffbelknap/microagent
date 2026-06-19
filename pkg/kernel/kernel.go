@@ -24,6 +24,7 @@ type InstallOptions struct {
 	OutputPath   string
 	Backend      string
 	Architecture string
+	Channel      string // kernel channel (default "lts")
 	Version      string // optional: pick a specific manifest version (default: latest)
 }
 
@@ -47,22 +48,26 @@ type VerifyResult struct {
 
 // resolveTarget fetches the signed manifest and returns the chosen kernel for
 // backend/arch: the exact version when given, otherwise the latest available.
-func resolveTarget(backend, arch, version string) (KernelTarget, error) {
+func resolveTarget(backend, arch, channel, version string) (KernelTarget, error) {
+	if channel == "" {
+		channel = "lts"
+	}
 	targets, err := FetchTargets(DefaultSource())
 	if err != nil {
 		return KernelTarget{}, fmt.Errorf("fetch signed kernel manifest: %w", err)
 	}
+	targets = FilterChannel(targets, channel)
 	if version != "" {
 		for _, t := range targets {
 			if t.Backend == backend && t.Arch == arch && t.Version == version {
 				return t, nil
 			}
 		}
-		return KernelTarget{}, fmt.Errorf("no %s/%s kernel %s in the signed manifest", backend, arch, version)
+		return KernelTarget{}, fmt.Errorf("no %s/%s/%s kernel %s in the signed manifest", backend, arch, channel, version)
 	}
 	latest := LatestTarget(targets, backend, arch)
 	if latest == nil {
-		return KernelTarget{}, fmt.Errorf("no %s/%s kernel in the signed manifest", backend, arch)
+		return KernelTarget{}, fmt.Errorf("no %s/%s/%s kernel in the signed manifest", backend, arch, channel)
 	}
 	return *latest, nil
 }
@@ -104,7 +109,7 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 		opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	}
 	if opts.URL == "" && opts.FromPath == "" {
-		target, err := resolveTarget(opts.Backend, opts.Architecture, opts.Version)
+		target, err := resolveTarget(opts.Backend, opts.Architecture, opts.Channel, opts.Version)
 		if err != nil {
 			return InstallResult{}, err
 		}
