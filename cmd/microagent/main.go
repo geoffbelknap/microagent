@@ -3390,6 +3390,7 @@ func runConnect(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
+	workspace.MarkActivity(workspace.Options{StateDir: opts.StateDir, Name: name})
 	if *readyTimeoutSeconds < 0 {
 		return fmt.Errorf("connect ready-timeout must not be negative")
 	}
@@ -3564,7 +3565,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
-	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Lifetime lease in seconds; the gc reaps the VM once past this. 0 = permanent (preserves a create-time lease)")
+	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Idle TTL in seconds; the VM is reaped after this long with no exec/connect (activity renews). 0 = permanent (preserves a create-time lease)")
 	var startModelRunner workspace.ModelRunnerSpec
 	var startModelMediation workspace.ModelMediationSpec
 	modelRunnerCommand := ""
@@ -4046,7 +4047,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.UintVar(&resultPort, "result-port", resultPort, "Vsock result port")
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
-	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Lifetime lease in seconds; the gc reaps the VM once past this. 0 = permanent")
+	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Idle TTL in seconds; the VM is reaped after this long with no exec/connect (activity renews). 0 = permanent")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run")
 	rm := false
 	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")

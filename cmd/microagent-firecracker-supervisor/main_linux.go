@@ -43,6 +43,18 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		}
 		return firecrackersupervisor.RunPortForwarder(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
 	}
+	if len(args) > 0 && args[0] == "--deadman" {
+		fs := flag.NewFlagSet("deadman", flag.ContinueOnError)
+		stateDir := fs.String("state-dir", "", "State directory")
+		name := fs.String("name", "", "Workspace name")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *stateDir == "" || *name == "" {
+			return fmt.Errorf("usage: microagent-firecracker-supervisor --deadman --state-dir <dir> --name <name>")
+		}
+		return firecrackersupervisor.RunDeadman(ctx, firecrackersupervisor.Options{StateDir: *stateDir, Name: *name})
+	}
 	if len(args) > 0 && args[0] == "--fork-mount-exec" {
 		return firecrackersupervisor.RunForkMountExec(args[1:])
 	}

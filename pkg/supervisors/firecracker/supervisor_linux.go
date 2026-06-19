@@ -198,14 +198,11 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 		opts.StateDir = req.Config.StateDir
 	}
 	if req.Command == "run" && os.Getenv(userNetworkResidentEnv) == "1" {
-		// The resident user-network supervisor governs VM lifetime by the declared
-		// lease (also gc-enforced), not the foreground run-timeout: a lease caps its
-		// wait; no lease means permanent. Replaces the old "user-network runs forever".
-		if req.Config != nil && req.Config.LeaseSeconds > 0 {
-			opts.Timeout = time.Duration(req.Config.LeaseSeconds) * time.Second
-		} else {
-			opts.Timeout = -1
-		}
+		// The resident user-network supervisor waits for the VM's whole life, so the
+		// foreground run-timeout must not apply. Lifetime is governed by the declared
+		// lease — enforced out-of-band by the deadman watcher + gc sweep, which are
+		// idle-based and renewable. A fixed timeout here would kill an active VM.
+		opts.Timeout = -1
 	}
 	if opts.Timeout == 0 && req.Config != nil && req.Config.TimeoutSeconds > 0 {
 		opts.Timeout = time.Duration(req.Config.TimeoutSeconds) * time.Second
@@ -2360,6 +2357,79 @@ func portForwarderLogPath(opts Options) string {
 	return filepath.Join(opts.StateDir, opts.Name, "port-forward.log")
 }
 
+// RunDeadman is the per-VM idle watcher, spawned only when a lease is declared
+// (--ttl). It periodically reconciles the workspace through gcWorkspace, which
+// reaps the VM once it has been idle past its lease (renewed by exec/shell use) or
+// its firecracker has died. The deadman's own PID is never recorded in runtime
+// state, so the reap's teardown cannot kill it; it observes the resulting Stopped
+// state and exits. The gc sweep remains the on-demand backstop.
+func RunDeadman(ctx context.Context, opts Options) error {
+	for {
+		state, err := readRuntimeState(opts)
+		if err != nil {
+			return nil // runtime state gone — nothing to watch
+		}
+		if state.Config.LeaseSeconds <= 0 {
+			return nil // no declared bound — don't busy-loop
+		}
+		if state.Event.State != vmkit.StateRunning {
+			return nil // stopped / halted / failed — done
+		}
+		if _, err := gcWorkspace(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "deadman reconcile %s: %v\n", opts.Name, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(deadmanPollInterval(state.Config.LeaseSeconds)):
+		}
+	}
+}
+
+// deadmanPollInterval polls at ~1/4 the lease so reap latency past the idle
+// deadline stays small, clamped to a sane band.
+func deadmanPollInterval(leaseSeconds int) time.Duration {
+	d := time.Duration(leaseSeconds) * time.Second / 4
+	if d < time.Second {
+		d = time.Second
+	}
+	if d > 60*time.Second {
+		d = 60 * time.Second
+	}
+	return d
+}
+
+func deadmanLogPath(opts Options) string {
+	return filepath.Join(opts.StateDir, opts.Name, "deadman.log")
+}
+
+func startDeadmanProcess(opts Options) (int, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+	logPath := deadmanLogPath(opts)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return 0, err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	cmd := exec.Command(executable, "--deadman", "--state-dir", opts.StateDir, "--name", opts.Name)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	_ = logFile.Close()
+	return pid, nil
+}
+
 // startEgressMediator allocates a free port on bindHost, spawns a detached
 // `microagent-firecracker-supervisor --egress-mediator` in the CURRENT netns
 // (host for nat, pasta for user mode — in user mode the spawning supervisor is
@@ -2819,6 +2889,11 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 		listeners = append(listeners, listener)
 		go servePortForward(listener, vsockSocketPath(opts), uint32(forward.GuestPort))
 	}
+	if state.Config.LeaseSeconds > 0 {
+		if _, err := startDeadmanProcess(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "start deadman watcher: %v\n", err)
+		}
+	}
 	watchWorkspaceRuntime(ctx, opts)
 	for _, listener := range listeners {
 		_ = listener.Close()
@@ -3195,7 +3270,7 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	// PID is alive AND still carries this workspace's argv.
 	a, _ := processActive(state.PID)
 	alive := a && processReferencesWorkspace(state.PID, opts)
-	expired := leaseExpired(state)
+	expired := leaseExpired(state, opts)
 	if alive && !expired {
 		return responseFromRuntimeState(opts, state), nil
 	}
@@ -3752,18 +3827,47 @@ func processReferencesWorkspace(pid int, opts Options) bool {
 }
 
 // leaseExpired reports whether a workspace declared a lifetime lease
-// (Config.LeaseSeconds > 0) and is now past StartedAt+LeaseSeconds. A zero lease
-// means permanent — never expired. This is the deadman half of gc: a live VM
-// past its declared bound is reaped just like a corpse.
-func leaseExpired(state runtimeState) bool {
-	if state.Config.LeaseSeconds <= 0 || state.StartedAt == "" {
+// (Config.LeaseSeconds > 0) and has now been idle past it. "Idle" is measured
+// from the last recorded activity (a connection on the exec/shell port) or, before
+// any activity, from StartedAt. A zero lease means permanent — never expired.
+// Activity renews the deadline, so an actively-used VM is never reaped; only an
+// idle one is.
+func leaseExpired(state runtimeState, opts Options) bool {
+	if state.Config.LeaseSeconds <= 0 {
 		return false
 	}
-	started, err := time.Parse(time.RFC3339, state.StartedAt)
+	base := time.Time{}
+	if state.StartedAt != "" {
+		if t, err := time.Parse(time.RFC3339, state.StartedAt); err == nil {
+			base = t
+		}
+	}
+	if at, ok := workspaceActivityTime(opts); ok && at.After(base) {
+		base = at
+	}
+	if base.IsZero() {
+		return false
+	}
+	return time.Now().After(base.Add(time.Duration(state.Config.LeaseSeconds) * time.Second))
+}
+
+// workspaceActivityPath is the marker file whose mtime records the last time the
+// VM was genuinely used (an exec or connect), written by workspace.MarkActivity.
+// A single-purpose file avoids a read-modify-write race on runtime.json across
+// processes; last-writer-wins is exactly the semantics we want. Keep the filename
+// in sync with workspace.MarkActivity.
+func workspaceActivityPath(opts Options) string {
+	return filepath.Join(opts.StateDir, opts.Name, "activity")
+}
+
+// workspaceActivityTime returns the last-activity time, or ok=false before any
+// activity has been recorded.
+func workspaceActivityTime(opts Options) (time.Time, bool) {
+	fi, err := os.Stat(workspaceActivityPath(opts))
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
-	return time.Now().After(started.Add(time.Duration(state.Config.LeaseSeconds) * time.Second))
+	return fi.ModTime(), true
 }
 
 func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) error {

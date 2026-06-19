@@ -939,7 +939,7 @@ func TestFirecrackerReadinessReportsDeadPortForwarder(t *testing.T) {
 	}
 }
 
-func TestUserNetworkResidentRunTimeoutFollowsLease(t *testing.T) {
+func TestUserNetworkResidentRunTimeoutDisabledRegardlessOfLease(t *testing.T) {
 	t.Setenv(userNetworkResidentEnv, "1")
 	req := vmkit.Request{
 		Command: "run",
@@ -951,16 +951,18 @@ func TestUserNetworkResidentRunTimeoutFollowsLease(t *testing.T) {
 		},
 		Config: &vmkit.Config{TimeoutSeconds: 300},
 	}
-	// No declared lease: the resident supervisor's wait is disabled (permanent).
+	// The resident supervisor waits for the VM's whole life; the foreground
+	// run-timeout never applies. Lifetime is the declared lease, enforced
+	// out-of-band by the deadman watcher + gc sweep (idle-based, renewable) — so a
+	// fixed timeout here is wrong whether or not a lease is set.
 	opts := Supervisor{}.normalizedOptions(req)
 	if opts.Timeout >= 0 {
 		t.Fatalf("no-lease resident run timeout = %s, want disabled (permanent)", opts.Timeout)
 	}
-	// A declared lease caps the resident supervisor's wait at the lease.
 	req.Config.LeaseSeconds = 45
 	opts = Supervisor{}.normalizedOptions(req)
-	if opts.Timeout != 45*time.Second {
-		t.Fatalf("leased resident run timeout = %s, want 45s", opts.Timeout)
+	if opts.Timeout >= 0 {
+		t.Fatalf("leased resident run timeout = %s, want disabled (lease enforced out-of-band)", opts.Timeout)
 	}
 	// Non-resident start keeps the configured run-timeout.
 	req.Config.LeaseSeconds = 0
