@@ -486,7 +486,7 @@ esac
 
 backend="$(host_backend)"
 case "$backend" in
-  firecracker|apple-vf)
+  linux-kvm|apple-vf)
     ;;
   *)
     echo "source install is not supported on $(uname -s)" >&2
