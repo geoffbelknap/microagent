@@ -22,6 +22,7 @@ const (
 type targetCustom struct {
 	Backend        string         `json:"backend"`
 	Arch           string         `json:"arch"`
+	Channel        string         `json:"channel"`
 	Version        string         `json:"version"`
 	Classification Classification `json:"classification,omitempty"`
 	SecurityFloor  string         `json:"securityFloor,omitempty"`
@@ -84,6 +85,7 @@ func targetsToKernels(targets map[string]*metadata.TargetFiles, targetsURL strin
 		out = append(out, KernelTarget{
 			Backend:        c.Backend,
 			Arch:           c.Arch,
+			Channel:        c.Channel,
 			Version:        c.Version,
 			URL:            strings.TrimSuffix(targetsURL, "/") + "/" + path,
 			SHA256:         tf.Hashes["sha256"].String(),

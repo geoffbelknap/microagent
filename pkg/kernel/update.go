@@ -21,6 +21,7 @@ const (
 type KernelTarget struct {
 	Backend        string         `json:"backend"`
 	Arch           string         `json:"arch"`
+	Channel        string         `json:"channel,omitempty"`
 	Version        string         `json:"version"`
 	URL            string         `json:"url"`
 	SHA256         string         `json:"sha256"`
@@ -54,6 +55,26 @@ type UpdateCheck struct {
 	Classification   Classification `json:"classification,omitempty"`
 	CVEs             []string       `json:"cves,omitempty"`
 	Target           *KernelTarget  `json:"-"`
+}
+
+// FilterChannel returns the targets in the given channel (default "lts").
+// A target with no channel recorded is treated as "lts" — back-compat with
+// pre-channel manifests.
+func FilterChannel(targets []KernelTarget, channel string) []KernelTarget {
+	if channel == "" {
+		channel = "lts"
+	}
+	var out []KernelTarget
+	for _, t := range targets {
+		tc := t.Channel
+		if tc == "" {
+			tc = "lts"
+		}
+		if tc == channel {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // LatestTarget returns the highest-versioned target for the backend/arch, or
