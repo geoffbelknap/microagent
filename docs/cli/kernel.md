@@ -1,30 +1,51 @@
 ---
 title: microagent kernel
-description: Install or verify a custom kernel.
+description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
 _Last updated: 2026-06-19_
 
 ```text
-microagent kernel install [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]   Install a kernel
-microagent kernel verify  --path <path> --sha256 <sum>                                    Verify a kernel checksum
+microagent kernel list    [--all] [--backend <name>] [--arch <arch>]                                       List available kernels
+microagent kernel check   [--backend <name>] [--arch <arch>]                                               Check the installed kernel
+microagent kernel install [--version <ver>] [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]  Install a kernel
+microagent kernel verify  --path <path> --sha256 <sum>                                                     Verify a kernel checksum
 ```
 
 `kernel` manages the guest kernel the microVMs boot. Most users can stick with
-`microagent run IMAGE [COMMAND ARG...]` and let `microagent` download the
-default kernel automatically - `kernel` is the manual escape hatch for custom
-kernels and explicit verification.
+`microagent run IMAGE [COMMAND ARG...]` and let `microagent` install the latest
+signed kernel automatically - `kernel` is the manual surface for listing,
+checking, and installing specific kernels.
+
+Available kernels come from a cryptographically signed manifest on
+`kernels.microagent.sh`. `list`, `check`, and `install` fetch that manifest and
+verify it against a TUF root embedded in the binary before trusting any entry,
+so a tampered or unsigned manifest yields an error rather than a bad kernel.
 
 ## Examples
 
-Install the default kernel:
+List the kernels available for this host:
+
+```bash
+microagent kernel list
+```
+
+Check whether the installed kernel is current - and whether any gap is
+security-relevant:
+
+```bash
+microagent kernel check
+```
+
+Install the latest signed kernel, or a specific version:
 
 ```bash
 microagent kernel install
+microagent kernel install --version 6.1.155
 ```
 
-Install from a URL with an explicit checksum:
+Install from a URL with an explicit checksum (custom kernel outside the manifest):
 
 ```bash
 microagent kernel install \
@@ -40,15 +61,40 @@ microagent kernel verify \
   --sha256 4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0
 ```
 
-## `install`
+## `list`
 
-With no options, `install` downloads the default kernel for the installed host
-backend and architecture.
+`list` prints the kernels available in the signed manifest for the host
+backend and architecture, or every backend with `--all`.
 
 | Flag | Description |
 |---|---|
-| `--url <url>` | Download URL |
-| `--from <path>` | Local kernel path |
+| `--all` | List kernels for all backends/architectures |
+| `--arch <arch>` | Guest architecture |
+| `--backend <name>` | Backend identity override |
+
+## `check`
+
+`check` reports whether the installed kernel is `current`, `optional` (behind
+the latest but at or above the security floor), `security` (below the floor -
+missing security fixes), or `unknown`. The installed version is resolved by
+matching the local kernel's checksum against the signed manifest.
+
+| Flag | Description |
+|---|---|
+| `--arch <arch>` | Guest architecture |
+| `--backend <name>` | Backend identity override |
+
+## `install`
+
+With no options, `install` downloads the latest signed kernel for the host
+backend and architecture. `--version` pins a specific manifest version; `--url`
+or `--from` install a custom kernel outside the manifest.
+
+| Flag | Description |
+|---|---|
+| `--version <ver>` | Install a specific manifest version (default: latest) |
+| `--url <url>` | Download URL (custom kernel) |
+| `--from <path>` | Local kernel path (custom kernel) |
 | `--sha256 <sum>` | Expected SHA-256 |
 | `--out <path>` | Output path (defaults to the writable kernel path for the host) |
 | `--arch <arch>` | Guest architecture |
@@ -70,15 +116,16 @@ backend and architecture.
 | Host | Default kernel path |
 |---|---|
 | Apple VF, arm64 | `~/.microagent/kernels/apple-vf/arm64/Image` |
-| Firecracker, amd64 | `~/.microagent/kernels/linux-kvm/amd64/Image` |
+| Linux KVM, amd64 | `~/.microagent/kernels/linux-kvm/amd64/Image` |
 
 ## Exit status
 
-`kernel install` and `kernel verify` exit `0` on success; nonzero when the
-download fails, the checksum does not match, or the kernel file cannot be read
-or written. In AX mode a failure is written as a structured error envelope.
+`kernel` subcommands exit `0` on success; nonzero when the manifest cannot be
+fetched or verified, the download fails, the checksum does not match, or the
+kernel file cannot be read or written. In AX mode a failure is written as a
+structured error envelope.
 
 ## Related
 
-- [`doctor`](/cli/doctor/) - reports whether the default kernel is installed
+- [`doctor`](/cli/doctor/) - reports whether the kernel is installed
 - [Backends](/concepts/backends/) - kernel expectations per backend

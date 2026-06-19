@@ -36,9 +36,11 @@ func TestInstallFromPathAndVerify(t *testing.T) {
 	}
 }
 
-func TestSupportReportsDownloadableDefault(t *testing.T) {
+func TestSupportReportsUnavailableWhenMissing(t *testing.T) {
+	// With kernel sources now driven by the signed manifest (no local pins),
+	// Support stays cheap and offline: a missing kernel is simply unavailable.
 	support := SupportForPath(vmkit.BackendLinuxKVM, "amd64", filepath.Join(t.TempDir(), "missing"))
-	if support.Status != "downloadable" || support.SHA256 == "" {
+	if support.Status != "unavailable" {
 		t.Fatalf("support = %#v", support)
 	}
 }

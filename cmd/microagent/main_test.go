@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -7451,77 +7449,24 @@ func TestKernelInstallFromLocalAndVerify(t *testing.T) {
 	}
 }
 
-func TestDefaultKernelManifestHasAppleVFArm64(t *testing.T) {
-	kernel, ok := defaultKernel(vmkit.BackendAppleVF, "arm64")
-	if !ok {
-		t.Fatal("missing apple-vf arm64 kernel")
+func TestEnsureWorkspaceKernelUsesInstalledKernel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Image")
+	if err := os.WriteFile(path, []byte("installed kernel"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if kernel.URL == "" || kernel.SHA256 == "" {
-		t.Fatalf("kernel = %#v", kernel)
+	opts := workspaceOptions{
+		Backend:      vmkit.BackendAppleVF,
+		Architecture: "arm64",
+		KernelPath:   path,
 	}
-}
-
-func TestDefaultKernelManifestHasFirecrackerAMD64(t *testing.T) {
-	kernel, ok := defaultKernel(vmkit.BackendLinuxKVM, "amd64")
-	if !ok {
-		t.Fatal("missing firecracker amd64 kernel")
+	// A kernel already present at KernelPath must be used as-is — no manifest
+	// fetch or install (the hybrid resolution's installed-kernel branch).
+	if err := ensureWorkspaceKernel(t.Context(), &opts); err != nil {
+		t.Fatalf("ensureWorkspaceKernel: %v", err)
 	}
-	if kernel.URL != "https://kernels.microagent.sh/linux-kvm/amd64/6.1.155/vmlinux" {
-		t.Fatalf("url = %q", kernel.URL)
-	}
-	if kernel.SHA256 != "4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0" {
-		t.Fatalf("sha256 = %q", kernel.SHA256)
-	}
-}
-
-func TestDefaultKernelManifestHasFirecrackerARM64(t *testing.T) {
-	kernel, ok := defaultKernel(vmkit.BackendLinuxKVM, "arm64")
-	if !ok {
-		t.Fatal("missing firecracker arm64 kernel")
-	}
-	if kernel.URL != "https://kernels.microagent.sh/linux-kvm/arm64/6.1.155/Image" {
-		t.Fatalf("url = %q", kernel.URL)
-	}
-	if kernel.SHA256 != "bd91c4f5c15e497b99ac0c96977a92e68a0c11d3c72267104f5fb968994c4a71" {
-		t.Fatalf("sha256 = %q", kernel.SHA256)
-	}
-}
-
-func TestDefaultKernelManifestHasWindowsHyperVAMD64(t *testing.T) {
-	kernel, ok := defaultKernel(vmkit.BackendWindowsHyperV, "amd64")
-	if !ok {
-		t.Fatal("missing windows-hyperv amd64 kernel")
-	}
-	if kernel.URL != "https://kernels.microagent.sh/windows-hyperv/amd64/6.12.22/vmlinux" {
-		t.Fatalf("url = %q", kernel.URL)
-	}
-	if kernel.SHA256 != "2a30b65ccd2095d5e22d2bbb611ec56a99bebc4c1fe9f4a533f2c5615b3cd684" {
-		t.Fatalf("sha256 = %q", kernel.SHA256)
-	}
-}
-
-func TestDefaultKernelSupportReportsDownloadable(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "Image")
-	originalDefaults := defaultKernels
-	defaultKernels = []kernelManifestEntry{
-		{
-			Backend:      vmkit.BackendAppleVF,
-			Architecture: "arm64",
-			URL:          "https://example.com/kernel",
-			SHA256:       "abc123",
-		},
-	}
-	t.Cleanup(func() {
-		defaultKernels = originalDefaults
-	})
-
-	support := defaultKernelSupportForPath(vmkit.BackendAppleVF, "arm64", path)
-	if support.Status != "downloadable" {
-		t.Fatalf("status = %q, want downloadable", support.Status)
-	}
-	if support.SHA256 != "abc123" {
-		t.Fatalf("sha256 = %q, want abc123", support.SHA256)
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "installed kernel" {
+		t.Fatalf("kernel changed: %q, %v", got, err)
 	}
 }
 
@@ -7537,43 +7482,8 @@ func TestEnsureWorkspaceKernelSkipsExplicitKernel(t *testing.T) {
 	}
 }
 
-func TestEnsureWorkspaceKernelInstallsDefaultKernel(t *testing.T) {
-	kernelBytes := []byte("test kernel")
-	sum := sha256.Sum256(kernelBytes)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write(kernelBytes)
-	}))
-	t.Cleanup(server.Close)
-
-	originalDefaults := defaultKernels
-	defaultKernels = []kernelManifestEntry{
-		{
-			Backend:      vmkit.BackendAppleVF,
-			Architecture: "arm64",
-			URL:          server.URL,
-			SHA256:       fmt.Sprintf("%x", sum),
-		},
-	}
-	t.Cleanup(func() {
-		defaultKernels = originalDefaults
-	})
-
-	opts := workspaceOptions{
-		Backend:      vmkit.BackendAppleVF,
-		Architecture: "arm64",
-		KernelPath:   filepath.Join(t.TempDir(), "Image"),
-	}
-	if err := ensureWorkspaceKernel(t.Context(), &opts); err != nil {
-		t.Fatalf("ensureWorkspaceKernel: %v", err)
-	}
-	got, err := os.ReadFile(opts.KernelPath)
-	if err != nil {
-		t.Fatalf("read kernel: %v", err)
-	}
-	if string(got) != string(kernelBytes) {
-		t.Fatalf("kernel bytes = %q, want %q", got, kernelBytes)
-	}
-}
+// The install-from-manifest path (no kernel present) is covered by the live
+// end-to-end suite, since install now fetches + verifies the signed manifest.
 
 func TestFirecrackerGuestHaltedDetectsKernelShutdown(t *testing.T) {
 	if runtime.GOOS != "linux" {
