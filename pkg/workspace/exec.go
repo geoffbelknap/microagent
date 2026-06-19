@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -193,6 +194,25 @@ func ExecStream(ctx context.Context, opts Options, req execprotocol.ExecRequest,
 	return execclient.New(addr).ExecStream(ctx, req, onChunk)
 }
 
+// MarkActivity records that the workspace was just genuinely used (an exec or
+// connect) by bumping its activity marker file's mtime. The deadman watcher and
+// gc sweep read this to measure idleness, so each real use renews a declared
+// --ttl lease. Only real user use calls this — internal readiness probes (the
+// forwarder's liveness ticker) deliberately do not, so they cannot keep an
+// abandoned VM alive. Keep the "activity" filename in sync with the firecracker
+// supervisor's activity reader (workspaceActivityPath).
+func MarkActivity(opts Options) {
+	if strings.TrimSpace(opts.Name) == "" || strings.TrimSpace(opts.StateDir) == "" {
+		return
+	}
+	path := filepath.Join(opts.StateDir, opts.Name, "activity")
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+		_ = f.Close()
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
+}
+
 // execDialAddr validates that the workspace is running with a reachable
 // structured exec service, gates on readiness, and returns the dial address.
 func execDialAddr(ctx context.Context, opts Options) (string, error) {
@@ -228,6 +248,7 @@ func execDialAddr(ctx context.Context, opts Options) (string, error) {
 	// caller's command is still issued exactly once, after the service answers
 	// (or the grace elapses, in which case the real attempt surfaces the error).
 	waitForExecReady(ctx, runtimeState, ExecReadyWait)
+	MarkActivity(opts)
 	return net.JoinHostPort("127.0.0.1", strconv.Itoa(int(runtimeState.Config.ExecPort))), nil
 }
 

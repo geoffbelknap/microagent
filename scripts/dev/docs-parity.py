@@ -121,6 +121,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "GuestHalted",
         "Options",
         "ResolveBinary",
+        "RunDeadman",
         "RunForkMountExec",
         "RunPortForwarder",
         "RunVsockListener",
