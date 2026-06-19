@@ -349,7 +349,7 @@ func ValidateRequest(req Request) error {
 		if err := ValidateConfig(req.Config); err != nil {
 			return err
 		}
-	case "inspect", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
+	case "inspect", "gc", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}

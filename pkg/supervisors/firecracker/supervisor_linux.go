@@ -74,6 +74,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return applyWorkspaceConfig(opts, req)
 	case "inspect":
 		return inspectWorkspace(opts)
+	case "gc":
+		return gcWorkspace(opts)
 	case "halt":
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateHalted)
 	case "quarantine":
@@ -3162,6 +3164,58 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 	return responseFromRuntimeState(opts, state), nil
 }
 
+// gcWorkspace reconciles one workspace against reality: if it's recorded as
+// running but its firecracker process is gone (crashed, OOM-killed, host
+// rebooted, or an orphaned supervisor), it's a corpse — reap any lingering
+// companion processes + transient network state and record it stopped. Unlike
+// inspectWorkspace's clean-halt path, this triggers on PID liveness, not the
+// serial log. Idempotent + ESRCH-tolerant, so a sweep can call it on every
+// workspace safely.
+func gcWorkspace(opts Options) (vmkit.Response, error) {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		event, eventErr := readEvent(opts)
+		if eventErr != nil {
+			return vmkit.Response{Backend: vmkit.BackendLinuxKVM}, nil
+		}
+		return responseFromEvent(event, ""), nil
+	}
+	if state.Event.State != vmkit.StateRunning {
+		return responseFromRuntimeState(opts, state), nil
+	}
+	// A live PID alone isn't proof of life — PIDs get reused (including by gc's
+	// own freshly-spawned supervisor). Treat the VM as healthy only if the
+	// recorded PID is alive AND still carries this workspace's argv.
+	if alive, _ := processActive(state.PID); alive && processReferencesWorkspace(state.PID, opts) {
+		return responseFromRuntimeState(opts, state), nil
+	}
+	// Recorded running but the VMM is gone (dead or its PID was reused) — reap.
+	if state.PID != 0 {
+		_ = signalProcessGroup(state.PID, syscall.SIGKILL)
+	}
+	if state.PortForwardPID != 0 {
+		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGKILL)
+	}
+	if state.VsockListenerPID != 0 {
+		terminateAuxProcess(state.VsockListenerPID)
+	}
+	if state.EgressMediatorPID != 0 {
+		terminateAuxProcess(state.EgressMediatorPID)
+	}
+	cleanupTransientFirewallRules(state.FirewallRules)
+	cleanupTransientNetworkDevices(state.NetworkDevices)
+	cleanupUserNetworkProcess(opts)
+	req := runtimeStateRequest(vmkit.Request{}, state)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateStopped, 0, 0, 0, 0, nil, nil, "reaped by gc: firecracker process gone"); err != nil {
+		return vmkit.Response{}, err
+	}
+	state, err = readRuntimeState(opts)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	return responseFromRuntimeState(opts, state), nil
+}
+
 func runtimeHasResultListener(opts Options, state runtimeState) bool {
 	resultPath := resultPathFromState(opts, state)
 	for _, listener := range state.Config.VsockListeners {
@@ -3656,6 +3710,22 @@ func processActive(pid int) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// processReferencesWorkspace reports whether the live process pid is actually
+// this workspace's own (firecracker/pasta/companion) — its argv references the
+// workspace state directory. This guards the gc liveness check against PID
+// reuse: a recycled pid is alive but won't carry the workspace path.
+func processReferencesWorkspace(pid int, opts Options) bool {
+	if pid <= 0 {
+		return false
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return false
+	}
+	cmd := strings.ReplaceAll(string(data), "\x00", " ")
+	return strings.Contains(cmd, filepath.Join(opts.StateDir, opts.Name))
 }
 
 func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) error {

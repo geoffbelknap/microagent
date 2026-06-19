@@ -509,7 +509,7 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		return vmkit.Response{}, err
 	}
 	switch command {
-	case "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
+	case "halt", "quarantine", "pause", "resume", "stop", "kill", "delete", "gc":
 	default:
 		return vmkit.Response{}, fmt.Errorf("unsupported workspace control command: %s", command)
 	}
