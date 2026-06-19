@@ -3184,12 +3184,21 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 		return responseFromRuntimeState(opts, state), nil
 	}
 	// A live PID alone isn't proof of life — PIDs get reused (including by gc's
-	// own freshly-spawned supervisor). Treat the VM as healthy only if the
-	// recorded PID is alive AND still carries this workspace's argv.
-	if alive, _ := processActive(state.PID); alive && processReferencesWorkspace(state.PID, opts) {
+	// own freshly-spawned supervisor). The VM is healthy only if the recorded
+	// PID is alive AND still carries this workspace's argv.
+	a, _ := processActive(state.PID)
+	alive := a && processReferencesWorkspace(state.PID, opts)
+	expired := leaseExpired(state)
+	if alive && !expired {
 		return responseFromRuntimeState(opts, state), nil
 	}
-	// Recorded running but the VMM is gone (dead or its PID was reused) — reap.
+	// Reap: the VMM is gone (dead or its PID was reused), or a live VM is past
+	// its declared lifetime lease. SIGKILL covers both — a no-op on a dead pid,
+	// a teardown of a live one.
+	reapReason := "reaped by gc: firecracker process gone"
+	if alive && expired {
+		reapReason = "reaped by gc: lifetime lease expired"
+	}
 	if state.PID != 0 {
 		_ = signalProcessGroup(state.PID, syscall.SIGKILL)
 	}
@@ -3206,7 +3215,7 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	cleanupTransientNetworkDevices(state.NetworkDevices)
 	cleanupUserNetworkProcess(opts)
 	req := runtimeStateRequest(vmkit.Request{}, state)
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateStopped, 0, 0, 0, 0, nil, nil, "reaped by gc: firecracker process gone"); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateStopped, 0, 0, 0, 0, nil, nil, reapReason); err != nil {
 		return vmkit.Response{}, err
 	}
 	state, err = readRuntimeState(opts)
@@ -3354,6 +3363,13 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 		SerialInputPath:   serialInputPath(opts),
 		UpdatedAt:         now.Format(time.RFC3339),
 		Error:             errorText,
+	}
+	// A declared lifetime lease is set once (at create/launch) and must survive
+	// later state writes — e.g. a start that didn't re-specify --ttl.
+	if runtime.Config.LeaseSeconds == 0 {
+		if prev, err := readRuntimeState(opts); err == nil && prev.Config.LeaseSeconds > 0 {
+			runtime.Config.LeaseSeconds = prev.Config.LeaseSeconds
+		}
 	}
 	if state == vmkit.StateStarting || state == vmkit.StateRunning {
 		runtime.StartedAt = now.Format(time.RFC3339)
@@ -3726,6 +3742,21 @@ func processReferencesWorkspace(pid int, opts Options) bool {
 	}
 	cmd := strings.ReplaceAll(string(data), "\x00", " ")
 	return strings.Contains(cmd, filepath.Join(opts.StateDir, opts.Name))
+}
+
+// leaseExpired reports whether a workspace declared a lifetime lease
+// (Config.LeaseSeconds > 0) and is now past StartedAt+LeaseSeconds. A zero lease
+// means permanent — never expired. This is the deadman half of gc: a live VM
+// past its declared bound is reaped just like a corpse.
+func leaseExpired(state runtimeState) bool {
+	if state.Config.LeaseSeconds <= 0 || state.StartedAt == "" {
+		return false
+	}
+	started, err := time.Parse(time.RFC3339, state.StartedAt)
+	if err != nil {
+		return false
+	}
+	return time.Now().After(started.Add(time.Duration(state.Config.LeaseSeconds) * time.Second))
 }
 
 func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) error {

@@ -3564,6 +3564,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
+	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Lifetime lease in seconds; the gc reaps the VM once past this. 0 = permanent (preserves a create-time lease)")
 	var startModelRunner workspace.ModelRunnerSpec
 	var startModelMediation workspace.ModelMediationSpec
 	modelRunnerCommand := ""
@@ -4045,6 +4046,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.UintVar(&resultPort, "result-port", resultPort, "Vsock result port")
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
+	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Lifetime lease in seconds; the gc reaps the VM once past this. 0 = permanent")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run")
 	rm := false
 	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
@@ -6862,6 +6864,7 @@ func reorderFlagArgs(args []string) []string {
 		"-arch":                      true,
 		"-size-mib":                  true,
 		"-timeout":                   true,
+		"-ttl":                       true,
 		"-ready-timeout":             true,
 		"-duration":                  true,
 		"-interval":                  true,
