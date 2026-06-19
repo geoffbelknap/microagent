@@ -79,7 +79,6 @@ var Defaults = []ManifestEntry{
 }
 
 func Default(backend, arch string) (ManifestEntry, bool) {
-	backend = vmkit.NormalizeBackend(backend)
 	for _, kernel := range Defaults {
 		if kernel.Backend == backend && kernel.Architecture == arch {
 			return kernel, true

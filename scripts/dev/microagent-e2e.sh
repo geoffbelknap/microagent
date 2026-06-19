@@ -60,39 +60,39 @@ SCENARIOS=(
 
 # Each entry: scenario|coverage|backends|feature summary.
 #   coverage = portable | backend-neutral | backend-specific | host-specific
-#   backends = none | host-default | firecracker,apple-vf | firecracker | apple-vf
+#   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf
 SCENARIO_COVERAGE=(
   "coverage-matrix|portable|none|E2E feature inventory and scenario metadata"
   "contract|portable|none|runtime contract, synthetic state/result/artifacts"
   "help-usage|portable|none|help, usage errors, unsupported container-style flags"
   "mcp-stdio|portable|none|serve mcp, initialize, tools/list, ping, describe"
-  "mcp-lifecycle|backend-neutral|firecracker,apple-vf,windows-hyperv|serve mcp workspace create/start/exec/halt/delete with CLI parity"
+  "mcp-lifecycle|backend-neutral|linux-kvm,apple-vf,windows-hyperv|serve mcp workspace create/start/exec/halt/delete with CLI parity"
   "registry-auth|portable|none|registry credentials and private OCI pull auth"
   "text-output|portable|none|human output mode for stable public CLI surfaces"
   "init|portable|none|init scaffold, providers, --force, generated spec validation"
   "survive-reboot|host-specific|host-default|supervise --install/--uninstall boot units; no real reboot"
-  "public-surface|backend-neutral|firecracker,apple-vf,windows-hyperv|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifact, perf, image prune"
-  "lifecycle-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|create/start/status/list/connect/logs/events/stats/halt/quarantine/clone/cp/artifact/image/delete"
-  "networking-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|network modes, publish, apply, quarantine, cached image/network paths"
-  "transport-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|mediation and vsock transport contract"
-  "supervision-deep|backend-neutral|firecracker,apple-vf,windows-hyperv|restart supervision, signal, failure, cleanup"
-  "volumes|backend-neutral|firecracker,apple-vf,windows-hyperv|volume create/list/status/delete, attach persistence, single attach"
-  "commit-images|backend-neutral|firecracker,apple-vf,windows-hyperv|commit stopped rootfs into local OCI image layout"
-  "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secret check, materialized secrets, on-demand secrets, audit records"
-  "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health.exec validation and supervise restart on unhealthy probe"
-  "exec-stream|backend-neutral|firecracker,apple-vf,windows-hyperv|structured exec streaming, non-zero exit propagation, buffered parity"
-  "model-serving|backend-neutral|firecracker,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
-  "model-mediation|host-specific|firecracker|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
-  "model-mediation-runner|host-specific|firecracker|Opt-in runner-neutral production run --model mediation matrix for a prepared OpenAI-compatible runner"
-  "model-mediation-runner-fake|host-specific|firecracker|Opt-in runner-neutral production run --model mediation matrix through a fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
-  "model-mediation-pressure-ci|host-specific|firecracker|CI-safe required-gate pressure target through the fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
-  "model-mediation-llamacpp|host-specific|firecracker|Opt-in production run --model mediation matrix with the llama.cpp runner"
-  "model-mediation-vllm|host-specific|firecracker|Opt-in production run --model mediation matrix with a real vLLM GPU runner"
-  "firecracker-lifecycle-host|backend-specific|firecracker|Firecracker lifecycle host mechanics"
-  "firecracker-networking-host|backend-specific|firecracker|Firecracker TAP, bridge, NAT, helper mechanics"
-  "firecracker-transport-host|backend-specific|firecracker|Firecracker /dev/vhost-vsock and helper mechanics"
-  "firecracker-supervision-host|backend-specific|firecracker|Firecracker helper PID cleanup mechanics"
-  "named-network|host-specific|firecracker|Linux privileged named-network bridge and DNS"
+  "public-surface|backend-neutral|linux-kvm,apple-vf,windows-hyperv|version, contract, profiles, host, doctor, kernel, rootfs, run/result, artifact, perf, image prune"
+  "lifecycle-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|create/start/status/list/connect/logs/events/stats/halt/quarantine/clone/cp/artifact/image/delete"
+  "networking-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|network modes, publish, apply, quarantine, cached image/network paths"
+  "transport-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|mediation and vsock transport contract"
+  "supervision-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|restart supervision, signal, failure, cleanup"
+  "volumes|backend-neutral|linux-kvm,apple-vf,windows-hyperv|volume create/list/status/delete, attach persistence, single attach"
+  "commit-images|backend-neutral|linux-kvm,apple-vf,windows-hyperv|commit stopped rootfs into local OCI image layout"
+  "secrets|backend-neutral|linux-kvm,apple-vf,windows-hyperv|secret check, materialized secrets, on-demand secrets, audit records"
+  "health|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health.exec validation and supervise restart on unhealthy probe"
+  "exec-stream|backend-neutral|linux-kvm,apple-vf,windows-hyperv|structured exec streaming, non-zero exit propagation, buffered parity"
+  "model-serving|backend-neutral|linux-kvm,apple-vf,windows-hyperv|model pull/list/stop and run --model over backend vsock bridge"
+  "model-mediation|host-specific|linux-kvm|Opt-in production run --model mediation matrix with a stub OpenAI-compatible runner"
+  "model-mediation-runner|host-specific|linux-kvm|Opt-in runner-neutral production run --model mediation matrix for a prepared OpenAI-compatible runner"
+  "model-mediation-runner-fake|host-specific|linux-kvm|Opt-in runner-neutral production run --model mediation matrix through a fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
+  "model-mediation-pressure-ci|host-specific|linux-kvm|CI-safe required-gate pressure target through the fake custom runner; no GPU, llama.cpp, vLLM, or HuggingFace access"
+  "model-mediation-llamacpp|host-specific|linux-kvm|Opt-in production run --model mediation matrix with the llama.cpp runner"
+  "model-mediation-vllm|host-specific|linux-kvm|Opt-in production run --model mediation matrix with a real vLLM GPU runner"
+  "firecracker-lifecycle-host|backend-specific|linux-kvm|Firecracker lifecycle host mechanics"
+  "firecracker-networking-host|backend-specific|linux-kvm|Firecracker TAP, bridge, NAT, helper mechanics"
+  "firecracker-transport-host|backend-specific|linux-kvm|Firecracker /dev/vhost-vsock and helper mechanics"
+  "firecracker-supervision-host|backend-specific|linux-kvm|Firecracker helper PID cleanup mechanics"
+  "named-network|host-specific|linux-kvm|Linux privileged named-network bridge and DNS"
   "windows-hyperv-lifecycle-host|backend-specific|windows-hyperv|Hyper-V boot, structured result delivery over hv_sock"
   "windows-hyperv-connect-host|backend-specific|windows-hyperv|Hyper-V socket shell connect and readiness"
   "windows-hyperv-exec-host|backend-specific|windows-hyperv|Structured exec bridge: buffered, stream, exit codes, readiness"
@@ -119,28 +119,28 @@ E2E_MATRIX=(
   "host/doctor|portable|host-default|public-surface,lifecycle-deep|Host capability and diagnostics for selected backend"
   "kernel install/verify|portable|host-default|public-surface,health,volumes|Backend-specific artifacts through a common CLI"
   "rootfs build|portable|host-default|public-surface,lifecycle-deep|OCI rootfs build plus validation failures"
-  "run/create/start|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,health,volumes,model-serving,windows-hyperv-lifecycle-host|Core workspace boot paths"
-  "status/list|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,applevf-workspace-connect|State/readiness/list surfaces"
-  "result/logs/artifact|backend-neutral|firecracker,apple-vf,windows-hyperv|contract,public-surface,lifecycle-deep|Structured result, serial logs, declared artifacts"
-  "events/stats|backend-neutral|firecracker,apple-vf,windows-hyperv|lifecycle-deep|Lifecycle event history and resource sampling"
-  "connect|backend-neutral|firecracker,apple-vf,windows-hyperv|lifecycle-deep,applevf-workspace-connect,windows-hyperv-connect-host|Interactive and send-mode console paths"
-  "exec|backend-neutral|firecracker,apple-vf,windows-hyperv|health,exec-stream,secrets,volumes,windows-hyperv-exec-host|Structured exec and streaming exec"
-  "halt/quarantine/stop/kill/delete|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup"
-  "clone/cp|backend-neutral|firecracker,apple-vf,windows-hyperv|lifecycle-deep|Stopped workspace copy and clone semantics; windows-hyperv cp rides a guest maintenance boot over exec"
-  "apply|backend-neutral|firecracker,apple-vf,windows-hyperv|networking-deep|Supported spec changes"
-  "network status/modes/publish|backend-neutral|firecracker,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|Portable modes plus backend publish mechanics; windows-hyperv HNS segments need an elevated host"
-  "network create/list/delete named|host-specific|firecracker,windows-hyperv|named-network,windows-hyperv-named-network-host|Privileged Linux named bridge and elevated windows-hyperv private HNS network; not Apple VF portable"
-  "volume create/list/status/delete|backend-neutral|firecracker,apple-vf,windows-hyperv|volumes|Managed volume lifecycle and attach semantics (ext4, or VHD-wrapped ext4 on windows-hyperv)"
-  "commit/image|backend-neutral|firecracker,apple-vf,windows-hyperv|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/delete/prune, commit"
+  "run/create/start|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,health,volumes,model-serving,windows-hyperv-lifecycle-host|Core workspace boot paths"
+  "status/list|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,applevf-workspace-connect|State/readiness/list surfaces"
+  "result/logs/artifact|backend-neutral|linux-kvm,apple-vf,windows-hyperv|contract,public-surface,lifecycle-deep|Structured result, serial logs, declared artifacts"
+  "events/stats|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep|Lifecycle event history and resource sampling"
+  "connect|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep,applevf-workspace-connect,windows-hyperv-connect-host|Interactive and send-mode console paths"
+  "exec|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health,exec-stream,secrets,volumes,windows-hyperv-exec-host|Structured exec and streaming exec"
+  "halt/quarantine/stop/kill/delete|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup"
+  "clone/cp|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep|Stopped workspace copy and clone semantics; windows-hyperv cp rides a guest maintenance boot over exec"
+  "apply|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep|Supported spec changes"
+  "network status/modes/publish|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|Portable modes plus backend publish mechanics; windows-hyperv HNS segments need an elevated host"
+  "network create/list/delete named|host-specific|linux-kvm,windows-hyperv|named-network,windows-hyperv-named-network-host|Privileged Linux named bridge and elevated windows-hyperv private HNS network; not Apple VF portable"
+  "volume create/list/status/delete|backend-neutral|linux-kvm,apple-vf,windows-hyperv|volumes|Managed volume lifecycle and attach semantics (ext4, or VHD-wrapped ext4 on windows-hyperv)"
+  "commit/image|backend-neutral|linux-kvm,apple-vf,windows-hyperv|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/delete/prune, commit"
   "registry auth|portable|none|registry-auth|Private registry credential discovery"
-  "secrets|backend-neutral|firecracker,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
-  "health|backend-neutral|firecracker,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
-  "supervise|backend-neutral|firecracker,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
-  "snapshot/pause/resume|backend-specific|firecracker,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
-  "model|backend-neutral|firecracker,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
-  "perf|backend-neutral|firecracker,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
+  "secrets|backend-neutral|linux-kvm,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
+  "health|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
+  "supervise|backend-neutral|linux-kvm,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
+  "snapshot/pause/resume|backend-specific|linux-kvm,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
+  "model|backend-neutral|linux-kvm,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
+  "perf|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
-  "serve mcp lifecycle|backend-neutral|firecracker,apple-vf,windows-hyperv|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
+  "serve mcp lifecycle|backend-neutral|linux-kvm,apple-vf,windows-hyperv|mcp-lifecycle|Workspace lifecycle driven through MCP tools with CLI parity"
   "AX/text output|portable|none|text-output,mcp-stdio|Structured AX and human text output contracts"
 )
 
@@ -174,7 +174,7 @@ Scenarios:
                      validation failures, image, artifact, quarantine/delete.
                      Defaults to Firecracker on Linux, Apple VF on macOS, and
                      windows-hyperv on Windows; override with
-                     MICROAGENT_E2E_BACKEND=firecracker|applevf|windows-hyperv.
+                     MICROAGENT_E2E_BACKEND=linux-kvm|applevf|windows-hyperv.
   networking-deep    Backend-neutral networking feature contract. Covers modes,
                      publish, cached NATS/rootfs, apply, artifacts,
                      halt/resume, quarantine, and invalid config paths where
@@ -260,7 +260,7 @@ Environment:
     E2E image cache use for scenarios that support it.
   MICROAGENT_E2E_REFRESH_IMAGE_CACHE=1 refreshes cached E2E image rootfs files
     for compatibility with older validation commands.
-  MICROAGENT_E2E_BACKEND=firecracker|applevf|windows-hyperv selects the backend
+  MICROAGENT_E2E_BACKEND=linux-kvm|applevf|windows-hyperv selects the backend
     lane for backend-agnostic feature scenarios. Windows runs use Git Bash with
     the windows-hyperv backend (Hyper-V role + HCS services).
   MICROAGENT_E2E_MODEL_MEDIATION=1 opts into the production run --model

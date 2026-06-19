@@ -115,7 +115,7 @@ PY
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
+"$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
 import sys

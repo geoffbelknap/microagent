@@ -12,7 +12,7 @@ case "$(uname -s)" in
     HOST_BACKEND="apple-vf"
     ;;
   Linux)
-    HOST_BACKEND="firecracker"
+    HOST_BACKEND="linux-kvm"
     ;;
   MINGW*|MSYS*|CYGWIN*)
     HOST_BACKEND="windows-hyperv"

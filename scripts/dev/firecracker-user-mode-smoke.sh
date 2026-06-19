@@ -83,7 +83,7 @@ if caps="$(getcap "$SUPERVISOR" 2>/dev/null)" && [ -n "$caps" ]; then
   exit 1
 fi
 
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
+"$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
 import sys
@@ -97,7 +97,7 @@ PY
 )"
 
 "$CLI" run \
-  --backend firecracker \
+  --backend linux-kvm \
   --image "$IMAGE" \
   --arch amd64 \
   --exec "wget -qO- -T 10 http://example.com >/tmp/user.out && echo USER_OUTBOUND_READY || echo USER_OUTBOUND_FAILED" \
@@ -134,7 +134,7 @@ SELF_EXIT_STATE="$STATE_DIR/self-exit"
 PUBLISH_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 
 "$CLI" create self-exit \
-  --backend firecracker \
+  --backend linux-kvm \
   --image "$IMAGE" \
   --arch amd64 \
   --entrypoint "sleep 5" \

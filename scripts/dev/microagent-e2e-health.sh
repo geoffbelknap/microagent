@@ -17,7 +17,7 @@ fi
 default_backend() {
   case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64)
-      printf '%s\n' firecracker
+      printf '%s\n' linux-kvm
       ;;
     Darwin:arm64)
       printf '%s\n' applevf
@@ -68,12 +68,12 @@ if [ -z "${DOCKER_CONFIG:-}" ]; then
 fi
 
 case "$BACKEND" in
-  firecracker)
+  linux-kvm)
     SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
     GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
     IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox:1.36}"
     e2e_build_firecracker_stack "$CLI" "$SUPERVISOR" "$GUEST_INIT"
-    "$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json" 2>/dev/null || e2e_fail "kernel install"
+    "$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json" 2>/dev/null || e2e_fail "kernel install"
     KERNEL="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["path"])' "$STATE_DIR/kernel-install.json")"
     CREATE_FLAGS=(--kernel "$KERNEL" --guest-init "$GUEST_INIT" --supervisor "$SUPERVISOR" --state-dir "$STATE_DIR" --size-mib 128 --result-port 0)
     START_FLAGS=(--state-dir "$STATE_DIR" --supervisor "$SUPERVISOR")

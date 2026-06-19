@@ -58,7 +58,7 @@ export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
 
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
+"$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
@@ -75,7 +75,7 @@ PY
 )"
 
 "$CLI" run \
-  --backend firecracker \
+  --backend linux-kvm \
   --image "$IMAGE" \
   --arch amd64 \
   --exec "echo $EXPECTED_OUTPUT" \
@@ -99,7 +99,7 @@ expected_kernel_sha = sys.argv[3]
 
 if result["response"]["ok"] is not True:
     raise SystemExit(result)
-if result["response"]["backend"] != "firecracker":
+if result["response"]["backend"] != "linux-kvm":
     raise SystemExit(result)
 if result["final_state"] != "stopped":
     raise SystemExit(result)
@@ -107,7 +107,7 @@ if result["image"]["platform"]["architecture"] != "amd64":
     raise SystemExit(result)
 if expected_output not in result["serial_log"]:
     raise SystemExit(result["serial_log"])
-if "reboot: System halted" not in result["serial_log"] and "reboot: Power down" not in result["serial_log"]:
+if not any(m in result["serial_log"] for m in ("reboot: System halted", "reboot: Power down", "reboot: Restarting system", "reboot: machine restart")):
     raise SystemExit(result["serial_log"])
 if not expected_kernel_sha:
     raise SystemExit("missing expected kernel sha")

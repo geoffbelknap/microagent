@@ -4,7 +4,7 @@ description: Speak the JSON protocol backend supervisors implement - requests, r
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-19_
 
 If you are implementing a supervisor, calling one directly, or debugging what
 a backend returned, this page is the protocol reference. Backend supervisors
@@ -37,7 +37,7 @@ backend-neutral runtime contract.
     "requestID": "req-1",
     "runtimeID": "agent-1",
     "role": "workload",
-    "backend": "firecracker"
+    "backend": "linux-kvm"
   },
   "config": {
     "kernelPath": "/tmp/Image",
@@ -121,13 +121,13 @@ below.
 ```json
 {
   "ok": true,
-  "backend": "firecracker",
+  "backend": "linux-kvm",
   "event": {
     "identity": {
       "requestID": "req-1",
       "runtimeID": "agent-1",
       "role": "workload",
-      "backend": "firecracker"
+      "backend": "linux-kvm"
     },
     "state": "prepared",
     "observedAt": "2026-05-02T00:00:00Z"
@@ -175,9 +175,9 @@ below.
       "requestID": "req-1",
       "runtimeID": "agent-1",
       "role": "workload",
-      "backend": "firecracker"
+      "backend": "linux-kvm"
     },
-    "backend": "firecracker",
+    "backend": "linux-kvm",
     "resultPath": "/tmp/microagent/agent-1/result.json",
     "startedAt": "2026-05-02T00:00:00Z",
     "completedAt": "2026-05-02T00:00:01Z",
@@ -247,9 +247,9 @@ Host responses use `host` instead of `event`.
 ```json
 {
   "ok": true,
-  "backend": "firecracker",
+  "backend": "linux-kvm",
   "host": {
-    "backend": "firecracker",
+    "backend": "linux-kvm",
     "architecture": "amd64",
     "binaryPath": "/usr/local/bin/firecracker",
     "kvmAvailable": true,

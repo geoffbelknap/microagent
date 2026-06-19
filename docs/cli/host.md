@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-19_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]   Report host backend capabilities
@@ -33,9 +33,9 @@ kernel under `kernel`). A trimmed Firecracker example:
 ```json
 {
   "ok": true,
-  "backend": "firecracker",
+  "backend": "linux-kvm",
   "host": {
-    "backend": "firecracker",
+    "backend": "linux-kvm",
     "architecture": "amd64",
     "supervisorPath": "/usr/local/lib/microagent/firecracker-supervisor",
     "supervisorAvailable": true,
@@ -48,10 +48,10 @@ kernel under `kernel`). A trimmed Firecracker example:
     "consoleMode": "interactive"
   },
   "kernel": {
-    "backend": "firecracker",
+    "backend": "linux-kvm",
     "architecture": "amd64",
     "status": "installed",
-    "path": "/home/user/.microagent/kernels/firecracker/amd64/vmlinux",
+    "path": "/home/user/.microagent/kernels/linux-kvm/amd64/vmlinux",
     "sha256": "..."
   }
 }
@@ -104,7 +104,7 @@ detected one, `--arch` when you plan to run non-native guests.
 
 | Flag | Description |
 |---|---|
-| `--backend <name>` | Backend override (`apple-vf`, `firecracker`, or `windows-hyperv`) |
+| `--backend <name>` | Backend override (`apple-vf`, `linux-kvm`, or `windows-hyperv`) |
 | `--arch <arch>` | Guest architecture (`amd64`, `arm64`) |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 

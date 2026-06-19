@@ -94,7 +94,7 @@ RUNNER_ENV_JSON=""
 RUNNER_PID=""
 RUNNER_PORT=""
 RESOLVED_CUDA_HOME=""
-CTRL_FLAGS=(--backend firecracker --state-dir "$STATE_DIR")
+CTRL_FLAGS=(--backend linux-kvm --state-dir "$STATE_DIR")
 case "$KEEP_STATE" in
   1|true|TRUE|yes|YES)
     KEEP_STATE=1

@@ -129,7 +129,7 @@ if caps="$(getcap "$SUPERVISOR" 2>/dev/null)" && [ -n "$caps" ]; then
   exit 1
 fi
 
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
+"$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
 import sys
@@ -315,7 +315,7 @@ rm_delete = read_json("images-rm-delete.json")
 prune_delete = read_json("images-prune-delete.json")
 prune_images_yes = read_json("prune-images-yes.txt")
 
-if doctor.get("ok") is not True or doctor.get("backend") != "firecracker":
+if doctor.get("ok") is not True or doctor.get("backend") != "linux-kvm":
     raise SystemExit(doctor)
 if not any(profile.get("name") == "tiny" for profile in profiles.get("profiles", [])):
     raise SystemExit(profiles)

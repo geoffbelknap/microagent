@@ -7,7 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 default_backend() {
   case "$(uname -s):$(uname -m)" in
     Linux:x86_64|Linux:amd64)
-      printf '%s\n' firecracker
+      printf '%s\n' linux-kvm
       ;;
     Darwin:arm64)
       printf '%s\n' applevf
@@ -24,7 +24,7 @@ default_backend() {
 BACKEND="${MICROAGENT_E2E_BACKEND:-$(default_backend)}"
 
 case "$BACKEND" in
-  firecracker)
+  linux-kvm)
     exec "$ROOT/scripts/dev/microagent-e2e-networking.sh"
     ;;
   applevf)

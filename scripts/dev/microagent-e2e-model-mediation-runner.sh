@@ -980,7 +980,7 @@ esac
 
 mkdir -p "$OUT_DIR" "$STATE_DIR"
 
-RUN_FLAGS=(--backend firecracker --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF")
+RUN_FLAGS=(--backend linux-kvm --network isolated --state-dir "$STATE_DIR" --model "$MODEL_REF")
 if [ "$KEEP_STATE" = "0" ]; then
   RUN_FLAGS+=(--rm)
 fi

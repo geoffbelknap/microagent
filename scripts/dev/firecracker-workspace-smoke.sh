@@ -99,7 +99,7 @@ PY
   )
 )
 
-"$CLI" kernel install --backend firecracker --arch amd64 >"$STATE_DIR/kernel-install.json"
+"$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
 import json
@@ -122,7 +122,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
     result = json.load(f)
 if result["ok"] is not True:
     raise SystemExit(result)
-if result["backend"] != "firecracker":
+if result["backend"] != "linux-kvm":
     raise SystemExit(result)
 if result["host"]["kvmAvailable"] is not True:
     raise SystemExit(result)
@@ -161,7 +161,7 @@ with open(sys.argv[3], "r", encoding="utf-8", errors="replace") as f:
 with open(sys.argv[4], "r", encoding="utf-8") as f:
     ps = json.load(f)
 
-if create["response"]["backend"] != "firecracker":
+if create["response"]["backend"] != "linux-kvm":
     raise SystemExit(create)
 if create["response"]["event"]["state"] != "prepared":
     raise SystemExit(create)

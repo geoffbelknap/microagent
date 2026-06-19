@@ -78,7 +78,7 @@ RUNNER_ENV_JSON=""
 RUNNER_ARGS_JSON=""
 RUNNER_PID=""
 RUNNER_PORT=""
-CTRL_FLAGS=(--backend firecracker --state-dir "$STATE_DIR")
+CTRL_FLAGS=(--backend linux-kvm --state-dir "$STATE_DIR")
 
 skip() { e2e_skip "microagent-e2e-model-mediation-runner-fake: $1"; }
 fail() { echo "FAIL microagent-e2e-model-mediation-runner-fake: $1" >&2; exit 1; }
