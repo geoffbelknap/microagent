@@ -87,6 +87,7 @@ type Options struct {
 	Mediation            *vmkit.MediationConfig
 	Health               Health
 	Timeout              time.Duration
+	LeaseSeconds         int
 	ResultPort           uint32
 	ShellPort            uint16
 	ExecPort             uint16
@@ -971,6 +972,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			SerialInput:              opts.SerialInput,
 			MaintenanceBoot:          opts.MaintenanceBoot,
 			TimeoutSeconds:           int(opts.Timeout.Seconds()),
+			LeaseSeconds:             opts.LeaseSeconds,
 			ModelGuestPort:           modelGuestPort,
 			ModelVsockPort:           modelVsockPort,
 		},

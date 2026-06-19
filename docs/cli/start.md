@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-19_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -52,6 +52,8 @@ Flags you'll actually use:
   booting fresh
 - `--profile <name>` / `--memory <MiB>` / `--cpus <n>` - one-start resource
   overrides; the stored config is the default
+- `--ttl <seconds>` - lifetime lease; the gc reaps the VM once it outlives this.
+  `0` (default) means permanent. Preserves a lease declared at `create` time
 - `--state-dir <dir>` - only when the workspace lives outside `~/.microagent/`
 
 The complete set:
@@ -63,6 +65,7 @@ The complete set:
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
 | `--cpus <n>` | CPU count override for this start |
+| `--ttl <seconds>` | Lifetime lease; the gc reaps the VM once past this. `0` = permanent (preserves a create-time lease) |
 | `--kernel <path>` | Linux kernel path override |
 | `--arch <arch>` | Guest architecture |
 | `--backend <name>` | Backend identity override |

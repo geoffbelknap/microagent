@@ -119,6 +119,10 @@ type Config struct {
 	GuestExecPort  uint16 `json:"guestExecPort,omitempty"`
 	SerialInput    bool   `json:"serialInput,omitempty"`
 	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	// LeaseSeconds bounds the VM's lifetime when set (>0): the gc sweep reaps a
+	// workspace still recorded running past StartedAt+LeaseSeconds. Zero means no
+	// bound — the VM is permanent and is never reaped for age.
+	LeaseSeconds int `json:"leaseSeconds,omitempty"`
 	// ModelGuestPort/ModelVsockPort wire a paired host model server to the guest:
 	// the guest forwarder listens on TCP 127.0.0.1:ModelGuestPort and tunnels to
 	// host vsock ModelVsockPort, which the supervisor proxies to the model server.
@@ -349,7 +353,7 @@ func ValidateRequest(req Request) error {
 		if err := ValidateConfig(req.Config); err != nil {
 			return err
 		}
-	case "inspect", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
+	case "inspect", "gc", "halt", "quarantine", "pause", "resume", "stop", "kill", "delete":
 		if err := ValidateIdentity(req.Identity); err != nil {
 			return err
 		}

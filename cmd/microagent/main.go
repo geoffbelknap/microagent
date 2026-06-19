@@ -204,6 +204,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "ps" {
 		return runPS(args[1:], stdout)
 	}
+	if args[0] == "gc" {
+		return runGC(ctx, args[1:], stdout)
+	}
 	if args[0] == "logs" || args[0] == "log" {
 		return runLogs(ctx, args[1:], stdout)
 	}
@@ -1269,6 +1272,66 @@ func filterRunningWorkspaces(entries []workspaceListEntry) []workspaceListEntry 
 		}
 	}
 	return filtered
+}
+
+// runGC sweeps the host for VMs recorded as running whose firecracker process
+// is gone (crashed, OOM-killed, host-rebooted, or an orphaned supervisor) and
+// reaps them — reconciling runtime state and reclaiming lingering companion
+// processes + transient network state. It does not touch healthy VMs. This is
+// the backstop for the supervisor deadman; safe to run on demand.
+func runGC(ctx context.Context, args []string, stdout *os.File) error {
+	opts := stateCommandOptions{StateDir: defaultStateDir()}
+	backend := hostBackend()
+	supervisorPath := defaultSupervisorPath(backend)
+	supervisorExplicit := hasFlagValue(args, "supervisor")
+	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&supervisorPath, "supervisor", supervisorPath, "supervisor path")
+	fs.StringVar(&backend, "backend", backend, "Backend identity (internal; must match this install)")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if !supervisorExplicit {
+		supervisorPath = defaultSupervisorPath(backend)
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected gc argument: %s", fs.Arg(0))
+	}
+	entries, err := workspace.List(opts.StateDir)
+	if err != nil {
+		return err
+	}
+	type gcReap struct {
+		Name string `json:"name"`
+		Was  string `json:"was"`
+	}
+	checked := 0
+	reaped := []gcReap{}
+	for _, entry := range entries {
+		if vmkit.VMState(entry.State) != vmkit.StateRunning {
+			continue
+		}
+		checked++
+		wopts := workspaceOptions{StateDir: opts.StateDir, Name: entry.Name, Backend: backend, SupervisorPath: supervisorPath}
+		resp, err := workspace.Control(ctx, wopts, "gc")
+		if err != nil && resp.Error == "" {
+			fmt.Fprintf(os.Stderr, "gc %s: %v\n", entry.Name, err)
+			continue
+		}
+		if resp.Event != nil && resp.Event.State == vmkit.StateStopped {
+			reaped = append(reaped, gcReap{Name: entry.Name, Was: entry.State})
+		}
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(struct {
+		Checked int      `json:"checked"`
+		Reaped  []gcReap `json:"reaped"`
+	}{Checked: checked, Reaped: reaped})
 }
 
 func runClone(args []string, stdout *os.File) error {
@@ -3501,6 +3564,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	var vsocks multiFlag
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
+	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Lifetime lease in seconds; the gc reaps the VM once past this. 0 = permanent (preserves a create-time lease)")
 	var startModelRunner workspace.ModelRunnerSpec
 	var startModelMediation workspace.ModelMediationSpec
 	modelRunnerCommand := ""
@@ -3982,6 +4046,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.UintVar(&resultPort, "result-port", resultPort, "Vsock result port")
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
+	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Lifetime lease in seconds; the gc reaps the VM once past this. 0 = permanent")
 	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run")
 	rm := false
 	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
@@ -6799,6 +6864,7 @@ func reorderFlagArgs(args []string) []string {
 		"-arch":                      true,
 		"-size-mib":                  true,
 		"-timeout":                   true,
+		"-ttl":                       true,
 		"-ready-timeout":             true,
 		"-duration":                  true,
 		"-interval":                  true,

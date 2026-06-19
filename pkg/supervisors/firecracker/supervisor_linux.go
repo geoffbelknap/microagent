@@ -74,6 +74,8 @@ func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, 
 		return applyWorkspaceConfig(opts, req)
 	case "inspect":
 		return inspectWorkspace(opts)
+	case "gc":
+		return gcWorkspace(opts)
 	case "halt":
 		return stopWorkspace(ctx, opts, req, syscall.SIGTERM, vmkit.StateHalted)
 	case "quarantine":
@@ -195,8 +197,15 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 	if opts.StateDir == "" && req.Config != nil {
 		opts.StateDir = req.Config.StateDir
 	}
-	if req.Command == "run" && os.Getenv(userNetworkDisableRunTimeoutEnv) == "1" {
-		opts.Timeout = -1
+	if req.Command == "run" && os.Getenv(userNetworkResidentEnv) == "1" {
+		// The resident user-network supervisor governs VM lifetime by the declared
+		// lease (also gc-enforced), not the foreground run-timeout: a lease caps its
+		// wait; no lease means permanent. Replaces the old "user-network runs forever".
+		if req.Config != nil && req.Config.LeaseSeconds > 0 {
+			opts.Timeout = time.Duration(req.Config.LeaseSeconds) * time.Second
+		} else {
+			opts.Timeout = -1
+		}
 	}
 	if opts.Timeout == 0 && req.Config != nil && req.Config.TimeoutSeconds > 0 {
 		opts.Timeout = time.Duration(req.Config.TimeoutSeconds) * time.Second
@@ -3162,6 +3171,67 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 	return responseFromRuntimeState(opts, state), nil
 }
 
+// gcWorkspace reconciles one workspace against reality: if it's recorded as
+// running but its firecracker process is gone (crashed, OOM-killed, host
+// rebooted, or an orphaned supervisor), it's a corpse — reap any lingering
+// companion processes + transient network state and record it stopped. Unlike
+// inspectWorkspace's clean-halt path, this triggers on PID liveness, not the
+// serial log. Idempotent + ESRCH-tolerant, so a sweep can call it on every
+// workspace safely.
+func gcWorkspace(opts Options) (vmkit.Response, error) {
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		event, eventErr := readEvent(opts)
+		if eventErr != nil {
+			return vmkit.Response{Backend: vmkit.BackendLinuxKVM}, nil
+		}
+		return responseFromEvent(event, ""), nil
+	}
+	if state.Event.State != vmkit.StateRunning {
+		return responseFromRuntimeState(opts, state), nil
+	}
+	// A live PID alone isn't proof of life — PIDs get reused (including by gc's
+	// own freshly-spawned supervisor). The VM is healthy only if the recorded
+	// PID is alive AND still carries this workspace's argv.
+	a, _ := processActive(state.PID)
+	alive := a && processReferencesWorkspace(state.PID, opts)
+	expired := leaseExpired(state)
+	if alive && !expired {
+		return responseFromRuntimeState(opts, state), nil
+	}
+	// Reap: the VMM is gone (dead or its PID was reused), or a live VM is past
+	// its declared lifetime lease. SIGKILL covers both — a no-op on a dead pid,
+	// a teardown of a live one.
+	reapReason := "reaped by gc: firecracker process gone"
+	if alive && expired {
+		reapReason = "reaped by gc: lifetime lease expired"
+	}
+	if state.PID != 0 {
+		_ = signalProcessGroup(state.PID, syscall.SIGKILL)
+	}
+	if state.PortForwardPID != 0 {
+		_ = signalProcessGroup(state.PortForwardPID, syscall.SIGKILL)
+	}
+	if state.VsockListenerPID != 0 {
+		terminateAuxProcess(state.VsockListenerPID)
+	}
+	if state.EgressMediatorPID != 0 {
+		terminateAuxProcess(state.EgressMediatorPID)
+	}
+	cleanupTransientFirewallRules(state.FirewallRules)
+	cleanupTransientNetworkDevices(state.NetworkDevices)
+	cleanupUserNetworkProcess(opts)
+	req := runtimeStateRequest(vmkit.Request{}, state)
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateStopped, 0, 0, 0, 0, nil, nil, reapReason); err != nil {
+		return vmkit.Response{}, err
+	}
+	state, err = readRuntimeState(opts)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	return responseFromRuntimeState(opts, state), nil
+}
+
 func runtimeHasResultListener(opts Options, state runtimeState) bool {
 	resultPath := resultPathFromState(opts, state)
 	for _, listener := range state.Config.VsockListeners {
@@ -3300,6 +3370,13 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 		SerialInputPath:   serialInputPath(opts),
 		UpdatedAt:         now.Format(time.RFC3339),
 		Error:             errorText,
+	}
+	// A declared lifetime lease is set once (at create/launch) and must survive
+	// later state writes — e.g. a start that didn't re-specify --ttl.
+	if runtime.Config.LeaseSeconds == 0 {
+		if prev, err := readRuntimeState(opts); err == nil && prev.Config.LeaseSeconds > 0 {
+			runtime.Config.LeaseSeconds = prev.Config.LeaseSeconds
+		}
 	}
 	if state == vmkit.StateStarting || state == vmkit.StateRunning {
 		runtime.StartedAt = now.Format(time.RFC3339)
@@ -3656,6 +3733,37 @@ func processActive(pid int) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// processReferencesWorkspace reports whether the live process pid is actually
+// this workspace's own (firecracker/pasta/companion) — its argv references the
+// workspace state directory. This guards the gc liveness check against PID
+// reuse: a recycled pid is alive but won't carry the workspace path.
+func processReferencesWorkspace(pid int, opts Options) bool {
+	if pid <= 0 {
+		return false
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return false
+	}
+	cmd := strings.ReplaceAll(string(data), "\x00", " ")
+	return strings.Contains(cmd, filepath.Join(opts.StateDir, opts.Name))
+}
+
+// leaseExpired reports whether a workspace declared a lifetime lease
+// (Config.LeaseSeconds > 0) and is now past StartedAt+LeaseSeconds. A zero lease
+// means permanent — never expired. This is the deadman half of gc: a live VM
+// past its declared bound is reaped just like a corpse.
+func leaseExpired(state runtimeState) bool {
+	if state.Config.LeaseSeconds <= 0 || state.StartedAt == "" {
+		return false
+	}
+	started, err := time.Parse(time.RFC3339, state.StartedAt)
+	if err != nil {
+		return false
+	}
+	return time.Now().After(started.Add(time.Duration(state.Config.LeaseSeconds) * time.Second))
 }
 
 func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) error {
