@@ -24,6 +24,7 @@ type InstallOptions struct {
 	OutputPath   string
 	Backend      string
 	Architecture string
+	Version      string // optional: pick a specific manifest version (default: latest)
 }
 
 type InstallResult struct {
@@ -44,47 +45,26 @@ type VerifyResult struct {
 	SHA256 string `json:"sha256"`
 }
 
-type ManifestEntry struct {
-	Backend      string
-	Architecture string
-	URL          string
-	SHA256       string
-}
-
-var Defaults = []ManifestEntry{
-	{
-		Backend:      vmkit.BackendAppleVF,
-		Architecture: "arm64",
-		URL:          "https://kernels.microagent.sh/apple-vf/arm64/6.12.22/Image",
-		SHA256:       "73fe78e51a8ce348e69311d376a02114440eee6b60bf2e91af54bdf2dfb405ec",
-	},
-	{
-		Backend:      vmkit.BackendLinuxKVM,
-		Architecture: "amd64",
-		URL:          "https://kernels.microagent.sh/linux-kvm/amd64/6.1.155/vmlinux",
-		SHA256:       "4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0",
-	},
-	{
-		Backend:      vmkit.BackendLinuxKVM,
-		Architecture: "arm64",
-		URL:          "https://kernels.microagent.sh/linux-kvm/arm64/6.1.155/Image",
-		SHA256:       "bd91c4f5c15e497b99ac0c96977a92e68a0c11d3c72267104f5fb968994c4a71",
-	},
-	{
-		Backend:      vmkit.BackendWindowsHyperV,
-		Architecture: "amd64",
-		URL:          "https://kernels.microagent.sh/windows-hyperv/amd64/6.12.22/vmlinux",
-		SHA256:       "2a30b65ccd2095d5e22d2bbb611ec56a99bebc4c1fe9f4a533f2c5615b3cd684",
-	},
-}
-
-func Default(backend, arch string) (ManifestEntry, bool) {
-	for _, kernel := range Defaults {
-		if kernel.Backend == backend && kernel.Architecture == arch {
-			return kernel, true
-		}
+// resolveTarget fetches the signed manifest and returns the chosen kernel for
+// backend/arch: the exact version when given, otherwise the latest available.
+func resolveTarget(backend, arch, version string) (KernelTarget, error) {
+	targets, err := FetchTargets(DefaultSource())
+	if err != nil {
+		return KernelTarget{}, fmt.Errorf("fetch signed kernel manifest: %w", err)
 	}
-	return ManifestEntry{}, false
+	if version != "" {
+		for _, t := range targets {
+			if t.Backend == backend && t.Arch == arch && t.Version == version {
+				return t, nil
+			}
+		}
+		return KernelTarget{}, fmt.Errorf("no %s/%s kernel %s in the signed manifest", backend, arch, version)
+	}
+	latest := LatestTarget(targets, backend, arch)
+	if latest == nil {
+		return KernelTarget{}, fmt.Errorf("no %s/%s kernel in the signed manifest", backend, arch)
+	}
+	return *latest, nil
 }
 
 func Support(backend, arch string) *vmkit.KernelSupport {
@@ -107,12 +87,6 @@ func SupportForPath(backend, arch, path string) *vmkit.KernelSupport {
 			return support
 		}
 	}
-	if kernel, ok := Default(backend, arch); ok {
-		support.SHA256 = kernel.SHA256
-		if support.Status == "unavailable" {
-			support.Status = "downloadable"
-		}
-	}
 	return support
 }
 
@@ -129,13 +103,13 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if opts.OutputPath == "" {
 		opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	}
-	if opts.URL == "" && opts.FromPath == "" && opts.SHA256 == "" {
-		kernel, ok := Default(opts.Backend, opts.Architecture)
-		if !ok {
-			return InstallResult{}, fmt.Errorf("no default kernel for %s/%s; use URL or FromPath", opts.Backend, opts.Architecture)
+	if opts.URL == "" && opts.FromPath == "" {
+		target, err := resolveTarget(opts.Backend, opts.Architecture, opts.Version)
+		if err != nil {
+			return InstallResult{}, err
 		}
-		opts.URL = kernel.URL
-		opts.SHA256 = kernel.SHA256
+		opts.URL = target.URL
+		opts.SHA256 = target.SHA256
 	}
 	if err := install(ctx, opts); err != nil {
 		return InstallResult{}, err

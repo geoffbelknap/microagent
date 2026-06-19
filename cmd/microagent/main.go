@@ -484,6 +484,7 @@ func runKernelInstall(ctx context.Context, args []string, stdout *os.File) error
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.URL, "url", "", "Kernel URL")
 	fs.StringVar(&opts.FromPath, "from", "", "Local kernel path")
+	fs.StringVar(&opts.Version, "version", "", "Install a specific manifest version (default: latest)")
 	fs.StringVar(&opts.SHA256, "sha256", "", "Expected SHA-256")
 	fs.StringVar(&opts.OutputPath, "out", opts.OutputPath, "Output path")
 	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
@@ -607,26 +608,7 @@ func defaultKernelSupportForPath(backend, arch, path string) *vmkit.KernelSuppor
 			return support
 		}
 	}
-	if kernel, ok := defaultKernel(backend, arch); ok {
-		support.SHA256 = kernel.SHA256
-		if support.Status == "unavailable" {
-			support.Status = "downloadable"
-		}
-	}
 	return support
-}
-
-type kernelManifestEntry = kernel.ManifestEntry
-
-var defaultKernels = kernel.Defaults
-
-func defaultKernel(backend, arch string) (kernelManifestEntry, bool) {
-	for _, kernel := range defaultKernels {
-		if kernel.Backend == backend && kernel.Architecture == arch {
-			return kernel, true
-		}
-	}
-	return kernelManifestEntry{}, false
 }
 
 func runRootFS(ctx context.Context, args []string, stdout *os.File) error {
@@ -4289,16 +4271,16 @@ func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	defaultKernel, ok := defaultKernel(opts.Backend, opts.Architecture)
-	if !ok {
-		return fmt.Errorf("no default kernel for %s/%s; pass --kernel", opts.Backend, opts.Architecture)
+	// No kernel installed yet: fetch + verify + install the latest from the
+	// signed manifest. (An already-present kernel is used as-is, above.)
+	if _, err := kernel.Install(ctx, kernel.InstallOptions{
+		Backend:      opts.Backend,
+		Architecture: opts.Architecture,
+		OutputPath:   opts.KernelPath,
+	}); err != nil {
+		return fmt.Errorf("install kernel for %s/%s: %w (or pass --kernel)", opts.Backend, opts.Architecture, err)
 	}
-	_, err := kernel.Install(ctx, kernel.InstallOptions{
-		URL:        defaultKernel.URL,
-		SHA256:     defaultKernel.SHA256,
-		OutputPath: opts.KernelPath,
-	})
-	return err
+	return nil
 }
 
 func workspaceSpecPath(command string, args []string) string {
@@ -7678,9 +7660,10 @@ Commands:
   verify               Verify a custom kernel
 
 Install options:
-  With no options, install Microagent's default kernel for this Mac.
-  -url <url>           Download URL
-  -from <path>         Local kernel path
+  With no options, install the latest kernel from the signed manifest.
+  -version <version>   Install a specific manifest version
+  -url <url>           Download URL (custom kernel)
+  -from <path>         Local kernel path (custom kernel)
   -sha256 <sha256>     Expected SHA-256
   -out <path>          Output path
 
