@@ -4,7 +4,7 @@ import "testing"
 
 func TestRuntimeContractCoversBothBackends(t *testing.T) {
 	contract := NewRuntimeContract()
-	if !contains(contract.Backends, BackendAppleVF) || !contains(contract.Backends, BackendFirecracker) || !contains(contract.Backends, BackendWindowsHyperV) {
+	if !contains(contract.Backends, BackendAppleVF) || !contains(contract.Backends, BackendLinuxKVM) || !contains(contract.Backends, BackendWindowsHyperV) {
 		t.Fatalf("backends = %#v", contract.Backends)
 	}
 	for _, command := range []string{"prepare", "start", "run", "inspect", "halt", "quarantine", "pause", "resume", "snapshot", "stop", "kill", "delete"} {

@@ -22,7 +22,7 @@ var consoleSendTokenPattern = regexp.MustCompile(`__ma_token=([0-9]+)`)
 func TestDialConsoleRejectsPausedWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent"
-	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendLinuxKVM}
 	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +39,7 @@ func TestDialConsoleRejectsPausedWorkspace(t *testing.T) {
 func TestSendConsoleCommandReturnsTimeoutWithPartialOutput(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent"
-	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendLinuxKVM}
 	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestSendConsoleCommandReturnsTimeoutWithPartialOutput(t *testing.T) {
 func TestSendConsoleCommandCompletionMarkerIsSuccess(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent"
-	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendLinuxKVM}
 	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestCommandReadinessRejectsAcceptThenClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendLinuxKVM}
 	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +312,7 @@ func writeRunningConsoleState(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	name := "agent"
-	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendLinuxKVM}
 	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
 	if err != nil {
 		t.Fatal(err)

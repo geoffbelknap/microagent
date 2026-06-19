@@ -15,7 +15,7 @@ import (
 func TestOptionsFromManifestThreadsEgressToConfig(t *testing.T) {
 	base := Options{
 		Name:       "ws",
-		Backend:    vmkit.BackendFirecracker,
+		Backend:    vmkit.BackendLinuxKVM,
 		KernelPath: "/k",
 		StateDir:   t.TempDir(),
 		Network:    vmkit.NetworkConfig{Mode: "user"},

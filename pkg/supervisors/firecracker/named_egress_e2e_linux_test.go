@@ -247,7 +247,7 @@ func missingTProxyModules() []string {
 
 func (h *namedE2EHarness) installKernel() {
 	h.t.Helper()
-	out, err := h.runCLI(3*time.Minute, "kernel", "install", "--backend", "firecracker", "--arch", "amd64")
+	out, err := h.runCLI(3*time.Minute, "kernel", "install", "--backend", "linux-kvm", "--arch", "amd64")
 	if err != nil {
 		h.t.Fatalf("kernel install failed: %v\n%s", err, out)
 	}
@@ -358,7 +358,7 @@ func (h *namedE2EHarness) writePreparedManifest(name, egressMode string, egressA
 			"requestID": name + "-prepared",
 			"runtimeID": name,
 			"role":      "workload",
-			"backend":   "firecracker",
+			"backend":   "linux-kvm",
 		},
 		"state":      "prepared",
 		"detail":     "prepared for named egress e2e",

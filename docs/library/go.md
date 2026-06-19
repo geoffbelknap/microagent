@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-18_
+_Last updated: 2026-06-19_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -283,7 +283,7 @@ assets directly.
 
 ```go
 result, err := kernel.Install(ctx, kernel.InstallOptions{
-	Backend:      vmkit.BackendFirecracker,
+	Backend:      vmkit.BackendLinuxKVM,
 	Architecture: "amd64",
 })
 if err != nil {
@@ -322,7 +322,7 @@ Use `pkg/diagnostics` for host preflight checks.
 
 ```go
 resp, err := diagnostics.Check(ctx, diagnostics.Options{
-	Backend: vmkit.BackendFirecracker,
+	Backend: vmkit.BackendLinuxKVM,
 	Arch:    "amd64",
 })
 if err != nil {

@@ -70,7 +70,7 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	}
 	req, err := readRequest(args)
 	if err != nil {
-		resp := vmkit.Response{OK: false, Backend: vmkit.BackendFirecracker, Error: err.Error()}
+		resp := vmkit.Response{OK: false, Backend: vmkit.BackendLinuxKVM, Error: err.Error()}
 		_ = writeResponse(stdout, resp)
 		return err
 	}

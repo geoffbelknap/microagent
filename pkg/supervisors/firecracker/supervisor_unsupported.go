@@ -24,7 +24,7 @@ type Supervisor struct {
 
 func (s Supervisor) Do(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
 	err := fmt.Errorf("firecracker supervisor is only supported on linux")
-	return vmkit.Response{OK: false, Backend: vmkit.BackendFirecracker, Error: err.Error()}, err
+	return vmkit.Response{OK: false, Backend: vmkit.BackendLinuxKVM, Error: err.Error()}, err
 }
 
 func ResolveBinary() (string, error) {

@@ -28,7 +28,7 @@ func TestSnapshotListAndRemoveAreHostSide(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker}
+	opts := Options{Name: name, StateDir: dir, Backend: vmkit.BackendLinuxKVM}
 
 	infos, err := SnapshotList(opts)
 	if err != nil {
@@ -51,7 +51,7 @@ func TestSnapshotListAndRemoveAreHostSide(t *testing.T) {
 }
 
 func TestSnapshotRemoveRejectsMissingTag(t *testing.T) {
-	opts := Options{Name: "agent-1", StateDir: t.TempDir(), Backend: vmkit.BackendFirecracker}
+	opts := Options{Name: "agent-1", StateDir: t.TempDir(), Backend: vmkit.BackendLinuxKVM}
 	if err := SnapshotRemove(opts, "ghost"); err == nil {
 		t.Fatal("expected error removing a missing snapshot")
 	}
@@ -62,7 +62,7 @@ func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
 	opts := Options{
 		Name:           "agent-1",
 		StateDir:       dir,
-		Backend:        vmkit.BackendFirecracker,
+		Backend:        vmkit.BackendLinuxKVM,
 		SupervisorPath: filepath.Join(dir, "no-such-supervisor"),
 	}
 	// With a missing supervisor binary, both calls fail at dispatch — but they
@@ -170,7 +170,7 @@ func TestValidateHostnameRejectsInvalidValues(t *testing.T) {
 }
 
 func TestBackendOwnsRuntimeState(t *testing.T) {
-	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendWindowsHyperV} {
+	for _, backend := range []string{vmkit.BackendLinuxKVM, vmkit.BackendWindowsHyperV} {
 		if !backendOwnsRuntimeState(backend) {
 			t.Fatalf("backendOwnsRuntimeState(%q) = false, want true", backend)
 		}
@@ -386,7 +386,7 @@ func TestStatusRunningWorkspaceStillChecksCurrentRootfs(t *testing.T) {
 }
 
 func TestReadinessFromRuntimeRequiresLiveShellTarget(t *testing.T) {
-	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendAppleVF} {
+	for _, backend := range []string{vmkit.BackendLinuxKVM, vmkit.BackendAppleVF} {
 		t.Run(backend, func(t *testing.T) {
 			dir := t.TempDir()
 			runtimeDir := filepath.Join(dir, "agent")
@@ -648,7 +648,7 @@ func TestApplyUpdatesStoppedWorkspaceNetwork(t *testing.T) {
 	if err := WriteManifest(opts); err != nil {
 		t.Fatal(err)
 	}
-	result, err := Apply(t.Context(), Options{StateDir: dir, Backend: vmkit.BackendFirecracker}, Spec{
+	result, err := Apply(t.Context(), Options{StateDir: dir, Backend: vmkit.BackendLinuxKVM}, Spec{
 		Name: "homebridge",
 		Network: NetworkSpec{
 			Mode:         "user",
@@ -697,7 +697,7 @@ func TestApplyRejectsLiveNonHostNetworkChange(t *testing.T) {
 	if err := WriteProcessState(opts, req, vmkit.StateRunning, 123, ""); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Apply(t.Context(), Options{StateDir: dir, Backend: vmkit.BackendFirecracker}, Spec{
+	_, err = Apply(t.Context(), Options{StateDir: dir, Backend: vmkit.BackendLinuxKVM}, Spec{
 		Name: "homebridge",
 		Network: NetworkSpec{
 			Mode:         "user",
@@ -755,8 +755,8 @@ func TestWorkspaceRootfsPathUsesBackendFormat(t *testing.T) {
 		wantFormat string
 	}{
 		{
-			name:       "firecracker",
-			backend:    vmkit.BackendFirecracker,
+			name:       "linux-kvm",
+			backend:    vmkit.BackendLinuxKVM,
 			wantSuffix: filepath.Join("workspaces", "research", "rootfs.ext4"),
 			wantFormat: rootfs.FormatExt4,
 		},
@@ -802,8 +802,8 @@ func TestWorkspaceDiskPathUsesBackendFormat(t *testing.T) {
 		wantFormat string
 	}{
 		{
-			name:       "firecracker",
-			backend:    vmkit.BackendFirecracker,
+			name:       "linux-kvm",
+			backend:    vmkit.BackendLinuxKVM,
 			wantSuffix: filepath.Join("workspaces", "research", "disks", "work.ext4"),
 			wantFormat: rootfs.FormatExt4,
 		},
@@ -952,7 +952,7 @@ func TestEnsureCanCreateRejectsRunningWorkspace(t *testing.T) {
 }
 
 func TestDetachedSupervisorCommandUsesStartForPersistentBackends(t *testing.T) {
-	for _, backend := range []string{vmkit.BackendFirecracker, vmkit.BackendWindowsHyperV} {
+	for _, backend := range []string{vmkit.BackendLinuxKVM, vmkit.BackendWindowsHyperV} {
 		if got := detachedSupervisorCommand(backend); got != "start" {
 			t.Fatalf("detachedSupervisorCommand(%q) = %q, want start", backend, got)
 		}
@@ -1104,7 +1104,7 @@ func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
 	opts := Options{
 		Name:       "agent-1",
-		Backend:    vmkit.BackendFirecracker,
+		Backend:    vmkit.BackendLinuxKVM,
 		KernelPath: "/k",
 		StateDir:   t.TempDir(),
 		MemoryMiB:  512,
@@ -1136,7 +1136,7 @@ func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
 func TestApplyManifestPreservesOffForStart(t *testing.T) {
 	opts := Options{
 		Name:       "agent-1",
-		Backend:    vmkit.BackendFirecracker,
+		Backend:    vmkit.BackendLinuxKVM,
 		KernelPath: "/k",
 		StateDir:   t.TempDir(),
 		MemoryMiB:  512,

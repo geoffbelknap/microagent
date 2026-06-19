@@ -70,8 +70,8 @@ func TestHealthApplicable(t *testing.T) {
 		opts Options
 		want bool
 	}{
-		{"not declared", Options{Backend: vmkit.BackendFirecracker}, false},
-		{"exec on firecracker", Options{Backend: vmkit.BackendFirecracker, Health: Health{Exec: []string{"true"}}}, true},
+		{"not declared", Options{Backend: vmkit.BackendLinuxKVM}, false},
+		{"exec on firecracker", Options{Backend: vmkit.BackendLinuxKVM, Health: Health{Exec: []string{"true"}}}, true},
 		{"exec on apple-vf", Options{Backend: vmkit.BackendAppleVF, Health: Health{Exec: []string{"true"}}}, true},
 		{"exec on windows-hyperv", Options{Backend: vmkit.BackendWindowsHyperV, Health: Health{Exec: []string{"true"}}}, true},
 		{"exec on backend without structured exec", Options{Backend: "unknown", Health: Health{Exec: []string{"true"}}}, false},
@@ -218,7 +218,7 @@ func TestRunHealthProbeExec(t *testing.T) {
 		_ = execprotocol.EncodeMessage(conn, result)
 	})
 	defer stop()
-	opts := writeExecRuntimeState(t, vmkit.BackendFirecracker, vmkit.StateRunning, port)
+	opts := writeExecRuntimeState(t, vmkit.BackendLinuxKVM, vmkit.StateRunning, port)
 
 	exitCode = 0
 	if err := runHealthProbe(context.Background(), opts, Health{Exec: []string{"/bin/true"}, TimeoutSeconds: 2}); err != nil {

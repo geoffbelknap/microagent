@@ -11,7 +11,7 @@ import (
 
 func TestSampleStatsRejectsPausedWorkspace(t *testing.T) {
 	dir := t.TempDir()
-	opts := Options{Name: "agent-1", StateDir: dir, Backend: vmkit.BackendFirecracker}
+	opts := Options{Name: "agent-1", StateDir: dir, Backend: vmkit.BackendLinuxKVM}
 	req, err := Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
 	if err != nil {
 		t.Fatal(err)

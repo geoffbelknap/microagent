@@ -781,7 +781,7 @@ func TestStructuredErrorMapping(t *testing.T) {
 
 func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 	resp, err := firecrackerDoctorResponse(
-		vmkit.BackendFirecracker,
+		vmkit.BackendLinuxKVM,
 		"amd64",
 		func() (string, error) { return "/usr/local/bin/firecracker", nil },
 		func(diagnostics.Options) (string, error) {
@@ -825,8 +825,8 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 	if !resp.OK {
 		t.Fatalf("OK = false, error = %q", resp.Error)
 	}
-	if resp.Backend != vmkit.BackendFirecracker {
-		t.Fatalf("Backend = %q, want %q", resp.Backend, vmkit.BackendFirecracker)
+	if resp.Backend != vmkit.BackendLinuxKVM {
+		t.Fatalf("Backend = %q, want %q", resp.Backend, vmkit.BackendLinuxKVM)
 	}
 	if resp.Host == nil {
 		t.Fatal("Host is nil")
@@ -847,7 +847,7 @@ func TestFirecrackerDoctorDoesNotRequireAppleVFSupervisor(t *testing.T) {
 
 func TestFirecrackerDoctorReportsMissingHostSupport(t *testing.T) {
 	resp, err := firecrackerDoctorResponse(
-		vmkit.BackendFirecracker,
+		vmkit.BackendLinuxKVM,
 		"amd64",
 		func() (string, error) { return "", fmt.Errorf("firecracker binary not found") },
 		func(diagnostics.Options) (string, error) {
@@ -933,8 +933,8 @@ func TestHostNoSubcommandStillReportsDiagnostics(t *testing.T) {
 }
 
 func TestHostCommandRejectsNonHostBackend(t *testing.T) {
-	otherBackend := vmkit.BackendFirecracker
-	if hostBackend() == vmkit.BackendFirecracker {
+	otherBackend := vmkit.BackendLinuxKVM
+	if hostBackend() == vmkit.BackendLinuxKVM {
 		otherBackend = vmkit.BackendAppleVF
 	}
 	stdout, err := os.Create(filepath.Join(t.TempDir(), "stdout.json"))
@@ -977,7 +977,7 @@ func TestContractCommandReportsBackendNeutralRuntimeContract(t *testing.T) {
 	if contract.Version != "agent-runtime.v1" {
 		t.Fatalf("version = %q", contract.Version)
 	}
-	if !stringSliceContains(contract.Backends, vmkit.BackendAppleVF) || !stringSliceContains(contract.Backends, vmkit.BackendFirecracker) {
+	if !stringSliceContains(contract.Backends, vmkit.BackendAppleVF) || !stringSliceContains(contract.Backends, vmkit.BackendLinuxKVM) {
 		t.Fatalf("backends = %#v", contract.Backends)
 	}
 	if !contractItemSliceContains(contract.Commands, "quarantine") || !contractItemSliceContains(contract.ReadinessSignals, "mediationReady") || !contractItemSliceContains(contract.ResultFields, "exitCode") {
@@ -2279,7 +2279,7 @@ func TestPendingModelRelease(t *testing.T) {
 	t.Cleanup(func() { releaseHostWorkerMediator = prevReleaseMediator })
 
 	// Missing manifest must yield a silent no-op.
-	pendingModelRelease(dir, "ghost", vmkit.BackendFirecracker)()
+	pendingModelRelease(dir, "ghost", vmkit.BackendLinuxKVM)()
 
 	opts := workspace.DefaultOptions()
 	opts.Name = "ws"
@@ -2301,7 +2301,7 @@ func TestPendingModelRelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := appendWorkspaceEvent(filepath.Join(dir, "ws", "events.json"), workspaceEventFile{
-		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "ws", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "ws", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		State:      vmkit.StateRunning,
 		ObservedAt: "2026-06-15T00:00:00Z",
 	}); err != nil {
@@ -2309,7 +2309,7 @@ func TestPendingModelRelease(t *testing.T) {
 	}
 	// The ref is captured at call time: removing the manifest afterwards (as
 	// delete does) must not stop the release.
-	release := pendingModelRelease(dir, "ws", vmkit.BackendFirecracker)
+	release := pendingModelRelease(dir, "ws", vmkit.BackendLinuxKVM)
 	if err := os.RemoveAll(filepath.Join(dir, "workspaces", "ws")); err != nil {
 		t.Fatal(err)
 	}
@@ -2335,7 +2335,7 @@ func TestPendingModelRelease(t *testing.T) {
 
 func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
 	dir := t.TempDir()
-	if err := appendModelWorkerEventIfWorkspaceExists(dir, "missing", vmkit.BackendFirecracker, vmkit.StateStarting, "model_worker=attached"); err != nil {
+	if err := appendModelWorkerEventIfWorkspaceExists(dir, "missing", vmkit.BackendLinuxKVM, vmkit.StateStarting, "model_worker=attached"); err != nil {
 		t.Fatalf("missing workspace event: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "missing")); !os.IsNotExist(err) {
@@ -2351,7 +2351,7 @@ func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
 		PID:                1234,
 		RunnerConfigDigest: "digest123",
 	}
-	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendFirecracker}, runner, "http://127.0.0.1:11434/v1", nil); err != nil {
+	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendLinuxKVM}, runner, "http://127.0.0.1:11434/v1", nil); err != nil {
 		t.Fatalf("append attached event: %v", err)
 	}
 	events, err := workspace.ReadEvents(dir, "ws")
@@ -2367,10 +2367,10 @@ func TestAppendModelWorkerEventIfWorkspaceExists(t *testing.T) {
 			t.Fatalf("event detail %q missing %q", event.Detail, want)
 		}
 	}
-	if event.State != vmkit.StateStarting || event.Identity.RuntimeID != "ws" || event.Identity.Backend != vmkit.BackendFirecracker {
+	if event.State != vmkit.StateStarting || event.Identity.RuntimeID != "ws" || event.Identity.Backend != vmkit.BackendLinuxKVM {
 		t.Fatalf("event = %+v", event)
 	}
-	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendFirecracker}, runner, "http://127.0.0.1:11434/v1", &hostworker.ProcessRecord{
+	if err := appendModelWorkerAttachedEvent(workspaceOptions{StateDir: dir, Name: "ws", Backend: vmkit.BackendLinuxKVM}, runner, "http://127.0.0.1:11434/v1", &hostworker.ProcessRecord{
 		Mode:         hostworker.ModeLocalAllow,
 		PID:          5678,
 		Port:         12345,
@@ -3639,7 +3639,7 @@ func TestApplyRejectsLiveNonHostNetworkChange(t *testing.T) {
 			RequestID: "req-1",
 			RuntimeID: "homebridge",
 			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendFirecracker,
+			Backend:   vmkit.BackendLinuxKVM,
 		},
 		Config: &vmkit.Config{
 			KernelPath: "/tmp/kernel",
@@ -3668,7 +3668,7 @@ network:
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = run(t.Context(), []string{"apply", "--file", specPath, "--state-dir", dir, "--backend", vmkit.BackendFirecracker}, stdout)
+	err = run(t.Context(), []string{"apply", "--file", specPath, "--state-dir", dir, "--backend", vmkit.BackendLinuxKVM}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -4536,7 +4536,7 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 		if !ok {
 			t.Fatalf("host supervisor = %T, want vmkit.ExecutableSupervisor", supervisor)
 		}
-		if hostBackend() == vmkit.BackendFirecracker && executable.Path != "microagent-firecracker-supervisor" {
+		if hostBackend() == vmkit.BackendLinuxKVM && executable.Path != "microagent-firecracker-supervisor" {
 			t.Fatalf("firecracker supervisor path = %q", executable.Path)
 		}
 		if hostBackend() == vmkit.BackendAppleVF && executable.Path != "/tmp/applevf" {
@@ -4544,11 +4544,11 @@ func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
 		}
 	}
 
-	otherBackend := vmkit.BackendFirecracker
-	if hostBackend() == vmkit.BackendFirecracker {
+	otherBackend := vmkit.BackendLinuxKVM
+	if hostBackend() == vmkit.BackendLinuxKVM {
 		otherBackend = vmkit.BackendAppleVF
 	} else if hostBackend() == vmkit.BackendWindowsHyperV {
-		otherBackend = vmkit.BackendFirecracker
+		otherBackend = vmkit.BackendLinuxKVM
 	}
 	if _, err := workspaceSupervisor(workspaceOptions{Backend: otherBackend}); err == nil {
 		t.Fatalf("workspaceSupervisor(%q) err = nil, want host-only rejection", otherBackend)
@@ -6670,7 +6670,7 @@ func TestRunDispatchesLSAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	event := vmkit.Event{
-		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 		State:      vmkit.StateStopped,
 		ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
 	}
@@ -6712,7 +6712,7 @@ func TestRunPSFiltersStoppedWorkspaces(t *testing.T) {
 			t.Fatal(err)
 		}
 		event := vmkit.Event{
-			Identity:   vmkit.Identity{RequestID: "req-" + name, RuntimeID: name, Role: vmkit.RoleWorkload, Backend: vmkit.BackendFirecracker},
+			Identity:   vmkit.Identity{RequestID: "req-" + name, RuntimeID: name, Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
 			State:      state,
 			ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
 		}
@@ -7322,7 +7322,7 @@ func TestFirecrackerLegacyCreatePreparesStateLocally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"state": "prepared"`) || !strings.Contains(string(data), `"backend": "firecracker"`) {
+	if !strings.Contains(string(data), `"state": "prepared"`) || !strings.Contains(string(data), `"backend": "linux-kvm"`) {
 		t.Fatalf("runtime state = %s", data)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "agent-1", "firecracker.json")); err != nil {
@@ -7386,7 +7386,7 @@ func TestFirecrackerStatusReadsPreparedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `"state": "prepared"`) || !strings.Contains(string(data), `"backend": "firecracker"`) {
+	if !strings.Contains(string(data), `"state": "prepared"`) || !strings.Contains(string(data), `"backend": "linux-kvm"`) {
 		t.Fatalf("status output = %s", data)
 	}
 }
@@ -7462,7 +7462,7 @@ func TestDefaultKernelManifestHasAppleVFArm64(t *testing.T) {
 }
 
 func TestDefaultKernelManifestHasFirecrackerAMD64(t *testing.T) {
-	kernel, ok := defaultKernel(vmkit.BackendFirecracker, "amd64")
+	kernel, ok := defaultKernel(vmkit.BackendLinuxKVM, "amd64")
 	if !ok {
 		t.Fatal("missing firecracker amd64 kernel")
 	}
@@ -7475,7 +7475,7 @@ func TestDefaultKernelManifestHasFirecrackerAMD64(t *testing.T) {
 }
 
 func TestDefaultKernelManifestHasFirecrackerARM64(t *testing.T) {
-	kernel, ok := defaultKernel(vmkit.BackendFirecracker, "arm64")
+	kernel, ok := defaultKernel(vmkit.BackendLinuxKVM, "arm64")
 	if !ok {
 		t.Fatal("missing firecracker arm64 kernel")
 	}
@@ -7676,7 +7676,7 @@ func startCommandExecServer(t *testing.T, handle func(execprotocol.ExecRequest) 
 func writeCommandExecRuntimeState(t *testing.T, name string, state vmkit.VMState, execPort uint16) string {
 	t.Helper()
 	dir := t.TempDir()
-	opts := workspace.Options{Name: name, StateDir: dir, Backend: vmkit.BackendFirecracker, ExecPort: execPort}
+	opts := workspace.Options{Name: name, StateDir: dir, Backend: vmkit.BackendLinuxKVM, ExecPort: execPort}
 	req, err := workspace.Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
 	if err != nil {
 		t.Fatalf("workspace.Request: %v", err)
@@ -7718,9 +7718,9 @@ func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
 	defer f.Close()
 	resp := vmkit.Response{
 		OK:      true,
-		Backend: "firecracker",
+		Backend: "linux-kvm",
 		Host: &vmkit.HostSupport{
-			Backend:                "firecracker",
+			Backend:                "linux-kvm",
 			Architecture:           "amd64",
 			IPForwardEnabled:       true,
 			IsolatedNetworkReady:   true,

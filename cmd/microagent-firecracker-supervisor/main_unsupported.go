@@ -13,7 +13,7 @@ import (
 func main() {
 	resp := vmkit.Response{
 		OK:      false,
-		Backend: vmkit.BackendFirecracker,
+		Backend: vmkit.BackendLinuxKVM,
 		Error:   "firecracker supervisor is only supported on linux",
 	}
 	_ = json.NewEncoder(os.Stdout).Encode(resp)
