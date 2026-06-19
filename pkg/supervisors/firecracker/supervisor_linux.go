@@ -197,8 +197,15 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 	if opts.StateDir == "" && req.Config != nil {
 		opts.StateDir = req.Config.StateDir
 	}
-	if req.Command == "run" && os.Getenv(userNetworkDisableRunTimeoutEnv) == "1" {
-		opts.Timeout = -1
+	if req.Command == "run" && os.Getenv(userNetworkResidentEnv) == "1" {
+		// The resident user-network supervisor governs VM lifetime by the declared
+		// lease (also gc-enforced), not the foreground run-timeout: a lease caps its
+		// wait; no lease means permanent. Replaces the old "user-network runs forever".
+		if req.Config != nil && req.Config.LeaseSeconds > 0 {
+			opts.Timeout = time.Duration(req.Config.LeaseSeconds) * time.Second
+		} else {
+			opts.Timeout = -1
+		}
 	}
 	if opts.Timeout == 0 && req.Config != nil && req.Config.TimeoutSeconds > 0 {
 		opts.Timeout = time.Duration(req.Config.TimeoutSeconds) * time.Second

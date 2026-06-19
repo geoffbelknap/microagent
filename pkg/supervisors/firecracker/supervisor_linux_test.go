@@ -939,8 +939,8 @@ func TestFirecrackerReadinessReportsDeadPortForwarder(t *testing.T) {
 	}
 }
 
-func TestUserNetworkDisableRunTimeoutEnvOnlyDisablesRunTimeout(t *testing.T) {
-	t.Setenv(userNetworkDisableRunTimeoutEnv, "1")
+func TestUserNetworkResidentRunTimeoutFollowsLease(t *testing.T) {
+	t.Setenv(userNetworkResidentEnv, "1")
 	req := vmkit.Request{
 		Command: "run",
 		Identity: &vmkit.Identity{
@@ -951,10 +951,19 @@ func TestUserNetworkDisableRunTimeoutEnvOnlyDisablesRunTimeout(t *testing.T) {
 		},
 		Config: &vmkit.Config{TimeoutSeconds: 300},
 	}
+	// No declared lease: the resident supervisor's wait is disabled (permanent).
 	opts := Supervisor{}.normalizedOptions(req)
 	if opts.Timeout >= 0 {
-		t.Fatalf("run timeout = %s, want disabled", opts.Timeout)
+		t.Fatalf("no-lease resident run timeout = %s, want disabled (permanent)", opts.Timeout)
 	}
+	// A declared lease caps the resident supervisor's wait at the lease.
+	req.Config.LeaseSeconds = 45
+	opts = Supervisor{}.normalizedOptions(req)
+	if opts.Timeout != 45*time.Second {
+		t.Fatalf("leased resident run timeout = %s, want 45s", opts.Timeout)
+	}
+	// Non-resident start keeps the configured run-timeout.
+	req.Config.LeaseSeconds = 0
 	req.Command = "start"
 	opts = Supervisor{}.normalizedOptions(req)
 	if opts.Timeout != 300*time.Second {

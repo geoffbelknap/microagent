@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	userNetworkNamespaceEnv         = "MICROAGENT_FIRECRACKER_USER_NETWORK"
-	userNetworkPastaPIDEnv          = "MICROAGENT_FIRECRACKER_PASTA_PID_FILE"
-	userNetworkDisableRunTimeoutEnv = "MICROAGENT_FIRECRACKER_DISABLE_RUN_TIMEOUT"
+	userNetworkNamespaceEnv = "MICROAGENT_FIRECRACKER_USER_NETWORK"
+	userNetworkPastaPIDEnv  = "MICROAGENT_FIRECRACKER_PASTA_PID_FILE"
+	userNetworkResidentEnv  = "MICROAGENT_FIRECRACKER_USER_NETWORK_RESIDENT"
 )
 
 func insideUserNetworkNamespace() bool {
@@ -221,7 +221,7 @@ func detachedUserNetworkRequest(req vmkit.Request) vmkit.Request {
 	return innerReq
 }
 
-func newUserNetworkCommand(ctx context.Context, opts Options, req vmkit.Request, disableRunTimeout bool) (*exec.Cmd, error) {
+func newUserNetworkCommand(ctx context.Context, opts Options, req vmkit.Request, resident bool) (*exec.Cmd, error) {
 	pasta, err := resolveUserNetworkBinary()
 	if err != nil {
 		return nil, err
@@ -239,7 +239,7 @@ func newUserNetworkCommand(ctx context.Context, opts Options, req vmkit.Request,
 		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, pasta, userNetworkArgs(supervisor, pidFile, string(requestJSON))...)
-	cmd.Env = userNetworkEnv(opts, pidFile, disableRunTimeout)
+	cmd.Env = userNetworkEnv(opts, pidFile, resident)
 	return cmd, nil
 }
 
@@ -257,13 +257,13 @@ func userNetworkArgs(supervisor, pidFile, requestJSON string) []string {
 	}
 }
 
-func userNetworkEnv(opts Options, pidFile string, disableRunTimeout bool) []string {
+func userNetworkEnv(opts Options, pidFile string, resident bool) []string {
 	env := append(os.Environ(),
 		userNetworkNamespaceEnv+"=1",
 		userNetworkPastaPIDEnv+"="+pidFile,
 	)
-	if disableRunTimeout {
-		env = append(env, userNetworkDisableRunTimeoutEnv+"=1")
+	if resident {
+		env = append(env, userNetworkResidentEnv+"=1")
 	}
 	if opts.FirecrackerPath != "" {
 		env = append(env, "MICROAGENT_FIRECRACKER="+opts.FirecrackerPath)
