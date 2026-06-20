@@ -37,7 +37,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/microagent-model-mediation-pressure-presets.sh"
 
 CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
-OUT_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_OUT_DIR:-/tmp/ma-e2e-mm-runner-fake-$(date +%Y%m%d%H%M%S)}"
+OUT_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_OUT_DIR:-/tmp/microagent-e2e-model-mediation-runner-fake-$(date +%Y%m%d%H%M%S)}"
 STATE_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_STATE_DIR:-$OUT_DIR/state}"
 KEEP_FAILED="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_KEEP:-${MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE:-0}}"
 KEEP_STATE="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_KEEP_STATE:-0}"

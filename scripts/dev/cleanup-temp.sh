@@ -133,11 +133,11 @@ find_candidates() {
   local root="$1"
   if [ "$all" -eq 1 ]; then
     find "$root" -maxdepth 1 \
-      \( -name 'microagent-*' -o -name 'microvm-rootfs-smoke*' \) \
+      \( -name 'microagent-*' -o -name 'ma-e2e-mm-*' -o -name 'microvm-rootfs-smoke*' \) \
       -print
   else
     find "$root" -maxdepth 1 \
-      \( -name 'microagent-*' -o -name 'microvm-rootfs-smoke*' \) \
+      \( -name 'microagent-*' -o -name 'ma-e2e-mm-*' -o -name 'microvm-rootfs-smoke*' \) \
       -mmin "+$((min_age_hours * 60))" \
       -print
   fi
