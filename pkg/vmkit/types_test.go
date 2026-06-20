@@ -224,26 +224,26 @@ func TestValidateConfigRejectsBadDiskMode(t *testing.T) {
 }
 
 func TestValidateNetworkConfigRejectsInvalidMode(t *testing.T) {
-	if err := ValidateNetworkConfig(NetworkConfig{Mode: "open"}); err == nil {
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "open"}, ""); err == nil {
 		t.Fatal("ValidateNetworkConfig accepted invalid mode")
 	}
 }
 
 func TestValidateNetworkConfigAcceptsUserMode(t *testing.T) {
-	if err := ValidateNetworkConfig(NetworkConfig{Mode: "user"}); err != nil {
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "user"}, ""); err != nil {
 		t.Fatalf("ValidateNetworkConfig user: %v", err)
 	}
 }
 
 func TestBridgedRequiresUnsupported(t *testing.T) {
-	err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged"})
+	err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged"}, "")
 	if err == nil {
 		t.Fatal("ValidateNetworkConfig accepted bridged without unsupported ack")
 	}
 	if !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("ValidateNetworkConfig bridged error = %q, want it to mention unsupported", err)
 	}
-	if err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged", Unsupported: true}); err != nil {
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged", Unsupported: true}, ""); err != nil {
 		t.Fatalf("ValidateNetworkConfig bridged with unsupported ack: %v", err)
 	}
 }
@@ -254,7 +254,7 @@ func TestNatNamedRequireUnsupported(t *testing.T) {
 		if mode == "named" {
 			cfg.Name = "netA"
 		}
-		if err := ValidateNetworkConfig(cfg); err == nil {
+		if err := ValidateNetworkConfig(cfg, ""); err == nil {
 			t.Fatalf("ValidateNetworkConfig accepted %s without unsupported ack", mode)
 		} else if !strings.Contains(err.Error(), "unsupported") {
 			t.Fatalf("ValidateNetworkConfig %s error = %q, want it to mention unsupported", mode, err)
@@ -263,9 +263,35 @@ func TestNatNamedRequireUnsupported(t *testing.T) {
 		if mode == "named" {
 			ack.Name = "netA"
 		}
-		if err := ValidateNetworkConfig(ack); err != nil {
+		if err := ValidateNetworkConfig(ack, ""); err != nil {
 			t.Fatalf("ValidateNetworkConfig %s with unsupported ack: %v", mode, err)
 		}
+	}
+}
+
+// TestNatIsRelialyMediatedOnWindowsHyperV verifies the backend-specific relaxation:
+// nat mode does not require --unsupported on windows-hyperv because the managed NAT
+// network is reliably egress-mediated on that backend.
+func TestNatIsReliablyMediatedOnWindowsHyperV(t *testing.T) {
+	// nat on windows-hyperv must not require --unsupported.
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "nat"}, BackendWindowsHyperV); err != nil {
+		t.Fatalf("ValidateNetworkConfig(nat, windows-hyperv) = %v, want nil", err)
+	}
+	// nat on linux-kvm is still gated.
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "nat"}, BackendLinuxKVM); err == nil {
+		t.Fatal("ValidateNetworkConfig(nat, linux-kvm) = nil, want error")
+	}
+	// nat with empty backend (conservative default) is still gated.
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "nat"}, ""); err == nil {
+		t.Fatal("ValidateNetworkConfig(nat, \"\") = nil, want error")
+	}
+	// bridged is still gated even on windows-hyperv.
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged"}, BackendWindowsHyperV); err == nil {
+		t.Fatal("ValidateNetworkConfig(bridged, windows-hyperv) = nil, want error")
+	}
+	// named is still gated even on windows-hyperv.
+	if err := ValidateNetworkConfig(NetworkConfig{Mode: "named", Name: "x"}, BackendWindowsHyperV); err == nil {
+		t.Fatal("ValidateNetworkConfig(named, windows-hyperv) = nil, want error")
 	}
 }
 
@@ -276,7 +302,7 @@ func TestValidateNetworkConfigRejectsIsolatedPortForwards(t *testing.T) {
 			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
 		},
 	}
-	if err := ValidateNetworkConfig(cfg); err == nil {
+	if err := ValidateNetworkConfig(cfg, ""); err == nil {
 		t.Fatal("ValidateNetworkConfig accepted isolated port forward")
 	}
 }
@@ -289,7 +315,7 @@ func TestValidateNetworkConfigRejectsUnsupportedPortForwardProtocol(t *testing.T
 			{Protocol: "udp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
 		},
 	}
-	if err := ValidateNetworkConfig(cfg); err == nil {
+	if err := ValidateNetworkConfig(cfg, ""); err == nil {
 		t.Fatal("ValidateNetworkConfig accepted udp port forward")
 	}
 }
@@ -303,7 +329,7 @@ func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
 			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 8080},
 		},
 	}
-	if err := ValidateNetworkConfig(cfg); err == nil {
+	if err := ValidateNetworkConfig(cfg, ""); err == nil {
 		t.Fatal("ValidateNetworkConfig accepted duplicate host ports")
 	}
 }

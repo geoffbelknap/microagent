@@ -475,7 +475,7 @@ func ValidateConfig(config *Config) error {
 		}
 	}
 	if config.Network != nil {
-		if err := ValidateNetworkConfig(*config.Network); err != nil {
+		if err := ValidateNetworkConfig(*config.Network, ""); err != nil {
 			return err
 		}
 	}
@@ -562,7 +562,7 @@ func ValidateMediationConfig(mediation MediationConfig) error {
 	return nil
 }
 
-func ValidateNetworkConfig(network NetworkConfig) error {
+func ValidateNetworkConfig(network NetworkConfig, backend string) error {
 	mode := strings.TrimSpace(network.Mode)
 	if mode == "" {
 		mode = "user"
@@ -572,17 +572,22 @@ func ValidateNetworkConfig(network NetworkConfig) error {
 	default:
 		return fmt.Errorf("network.mode must be user, nat, isolated, bridged, or named")
 	}
-	// nat/named/bridged are gated behind an explicit --unsupported acknowledgement:
-	// transparent egress mediation is only reliable in the per-netns user/pasta path,
-	// so the host-netns modes are not guaranteed-mediated and default to fail-closed
-	// (refused) rather than silently running unmediated. bridged additionally bypasses
-	// mediation by design.
+	// bridged and named are gated behind an explicit --unsupported acknowledgement on all
+	// backends: bridged bypasses mediation by design, and named networks are not
+	// guaranteed-mediated. nat is also gated on most backends (only the per-netns
+	// user/pasta path is reliably mediated there), but on backends where NatReliablyMediated
+	// is true (currently windows-hyperv, where user and nat both map to the managed NAT
+	// adapter) the gate is lifted.
 	if !network.Unsupported {
 		switch mode {
 		case "bridged":
 			return fmt.Errorf("bridged networking is unsupported and unmediated; pass --unsupported to use it anyway")
-		case "nat", "named":
-			return fmt.Errorf("%s networking is unsupported and not reliably egress-mediated (only user mode is); pass --unsupported to use it anyway", mode)
+		case "named":
+			return fmt.Errorf("named networking is unsupported and not reliably egress-mediated (only user mode is); pass --unsupported to use it anyway")
+		case "nat":
+			if backend == "" || !BackendCapabilities(backend).NatReliablyMediated {
+				return fmt.Errorf("nat networking is unsupported and not reliably egress-mediated (only user mode is); pass --unsupported to use it anyway")
+			}
 		}
 	}
 	if mode == "named" && strings.TrimSpace(network.Name) == "" {

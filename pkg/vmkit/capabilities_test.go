@@ -42,6 +42,7 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				ShellReadinessProbe:  true,
 				SCSIBlockDevices:     true,
 				GuestMediatedCopy:    true,
+				NatReliablyMediated:  true,
 			},
 		},
 	}

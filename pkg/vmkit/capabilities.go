@@ -47,6 +47,14 @@ type Capabilities struct {
 	// state, and the working Hyper-V mechanisms (Save-VM/checkpoints) belong
 	// to VMMS, which the HCS-direct backend deliberately does not use.
 	Snapshot bool
+	// NatReliablyMediated reports whether the backend's nat mode is reliably
+	// egress-mediated, so it does not require the --unsupported acknowledgment.
+	// On windows-hyperv the user and nat modes both map to ensureManagedNATNetwork
+	// (the adapter rewrites mode to "nat"), and egress mediation is applied to
+	// that managed NAT adapter — so nat is as safe as user there. On linux-kvm
+	// and apple-vf only the user/pasta path is reliably mediated, so nat remains
+	// gated behind --unsupported on those backends.
+	NatReliablyMediated bool
 }
 
 // BackendCapabilities returns the capability table entry for a backend.
@@ -83,6 +91,7 @@ func BackendCapabilities(backend string) Capabilities {
 			ShellReadinessProbe:  true,
 			SCSIBlockDevices:     true,
 			GuestMediatedCopy:    true,
+			NatReliablyMediated:  true,
 		}
 	default:
 		return Capabilities{}

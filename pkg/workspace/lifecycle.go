@@ -1289,7 +1289,7 @@ func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 	}
 	opts.RestartPolicy = NormalizeRestartPolicy(opts.RestartPolicy)
 	opts.Network = NormalizeNetworkConfig(opts.Network)
-	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
+	if err := vmkit.ValidateNetworkConfig(opts.Network, opts.Backend); err != nil {
 		return err
 	}
 	if strings.TrimSpace(opts.Hostname) == "" {

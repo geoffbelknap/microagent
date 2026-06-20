@@ -151,7 +151,7 @@ func TestNetworkSpecRoundTripPreservesUnsupportedAck(t *testing.T) {
 	if !cfg.Unsupported {
 		t.Fatalf("NetworkConfigFromSpec dropped the unsupported ack: %#v", cfg)
 	}
-	if err := vmkit.ValidateNetworkConfig(cfg); err != nil {
+	if err := vmkit.ValidateNetworkConfig(cfg, ""); err != nil {
 		t.Fatalf("round-tripped bridged+unsupported config failed validation: %v", err)
 	}
 }
@@ -163,7 +163,7 @@ func TestNetworkSpecBridgedWithoutAckStillRejectedAtStart(t *testing.T) {
 	if cfg.Unsupported {
 		t.Fatalf("bridged spec without ack should not set Unsupported: %#v", cfg)
 	}
-	if err := vmkit.ValidateNetworkConfig(cfg); err == nil {
+	if err := vmkit.ValidateNetworkConfig(cfg, ""); err == nil {
 		t.Fatal("bridged config without the unsupported ack passed validation")
 	}
 }

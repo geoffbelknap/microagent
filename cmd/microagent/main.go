@@ -788,7 +788,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
-	warnIfUnmediatedNetwork(os.Stderr, opts.Network.Mode)
+	warnIfUnmediatedNetwork(os.Stderr, opts.Network.Mode, opts.Backend)
 
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
@@ -3538,13 +3538,19 @@ func parseForkSnapshotRef(ref string) (string, string, error) {
 // (bridged, nat, named). It is fired once per start/run from the CLI so the
 // operator sees it in their terminal. These modes still work (behind
 // --unsupported); this only makes the risk impossible to miss. The supported,
-// mediated modes (user, isolated) emit nothing.
-func warnIfUnmediatedNetwork(w io.Writer, mode string) {
+// mediated modes (user, isolated) emit nothing. On backends where nat is
+// reliably mediated (NatReliablyMediated == true, e.g. windows-hyperv), the
+// nat warning is suppressed because it no longer applies.
+func warnIfUnmediatedNetwork(w io.Writer, mode, backend string) {
 	switch strings.TrimSpace(mode) {
 	case "bridged":
 		fmt.Fprintln(w, "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.")
-	case "nat", "named":
+	case "named":
 		fmt.Fprintf(w, "⚠ %s networking is UNSUPPORTED — egress mediation is not reliable in this mode; use the default user mode for mediated egress. Not covered by microagent's security model.\n", strings.TrimSpace(mode))
+	case "nat":
+		if !vmkit.BackendCapabilities(backend).NatReliablyMediated {
+			fmt.Fprintf(w, "⚠ %s networking is UNSUPPORTED — egress mediation is not reliable in this mode; use the default user mode for mediated egress. Not covered by microagent's security model.\n", strings.TrimSpace(mode))
+		}
 	}
 }
 
@@ -3645,7 +3651,7 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 		// The effective network mode on start comes from the persisted manifest,
 		// not a CLI flag; warn off the manifest so a bridged workspace is flagged
 		// on every boot.
-		warnIfUnmediatedNetwork(os.Stderr, manifest.Network.Mode)
+		warnIfUnmediatedNetwork(os.Stderr, manifest.Network.Mode, opts.Backend)
 		var manifestRunner workspace.ModelRunnerSpec
 		if manifest.ModelRunner != nil {
 			manifestRunner = *manifest.ModelRunner
@@ -4271,7 +4277,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		}
 	}
 	opts.Network = normalizeNetworkConfig(opts.Network)
-	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
+	if err := vmkit.ValidateNetworkConfig(opts.Network, opts.Backend); err != nil {
 		return workspaceOptions{}, err
 	}
 	if command != "create" && strings.TrimSpace(opts.ServiceCommand) != "" {
@@ -6824,7 +6830,7 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 	}
 	config.VsockListeners = listeners
 	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, Interface: networkInterface, Unsupported: networkUnsupported, PortForwards: portForwards})
-	if err := vmkit.ValidateNetworkConfig(network); err != nil {
+	if err := vmkit.ValidateNetworkConfig(network, identity.Backend); err != nil {
 		return vmkit.Request{}, err
 	}
 	config.Network = &network
@@ -7105,7 +7111,7 @@ func parsePortForward(raw string) (vmkit.PortForward, error) {
 		HostPort:  uint16(hostPort),
 		GuestPort: uint16(guestPort),
 	}
-	if err := vmkit.ValidateNetworkConfig(vmkit.NetworkConfig{Mode: defaultNetworkMode, PortForwards: []vmkit.PortForward{forward}}); err != nil {
+	if err := vmkit.ValidateNetworkConfig(vmkit.NetworkConfig{Mode: defaultNetworkMode, PortForwards: []vmkit.PortForward{forward}}, ""); err != nil {
 		return vmkit.PortForward{}, err
 	}
 	return normalizeNetworkConfig(vmkit.NetworkConfig{PortForwards: []vmkit.PortForward{forward}}).PortForwards[0], nil

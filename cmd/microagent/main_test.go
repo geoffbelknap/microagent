@@ -1398,7 +1398,7 @@ func TestRequestForCommandBridgedRequiresUnsupported(t *testing.T) {
 
 func TestBridgedStartEmitsUnsupportedWarning(t *testing.T) {
 	var buf bytes.Buffer
-	warnIfUnmediatedNetwork(&buf, "bridged")
+	warnIfUnmediatedNetwork(&buf, "bridged", "")
 	got := buf.String()
 	if !strings.Contains(got, "UNSUPPORTED") {
 		t.Fatalf("bridged warning = %q, want it to contain UNSUPPORTED", got)
@@ -1412,7 +1412,7 @@ func TestBridgedStartEmitsUnsupportedWarning(t *testing.T) {
 func TestNatNamedStartEmitsUnsupportedWarning(t *testing.T) {
 	for _, mode := range []string{"nat", "named"} {
 		var buf bytes.Buffer
-		warnIfUnmediatedNetwork(&buf, mode)
+		warnIfUnmediatedNetwork(&buf, mode, "")
 		got := buf.String()
 		if !strings.Contains(got, "UNSUPPORTED") {
 			t.Fatalf("%s warning = %q, want it to contain UNSUPPORTED", mode, got)
@@ -1426,10 +1426,27 @@ func TestNatNamedStartEmitsUnsupportedWarning(t *testing.T) {
 func TestMediatedModesEmitNoWarning(t *testing.T) {
 	for _, mode := range []string{"user", "isolated", ""} {
 		var buf bytes.Buffer
-		warnIfUnmediatedNetwork(&buf, mode)
+		warnIfUnmediatedNetwork(&buf, mode, "")
 		if buf.Len() != 0 {
 			t.Fatalf("mode %q emitted a warning: %q", mode, buf.String())
 		}
+	}
+}
+
+func TestNatOnWindowsHyperVEmitsNoWarning(t *testing.T) {
+	var buf bytes.Buffer
+	warnIfUnmediatedNetwork(&buf, "nat", vmkit.BackendWindowsHyperV)
+	if buf.Len() != 0 {
+		t.Fatalf("nat on windows-hyperv emitted a warning: %q", buf.String())
+	}
+}
+
+func TestNatOnLinuxKVMEmitsUnsupportedWarning(t *testing.T) {
+	var buf bytes.Buffer
+	warnIfUnmediatedNetwork(&buf, "nat", vmkit.BackendLinuxKVM)
+	got := buf.String()
+	if !strings.Contains(got, "UNSUPPORTED") {
+		t.Fatalf("nat on linux-kvm warning = %q, want it to contain UNSUPPORTED", got)
 	}
 }
 

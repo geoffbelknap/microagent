@@ -46,7 +46,7 @@ func Apply(ctx context.Context, opts Options, spec Spec) (ApplyResult, error) {
 	}
 	if specHasNetwork(spec.Network) {
 		network := NormalizeNetworkConfig(NetworkConfigFromSpec(spec.Network))
-		if err := vmkit.ValidateNetworkConfig(network); err != nil {
+		if err := vmkit.ValidateNetworkConfig(network, opts.Backend); err != nil {
 			return ApplyResult{}, err
 		}
 		networkSpec := NetworkSpecFromConfig(network)
