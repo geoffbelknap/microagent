@@ -143,10 +143,10 @@ find_candidates() {
   fi
 }
 
-candidate_file="$(mktemp -t makit-cleanup.XXXXXX)"
-filtered_file="$(mktemp -t makit-cleanup-filtered.XXXXXX)"
-live_file="$(mktemp -t makit-cleanup-live.XXXXXX)"
-process_file="$(mktemp -t makit-cleanup-processes.XXXXXX)"
+candidate_file="$(mktemp -t microagent-cleanup.XXXXXX)"
+filtered_file="$(mktemp -t microagent-cleanup-filtered.XXXXXX)"
+live_file="$(mktemp -t microagent-cleanup-live.XXXXXX)"
+process_file="$(mktemp -t microagent-cleanup-processes.XXXXXX)"
 trap 'rm -f "$candidate_file" "$filtered_file" "$live_file" "$process_file"' EXIT
 
 snapshot_processes() {
