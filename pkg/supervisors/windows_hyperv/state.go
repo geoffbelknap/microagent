@@ -179,6 +179,104 @@ type runtimeState struct {
 	Error                  string                 `json:"error,omitempty"`
 }
 
+// lastActivityTime reads the mtime of the per-workspace activity marker that
+// workspace.MarkActivity stamps on each genuine exec/connect. ok=false before any
+// activity has been recorded. Keep the "activity" filename in sync with
+// workspace.MarkActivity (the renewal signal is written there, backend-neutral).
+func lastActivityTime(stateDir, name string) (time.Time, bool) {
+	fi, err := os.Stat(filepath.Join(stateDir, name, "activity"))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return fi.ModTime(), true
+}
+
+// leaseExpired reports whether a declared idle lease has elapsed: the workspace
+// set Config.LeaseSeconds > 0 and has now been idle (no exec/connect, which stamp
+// the shared activity marker) past it, measured from max(StartedAt, last
+// activity). A zero lease means permanent. Mirrors the firecracker supervisor's
+// idle-renewal lease so behaviour is identical across backends.
+func leaseExpired(state runtimeState, stateDir, name string) bool {
+	if state.Config.LeaseSeconds <= 0 {
+		return false
+	}
+	base := time.Time{}
+	if state.StartedAt != "" {
+		if t, err := time.Parse(time.RFC3339, state.StartedAt); err == nil {
+			base = t
+		}
+	}
+	if at, ok := lastActivityTime(stateDir, name); ok && at.After(base) {
+		base = at
+	}
+	if base.IsZero() {
+		return false
+	}
+	return time.Now().After(base.Add(time.Duration(state.Config.LeaseSeconds) * time.Second))
+}
+
+// currentStateResponse builds a response from the recorded state without
+// changing it (the gc healthy / not-a-candidate paths).
+func currentStateResponse(state runtimeState) (vmkit.Response, error) {
+	event, err := eventFromFile(state.Event)
+	if err != nil {
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	readiness := runtimeReadinessForState(state)
+	resp := vmkit.Response{OK: state.Event.State != vmkit.StateFailed, Backend: vmkit.BackendWindowsHyperV, Event: &event, Readiness: &readiness}
+	if state.Error != "" {
+		resp.Error = state.Error
+	}
+	return resp, nil
+}
+
+// gc reconciles one workspace: a VM recorded running/starting whose HCS compute
+// system is gone — or a live VM idle past its declared lease — is
+// reaped via the canonical kill teardown and recorded stopped. Healthy VMs within
+// their lease are untouched. This is the windows-hyperv half of microagent gc +
+// the deadman watcher; it mirrors the firecracker supervisor's gcWorkspace, using
+// the adapter's existing Exists probe for liveness instead of a process PID.
+func (s Supervisor) gc(ctx context.Context, req vmkit.Request) (vmkit.Response, error) {
+	state, err := readRuntimeState(req)
+	if err != nil {
+		return vmkit.Response{OK: false, Backend: vmkit.BackendWindowsHyperV, Error: err.Error()}, err
+	}
+	if state.Event.State != vmkit.StateRunning && state.Event.State != vmkit.StateStarting {
+		return currentStateResponse(state)
+	}
+	// Liveness: a recorded compute system that HCS no longer knows is stale.
+	// A probe error is treated as "alive" so uncertainty never reaps (mirrors the
+	// inspect reconcile: only a definite "gone" transitions the workspace).
+	alive := false
+	if state.ComputeSystemID != "" {
+		if exists, existsErr := s.runtimeAdapter().Exists(ctx, state.ComputeSystemID); existsErr != nil || exists {
+			alive = true
+		}
+	}
+	expired := leaseExpired(state, req.Config.StateDir, req.Identity.RuntimeID)
+	if alive && !expired {
+		return currentStateResponse(state)
+	}
+	reason := "reaped by gc: compute system gone"
+	if alive && expired {
+		reason = "reaped by gc: lifetime lease expired"
+	}
+	stopRuntimeListenerForTeardown(state.VsockListenerPID)
+	if alive && state.ComputeSystemID != "" {
+		if err := s.teardownComputeSystem(ctx, state.ComputeSystemID, false, s.releaseNetworkAttachments(ctx, state)); err != nil && !isMissingComputeSystem(err) {
+			return failRun(req, vmkit.StateFailed, fmt.Sprintf("gc reap failed: %s", err), err)
+		}
+	}
+	if err := s.runtimeAdapter().CleanupNetwork(ctx, state); err != nil {
+		return failRun(req, vmkit.StateFailed, fmt.Sprintf("gc network cleanup failed: %s", err), err)
+	}
+	event, err := writeRuntimeTransitionWithComputeIDsAndListenerPID(req, vmkit.StateStopped, reason, "", state.ComputeSystemID, state.ComputeSystemRuntimeID, clearVsockListenerPID)
+	if err != nil {
+		return vmkit.Response{}, err
+	}
+	return vmkit.Response{OK: true, Backend: vmkit.BackendWindowsHyperV, Event: &event}, nil
+}
+
 var startRuntimeListenersHook = startRuntimeListeners
 var startRuntimeListenerProcessHook = startRuntimeListenerProcess
 var terminateRuntimeListenerProcessHook = terminateRuntimeListenerProcess
@@ -283,6 +381,11 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 			_ = listeners.Close()
 		}
 		return vmkit.Response{}, err
+	}
+	if !foreground && runtimeReq.Config != nil && runtimeReq.Config.LeaseSeconds > 0 {
+		if _, err := startDeadmanProcessHook(runtimeReq); err != nil {
+			fmt.Fprintf(os.Stderr, "start deadman watcher: %v\n", err)
+		}
 	}
 	if foreground && listeners != nil {
 		if err := listeners.Wait(ctx); err != nil {
@@ -1188,6 +1291,77 @@ func RunRuntimeListeners(ctx context.Context, opts Options) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// RunDeadman is the per-VM idle watcher, spawned at a detached start only when a
+// lease is declared (--ttl). It polls the workspace and reaps it via gc once it
+// has been idle past its lease (renewed by exec/connect) or its compute system is
+// gone. Its own PID is never recorded in runtime state, so a reap's teardown
+// cannot kill it; it observes the resulting stopped state and exits. The gc sweep
+// remains the on-demand backstop. Mirrors the firecracker RunDeadman.
+func RunDeadman(ctx context.Context, opts Options) error {
+	for {
+		req, state, err := runtimeListenerRequest(opts)
+		if err != nil {
+			return nil // runtime state gone / missing compute IDs — nothing to watch
+		}
+		if state.Config.LeaseSeconds <= 0 {
+			return nil // no declared bound
+		}
+		if state.Event.State != vmkit.StateRunning && state.Event.State != vmkit.StateStarting {
+			return nil // stopped / halted / failed
+		}
+		if _, err := (Supervisor{}).gc(ctx, req); err != nil {
+			fmt.Fprintf(os.Stderr, "deadman reconcile %s: %v\n", opts.Name, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(deadmanPollInterval(state.Config.LeaseSeconds)):
+		}
+	}
+}
+
+// deadmanPollInterval polls at ~1/4 the lease so reap latency past the idle
+// deadline stays small, clamped to a sane band (matches the firecracker watcher).
+func deadmanPollInterval(leaseSeconds int) time.Duration {
+	d := time.Duration(leaseSeconds) * time.Second / 4
+	if d < time.Second {
+		d = time.Second
+	}
+	if d > 60*time.Second {
+		d = 60 * time.Second
+	}
+	return d
+}
+
+var startDeadmanProcessHook = startDeadmanProcess
+
+func startDeadmanProcess(req vmkit.Request) (int, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+	logPath := filepath.Join(runtimeDir(req), "deadman.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return 0, err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	cmd := exec.Command(executable, "--windows-hyperv-deadman", "--state-dir", req.Config.StateDir, "--name", req.Identity.RuntimeID)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = detachedListenerSysProcAttr()
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	_ = logFile.Close()
+	return pid, nil
 }
 
 func runtimeListenerRequest(opts Options) (vmkit.Request, runtimeState, error) {
