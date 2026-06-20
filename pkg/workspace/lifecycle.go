@@ -1930,11 +1930,19 @@ func CopyFile(source, target string, mode os.FileMode) error {
 		return err
 	}
 	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
 	if copyErr != nil {
+		_ = out.Close()
 		return copyErr
 	}
-	return closeErr
+	if chmodErr := out.Chmod(mode); chmodErr != nil {
+		_ = out.Close()
+		return chmodErr
+	}
+	closeErr := out.Close()
+	if closeErr != nil {
+		return closeErr
+	}
+	return nil
 }
 
 func parseOptionalTime(value string) *time.Time {
