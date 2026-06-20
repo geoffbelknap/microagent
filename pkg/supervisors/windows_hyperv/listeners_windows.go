@@ -140,6 +140,7 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 			_ = set.Close()
 			return nil, fmt.Errorf("build windows-hyperv egress mediator: %w", err)
 		}
+		mediator := newEgressMediator(handler, req)
 		l, err := winio.ListenHvsock(&winio.HvsockAddr{
 			VMID:      vmID,
 			ServiceID: winio.VsockServiceID(egress.DefaultMediatorVsockPort),
@@ -158,7 +159,7 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 				if err != nil {
 					return
 				}
-				go serveEgressMediatorConn(conn, handler)
+				go serveEgressMediatorConn(conn, mediator)
 			}
 		}(l)
 	}
@@ -268,19 +269,86 @@ type destConn struct {
 	dst netip.AddrPort
 }
 
+// egressMediator bundles the shared egress.Handler with the per-workspace DNS
+// upstream + forward round-trip the DNS-over-TCP path needs. The Handler carries
+// the policy/allowlist/CA/caps/audit shared across every connection; resolver and
+// dnsForward are only consulted for captured TCP/53 streams (DNS-over-TCP). One
+// mediator instance serves every accepted connection so the Handler's atomic cap
+// counters stay process-wide.
+type egressMediator struct {
+	handler  *egress.Handler
+	resolver netip.AddrPort
+	// dnsForward performs the resolver round-trip for a guest DNS-over-TCP query.
+	// Injectable for tests; production wiring (newEgressMediator) sets it to
+	// egress.DefaultDNSForwardTCP.
+	dnsForward func(resolver netip.AddrPort, query []byte) ([]byte, error)
+}
+
+// newEgressMediator builds the per-workspace mediator: the shared handler plus
+// the upstream resolver selected from the workspace's DNS config (the host's
+// configured upstream, mirroring what the guest would have used over the NAT
+// uplink before P5 removes it). DNS-over-TCP queries are forwarded to this
+// upstream via egress.DefaultDNSForwardTCP.
+func newEgressMediator(handler *egress.Handler, req vmkit.Request) *egressMediator {
+	return &egressMediator{
+		handler:    handler,
+		resolver:   egressUpstreamResolver(req),
+		dnsForward: egress.DefaultDNSForwardTCP,
+	}
+}
+
+// egressUpstreamResolver picks the upstream DNS resolver the mediator forwards
+// guest DNS-over-TCP queries to. It prefers the first valid entry in the
+// workspace's network DNS list (the host-configured upstream, e.g. the NAT
+// gateway or an HCS-vended server) and falls back to a public resolver
+// (1.1.1.1:53) when none is configured or parseable — so a mediated workspace
+// can always resolve even if the network record carried no DNS server. The
+// returned AddrPort always targets port 53.
+func egressUpstreamResolver(req vmkit.Request) netip.AddrPort {
+	const fallback = "1.1.1.1"
+	server := fallback
+	if req.Config != nil && req.Config.Network != nil {
+		for _, d := range req.Config.Network.DNS {
+			if ip, err := netip.ParseAddr(strings.TrimSpace(d)); err == nil {
+				server = ip.String()
+				break
+			}
+		}
+	}
+	ip, err := netip.ParseAddr(server)
+	if err != nil {
+		ip = netip.MustParseAddr(fallback)
+	}
+	return netip.AddrPortFrom(ip, 53)
+}
+
 // serveEgressMediatorConn services one guest-forwarded egress stream: it reads
 // the egress DestHeader (the original destination the guest observed) off the
-// front of the stream, then runs the shared internal/egress core on the
-// remainder with OrigDst injected to return that header's destination. The
-// handler enforces the workspace allowlist/passthrough, intercepts TLS per-SNI
-// with the per-workspace CA, applies the bounded-operations caps, and audits —
-// none of which is reimplemented here. A malformed/truncated header closes the
-// conn fail-closed without dialing anything upstream.
-func serveEgressMediatorConn(conn net.Conn, handler *egress.Handler) {
+// front of the stream, then either (a) handles it as DNS-over-TCP when the
+// header names TCP/53 — de-framing the query, resolving it through the shared
+// core's filtering resolver-forwarder (handleDNS: policy + REFUSED synthesis +
+// NameCache + audit) against the workspace upstream, and framing the response
+// back — or (b) runs the shared internal/egress TCP/TLS core on the remainder
+// with OrigDst injected to return the header's destination. DNS is deliberately
+// kept off the TLS-MITM path (it is not TLS). A malformed/truncated header
+// closes the conn fail-closed without dialing or resolving anything.
+func serveEgressMediatorConn(conn net.Conn, m *egressMediator) {
 	hdr, err := egress.ReadDestHeader(conn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "read egress dest header from guest: %v\n", err)
 		_ = conn.Close()
+		return
+	}
+	// DNS-over-TCP: a captured TCP/53 stream is the guest's resolver (forced onto
+	// TCP via resolv.conf "options use-vc"). Resolve it through the filtering
+	// resolver-forwarder instead of the TLS-MITM/L4-splice path. The handler is
+	// the single shared instance — handleDNS only touches policy/NameCache/audit,
+	// never the cap counters, so sharing it here is correct.
+	if hdr.Proto == "tcp" && hdr.Port == 53 {
+		defer func() { _ = conn.Close() }()
+		if err := m.handler.HandleDNSOverTCP(conn, m.resolver, m.dnsForward); err != nil {
+			fmt.Fprintf(os.Stderr, "mediate egress DNS-over-TCP: %v\n", err)
+		}
 		return
 	}
 	dst, err := destHeaderAddrPort(hdr)
@@ -293,7 +361,7 @@ func serveEgressMediatorConn(conn net.Conn, handler *egress.Handler) {
 	// stream's destination from the conn — never copy the Handler (its atomic cap
 	// counters are process-wide and must stay shared). Handle closes the wrapper
 	// (and thus conn) on return.
-	handler.Handle(&destConn{Conn: conn, dst: dst})
+	m.handler.Handle(&destConn{Conn: conn, dst: dst})
 }
 
 // destHeaderAddrPort converts a guest DestHeader into the netip.AddrPort the

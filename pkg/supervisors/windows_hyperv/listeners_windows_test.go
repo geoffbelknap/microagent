@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,7 +18,61 @@ import (
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"golang.org/x/net/dns/dnsmessage"
 )
+
+// dnsQueryA builds a minimal DNS A-record query (one question) for name with id.
+func dnsQueryA(t *testing.T, id uint16, name string) []byte {
+	t.Helper()
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
+	if err := b.StartQuestions(); err != nil {
+		t.Fatalf("StartQuestions: %v", err)
+	}
+	if err := b.Question(dnsmessage.Question{
+		Name:  dnsmessage.MustNewName(name),
+		Type:  dnsmessage.TypeA,
+		Class: dnsmessage.ClassINET,
+	}); err != nil {
+		t.Fatalf("Question: %v", err)
+	}
+	msg, err := b.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	return msg
+}
+
+// dnsResponseA builds a DNS response echoing one question and carrying a single
+// A answer (name -> ip) with the given ttl.
+func dnsResponseA(t *testing.T, id uint16, name string, ip [4]byte, ttl uint32) []byte {
+	t.Helper()
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, Response: true, RecursionAvailable: true})
+	if err := b.StartQuestions(); err != nil {
+		t.Fatalf("StartQuestions: %v", err)
+	}
+	if err := b.Question(dnsmessage.Question{
+		Name:  dnsmessage.MustNewName(name),
+		Type:  dnsmessage.TypeA,
+		Class: dnsmessage.ClassINET,
+	}); err != nil {
+		t.Fatalf("Question: %v", err)
+	}
+	if err := b.StartAnswers(); err != nil {
+		t.Fatalf("StartAnswers: %v", err)
+	}
+	if err := b.AResource(dnsmessage.ResourceHeader{
+		Name:  dnsmessage.MustNewName(name),
+		Class: dnsmessage.ClassINET,
+		TTL:   ttl,
+	}, dnsmessage.AResource{A: ip}); err != nil {
+		t.Fatalf("AResource: %v", err)
+	}
+	msg, err := b.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	return msg
+}
 
 // mediatedEgressRequest builds a request whose config has egress mediation
 // active (mediated mode + a mediating network) with the given allowlist.
@@ -70,7 +125,7 @@ func TestServeEgressMediatorConnForwardsAllowedHeaderDest(t *testing.T) {
 	}
 
 	hostConn, guestConn := net.Pipe()
-	go serveEgressMediatorConn(hostConn, handler)
+	go serveEgressMediatorConn(hostConn, newEgressMediator(handler, req))
 
 	// Guest writes the DestHeader (IP literal so no DNS), then raw (non-TLS) bytes
 	// so the core takes the L4 splice path and dials upstream via h.Dial.
@@ -114,7 +169,7 @@ func TestServeEgressMediatorConnDeniesNonAllowlistedHeaderDest(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		serveEgressMediatorConn(hostConn, handler)
+		serveEgressMediatorConn(hostConn, newEgressMediator(handler, req))
 	}()
 	go func() {
 		_ = egress.WriteDestHeader(guestConn, egress.DestHeader{Proto: "tcp", Host: "203.0.113.9", Port: 443})
@@ -154,7 +209,7 @@ func TestServeEgressMediatorConnRejectsTruncatedHeader(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		serveEgressMediatorConn(hostConn, handler)
+		serveEgressMediatorConn(hostConn, newEgressMediator(handler, req))
 	}()
 	// Write one byte then close — not a full header.
 	_, _ = guestConn.Write([]byte{0x01})
@@ -164,6 +219,74 @@ func TestServeEgressMediatorConnRejectsTruncatedHeader(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("serveEgressMediatorConn did not fail closed on truncated header")
 	}
+}
+
+// TestServeEgressMediatorConnHandlesDNSOverTCP asserts a captured TCP/53 stream
+// is routed to the DNS-over-TCP handler (not the TLS-MITM/L4 path): the front-end
+// de-frames the length-prefixed query, forwards it via the mediator's injected
+// dnsForward, and frames the response back. mediated mode allows any name so the
+// query is forwarded without an allowlist entry.
+func TestServeEgressMediatorConnHandlesDNSOverTCP(t *testing.T) {
+	req := mediatedEgressRequest(t, nil)
+	if err := mintEgressCA(req); err != nil {
+		t.Fatalf("mint CA: %v", err)
+	}
+	handler, closeHandler, err := buildEgressHandler(req)
+	if err != nil {
+		t.Fatalf("buildEgressHandler: %v", err)
+	}
+	defer closeHandler()
+	// The TCP/TLS Dial must NEVER be reached for a DNS stream.
+	handler.Dial = func(network, addr string) (net.Conn, error) {
+		t.Fatalf("DNS-over-TCP stream must not take the upstream Dial path (addr=%q)", addr)
+		return nil, nil
+	}
+	mediator := newEgressMediator(handler, req)
+	// Inject the resolver round-trip: assert the de-framed query reaches it and
+	// return a canned answer to frame back.
+	wantResp := dnsResponseA(t, 0x1234, "example.com.", [4]byte{93, 184, 216, 34}, 300)
+	forwarded := make(chan []byte, 1)
+	mediator.dnsForward = func(resolver netip.AddrPort, query []byte) ([]byte, error) {
+		forwarded <- append([]byte(nil), query...)
+		return wantResp, nil
+	}
+
+	hostConn, guestConn := net.Pipe()
+	go serveEgressMediatorConn(hostConn, mediator)
+
+	query := dnsQueryA(t, 0x1234, "example.com.")
+	go func() {
+		_ = egress.WriteDestHeader(guestConn, egress.DestHeader{Proto: "tcp", Host: "10.0.0.1", Port: 53})
+		var lenBuf [2]byte
+		lenBuf[0] = byte(len(query) >> 8)
+		lenBuf[1] = byte(len(query))
+		_, _ = guestConn.Write(lenBuf[:])
+		_, _ = guestConn.Write(query)
+	}()
+
+	select {
+	case q := <-forwarded:
+		if string(q) != string(query) {
+			t.Fatalf("forwarded query did not match the de-framed query")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("DNS-over-TCP query was not forwarded to the resolver")
+	}
+
+	// Read the framed response back off the guest side.
+	var lenBuf [2]byte
+	if _, err := io.ReadFull(guestConn, lenBuf[:]); err != nil {
+		t.Fatalf("read response length prefix: %v", err)
+	}
+	n := int(lenBuf[0])<<8 | int(lenBuf[1])
+	resp := make([]byte, n)
+	if _, err := io.ReadFull(guestConn, resp); err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	if string(resp) != string(wantResp) {
+		t.Fatalf("framed response mismatch")
+	}
+	_ = guestConn.Close()
 }
 
 // TestMintEgressCAWritesCertAndKeyWhenMediated asserts a mediated start mints the
