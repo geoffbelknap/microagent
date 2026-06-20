@@ -6408,6 +6408,359 @@ func TestWindowsHyperVModelBridgeSmoke(t *testing.T) {
 	}
 }
 
+// egressMitmHost is the allowlisted external HTTPS host the mediator MITMs. It is
+// the canonical stable target the sibling egress e2e scripts and the firecracker
+// named-egress e2e use.
+const egressMitmHost = "example.com"
+
+// egressDeniedHost is a DIFFERENT external HTTPS host that is NOT on the strict
+// allowlist, so a strict mediated guest must be refused egress to it.
+const egressDeniedHost = "www.iana.org"
+
+// egressCurlImage is alpine-based with curl (TLS), /bin/sh, and a public CA
+// bundle at /etc/ssl/certs/ca-certificates.crt — the same image the egress-mitm
+// e2e and the firecracker named-egress e2e use. The host CA delivery combines
+// that system bundle with our per-workspace egress CA into
+// /etc/microagent/egress-ca-bundle.pem, which curl pins via --cacert.
+const egressCurlImage = "docker.io/curlimages/curl:latest"
+
+// TestWindowsHyperVEgressMediation proves the windows-hyperv egress-mediation
+// path end to end on a real Hyper-V host. A mediated `user` workspace boots on
+// the no-uplink Private HNS network (microagent-mediated-egress): the in-guest
+// nft OUTPUT REDIRECT ships guest TCP to the in-guest forwarder, which forwards
+// over AF_VSOCK to the host mediator (per-SNI TLS MITM + policy + audit). The
+// subtests lock in:
+//
+//   - AllowedMITM        the allowlisted host is reached with a clean TLS chain
+//                        verified by the guest's installed per-workspace CA (the
+//                        leaf's issuer is "microagent egress"), and the host
+//                        audit records egress_allow mitm:true for it.
+//   - DeniedBlocked      a different, non-allowlisted host is refused — the guest
+//                        curl fails closed AND the audit records egress_deny.
+//   - DNSThroughMediator a name resolves (TCP/53 through the mediator, audited
+//                        egress_dns_allow); the resolv.conf forces use-vc so DNS
+//                        never leaves as unmediated UDP/53.
+//   - NoBypass           the keystone: after the guest egress-flush deletes its
+//                        own nft enforcement, egress to a public IP still FAILS
+//                        because the Private HNS network has no uplink — the
+//                        no-bypass guarantee is host-side topology, not guest nft.
+//
+// Strict mode (--egress strict + a single --egress-allow) gives one test both the
+// allow and the deny: example.com is allowlisted and MITM'd; www.iana.org is not
+// and is refused. Creating the Private HNS network needs elevation, so the smoke
+// skips when the host token is not elevated rather than failing on a permission
+// error, mirroring the named-network smoke.
+func TestWindowsHyperVEgressMediation(t *testing.T) {
+	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_EGRESS_SMOKE") != "1" {
+		t.Skip("set MICROAGENT_WINDOWS_HYPERV_EGRESS_SMOKE=1 to run the Windows Hyper-V egress-mediation smoke test")
+	}
+	if !windowsHostElevated() {
+		t.Skip("egress-mediation realizes a Private HNS network, which requires an elevated (administrator) host")
+	}
+	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
+	if kernelPath == "" {
+		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
+	}
+
+	dir := t.TempDir()
+	workspaceName := fmt.Sprintf("whv-egress-%d", time.Now().UnixNano()%1000000000)
+	cliPath := filepath.Join(dir, "microagent.exe")
+	guestInitPath := filepath.Join(dir, "microagent-guestinit")
+	// The detached start spawns the runtime listener helper (the egress mediator
+	// front-end, exec/shell bridges) from the running executable, so start must
+	// drive the real CLI binary end to end.
+	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
+	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+
+	// Mediated user workspace: strict egress, a single allowlisted host. The user
+	// network mode mediates (NetworkModeMediates), so this attaches to the Private
+	// no-uplink microagent-mediated-egress HNS network and provisions the mediator
+	// + CA. A long-lived service command keeps the guest up for the exec probes.
+	workspaceOpts := workspace.Options{
+		Name:            workspaceName,
+		Backend:         vmkit.BackendWindowsHyperV,
+		Architecture:    "amd64",
+		StateDir:        dir,
+		KernelPath:      kernelPath,
+		GuestInitPath:   guestInitPath,
+		ImageRef:        egressCurlImage,
+		ServiceCommand:  "sleep 600",
+		PrepareForStart: true,
+		MemoryMiB:       512,
+		CPUCount:        2,
+		SizeMiB:         1024,
+		Network:         vmkit.NetworkConfig{Mode: "user"},
+		EgressMode:      vmkit.EgressModeStrict,
+		EgressAllow:     []string{egressMitmHost},
+	}
+	if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
+		t.Fatalf("BuildRootfs: %v", err)
+	}
+	if err := workspace.WriteManifest(workspaceOpts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	t.Cleanup(func() {
+		// The test ctx is canceled by the deferred cancel() before t.Cleanup runs,
+		// so teardown gets its own context — otherwise stop/delete no-op and leak a
+		// running compute system and its Private HNS endpoint.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cleanupCancel()
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "stop", workspaceName, "--state-dir", dir)
+		_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", workspaceName, "--state-dir", dir, "--yes")
+	})
+
+	runExternal(t, ctx, cliPath, "start", workspaceName, "--state-dir", dir, "--kernel", kernelPath)
+	waitForWorkspaceState(t, dir, workspaceName, vmkit.StateRunning, 30*time.Second)
+
+	// Exec readiness is a structured exec round-trip through the bridge; allow the
+	// guest exec service a bounded window to come up before the egress probes run.
+	execReadyDeadline := time.Now().Add(60 * time.Second)
+	for {
+		status, err := workspace.Status(workspace.Options{
+			Name:     workspaceName,
+			Backend:  vmkit.BackendWindowsHyperV,
+			StateDir: dir,
+		})
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		if status.Readiness != nil && status.Readiness.ExecReady.Ready {
+			break
+		}
+		if time.Now().After(execReadyDeadline) {
+			logWindowsHyperVSmokeState(t, dir, workspaceName)
+			t.Fatalf("exec readiness = %#v", status.Readiness)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// guestExec runs an in-guest command via the real CLI exec path and returns its
+	// combined output, failing the test on a transport error (a non-zero in-guest
+	// exit is the caller's concern, surfaced through parsed fields). The mediated
+	// guest's curl pins the combined bundle the host delivered over the CA hvsock.
+	guestExec := func(timeout time.Duration, script string) string {
+		t.Helper()
+		execCtx, execCancel := context.WithTimeout(ctx, timeout)
+		defer execCancel()
+		out, err := runExternalOutput(execCtx, cliPath, "exec", workspaceName, "--state-dir", dir, "--", "sh", "-c", script)
+		if err != nil {
+			// A non-zero guest exit returns an *exec.ExitError but still carries the
+			// captured output we parse; only a transport-level failure is fatal here.
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) {
+				logWindowsHyperVSmokeState(t, dir, workspaceName)
+				t.Fatalf("guest exec transport error: %v\n%s", err, out)
+			}
+		}
+		return string(out)
+	}
+
+	bundle := "/etc/microagent/egress-ca-bundle.pem"
+
+	// --- AllowedMITM + DNSThroughMediator: one curl to the allowlisted host ---
+	// A clean exit-0 HTTPS fetch verified against the combined bundle proves the
+	// guest installed our CA AND the mediator MITM'd the leaf; -v issuer confirms
+	// the chain is "microagent egress" (not a self-signed error). Resolving the
+	// name at all proves DNS rode TCP/53 through the mediator (UDP/53 is dropped).
+	allowScript := strings.Join([]string{
+		"set +e",
+		"echo BUNDLE=$([ -f " + bundle + " ] && echo yes || echo no)",
+		fmt.Sprintf("curl -sS -m 25 --cacert %s https://%s/ -o /dev/null -w 'ALLOW_CODE=%%{http_code}\\n' 2>/dev/null; echo ALLOW_EXIT=$?", bundle, egressMitmHost),
+		fmt.Sprintf("echo ALLOW_ISSUER=$(curl -sS -m 25 -v --cacert %s https://%s/ 2>&1 | sed -n 's/^\\* *issuer: *//p' | head -1)", bundle, egressMitmHost),
+		"sync",
+	}, "\n")
+	allowOut := guestExec(70*time.Second, allowScript)
+	if egressField(allowOut, "BUNDLE") != "yes" {
+		t.Fatalf("combined egress CA bundle missing in guest:\n%s", allowOut)
+	}
+	if code := egressField(allowOut, "ALLOW_CODE"); code == "" {
+		t.Fatalf("allowlisted host %s returned no HTTP code (TLS/DNS/egress failed):\n%s", egressMitmHost, allowOut)
+	}
+	if exit := egressField(allowOut, "ALLOW_EXIT"); exit != "0" {
+		t.Fatalf("allowlisted host %s was not reached cleanly (ALLOW_EXIT=%s); a non-zero exit here means the MITM leaf failed to verify against our CA or DNS/egress failed:\n%s", egressMitmHost, exit, allowOut)
+	}
+	if issuer := egressFieldRest(allowOut, "ALLOW_ISSUER"); !strings.Contains(strings.ToLower(issuer), "microagent egress") {
+		t.Fatalf("allowlisted host %s was NOT MITM'd (issuer=%q must be our egress CA):\n%s", egressMitmHost, issuer, allowOut)
+	}
+
+	// --- DeniedBlocked: a different, non-allowlisted host must be refused ---
+	denyScript := fmt.Sprintf("curl -sS -m 20 --cacert %s https://%s/ -o /dev/null 2>/dev/null; echo DENY_EXIT=$?", bundle, egressDeniedHost)
+	denyOut := guestExec(40*time.Second, denyScript)
+	if exit := egressField(denyOut, "DENY_EXIT"); exit == "0" {
+		t.Fatalf("non-allowlisted host %s was NOT refused (DENY_EXIT=%s); strict default-deny must block it:\n%s", egressDeniedHost, exit, denyOut)
+	}
+
+	// Audit assertions: the mediator must have recorded the allow (MITM'd), a DNS
+	// allow over TCP/53, and the deny. Poll briefly so the audit append is flushed.
+	assertEgressAudit(t, dir, workspaceName)
+
+	// --- NoBypass (keystone): flush the guest's own nft enforcement, then egress
+	// to a PUBLIC IP must still fail because the Private HNS network has no uplink.
+	// 1.1.1.1 is a stable public anycast resolver; a TCP connect to :443 is the
+	// minimal reachability probe and needs no DNS (which is now also gone).
+	// The guest-init is staged at the canonical rootfs.DefaultInitPath
+	// (/sbin/microagent-init), which the kernel cmdline boots as init=. Its
+	// egress-flush subcommand deletes the guest egress inet table over netlink.
+	flushOut := guestExec(20*time.Second, "/sbin/microagent-init egress-flush 2>&1; echo FLUSH_EXIT=$?")
+	if !strings.Contains(flushOut, "flushed inet table") && !strings.Contains(flushOut, "already flushed") {
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatalf("guest egress-flush did not tear down the in-guest egress table:\n%s", flushOut)
+	}
+	t.Logf("egress-flush output:\n%s", flushOut)
+
+	bypassScript := strings.Join([]string{
+		"set +e",
+		// After the flush there is no in-guest REDIRECT/forwarder, so this is a
+		// direct connect attempt straight out the NIC. The Private HNS network has
+		// no WinNAT uplink, so it must fail (non-zero). A short timeout keeps the
+		// closed path fast.
+		"curl -sS -m 12 https://1.1.1.1/ -o /dev/null 2>/dev/null; echo BYPASS_HTTPS_EXIT=$?",
+		"sync",
+	}, "\n")
+	bypassOut := guestExec(40*time.Second, bypassScript)
+	if exit := egressField(bypassOut, "BYPASS_HTTPS_EXIT"); exit == "0" {
+		logWindowsHyperVSmokeState(t, dir, workspaceName)
+		t.Fatalf("KEYSTONE FAILURE: after egress-flush the guest reached a public IP (BYPASS_HTTPS_EXIT=%s) — the no-uplink Private HNS topology did not contain egress:\n%s", exit, bypassOut)
+	}
+}
+
+// assertEgressAudit polls the windows-hyperv egress mediator audit log and asserts
+// it recorded the allow (MITM'd external host), a DNS allow over the mediator, and
+// the deny. The append is buffered, so it polls for a bounded window before failing.
+//
+// The deny in STRICT mode lands at the DNS layer, NOT the TCP layer: the mediator
+// REFUSES the non-allowlisted name (egress_dns_deny for its qname), so the guest
+// never learns an IP and no TCP connection — hence no egress_deny — is ever
+// attempted. This mirrors the firecracker egress-mitm e2e, which asserts exactly
+// that strict blocks before any TCP. So "deny present" is satisfied by an
+// egress_dns_deny for the denied host's qname (with an egress_deny accepted too,
+// for robustness against a future allowlist that lets the name resolve but blocks
+// the TCP flow).
+func assertEgressAudit(t *testing.T, stateDir, name string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var lastEvents []map[string]any
+	for {
+		events := readEgressAuditEvents(t, stateDir, name)
+		lastEvents = events
+		haveAllow := egressHasEvent(events, "egress_allow", map[string]any{"host": egressMitmHost, "mitm": true})
+		// Strict blocks the non-allowlisted host at the DNS layer (egress_dns_deny
+		// for its qname); accept a TCP-layer egress_deny too for robustness.
+		haveDeny := egressHasEvent(events, "egress_dns_deny", map[string]any{"qname": egressDeniedHost}) ||
+			egressHasEvent(events, "egress_deny", map[string]any{"host": egressDeniedHost})
+		haveDNS := egressHasEventName(events, "egress_dns_allow")
+		if haveAllow && haveDeny && haveDNS {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("egress audit missing required events (allow-mitm=%v deny=%v dns=%v) for allow=%s deny=%s:\n%s",
+				haveAllow, haveDeny, haveDNS, egressMitmHost, egressDeniedHost, egressDumpEvents(lastEvents))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// readEgressAuditEvents parses the windows-hyperv egress mediator audit log
+// (<state-dir>/<name>/egress-mediator-audit.jsonl) into decoded JSON objects.
+func readEgressAuditEvents(t *testing.T, stateDir, name string) []map[string]any {
+	t.Helper()
+	path := filepath.Join(stateDir, name, "egress-mediator-audit.jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("open egress audit %s: %v", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	var events []map[string]any
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var ev map[string]any
+		if json.Unmarshal([]byte(line), &ev) == nil {
+			events = append(events, ev)
+		}
+	}
+	return events
+}
+
+// egressHasEvent reports whether any audit event matches the given event name and
+// all supplied field equalities (a nil want matches the event name alone).
+func egressHasEvent(events []map[string]any, name string, want map[string]any) bool {
+	for _, ev := range events {
+		if ev["event"] != name {
+			continue
+		}
+		ok := true
+		for k, v := range want {
+			if !egressValuesEqual(ev[k], v) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}
+
+func egressHasEventName(events []map[string]any, name string) bool {
+	return egressHasEvent(events, name, nil)
+}
+
+func egressValuesEqual(got, want any) bool {
+	switch w := want.(type) {
+	case string:
+		s, ok := got.(string)
+		return ok && s == w
+	case bool:
+		b, ok := got.(bool)
+		return ok && b == w
+	default:
+		return fmt.Sprint(got) == fmt.Sprint(want)
+	}
+}
+
+func egressDumpEvents(events []map[string]any) string {
+	data, _ := json.MarshalIndent(events, "", "  ")
+	return string(data)
+}
+
+// egressField returns the first NAME=VALUE token's single-word value from guest
+// exec output (the guest shell may prefix lines, so it matches anywhere).
+func egressField(out, name string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if i := strings.Index(line, name+"="); i >= 0 {
+			rest := line[i+len(name)+1:]
+			if j := strings.IndexAny(rest, " \t\r"); j >= 0 {
+				return rest[:j]
+			}
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+// egressFieldRest returns NAME=... through end-of-line (for values that contain
+// spaces, e.g. a cert issuer DN).
+func egressFieldRest(out, name string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if i := strings.Index(line, name+"="); i >= 0 {
+			return strings.TrimSpace(line[i+len(name)+1:])
+		}
+	}
+	return ""
+}
+
 func buildCmd(t *testing.T, workdir, output, pkg, goos, goarch string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

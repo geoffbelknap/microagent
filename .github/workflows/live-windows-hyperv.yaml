@@ -59,6 +59,7 @@ jobs:
               windows-hyperv-lifecycle-host windows-hyperv-connect-host
               windows-hyperv-exec-host windows-hyperv-transport-host
               windows-hyperv-model-host windows-hyperv-named-network-host
+              windows-hyperv-egress-host
     env:
       MICROAGENT_WINDOWS_HYPERV_IMAGE: ${{ inputs.image || 'docker.io/library/busybox:1.36' }}
       MICROAGENT_WINDOWS_HYPERV_GUESTINIT: ${{ github.workspace }}\.build\libexec\microagent-guestinit-amd64
