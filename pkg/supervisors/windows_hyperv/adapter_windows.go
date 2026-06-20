@@ -485,6 +485,9 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	// mediation is not active, so an unmediated guest installs no capture/forwarder.
 	if egressMediationActive(&spec.Config) {
 		kernelCmdLine += fmt.Sprintf(" microagent_egress_mediator_port=%d", egress.DefaultMediatorVsockPort)
+		if spec.Config.CACertPort != 0 {
+			kernelCmdLine += fmt.Sprintf(" microagent_ca_cert_port=%d", spec.Config.CACertPort)
+		}
 	}
 	// The HNS endpoint assigned the guest its address, but the synthetic
 	// NIC (hv_netvsc) comes up unconfigured: tell the guest its static

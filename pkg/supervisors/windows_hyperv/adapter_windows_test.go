@@ -256,9 +256,10 @@ func TestBuildComputeSystemDocumentEmitsEgressMediatorCmdline(t *testing.T) {
 	mediated, err := buildComputeSystemDocument(computeSystemSpec{
 		Name: "agent-1",
 		Config: vmkit.Config{
-			KernelPath: "C:\\microagent\\Image",
-			RootfsPath: "C:\\microagent\\rootfs.vhd",
-			EgressMode: vmkit.EgressModeMediated,
+			KernelPath:  "C:\\microagent\\Image",
+			RootfsPath:  "C:\\microagent\\rootfs.vhd",
+			EgressMode:  vmkit.EgressModeMediated,
+			CACertPort:  1030,
 			Network: &vmkit.NetworkConfig{
 				Mode:    "user",
 				IP:      "192.168.127.5/24",
@@ -270,6 +271,9 @@ func TestBuildComputeSystemDocumentEmitsEgressMediatorCmdline(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := "microagent_egress_mediator_port=1032"; !strings.Contains(string(mediated), want) {
+		t.Fatalf("mediated cmdline missing %q: %s", want, mediated)
+	}
+	if want := "microagent_ca_cert_port=1030"; !strings.Contains(string(mediated), want) {
 		t.Fatalf("mediated cmdline missing %q: %s", want, mediated)
 	}
 
@@ -293,6 +297,9 @@ func TestBuildComputeSystemDocumentEmitsEgressMediatorCmdline(t *testing.T) {
 	if strings.Contains(string(unmediated), "microagent_egress_mediator_port") {
 		t.Fatalf("unmediated cmdline must not emit the egress mediator port: %s", unmediated)
 	}
+	if strings.Contains(string(unmediated), "microagent_ca_cert_port") {
+		t.Fatalf("unmediated cmdline must not emit the ca cert port: %s", unmediated)
+	}
 
 	// Mediation requested but network mode does not mediate (bridged): no mediator
 	// runs, so the guest must not be told to forward to a port nothing serves.
@@ -310,6 +317,9 @@ func TestBuildComputeSystemDocumentEmitsEgressMediatorCmdline(t *testing.T) {
 	}
 	if strings.Contains(string(bridged), "microagent_egress_mediator_port") {
 		t.Fatalf("bridged (unmediated) cmdline must not emit the egress mediator port: %s", bridged)
+	}
+	if strings.Contains(string(bridged), "microagent_ca_cert_port") {
+		t.Fatalf("bridged (unmediated) cmdline must not emit the ca cert port: %s", bridged)
 	}
 }
 
