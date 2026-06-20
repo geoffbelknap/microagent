@@ -76,6 +76,19 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 			go secrets.Serve(l)
 			continue
 		}
+		if listener.Target == secretxfer.CACertTarget {
+			caCertPath := egressCACertPath(req)
+			go func(l net.Listener) {
+				for {
+					conn, err := l.Accept()
+					if err != nil {
+						return
+					}
+					go serveCACertConn(conn, caCertPath)
+				}
+			}(l)
+			continue
+		}
 		go set.serve(l, listener.Target, listener.Target == resultPath(req))
 	}
 	if req.Config.Network != nil {
@@ -134,7 +147,32 @@ func isAllowedHVSockTarget(req vmkit.Request, target string) bool {
 	if target == secretxfer.ServerTarget {
 		return true
 	}
+	if target == secretxfer.CACertTarget {
+		return true
+	}
 	return target == resultPath(req)
+}
+
+// egressCACertPath returns the path to the per-workspace egress CA certificate
+// PEM file that is served to the guest over the cacert://serve hvsock listener.
+func egressCACertPath(req vmkit.Request) string {
+	return filepath.Join(runtimeDir(req), "egress-ca.pem")
+}
+
+// serveCACertConn sends the egress CA certificate PEM (at caCertPath) to conn
+// using the secretxfer length-prefix framing, then closes conn. If the file is
+// absent or unreadable, the error is logged to stderr and the conn is closed
+// without writing any data.
+func serveCACertConn(conn net.Conn, caCertPath string) {
+	defer func() { _ = conn.Close() }()
+	pem, err := os.ReadFile(caCertPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read egress-ca.pem for hvsock guest: %v\n", err)
+		return
+	}
+	if err := secretxfer.ServeCACert(conn, pem); err != nil {
+		fmt.Fprintf(os.Stderr, "serve egress CA to hvsock guest: %v\n", err)
+	}
 }
 
 func copySerialPipe(pipePath, target string) {

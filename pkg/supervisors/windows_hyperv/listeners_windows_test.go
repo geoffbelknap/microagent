@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio/pkg/guid"
+	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
@@ -244,6 +245,83 @@ func TestStartRuntimeListenersExecBridgeDialsGuestExecPort(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("exec bridge did not dial the guest")
+	}
+}
+
+// TestStartRuntimeListenersAcceptsCACertTarget verifies two things:
+//  1. isAllowedHVSockTarget returns true for the cacert://serve sentinel.
+//  2. The per-connection cacert serve logic reads egress-ca.pem and writes it
+//     with the secretxfer framing that FetchCACert can decode.
+//
+// A full hvsock round-trip through winio.ListenHvsock is not exercised here
+// because it requires a live Hyper-V compute system; instead the per-connection
+// handler (serveCACertConn) is tested directly via net.Pipe.
+func TestStartRuntimeListenersAcceptsCACertTarget(t *testing.T) {
+	stateDir := t.TempDir()
+	runtimeID := "agent-cacert-1"
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RuntimeID: runtimeID},
+		Config:   &vmkit.Config{StateDir: stateDir},
+	}
+
+	// 1. Validation: isAllowedHVSockTarget must accept the cacert sentinel.
+	if !isAllowedHVSockTarget(req, secretxfer.CACertTarget) {
+		t.Fatal("isAllowedHVSockTarget returned false for CACertTarget; expected true")
+	}
+
+	// 2. Write a known CA PEM into the workspace dir that serveCACertConn reads.
+	wsDir := filepath.Join(stateDir, runtimeID)
+	if err := os.MkdirAll(wsDir, 0o700); err != nil {
+		t.Fatalf("mkdir workspace dir: %v", err)
+	}
+	wantPEM := []byte("-----BEGIN CERTIFICATE-----\nZmFrZWNh\n-----END CERTIFICATE-----\n")
+	if err := os.WriteFile(filepath.Join(wsDir, "egress-ca.pem"), wantPEM, 0o644); err != nil {
+		t.Fatalf("write egress-ca.pem: %v", err)
+	}
+
+	// 3. Exercise the per-connection handler via net.Pipe (no Hyper-V required).
+	hostConn, guestConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveCACertConn(hostConn, filepath.Join(wsDir, "egress-ca.pem"))
+	}()
+
+	gotPEM, err := secretxfer.FetchCACert(guestConn)
+	if err != nil {
+		t.Fatalf("FetchCACert: %v", err)
+	}
+	if string(gotPEM) != string(wantPEM) {
+		t.Fatalf("cacert PEM mismatch: got %q, want %q", gotPEM, wantPEM)
+	}
+	_ = guestConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("serveCACertConn did not finish")
+	}
+}
+
+func TestServeCACertConnLogsAndClosesWhenFileAbsent(t *testing.T) {
+	missingPath := filepath.Join(t.TempDir(), "no-such", "egress-ca.pem")
+	hostConn, guestConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveCACertConn(hostConn, missingPath)
+	}()
+	// The host-side conn should be closed promptly without writing data.
+	buf := make([]byte, 1)
+	_ = guestConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := guestConn.Read(buf)
+	if n != 0 || err == nil {
+		t.Fatalf("expected closed conn, got n=%d err=%v", n, err)
+	}
+	_ = guestConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("serveCACertConn did not finish after missing file")
 	}
 }
 
