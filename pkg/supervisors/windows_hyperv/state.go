@@ -343,6 +343,13 @@ func (s Supervisor) startComputeSystem(ctx context.Context, req vmkit.Request, f
 	ensureBindableManagementPorts(req.Config)
 	spec.Config.ExecPort = req.Config.ExecPort
 	spec.Config.GuestExecPort = req.Config.GuestExecPort
+	// Mint the per-workspace egress CA before any listener serves or loads it: the
+	// CA-cert hvsock serve goroutine delivers egress-ca.pem to the guest, and the
+	// mediator front-end loads the cert+key for per-SNI TLS interception. Both read
+	// the same on-disk paths this writes. A no-op when mediation is not active.
+	if err := mintEgressCAHook(runtimeReq); err != nil {
+		return failRunWithCleanup(ctx, runtimeReq, adapter, handle, false, fmt.Sprintf("egress CA mint failed: %s", err), err)
+	}
 	listenerPID := 0
 	var listeners runtimeListenerSet
 	if foreground {

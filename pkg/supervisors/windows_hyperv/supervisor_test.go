@@ -2070,6 +2070,149 @@ func TestDetachedStartWaitsForAcceptingExecBridge(t *testing.T) {
 	}
 }
 
+// TestMediatedStartMintsEgressCA asserts a mediated detached start mints the
+// per-workspace egress CA and writes BOTH the public cert and the private key at
+// the agreed paths before the listeners come up — coordinating the mediator
+// front-end load and the cacert serve goroutine with one mint.
+func TestMediatedStartMintsEgressCA(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	oldStart := startRuntimeListenerProcessHook
+	t.Cleanup(func() { startRuntimeListenerProcessHook = oldStart })
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve exec port: %v", err)
+	}
+	execPort := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	var bridge net.Listener
+	startRuntimeListenerProcessHook = func(req vmkit.Request) (int, error) {
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(execPort))))
+		if err != nil {
+			return 0, err
+		}
+		bridge = l
+		go func() {
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					return
+				}
+				_ = conn.Close()
+			}
+		}()
+		return 424242, nil
+	}
+	t.Cleanup(func() {
+		if bridge != nil {
+			_ = bridge.Close()
+		}
+	})
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			ExecPort:   execPort,
+			EgressMode: vmkit.EgressModeMediated,
+			Network:    &vmkit.NetworkConfig{Mode: "user"},
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK {
+		t.Fatalf("mediated start resp=%#v err=%v", resp, err)
+	}
+	if _, err := os.Stat(egressCACertPath(req)); err != nil {
+		t.Fatalf("mediated start did not write egress CA cert: %v", err)
+	}
+	if _, err := os.Stat(egressCAKeyPath(req)); err != nil {
+		t.Fatalf("mediated start did not write egress CA key: %v", err)
+	}
+}
+
+// TestNonMediatedStartMintsNoEgressCA asserts a non-mediated start writes neither
+// the CA cert nor the key.
+func TestNonMediatedStartMintsNoEgressCA(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("windows-hyperv start path is windows-only")
+	}
+	oldStart := startRuntimeListenerProcessHook
+	t.Cleanup(func() { startRuntimeListenerProcessHook = oldStart })
+
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve exec port: %v", err)
+	}
+	execPort := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	var bridge net.Listener
+	startRuntimeListenerProcessHook = func(req vmkit.Request) (int, error) {
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(int(execPort))))
+		if err != nil {
+			return 0, err
+		}
+		bridge = l
+		go func() {
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					return
+				}
+				_ = conn.Close()
+			}
+		}()
+		return 424242, nil
+	}
+	t.Cleanup(func() {
+		if bridge != nil {
+			_ = bridge.Close()
+		}
+	})
+
+	stateDir := t.TempDir()
+	adapter := &fakeAdapter{handle: computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}}
+	req := vmkit.Request{
+		Command: "start",
+		Identity: &vmkit.Identity{
+			RequestID: "req-1",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendWindowsHyperV,
+		},
+		Config: &vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			StateDir:   stateDir,
+			ExecPort:   execPort,
+			EgressMode: vmkit.EgressModeOff,
+		},
+	}
+	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
+	if err != nil || !resp.OK {
+		t.Fatalf("non-mediated start resp=%#v err=%v", resp, err)
+	}
+	if _, err := os.Stat(egressCACertPath(req)); !os.IsNotExist(err) {
+		t.Fatalf("non-mediated start wrote an egress CA cert: %v", err)
+	}
+	if _, err := os.Stat(egressCAKeyPath(req)); !os.IsNotExist(err) {
+		t.Fatalf("non-mediated start wrote an egress CA key: %v", err)
+	}
+}
+
 func TestRunMovesHeldExecPortAfterCreateAndRecordsIt(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("windows-hyperv run path is windows-only")
