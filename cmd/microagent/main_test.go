@@ -161,6 +161,7 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"model-runner-arg", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-arg", "-ngl"}, "-model-runner-arg", "-ngl"},
 		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
 		{"egress-policy", []string{"demo", "--egress", "strict", "--egress-policy", "/tmp/egress.yaml"}, "-egress-policy", "/tmp/egress.yaml"},
+		{"egress-swap-config", []string{"demo", "--egress", "strict", "--egress-swap-config", "/tmp/swaps.yaml"}, "-egress-swap-config", "/tmp/swaps.yaml"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)
@@ -177,6 +178,52 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 				t.Fatalf("reorderFlagArgs(%v) = %v; %s value not kept adjacent", tc.args, reordered, tc.flag)
 			}
 		})
+	}
+}
+
+func TestParseWorkspaceOptionsPositionalNameWithSwapConfig(t *testing.T) {
+	// Regression: --egress-swap-config must be recognized as a value flag by
+	// reorderFlagArgs, otherwise its argument is stranded as a positional after
+	// the workspace name, making NArg() != 1 and rejecting the name.
+	opts, err := parseWorkspaceOptions("create", []string{
+		"victim",
+		"--image", "docker.io/library/alpine:3.20",
+		"--egress", "strict",
+		"--egress-allow", "registry.npmjs.org",
+		"--egress-swap-config", "swaps.yaml",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "victim" {
+		t.Fatalf("Name = %q, want victim", opts.Name)
+	}
+	if opts.EgressSwapConfigPath != "swaps.yaml" {
+		t.Fatalf("EgressSwapConfigPath = %q, want swaps.yaml", opts.EgressSwapConfigPath)
+	}
+}
+
+func TestParseWorkspaceOptionsEgressAllowCommaSplits(t *testing.T) {
+	// A comma-separated allowlist must split into distinct hosts, not be stored
+	// as one literal host (which silently denies every real host).
+	opts, err := parseWorkspaceOptions("create", []string{
+		"victim",
+		"--image", "docker.io/library/alpine:3.20",
+		"--egress", "strict",
+		"--egress-allow", "registry.npmjs.org,postman-echo.com",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	got := map[string]bool{}
+	for _, h := range opts.EgressAllow {
+		got[h] = true
+	}
+	if !got["registry.npmjs.org"] || !got["postman-echo.com"] {
+		t.Fatalf("EgressAllow = %v, want both registry.npmjs.org and postman-echo.com as separate hosts", opts.EgressAllow)
+	}
+	if got["registry.npmjs.org,postman-echo.com"] {
+		t.Fatalf("EgressAllow kept the comma-joined value as one literal host: %v", opts.EgressAllow)
 	}
 }
 

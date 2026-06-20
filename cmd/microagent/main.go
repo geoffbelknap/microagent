@@ -3944,6 +3944,23 @@ type stateCommandOptions struct {
 	StateDir string
 }
 
+// splitCommaHosts flattens comma-separated host entries into distinct hosts.
+// --egress-allow / --egress-passthrough are repeatable, but operators reasonably
+// also write a single comma-separated list; without this, "a,b" is stored as one
+// literal host that matches nothing and silently denies both. Hostnames never
+// contain commas, so splitting is safe; empty fields are dropped.
+func splitCommaHosts(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, entry := range in {
+		for _, h := range strings.Split(entry, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				out = append(out, h)
+			}
+		}
+	}
+	return out
+}
+
 func parseWorkspaceOptions(command string, args []string) (workspaceOptions, error) {
 	kernelExplicit := hasFlagValue(args, "kernel")
 	memoryExplicit := hasFlagValue(args, "memory")
@@ -4130,8 +4147,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		return workspaceOptions{}, err
 	}
 	opts.EgressMode = mode
-	allowHosts := []string(egressAllow)
-	passthroughHosts := []string(egressPassthrough)
+	allowHosts := splitCommaHosts([]string(egressAllow))
+	passthroughHosts := splitCommaHosts([]string(egressPassthrough))
 	if strings.TrimSpace(egressPolicy) != "" {
 		// A policy file only enforces against a running mediator; with mediation
 		// off there is nothing to apply it to, so reject rather than silently
@@ -6920,6 +6937,7 @@ func reorderFlagArgs(args []string) []string {
 		"-egress-allow":              true,
 		"-egress-passthrough":        true,
 		"-egress-policy":             true,
+		"-egress-swap-config":        true,
 	}
 	var flags []string
 	var positional []string
