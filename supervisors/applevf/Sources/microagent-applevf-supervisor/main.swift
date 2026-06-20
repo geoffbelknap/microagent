@@ -45,6 +45,7 @@ struct Config: Codable {
     var network: NetworkConfig?
     var shellPort: UInt16?
     var execPort: UInt16?
+    var leaseSeconds: Int?
     var guestExecPort: UInt16?
     var secretsPort: UInt32?
     var secrets: [SecretRef]?
@@ -268,6 +269,9 @@ func main() -> Int32 {
             try runConsole(request)
             return 0
         }
+        if request.command == "deadman" {
+            return runDeadman(request)
+        }
         let response = try handle(request)
         write(response)
         return response.ok ? 0 : 1
@@ -336,7 +340,8 @@ func handle(_ request: Request) throws -> Response {
         process.standardError = supervisorLog
         try process.run()
         try writeRuntimeState(event: event, config: config, pid: process.processIdentifier, error: nil)
-        return response(event: event, config: config, error: nil)
+        let runtimeConfig = try readRuntimeState(identity: identity, stateDir: config.stateDir)?.config ?? config
+        return response(event: event, config: runtimeConfig, error: nil)
     case "inspect":
         let identity = try validatedIdentity(request.identity)
         let config = try stateConfig(request.config)
@@ -348,6 +353,8 @@ func handle(_ request: Request) throws -> Response {
         }
         let runtimeConfig = try readRuntimeState(identity: identity, stateDir: config.stateDir)?.config ?? config
         return response(event: event, config: runtimeConfig, error: nil)
+    case "gc":
+        return try gcWorkspace(request)
     case "stop":
         return try stateOnly(request, state: .stopped, detail: nil)
     case "halt":
@@ -439,6 +446,117 @@ func waitForQuarantineAck(path: URL, timeout: TimeInterval) throws {
         usleep(20_000)
     }
     throw ProtocolError.invalid("apple-vf quarantine control did not acknowledge before timeout")
+}
+
+func gcWorkspace(_ request: Request) throws -> Response {
+    let identity = try validatedIdentity(request.identity)
+    let config = try stateConfig(request.config)
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir) else {
+        let event = try readEvent(identity: identity, stateDir: config.stateDir) ?? Event(identity: identity, state: .unknown, detail: nil, observedAt: Date())
+        return response(event: event, config: config, error: nil)
+    }
+    guard runtime.event.state == .running || runtime.event.state == .starting else {
+        return response(event: runtime.event, config: runtime.config, error: nil)
+    }
+    let alive = processAlive(runtime.pid)
+    let expired = leaseExpired(runtime)
+    if alive && !expired {
+        return response(event: runtime.event, config: runtime.config, error: nil)
+    }
+    let reason = alive && expired ? "reaped by gc: lifetime lease expired" : "reaped by gc: process gone"
+    if alive, let pid = runtime.pid {
+        if kill(pid, SIGKILL) != 0 && errno != ESRCH {
+            fputs("gc signal \(pid) failed with errno \(errno)\n", stderr)
+        }
+        _ = waitForProcessExit(pid: pid, timeout: 2.0)
+    }
+    let event = Event(identity: identity, state: .stopped, detail: runtime.event.detail, observedAt: Date())
+    try writeState(event: event, config: runtime.config)
+    try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: reason)
+    return response(event: event, config: runtime.config, error: nil)
+}
+
+func runDeadman(_ request: Request) -> Int32 {
+    guard let identity = request.identity, let stateDir = request.config?.stateDir else {
+        return 1
+    }
+    while true {
+        guard let runtime = try? readRuntimeState(identity: identity, stateDir: stateDir) else {
+            return 0
+        }
+        guard let lease = runtime.config.leaseSeconds, lease > 0 else {
+            return 0
+        }
+        guard runtime.event.state == .running || runtime.event.state == .starting else {
+            return 0
+        }
+        do {
+            _ = try gcWorkspace(request.withCommand("gc"))
+        } catch {
+            fputs("deadman reconcile \(identity.runtimeID): \(error)\n", stderr)
+        }
+        Thread.sleep(forTimeInterval: deadmanPollInterval(leaseSeconds: lease))
+    }
+}
+
+func deadmanPollInterval(leaseSeconds: Int) -> TimeInterval {
+    return max(1.0, min(60.0, Double(leaseSeconds) / 4.0))
+}
+
+func startDeadmanProcessIfNeeded(request: Request, identity: Identity, config: Config) {
+    guard (config.leaseSeconds ?? 0) > 0,
+          let payload = try? requestJSON(request.withCommand("deadman")) else {
+        return
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: currentExecutablePath())
+    process.arguments = ["--request-json", payload]
+    process.standardInput = FileHandle.nullDevice
+    if let log = deadmanLogFile(identity: identity, stateDir: config.stateDir) {
+        process.standardOutput = log
+        process.standardError = log
+    } else {
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+    }
+    do {
+        try process.run()
+    } catch {
+        fputs("start deadman watcher \(identity.runtimeID): \(error)\n", stderr)
+    }
+}
+
+func deadmanLogFile(identity: Identity, stateDir: String) -> FileHandle? {
+    let path = runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("deadman.log")
+    FileManager.default.createFile(atPath: path.path, contents: nil)
+    guard let handle = try? FileHandle(forWritingTo: path) else {
+        return nil
+    }
+    _ = try? handle.seekToEnd()
+    return handle
+}
+
+func leaseExpired(_ runtime: RuntimeState) -> Bool {
+    guard let lease = runtime.config.leaseSeconds, lease > 0 else {
+        return false
+    }
+    var base = runtime.startedAt ?? Date.distantPast
+    if let activity = lastActivity(identity: runtime.event.identity, stateDir: runtime.config.stateDir), activity > base {
+        base = activity
+    }
+    if base == Date.distantPast {
+        return false
+    }
+    return Date() > base.addingTimeInterval(TimeInterval(lease))
+}
+
+func lastActivity(identity: Identity, stateDir: String) -> Date? {
+    let path = runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("activity")
+    guard let attrs = try? FileManager.default.attributesOfItem(atPath: path.path),
+          let modified = attrs[.modificationDate] as? Date else {
+        return nil
+    }
+    return modified
 }
 
 func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Response {
@@ -829,19 +947,23 @@ func appendEvent(event: Event, stateDir: String) throws {
 
 func writeRuntimeState(event: Event, config: Config, pid: Int32?, error: String?) throws {
     let previous = try? readRuntimeState(identity: event.identity, stateDir: config.stateDir)
+    var runtimeConfig = config
+    if (runtimeConfig.leaseSeconds ?? 0) <= 0, let previousLease = previous?.config.leaseSeconds, previousLease > 0 {
+        runtimeConfig.leaseSeconds = previousLease
+    }
     let startedAt = event.state == .starting || event.state == .running ? Date() : previous?.startedAt
     let runtime = RuntimeState(
         event: event,
-        config: config,
+        config: runtimeConfig,
         pid: pid,
-        serialLogPath: serialLogPath(identity: event.identity, stateDir: config.stateDir).path,
-        serialInputPath: serialInputPath(identity: event.identity, stateDir: config.stateDir).path,
+        serialLogPath: serialLogPath(identity: event.identity, stateDir: runtimeConfig.stateDir).path,
+        serialInputPath: serialInputPath(identity: event.identity, stateDir: runtimeConfig.stateDir).path,
         startedAt: startedAt,
         updatedAt: Date(),
-        readiness: readiness(event: event, config: config),
+        readiness: readiness(event: event, config: runtimeConfig),
         error: error
     )
-    try encoder.encode(runtime).write(to: runtimePath(identity: event.identity, stateDir: config.stateDir), options: .atomic)
+    try encoder.encode(runtime).write(to: runtimePath(identity: event.identity, stateDir: runtimeConfig.stateDir), options: .atomic)
 }
 
 func readEvent(identity: Identity, stateDir: String) throws -> Event? {
@@ -1785,6 +1907,8 @@ func runVM(_ request: Request) throws {
             switch result {
             case .success:
                 updateRuntime(identity: identity, config: config, state: .running, error: nil)
+                let runtimeConfig = (try? readRuntimeState(identity: identity, stateDir: config.stateDir))?.config ?? config
+                startDeadmanProcessIfNeeded(request: request, identity: identity, config: runtimeConfig)
             case .failure(let error):
                 startError = error
                 updateRuntime(identity: identity, config: config, state: .failed, error: error.localizedDescription)
