@@ -3,8 +3,6 @@ package egress
 import (
 	"encoding/binary"
 	"testing"
-
-	"golang.org/x/sys/unix"
 )
 
 func TestParseOriginalDstV4(t *testing.T) {
@@ -36,8 +34,9 @@ func TestParseOriginalDstV4ShortInput(t *testing.T) {
 func TestParseOriginalDstRejectsV6Sockaddr(t *testing.T) {
 	// struct sockaddr_in6 (28 bytes): family(2) port(2) flowinfo(4) addr(16) scope(4).
 	buf := make([]byte, 28)
-	// Native-endian family = AF_INET6.
-	binary.NativeEndian.PutUint16(buf[0:2], uint16(unix.AF_INET6))
+	// Native-endian family = AF_INET6 (10 on Linux). Use the literal so this
+	// OS-neutral parser test builds on every host (no golang.org/x/sys/unix).
+	binary.NativeEndian.PutUint16(buf[0:2], uint16(10))
 	// port 0x01BB (443), big-endian — to prove we don't just fall through to a v4 parse.
 	buf[2], buf[3] = 0x01, 0xBB
 	// flowinfo + first addr bytes set to non-zero so a v4 misparse would yield a
