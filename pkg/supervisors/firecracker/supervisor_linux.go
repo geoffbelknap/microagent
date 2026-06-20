@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -1458,7 +1459,7 @@ func acquireEgressCA(opts Options, restore bool, expectedCASHA string) (caCertPa
 	if caErr = os.MkdirAll(wsDir, 0o700); caErr != nil {
 		return "", "", noop, fmt.Errorf("create workspace dir for egress CA: %w", caErr)
 	}
-	if caErr = os.WriteFile(caCertPath, ca.CertPEM(), 0o644); caErr != nil {
+	if caErr = fsutil.WriteFile(caCertPath, ca.CertPEM(), 0o644); caErr != nil {
 		return "", "", noop, fmt.Errorf("write egress CA cert: %w", caErr)
 	}
 	if caErr = os.WriteFile(caKeyPath, caKeyPEM, 0o600); caErr != nil {

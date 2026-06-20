@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 )
 
@@ -70,7 +71,7 @@ func writeCACert(root string, certPEM []byte) ([]string, error) {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return nil, fmt.Errorf("create CA cert dir: %w", err)
 	}
-	if err := os.WriteFile(dest, certPEM, 0o644); err != nil {
+	if err := fsutil.WriteFile(dest, certPEM, 0o644); err != nil {
 		return nil, fmt.Errorf("write CA cert: %w", err)
 	}
 	log.Printf("microagent-init: CA cert written to %s (%d bytes)", dest, len(certPEM))
@@ -92,7 +93,7 @@ func writeCACert(root string, certPEM []byte) ([]string, error) {
 	bundleContents = append(bundleContents, certPEM...)
 
 	bundleDest := filepath.Join(root, caCertBundlePath)
-	if err := os.WriteFile(bundleDest, bundleContents, 0o644); err != nil {
+	if err := fsutil.WriteFile(bundleDest, bundleContents, 0o644); err != nil {
 		return nil, fmt.Errorf("write CA bundle: %w", err)
 	}
 	log.Printf("microagent-init: combined CA bundle written to %s (%d bytes)", bundleDest, len(bundleContents))
@@ -102,7 +103,7 @@ func writeCACert(root string, certPEM []byte) ([]string, error) {
 	// portable guarantee.
 	sysPath := filepath.Join(root, caCertSystemPath)
 	if err := os.MkdirAll(filepath.Dir(sysPath), 0o755); err == nil {
-		if err := os.WriteFile(sysPath, certPEM, 0o644); err == nil {
+		if err := fsutil.WriteFile(sysPath, certPEM, 0o644); err == nil {
 			if updater, err := exec.LookPath(updateCACertsCmd); err == nil {
 				if out, err := exec.Command(updater).CombinedOutput(); err != nil {
 					log.Printf("microagent-init: update-ca-certificates: %v: %s", err, out)
