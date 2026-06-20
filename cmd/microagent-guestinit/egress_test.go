@@ -7,6 +7,9 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,10 +146,54 @@ func TestBuildGuestEgressRulesetShape(t *testing.T) {
 	if !rs.dropsIPv6 {
 		t.Fatal("filter chain must drop all guest IPv6 egress")
 	}
-	if !rs.permitsDNSUDP {
-		t.Fatal("filter chain must permit UDP/53 (resolv.conf path until P6)")
+	if rs.permitsDNSUDP {
+		t.Fatal("filter chain must NOT permit UDP/53: DNS goes over TCP through the mediator (no unmediated UDP leak)")
 	}
 	if !rs.dropsOtherL4 {
-		t.Fatal("filter chain must drop non-TCP/non-DNS L4 (fail closed)")
+		t.Fatal("filter chain must drop all non-TCP L4 incl UDP/53 (fail closed)")
+	}
+}
+
+// TestWriteMediatedResolvConf asserts the mediated resolv.conf forces DNS over
+// TCP: it carries a nameserver (any address — the nft OUTPUT REDIRECT captures
+// the TCP/53 connection regardless) and the resolver options that make glibc/musl
+// use a TCP virtual circuit (use-vc) and not pack two queries into one socket
+// (single-request), so the guest's DNS leaves as TCP/53 and is mediated.
+func TestWriteMediatedResolvConf(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "resolv.conf")
+	if err := writeMediatedResolvConfAt(path); err != nil {
+		t.Fatalf("writeMediatedResolvConfAt: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read resolv.conf: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "nameserver ") {
+		t.Errorf("resolv.conf missing a nameserver line:\n%s", got)
+	}
+	if !strings.Contains(got, "options use-vc") {
+		t.Errorf("resolv.conf missing 'options use-vc' (forces TCP DNS):\n%s", got)
+	}
+	if !strings.Contains(got, "single-request") {
+		t.Errorf("resolv.conf missing 'single-request':\n%s", got)
+	}
+}
+
+// TestWriteRouteLocalnet asserts the route_localnet sysctl is set to 1 so the
+// nat/output REDIRECT's rewritten 127.0.0.1 destination is routed to the
+// loopback forwarder instead of being martian-dropped.
+func TestWriteRouteLocalnet(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "route_localnet")
+	if err := writeRouteLocalnetAt(path); err != nil {
+		t.Fatalf("writeRouteLocalnetAt: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read route_localnet: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "1" {
+		t.Errorf("route_localnet = %q, want 1", string(data))
 	}
 }

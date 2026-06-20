@@ -38,12 +38,13 @@ import (
 //     mediator at AF_VSOCK egress.DefaultMediatorVsockPort, writes a DestHeader,
 //     and pumps bytes. Loops are avoided by skipping (a) loopback output and (b)
 //     traffic from the forwarder's own uid.
-//   - Fail-closed: an inet filter/output chain DROPs all guest IPv6 egress and all
-//     non-TCP L4 except UDP/53. The UDP/53 carve-out keeps the existing resolv.conf
-//     DNS path working under the P5-not-done NAT topology; routing DNS THROUGH the
-//     mediator is P6 (the host front-end has no UDP bridge yet). DNS-over-TCP to
-//     :53 is captured by the TCP REDIRECT like any other TCP and shipped as a
-//     proto-"tcp" DestHeader.
+//   - Fail-closed: an inet filter/output chain DROPs all guest IPv6 egress and ALL
+//     non-TCP L4 (including UDP/53 — no unmediated DNS leak). Guest DNS is forced
+//     onto TCP via /etc/resolv.conf ("options use-vc"), so the resolver opens a
+//     TCP/53 connection; the nat/output REDIRECT captures it like any other TCP and
+//     it is shipped as a proto-"tcp" DestHeader to port 53, where the host mediator
+//     resolves it through its filtering DNS-over-TCP handler. UDP DNS cannot be
+//     mediated from the OUTPUT chain (TPROXY is invalid there), so it is dropped.
 //
 // All rules are inet-family, matching the firecracker expr style (REDIRECT via
 // expr.Redir, DROP verdicts in a filter chain), and are installed ONLY when the
@@ -62,8 +63,9 @@ const egressForwarderUID uint32 = 30000
 // REDIRECT targets. Fixed and guest-local; nothing else in the guest binds it.
 const egressForwarderPort uint16 = 41032
 
-// dnsPort is the UDP destination port carved out of the fail-closed drop so the
-// resolv.conf path keeps resolving until DNS-through-mediator (P6) lands.
+// dnsPort is the DNS service port. Guest DNS is forced onto TCP (resolv.conf
+// "options use-vc"), so a TCP/53 connection is captured by the nat/output
+// REDIRECT and mediated; UDP/53 is dropped by the fail-closed filter chain.
 const dnsPort uint16 = 53
 
 // nftInet aliases the google/nftables inet table family so tests and the builder
@@ -87,14 +89,13 @@ type guestEgressRuleset struct {
 
 	redirectExprs []expr.Any // nat/output: skip lo + skip forwarder uid, then REDIRECT tcp -> forwarderPort
 	v6DropExprs   []expr.Any // filter/output: drop all ipv6
-	dnsAllowExprs []expr.Any // filter/output: accept udp dport 53
 	tcpAllowExprs []expr.Any // filter/output: accept tcp (already REDIRECTed)
-	otherL4Exprs  []expr.Any // filter/output: drop everything else
+	otherL4Exprs  []expr.Any // filter/output: drop everything else (incl UDP/53)
 
 	skipsForwarderUID bool
 	skipsLoopback     bool
 	dropsIPv6         bool
-	permitsDNSUDP     bool
+	permitsDNSUDP     bool // false now: UDP/53 is dropped, DNS goes over TCP through the mediator
 	dropsOtherL4      bool
 }
 
@@ -146,22 +147,17 @@ func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgr
 	)
 
 	// filter/output fail-closed program. Rules are evaluated in insertion order:
-	//  1. nfproto == ipv6 -> drop      (no v6 channel escapes)
-	//  2. l4proto == udp, udp dport 53 -> accept   (resolv.conf path until P6)
-	//  3. l4proto == tcp -> accept     (already REDIRECTed at the nat hook)
-	//  4. (catch-all) -> drop          (ICMP, other UDP, other L4: fail closed)
+	//  1. nfproto == ipv6 -> drop   (no v6 channel escapes)
+	//  2. l4proto == tcp -> accept  (already REDIRECTed at the nat hook; incl TCP/53)
+	//  3. (catch-all) -> drop       (ICMP, ALL UDP incl UDP/53, other L4: fail closed)
+	// There is NO UDP/53 carve-out: guest DNS is forced onto TCP (resolv.conf
+	// "options use-vc"), so it is captured by the TCP REDIRECT and mediated. Any
+	// UDP/53 that still escapes the resolver (e.g. a statically-configured app)
+	// hits the catch-all drop — no unmediated DNS leak.
 	v6DropExprs := []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV6}},
 		&expr.Verdict{Kind: expr.VerdictDrop},
-	}
-	dnsAllowExprs := []expr.Any{
-		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_UDP}},
-		// th dport == 53 (transport-header dport, offset 2, len 2, big-endian)
-		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
-		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(dnsPort)},
-		&expr.Verdict{Kind: expr.VerdictAccept},
 	}
 	tcpAllowExprs := []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
@@ -169,7 +165,8 @@ func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgr
 		&expr.Verdict{Kind: expr.VerdictAccept},
 	}
 	otherL4Exprs := []expr.Any{
-		// Catch-all: anything reaching here is neither ipv6, nor udp/53, nor tcp.
+		// Catch-all: anything reaching here is neither ipv6 nor tcp — drop it
+		// (all UDP including UDP/53, ICMP, and any other L4).
 		&expr.Verdict{Kind: expr.VerdictDrop},
 	}
 
@@ -179,14 +176,13 @@ func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgr
 		filterChain:   filterChain,
 		redirectExprs: redirectExprs,
 		v6DropExprs:   v6DropExprs,
-		dnsAllowExprs: dnsAllowExprs,
 		tcpAllowExprs: tcpAllowExprs,
 		otherL4Exprs:  otherL4Exprs,
 
 		skipsForwarderUID: true,
 		skipsLoopback:     true,
 		dropsIPv6:         true,
-		permitsDNSUDP:     true,
+		permitsDNSUDP:     false,
 		dropsOtherL4:      true,
 	}
 }
@@ -212,9 +208,27 @@ func installGuestEgress(mediatorVsockPort uint32) error {
 	if err := bringUpLoopback(); err != nil {
 		return fmt.Errorf("egress forwarder: bring up loopback: %w", err)
 	}
+	// Allow the nat/output REDIRECT to steer guest-originated TCP to the loopback
+	// forwarder. The REDIRECT rewrites the destination to 127.0.0.1:<forwarder>,
+	// but the kernel martian-drops a packet routed to 127.0.0.0/8 that did not
+	// originate on loopback UNLESS route_localnet is enabled on the egress
+	// interface. Without this every captured connection is silently dropped before
+	// it reaches the forwarder. Enable it before installing the ruleset so there is
+	// never a window where the REDIRECT fires but the packet is dropped.
+	if err := enableRouteLocalnet(); err != nil {
+		return fmt.Errorf("egress forwarder: enable route_localnet: %w", err)
+	}
 	rs := buildGuestEgressRuleset(egressForwarderUID, egressForwarderPort)
 	if err := applyGuestEgressRuleset(rs); err != nil {
 		return fmt.Errorf("egress forwarder: install nft ruleset: %w", err)
+	}
+	// Force guest DNS onto TCP so it is captured by the TCP REDIRECT and mediated.
+	// The fail-closed filter chain now drops UDP/53, so without this the guest
+	// resolver (which defaults to UDP) would be silently blocked. Must run AFTER
+	// the ruleset is in place so there is never a window where UDP DNS both works
+	// and is unmediated.
+	if err := writeMediatedResolvConf(); err != nil {
+		return fmt.Errorf("egress forwarder: write mediated resolv.conf: %w", err)
 	}
 	cmd := exec.Command(os.Args[0], "egress-forward-helper",
 		strconv.Itoa(int(egressForwarderPort)),
@@ -231,17 +245,77 @@ func installGuestEgress(mediatorVsockPort uint32) error {
 	return nil
 }
 
+// routeLocalnetPath is the sysctl that gates routing to 127.0.0.0/8 from a
+// non-loopback path. The "all" knob applies to every interface, which is what
+// the OUTPUT-hook REDIRECT to the loopback forwarder needs.
+const routeLocalnetPath = "/proc/sys/net/ipv4/conf/all/route_localnet"
+
+// enableRouteLocalnet sets net.ipv4.conf.all.route_localnet=1 so the nat/output
+// REDIRECT's rewritten 127.0.0.1 destination is routed to the loopback forwarder
+// instead of being martian-dropped. Split from the path so the write is
+// unit-testable without /proc.
+func enableRouteLocalnet() error {
+	return writeRouteLocalnetAt(routeLocalnetPath)
+}
+
+// writeRouteLocalnetAt writes "1" to path (the route_localnet sysctl).
+func writeRouteLocalnetAt(path string) error {
+	if err := os.WriteFile(path, []byte("1\n"), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// mediatedResolvConfNameserver is the placeholder nameserver written into the
+// mediated guest's resolv.conf. The actual address is irrelevant: the nft
+// nat/output REDIRECT rewrites the destination of any guest-originated TCP/53
+// connection to the local forwarder regardless of the configured server, so the
+// resolver only needs SOME address to open a TCP virtual circuit to. A
+// documentation-range TEST-NET-1 address (RFC 5737) makes it obvious in the
+// guest's resolv.conf that the value is a stand-in, not a real resolver.
+const mediatedResolvConfNameserver = "192.0.2.53"
+
+// writeMediatedResolvConf writes /etc/resolv.conf for a mediated guest. It is
+// called from installGuestEgress after the fail-closed ruleset (which drops
+// UDP/53) is installed.
+func writeMediatedResolvConf() error {
+	return writeMediatedResolvConfAt("/etc/resolv.conf")
+}
+
+// writeMediatedResolvConfAt writes the mediated resolv.conf to path. It forces
+// the guest resolver onto TCP so DNS leaves as TCP/53 (captured by the REDIRECT
+// and mediated) rather than UDP/53 (dropped by the fail-closed chain):
+//
+//   - "options use-vc" makes glibc/musl use a TCP virtual circuit for queries
+//     instead of UDP.
+//   - "options single-request" sends the A and AAAA lookups sequentially rather
+//     than parallelizing them on one socket, which is the more robust pattern for
+//     a serial TCP resolver and avoids a known glibc parallel-A/AAAA stall.
+//
+// The nameserver address is a placeholder (see mediatedResolvConfNameserver):
+// the REDIRECT rewrites the TCP/53 destination regardless. Split out from
+// writeMediatedResolvConf so the content is unit-testable without touching /etc.
+func writeMediatedResolvConfAt(path string) error {
+	content := "nameserver " + mediatedResolvConfNameserver + "\n" +
+		"options use-vc\n" +
+		"options single-request\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
 // applyGuestEgressRuleset flushes the built ruleset to netfilter via google/nftables.
-// The filter-chain rules are added in precedence order (v6 drop, dns accept, tcp
-// accept, catch-all drop): nft evaluates in insertion order, so the drop must be
-// last. A single Flush commits the whole program atomically.
+// The filter-chain rules are added in precedence order (v6 drop, tcp accept,
+// catch-all drop): nft evaluates in insertion order, so the drop must be last. A
+// single Flush commits the whole program atomically.
 func applyGuestEgressRuleset(rs guestEgressRuleset) error {
 	conn := &nftables.Conn{}
 	conn.AddTable(rs.table)
 	conn.AddChain(rs.natChain)
 	conn.AddChain(rs.filterChain)
 	conn.AddRule(&nftables.Rule{Table: rs.table, Chain: rs.natChain, Exprs: rs.redirectExprs})
-	for _, exprs := range [][]expr.Any{rs.v6DropExprs, rs.dnsAllowExprs, rs.tcpAllowExprs, rs.otherL4Exprs} {
+	for _, exprs := range [][]expr.Any{rs.v6DropExprs, rs.tcpAllowExprs, rs.otherL4Exprs} {
 		conn.AddRule(&nftables.Rule{Table: rs.table, Chain: rs.filterChain, Exprs: exprs})
 	}
 	if err := conn.Flush(); err != nil {
