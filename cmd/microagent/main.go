@@ -5167,6 +5167,11 @@ func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
 		}
 		return "unavailable"
 	}
+	if host.Backend == vmkit.BackendAppleVF {
+		networkReady := host.FrameworkAvailable && host.VirtualizationSupported && host.SupervisorAvailable
+		fmt.Fprintf(stdout, "Networking: isolated %s, user/nat %s\n", ready(networkReady), ready(networkReady))
+		return
+	}
 	fmt.Fprintf(stdout, "Networking: isolated %s, user %s, nat/bridged/named %s\n",
 		ready(host.IsolatedNetworkReady),
 		ready(host.UserNetworkReady),

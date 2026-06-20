@@ -21,6 +21,9 @@ func NetworkRemediation(host *vmkit.HostSupport) string {
 	if host == nil || host.PrivilegedNetworkReady {
 		return ""
 	}
+	if host.Backend != "" && host.Backend != vmkit.BackendLinuxKVM {
+		return ""
+	}
 	if host.IPForwardEnabled && !host.SupervisorNetAdminCapable {
 		return "nat/bridged/named networking unavailable: the supervisor lacks CAP_NET_ADMIN (a 'brew upgrade' resets it). Re-run: microagent host setup-networking"
 	}
