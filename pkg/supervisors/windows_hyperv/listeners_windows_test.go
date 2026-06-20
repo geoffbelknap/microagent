@@ -4,6 +4,7 @@ package windows_hyperv
 
 import (
 	"context"
+	"crypto/tls"
 	"io"
 	"net"
 	"os"
@@ -13,9 +14,227 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio/pkg/guid"
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+// mediatedEgressRequest builds a request whose config has egress mediation
+// active (mediated mode + a mediating network) with the given allowlist.
+func mediatedEgressRequest(t *testing.T, allow []string) vmkit.Request {
+	t.Helper()
+	return vmkit.Request{
+		Identity: &vmkit.Identity{RuntimeID: "agent-egress"},
+		Config: &vmkit.Config{
+			StateDir:    t.TempDir(),
+			EgressMode:  vmkit.EgressModeMediated,
+			EgressAllow: allow,
+			Network:     &vmkit.NetworkConfig{Mode: "user"},
+		},
+	}
+}
+
+// TestServeEgressMediatorConnForwardsAllowedHeaderDest drives the extracted
+// per-connection handler with a net.Pipe carrying a DestHeader and asserts the
+// shared egress core is invoked with the header's destination: an allowlisted
+// host reaches a stub upstream (via the injected Dial), proving OrigDst was set
+// from the header and the allowlist policy ran on it.
+func TestServeEgressMediatorConnForwardsAllowedHeaderDest(t *testing.T) {
+	// Allowlist the destination IP literal so a raw-TCP (non-TLS) flow — which the
+	// core polices by the destination IP — is permitted and takes the L4 splice
+	// path through the injected Dial (the MITM path uses tls.Dial directly and is
+	// not exercised here). strict mode keeps the default-deny allowlist.
+	req := mediatedEgressRequest(t, []string{"203.0.113.7"})
+	req.Config.EgressMode = vmkit.EgressModeStrict
+	if err := mintEgressCA(req); err != nil {
+		t.Fatalf("mint CA: %v", err)
+	}
+	handler, closeHandler, err := buildEgressHandler(req)
+	if err != nil {
+		t.Fatalf("buildEgressHandler: %v", err)
+	}
+	defer closeHandler()
+	// The injected Dial records the upstream address the core resolved from the
+	// header destination, proving OrigDst was set from the header and the allowlist
+	// passed on that dst. Returning a closed pipe end is enough — we assert on the
+	// dialed address, not the splice.
+	dialedAddr := make(chan string, 1)
+	handler.Dial = func(network, addr string) (net.Conn, error) {
+		select {
+		case dialedAddr <- addr:
+		default:
+		}
+		host, vm := net.Pipe()
+		_ = vm.Close()
+		return host, nil
+	}
+
+	hostConn, guestConn := net.Pipe()
+	go serveEgressMediatorConn(hostConn, handler)
+
+	// Guest writes the DestHeader (IP literal so no DNS), then raw (non-TLS) bytes
+	// so the core takes the L4 splice path and dials upstream via h.Dial.
+	go func() {
+		_ = egress.WriteDestHeader(guestConn, egress.DestHeader{Proto: "tcp", Host: "203.0.113.7", Port: 443})
+		_, _ = guestConn.Write([]byte("GET / HTTP/1.0\r\n\r\n"))
+	}()
+
+	select {
+	case addr := <-dialedAddr:
+		if addr != "203.0.113.7:443" {
+			t.Fatalf("mediator dialed %q, want upstream from header dst 203.0.113.7:443", addr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("allowed destination was not dialed upstream from the header dst")
+	}
+	_ = guestConn.Close()
+}
+
+// TestServeEgressMediatorConnDeniesNonAllowlistedHeaderDest asserts the core's
+// fail-closed allowlist runs against the header destination: a non-allowlisted
+// host is never dialed upstream.
+func TestServeEgressMediatorConnDeniesNonAllowlistedHeaderDest(t *testing.T) {
+	req := mediatedEgressRequest(t, []string{"allowed.example.com"})
+	req.Config.EgressMode = vmkit.EgressModeStrict // strict = default-deny
+	if err := mintEgressCA(req); err != nil {
+		t.Fatalf("mint CA: %v", err)
+	}
+	handler, closeHandler, err := buildEgressHandler(req)
+	if err != nil {
+		t.Fatalf("buildEgressHandler: %v", err)
+	}
+	defer closeHandler()
+	dialed := make(chan string, 1)
+	handler.Dial = func(network, addr string) (net.Conn, error) {
+		dialed <- addr
+		return nil, nil
+	}
+
+	hostConn, guestConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveEgressMediatorConn(hostConn, handler)
+	}()
+	go func() {
+		_ = egress.WriteDestHeader(guestConn, egress.DestHeader{Proto: "tcp", Host: "203.0.113.9", Port: 443})
+		client := tls.Client(guestConn, &tls.Config{ServerName: "denied.example.com", InsecureSkipVerify: true})
+		_ = client.Handshake()
+		_ = client.Close()
+	}()
+
+	select {
+	case addr := <-dialed:
+		t.Fatalf("denied destination was dialed upstream: %q", addr)
+	case <-done:
+		// handler returned without dialing — fail-closed, as required.
+	case <-time.After(3 * time.Second):
+		t.Fatal("serveEgressMediatorConn did not finish")
+	}
+	_ = guestConn.Close()
+}
+
+// TestServeEgressMediatorConnRejectsTruncatedHeader asserts a malformed/truncated
+// DestHeader closes the conn fail-closed without dialing upstream.
+func TestServeEgressMediatorConnRejectsTruncatedHeader(t *testing.T) {
+	req := mediatedEgressRequest(t, nil)
+	if err := mintEgressCA(req); err != nil {
+		t.Fatalf("mint CA: %v", err)
+	}
+	handler, closeHandler, err := buildEgressHandler(req)
+	if err != nil {
+		t.Fatalf("buildEgressHandler: %v", err)
+	}
+	defer closeHandler()
+	handler.Dial = func(network, addr string) (net.Conn, error) {
+		t.Fatalf("truncated header must not dial upstream (addr=%q)", addr)
+		return nil, nil
+	}
+	hostConn, guestConn := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveEgressMediatorConn(hostConn, handler)
+	}()
+	// Write one byte then close — not a full header.
+	_, _ = guestConn.Write([]byte{0x01})
+	_ = guestConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("serveEgressMediatorConn did not fail closed on truncated header")
+	}
+}
+
+// TestMintEgressCAWritesCertAndKeyWhenMediated asserts a mediated start mints the
+// CA and writes BOTH the public cert (egress-ca.pem) and the private key
+// (egress-ca-key.pem) at the agreed paths the front-end and the cacert serve
+// goroutine both read.
+func TestMintEgressCAWritesCertAndKeyWhenMediated(t *testing.T) {
+	req := mediatedEgressRequest(t, nil)
+	if err := mintEgressCA(req); err != nil {
+		t.Fatalf("mintEgressCA: %v", err)
+	}
+	certPEM, err := os.ReadFile(egressCACertPath(req))
+	if err != nil {
+		t.Fatalf("read minted cert: %v", err)
+	}
+	keyPEM, err := os.ReadFile(egressCAKeyPath(req))
+	if err != nil {
+		t.Fatalf("read minted key: %v", err)
+	}
+	// The cert+key must form a loadable CA (reusing egress.LoadCA).
+	if _, err := egress.LoadCA(certPEM, keyPEM); err != nil {
+		t.Fatalf("minted cert/key do not form a valid CA: %v", err)
+	}
+}
+
+// TestMintEgressCASkippedWhenNotMediated asserts a non-mediated start mints
+// nothing: neither the cert nor the key is written.
+func TestMintEgressCASkippedWhenNotMediated(t *testing.T) {
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RuntimeID: "agent-open"},
+		Config: &vmkit.Config{
+			StateDir:   t.TempDir(),
+			EgressMode: vmkit.EgressModeOff,
+		},
+	}
+	if err := mintEgressCA(req); err != nil {
+		t.Fatalf("mintEgressCA (off): %v", err)
+	}
+	if _, err := os.Stat(egressCACertPath(req)); !os.IsNotExist(err) {
+		t.Fatalf("non-mediated start wrote a CA cert: %v", err)
+	}
+	if _, err := os.Stat(egressCAKeyPath(req)); !os.IsNotExist(err) {
+		t.Fatalf("non-mediated start wrote a CA key: %v", err)
+	}
+}
+
+// TestStartRuntimeListenersBindsEgressMediatorService asserts that a mediated
+// workspace adds the egress mediator hvsock service to the listener set (so it is
+// torn down with the others) and that the start fails closed when the handler
+// cannot be built (CA absent). The hvsock bind itself requires a live compute
+// system, so this drives the build/teardown wiring via the same startRuntimeListeners
+// entrypoint the exec-bridge tests use.
+func TestStartRuntimeListenersEgressMediatorFailsClosedWithoutCA(t *testing.T) {
+	req := mediatedEgressRequest(t, []string{"allowed.example.com"})
+	// Also give it an exec bridge so startRuntimeListeners has work and reaches the
+	// egress block; deliberately DO NOT mint the CA so buildEgressHandler fails.
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve exec port: %v", err)
+	}
+	req.Config.ExecPort = uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+	handle := computeSystemHandle{ID: "fake", RuntimeID: "11111111-1111-1111-1111-111111111111"}
+	set, err := startRuntimeListeners(context.Background(), handle, req)
+	if err == nil {
+		if set != nil {
+			_ = set.Close()
+		}
+		t.Fatal("startRuntimeListeners did not fail closed when the egress CA is absent")
+	}
+}
 
 func TestWindowsHyperVVsockTargetValidationAllowsTCPAndResultOnly(t *testing.T) {
 	stateDir := t.TempDir()

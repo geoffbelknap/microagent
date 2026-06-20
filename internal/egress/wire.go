@@ -17,6 +17,16 @@ const (
 	protoUDP byte = 0x02
 )
 
+// DefaultMediatorVsockPort is the per-VM hvsock service port the windows-hyperv
+// guest-side egress forwarder dials to ship each outbound connection (prefixed
+// with a DestHeader) to the host mediator front-end. hvsock ports are per-VM, so
+// a fixed port is safe across workspaces. The host front-end binds this port and
+// the guest forwarder (added later) dials the same constant; both reference this
+// single definition so they cannot drift. It lives next to the wire codec the two
+// sides share, alongside the other workspace default ports referenced via
+// pkg/workspace.
+const DefaultMediatorVsockPort uint32 = 1032
+
 // DestHeader carries the original connection destination that the guest
 // forwarder observed before handing the stream to the host mediator over an
 // hvsock. Both sides of the hvsock bridge (guest forwarder and host mediator

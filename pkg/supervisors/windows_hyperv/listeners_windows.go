@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/Microsoft/go-winio/pkg/guid"
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -122,10 +124,201 @@ func startRuntimeListeners(ctx context.Context, handle computeSystemHandle, req 
 		started++
 		go serveTCPToHVSockForward(l, vmID, uint32(guestExecPort(*req.Config)), "structured exec")
 	}
+	// Egress mediator front-end: when mediation is active for this workspace, bind
+	// a dedicated per-VM hvsock service. The guest-side forwarder ships each
+	// outbound connection — prefixed with an egress DestHeader naming the original
+	// destination — to this port, and the host runs the internal/egress core on it
+	// (policy/allowlist/TLS interception/audit/caps) with the destination injected
+	// from the header. Build the egress.Handler from req.Config's egress fields +
+	// the per-workspace CA cert/key, mirroring the firecracker --egress-mediator
+	// wiring. Fail closed: a bind error closes the set and fails the start, like
+	// every other listener here, so a mediated workspace never boots with the
+	// mediator service silently absent.
+	if egressMediationActive(req.Config) {
+		handler, closeHandler, err := buildEgressHandler(req)
+		if err != nil {
+			_ = set.Close()
+			return nil, fmt.Errorf("build windows-hyperv egress mediator: %w", err)
+		}
+		l, err := winio.ListenHvsock(&winio.HvsockAddr{
+			VMID:      vmID,
+			ServiceID: winio.VsockServiceID(egress.DefaultMediatorVsockPort),
+		})
+		if err != nil {
+			closeHandler()
+			_ = set.Close()
+			return nil, fmt.Errorf("listen windows-hyperv egress mediator hvsocket port %d: %w", egress.DefaultMediatorVsockPort, err)
+		}
+		set.listeners = append(set.listeners, l)
+		started++
+		go func(l net.Listener) {
+			defer closeHandler()
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					return
+				}
+				go serveEgressMediatorConn(conn, handler)
+			}
+		}(l)
+	}
 	if started == 0 {
 		return nil, nil
 	}
 	return set, nil
+}
+
+// buildEgressHandler constructs the per-workspace egress.Handler the mediator
+// front-end runs on each accepted hvsock stream. It mirrors the firecracker
+// --egress-mediator wiring (egress.Options -> Handler): the same enforcement
+// mode, EgressAllow allowlist policy, EgressPassthrough non-intercepted hosts,
+// per-workspace CA (cert+key) for per-SNI TLS interception, bounded-operations
+// caps, and a JSONL audit logger. OrigDst and Dial are left for the
+// per-connection handler to inject (the header destination + a real net dialer),
+// so this builds everything that is per-workspace and reused across connections.
+// The returned close func releases the audit logger.
+func buildEgressHandler(req vmkit.Request) (*egress.Handler, func(), error) {
+	config := req.Config
+	mode := vmkit.NormalizeEgressMode(config.EgressMode)
+	policy, err := egress.NewPolicy(config.EgressAllow)
+	if err != nil {
+		return nil, nil, fmt.Errorf("egress allowlist: %w", err)
+	}
+	var passthrough *egress.Policy
+	if len(config.EgressPassthrough) > 0 {
+		passthrough, err = egress.NewPolicy(config.EgressPassthrough)
+		if err != nil {
+			return nil, nil, fmt.Errorf("egress passthrough: %w", err)
+		}
+	}
+	// Per-workspace CA for TLS interception: load the cert+key minted at start.
+	// Both must be present (the mint writes both) — a half-present pair fails
+	// closed rather than silently disabling MITM.
+	certPEM, err := os.ReadFile(egressCACertPath(req))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read egress CA cert: %w", err)
+	}
+	keyPEM, err := os.ReadFile(egressCAKeyPath(req))
+	if err != nil {
+		return nil, nil, fmt.Errorf("read egress CA key: %w", err)
+	}
+	ca, err := egress.LoadCA(certPEM, keyPEM)
+	if err != nil {
+		return nil, nil, err
+	}
+	// JSONL audit log, size-bounded when the caps request it (ASK tenet 8) —
+	// identical selection to egress.Serve. Lives next to the workspace's other
+	// runtime artifacts.
+	auditPath := filepath.Join(runtimeDir(req), "egress-mediator-audit.jsonl")
+	if err := os.MkdirAll(filepath.Dir(auditPath), 0o700); err != nil {
+		return nil, nil, fmt.Errorf("create egress audit dir: %w", err)
+	}
+	var logger egress.Logger
+	var closeLogger func()
+	if config.EgressAuditMaxBytes > 0 {
+		rl, err := egress.NewRotatingFileLogger(auditPath, config.EgressAuditMaxBytes, config.EgressAuditMaxBackups)
+		if err != nil {
+			return nil, nil, err
+		}
+		logger = rl
+		closeLogger = func() { _ = rl.Close() }
+	} else {
+		fl, err := egress.NewFileLogger(auditPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		logger = fl
+		closeLogger = func() { _ = fl.Close() }
+	}
+	h := &egress.Handler{
+		Mode:        mode,
+		Policy:      policy,
+		Passthrough: passthrough,
+		CA:          ca,
+		Logger:      logger,
+		Dial:        net.Dial,
+		// OrigDst recovers the per-stream destination from the destConn wrapper the
+		// front-end hands to Handle. ONE shared Handler serves every connection so
+		// its process-wide caps counters (MaxTotalBytes/MaxConcurrentConns) bound the
+		// whole workspace — never copy the Handler per connection (the atomic
+		// counters would split). The dst travels on the conn, not on a cloned field.
+		OrigDst: func(c net.Conn) (netip.AddrPort, error) {
+			if dc, ok := c.(*destConn); ok {
+				return dc.dst, nil
+			}
+			return netip.AddrPort{}, fmt.Errorf("egress mediator: connection is not a destConn")
+		},
+		Limits: egress.Limits{
+			MaxBytesPerSec:     config.EgressMaxBytesPerSec,
+			MaxTotalBytes:      config.EgressMaxTotalBytes,
+			MaxConcurrentConns: config.EgressMaxConcurrentConns,
+		},
+	}
+	return h, closeLogger, nil
+}
+
+// destConn wraps a guest-forwarded egress stream with the original destination
+// recovered from its DestHeader. The shared Handler's OrigDst type-asserts to
+// this and returns dst, so a single Handler instance (with shared cap counters)
+// can serve every connection while each connection still carries its own
+// destination. It embeds net.Conn so all other I/O passes straight through to the
+// underlying hvsock stream (the header has already been consumed before wrapping).
+type destConn struct {
+	net.Conn
+	dst netip.AddrPort
+}
+
+// serveEgressMediatorConn services one guest-forwarded egress stream: it reads
+// the egress DestHeader (the original destination the guest observed) off the
+// front of the stream, then runs the shared internal/egress core on the
+// remainder with OrigDst injected to return that header's destination. The
+// handler enforces the workspace allowlist/passthrough, intercepts TLS per-SNI
+// with the per-workspace CA, applies the bounded-operations caps, and audits —
+// none of which is reimplemented here. A malformed/truncated header closes the
+// conn fail-closed without dialing anything upstream.
+func serveEgressMediatorConn(conn net.Conn, handler *egress.Handler) {
+	hdr, err := egress.ReadDestHeader(conn)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read egress dest header from guest: %v\n", err)
+		_ = conn.Close()
+		return
+	}
+	dst, err := destHeaderAddrPort(hdr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve egress dest header %s:%d: %v\n", hdr.Host, hdr.Port, err)
+		_ = conn.Close()
+		return
+	}
+	// Wrap the post-header stream so the SHARED handler's OrigDst recovers THIS
+	// stream's destination from the conn — never copy the Handler (its atomic cap
+	// counters are process-wide and must stay shared). Handle closes the wrapper
+	// (and thus conn) on return.
+	handler.Handle(&destConn{Conn: conn, dst: dst})
+}
+
+// destHeaderAddrPort converts a guest DestHeader into the netip.AddrPort the
+// egress core's OrigDst contract returns. The guest sends the destination it
+// observed; when it is an IP literal it is used directly, otherwise it is
+// resolved to an IP here so the mediator has a concrete dial target while still
+// policing by the sniffed SNI/Host. The header host is preserved for audit via
+// the handler's own host sniffing.
+func destHeaderAddrPort(hdr egress.DestHeader) (netip.AddrPort, error) {
+	if ip, err := netip.ParseAddr(strings.TrimSpace(hdr.Host)); err == nil {
+		return netip.AddrPortFrom(ip, hdr.Port), nil
+	}
+	ips, err := net.LookupIP(hdr.Host)
+	if err != nil {
+		return netip.AddrPort{}, err
+	}
+	for _, ip := range ips {
+		if v4 := ip.To4(); v4 != nil {
+			addr, ok := netip.AddrFromSlice(v4)
+			if ok {
+				return netip.AddrPortFrom(addr, hdr.Port), nil
+			}
+		}
+	}
+	return netip.AddrPort{}, fmt.Errorf("no IPv4 address for egress dest host %q", hdr.Host)
 }
 
 func hasResultTarget(req vmkit.Request) bool {
@@ -151,12 +344,6 @@ func isAllowedHVSockTarget(req vmkit.Request, target string) bool {
 		return true
 	}
 	return target == resultPath(req)
-}
-
-// egressCACertPath returns the path to the per-workspace egress CA certificate
-// PEM file that is served to the guest over the cacert://serve hvsock listener.
-func egressCACertPath(req vmkit.Request) string {
-	return filepath.Join(runtimeDir(req), "egress-ca.pem")
 }
 
 // serveCACertConn sends the egress CA certificate PEM (at caCertPath) to conn
