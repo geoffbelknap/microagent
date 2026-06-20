@@ -133,20 +133,20 @@ find_candidates() {
   local root="$1"
   if [ "$all" -eq 1 ]; then
     find "$root" -maxdepth 1 \
-      \( -name 'microagent-*' -o -name 'microvm-rootfs-smoke*' \) \
+      \( -name 'microagent-*' -o -name 'ma-e2e-mm-*' -o -name 'microvm-rootfs-smoke*' \) \
       -print
   else
     find "$root" -maxdepth 1 \
-      \( -name 'microagent-*' -o -name 'microvm-rootfs-smoke*' \) \
+      \( -name 'microagent-*' -o -name 'ma-e2e-mm-*' -o -name 'microvm-rootfs-smoke*' \) \
       -mmin "+$((min_age_hours * 60))" \
       -print
   fi
 }
 
-candidate_file="$(mktemp -t makit-cleanup.XXXXXX)"
-filtered_file="$(mktemp -t makit-cleanup-filtered.XXXXXX)"
-live_file="$(mktemp -t makit-cleanup-live.XXXXXX)"
-process_file="$(mktemp -t makit-cleanup-processes.XXXXXX)"
+candidate_file="$(mktemp -t microagent-cleanup.XXXXXX)"
+filtered_file="$(mktemp -t microagent-cleanup-filtered.XXXXXX)"
+live_file="$(mktemp -t microagent-cleanup-live.XXXXXX)"
+process_file="$(mktemp -t microagent-cleanup-processes.XXXXXX)"
 trap 'rm -f "$candidate_file" "$filtered_file" "$live_file" "$process_file"' EXIT
 
 snapshot_processes() {
