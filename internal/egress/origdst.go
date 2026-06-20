@@ -4,9 +4,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net/netip"
-
-	"golang.org/x/sys/unix"
 )
+
+// afInet is AF_INET, which is 2 on every platform (POSIX). Using a plain
+// constant rather than golang.org/x/sys/afInet — which is undefined on
+// non-Linux builds — lets this IPv4-only SO_ORIGINAL_DST parser cross-compile
+// for non-Linux targets (e.g. the windows-hyperv supervisor binary). The parser
+// itself only ever runs on Linux; this changes no Linux behaviour.
+const afInet = 0x2
 
 // parseOriginalDstV4 decodes an IPv4 struct sockaddr_in. SO_ORIGINAL_DST is
 // IPv4-only; IPv6 original-destination recovery (IP6T_SO_ORIGINAL_DST) is not
@@ -25,8 +30,8 @@ func parseOriginalDstV4(b []byte) (netip.AddrPort, error) {
 		return netip.AddrPort{}, fmt.Errorf("egress: short sockaddr (%d bytes)", len(b))
 	}
 	// sa_family_t is a host-byte-order uint16 at offset 0.
-	if family := binary.NativeEndian.Uint16(b[0:2]); family != unix.AF_INET {
-		return netip.AddrPort{}, fmt.Errorf("egress: sockaddr family %d is not AF_INET (%d); IPv6/other original-destination not supported", family, unix.AF_INET)
+	if family := binary.NativeEndian.Uint16(b[0:2]); family != afInet {
+		return netip.AddrPort{}, fmt.Errorf("egress: sockaddr family %d is not AF_INET (%d); IPv6/other original-destination not supported", family, afInet)
 	}
 	port := binary.BigEndian.Uint16(b[2:4])
 	addr := netip.AddrFrom4([4]byte{b[4], b[5], b[6], b[7]})

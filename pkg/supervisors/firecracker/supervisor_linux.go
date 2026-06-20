@@ -3248,7 +3248,7 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 
 // gcWorkspace reconciles one workspace against reality: if it's recorded as
 // running but its firecracker process is gone (crashed, OOM-killed, host
-// rebooted, or an orphaned supervisor), it's a corpse — reap any lingering
+// rebooted, or an orphaned supervisor), it's stale — reap any lingering
 // companion processes + transient network state and record it stopped. Unlike
 // inspectWorkspace's clean-halt path, this triggers on PID liveness, not the
 // serial log. Idempotent + ESRCH-tolerant, so a sweep can call it on every
