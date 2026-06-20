@@ -247,6 +247,72 @@ func TestBuildComputeSystemDocumentEmitsNamedNetworkStaticCmdline(t *testing.T) 
 	}
 }
 
+func TestBuildComputeSystemDocumentEmitsEgressMediatorCmdline(t *testing.T) {
+	// When egress mediation is active for the workspace, the guest must be told
+	// to start its transparent forwarder and which hvsock port to dial — the same
+	// way the shell/exec/model ports are passed on the kernel command line. The
+	// value is the shared egress.DefaultMediatorVsockPort (1032), so the guest
+	// forwarder and the host mediator front-end cannot drift.
+	mediated, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			EgressMode: vmkit.EgressModeMediated,
+			Network: &vmkit.NetworkConfig{
+				Mode:    "user",
+				IP:      "192.168.127.5/24",
+				Gateway: "192.168.127.1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "microagent_egress_mediator_port=1032"; !strings.Contains(string(mediated), want) {
+		t.Fatalf("mediated cmdline missing %q: %s", want, mediated)
+	}
+
+	// Mediation OFF (default egress mode): the forwarder param must be absent so
+	// an unmediated guest never installs the capture/forwarder.
+	unmediated, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			Network: &vmkit.NetworkConfig{
+				Mode:    "user",
+				IP:      "192.168.127.5/24",
+				Gateway: "192.168.127.1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(unmediated), "microagent_egress_mediator_port") {
+		t.Fatalf("unmediated cmdline must not emit the egress mediator port: %s", unmediated)
+	}
+
+	// Mediation requested but network mode does not mediate (bridged): no mediator
+	// runs, so the guest must not be told to forward to a port nothing serves.
+	bridged, err := buildComputeSystemDocument(computeSystemSpec{
+		Name: "agent-1",
+		Config: vmkit.Config{
+			KernelPath: "C:\\microagent\\Image",
+			RootfsPath: "C:\\microagent\\rootfs.vhd",
+			EgressMode: vmkit.EgressModeStrict,
+			Network:    &vmkit.NetworkConfig{Mode: "bridged"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(bridged), "microagent_egress_mediator_port") {
+		t.Fatalf("bridged (unmediated) cmdline must not emit the egress mediator port: %s", bridged)
+	}
+}
+
 func TestPickFreeSubnetAvoidsOverlap(t *testing.T) {
 	candidates := []string{"192.168.127.0/24", "192.168.214.0/24", "10.71.214.0/24"}
 

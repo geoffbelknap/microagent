@@ -14,6 +14,7 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/Microsoft/hcsshim/hcn"
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
@@ -449,6 +450,16 @@ func buildComputeSystemDocument(spec computeSystemSpec) ([]byte, error) {
 	}
 	if spec.Config.MaintenanceBoot {
 		kernelCmdLine += " microagent_maintenance=1"
+	}
+	// Egress mediation: when this workspace runs a mediator (egress mode on AND a
+	// network mode that routes through it), tell the guest to start its transparent
+	// forwarder and which per-VM hvsock service port to dial — the same way the
+	// shell/exec/model ports are passed. The port is the shared
+	// egress.DefaultMediatorVsockPort the host front-end binds (listeners_windows.go),
+	// so the guest forwarder and the host service cannot drift. Absent when
+	// mediation is not active, so an unmediated guest installs no capture/forwarder.
+	if egressMediationActive(&spec.Config) {
+		kernelCmdLine += fmt.Sprintf(" microagent_egress_mediator_port=%d", egress.DefaultMediatorVsockPort)
 	}
 	// The HNS endpoint assigned the guest its address, but the synthetic
 	// NIC (hv_netvsc) comes up unconfigured: tell the guest its static
