@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/google/nftables/expr"
 )
 
 // TestApplyKernelConfigEgressMediatorPort asserts the cmdline param toggles the
@@ -53,8 +54,8 @@ func TestApplyKernelConfigEgressMediatorPort(t *testing.T) {
 // connection and the mediator stream. A net.Pipe stands in for the captured app
 // connection; a fake mediator reads the header off its end and echoes the body.
 func TestForwardEgressConnWritesDestHeaderAndPumps(t *testing.T) {
-	appSide, forwarderSide := net.Pipe()       // app <-> forwarder (the captured conn)
-	mediatorGuest, mediatorHost := net.Pipe()   // forwarder <-> mediator stream
+	appSide, forwarderSide := net.Pipe()      // app <-> forwarder (the captured conn)
+	mediatorGuest, mediatorHost := net.Pipe() // forwarder <-> mediator stream
 
 	origDst := netip.MustParseAddrPort("203.0.113.7:443")
 
@@ -132,11 +133,37 @@ func TestBuildGuestEgressRulesetShape(t *testing.T) {
 	if rs.table.Family != nftInet {
 		t.Fatalf("table family = %v, want inet", rs.table.Family)
 	}
-	// The REDIRECT rule must target the forwarder's TCP port and carry a uid-skip
-	// (loop avoidance) and a loopback-skip somewhere in its expression list.
-	if len(rs.redirectExprs) == 0 {
-		t.Fatal("no redirect exprs built")
+
+	// The nat/output chain MUST be three separate rules, in order: the two RETURN
+	// guards (skip-lo, skip-uid) preceding the REDIRECT. A single concatenated rule
+	// makes the kernel AND the leading oifname=="lo" match with the REDIRECT, so the
+	// REDIRECT never fires on real egress (eth0) and traffic falls through policy
+	// accept unmediated — the capture bug this fix closes.
+	natRules := guestNATChainRules(rs)
+	if len(natRules) != 3 {
+		t.Fatalf("nat chain has %d rules, want exactly 3 (skip-lo return, skip-uid return, tcp redirect)", len(natRules))
 	}
+	// Rule 1: oifname "lo" -> return.
+	if !exprsHaveMeta(natRules[0], expr.MetaKeyOIFNAME) || !exprsHaveVerdict(natRules[0], expr.VerdictReturn) {
+		t.Fatalf("nat rule 0 must be oifname lo -> return, got %s", summarizeExprs(natRules[0]))
+	}
+	// Rule 2: meta skuid <uid> -> return.
+	if !exprsHaveMeta(natRules[1], expr.MetaKeySKUID) || !exprsHaveVerdict(natRules[1], expr.VerdictReturn) {
+		t.Fatalf("nat rule 1 must be meta skuid -> return, got %s", summarizeExprs(natRules[1]))
+	}
+	// Rule 3: meta l4proto tcp -> redirect. This must NOT carry an oifname/skuid
+	// match (those are their own preceding rules now) — the REDIRECT must reach a
+	// real-egress packet on eth0.
+	if !exprsHaveMeta(natRules[2], expr.MetaKeyL4PROTO) || !exprsHaveRedirect(natRules[2]) {
+		t.Fatalf("nat rule 2 must be l4proto tcp -> redirect, got %s", summarizeExprs(natRules[2]))
+	}
+	if exprsHaveMeta(natRules[2], expr.MetaKeyOIFNAME) {
+		t.Fatalf("redirect rule must not AND an oifname match (that gates the REDIRECT): %s", summarizeExprs(natRules[2]))
+	}
+	if exprsHaveVerdict(natRules[2], expr.VerdictReturn) {
+		t.Fatalf("redirect rule must not contain a return verdict before the redirect: %s", summarizeExprs(natRules[2]))
+	}
+
 	if !rs.skipsForwarderUID {
 		t.Fatal("redirect must skip the forwarder's own uid to avoid loops")
 	}
@@ -152,6 +179,89 @@ func TestBuildGuestEgressRulesetShape(t *testing.T) {
 	if !rs.dropsOtherL4 {
 		t.Fatal("filter chain must drop all non-TCP L4 incl UDP/53 (fail closed)")
 	}
+}
+
+// guestNATChainRules returns the nat/output chain's rules in installation order,
+// each as its own []expr.Any — the exact slices applyGuestEgressRuleset adds as
+// separate nftables.Rules. Keeping this in one helper means the shape test and the
+// terminal-verdict invariant guard agree on what the installer builds.
+func guestNATChainRules(rs guestEgressRuleset) [][]expr.Any {
+	return [][]expr.Any{rs.skipLoExprs, rs.skipUIDExprs, rs.redirectExprs}
+}
+
+// guestFilterChainRules returns the filter/output chain's rules in installation
+// order.
+func guestFilterChainRules(rs guestEgressRuleset) [][]expr.Any {
+	return [][]expr.Any{rs.v6DropExprs, rs.tcpAllowExprs, rs.otherL4Exprs}
+}
+
+// TestGuestEgressRulesetNoExprAfterTerminalVerdict guards the invariant nft(8)
+// enforces and the kernel silently violates via netlink: a terminal verdict
+// (accept/drop/return) must be the LAST expression in a rule. An expression after
+// a terminal verdict "has no effect" (nft rejects it as "Statement after terminal
+// statement has no effect"); via the netlink path it installs but the trailing
+// statement is dead. The original capture bug was exactly this — three
+// match->verdict groups concatenated into one rule, so the REDIRECT after the two
+// RETURNs was unreachable. Applying the guard across EVERY rule the installer
+// builds means this class of bug cannot silently regress.
+func TestGuestEgressRulesetNoExprAfterTerminalVerdict(t *testing.T) {
+	rs := buildGuestEgressRuleset(egressForwarderUID, egressForwarderPort)
+	rules := append(guestNATChainRules(rs), guestFilterChainRules(rs)...)
+	for ruleIdx, exprs := range rules {
+		for i, e := range exprs {
+			v, ok := e.(*expr.Verdict)
+			if !ok {
+				continue
+			}
+			if !isTerminalVerdict(v.Kind) {
+				continue
+			}
+			if i != len(exprs)-1 {
+				t.Fatalf("rule %d has a terminal verdict (%v) at expr %d of %d — a non-terminal trailing expr would be dead/AND'd; verdict must be last: %s",
+					ruleIdx, v.Kind, i, len(exprs), summarizeExprs(exprs))
+			}
+		}
+	}
+}
+
+// isTerminalVerdict reports whether a verdict kind terminates rule evaluation
+// (accept, drop, return, queue, stolen). For these, no further expression in the
+// same rule executes, so any trailing expr is dead. (jump/goto continue into
+// another chain and are not terminal for this rule's expr list.)
+func isTerminalVerdict(k expr.VerdictKind) bool {
+	switch k {
+	case expr.VerdictAccept, expr.VerdictDrop, expr.VerdictReturn, expr.VerdictQueue, expr.VerdictStolen:
+		return true
+	default:
+		return false
+	}
+}
+
+func exprsHaveMeta(exprs []expr.Any, key expr.MetaKey) bool {
+	for _, e := range exprs {
+		if m, ok := e.(*expr.Meta); ok && m.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func exprsHaveVerdict(exprs []expr.Any, kind expr.VerdictKind) bool {
+	for _, e := range exprs {
+		if v, ok := e.(*expr.Verdict); ok && v.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func exprsHaveRedirect(exprs []expr.Any) bool {
+	for _, e := range exprs {
+		if _, ok := e.(*expr.Redir); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // TestWriteMediatedResolvConf asserts the mediated resolv.conf forces DNS over

@@ -87,7 +87,15 @@ type guestEgressRuleset struct {
 	natChain    *nftables.Chain
 	filterChain *nftables.Chain
 
-	redirectExprs []expr.Any // nat/output: skip lo + skip forwarder uid, then REDIRECT tcp -> forwarderPort
+	// nat/output REDIRECT split into three separate rules (one match -> verdict
+	// each), so the kernel does NOT AND the leading oifname/skuid matches with the
+	// REDIRECT. Concatenating them into a single rule made the leading oifname=="lo"
+	// (false for real egress on eth0) gate the whole rule, so the REDIRECT never
+	// fired and traffic fell through policy accept unmediated.
+	skipLoExprs   []expr.Any // nat/output rule 1: oifname "lo" -> return
+	skipUIDExprs  []expr.Any // nat/output rule 2: meta skuid <forwarderUID> -> return
+	redirectExprs []expr.Any // nat/output rule 3: meta l4proto tcp -> redirect to forwarderPort
+
 	v6DropExprs   []expr.Any // filter/output: drop all ipv6
 	tcpAllowExprs []expr.Any // filter/output: accept tcp (already REDIRECTed)
 	otherL4Exprs  []expr.Any // filter/output: drop everything else (incl UDP/53)
@@ -121,30 +129,40 @@ func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgr
 		Priority: nftables.ChainPriorityFilter,
 	}
 
-	// nat/output REDIRECT: skip loopback (oifname "lo" -> return), skip the
-	// forwarder's own uid (meta skuid <uid> -> return), then for tcp REDIRECT to
-	// the local forwarder port. REDIRECT is DNAT-to-localhost, so the forwarder
-	// recovers the original destination via SO_ORIGINAL_DST.
-	redirectExprs := []expr.Any{
+	// nat/output REDIRECT, split into THREE separate rules so the kernel evaluates
+	// each match->verdict independently (insertion order). A single concatenated
+	// rule ANDs all its matches: the leading oifname=="lo" (false for real egress on
+	// eth0) would gate the REDIRECT, so it would never fire and traffic would fall
+	// through policy accept unmediated. nft(8) rejects the concatenated form as
+	// "Statement after terminal statement has no effect"; the netlink path installs
+	// it silently. Mirroring the firecracker fail-closed loop (each rule is one
+	// match->verdict) keeps the two guards as their own RETURNs preceding the
+	// REDIRECT:
+	//   1. oifname "lo" -> return    (do not redirect guest-local loopback)
+	//   2. meta skuid <uid> -> return (the forwarder's own traffic; loop avoidance)
+	//   3. meta l4proto tcp -> redirect to :forwarderPort
+	// REDIRECT is DNAT-to-localhost, so the forwarder recovers the original
+	// destination via SO_ORIGINAL_DST.
+	skipLoExprs := []expr.Any{
 		// oifname == "lo" -> return (do not redirect guest-local loopback)
 		&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: nftIfName("lo")},
 		&expr.Verdict{Kind: expr.VerdictReturn},
 	}
-	redirectExprs = append(redirectExprs,
+	skipUIDExprs := []expr.Any{
 		// meta skuid == forwarderUID -> return (the forwarder's own traffic)
 		&expr.Meta{Key: expr.MetaKeySKUID, Register: 1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.NativeEndian.PutUint32(forwarderUID)},
 		&expr.Verdict{Kind: expr.VerdictReturn},
-	)
-	redirectExprs = append(redirectExprs,
+	}
+	redirectExprs := []expr.Any{
 		// l4proto == tcp
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_TCP}},
 		// redirect to :forwarderPort
 		&expr.Immediate{Register: 1, Data: binaryutil.BigEndian.PutUint16(forwarderPort)},
 		&expr.Redir{RegisterProtoMin: 1, RegisterProtoMax: 1, Flags: unix.NF_NAT_RANGE_PROTO_SPECIFIED},
-	)
+	}
 
 	// filter/output fail-closed program. Rules are evaluated in insertion order:
 	//  1. nfproto == ipv6 -> drop   (no v6 channel escapes)
@@ -174,6 +192,8 @@ func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgr
 		table:         table,
 		natChain:      natChain,
 		filterChain:   filterChain,
+		skipLoExprs:   skipLoExprs,
+		skipUIDExprs:  skipUIDExprs,
 		redirectExprs: redirectExprs,
 		v6DropExprs:   v6DropExprs,
 		tcpAllowExprs: tcpAllowExprs,
@@ -306,15 +326,25 @@ func writeMediatedResolvConfAt(path string) error {
 }
 
 // applyGuestEgressRuleset flushes the built ruleset to netfilter via google/nftables.
-// The filter-chain rules are added in precedence order (v6 drop, tcp accept,
-// catch-all drop): nft evaluates in insertion order, so the drop must be last. A
-// single Flush commits the whole program atomically.
+//
+// The nat/output REDIRECT is installed as THREE separate rules in order
+// (skip-lo return, skip-uid return, tcp redirect): nft evaluates rules in
+// insertion order, so the two RETURN guards precede the REDIRECT and each is its
+// own match->verdict. They MUST NOT be concatenated into one rule — the kernel
+// would AND the matches, so the leading oifname=="lo" (false for real egress)
+// would gate the REDIRECT and it would never fire (the original capture bug).
+//
+// The filter-chain rules are likewise added in precedence order (v6 drop, tcp
+// accept, catch-all drop): the drop must be last. A single Flush commits the
+// whole program atomically.
 func applyGuestEgressRuleset(rs guestEgressRuleset) error {
 	conn := &nftables.Conn{}
 	conn.AddTable(rs.table)
 	conn.AddChain(rs.natChain)
 	conn.AddChain(rs.filterChain)
-	conn.AddRule(&nftables.Rule{Table: rs.table, Chain: rs.natChain, Exprs: rs.redirectExprs})
+	for _, exprs := range [][]expr.Any{rs.skipLoExprs, rs.skipUIDExprs, rs.redirectExprs} {
+		conn.AddRule(&nftables.Rule{Table: rs.table, Chain: rs.natChain, Exprs: exprs})
+	}
 	for _, exprs := range [][]expr.Any{rs.v6DropExprs, rs.tcpAllowExprs, rs.otherL4Exprs} {
 		conn.AddRule(&nftables.Rule{Table: rs.table, Chain: rs.filterChain, Exprs: exprs})
 	}
