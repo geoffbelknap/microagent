@@ -7651,6 +7651,41 @@ func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
 	}
 }
 
+func TestWriteDoctorResponseTextAppleVFNetworkingDoesNotSuggestLinuxSetup(t *testing.T) {
+	oldOutput := outputFormat
+	t.Cleanup(func() { outputFormat = oldOutput })
+	outputFormat = "text"
+	f, err := os.CreateTemp(t.TempDir(), "doctor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	resp := vmkit.Response{
+		OK:      true,
+		Backend: vmkit.BackendAppleVF,
+		Host: &vmkit.HostSupport{
+			Backend:                 vmkit.BackendAppleVF,
+			Architecture:            "arm64",
+			FrameworkAvailable:      true,
+			VirtualizationSupported: true,
+			SupervisorAvailable:     true,
+			ConsoleAvailable:        true,
+			ConsoleMode:             "interactive",
+		},
+	}
+	if err := writeDoctorResponse(f, resp); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(f.Name())
+	out := string(data)
+	if !strings.Contains(out, "Networking: isolated ready, user/nat ready") {
+		t.Errorf("expected apple-vf networking readiness, got:\n%s", out)
+	}
+	if strings.Contains(out, "setup-networking") {
+		t.Errorf("apple-vf doctor should not suggest Linux setup-networking, got:\n%s", out)
+	}
+}
+
 func TestParseEgressMode(t *testing.T) {
 	cases := map[string]string{
 		"": "mediated", "mediated": "mediated",
