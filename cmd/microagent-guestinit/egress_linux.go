@@ -38,13 +38,18 @@ import (
 //     mediator at AF_VSOCK egress.DefaultMediatorVsockPort, writes a DestHeader,
 //     and pumps bytes. Loops are avoided by skipping (a) loopback output and (b)
 //     traffic from the forwarder's own uid.
+//   - DNS: the mediated resolv.conf names a guest-local DNS bridge (dnsBridgeAddr:53)
+//     as the sole nameserver, so the resolver sends DNS straight to the bridge over
+//     loopback — UDP or TCP. The bridge ships each query to the host mediator's
+//     DNS-over-TCP handler (a proto-"tcp" DestHeader to port 53) and returns the
+//     answer. This is libc-agnostic: musl always uses UDP and ignores "options
+//     use-vc", but it still reaches the bridge's UDP socket. (An nft REDIRECT cannot
+//     reliably steer UDP to a loopback listener from OUTPUT — that is the TPROXY-only
+//     limitation — so the bridge listens on a real :53 instead of relying on capture.)
 //   - Fail-closed: an inet filter/output chain DROPs all guest IPv6 egress and ALL
-//     non-TCP L4 (including UDP/53 — no unmediated DNS leak). Guest DNS is forced
-//     onto TCP via /etc/resolv.conf ("options use-vc"), so the resolver opens a
-//     TCP/53 connection; the nat/output REDIRECT captures it like any other TCP and
-//     it is shipped as a proto-"tcp" DestHeader to port 53, where the host mediator
-//     resolves it through its filtering DNS-over-TCP handler. UDP DNS cannot be
-//     mediated from the OUTPUT chain (TPROXY is invalid there), so it is dropped.
+//     non-TCP, non-loopback L4. Guest DNS to the loopback bridge is accepted by the
+//     oifname-lo rule; any UDP aimed at the real NIC hits the catch-all drop — no
+//     unmediated egress leak.
 //
 // All rules are inet-family, matching the firecracker expr style (REDIRECT via
 // expr.Redir, DROP verdicts in a filter chain), and are installed ONLY when the
@@ -63,10 +68,24 @@ const egressForwarderUID uint32 = 30000
 // REDIRECT targets. Fixed and guest-local; nothing else in the guest binds it.
 const egressForwarderPort uint16 = 41032
 
-// dnsPort is the DNS service port. Guest DNS is forced onto TCP (resolv.conf
-// "options use-vc"), so a TCP/53 connection is captured by the nat/output
-// REDIRECT and mediated; UDP/53 is dropped by the fail-closed filter chain.
+// dnsPort is the DNS service port. The mediated guest's resolv.conf points its
+// resolver at the guest-local DNS bridge on dnsBridgeAddr:dnsPort, so DNS queries
+// (UDP or TCP) go straight to the bridge over loopback — no nft REDIRECT, which
+// cannot reliably steer UDP to a loopback listener from the OUTPUT hook (that is
+// the TPROXY-only limitation). The bridge ships each query to the host mediator's
+// DNS-over-TCP handler. This makes DNS mediation libc-agnostic: musl always uses
+// UDP and ignores "options use-vc", but it still reaches the bridge because the
+// bridge listens on UDP/53 directly.
 const dnsPort uint16 = 53
+
+// dnsBridgeAddr is the loopback address the guest DNS bridge listens on (UDP+TCP
+// port 53) and the mediated resolv.conf names as the sole nameserver. Loopback so
+// the query never leaves the guest before the bridge ships it to the host
+// mediator over hvsock; the fail-closed filter chain's oifname-lo accept lets the
+// loopback DNS through. A non-127.0.0.1 loopback address (127.0.0.53, the
+// systemd-resolved convention) keeps it distinct from anything an app might
+// already expect on 127.0.0.1.
+const dnsBridgeAddr = "127.0.0.53"
 
 // nftInet aliases the google/nftables inet table family so tests and the builder
 // reference a single value.
@@ -97,21 +116,23 @@ type guestEgressRuleset struct {
 	redirectExprs []expr.Any // nat/output rule 3: meta l4proto tcp -> redirect to forwarderPort
 
 	v6DropExprs   []expr.Any // filter/output: drop all ipv6
+	loAcceptExprs []expr.Any // filter/output: accept oifname "lo" (the guest-local DNS bridge traffic)
 	tcpAllowExprs []expr.Any // filter/output: accept tcp (already REDIRECTed)
-	otherL4Exprs  []expr.Any // filter/output: drop everything else (incl UDP/53)
+	otherL4Exprs  []expr.Any // filter/output: drop everything else (unmediated UDP, ICMP, ...)
 
 	skipsForwarderUID bool
 	skipsLoopback     bool
 	dropsIPv6         bool
-	permitsDNSUDP     bool // false now: UDP/53 is dropped, DNS goes over TCP through the mediator
+	acceptsLoopback   bool // true: the filter chain accepts oifname "lo" so the guest-local DNS bridge works
 	dropsOtherL4      bool
 }
 
 // buildGuestEgressRuleset constructs the inet-family OUTPUT-path ruleset for the
-// given forwarder uid and TCP port. It mirrors the firecracker expr style but in
-// the OUTPUT hook: nat/output REDIRECT for TCP (with loopback + own-uid skips for
-// loop avoidance) and a filter/output fail-closed program (drop v6, accept udp/53,
-// accept tcp, drop the rest).
+// given forwarder uid, TCP forwarder port, and UDP DNS-bridge port. It mirrors the
+// firecracker expr style but in the OUTPUT hook: nat/output REDIRECTs (UDP/53 to
+// the DNS bridge, all other TCP to the forwarder, with loopback + own-uid skips
+// for loop avoidance) and a filter/output fail-closed program (drop v6, accept
+// loopback — the REDIRECT targets are on lo — accept tcp, drop the rest).
 func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgressRuleset {
 	table := &nftables.Table{Family: nftInet, Name: guestEgressTableName}
 	natChain := &nftables.Chain{
@@ -166,16 +187,27 @@ func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgr
 
 	// filter/output fail-closed program. Rules are evaluated in insertion order:
 	//  1. nfproto == ipv6 -> drop   (no v6 channel escapes)
-	//  2. l4proto == tcp -> accept  (already REDIRECTed at the nat hook; incl TCP/53)
-	//  3. (catch-all) -> drop       (ICMP, ALL UDP incl UDP/53, other L4: fail closed)
-	// There is NO UDP/53 carve-out: guest DNS is forced onto TCP (resolv.conf
-	// "options use-vc"), so it is captured by the TCP REDIRECT and mediated. Any
-	// UDP/53 that still escapes the resolver (e.g. a statically-configured app)
-	// hits the catch-all drop — no unmediated DNS leak.
+	//  2. oifname == lo  -> accept  (the mediated resolv.conf points the resolver at
+	//                                the guest-local DNS bridge on dnsBridgeAddr:53,
+	//                                so its UDP/TCP DNS egresses on lo; loopback never
+	//                                leaves the guest, so accepting it is safe and
+	//                                lets the guest DNS reach the bridge instead of
+	//                                hitting the catch-all drop below)
+	//  3. l4proto == tcp -> accept  (already REDIRECTed at the nat hook; incl TCP/53)
+	//  4. (catch-all) -> drop       (ICMP, UNMEDIATED UDP, other L4: fail closed)
+	// Guest DNS goes to the loopback bridge (rule 2), not out the NIC. UDP that is
+	// NOT loopback (e.g. an app blasting UDP at a public IP) egresses on the real
+	// NIC and hits the catch-all drop — no unmediated UDP leak.
 	v6DropExprs := []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
 		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV6}},
 		&expr.Verdict{Kind: expr.VerdictDrop},
+	}
+	loAcceptExprs := []expr.Any{
+		// oifname == "lo" -> accept (the guest-local DNS bridge's loopback traffic).
+		&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: nftIfName("lo")},
+		&expr.Verdict{Kind: expr.VerdictAccept},
 	}
 	tcpAllowExprs := []expr.Any{
 		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
@@ -183,8 +215,8 @@ func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgr
 		&expr.Verdict{Kind: expr.VerdictAccept},
 	}
 	otherL4Exprs := []expr.Any{
-		// Catch-all: anything reaching here is neither ipv6 nor tcp — drop it
-		// (all UDP including UDP/53, ICMP, and any other L4).
+		// Catch-all: anything reaching here is neither ipv6, loopback, nor tcp —
+		// drop it (unmediated UDP, ICMP, and any other L4).
 		&expr.Verdict{Kind: expr.VerdictDrop},
 	}
 
@@ -196,13 +228,14 @@ func buildGuestEgressRuleset(forwarderUID uint32, forwarderPort uint16) guestEgr
 		skipUIDExprs:  skipUIDExprs,
 		redirectExprs: redirectExprs,
 		v6DropExprs:   v6DropExprs,
+		loAcceptExprs: loAcceptExprs,
 		tcpAllowExprs: tcpAllowExprs,
 		otherL4Exprs:  otherL4Exprs,
 
 		skipsForwarderUID: true,
 		skipsLoopback:     true,
 		dropsIPv6:         true,
-		permitsDNSUDP:     false,
+		acceptsLoopback:   true,
 		dropsOtherL4:      true,
 	}
 }
@@ -242,26 +275,43 @@ func installGuestEgress(mediatorVsockPort uint32) error {
 	if err := applyGuestEgressRuleset(rs); err != nil {
 		return fmt.Errorf("egress forwarder: install nft ruleset: %w", err)
 	}
-	// Force guest DNS onto TCP so it is captured by the TCP REDIRECT and mediated.
-	// The fail-closed filter chain now drops UDP/53, so without this the guest
-	// resolver (which defaults to UDP) would be silently blocked. Must run AFTER
-	// the ruleset is in place so there is never a window where UDP DNS both works
-	// and is unmediated.
+	// Write the mediated resolv.conf. It points the resolver at the guest-local DNS
+	// bridge on dnsBridgeAddr:53, so DNS goes straight to the bridge over loopback
+	// (no nft REDIRECT, which cannot reliably steer UDP to a loopback listener) and
+	// the bridge ships it to the host mediator. Works for UDP (musl) and TCP (glibc)
+	// resolvers alike. Must run AFTER the ruleset (and the bridge start below races
+	// only the resolver, which the workload uses) so there is never a window where
+	// DNS both works and is unmediated.
 	if err := writeMediatedResolvConf(); err != nil {
 		return fmt.Errorf("egress forwarder: write mediated resolv.conf: %w", err)
 	}
-	cmd := exec.Command(os.Args[0], "egress-forward-helper",
+	// TCP forwarder: runs under egressForwarderUID (the uid the nat REDIRECT skips
+	// for loop avoidance) and services every captured guest TCP connection.
+	forwarder := exec.Command(os.Args[0], "egress-forward-helper",
 		strconv.Itoa(int(egressForwarderPort)),
 		strconv.FormatUint(uint64(mediatorVsockPort), 10))
-	cmd.SysProcAttr = &syscall.SysProcAttr{
+	forwarder.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: egressForwarderUID, Gid: egressForwarderUID},
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
+	forwarder.Stdout = os.Stdout
+	forwarder.Stderr = os.Stderr
+	if err := forwarder.Start(); err != nil {
 		return fmt.Errorf("egress forwarder: start helper: %w", err)
 	}
-	log.Printf("microagent-init: egress forwarder listening on 127.0.0.1:%d, mediator hvsock port %d", egressForwarderPort, mediatorVsockPort)
+	// DNS bridge: binds the privileged dnsBridgeAddr:53 (UDP+TCP), so it runs as
+	// root (the forwarder uid could not bind <1024). It dials the mediator over
+	// hvsock, never IP, so it needs no REDIRECT skip. A separate subprocess (like
+	// the forwarder) so it survives the run() syscall.Exec handoff to the workload.
+	dnsBridge := exec.Command(os.Args[0], "egress-dns-bridge",
+		dnsBridgeAddr,
+		strconv.Itoa(int(dnsPort)),
+		strconv.FormatUint(uint64(mediatorVsockPort), 10))
+	dnsBridge.Stdout = os.Stdout
+	dnsBridge.Stderr = os.Stderr
+	if err := dnsBridge.Start(); err != nil {
+		return fmt.Errorf("egress DNS bridge: start helper: %w", err)
+	}
+	log.Printf("microagent-init: egress forwarder listening on 127.0.0.1:%d (TCP), DNS bridge on %s:%d, mediator hvsock port %d", egressForwarderPort, dnsBridgeAddr, dnsPort, mediatorVsockPort)
 	return nil
 }
 
@@ -286,37 +336,30 @@ func writeRouteLocalnetAt(path string) error {
 	return nil
 }
 
-// mediatedResolvConfNameserver is the placeholder nameserver written into the
-// mediated guest's resolv.conf. The actual address is irrelevant: the nft
-// nat/output REDIRECT rewrites the destination of any guest-originated TCP/53
-// connection to the local forwarder regardless of the configured server, so the
-// resolver only needs SOME address to open a TCP virtual circuit to. A
-// documentation-range TEST-NET-1 address (RFC 5737) makes it obvious in the
-// guest's resolv.conf that the value is a stand-in, not a real resolver.
-const mediatedResolvConfNameserver = "192.0.2.53"
-
 // writeMediatedResolvConf writes /etc/resolv.conf for a mediated guest. It is
-// called from installGuestEgress after the fail-closed ruleset (which drops
-// UDP/53) is installed.
+// called from installGuestEgress after the fail-closed ruleset is installed.
 func writeMediatedResolvConf() error {
 	return writeMediatedResolvConfAt("/etc/resolv.conf")
 }
 
-// writeMediatedResolvConfAt writes the mediated resolv.conf to path. It forces
-// the guest resolver onto TCP so DNS leaves as TCP/53 (captured by the REDIRECT
-// and mediated) rather than UDP/53 (dropped by the fail-closed chain):
+// writeMediatedResolvConfAt writes the mediated resolv.conf to path. It points the
+// guest resolver straight at the guest-local DNS bridge (dnsBridgeAddr:53), which
+// listens on UDP and TCP and ships every query to the host mediator over hvsock.
+// Sending to a real loopback :53 listener (rather than relying on an nft REDIRECT,
+// which cannot reliably steer UDP to a loopback listener from the OUTPUT hook) is
+// what makes DNS work for ANY libc:
 //
-//   - "options use-vc" makes glibc/musl use a TCP virtual circuit for queries
-//     instead of UDP.
-//   - "options single-request" sends the A and AAAA lookups sequentially rather
-//     than parallelizing them on one socket, which is the more robust pattern for
-//     a serial TCP resolver and avoids a known glibc parallel-A/AAAA stall.
+//   - musl ignores "options use-vc" and always uses UDP — it reaches the bridge's
+//     UDP socket.
+//   - glibc with "options use-vc" uses TCP — it reaches the bridge's TCP socket.
 //
-// The nameserver address is a placeholder (see mediatedResolvConfNameserver):
-// the REDIRECT rewrites the TCP/53 destination regardless. Split out from
-// writeMediatedResolvConf so the content is unit-testable without touching /etc.
+// "options single-request" sends the A and AAAA lookups sequentially rather than
+// parallelizing them on one socket, avoiding a known glibc parallel-A/AAAA stall.
+// "options use-vc" is kept as a harmless hint for glibc; musl ignores it and uses
+// the bridge's UDP path. Split out from writeMediatedResolvConf so the content is
+// unit-testable without touching /etc.
 func writeMediatedResolvConfAt(path string) error {
-	content := "nameserver " + mediatedResolvConfNameserver + "\n" +
+	content := "nameserver " + dnsBridgeAddr + "\n" +
 		"options use-vc\n" +
 		"options single-request\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -342,10 +385,14 @@ func applyGuestEgressRuleset(rs guestEgressRuleset) error {
 	conn.AddTable(rs.table)
 	conn.AddChain(rs.natChain)
 	conn.AddChain(rs.filterChain)
+	// nat/output order: the two RETURN guards, then the generic TCP redirect.
 	for _, exprs := range [][]expr.Any{rs.skipLoExprs, rs.skipUIDExprs, rs.redirectExprs} {
 		conn.AddRule(&nftables.Rule{Table: rs.table, Chain: rs.natChain, Exprs: exprs})
 	}
-	for _, exprs := range [][]expr.Any{rs.v6DropExprs, rs.tcpAllowExprs, rs.otherL4Exprs} {
+	// filter/output order: v6 drop, loopback accept (the guest-local DNS bridge
+	// traffic), tcp accept, catch-all drop. The loopback accept MUST precede the
+	// catch-all drop so the guest's loopback DNS to the bridge is not dropped.
+	for _, exprs := range [][]expr.Any{rs.v6DropExprs, rs.loAcceptExprs, rs.tcpAllowExprs, rs.otherL4Exprs} {
 		conn.AddRule(&nftables.Rule{Table: rs.table, Chain: rs.filterChain, Exprs: exprs})
 	}
 	if err := conn.Flush(); err != nil {
@@ -504,11 +551,12 @@ func runEgressForwardHelper(args []string) int {
 		fmt.Fprintf(os.Stderr, "parse forwarder port: %v\n", err)
 		return 127
 	}
-	mediatorVsockPort, err := strconv.ParseUint(strings.TrimSpace(args[1]), 10, 32)
-	if err != nil || mediatorVsockPort == 0 {
+	mediatorVsockPort64, err := strconv.ParseUint(strings.TrimSpace(args[1]), 10, 32)
+	if err != nil || mediatorVsockPort64 == 0 {
 		fmt.Fprintf(os.Stderr, "parse mediator vsock port: %v\n", err)
 		return 127
 	}
+	mediatorVsockPort := uint32(mediatorVsockPort64)
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", forwarderPort))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "listen egress forwarder on 127.0.0.1:%d: %v\n", forwarderPort, err)
@@ -519,8 +567,161 @@ func runEgressForwardHelper(args []string) int {
 		if err != nil {
 			return 0
 		}
-		go serveCapturedEgressConn(conn, uint32(mediatorVsockPort))
+		go serveCapturedEgressConn(conn, mediatorVsockPort)
 	}
+}
+
+// runEgressDNSBridge is the egress-dns-bridge subprocess. It binds the guest-local
+// DNS bridge address (dnsBridgeAddr:53, the sole nameserver in the mediated
+// resolv.conf) on BOTH UDP and TCP and services every guest DNS query by shipping
+// it to the host mediator's DNS-over-TCP handler (policy + REFUSED synthesis +
+// audit) and returning the answer. This is what makes DNS mediation libc-agnostic:
+// the resolver sends straight to a real :53 listener over loopback (no nft
+// REDIRECT, which cannot reliably steer UDP to a loopback listener from OUTPUT), so
+// it works whether the resolver speaks UDP (musl, which ignores "options use-vc")
+// or TCP (glibc with use-vc).
+//
+// The bridge binds port 53, so it must run as root (the forwarder uid cannot bind
+// <1024). It dials the mediator over hvsock — never IP — so it needs no nft skip
+// and creates no loop. args: <addr> <port> <mediatorVsockPort>.
+func runEgressDNSBridge(args []string) int {
+	if len(args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: microagent-init egress-dns-bridge <addr> <port> <mediatorVsockPort>")
+		return 127
+	}
+	addr := strings.TrimSpace(args[0])
+	port, err := parseUint16(args[1])
+	if err != nil || port == 0 {
+		fmt.Fprintf(os.Stderr, "parse dns bridge port: %v\n", err)
+		return 127
+	}
+	mediatorVsockPort64, err := strconv.ParseUint(strings.TrimSpace(args[2]), 10, 32)
+	if err != nil || mediatorVsockPort64 == 0 {
+		fmt.Fprintf(os.Stderr, "parse mediator vsock port: %v\n", err)
+		return 127
+	}
+	mediatorVsockPort := uint32(mediatorVsockPort64)
+
+	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(addr), Port: int(port)})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listen egress DNS bridge UDP %s:%d: %v\n", addr, port, err)
+		return 127
+	}
+	// TCP DNS too (glibc with use-vc, and large answers): bind the same addr:53.
+	tcpLn, err := net.Listen("tcp", fmt.Sprintf("%s:%d", addr, port))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "listen egress DNS bridge TCP %s:%d: %v\n", addr, port, err)
+		return 127
+	}
+	go serveEgressDNSBridgeTCP(tcpLn, mediatorVsockPort)
+	serveEgressDNSBridgeUDP(udpConn, mediatorVsockPort)
+	return 0
+}
+
+// serveEgressDNSBridgeUDP reads each UDP DNS datagram and bridges it to the
+// mediator per query.
+func serveEgressDNSBridgeUDP(conn *net.UDPConn, mediatorVsockPort uint32) {
+	buf := make([]byte, 65535)
+	for {
+		n, client, err := conn.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		query := append([]byte(nil), buf[:n]...)
+		go bridgeOneDNSQuery(conn, client, query, mediatorVsockPort)
+	}
+}
+
+// serveEgressDNSBridgeTCP accepts TCP DNS connections (RFC 1035 length-prefixed
+// framing) and pipes each one straight to the mediator's DNS-over-TCP handler,
+// which already speaks that framing. The mediator loops over successive queries on
+// the connection (glibc sends A then AAAA on one socket), so the bridge just
+// shuttles the framed bytes both ways.
+func serveEgressDNSBridgeTCP(ln net.Listener, mediatorVsockPort uint32) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go bridgeTCPDNSConn(conn, mediatorVsockPort)
+	}
+}
+
+// bridgeTCPDNSConn forwards a guest TCP DNS connection to the mediator's
+// DNS-over-TCP handler. The guest already frames queries with the 2-byte length
+// prefix the mediator expects, so the bytes pass through unchanged in both
+// directions after the DestHeader.
+func bridgeTCPDNSConn(local net.Conn, mediatorVsockPort uint32) {
+	fd, err := dialHostVsock(mediatorVsockPort, 5*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "egress DNS bridge: dial mediator hvsock port %d: %v\n", mediatorVsockPort, err)
+		_ = local.Close()
+		return
+	}
+	mediator := os.NewFile(uintptr(fd), "egress-dns-tcp-vsock")
+	if mediator == nil {
+		_ = unix.Close(fd)
+		_ = local.Close()
+		return
+	}
+	// forwardEgressConn writes the DestHeader (tcp/53 -> the mediator's DNS-over-TCP
+	// handler) and pumps the framed query/response bytes both ways, closing both
+	// ends on return.
+	forwardEgressConn(local, netip.AddrPortFrom(netip.MustParseAddr(dnsBridgeAddr), dnsPort), mediator)
+}
+
+// bridgeOneDNSQuery ships a single guest UDP DNS query to the mediator's
+// DNS-over-TCP handler and writes the answer back to the guest client. It opens a
+// fresh mediator hvsock connection per query (DNS queries are short and
+// independent), writes the DestHeader + length-prefixed query, reads the
+// length-prefixed response, and sends the bare DNS answer back over UDP. All
+// errors fail silent for that query (the guest resolver retries/timeouts) — a
+// single malformed or slow query must not wedge the bridge.
+func bridgeOneDNSQuery(conn *net.UDPConn, client *net.UDPAddr, query []byte, mediatorVsockPort uint32) {
+	if len(query) == 0 || len(query) > 0xFFFF {
+		return
+	}
+	fd, err := dialHostVsock(mediatorVsockPort, 5*time.Second)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "egress DNS bridge: dial mediator hvsock port %d: %v\n", mediatorVsockPort, err)
+		return
+	}
+	mediator := os.NewFile(uintptr(fd), "egress-dns-vsock")
+	if mediator == nil {
+		_ = unix.Close(fd)
+		return
+	}
+	defer func() { _ = mediator.Close() }()
+	_ = mediator.SetDeadline(time.Now().Add(10 * time.Second))
+
+	if err := egress.WriteDestHeader(mediator, egress.DestHeader{Proto: "tcp", Host: "127.0.0.1", Port: dnsPort}); err != nil {
+		fmt.Fprintf(os.Stderr, "egress DNS bridge: write dest header: %v\n", err)
+		return
+	}
+	// 2-byte big-endian length prefix + query (RFC 1035 §4.2.2 TCP framing).
+	var lenBuf [2]byte
+	lenBuf[0] = byte(len(query) >> 8)
+	lenBuf[1] = byte(len(query))
+	if _, err := mediator.Write(lenBuf[:]); err != nil {
+		return
+	}
+	if _, err := mediator.Write(query); err != nil {
+		return
+	}
+	// Read the length-prefixed response.
+	if _, err := io.ReadFull(mediator, lenBuf[:]); err != nil {
+		return
+	}
+	respLen := int(lenBuf[0])<<8 | int(lenBuf[1])
+	if respLen == 0 || respLen > 0xFFFF {
+		return
+	}
+	resp := make([]byte, respLen)
+	if _, err := io.ReadFull(mediator, resp); err != nil {
+		return
+	}
+	// Send the bare DNS answer (no length prefix) back to the guest over UDP.
+	_, _ = conn.WriteToUDP(resp, client)
 }
 
 // serveCapturedEgressConn handles one REDIRECTed TCP connection: recover the

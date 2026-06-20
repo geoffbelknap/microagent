@@ -2,6 +2,7 @@ package egress
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -31,43 +32,58 @@ import (
 // connection but never wrote a query must not pin a goroutine forever.
 const dnsTCPReadTimeout = 10 * time.Second
 
-// HandleDNSOverTCP services one captured DNS-over-TCP stream. It reads a single
-// 2-byte-length-prefixed DNS query off rw, runs it through handleDNS (reusing
-// the firecracker resolver/policy/cache/audit core) with the given upstream
-// resolver and forward round-trip, and writes the length-prefixed response back
-// on rw. forward performs the actual resolver round-trip (injected for tests;
-// production wiring passes DefaultDNSForwardTCP). A truncated/unframeable query,
-// or a handleDNS error (parse/forward failure), returns an error so the caller
-// closes the stream fail-closed; a policy DENY is NOT an error — handleDNS
-// returns a synthesized REFUSED that is framed back to the guest, mirroring the
-// UDP path's behavior.
+// HandleDNSOverTCP services a captured DNS-over-TCP stream. A guest stub resolver
+// forced onto TCP (resolv.conf "options use-vc") keeps the TCP/53 connection open
+// and sends SUCCESSIVE queries on it — glibc in particular issues the A and AAAA
+// lookups of one getaddrinfo() over the SAME connection (even with
+// "single-request", which serializes them rather than splitting them onto two
+// sockets). So the handler loops: it reads each 2-byte-length-prefixed query off
+// rw, runs it through handleDNS (reusing the firecracker resolver/policy/cache/
+// audit core) with the given upstream resolver and forward round-trip, writes the
+// length-prefixed response back, and repeats until the guest closes the
+// connection. forward performs the actual resolver round-trip (injected for tests;
+// production wiring passes DefaultDNSForwardTCP).
+//
+// A clean EOF before the next length prefix is normal termination (the guest is
+// done) and returns nil. A truncated/unframeable query mid-message, or a
+// handleDNS error (parse/forward failure), returns an error so the caller closes
+// the stream fail-closed; a policy DENY is NOT an error — handleDNS returns a
+// synthesized REFUSED that is framed back to the guest, mirroring the UDP path's
+// behavior. Servicing only the first query and closing the connection would break
+// glibc's second (AAAA) query on the same socket and fail the whole lookup.
 func (h *Handler) HandleDNSOverTCP(rw io.ReadWriter, resolver netip.AddrPort, forward func(resolver netip.AddrPort, query []byte) ([]byte, error)) error {
-	if c, ok := rw.(net.Conn); ok {
-		_ = c.SetReadDeadline(time.Now().Add(dnsTCPReadTimeout))
+	for {
+		if c, ok := rw.(net.Conn); ok {
+			_ = c.SetReadDeadline(time.Now().Add(dnsTCPReadTimeout))
+		}
+		query, err := readDNSOverTCP(rw)
+		if err != nil {
+			// A clean EOF before the next query's length prefix is the guest closing
+			// the connection after its last query — normal termination, not an error.
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("egress: read DNS-over-TCP query: %w", err)
+		}
+		// Clear the read deadline before the (potentially blocking) forward + write
+		// so a subsequent slow upstream is bounded by the forward's own timeout, not
+		// the query-read deadline.
+		if c, ok := rw.(net.Conn); ok {
+			_ = c.SetReadDeadline(time.Time{})
+		}
+		resp, err := h.handleDNS(query, resolver, forward)
+		if err != nil {
+			// handleDNS already audited egress_dns_error; surface the error so the
+			// caller closes the stream fail-closed (no response framed).
+			return err
+		}
+		if resp == nil {
+			continue
+		}
+		if err := writeDNSOverTCP(rw, resp); err != nil {
+			return fmt.Errorf("egress: write DNS-over-TCP response: %w", err)
+		}
 	}
-	query, err := readDNSOverTCP(rw)
-	if err != nil {
-		return fmt.Errorf("egress: read DNS-over-TCP query: %w", err)
-	}
-	// Clear the read deadline before the (potentially blocking) forward + write
-	// so a subsequent slow upstream is bounded by the forward's own timeout, not
-	// the query-read deadline.
-	if c, ok := rw.(net.Conn); ok {
-		_ = c.SetReadDeadline(time.Time{})
-	}
-	resp, err := h.handleDNS(query, resolver, forward)
-	if err != nil {
-		// handleDNS already audited egress_dns_error; surface the error so the
-		// caller closes the stream fail-closed (no response framed).
-		return err
-	}
-	if resp == nil {
-		return nil
-	}
-	if err := writeDNSOverTCP(rw, resp); err != nil {
-		return fmt.Errorf("egress: write DNS-over-TCP response: %w", err)
-	}
-	return nil
 }
 
 // readDNSOverTCP reads one 2-byte-length-prefixed DNS message from r (RFC 1035

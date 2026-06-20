@@ -298,21 +298,37 @@ func newEgressMediator(handler *egress.Handler, req vmkit.Request) *egressMediat
 }
 
 // egressUpstreamResolver picks the upstream DNS resolver the mediator forwards
-// guest DNS-over-TCP queries to. It prefers the first valid entry in the
-// workspace's network DNS list (the host-configured upstream, e.g. the NAT
-// gateway or an HCS-vended server) and falls back to a public resolver
-// (1.1.1.1:53) when none is configured or parseable — so a mediated workspace
-// can always resolve even if the network record carried no DNS server. The
-// returned AddrPort always targets port 53.
+// guest DNS-over-TCP queries to. The mediator dials this resolver FROM THE HOST
+// (the guest's DNS rides the hvsock to the host front-end, never the NIC), so the
+// resolver must be reachable from the host — NOT the guest's own view of DNS.
+//
+// On the mediated no-uplink topology (P5) the workspace's network DNS list is the
+// guest-facing HNS gateway (e.g. 192.168.214.1), which is a dead end from the
+// host: the Private HNS network has no uplink and the gateway runs no DNS-over-TCP
+// server the host can reach, so forwarding there fails every query. The gateway
+// address is the guest's resolver-of-record, never a host-reachable upstream, so
+// any DNS entry that equals the network gateway is skipped. The first remaining
+// host-reachable entry wins; when none remain (the common mediated case, where the
+// only DNS entry IS the gateway) it falls back to a public resolver (1.1.1.1:53)
+// the host can always reach over TCP/53. The returned AddrPort always targets
+// port 53.
 func egressUpstreamResolver(req vmkit.Request) netip.AddrPort {
 	const fallback = "1.1.1.1"
 	server := fallback
 	if req.Config != nil && req.Config.Network != nil {
+		gateway, _ := netip.ParseAddr(strings.TrimSpace(req.Config.Network.Gateway))
 		for _, d := range req.Config.Network.DNS {
-			if ip, err := netip.ParseAddr(strings.TrimSpace(d)); err == nil {
-				server = ip.String()
-				break
+			ip, err := netip.ParseAddr(strings.TrimSpace(d))
+			if err != nil {
+				continue
 			}
+			// Skip the guest-facing HNS gateway: it is the guest's resolver view,
+			// unreachable from the host on the no-uplink mediated network.
+			if gateway.IsValid() && ip == gateway {
+				continue
+			}
+			server = ip.String()
+			break
 		}
 	}
 	ip, err := netip.ParseAddr(server)

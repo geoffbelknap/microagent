@@ -289,6 +289,57 @@ func TestServeEgressMediatorConnHandlesDNSOverTCP(t *testing.T) {
 	_ = guestConn.Close()
 }
 
+// TestEgressUpstreamResolverSkipsGuestGateway asserts the mediator's DNS upstream
+// selection never forwards to the guest-facing HNS gateway. The mediator dials the
+// resolver from the HOST, but the workspace network DNS list carries the guest's
+// view — on the no-uplink mediated topology that is the HNS gateway, a dead end
+// from the host. So a DNS entry equal to the network gateway is skipped in favor
+// of a host-reachable entry, or the public fallback when the gateway is the only
+// entry.
+func TestEgressUpstreamResolverSkipsGuestGateway(t *testing.T) {
+	cases := []struct {
+		name    string
+		gateway string
+		dns     []string
+		want    string
+	}{
+		{
+			// The common mediated no-uplink case: the only DNS entry IS the HNS
+			// gateway, so it is skipped and the host-reachable public fallback wins.
+			name:    "gateway-only falls back to public",
+			gateway: "192.168.214.1",
+			dns:     []string{"192.168.214.1"},
+			want:    "1.1.1.1:53",
+		},
+		{
+			// A real host-reachable upstream after the gateway is honored.
+			name:    "host-reachable entry after gateway wins",
+			gateway: "192.168.214.1",
+			dns:     []string{"192.168.214.1", "9.9.9.9"},
+			want:    "9.9.9.9:53",
+		},
+		{
+			name:    "no dns falls back to public",
+			gateway: "192.168.214.1",
+			dns:     nil,
+			want:    "1.1.1.1:53",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := vmkit.Request{
+				Identity: &vmkit.Identity{RuntimeID: "agent-egress"},
+				Config: &vmkit.Config{
+					Network: &vmkit.NetworkConfig{Mode: "user", Gateway: tc.gateway, DNS: tc.dns},
+				},
+			}
+			if got := egressUpstreamResolver(req).String(); got != tc.want {
+				t.Fatalf("egressUpstreamResolver = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestMintEgressCAWritesCertAndKeyWhenMediated asserts a mediated start mints the
 // CA and writes BOTH the public cert (egress-ca.pem) and the private key
 // (egress-ca-key.pem) at the agreed paths the front-end and the cacert serve

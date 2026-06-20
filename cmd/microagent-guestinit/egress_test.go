@@ -122,9 +122,10 @@ func TestForwardEgressConnWritesDestHeaderAndPumps(t *testing.T) {
 
 // TestBuildGuestEgressRulesetShape asserts the nft ruleset the forwarder installs
 // has the expected inet-family tables/chains and verdicts: a nat/output chain with
-// a TCP REDIRECT (skipping loopback + the forwarder's own uid), and a filter/output
-// chain that drops all IPv6 and all non-TCP/non-DNS L4 — the OUTPUT-path analog of
-// the firecracker PREROUTING fail-closed shape.
+// a generic TCP REDIRECT (skipping loopback + the forwarder's own uid), and a
+// filter/output chain that drops all IPv6, accepts loopback (the guest-local DNS
+// bridge traffic), accepts TCP, and drops the rest — the OUTPUT-path analog of the
+// firecracker PREROUTING fail-closed shape.
 func TestBuildGuestEgressRulesetShape(t *testing.T) {
 	rs := buildGuestEgressRuleset(12345, 4242)
 	if rs.table == nil || rs.natChain == nil || rs.filterChain == nil {
@@ -138,7 +139,7 @@ func TestBuildGuestEgressRulesetShape(t *testing.T) {
 	// guards (skip-lo, skip-uid) preceding the REDIRECT. A single concatenated rule
 	// makes the kernel AND the leading oifname=="lo" match with the REDIRECT, so the
 	// REDIRECT never fires on real egress (eth0) and traffic falls through policy
-	// accept unmediated — the capture bug this fix closes.
+	// accept unmediated — the capture bug this shape closes.
 	natRules := guestNATChainRules(rs)
 	if len(natRules) != 3 {
 		t.Fatalf("nat chain has %d rules, want exactly 3 (skip-lo return, skip-uid return, tcp redirect)", len(natRules))
@@ -164,6 +165,17 @@ func TestBuildGuestEgressRulesetShape(t *testing.T) {
 		t.Fatalf("redirect rule must not contain a return verdict before the redirect: %s", summarizeExprs(natRules[2]))
 	}
 
+	// The filter chain must accept oifname "lo" (the guest-local DNS bridge's
+	// loopback traffic) before the catch-all drop, or the guest's DNS to the bridge
+	// is dropped.
+	filterRules := guestFilterChainRules(rs)
+	if len(filterRules) != 4 {
+		t.Fatalf("filter chain has %d rules, want exactly 4 (v6 drop, lo accept, tcp accept, catch-all drop)", len(filterRules))
+	}
+	if !exprsHaveMeta(filterRules[1], expr.MetaKeyOIFNAME) || !exprsHaveVerdict(filterRules[1], expr.VerdictAccept) {
+		t.Fatalf("filter rule 1 must be oifname lo -> accept, got %s", summarizeExprs(filterRules[1]))
+	}
+
 	if !rs.skipsForwarderUID {
 		t.Fatal("redirect must skip the forwarder's own uid to avoid loops")
 	}
@@ -173,11 +185,11 @@ func TestBuildGuestEgressRulesetShape(t *testing.T) {
 	if !rs.dropsIPv6 {
 		t.Fatal("filter chain must drop all guest IPv6 egress")
 	}
-	if rs.permitsDNSUDP {
-		t.Fatal("filter chain must NOT permit UDP/53: DNS goes over TCP through the mediator (no unmediated UDP leak)")
+	if !rs.acceptsLoopback {
+		t.Fatal("filter chain must accept loopback so the guest-local DNS bridge works")
 	}
 	if !rs.dropsOtherL4 {
-		t.Fatal("filter chain must drop all non-TCP L4 incl UDP/53 (fail closed)")
+		t.Fatal("filter chain must drop all unmediated non-TCP L4 (fail closed)")
 	}
 }
 
@@ -192,7 +204,7 @@ func guestNATChainRules(rs guestEgressRuleset) [][]expr.Any {
 // guestFilterChainRules returns the filter/output chain's rules in installation
 // order.
 func guestFilterChainRules(rs guestEgressRuleset) [][]expr.Any {
-	return [][]expr.Any{rs.v6DropExprs, rs.tcpAllowExprs, rs.otherL4Exprs}
+	return [][]expr.Any{rs.v6DropExprs, rs.loAcceptExprs, rs.tcpAllowExprs, rs.otherL4Exprs}
 }
 
 // TestGuestEgressRulesetNoExprAfterTerminalVerdict guards the invariant nft(8)
@@ -264,6 +276,7 @@ func exprsHaveRedirect(exprs []expr.Any) bool {
 	return false
 }
 
+
 // TestWriteMediatedResolvConf asserts the mediated resolv.conf forces DNS over
 // TCP: it carries a nameserver (any address — the nft OUTPUT REDIRECT captures
 // the TCP/53 connection regardless) and the resolver options that make glibc/musl
@@ -280,11 +293,13 @@ func TestWriteMediatedResolvConf(t *testing.T) {
 		t.Fatalf("read resolv.conf: %v", err)
 	}
 	got := string(data)
-	if !strings.Contains(got, "nameserver ") {
-		t.Errorf("resolv.conf missing a nameserver line:\n%s", got)
+	// The nameserver MUST be the guest-local DNS bridge so the resolver sends DNS
+	// straight to the bridge over loopback (the bridge ships it to the mediator).
+	if !strings.Contains(got, "nameserver "+dnsBridgeAddr) {
+		t.Errorf("resolv.conf nameserver must be the DNS bridge %s:\n%s", dnsBridgeAddr, got)
 	}
 	if !strings.Contains(got, "options use-vc") {
-		t.Errorf("resolv.conf missing 'options use-vc' (forces TCP DNS):\n%s", got)
+		t.Errorf("resolv.conf missing 'options use-vc' (glibc TCP hint):\n%s", got)
 	}
 	if !strings.Contains(got, "single-request") {
 		t.Errorf("resolv.conf missing 'single-request':\n%s", got)

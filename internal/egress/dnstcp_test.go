@@ -82,6 +82,50 @@ func TestHandleDNSOverTCPResolvesAndFrames(t *testing.T) {
 	assertEvent(t, log, "egress_dns_allow")
 }
 
+// TestHandleDNSOverTCPServesSuccessiveQueries asserts the handler loops over
+// MULTIPLE length-prefixed queries on one connection (glibc sends the A and AAAA
+// lookups of a single getaddrinfo over the same socket) and returns nil on the
+// clean EOF after the last one. Servicing only the first query and closing would
+// break glibc's second query and fail the whole lookup.
+func TestHandleDNSOverTCPServesSuccessiveQueries(t *testing.T) {
+	pol, _ := NewPolicy([]string{"allowed.example.com"})
+	log := &BufferLogger{}
+	h := &Handler{Mode: "strict", Policy: pol, Logger: log, NameCache: NewNameCache()}
+
+	respA := buildResponseWithA(t, 0x0001, "allowed.example.com.", "allowed.example.com.",
+		[4]byte{203, 0, 113, 7}, 300)
+	respB := buildResponseWithA(t, 0x0002, "allowed.example.com.", "allowed.example.com.",
+		[4]byte{203, 0, 113, 8}, 300)
+	responses := [][]byte{respA, respB}
+	var forwarded int
+	forward := func(r netip.AddrPort, q []byte) ([]byte, error) {
+		resp := responses[forwarded]
+		forwarded++
+		return resp, nil
+	}
+
+	var in, out bytes.Buffer
+	// Two queries back to back on the same stream, then EOF (in has no more bytes).
+	writeTCPDNSMessage(t, &in, buildQuery(t, 0x0001, "allowed.example.com.", dnsmessage.TypeA))
+	writeTCPDNSMessage(t, &in, buildQuery(t, 0x0002, "allowed.example.com.", dnsmessage.TypeAAAA))
+
+	resolver := netip.MustParseAddrPort("1.1.1.1:53")
+	rw := &readWriter{r: &in, w: &out}
+	if err := h.HandleDNSOverTCP(rw, resolver, forward); err != nil {
+		t.Fatalf("HandleDNSOverTCP: %v", err)
+	}
+	if forwarded != 2 {
+		t.Fatalf("forwarded %d queries, want 2 (handler must loop over successive queries)", forwarded)
+	}
+	// Both framed responses must come back in order.
+	if got := readTCPDNSMessage(t, &out); !bytes.Equal(got, respA) {
+		t.Errorf("first response mismatch")
+	}
+	if got := readTCPDNSMessage(t, &out); !bytes.Equal(got, respB) {
+		t.Errorf("second response mismatch")
+	}
+}
+
 // TestHandleDNSOverTCPDeniedReturnsRefused asserts a strict-mode non-allowlisted
 // name is never forwarded and the handler writes a length-prefixed REFUSED back,
 // matching the core's DNS deny convention (synthesizeRefused).

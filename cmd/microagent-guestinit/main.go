@@ -93,6 +93,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "egress-forward-helper" {
 		os.Exit(runEgressForwardHelper(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "egress-dns-bridge" {
+		os.Exit(runEgressDNSBridge(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "egress-dump" {
 		os.Exit(runEgressDump(os.Args[2:]))
 	}
