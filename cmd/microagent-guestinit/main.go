@@ -46,6 +46,13 @@ type config struct {
 	SecretsControlPort uint16        `json:"secretsControlPort,omitempty"`
 	ModelGuestPort     uint16        `json:"modelGuestPort,omitempty"`
 	ModelVsockPort     uint32        `json:"modelVsockPort,omitempty"`
+	// EgressMediatorPort is the host hvsock service port the in-guest transparent
+	// forwarder dials to ship each guest-originated TCP connection (prefixed with
+	// an egress DestHeader) to the host mediator. Set only from the kernel cmdline
+	// (microagent_egress_mediator_port=<P>); a non-zero value means egress
+	// mediation is ON and the guest must install the capture + run the forwarder
+	// before handing off to the workload.
+	EgressMediatorPort uint32 `json:"-"`
 	ConsoleShell       string        `json:"consoleShell,omitempty"`
 	Hostname           string        `json:"hostname,omitempty"`
 	// Maintenance is set from the kernel cmdline (microagent_maintenance=1),
@@ -82,6 +89,12 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "model-forward-helper" {
 		os.Exit(runModelForwardHelper(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "egress-forward-helper" {
+		os.Exit(runEgressForwardHelper(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "egress-dump" {
+		os.Exit(runEgressDump(os.Args[2:]))
 	}
 	code := run()
 	poweroff()
@@ -224,6 +237,23 @@ func run() int {
 	if cfg.ModelGuestPort != 0 && cfg.ModelVsockPort != 0 {
 		if err := startModelForwarder(cfg.ModelGuestPort, cfg.ModelVsockPort); err != nil {
 			fmt.Fprintf(os.Stderr, "model forwarder: %v\n", err)
+		}
+	}
+	// Egress mediation: when the host signals it is active, install the transparent
+	// capture (nft inet OUTPUT REDIRECT for TCP + fail-closed drops) and start the
+	// forwarder BEFORE handing off to the workload, so the workload's first packet
+	// is already mediated. Fail-closed: an install error fails the boot rather than
+	// letting the workload run with egress uncaptured. Skipped on a maintenance boot
+	// (no workload runs). Active only when microagent_egress_mediator_port was set.
+	if cfg.EgressMediatorPort != 0 && !cfg.Maintenance {
+		if err := installGuestEgress(cfg.EgressMediatorPort); err != nil {
+			code = 127
+			res.Error = err.Error()
+			fmt.Fprintln(os.Stderr, err)
+			res.ExitCode = code
+			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			_ = sendResult(cfg.Port, res)
+			return code
 		}
 	}
 	if err := startShellHelper(cfg.ShellPort, cfg.ConsoleShell, guestEnv(cfg.Env)); err != nil {
@@ -1295,6 +1325,13 @@ func applyKernelConfigOverridesFromCmdline(cfg *config, cmdline string) error {
 		}
 		cfg.ModelGuestPort = gp
 		cfg.ModelVsockPort = uint32(vp)
+	}
+	if raw := values["microagent_egress_mediator_port"]; strings.TrimSpace(raw) != "" {
+		port, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 16)
+		if err != nil || port == 0 {
+			return fmt.Errorf("microagent_egress_mediator_port must be a positive uint16")
+		}
+		cfg.EgressMediatorPort = uint32(port)
 	}
 	return nil
 }
