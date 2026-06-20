@@ -168,7 +168,7 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 	// cannot be reproduced, because restoring it would silently break every MITM
 	// handshake of the guest.
 	caSHA := ""
-	if vmkit.EgressMediationOn(state.Config.EgressMode) {
+	if vmkit.EgressMediationOn(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
 		sha, err := egressCACertSHA256(filepath.Join(opts.StateDir, opts.Name))
 		if err != nil {
 			return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot of mediated workspace %s requires its persisted egress CA: %w", opts.Name, err)
@@ -453,13 +453,85 @@ func copyFile(source, target string) error {
 		return err
 	}
 	defer func() { _ = in.Close() }()
+
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
 	out, err := os.Create(target)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	if err := cloneFile(in, out); err == nil {
+		return out.Close()
+	}
+	if err := out.Truncate(info.Size()); err != nil {
 		_ = out.Close()
 		return err
 	}
+	if err := copyFileSparse(in, out, info.Size()); err != nil {
+		if !isSparseSeekUnsupported(err) {
+			_ = out.Close()
+			return err
+		}
+		if _, err := in.Seek(0, io.SeekStart); err != nil {
+			_ = out.Close()
+			return err
+		}
+		if _, err := out.Seek(0, io.SeekStart); err != nil {
+			_ = out.Close()
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			_ = out.Close()
+			return err
+		}
+	}
 	return out.Close()
+}
+
+func cloneFile(in, out *os.File) error {
+	return unix.IoctlSetInt(int(out.Fd()), unix.FICLONE, int(in.Fd()))
+}
+
+func copyFileSparse(in, out *os.File, size int64) error {
+	if size == 0 {
+		return nil
+	}
+	inFD := int(in.Fd())
+	offset := int64(0)
+	for offset < size {
+		data, err := unix.Seek(inFD, offset, unix.SEEK_DATA)
+		if err != nil {
+			if err == unix.ENXIO {
+				return nil
+			}
+			return err
+		}
+		if data >= size {
+			return nil
+		}
+		hole, err := unix.Seek(inFD, data, unix.SEEK_HOLE)
+		if err != nil {
+			return err
+		}
+		if hole > size {
+			hole = size
+		}
+		if _, err := in.Seek(data, io.SeekStart); err != nil {
+			return err
+		}
+		if _, err := out.Seek(data, io.SeekStart); err != nil {
+			return err
+		}
+		if _, err := io.CopyN(out, in, hole-data); err != nil {
+			return err
+		}
+		offset = hole
+	}
+	return nil
+}
+
+func isSparseSeekUnsupported(err error) bool {
+	return err == unix.EINVAL || err == unix.ENOTTY || err == unix.EOPNOTSUPP
 }
