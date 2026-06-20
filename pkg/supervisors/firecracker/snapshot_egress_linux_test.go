@@ -181,6 +181,36 @@ func TestSnapshotManifestFromStateFailsClosedOnMissingCA(t *testing.T) {
 	}
 }
 
+// TestSnapshotManifestFromStateSkipsCAForIsolatedNetwork proves that an
+// isolated workspace can be snapshotted even when its stored egress posture was
+// normalized to mediated. Isolated workspaces do not run the mediator or mint a
+// CA, so requiring egress-ca.pem here made every isolated snapshot fail closed.
+func TestSnapshotManifestFromStateSkipsCAForIsolatedNetwork(t *testing.T) {
+	stateDir := t.TempDir()
+	opts := Options{Name: "iso", StateDir: stateDir}
+	if err := os.MkdirAll(filepath.Join(stateDir, opts.Name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := runtimeState{
+		Config: vmkit.Config{
+			CPUCount:   2,
+			MemoryMiB:  512,
+			EgressMode: vmkit.EgressModeMediated,
+			Network:    &vmkit.NetworkConfig{Mode: "isolated"},
+		},
+	}
+	manifest, err := snapshotManifestFromState("warm", state, opts, false)
+	if err != nil {
+		t.Fatalf("snapshotManifestFromState isolated: %v", err)
+	}
+	if manifest.EgressCASHA256 != "" {
+		t.Fatalf("EgressCASHA256 = %q, want empty for isolated network", manifest.EgressCASHA256)
+	}
+	if manifest.NetworkMode != "isolated" {
+		t.Fatalf("NetworkMode = %q, want isolated", manifest.NetworkMode)
+	}
+}
+
 // TestSnapshotManifestFromStateNoEgressWhenOff proves an unmediated workspace
 // records no CA fingerprint and does not require a persisted CA file.
 func TestSnapshotManifestFromStateNoEgressWhenOff(t *testing.T) {

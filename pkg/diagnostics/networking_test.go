@@ -61,4 +61,8 @@ func TestNetworkRemediation(t *testing.T) {
 	if !strings.Contains(got, "microagent host setup-networking") || strings.Contains(got, "sudo microagent") {
 		t.Errorf("generic remediation = %q, want no-sudo setup-networking command", got)
 	}
+	appleVF := &vmkit.HostSupport{Backend: vmkit.BackendAppleVF}
+	if got := NetworkRemediation(appleVF); got != "" {
+		t.Errorf("apple-vf remediation = %q, want empty", got)
+	}
 }
