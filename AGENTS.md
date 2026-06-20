@@ -129,6 +129,8 @@ This repository owns the VM pieces:
   branch and update it automatically when possible.
 - After pushing changes to an existing PR branch, update the PR without waiting
   for another prompt.
+- Prefer squash merge for focused task PRs when the repository supports it. Use
+  merge commits only when preserving branch structure is intentional.
 - Enable auto-merge on PRs by default when required checks and review gates
   cover the change and the user has not asked to leave the PR unmerged.
 
