@@ -34,6 +34,17 @@ const (
 	// named network. It is distinct from the shared NAT network so cleanup may
 	// reap an empty named network without touching the persistent NAT one.
 	managedNamedNetworkPrefix = "microagent-net-"
+
+	// managedMediatedNetworkName is the shared Private (non-NAT) HNS network that
+	// backs egress-mediated user/nat workspaces. It hands out an IP, gateway and
+	// default route (so the guest's route decision succeeds and the OUTPUT-hook nft
+	// REDIRECT still fires) but, being Private, has NO WinNAT uplink to the physical
+	// network — so a guest that flushes its own nft rules has no path off-box except
+	// the host mediator over hvsock (AF_VSOCK, independent of the NIC). This is the
+	// host-enforced no-uplink topology: enforcement is the network type, which the
+	// guest cannot change. It is distinct from the NATting microagent-nat network so
+	// unmediated workspaces keep their real uplink unchanged.
+	managedMediatedNetworkName = "microagent-mediated-egress"
 )
 
 // managedNamedNetworkName derives the HNS network name backing a named-network
@@ -101,7 +112,21 @@ func (a defaultAdapter) PrepareNetwork(ctx context.Context, spec computeSystemSp
 		}
 		return createNetworkEndpoint(hcnNetwork, spec.Name, network)
 	case "user", "nat":
-		hcnNetwork, err := ensureManagedNATNetwork()
+		// Egress-mediated user/nat workspaces attach to the Private (non-NAT)
+		// mediated-egress network instead of the NATting one: it hands out the same
+		// shape of IP/gateway/default-route (so the guest's route decision succeeds
+		// and the OUTPUT-hook nft REDIRECT still fires) but has NO WinNAT uplink, so
+		// a guest that flushes its own nft rules has no path off-box except the host
+		// mediator over hvsock. Unmediated workspaces keep the real NAT uplink.
+		// (Endpoint ACLs cannot do this on a NAT network — HNS routes NAT egress
+		// through WinNAT, which the endpoint ACL/VFP layer does not gate; the
+		// no-uplink guarantee has to be the network type, which the guest cannot
+		// change.)
+		ensureNetwork := ensureManagedNATNetwork
+		if egressMediationActive(&spec.Config) {
+			ensureNetwork = ensureManagedMediatedNetwork
+		}
+		hcnNetwork, err := ensureNetwork()
 		if err != nil {
 			return networkAttachment{}, err
 		}
@@ -778,6 +803,56 @@ func createStaticNetworkEndpoint(hcnNetwork *hcn.HostComputeNetwork, runtimeID, 
 		NetworkEndpointID: created.Id,
 		RuntimeNetwork:    &runtimeNetwork,
 	}, nil
+}
+
+// ensureManagedMediatedNetwork lazily creates the shared Private (non-NAT) HNS
+// network that backs egress-mediated user/nat workspaces. It mirrors the managed
+// NAT network's addressing — a free /24 picked the same way, carrying the gateway
+// and a 0.0.0.0/0 default route — so the guest's static config and route decision
+// are identical to the NAT path and its OUTPUT-hook nft REDIRECT still fires. The
+// difference is the network TYPE: Private installs no WinNAT, so the default route
+// leads nowhere off-box. That is the host-enforced no-uplink guarantee: a guest
+// that flushes its own nft rules cannot reach the physical network over the NIC;
+// only the host mediator over hvsock (AF_VSOCK, independent of the NIC) remains.
+// Idempotent so concurrent mediated starts converge on the one shared network.
+func ensureManagedMediatedNetwork() (*hcn.HostComputeNetwork, error) {
+	existing, err := hcn.GetNetworkByName(managedMediatedNetworkName)
+	if err == nil {
+		return existing, nil
+	}
+	if !hcn.IsNotFoundError(err) {
+		return nil, fmt.Errorf("find HNS mediated network %q: %w", managedMediatedNetworkName, err)
+	}
+	// Avoid overlapping any existing HNS network (including the managed NAT one),
+	// the same fail-closed selection the NAT network uses.
+	subnet, gateway, err := pickManagedNATSubnet()
+	if err != nil {
+		return nil, err
+	}
+	// HNS assigns the gateway to the host vNIC for a Private network, so the guest
+	// reaches the gateway (route forms) and the host — but there is no NAT behind
+	// it, so no physical egress. The 0.0.0.0/0 route is what makes the guest's
+	// route decision succeed so the REDIRECT capture fires.
+	hcnNetwork := &hcn.HostComputeNetwork{
+		Type: hcn.Private,
+		Name: managedMediatedNetworkName,
+		Ipams: []hcn.Ipam{{
+			Type: "Static",
+			Subnets: []hcn.Subnet{{
+				IpAddressPrefix: subnet,
+				Routes: []hcn.Route{{
+					NextHop:           gateway,
+					DestinationPrefix: managedNATRoute,
+				}},
+			}},
+		}},
+		SchemaVersion: hcn.SchemaVersion{Major: 2, Minor: 0},
+	}
+	created, err := hcnNetwork.Create()
+	if err != nil {
+		return nil, fmt.Errorf("create HNS mediated network %q (subnet %s): %w", managedMediatedNetworkName, subnet, err)
+	}
+	return created, nil
 }
 
 func createNetworkEndpoint(network *hcn.HostComputeNetwork, runtimeID string, runtimeNetwork vmkit.NetworkConfig) (networkAttachment, error) {

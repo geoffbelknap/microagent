@@ -397,6 +397,37 @@ func runEgressDump([]string) int {
 	return 1
 }
 
+// runEgressFlush deletes the guest egress inet table via netlink, the same way a
+// compromised root inside the guest would tear down its own enforcement (the
+// busybox/curl images ship no nft(8), so there is no other way to simulate it).
+// It is a deliberate negative-test affordance (microagent-init egress-flush): it
+// proves the host-enforced no-uplink topology by stripping the in-guest capture
+// and fail-closed drops, after which any guest egress depends solely on the host
+// (the NAT-endpoint ACLs), not on rules the guest controls. Idempotent: a missing
+// table is reported but treated as already-flushed (exit 0).
+func runEgressFlush([]string) int {
+	conn := &nftables.Conn{}
+	tables, err := conn.ListTablesOfFamily(nftInet)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "list inet tables: %v\n", err)
+		return 1
+	}
+	for _, t := range tables {
+		if t.Name != guestEgressTableName {
+			continue
+		}
+		conn.DelTable(t)
+		if err := conn.Flush(); err != nil {
+			fmt.Fprintf(os.Stderr, "delete inet table %q: %v\n", guestEgressTableName, err)
+			return 1
+		}
+		fmt.Printf("flushed inet table %s\n", guestEgressTableName)
+		return 0
+	}
+	fmt.Printf("no inet table %q installed (already flushed)\n", guestEgressTableName)
+	return 0
+}
+
 func hookName(h *nftables.ChainHook) string {
 	if h == nil {
 		return "?"

@@ -96,6 +96,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "egress-dump" {
 		os.Exit(runEgressDump(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "egress-flush" {
+		os.Exit(runEgressFlush(os.Args[2:]))
+	}
 	code := run()
 	poweroff()
 	os.Exit(code)

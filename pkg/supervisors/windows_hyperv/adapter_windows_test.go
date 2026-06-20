@@ -313,6 +313,57 @@ func TestBuildComputeSystemDocumentEmitsEgressMediatorCmdline(t *testing.T) {
 	}
 }
 
+func TestMediatedUserNatSelectsPrivateNoUplinkNetwork(t *testing.T) {
+	// The keystone: a mediated user/nat workspace attaches to the Private (non-NAT)
+	// mediated-egress network rather than the NATting microagent-nat one. The
+	// Private network hands out an IP, gateway and default route (so the guest's
+	// route decision succeeds and the OUTPUT-hook nft REDIRECT fires) but has no
+	// WinNAT uplink, so a guest that flushes its own nft rules has no path off-box
+	// except the host mediator over hvsock. Endpoint ACLs cannot do this on a NAT
+	// network — HNS routes NAT egress through WinNAT, below the ACL/VFP layer.
+	//
+	// The network choice is gated purely by egressMediationActive, so assert that
+	// predicate drives the selection for the mediated and unmediated user/nat paths.
+	mediatedUser := vmkit.Config{
+		EgressMode: vmkit.EgressModeMediated,
+		Network:    &vmkit.NetworkConfig{Mode: "user"},
+	}
+	if !egressMediationActive(&mediatedUser) {
+		t.Fatal("a mediated user workspace must select the Private no-uplink network")
+	}
+	strictNAT := vmkit.Config{
+		EgressMode: vmkit.EgressModeStrict,
+		Network:    &vmkit.NetworkConfig{Mode: "nat"},
+	}
+	if !egressMediationActive(&strictNAT) {
+		t.Fatal("a strict nat workspace must select the Private no-uplink network")
+	}
+
+	// Unmediated (default egress): keep the real NAT uplink — the working path is
+	// untouched.
+	unmediated := vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "user"}}
+	if egressMediationActive(&unmediated) {
+		t.Fatal("an unmediated user workspace must keep the NATting network (real uplink)")
+	}
+
+	// Mediation requested but the network mode does not route through the mediator
+	// (bridged): no mediator runs, so it must NOT be moved onto the no-uplink
+	// network or it would be stranded.
+	bridged := vmkit.Config{
+		EgressMode: vmkit.EgressModeStrict,
+		Network:    &vmkit.NetworkConfig{Mode: "bridged"},
+	}
+	if egressMediationActive(&bridged) {
+		t.Fatal("a bridged (unmediated) workspace must not be moved onto the no-uplink network")
+	}
+
+	// The Private mediated-egress network must be a distinct, dedicated network so
+	// it never disturbs the NATting microagent-nat network unmediated workspaces use.
+	if managedMediatedNetworkName == managedNATNetworkName {
+		t.Fatal("the mediated-egress network must be distinct from the NAT network")
+	}
+}
+
 func TestPickFreeSubnetAvoidsOverlap(t *testing.T) {
 	candidates := []string{"192.168.127.0/24", "192.168.214.0/24", "10.71.214.0/24"}
 
