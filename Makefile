@@ -1,4 +1,5 @@
 UNAME_S := $(shell uname -s)
+TMPDIR ?= /tmp
 PREFIX ?= $(HOME)/.local
 INSTALL_KERNEL ?= 1
 DOWNLOAD_FIRECRACKER ?= 1
@@ -9,6 +10,7 @@ CHECK ?= 1
 QUIET ?= 1
 ARCH ?=
 FIRECRACKER ?=
+GOLANGCI_LINT_CACHE ?= $(TMPDIR)/microagent-golangci-lint-cache
 
 INSTALL_ARGS := --prefix $(PREFIX)
 ifneq ($(ARCH),)
@@ -45,7 +47,7 @@ fmt:
 	gofmt -w cmd pkg supervisors
 
 lint:
-	golangci-lint run
+	GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE)" golangci-lint run
 
 test-race:
 	go test -race ./...
