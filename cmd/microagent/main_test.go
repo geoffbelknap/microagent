@@ -127,6 +127,31 @@ func TestHelpIsCompactAndHelpAllListsAdvancedCommands(t *testing.T) {
 	}
 }
 
+func TestRunTopLevelHelpFlagAliases(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"-h"}} {
+		dir := t.TempDir()
+		stdoutPath := filepath.Join(dir, "stdout.txt")
+		stdout, err := os.Create(stdoutPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = run(t.Context(), args, stdout)
+		if closeErr := stdout.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		if err != nil {
+			t.Fatalf("run(%v): %v", args, err)
+		}
+		data, err := os.ReadFile(stdoutPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "microagent help all") {
+			t.Fatalf("help output for %v missing help all pointer:\n%s", args, data)
+		}
+	}
+}
+
 func TestParseForkSnapshotRef(t *testing.T) {
 	source, tag, err := parseForkSnapshotRef("base:pre-upgrade")
 	if err != nil {
@@ -1698,11 +1723,12 @@ func TestWorkspaceRequestIncludesDisks(t *testing.T) {
 
 func TestRunUsesSupervisorOverride(t *testing.T) {
 	dir := t.TempDir()
+	requestPath := filepath.Join(dir, "request.json")
 	supervisor := filepath.Join(dir, "supervisor")
 	script := fmt.Sprintf(`#!/usr/bin/env bash
 set -euo pipefail
-python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": True, "backend": %q, "event": {"identity": req["identity"], "state": "prepared", "observedAt": "2026-05-02T00:00:00Z"}}))'
-`, hostBackend())
+python3 -c 'import json,sys; req=json.load(sys.stdin); open(%q, "w").write(json.dumps(req)); print(json.dumps({"ok": True, "backend": %q, "event": {"identity": req["identity"], "state": "prepared", "observedAt": "2026-05-02T00:00:00Z"}}))'
+`, requestPath, hostBackend())
 	if err := os.WriteFile(supervisor, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1732,6 +1758,23 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); print(json.dumps({"ok": T
 	}
 	if !strings.Contains(string(data), `"state": "prepared"`) {
 		t.Fatalf("stdout missing prepared state: %s", data)
+	}
+	var req vmkit.Request
+	requestData, err := os.ReadFile(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(requestData, &req); err != nil {
+		t.Fatalf("decode supervisor request %q: %v", requestData, err)
+	}
+	if req.Command != "prepare" {
+		t.Fatalf("supervisor request command = %q, want prepare", req.Command)
+	}
+	if req.Identity == nil || req.Identity.RuntimeID != "agent-1" || req.Identity.Backend != hostBackend() {
+		t.Fatalf("supervisor request identity = %#v", req.Identity)
+	}
+	if req.Config == nil || req.Config.RootfsPath != "/tmp/rootfs.ext4" || req.Config.KernelPath != "/tmp/kernel" {
+		t.Fatalf("supervisor request config = %#v", req.Config)
 	}
 }
 
@@ -6835,6 +6878,37 @@ func TestRunDispatchesLSAlias(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "research") {
 		t.Fatalf("ls output = %s", got)
+	}
+}
+
+func TestRunDispatchesLogAlias(t *testing.T) {
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, "research")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "serial.log"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "log.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run(t.Context(), []string{"log", "research", "--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("run log: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello\n" {
+		t.Fatalf("log output = %q", got)
 	}
 }
 
