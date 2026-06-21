@@ -4,7 +4,7 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-20_
 
 microagent installs with one backend per host OS: Firecracker on Linux,
 Apple Virtualization.framework on macOS, and Hyper-V on Windows.
@@ -67,7 +67,10 @@ covered in [Networking](/concepts/networking/).
   `clone`, `cp`, artifacts, and `commit` ride guest-mediated maintenance boots.
 - Supports `user`/`nat` (HNS NAT) and `isolated` networking plus published TCP
   ports through Hyper-V socket bridging. Live `apply` of host-bind forward
-  changes is supported.
+  changes is supported. `user` and `nat` are both egress-mediated on Windows
+  Hyper-V: the host mediator enforces policy over a no-uplink HNS topology, with
+  per-SNI TLS interception, DNS resolution through the mediator, and a
+  per-workspace CA. See [Egress mediation](/protocol/windows-hyperv/#egress-mediation).
 - Supports structured [`exec`](/cli/exec/) (buffered and `--stream`) through a
   host TCP listener bridged to the guest exec service over Hyper-V sockets,
   [`connect`](/cli/connect/) over Hyper-V sockets, secrets (materialized,

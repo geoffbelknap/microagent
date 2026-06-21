@@ -4,7 +4,7 @@ description: Run Linux guests on Windows through HCS - no WSL, no QEMU.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-20_
 
 If you want Linux guests on a Windows host - without WSL and without QEMU -
 this page documents the `windows-hyperv` backend. It talks to
@@ -114,6 +114,72 @@ the built-in ICS `Default Switch`, which serve addresses over DHCP), the guest
 DHCPs on its NIC instead. Endpoint cleanup runs when foreground `run` completes
 and during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
 
+## Egress mediation
+
+Egress mediation is supported for the `user` and `nat` network modes on
+Windows Hyper-V.
+
+### How it works
+
+When a workspace starts in `user` or `nat` mode, the supervisor mints a
+fresh per-workspace ECDSA P-256 CA and starts a host-side mediator process.
+The workspace is placed on a no-uplink HNS network — its only path off the
+host is the mediator — so traffic cannot reach the internet except through
+that path.
+
+Inside the guest, outbound TCP connections are transparently redirected to a
+Hyper-V socket listener that connects to the host mediator. The host mediator
+applies the egress policy (allow / passthrough / strict), performs per-SNI TLS
+interception, resolves DNS, and audits every connection. Non-TCP and non-UDP
+traffic (ICMP and the like) is dropped fail-closed. IPv6 egress is dropped
+fail-closed while mediation ships v4-only.
+
+The per-workspace CA's public certificate is delivered to the guest over a
+Hyper-V socket channel at boot and installed into the guest's trust store, so
+tools inside the guest trust the per-SNI leaf certificates the mediator signs.
+The CA private key never leaves the host.
+
+### Topology and enforcement
+
+Policy enforcement is host-side: the mediator and the no-uplink topology
+together ensure a workspace cannot reach the internet except through the
+mediation path. A compromised guest can disrupt its own connectivity (the
+capture runs inside the guest, so it could break the redirect), but it cannot
+bypass the mediator — the host provides the only network path, and the mediator
+is that path. At worst the workspace loses egress (fail-closed).
+
+### Comparison with Linux/Firecracker
+
+On the Linux/Firecracker backend, egress capture is enforced entirely host-side
+via netfilter TPROXY rules that redirect guest traffic before it leaves the
+hypervisor host network namespace; the guest plays no part in the capture. On
+Windows Hyper-V the policy enforcement is likewise host-side (the mediator plus
+the no-uplink topology), but the transparent redirect runs inside the guest via
+nftables redirect rules. A compromised guest can therefore break its own egress
+but cannot escape mediation.
+
+### Mediation modes
+
+The same three egress modes apply on Windows Hyper-V:
+
+| Mode | Effect |
+|---|---|
+| `mediated` | All TCP egress is captured, TLS is intercepted per-SNI, DNS is resolved and audited. Nothing is blocked. (Default) |
+| `strict` | Same capture, but only allowlisted destinations are permitted. Non-allowlisted DNS queries are answered REFUSED before any connection is attempted. |
+| `off` | No capture. The workspace's HNS NAT endpoint has a standard uplink. |
+
+See [Egress mediation](/concepts/egress-mediation/) for the full policy,
+allowlist, passthrough, credential-swap, and audit-log documentation. View the
+audit log with [`microagent egress`](/cli/egress/).
+
+### `bridged` remains unmediated
+
+`bridged` mode on Windows Hyper-V attaches the guest directly to the named HNS
+network or Hyper-V switch you declare. That L2 presence bypasses the no-uplink
+topology and the host mediator, so `bridged` workspaces are not egress-mediated.
+`bridged` requires `--unsupported` and is outside the egress-mediation security
+model, exactly as documented in [Networking](/concepts/networking/).
+
 ## Structured exec
 
 `microagent exec` (buffered and `--stream`) works against running
@@ -179,6 +245,10 @@ object and marks `readiness.resultReady.ready` true.
 
 ## Current limitations
 
+- Egress mediation is supported for `user` and `nat` (see
+  [Egress mediation](#egress-mediation) above). `bridged` mode is not
+  egress-mediated and requires `--unsupported`. `isolated` and named networks
+  have no external egress and are unaffected.
 - `bridged` networking requires `network.interface` to name an existing HNS
   network or Hyper-V switch and fails closed when it is missing. The DHCP path
   (guest addressed by the bridged network) is live-verified against the

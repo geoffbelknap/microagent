@@ -4,7 +4,7 @@ description: Choose a network mode and see what each one does under the hood on 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-20_
 
 This is the internals page for workspace networking: read it to choose a
 network mode and to understand what each mode actually does on each backend.
@@ -14,27 +14,32 @@ mediation channel has its own guide at
 [Build agents on the mediation channel](/guides/agents-and-mediation/).
 
 Every workspace declares its network intent. `user` (the default) and
-`isolated` are **supported and egress-mediated**; `nat`, `named`, and `bridged`
-are **unsupported** and gated behind `--unsupported` (their egress is not
-reliably mediated — see the note below).
+`isolated` are **supported and egress-mediated** on all backends. `nat` is
+also reliably egress-mediated on Windows Hyper-V (both `user` and `nat` use
+the same managed HNS NAT network there, with full mediation support). On
+Linux/Firecracker, `nat` runs in the host network namespace where transparent
+capture does not work reliably, so it is **unsupported** and gated behind
+`--unsupported`. `named` and `bridged` are **unsupported** on all backends.
 
 | Mode | What it does |
 |---|---|
-| `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. Egress-mediated. |
+| `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. Egress-mediated on all backends. |
 | `isolated` | No guest network device. The guest has no network access at all. |
-| `nat` | **Unsupported** (`--unsupported`). Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
+| `nat` | Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. Egress-mediated and fully supported on Windows Hyper-V. **Unsupported** (`--unsupported`) on Linux/Firecracker (capture not reliable in host namespace). |
 | `named` | **Unsupported** (`--unsupported`). Joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a shared managed bridge so members reach each other, and `/etc/hosts` name resolution. Currently implemented by Firecracker on Linux. |
 
-> **`nat`, `named`, and `bridged` are unsupported and not reliably egress-mediated.**
-> `nat` and `named` run in the host network namespace, where transparent capture
-> (TCP REDIRECT original-destination recovery and UDP TPROXY steering) does not
-> work reliably; `bridged` gives the workspace its own L2 presence on an existing
-> host bridge and **bypasses [egress mediation](/concepts/egress-mediation/)** by
-> design. None are covered by microagent's security model: they are hidden from
-> the advertised modes, require `--unsupported` to select, and may be broken or
-> removed. Transparent egress mediation is currently reliable only in the
-> per-namespace `user`/pasta path. The sections below document their mechanics for
-> the operators who knowingly opt in.
+> **`named` and `bridged` are unsupported and not reliably egress-mediated on
+> any backend.** `named` runs in the host network namespace (Firecracker), where
+> transparent capture does not work reliably. `bridged` gives the workspace its
+> own L2 presence on an existing host bridge or switch and **bypasses
+> [egress mediation](/concepts/egress-mediation/)** by design. Neither is
+> covered by microagent's security model: they are hidden from the advertised
+> modes, require `--unsupported` to select, and may be broken or removed. The
+> sections below document their mechanics for operators who knowingly opt in.
+>
+> On Linux/Firecracker, `nat` shares the host network namespace limitation
+> above and also requires `--unsupported`. On Windows Hyper-V, `nat` uses the
+> same mediated HNS NAT network as `user` and does not require `--unsupported`.
 
 This page is about *which network device a workspace gets and how it is wired*.
 What the workspace is allowed to send over that device - capture, allowlists,

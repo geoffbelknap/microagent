@@ -4,7 +4,7 @@ description: How microagent captures, audits, and controls everything a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-18_
+_Last updated: 2026-06-20_
 
 Egress mediation is microagent's transparent control point for **everything a
 workspace sends to the network**. The host captures the guest's outbound
@@ -21,11 +21,22 @@ to?" and, when you want it, "what is it allowed to talk to?".
 > word "mediation". See [networking](/concepts/networking/#mediation-channel) for
 > the channel.
 
-Egress mediation is implemented by the Firecracker backend on Linux. It does not
-apply to the [unsupported `bridged` mode](/concepts/networking/), which gives the
-guest its own L2 presence and bypasses mediation entirely - that is exactly why
-`bridged` is hidden, requires `--unsupported`, and is outside microagent's
-security model.
+Egress mediation is implemented for:
+
+- **Firecracker on Linux** (`user` and `nat` modes): capture is enforced
+  entirely host-side via netfilter rules that intercept guest traffic before
+  it leaves the host network namespace.
+- **Windows Hyper-V** (`user` and `nat` modes): policy enforcement is
+  host-side (the mediator plus a no-uplink HNS topology), with transparent
+  TCP redirect running inside the guest. A compromised guest can break its own
+  egress but cannot bypass the mediator. See
+  [Egress mediation](/protocol/windows-hyperv/#egress-mediation) on the
+  Windows Hyper-V page for the full topology description.
+
+It does not apply to the [unsupported `bridged` mode](/concepts/networking/)
+on any backend, which gives the guest its own L2 presence and bypasses
+mediation entirely — that is exactly why `bridged` is hidden, requires
+`--unsupported`, and is outside microagent's security model.
 
 ## The three modes
 

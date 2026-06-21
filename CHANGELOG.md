@@ -5,6 +5,31 @@ been cut into a release yet.
 
 ## Unreleased
 
+### windows-hyperv egress mediation for user and nat
+
+Egress mediation now works on Windows Hyper-V for `user` and `nat` network
+modes. Both modes use the same managed HNS NAT network, which is placed on a
+no-uplink HNS topology at mediated start — the only path off the host for a
+mediated workspace is through the host-side mediator.
+
+- **Transparent TCP capture** runs inside the guest via nftables redirect
+  rules; outbound connections are forwarded to the host mediator over a Hyper-V
+  socket.
+- **Per-workspace egress CA**: a fresh ECDSA P-256 CA is minted at workspace
+  start. Its public certificate is delivered to the guest over Hyper-V socket
+  and installed into the guest trust store, so per-SNI TLS interception works
+  transparently without manual CA configuration.
+- **TLS interception** (per-SNI MITM), **DNS resolution through the mediator**,
+  and the full audit log (`microagent egress`) are all functional.
+- **Host-enforced topology**: the no-uplink HNS network means a workspace cannot
+  reach the internet except through the mediator. A compromised guest can break
+  its own egress (fail-closed) but cannot bypass policy enforcement.
+- **`nat` no longer requires `--unsupported`** on Windows Hyper-V: it shares
+  the managed network with `user` and is reliably mediated. `bridged` remains
+  unmediated and still requires `--unsupported`.
+- Non-TCP/UDP traffic (ICMP and the like) is dropped fail-closed. IPv6 egress
+  is dropped fail-closed while mediation ships v4-only.
+
 ### windows-hyperv snapshot is unsupported (documented limitation)
 
 - `snapshot create`, `start --from-snapshot`, and `create --from-snapshot` now
