@@ -3703,29 +3703,72 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 			return workspaceOptions{}, fmt.Errorf("unexpected %s argument: %s", command, fs.Arg(0))
 		}
 	}
+	if err := applyModelRunnerOptionFlags(&opts, modelRunnerCommand, modelRunnerArgs, modelRunnerEnv); err != nil {
+		return workspaceOptions{}, err
+	}
+	if err := applySetupEnvSecretOptionFlags(&opts, setupCommands, setupFiles, envVars, secretFlags, secretsEnvFile, secretOnDemandFlags, secretsAudit); err != nil {
+		return workspaceOptions{}, err
+	}
+	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig); err != nil {
+		return workspaceOptions{}, err
+	}
+	if err := applyStorageOptionFlags(&opts, volumeFlags, diskFlags, bundleFlags, outputFlags); err != nil {
+		return workspaceOptions{}, err
+	}
+	if err := applyNetworkMediationOptionFlags(&opts, publishFlags, mediationMapping, mediationOptional, command); err != nil {
+		return workspaceOptions{}, err
+	}
+	explicit := workspaceOptionExplicitFlags{
+		Kernel:     kernelExplicit,
+		Memory:     memoryExplicit,
+		CPUs:       cpusExplicit,
+		Size:       sizeExplicit,
+		Spec:       specExplicit,
+		Supervisor: supervisorExplicit,
+	}
+	if err := finalizeWorkspaceOptions(command, &opts, explicit, rm, specPath, resultPort, timeoutSeconds); err != nil {
+		return workspaceOptions{}, err
+	}
+	return opts, nil
+}
+
+type workspaceOptionExplicitFlags struct {
+	Kernel     bool
+	Memory     bool
+	CPUs       bool
+	Size       bool
+	Spec       bool
+	Supervisor bool
+}
+
+func applyModelRunnerOptionFlags(opts *workspaceOptions, modelRunnerCommand string, modelRunnerArgs, modelRunnerEnv multiFlag) error {
 	if strings.TrimSpace(modelRunnerCommand) != "" {
 		command, err := modelrunner.ParseRunnerCommand(modelRunnerCommand)
 		if err != nil {
-			return workspaceOptions{}, fmt.Errorf("model runner command: %w", err)
+			return fmt.Errorf("model runner command: %w", err)
 		}
 		opts.ModelRunner.Command = command
 	}
 	opts.ModelRunner.Args = append([]string{}, modelRunnerArgs...)
 	opts.ModelRunner.Env = append([]string{}, modelRunnerEnv...)
+	return nil
+}
+
+func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setupFiles, envVars, secretFlags multiFlag, secretsEnvFile string, secretOnDemandFlags multiFlag, secretsAudit bool) error {
 	opts.SetupCommands = append([]string{}, setupCommands...)
 	setupFileCommands, err := setupCommandsFromFiles(setupFiles, ".")
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.SetupCommands = append(opts.SetupCommands, setupFileCommands...)
 	env, err := parseEnvFlags(envVars)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.Env = mergeEnv(opts.Env, env)
 	secrets, err := parseSecretFlags(secretFlags)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.Secrets = secrets
 	if strings.TrimSpace(secretsEnvFile) != "" {
@@ -3733,13 +3776,17 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	}
 	onDemand, err := parseSecretFlags(secretOnDemandFlags)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.OnDemandSecrets = onDemand
 	opts.SecretsAudit = secretsAudit
+	return nil
+}
+
+func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string) error {
 	mode, err := parseEgressMode(egressMode)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.EgressMode = mode
 	allowHosts := splitCommaHosts([]string(egressAllow))
@@ -3749,11 +3796,11 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		// off there is nothing to apply it to, so reject rather than silently
 		// ignore (which would mislead the operator into believing it took effect).
 		if mode == vmkit.EgressModeOff {
-			return workspaceOptions{}, fmt.Errorf("--egress-policy: an egress policy file requires --egress mediated or strict")
+			return fmt.Errorf("--egress-policy: an egress policy file requires --egress mediated or strict")
 		}
 		pf, err := egress.LoadPolicyFile(egressPolicy)
 		if err != nil {
-			return workspaceOptions{}, err
+			return err
 		}
 		// Precedence is additive/union: default-deny means a policy file can only
 		// ADD reachability, never remove it, so flags + file + manifest combine by
@@ -3769,73 +3816,85 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		// mediation off there is no mediator to inject it, so reject rather than
 		// silently ignore (mirroring --egress-policy).
 		if mode == vmkit.EgressModeOff {
-			return workspaceOptions{}, fmt.Errorf("--egress-swap-config: credential swap requires --egress mediated or strict")
+			return fmt.Errorf("--egress-swap-config: credential swap requires --egress mediated or strict")
 		}
 		opts.EgressSwapConfigPath = trimmed
 	}
+	return nil
+}
+
+func applyStorageOptionFlags(opts *workspaceOptions, volumeFlags, diskFlags, bundleFlags, outputFlags multiFlag) error {
 	volumes, err := parseWorkspaceVolumes(volumeFlags)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	disks, err := parseWorkspaceDisks(diskFlags, false)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	bundles, err := parseWorkspaceDisks(bundleFlags, true)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.Disks = append(opts.Disks, volumes...)
 	opts.Disks = append(opts.Disks, disks...)
 	opts.Disks = append(opts.Disks, bundles...)
 	outputs, err := parseWorkspaceOutputs(outputFlags)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.Outputs = append(opts.Outputs, outputs...)
+	return nil
+}
+
+func applyNetworkMediationOptionFlags(opts *workspaceOptions, publishFlags multiFlag, mediationMapping string, mediationOptional bool, command string) error {
 	published, err := parsePortForwardMappings(publishFlags)
 	if err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.Network.PortForwards = append(opts.Network.PortForwards, published...)
 	if strings.TrimSpace(mediationMapping) != "" {
 		mediation, err := parseMediationMapping(mediationMapping, mediationOptional)
 		if err != nil {
-			return workspaceOptions{}, err
+			return err
 		}
 		opts.Mediation = &mediation
 	} else if mediationOptional {
-		return workspaceOptions{}, fmt.Errorf("%s requires --mediation with --mediation-optional", command)
+		return fmt.Errorf("%s requires --mediation with --mediation-optional", command)
 	}
+	return nil
+}
+
+func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit workspaceOptionExplicitFlags, rm bool, specPath string, resultPort uint, timeoutSeconds int) error {
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		if command == "create" {
 			opts.ImageRef = defaultWorkspaceImage(opts.Architecture)
 		} else {
-			return workspaceOptions{}, fmt.Errorf("%s requires --image", command)
+			return fmt.Errorf("%s requires --image", command)
 		}
 	}
 	if command == "run" && strings.TrimSpace(opts.ExecCommand) == "" {
 		opts.UseImageCommand = true
 	}
 	if err := validateConsoleShell(opts.ConsoleShell); err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	if strings.TrimSpace(opts.Hostname) == "" && strings.TrimSpace(opts.Name) != "" {
 		opts.Hostname = workspace.DefaultHostname(opts.Name)
 	}
 	if err := validateHostname(opts.Hostname); err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
-	if !kernelExplicit {
+	if !explicit.Kernel {
 		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
 	}
-	if !supervisorExplicit {
+	if !explicit.Supervisor {
 		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
-	opts.KernelExplicit = kernelExplicit
+	opts.KernelExplicit = explicit.Kernel
 	if err := validateRestartPolicy(opts.RestartPolicy); err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	opts.RestartPolicy = normalizeRestartPolicy(opts.RestartPolicy)
 	// --network-name selects a user-defined named network; it implies named mode
@@ -3845,44 +3904,44 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 		case "", defaultNetworkMode, "named":
 			opts.Network.Mode = "named"
 		default:
-			return workspaceOptions{}, fmt.Errorf("--network-name cannot be combined with --network %s; named networks use their own managed bridge", opts.Network.Mode)
+			return fmt.Errorf("--network-name cannot be combined with --network %s; named networks use their own managed bridge", opts.Network.Mode)
 		}
 	}
 	opts.Network = normalizeNetworkConfig(opts.Network)
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
-		return workspaceOptions{}, err
+		return err
 	}
 	if command != "create" && strings.TrimSpace(opts.ServiceCommand) != "" {
-		return workspaceOptions{}, fmt.Errorf("%s does not support --service-command", command)
+		return fmt.Errorf("%s does not support --service-command", command)
 	}
 	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
-		return workspaceOptions{}, fmt.Errorf("%s cannot use both --image-command and --service-command", command)
+		return fmt.Errorf("%s cannot use both --image-command and --service-command", command)
 	}
 	if command == "run" && rm && opts.Keep {
-		return workspaceOptions{}, fmt.Errorf("run cannot use both --rm and --keep")
+		return fmt.Errorf("run cannot use both --rm and --keep")
 	}
 	if command != "run" && rm {
-		return workspaceOptions{}, fmt.Errorf("%s does not support --rm", command)
+		return fmt.Errorf("%s does not support --rm", command)
 	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
-	if specExplicit && specPath == "" {
-		return workspaceOptions{}, fmt.Errorf("%s requires --file path", command)
+	if explicit.Spec && specPath == "" {
+		return fmt.Errorf("%s requires --file path", command)
 	}
-	if err := applyResourceProfile(&opts, memoryExplicit || opts.SpecMemory, cpusExplicit || opts.SpecCPU, sizeExplicit || opts.SpecSize); err != nil {
-		return workspaceOptions{}, err
+	if err := applyResourceProfile(opts, explicit.Memory || opts.SpecMemory, explicit.CPUs || opts.SpecCPU, explicit.Size || opts.SpecSize); err != nil {
+		return err
 	}
-	if err := validateResourceConfig(workspaceResources(opts), true); err != nil {
-		return workspaceOptions{}, err
+	if err := validateResourceConfig(workspaceResources(*opts), true); err != nil {
+		return err
 	}
 	if timeoutSeconds <= 0 {
-		return workspaceOptions{}, fmt.Errorf("%s timeout must be positive", command)
+		return fmt.Errorf("%s timeout must be positive", command)
 	}
 	if resultPort > uint(^uint32(0)) {
-		return workspaceOptions{}, fmt.Errorf("%s result port is too large", command)
+		return fmt.Errorf("%s result port is too large", command)
 	}
 	opts.ResultPort = uint32(resultPort)
 	opts.Timeout = time.Duration(timeoutSeconds) * time.Second
-	return opts, nil
+	return nil
 }
 
 func applyContainerRunArgs(opts *workspaceOptions, args []string) error {
