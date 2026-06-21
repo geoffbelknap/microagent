@@ -4,7 +4,7 @@ description: Inspect workspace networking and manage named networks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-21_
 
 ```text
 microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's network
@@ -87,8 +87,10 @@ microagent create --name db  --image docker.io/library/postgres:16 --network-nam
 ```
 
 Each member is allocated a **stable IP** from the network's subnet (persisted in
-the registry, so it survives stop/start). On Firecracker/Linux, members share a
-managed Linux bridge so they reach each other directly:
+the registry, so it survives stop/start). Firecracker/Linux members share a
+managed Linux bridge; Apple VF/macOS members share a microagent-owned userspace
+L2 switch through `VZFileHandleNetworkDeviceAttachment`, without Apple's vmnet
+entitlement:
 
 ```bash
 microagent exec web -- ping db        # resolve by name and reach the peer
@@ -99,15 +101,15 @@ member set (the cmdline → guest-init seam, parallel to DNS). Because it is a
 boot-time snapshot, a member learns peers that joined **before** it booted;
 restart a workspace to pick up members that joined later. Cross-VM connectivity
 by IP is always available regardless of boot order. Deleting a workspace frees
-its address; the shared bridge is removed once the last member stops.
+its address; backend host-side attachment state is reaped once the last member
+stops.
 
 Named workspace attachment is currently implemented by the Firecracker/Linux
-backend. It requires `net.ipv4.ip_forward=1` on the host (as with `nat` mode)
-and CAP_NET_ADMIN in the supervisor - see
-[`host setup-networking`](/cli/host/#setup-networking). The `network create`
-registry commands can run on macOS, but Apple VF does not currently implement
-`network.mode=named`; starting an Apple VF workspace on a named network fails
-backend validation.
+and Apple VF/macOS backends. Firecracker requires `net.ipv4.ip_forward=1` on
+the host (as with `nat` mode) and CAP_NET_ADMIN in the supervisor - see
+[`host setup-networking`](/cli/host/#setup-networking). Apple VF does not use
+Linux host setup, vmnet logical networks, or the restricted
+`com.apple.vm.networking` entitlement for named networks.
 
 ## Flags
 

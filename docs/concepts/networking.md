@@ -23,14 +23,16 @@ reliably mediated — see the note below).
 | `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. Egress-mediated. |
 | `isolated` | No guest network device. The guest has no network access at all. |
 | `nat` | **Unsupported** (`--unsupported`). Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
-| `named` | **Unsupported** (`--unsupported`). Joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a shared managed bridge so members reach each other, and `/etc/hosts` name resolution. Currently implemented by Firecracker on Linux. |
+| `named` | **Unsupported** (`--unsupported`). Joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a backend-managed private L2 segment so members reach each other, and `/etc/hosts` name resolution. Implemented by Firecracker/Linux and Apple VF/macOS. |
 
 > **`nat`, `named`, and `bridged` are unsupported and not reliably egress-mediated.**
-> `nat` and `named` run in the host network namespace, where transparent capture
-> (TCP REDIRECT original-destination recovery and UDP TPROXY steering) does not
-> work reliably; `bridged` gives the workspace its own L2 presence on an existing
-> host bridge and **bypasses [egress mediation](/concepts/egress-mediation/)** by
-> design. None are covered by microagent's security model: they are hidden from
+> Linux `nat` and `named` run in the host network namespace, where transparent
+> capture (TCP REDIRECT original-destination recovery and UDP TPROXY steering)
+> does not work reliably; Apple VF `named` is a private userspace L2 switch but
+> is not currently transparently mediated. `bridged` gives the workspace its own
+> L2 presence on an existing host bridge and **bypasses
+> [egress mediation](/concepts/egress-mediation/)** by design. None are covered
+> by microagent's security model: they are hidden from
 > the advertised modes, require `--unsupported` to select, and may be broken or
 > removed. Transparent egress mediation is currently reliable only in the
 > per-namespace `user`/pasta path. The sections below document their mechanics for
@@ -48,8 +50,8 @@ three backends:
 
 | Backend | What works today |
 |---|---|
-| Apple VF | `user`, `nat`, `isolated`, static NAT config, and TCP `--publish` work. `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
-| Firecracker | `user` runs Firecracker inside a `pasta` user namespace with a namespace-local TAP. `nat` creates a host-side TAP and installs nftables MASQUERADE rules. `bridged` attaches a transient TAP to an existing host Linux bridge. `isolated` and TCP `--publish` work. |
+| Apple VF | `user`, `nat`, `isolated`, `named`, static NAT config, and TCP `--publish` work. `named` uses a microagent-owned userspace L2 switch over `VZFileHandleNetworkDeviceAttachment`; `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
+| Firecracker | `user` runs Firecracker inside a `pasta` user namespace with a namespace-local TAP. `nat` creates a host-side TAP and installs nftables MASQUERADE rules. `named` attaches a TAP to a managed Linux bridge. `bridged` attaches a transient TAP to an existing host Linux bridge. `isolated` and TCP `--publish` work. |
 | Windows Hyper-V | Experimental. `user` and `nat` use the managed `microagent-nat` HNS NAT network. `isolated` starts without an external network adapter. TCP `--publish` works through Hyper-V socket bridging. `bridged` attaches to the named HNS network or Hyper-V switch. |
 
 Apple VF NAT is backend-managed by macOS: `user` and `nat` both map to `VZNATNetworkDeviceAttachment`, which runs in user space inside the framework with no privileges required, so microagent does not create a TAP, configure `pf`, or allocate a subnet of its own. By default it asks the kernel to do DHCP via `ip=dhcp`, and guest init writes `/etc/resolv.conf` from the kernel's DHCP nameserver data, so NAT works without an image-local DHCP client. When a spec declares `network.ip`, `network.gateway`, and optional `network.dns`, Apple VF passes those values to guest init for static IPv4 setup. Use the macOS NAT subnet, normally `192.168.64.0/24` with gateway `192.168.64.1`; Virtualization.framework still owns the attachment and does not expose an independently allocated runtime lease.
@@ -233,9 +235,10 @@ the current user cannot create HNS endpoints for HCS compute systems.
 `bridged` mode attaches to a bridge *you* already created. A **named network**
 is microagent's own managed equivalent: declare it once, and any number of
 workspaces join it by name and become peers on a shared subnet. It is the
-in-boundary analog of a Docker user-defined network. Workspace attachment is
-currently implemented by the Firecracker/Linux backend; Apple VF does not
-currently implement `network.mode=named`.
+in-boundary analog of a Docker user-defined network. Firecracker attaches
+members to a managed Linux bridge; Apple VF attaches members to a
+microagent-owned userspace L2 switch over `VZFileHandleNetworkDeviceAttachment`
+so it does not depend on Apple's vmnet entitlement.
 
 Create the network (a VM-independent registry record, no host devices yet):
 
@@ -252,19 +255,21 @@ microagent create db  --image docker.io/library/postgres:16 --network-name devne
 microagent exec web -- ping db                # reach a peer by name
 ```
 
-What joining does, realized by the Firecracker supervisor at start:
+What joining does, realized by the backend supervisor at start:
 
 - **Stable address.** Each member is allocated the lowest free host in the
   network's subnet (the gateway is `.1`), persisted in the registry so the
   address survives stop/start. Deleting a workspace frees its address.
-- **Shared bridge.** A managed Linux bridge (`mbr<hash>`) is created on demand
-  with the gateway address; each member's TAP is enslaved to it, so members are
-  on one L2 segment and reach each other directly. The bridge is reaped once the
-  last member stops - no orphan devices.
+- **Private L2 segment.** Firecracker creates a managed Linux bridge
+  (`mbr<hash>`) with the gateway address and enslaves each member's TAP to it.
+  Apple VF starts a microagent-owned userspace switch and attaches each member
+  with `VZFileHandleNetworkDeviceAttachment`, avoiding vmnet entitlements.
+  Backend host-side attachment state is reaped once the last member stops.
 - **Name resolution.** `/etc/hosts` is injected at boot from the current member
   set via the kernel-cmdline → guest-init seam (`microagent_net_hosts`,
-  parallel to DNS). Outbound egress goes through the gateway with NAT, exactly
-  like `nat` mode.
+  parallel to DNS). Firecracker named networks route outbound egress through
+  the gateway with NAT; Apple VF named networks are private peer segments and
+  do not add NAT egress.
 
 `/etc/hosts` is a **boot-time snapshot**: a member resolves peers that joined
 *before* it booted. Reachability by IP is always order-independent (it's L2);

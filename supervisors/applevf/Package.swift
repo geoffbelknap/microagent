@@ -16,6 +16,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "microagent-applevf-supervisor"
+        ),
+        .testTarget(
+            name: "microagent-applevf-supervisorTests",
+            dependencies: ["microagent-applevf-supervisor"]
         )
     ]
 )
