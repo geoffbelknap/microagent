@@ -4,7 +4,7 @@ description: Put an app and a database on one named network so they reach and re
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-21_
 
 Two workspaces, one subnet: an app called `web` that reaches a database
 called `db` by name. That's where this guide ends up. A named network is
@@ -12,22 +12,26 @@ microagent's managed analog of a Docker user-defined network: declare it once,
 join workspaces by name.
 
 > **Named networks are currently unsupported and not reliably egress-mediated.**
-> They run in the host network namespace, where transparent egress capture does
-> not work reliably, so they are gated behind `--unsupported` and are not covered
-> by microagent's security model. For mediated egress, use the default `user`
-> mode. See [networking concepts](/concepts/networking/).
+> Linux named networks run in the host network namespace, where transparent
+> egress capture does not work reliably. Apple VF named networks use a private
+> userspace L2 switch, but are not currently transparently mediated. Named mode
+> is gated behind `--unsupported` and is not covered by microagent's security
+> model. For mediated egress, use the default `user` mode. See
+> [networking concepts](/concepts/networking/).
 
-Named-network attachment is currently implemented by the Firecracker/Linux
-backend and needs the same host setup as `nat` mode: `net.ipv4.ip_forward=1`
-and `CAP_NET_ADMIN` in the supervisor. Check and apply that once:
+On Firecracker/Linux, named-network attachment needs the same host setup as
+`nat` mode: `net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in the supervisor.
+Check and apply that once:
 
 ```bash
 microagent host setup-networking --check
 microagent host setup-networking
 ```
 
-The registry commands below run anywhere; only booting members needs the
-privileged setup. Apple VF does not currently implement `network.mode=named`.
+The registry commands below run anywhere. Apple VF/macOS does not need that
+Linux host setup for named networks; it attaches members to a microagent-owned
+userspace L2 switch through `VZFileHandleNetworkDeviceAttachment` and does not
+use Apple's vmnet entitlement.
 
 ## 1. Create the network
 
@@ -57,9 +61,10 @@ microagent start web
 
 Each member gets a stable address from the subnet (`db` → `10.44.50.2`,
 `web` → `10.44.50.3`; `.1` is the gateway), persisted in the registry so it
-survives stop and start. The first member to start brings up the shared
-managed bridge; later members attach to it. Outbound egress still works,
-routed through the gateway with NAT.
+survives stop and start. Firecracker brings up a shared managed Linux bridge;
+Apple VF brings up a userspace L2 switch for peer traffic. Linux named networks
+route outbound egress through the gateway with NAT; Apple VF named networks are
+private peer segments and do not add NAT egress.
 
 Check membership and runtime addresses:
 
@@ -118,9 +123,9 @@ microagent halt db && microagent delete db --yes
 microagent network delete devnet
 ```
 
-Deleting a workspace frees its address; the managed bridge is reaped when the
-last member stops. `network delete` fails closed while members remain - `--force`
-overrides.
+Deleting a workspace frees its address; backend host-side attachment state is
+reaped when the last member stops. `network delete` fails closed while members
+remain - `--force` overrides.
 
 ## What's next
 

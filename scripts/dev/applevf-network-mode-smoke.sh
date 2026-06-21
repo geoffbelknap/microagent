@@ -255,6 +255,68 @@ if "APPLEVF_STATIC_NAT_OK" not in connect:
     raise SystemExit(connect)
 PY
 
+NAMED_STATE="$STATE_DIR/named"
+"$CLI" network create devnet --state-dir "$NAMED_STATE" >"$STATE_DIR/named-create-network.txt"
+for workspace in db web; do
+  "$CLI" create "$workspace" \
+    --backend apple-vf \
+    --image "$IMAGE" \
+    --arch "$ARCH" \
+    --kernel "$KERNEL" \
+    --state-dir "$NAMED_STATE" \
+    --size-mib "${MICROAGENT_APPLEVF_NETWORK_SIZE_MIB:-128}" \
+    --mke2fs "$MKE2FS" \
+    --guest-init "$GUEST_INIT" \
+    --supervisor "$SUPERVISOR" \
+    --memory "${MICROAGENT_APPLEVF_NETWORK_MEMORY_MIB:-512}" \
+    --cpus "${MICROAGENT_APPLEVF_NETWORK_CPUS:-2}" \
+    --network-name devnet \
+    --unsupported \
+    --egress off \
+    --service-command "sleep 300" >"$STATE_DIR/named-${workspace}-create.json"
+done
+"$CLI" start db \
+  --state-dir "$NAMED_STATE" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/named-db-start.json"
+wait_for_status_ready db "$NAMED_STATE" "$STATE_DIR/named-db-status.json"
+"$CLI" start web \
+  --state-dir "$NAMED_STATE" \
+  --kernel "$KERNEL" \
+  --supervisor "$SUPERVISOR" >"$STATE_DIR/named-web-start.json"
+wait_for_status_ready web "$NAMED_STATE" "$STATE_DIR/named-web-status.json"
+"$CLI" connect web \
+  --state-dir "$NAMED_STATE" \
+  --send "cat /proc/cmdline 2>&1; cat /etc/hosts 2>&1; ping -c 1 -W 5 db >/tmp/applevf-named-ping.out && echo APPLEVF_NAMED_OK; sync" \
+  --ready-timeout 30 \
+  --timeout "${MICROAGENT_APPLEVF_NETWORK_TIMEOUT_SECONDS:-45}" >"$STATE_DIR/named-web-connect.txt"
+"$CLI" network web --state-dir "$NAMED_STATE" >"$STATE_DIR/named-web-network.json"
+"$CLI" halt web --state-dir "$NAMED_STATE" --supervisor "$SUPERVISOR" >"$STATE_DIR/named-web-halt.json"
+"$CLI" halt db --state-dir "$NAMED_STATE" --supervisor "$SUPERVISOR" >"$STATE_DIR/named-db-halt.json"
+"$CLI" delete web --yes --state-dir "$NAMED_STATE" --supervisor "$SUPERVISOR" >"$STATE_DIR/named-web-delete.json"
+"$CLI" delete db --yes --state-dir "$NAMED_STATE" --supervisor "$SUPERVISOR" >"$STATE_DIR/named-db-delete.json"
+
+python3 - "$STATE_DIR/named-web-network.json" "$STATE_DIR/named-web-connect.txt" <<'PY'
+import json
+import sys
+
+network_path, connect_path = sys.argv[1:3]
+with open(network_path, "r", encoding="utf-8") as f:
+    network = json.load(f)
+with open(connect_path, "r", encoding="utf-8", errors="replace") as f:
+    connect = f.read()
+runtime = network.get("runtime") or {}
+if runtime.get("mode") != "named" or runtime.get("name") != "devnet":
+    raise SystemExit(network)
+if runtime.get("ip") != "10.44.1.3/24" or runtime.get("gateway") != "10.44.1.1":
+    raise SystemExit(network)
+hosts = runtime.get("hosts") or []
+if "db:10.44.1.2" not in hosts or "web:10.44.1.3" not in hosts:
+    raise SystemExit(network)
+if "APPLEVF_NAMED_OK" not in connect:
+    raise SystemExit(connect)
+PY
+
 ISOLATED_RESPONSE="$(run_check isolated-check isolated)"
 python3 - "$ISOLATED_RESPONSE" <<'PY'
 import json

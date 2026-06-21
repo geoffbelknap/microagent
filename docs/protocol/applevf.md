@@ -4,7 +4,7 @@ description: Drive the macOS backend executable - one JSON request in, one respo
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-21_
 
 If you run microagent on macOS, or you want to drive Virtualization.framework
 from a language that isn't Swift, this page documents the executable that
@@ -91,6 +91,7 @@ devices:
 | `nat` | Adds a `VZNATNetworkDeviceAttachment` and requests guest DHCP with `ip=dhcp` |
 | `isolated` | Adds no network device |
 | `bridged` | Adds a `VZBridgedNetworkDeviceAttachment`; uses DHCP unless static IP and gateway are declared |
+| `named` | Adds a `VZFileHandleNetworkDeviceAttachment` connected to a microagent-owned userspace L2 switch for the named network; uses registry-allocated static IPv4 config |
 
 `nat` is the default. It uses Virtualization.framework's native NAT service,
 not a TAP device, host bridge, or host firewall rule set managed by
@@ -118,6 +119,14 @@ supervisor process to have Apple's restricted `com.apple.vm.networking`
 entitlement. Open-source builds cannot self-sign that entitlement, and `sudo`
 does not bypass the check. Local ad-hoc builds fail closed during `check` with
 a clear entitlement error.
+
+`named` does not use Apple's vmnet logical-network APIs or the
+`com.apple.vm.networking` entitlement. At start, the supervisor joins the
+backend-neutral named-network registry, records the member's stable IP, subnet,
+gateway, and `/etc/hosts` entries in the runtime network config, and attaches
+the VM NIC to a Unix-datagram, file-handle L2 switch owned by microagent. The
+switch forwards Ethernet frames only between members of the same named network;
+it does not create a host bridge, configure `pf`, or provide NAT egress.
 
 Port forwards are supported for TCP. The supervisor listens on the requested
 host address and port, connects to the guest over virtio-vsock, and guest init
