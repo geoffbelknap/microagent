@@ -4,7 +4,7 @@ description: Terms used throughout the microagent docs and what they actually me
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-21_
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse - and the distinctions matter for what you can do next.
 
@@ -16,7 +16,7 @@ A handful of terms come up often enough that it's worth pinning them down before
 
 ## VMs and what's inside them
 
-- **backend** - how the host OS runs VMs. Linux uses Firecracker. macOS uses Apple Virtualization.framework. Windows uses Hyper-V. One backend per host; the choice is automatic.
+- **backend** - how the host OS runs VMs. Supported backends are Firecracker on Linux and Apple Virtualization.framework on macOS. WSL is an intended Linux compatibility lane rather than a separate backend. Windows Hyper-V is experimental. See [Platform support](/concepts/platform-support/).
 - **substrate** - the host-side VM substrate microagent owns: kernel management, OCI-to-disk conversion, VM lifecycle, and host/guest wiring. Everything below the workspace and above the hypervisor.
 - **microVM** - the small, fast VM each workspace runs in. Booted by the backend.
 - **guest** - the Linux userspace inside the microVM. What your OCI image becomes once it's booted.
@@ -35,7 +35,7 @@ A handful of terms come up often enough that it's worth pinning them down before
 
 ## Control surface
 
-- **supervisor** - a small JSON-in / JSON-out executable that owns lifecycle for one backend (`microagent-firecracker-supervisor`, `microagent-applevf-supervisor`, plus a Windows Hyper-V supervisor). Anything that can spawn a subprocess and parse JSON can drive it.
+- **supervisor** - a small JSON-in / JSON-out executable that owns lifecycle for one backend (`microagent-firecracker-supervisor`, `microagent-applevf-supervisor`, plus the experimental Windows Hyper-V supervisor). Anything that can spawn a subprocess and parse JSON can drive it.
 - **mediation channel** - a guest-to-host vsock contract for the agent's calls into your host control plane. Declared, required by default, and fail-closed unless you explicitly opt out. **Not the same as egress mediation** (below); they only share the word "mediation". See [Build agents on the mediation channel](/guides/agents-and-mediation/).
 - **egress mediation** - the capture-and-control layer over the guest's *ordinary network egress* (the TCP/UDP/DNS it sends out of its network device). On by default (`mediated`), with `strict` and `off` modes. Intercepts TLS with a per-workspace CA, allowlists destinations, and audits every decision. Distinct from the vsock mediation channel above. See [Egress mediation](/concepts/egress-mediation/).
 - **state directory** - where workspace records live on the host (default `~/.microagent/`).

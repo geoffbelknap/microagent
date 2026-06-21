@@ -4,9 +4,11 @@ Run AI agent workspaces in microVMs.
 
 Each agent gets its own Linux microVM with its own kernel, rootfs, state, and
 lifecycle. Boot from an OCI image and tear down, or keep the workspace around
-and halt/resume it later. Linux uses Firecracker; macOS uses Apple
-Virtualization.framework; Windows Hyper-V support is experimental. Identity,
-policy, credentials, and control-plane decisions live in your code.
+and halt/resume it later. Linux and macOS are the supported host targets:
+Linux uses Firecracker, and macOS uses Apple Virtualization.framework. WSL is
+an intended Linux compatibility lane when the required Linux host capabilities
+are available. Windows Hyper-V support is experimental. Identity, policy,
+credentials, and control-plane decisions live in your code.
 
 The project is a Go library first. The `microagent` CLI is a thin shell over
 the exported packages, so anything the CLI can do, your Go program can do
@@ -142,7 +144,7 @@ Pick the path that matches what you're doing:
 
 | Reference and operations | |
 |---|---|
-| [Concepts](docs/concepts/architecture.md) | Architecture, backends, networking, state, [glossary](docs/concepts/glossary.md) |
+| [Concepts](docs/concepts/architecture.md) | Architecture, [platform support](docs/concepts/platform-support.md), backends, networking, state, [glossary](docs/concepts/glossary.md) |
 | [Guides](docs/guides/index.md) | Task-shaped walkthroughs |
 | [Security](docs/security.md) | Trust boundary; see [`SECURITY.md`](SECURITY.md) for disclosure |
 | [Troubleshooting](docs/troubleshooting.md) | Common failure modes, indexed by symptom |

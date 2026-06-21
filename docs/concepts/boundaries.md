@@ -4,7 +4,7 @@ description: Know what microagent owns and what your runtime must supply before 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-21_
 
 `microagent` runs Linux workspaces inside microVMs, and it stops at the VM
 boundary. Read this page before you design a runtime around it, so you know
@@ -26,7 +26,7 @@ program supplies identity, policy, credentials, and intent.
 - MCP stdio adapter over the existing substrate APIs
 - Firecracker supervisor implementation (Go executable)
 - Apple Virtualization.framework supervisor implementation (Swift executable)
-- Windows Hyper-V supervisor implementation (Go)
+- Experimental Windows Hyper-V supervisor implementation (Go)
 - State files and cleanup
 - Host/guest wiring such as vsock listeners
 

@@ -4,28 +4,32 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-21_
 
-microagent installs with one backend per host OS: Firecracker on Linux,
-Apple Virtualization.framework on macOS, and Hyper-V on Windows.
-This page is the cross-platform picture - what each backend supports and what
-it needs from the host - so you can decide which OS to deploy on and check
-whether yours has what it needs. The CLI does not fall back to a cross-host
-default - if a request names a backend that does not match the installed host
-OS, microagent fails before it builds a rootfs or talks to a supervisor.
+microagent's supported host targets are Linux and macOS. Linux uses
+Firecracker, and macOS uses Apple Virtualization.framework. WSL is an intended
+Linux compatibility lane when the underlying Linux prerequisites are available.
+Windows Hyper-V remains an experimental backend. See
+[Platform support](/concepts/platform-support/) for the support policy.
+
+This page is the backend picture - what each backend implements and what it
+needs from the host - so you can decide where to deploy and check whether the
+host has what it needs. The CLI does not fall back to a cross-host default - if
+a request names a backend that does not match the installed host OS, microagent
+fails before it builds a rootfs or talks to a supervisor.
 
 | Backend | Host OS | Maturity | Networking modes | Requirements | Notes |
 |---|---|---|---|---|---|
-| `linux-kvm` | Linux | Production | `user`, `nat`, `isolated`, `bridged`, `named`, TCP `--publish` | `/dev/kvm`, `firecracker` binary | Full feature surface; importable as a Go package |
-| `apple-vf` | macOS (Apple silicon) | Production | `user`, `nat`, `isolated`, TCP `--publish`; `bridged` entitlement-gated | Virtualization.framework, Swift supervisor binary | NAT is macOS-managed; no `named` networks yet |
-| `windows-hyperv` | Windows | Supported | `user`/`nat` (HNS NAT), `isolated`, `bridged` (named HNS network/switch), TCP `--publish` | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
+| `linux-kvm` | Linux | Supported | `user`, `nat`, `isolated`, `bridged`, `named`, TCP `--publish` | `/dev/kvm`, `/dev/vhost-vsock`, `/dev/net/tun`, `firecracker`, `pasta` for `user` networking | Reference implementation; importable as a Go package. WSL uses this backend when the Linux prerequisites are exposed. |
+| `apple-vf` | macOS (Apple silicon) | Supported | `user`, `nat`, `isolated`, TCP `--publish`; `bridged` entitlement-gated | Virtualization.framework, Swift supervisor binary | NAT is macOS-managed; no `named` networks yet |
+| `windows-hyperv` | Windows | Experimental | `user`/`nat` (HNS NAT), `isolated`, `bridged` (named HNS network/switch), TCP `--publish` | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
 
-All three expose the same backend-neutral request and response structures, the
-same lifecycle verbs, and interactive [`connect`](/cli/connect/) - the
-mechanics under each verb differ per host. Firecracker and Apple VF share the
-executable supervisor boundary; Windows Hyper-V speaks the same `vmkit`
-protocol inside a Go supervisor boundary. Networking internals per backend are
-covered in [Networking](/concepts/networking/).
+Implemented backends expose the same backend-neutral request and response
+structures where they implement a feature. The mechanics under each verb differ
+per host. Firecracker and Apple VF share the executable supervisor boundary;
+Windows Hyper-V speaks the same `vmkit` protocol inside an experimental Go
+supervisor boundary. Networking internals per backend are covered in
+[Networking](/concepts/networking/).
 
 ## Firecracker (Linux)
 
@@ -33,13 +37,27 @@ covered in [Networking](/concepts/networking/).
 - Uses `microagent-firecracker-supervisor` around the Firecracker process.
   Override the supervisor with `--supervisor` or
   `MICROAGENT_FIRECRACKER_SUPERVISOR`.
-- Requires `/dev/kvm` and the `firecracker` binary on `PATH` (or under
+- Requires `/dev/kvm`, `/dev/vhost-vsock`, `/dev/net/tun`, working
+  unprivileged user namespaces, `pasta` for the default `user` network mode,
+  and the `firecracker` binary on `PATH` (or under
   `<prefix>/libexec/firecracker`, or `MICROAGENT_FIRECRACKER`).
 - `delete` refuses to remove state while the recorded VM process is still
   running. Use `stop` or `kill` first.
 - Supports interactive [`connect`](/cli/connect/) and `connect --send`. Use
   [`logs`](/cli/logs/) when you only need captured serial output.
 - The default kernel path is `~/.microagent/kernels/linux-kvm/<arch>/Image`.
+
+### WSL compatibility
+
+WSL uses the `linux-kvm` backend; it is not a separate backend id and
+microagent does not fall back from WSL to `windows-hyperv`. It works when the
+WSL environment exposes the Linux host capabilities Firecracker needs. Run
+`microagent doctor` inside WSL before creating workspaces; it must report the
+Linux KVM, vsock, TUN, user namespace, supervisor, guest-init, kernel, and
+`pasta` prerequisites as available before a workspace can boot.
+
+Use the Linux backend docs and troubleshooting guidance for WSL unless a page
+calls out a WSL-specific behavior.
 
 ## Apple VF (macOS)
 
@@ -55,9 +73,10 @@ covered in [Networking](/concepts/networking/).
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
 
-## Windows Hyper-V
+## Windows Hyper-V (experimental)
 
 - Targets Linux microVM-style workspaces on Windows without WSL or QEMU.
+- This backend is experimental; behavior and coverage may change.
 - Uses the backend name `windows-hyperv` and Host Compute Service through
   `vmcompute.dll`; lifecycle state records HCS compute IDs.
 - Consumes VHD root disks at `~/.microagent/workspaces/<name>/rootfs.vhd`, and

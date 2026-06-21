@@ -1,15 +1,17 @@
 ---
 title: Runtime contract
-description: Depend on one set of runtime semantics across Firecracker, Apple VF, and Hyper-V.
+description: Depend on one set of runtime semantics across backend implementations.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-21_
 
 If you are building an agent runtime on top of microagent, this page defines
-the semantics you can rely on across every backend - Firecracker, Apple VF,
-and Windows Hyper-V. `microagent --json contract` is the JSON
-source for the shared runtime contract.
+the semantics you can rely on across backend implementations where they expose
+a capability. Firecracker on Linux and Apple VF on macOS are supported host
+targets. Windows Hyper-V follows the same contract shape as an experimental
+backend. `microagent --json contract` is the JSON source for the shared runtime
+contract.
 
 ## Scope
 

@@ -24,6 +24,24 @@ This repository owns the VM pieces:
 - Apple Virtualization.framework supervisor protocol
 - experimental Windows Hyper-V supervisor boundary
 
+## Platform support
+
+- Linux (`linux-kvm` / Firecracker) and macOS (`apple-vf` / Apple
+  Virtualization.framework) are the supported release targets.
+- WSL is an intended compatibility lane through the Linux backend when the
+  underlying Linux prerequisites are available. Keep it working when changes
+  touch Linux host assumptions, and use intermittent WSL parity passes to catch
+  drift. Do not create a separate WSL product contract or make WSL a standing
+  release gate.
+- Windows Hyper-V (`windows-hyperv`) is experimental. After the current parity
+  cleanup, do not expand Hyper-V parity or make it release-blocking unless the
+  user explicitly scopes that work and there is a named owner for host access,
+  CI signal, docs, and maintenance.
+- Keep backend-neutral request/response, AX, MCP, readiness, result, artifact,
+  and verification shapes stable where a backend implements a feature. Do not
+  treat backend-neutral protocol shape as a promise that every backend is a
+  required parity gate.
+
 ## Non-goals
 
 - Do not implement orchestration, planning, LLM calls, agent-side tools, or
@@ -99,15 +117,18 @@ This repository owns the VM pieces:
   must reflect the real host.
 - Use `scripts/dev/microagent-e2e.sh --list` as the source of truth for E2E
   scenario names, coverage classes, platform requirements, and backend
-  coverage. Backend-neutral feature suites must run the current host backend
-  selected by `MICROAGENT_E2E_BACKEND`. Backend-specific scenarios are host
-  implementation probes and must be named as such.
+  coverage. For release validation, backend-neutral feature suites must run the
+  current supported host backend selected by `MICROAGENT_E2E_BACKEND`.
+  Experimental Hyper-V runs are diagnostic unless explicitly scoped as part of
+  the task. Backend-specific scenarios are host implementation probes and must
+  be named as such.
 - Before fresh live runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to
   identify preserved stale state. Delete only after confirming the candidates
   are test-owned and safe.
 - Do not put internal docs or transient test-run notes in `docs/`; anything in
   `docs/` becomes part of the public docs site. Keep internal docs outside the
-  public repository.
+  public repository; use Notion for internal decisions, plans, and running
+  notes. Keep `AGENTS.md` limited to repo working instructions.
 - When command output, flags, runtime semantics, or operator workflows change,
   update README/docs and run `python3 scripts/dev/markdown-link-check.py` and
   `python3 scripts/dev/docs-last-updated.py --check` and
