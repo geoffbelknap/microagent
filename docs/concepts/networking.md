@@ -14,13 +14,16 @@ mediation channel has its own guide at
 [Build agents on the mediation channel](/guides/agents-and-mediation/).
 
 Every workspace declares its network intent. `user` (the default) and
-`isolated` are **supported and egress-mediated**; `nat`, `named`, and `bridged`
-are **unsupported** and gated behind `--unsupported` (their egress is not
-reliably mediated — see the note below).
+`isolated` are supported network modes. Transparent
+[egress mediation](/concepts/egress-mediation/) is implemented by the
+Firecracker backend's `user` path; Apple VF's native NAT attachments are not
+transparently mediated. `nat`, `named`, and `bridged` are **unsupported** and
+gated behind `--unsupported` (their egress is not reliably mediated — see the
+note below).
 
 | Mode | What it does |
 |---|---|
-| `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. Egress-mediated. |
+| `user` | Default. Unprivileged outbound IPv4, plus declared TCP `--publish` forwards. Egress-mediated on Firecracker/Linux. On Apple VF/macOS it uses the native unmediated Virtualization.framework NAT attachment. |
 | `isolated` | No guest network device. The guest has no network access at all. |
 | `nat` | **Unsupported** (`--unsupported`). Outbound IPv4 via backend NAT, plus declared TCP `--publish` forwards. |
 | `named` | **Unsupported** (`--unsupported`). Joins a [user-defined named network](#named-networks): a stable IP from the network's subnet, a backend-managed private L2 segment so members reach each other, and `/etc/hosts` name resolution. Implemented by Firecracker/Linux and Apple VF/macOS. |
@@ -35,8 +38,8 @@ reliably mediated — see the note below).
 > by microagent's security model: they are hidden from
 > the advertised modes, require `--unsupported` to select, and may be broken or
 > removed. Transparent egress mediation is currently reliable only in the
-> per-namespace `user`/pasta path. The sections below document their mechanics for
-> the operators who knowingly opt in.
+> Firecracker per-namespace `user`/pasta path. The sections below document their
+> mechanics for the operators who knowingly opt in.
 
 This page is about *which network device a workspace gets and how it is wired*.
 What the workspace is allowed to send over that device - capture, allowlists,
