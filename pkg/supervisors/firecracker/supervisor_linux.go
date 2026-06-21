@@ -3113,7 +3113,7 @@ func handleGuestVsockConnection(conn net.Conn, target string) {
 		fmt.Fprintf(os.Stderr, "create result directory for %s: %v\n", target, err)
 		return
 	}
-	if err := os.WriteFile(target, data, 0o600); err != nil {
+	if err := writeFileAtomically(target, data, 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "write result %s: %v\n", target, err)
 	}
 }
@@ -3997,6 +3997,10 @@ func writeJSONFile(path string, value any) error {
 		return err
 	}
 	data = append(data, '\n')
+	return writeFileAtomically(path, data, 0o600)
+}
+
+func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
@@ -4013,7 +4017,7 @@ func writeJSONFile(path string, value any) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(mode); err != nil {
 		_ = tmp.Close()
 		return err
 	}
