@@ -7,10 +7,11 @@ microVMs.
 
 This repository owns the VM pieces:
 
-- run, create, start, status/inspect, halt, quarantine, stop, kill,
-  delete/rm, supervise, clone, cp, logs, connect, result, ps, network,
-  artifacts, images, prune, perf, rootfs, kernel, host, doctor, and contract
-  commands
+- CLI/API surfaces documented under `docs/cli/` and implemented in
+  `cmd/microagent`: workspace lifecycle and control, structured exec,
+  connect/logs/events/stats/result, file copy and artifacts, snapshots and
+  forks, image/commit, network, volume, model, secret, rootfs, kernel, host,
+  doctor, contract, perf, serve, AX, and MCP surfaces
 - rootfs builds from OCI images
 - local image records and reusable rootfs baselines
 - guest metadata and identity propagation
@@ -39,12 +40,13 @@ This repository owns the VM pieces:
 - Do not grow rootfs build logic into a general image scanner, signer, or
   registry management tool.
 - Do not become a container engine. Container-style conveniences are allowed
-  only when they map cleanly to microVM semantics. Do not implement
-  container-engine APIs, compose projects, pods, privileged mode,
-  namespace/device controls, or host directory bind mounts. Named volumes are
-  allowed only as the microVM analog: platform-managed, single-attach ext4
-  disks addressable by name, with a lifecycle independent of any one VM. Do not
-  implement the Docker volume model — daemon-managed, driver-based, or
+  only when they map cleanly to microVM semantics.
+- Do not implement container-engine APIs, compose projects, pods, privileged
+  mode, namespace/device controls, or host directory bind mounts.
+- Named volumes are allowed only as the microVM analog: platform-managed,
+  single-attach ext4 disks addressable by name, with a lifecycle independent of
+  any one VM.
+- Do not implement the Docker volume model — daemon-managed, driver-based, or
   concurrently-shared volumes — which does not map to microVM semantics.
 
 ## Design rules
@@ -66,17 +68,40 @@ This repository owns the VM pieces:
   `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`; do not write login
   state or broker credentials.
 
+## Collaboration rules
+
+- Treat a writable worktree as single-writer. If multiple people or agents are
+  working in parallel, create separate branches and separate `git worktree`
+  checkouts instead of sharing the same checkout.
+- Use one task branch per focused change. Keep branch names descriptive, and use
+  the `codex/` prefix for Codex-created branches unless the user asks for
+  another name.
+- Before editing, run `git status --short --branch --untracked-files=all` and
+  inspect existing local changes. Do not overwrite, reformat, stage, or delete
+  changes you did not make.
+- If the current branch changes, or unexpected modified or untracked files
+  appear while you are working, pause and report the conflict instead of
+  guessing ownership.
+- Keep changes scoped to the files needed for the assigned task. If a cleanup
+  crosses ownership boundaries or overlaps another in-flight change, split it
+  into a separate branch or ask for coordination.
+- Use pull requests as the integration point for parallel work. Do not merge
+  several agents' local changes together in one shared worktree unless the user
+  explicitly asks you to reconcile them.
+- Give concurrent tool runs separate writable caches when the tool uses locks or
+  mutable cache state. For example, set `GOLANGCI_LINT_CACHE` to a task-specific
+  directory under `/tmp` when running lint in parallel.
+
 ## Testing rules
 
 - Run live Firecracker, network, and E2E tests outside sandboxed environments.
   KVM, `/dev/vhost-vsock`, `/dev/net/tun`, networking tools, and cleanup checks
   must reflect the real host.
-- Use `scripts/dev/microagent-e2e.sh --list` to see E2E scenarios. Feature
-  suites should be backend-neutral by default: `public-surface`,
-  `lifecycle-deep`, `networking-deep`, `transport-deep`, and
-  `supervision-deep` must run the current host backend selected by
-  `MICROAGENT_E2E_BACKEND`. Firecracker-only or Apple-VF-only scenarios are
-  host implementation probes and must be named as such.
+- Use `scripts/dev/microagent-e2e.sh --list` as the source of truth for E2E
+  scenario names, coverage classes, platform requirements, and backend
+  coverage. Backend-neutral feature suites must run the current host backend
+  selected by `MICROAGENT_E2E_BACKEND`. Backend-specific scenarios are host
+  implementation probes and must be named as such.
 - Before fresh live runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to
   identify preserved stale state. Delete only after confirming the candidates
   are test-owned and safe.
@@ -104,11 +129,15 @@ This repository owns the VM pieces:
   branch and update it automatically when possible.
 - After pushing changes to an existing PR branch, update the PR without waiting
   for another prompt.
-- Enable auto-merge on PRs by default when the repository supports it and the
-  user has not asked to leave the PR unmerged.
+- Prefer squash merge for focused task PRs when the repository supports it. Use
+  merge commits only when preserving branch structure is intentional.
+- Enable auto-merge on PRs by default when required checks and review gates
+  cover the change and the user has not asked to leave the PR unmerged.
 
 ## Project boundary
 
 Other projects supply policy, audit meaning, identity, and user intent. This
 project owns kernels, rootfs conversion, VM commands, runtime verification, and
-state reporting.
+state reporting. Kernel build and release machinery belongs in the private
+companion `microagent-kernels` repository; this repository should consume and
+verify tagged kernel artifacts without duplicating that workflow.
