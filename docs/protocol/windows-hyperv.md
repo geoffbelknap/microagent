@@ -4,12 +4,15 @@ description: Run Linux guests on Windows through HCS - no WSL, no QEMU.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-21_
 
 If you want Linux guests on a Windows host - without WSL and without QEMU -
 this page documents the `windows-hyperv` backend. It talks to
 Windows Host Compute Service (HCS) through `vmcompute.dll` and prepares
 Hyper-V utility VM-style compute systems from microagent runtime requests.
+
+Status: `windows-hyperv` is experimental. Behavior and coverage may change.
+See [Platform support](/concepts/platform-support/) for the support policy.
 
 For the shared command list and response shape, see
 [Supervisor protocol](/protocol/). This page covers the Windows host behavior

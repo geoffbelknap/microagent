@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-21_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -41,8 +41,8 @@ microagent start research --from-snapshot pre-upgrade
 ```
 
 After it's running, open a console with [`connect`](/cli/connect/) on Apple
-VF, Firecracker, or Windows Hyper-V, or read serial output with
-[`logs`](/cli/logs/).
+VF, Firecracker, or the experimental Windows Hyper-V backend, or read serial
+output with [`logs`](/cli/logs/).
 
 ## Flags
 

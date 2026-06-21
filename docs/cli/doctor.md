@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-20_
+_Last updated: 2026-06-21_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -56,7 +56,7 @@ and `kernel` populated. `ok` is `false` when any required check fails.
   `kernel.apparmor_restrict_unprivileged_userns` are caught, not just the
   classic userns sysctls), default kernel installed, interactive console
   available.
-- **Windows Hyper-V:** Windows Host Compute Service available,
+- **Windows Hyper-V (experimental):** Windows Host Compute Service available,
   Hyper-V / Windows Hypervisor Platform support available, HCS access allowed
   for the current user, HCN/HNS networking available, Hyper-V sockets
   available, default kernel installed, guest-init available, and HVSock console

@@ -61,6 +61,9 @@ SCENARIOS=(
 # Each entry: scenario|coverage|backends|feature summary.
 #   coverage = portable | backend-neutral | backend-specific | host-specific
 #   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf
+# This is a coverage inventory, not the release support policy. See
+# docs/concepts/platform-support.md for supported, compatibility, and
+# experimental host tiers.
 SCENARIO_COVERAGE=(
   "coverage-matrix|portable|none|E2E feature inventory and scenario metadata"
   "contract|portable|none|runtime contract, synthetic state/result/artifacts"
@@ -173,7 +176,7 @@ Scenarios:
                      create/start/status/list/connect/logs/halt/resume/cp/clone,
                      validation failures, image, artifact, quarantine/delete.
                      Defaults to Firecracker on Linux, Apple VF on macOS, and
-                     windows-hyperv on Windows; override with
+                     experimental windows-hyperv on Windows; override with
                      MICROAGENT_E2E_BACKEND=linux-kvm|applevf|windows-hyperv.
   networking-deep    Backend-neutral networking feature contract. Covers modes,
                      publish, cached NATS/rootfs, apply, artifacts,
@@ -196,7 +199,7 @@ Scenarios:
                      exit-status propagation.
   model-serving      Local host model server paired into a workspace over the
                      backend vsock bridge (Firecracker on Linux, Apple VF on
-                     macOS, Hyper-V sockets on Windows).
+                     macOS, experimental Hyper-V sockets on Windows).
   model-mediation    Opt-in Linux host backend matrix for run --model
                      mediation. Set MICROAGENT_E2E_MODEL_MEDIATION=1.
   model-mediation-runner
@@ -262,7 +265,7 @@ Environment:
     for compatibility with older validation commands.
   MICROAGENT_E2E_BACKEND=linux-kvm|applevf|windows-hyperv selects the backend
     lane for backend-agnostic feature scenarios. Windows runs use Git Bash with
-    the windows-hyperv backend (Hyper-V role + HCS services).
+    the experimental windows-hyperv backend (Hyper-V role + HCS services).
   MICROAGENT_E2E_MODEL_MEDIATION=1 opts into the production run --model
     mediation matrix with a stub OpenAI-compatible runner. It does not require
     a GPU or llama.cpp.

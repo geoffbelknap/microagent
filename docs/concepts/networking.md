@@ -4,7 +4,7 @@ description: Choose a network mode and see what each one does under the hood on 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-21_
 
 This is the internals page for workspace networking: read it to choose a
 network mode and to understand what each mode actually does on each backend.
@@ -50,7 +50,7 @@ three backends:
 |---|---|
 | Apple VF | `user`, `nat`, `isolated`, static NAT config, and TCP `--publish` work. `bridged` is implemented but gated by Apple's restricted `com.apple.vm.networking` entitlement, which open-source builds can't self-sign. |
 | Firecracker | `user` runs Firecracker inside a `pasta` user namespace with a namespace-local TAP. `nat` creates a host-side TAP and installs nftables MASQUERADE rules. `bridged` attaches a transient TAP to an existing host Linux bridge. `isolated` and TCP `--publish` work. |
-| Windows Hyper-V | `user` and `nat` use the managed `microagent-nat` HNS NAT network. `isolated` starts without an external network adapter. TCP `--publish` works through Hyper-V socket bridging. `bridged` attaches to the named HNS network or Hyper-V switch. |
+| Windows Hyper-V | Experimental. `user` and `nat` use the managed `microagent-nat` HNS NAT network. `isolated` starts without an external network adapter. TCP `--publish` works through Hyper-V socket bridging. `bridged` attaches to the named HNS network or Hyper-V switch. |
 
 Apple VF NAT is backend-managed by macOS: `user` and `nat` both map to `VZNATNetworkDeviceAttachment`, which runs in user space inside the framework with no privileges required, so microagent does not create a TAP, configure `pf`, or allocate a subnet of its own. By default it asks the kernel to do DHCP via `ip=dhcp`, and guest init writes `/etc/resolv.conf` from the kernel's DHCP nameserver data, so NAT works without an image-local DHCP client. When a spec declares `network.ip`, `network.gateway`, and optional `network.dns`, Apple VF passes those values to guest init for static IPv4 setup. Use the macOS NAT subnet, normally `192.168.64.0/24` with gateway `192.168.64.1`; Virtualization.framework still owns the attachment and does not expose an independently allocated runtime lease.
 
