@@ -2960,6 +2960,97 @@ resources:
 	}
 }
 
+func TestParseWorkspaceOptionsMergesSpecSetupEnvAndSecretFlags(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "microagent.yaml")
+	setupPath := filepath.Join(dir, "flag-setup.sh")
+	if err := os.WriteFile(setupPath, []byte("#!/bin/sh\necho from-file\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := `
+name: from-spec
+image: docker.io/library/busybox:1.36
+setup:
+  - run: echo from-spec
+env:
+  MODE: spec
+  SPEC_ONLY: "1"
+`
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts, err := parseWorkspaceOptions("create", []string{
+		"--file", specPath,
+		"--setup", "echo from-flag",
+		"--setup-file", setupPath,
+		"--env", "MODE=flag",
+		"-e", "FLAG_ONLY=1",
+		"--secret", "API=env:API_TOKEN",
+		"--secrets-env-file", "/tmp/app.env",
+		"--secret-on-demand", "DB=env:DB_TOKEN",
+		"--secrets-audit",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if len(opts.SetupCommands) != 3 || !reflect.DeepEqual(opts.SetupCommands[:2], []string{"echo from-spec", "echo from-flag"}) || !strings.Contains(opts.SetupCommands[2], "echo from-file") {
+		t.Fatalf("SetupCommands = %#v", opts.SetupCommands)
+	}
+	if opts.Env["MODE"] != "flag" || opts.Env["SPEC_ONLY"] != "1" || opts.Env["FLAG_ONLY"] != "1" {
+		t.Fatalf("Env = %#v", opts.Env)
+	}
+	if opts.Secrets["API"] != "env:API_TOKEN" {
+		t.Fatalf("Secrets = %#v", opts.Secrets)
+	}
+	if len(opts.SecretEnvFiles) != 1 || opts.SecretEnvFiles[0] != "/tmp/app.env" {
+		t.Fatalf("SecretEnvFiles = %#v", opts.SecretEnvFiles)
+	}
+	if opts.OnDemandSecrets["DB"] != "env:DB_TOKEN" || !opts.SecretsAudit {
+		t.Fatalf("OnDemandSecrets = %#v SecretsAudit = %t", opts.OnDemandSecrets, opts.SecretsAudit)
+	}
+}
+
+func TestParseWorkspaceOptionsRejectsDuplicateSecretFlags(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{
+		"research",
+		"--secret", "API=env:API_TOKEN",
+		"--secret", "API=env:OTHER_TOKEN",
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicate secret name") {
+		t.Fatalf("err = %v, want duplicate secret validation", err)
+	}
+}
+
+func TestParseWorkspaceOptionsRunAcceptsContainerFlagsAfterImage(t *testing.T) {
+	opts, err := parseWorkspaceOptions("run", []string{
+		"docker.io/library/busybox:1.36",
+		"--env", "GREETING=hello",
+		"--publish", "127.0.0.1:18080:8080/tcp",
+		"printenv",
+		"GREETING",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.ImageRef != "docker.io/library/busybox:1.36" {
+		t.Fatalf("ImageRef = %q", opts.ImageRef)
+	}
+	if opts.Env["GREETING"] != "hello" {
+		t.Fatalf("Env = %#v", opts.Env)
+	}
+	if opts.ExecCommand != "exec 'printenv' 'GREETING'" {
+		t.Fatalf("ExecCommand = %q", opts.ExecCommand)
+	}
+	if len(opts.Network.PortForwards) != 1 {
+		t.Fatalf("PortForwards = %#v", opts.Network.PortForwards)
+	}
+	forward := opts.Network.PortForwards[0]
+	if forward.Host != "127.0.0.1" || forward.HostPort != 18080 || forward.GuestPort != 8080 || forward.Protocol != "tcp" {
+		t.Fatalf("PortForward = %#v", forward)
+	}
+}
+
 func TestParseWorkspaceOptionsFindsDefaultSpecFile(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
