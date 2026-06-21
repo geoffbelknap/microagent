@@ -23,6 +23,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
+	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
@@ -3243,7 +3244,7 @@ func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
 	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := recordImageProvenance(dir, rootfs.Provenance{
+	if err := imagecache.RecordProvenance(dir, rootfs.Provenance{
 		ImageRef:    "docker.io/library/busybox:1.36",
 		ResolvedRef: "docker.io/library/busybox@sha256:abc",
 		Digest:      "sha256:abc",
@@ -3275,9 +3276,9 @@ func TestImagesListAndPruneUseLocalIndex(t *testing.T) {
 	if err := os.Remove(rootfsPath); err != nil {
 		t.Fatal(err)
 	}
-	pruned, err := pruneImageRecords(dir, false)
+	pruned, err := imagecache.Prune(dir, false)
 	if err != nil {
-		t.Fatalf("pruneImageRecords: %v", err)
+		t.Fatalf("imagecache.Prune: %v", err)
 	}
 	if len(pruned.Removed) != 1 || len(pruned.Kept) != 0 {
 		t.Fatalf("pruned = %#v", pruned)
@@ -3294,7 +3295,7 @@ func TestImagesPruneDeleteRemovesReusableBaselines(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
-		if err := upsertImageRecord(dir, imageRecord{
+		if err := imagecache.Upsert(dir, imagecache.Record{
 			ImageRef:    ref,
 			ResolvedRef: "docker.io/library/busybox@sha256:abc",
 			Digest:      "sha256:abc",
@@ -3306,9 +3307,9 @@ func TestImagesPruneDeleteRemovesReusableBaselines(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pruned, err := pruneImageRecords(dir, true)
+	pruned, err := imagecache.Prune(dir, true)
 	if err != nil {
-		t.Fatalf("pruneImageRecords: %v", err)
+		t.Fatalf("imagecache.Prune: %v", err)
 	}
 	if len(pruned.Deleted) != 2 || len(pruned.Kept) != 0 || len(pruned.Removed) != 0 {
 		t.Fatalf("pruned = %#v", pruned)
@@ -3348,7 +3349,7 @@ func TestRunImagePruneDeletesReusableBaselinesWithYes(t *testing.T) {
 	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := upsertImageRecord(dir, imageRecord{
+	if err := imagecache.Upsert(dir, imagecache.Record{
 		ImageRef:    "docker.io/library/busybox:1.36",
 		ResolvedRef: "docker.io/library/busybox@sha256:abc",
 		Digest:      "sha256:abc",
@@ -3392,7 +3393,7 @@ func TestImagesPruneDeleteKeepsWorkspaceRootfs(t *testing.T) {
 	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := upsertImageRecord(dir, imageRecord{
+	if err := imagecache.Upsert(dir, imagecache.Record{
 		ImageRef:    "docker.io/library/busybox:1.36",
 		ResolvedRef: "docker.io/library/busybox@sha256:abc",
 		Digest:      "sha256:abc",
@@ -3403,9 +3404,9 @@ func TestImagesPruneDeleteKeepsWorkspaceRootfs(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	pruned, err := pruneImageRecords(dir, true)
+	pruned, err := imagecache.Prune(dir, true)
 	if err != nil {
-		t.Fatalf("pruneImageRecords: %v", err)
+		t.Fatalf("imagecache.Prune: %v", err)
 	}
 	if len(pruned.Kept) != 1 || len(pruned.Deleted) != 0 || len(pruned.Removed) != 0 {
 		t.Fatalf("pruned = %#v", pruned)
@@ -3424,7 +3425,7 @@ func TestImagesTagCreatesAlias(t *testing.T) {
 	if err := os.WriteFile(rootfsPath, []byte("rootfs"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := upsertImageRecord(dir, imageRecord{
+	if err := imagecache.Upsert(dir, imagecache.Record{
 		ImageRef:    "docker.io/library/busybox:1.36",
 		ResolvedRef: "docker.io/library/busybox@sha256:abc",
 		Digest:      "sha256:abc",
@@ -3435,14 +3436,14 @@ func TestImagesTagCreatesAlias(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tagged, err := tagImageRecord(dir, "sha256:abc", "local/busybox:baseline")
+	tagged, err := imagecache.Tag(dir, "sha256:abc", "local/busybox:baseline")
 	if err != nil {
-		t.Fatalf("tagImageRecord: %v", err)
+		t.Fatalf("imagecache.Tag: %v", err)
 	}
 	if tagged.ImageRef != "local/busybox:baseline" || tagged.OutputPath != rootfsPath {
 		t.Fatalf("tagged = %#v", tagged)
 	}
-	images, err := listImageRecords(dir)
+	images, err := imagecache.List(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3461,7 +3462,7 @@ func TestImagesRemoveAliasKeepsSharedBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
-		if err := upsertImageRecord(dir, imageRecord{
+		if err := imagecache.Upsert(dir, imagecache.Record{
 			ImageRef:    ref,
 			ResolvedRef: "docker.io/library/busybox@sha256:abc",
 			Digest:      "sha256:abc",
@@ -3473,9 +3474,9 @@ func TestImagesRemoveAliasKeepsSharedBaseline(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	removed, err := removeImageRecords(dir, "local/busybox:baseline", true)
+	removed, err := imagecache.Remove(dir, "local/busybox:baseline", true)
 	if err != nil {
-		t.Fatalf("removeImageRecords: %v", err)
+		t.Fatalf("imagecache.Remove: %v", err)
 	}
 	if len(removed.Removed) != 1 || len(removed.Deleted) != 0 || len(removed.Kept) != 1 {
 		t.Fatalf("removed = %#v", removed)
@@ -3495,7 +3496,7 @@ func TestImagesRemoveDigestDeletesUnsharedBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, ref := range []string{"docker.io/library/busybox:1.36", "local/busybox:baseline"} {
-		if err := upsertImageRecord(dir, imageRecord{
+		if err := imagecache.Upsert(dir, imagecache.Record{
 			ImageRef:    ref,
 			ResolvedRef: "docker.io/library/busybox@sha256:abc",
 			Digest:      "sha256:abc",
@@ -3507,9 +3508,9 @@ func TestImagesRemoveDigestDeletesUnsharedBaseline(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	removed, err := removeImageRecords(dir, "sha256:abc", true)
+	removed, err := imagecache.Remove(dir, "sha256:abc", true)
 	if err != nil {
-		t.Fatalf("removeImageRecords: %v", err)
+		t.Fatalf("imagecache.Remove: %v", err)
 	}
 	if len(removed.Deleted) != 2 || len(removed.Removed) != 0 || len(removed.Kept) != 0 {
 		t.Fatalf("removed = %#v", removed)
@@ -5300,7 +5301,7 @@ func TestCreateWorkspaceRootfsUsesPulledBaseline(t *testing.T) {
 	if err := os.WriteFile(baseline, []byte("baseline"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := upsertImageRecord(dir, imageRecord{
+	if err := imagecache.Upsert(dir, imagecache.Record{
 		ImageRef:    "local/busybox:baseline",
 		ResolvedRef: "docker.io/library/busybox@sha256:abc",
 		Digest:      "sha256:abc",
