@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -238,23 +239,58 @@ func newUserNetworkCommand(ctx context.Context, opts Options, req vmkit.Request,
 	if err := os.MkdirAll(filepath.Dir(pidFile), 0o700); err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, pasta, userNetworkArgs(supervisor, pidFile, string(requestJSON))...)
+	cmd := exec.CommandContext(ctx, pasta, userNetworkArgs(supervisor, pidFile, string(requestJSON), !hostHasRoutableIPv6())...)
 	cmd.Env = userNetworkEnv(opts, pidFile, resident)
 	return cmd, nil
 }
 
-func userNetworkArgs(supervisor, pidFile, requestJSON string) []string {
-	return []string{
-		"--config-net",
-		"--quiet",
-		"--pid", pidFile,
+func userNetworkArgs(supervisor, pidFile, requestJSON string, ipv4Only bool) []string {
+	args := []string{"--config-net", "--quiet", "--pid", pidFile}
+	if ipv4Only {
+		// The host has no routable IPv6 (IPv6 disabled, or an IPv4-only network
+		// such as a CI runner). Without this, pasta's --config-net fails with
+		// "No routable interface for IPv6: IPv6 is disabled".
+		args = append(args, "-4")
+	}
+	args = append(args,
 		// "--" stops pasta's option parsing: older passt releases (e.g. the
 		// Ubuntu 24.04 package) permute getopt-style and otherwise try to
 		// parse the supervisor's --request-json flag as their own.
 		"--",
 		supervisor,
 		"--request-json", requestJSON,
+	)
+	return args
+}
+
+// hostHasRoutableIPv6 reports whether any up, non-loopback interface carries a
+// global-unicast IPv6 address (a ULA such as a Tailscale address counts). When
+// none does, pasta's --config-net must be restricted to IPv4.
+func hostHasRoutableIPv6() bool {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return false
 	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && isRoutableIPv6(ipnet.IP) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isRoutableIPv6 reports whether ip is a global-unicast IPv6 address.
+func isRoutableIPv6(ip net.IP) bool {
+	return ip.To4() == nil && ip.IsGlobalUnicast() && !ip.IsLinkLocalUnicast()
 }
 
 func userNetworkEnv(opts Options, pidFile string, resident bool) []string {

@@ -41,7 +41,7 @@ ifeq ($(QUIET),1)
 INSTALL_ARGS += --quiet
 endif
 
-.PHONY: fmt lint test-race test dev dev-build install smoke smoke-contract smoke-rootfs smoke-microagent-e2e smoke-microagent-public-surface smoke-microagent-lifecycle-matrix smoke-microagent-networking smoke-microagent-mediation smoke-microagent-supervise smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
+.PHONY: fmt lint test-race test dev dev-build install smoke smoke-contract smoke-rootfs smoke-microagent-e2e smoke-microagent-public-surface smoke-microagent-lifecycle-matrix smoke-microagent-networking smoke-microagent-mediation smoke-microagent-supervise smoke-firecracker smoke-firecracker-console smoke-firecracker-publish smoke-firecracker-network smoke-firecracker-confined smoke-workspace smoke-applevf-network smoke-applevf-publish smoke-applevf-vsock release-check release-check-live signed-supervisor smoke-boot
 
 fmt:
 	gofmt -w cmd pkg supervisors
@@ -119,6 +119,9 @@ smoke-firecracker-publish:
 
 smoke-firecracker-network:
 	scripts/dev/microagent-e2e.sh networking
+
+smoke-firecracker-confined:
+	scripts/dev/firecracker-confined-smoke.sh
 
 smoke-workspace:
 ifeq ($(UNAME_S),Darwin)
