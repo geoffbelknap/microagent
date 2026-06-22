@@ -14,8 +14,14 @@ let package = Package(
         )
     ],
     targets: [
+        // Thin C shim over libSystem's sandbox_init so the Swift supervisor can
+        // apply a Seatbelt profile without importing the deprecated <sandbox.h>.
+        .target(
+            name: "CMicroagentSandbox"
+        ),
         .executableTarget(
-            name: "microagent-applevf-supervisor"
+            name: "microagent-applevf-supervisor",
+            dependencies: ["CMicroagentSandbox"]
         ),
         .testTarget(
             name: "microagent-applevf-supervisorTests",
