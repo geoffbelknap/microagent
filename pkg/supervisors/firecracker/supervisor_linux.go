@@ -43,6 +43,10 @@ type Options struct {
 	Timeout            time.Duration
 	FirecrackerPath    string
 	ResolveFirecracker func() (string, error)
+	// Confinement selects the VMM-process confinement mode for this backend:
+	// "auto" (default), "off", "jailer", or "rootless". Resolved from
+	// MICROAGENT_CONFINEMENT. Inert until the launch path wires it in.
+	Confinement string
 }
 
 type Supervisor struct {
@@ -213,6 +217,9 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 	}
 	if opts.ResolveFirecracker == nil {
 		opts.ResolveFirecracker = ResolveBinary
+	}
+	if opts.Confinement == "" {
+		opts.Confinement = resolveConfinementKnob()
 	}
 	return opts
 }
