@@ -135,6 +135,10 @@ run_outbound_smoke() {
   local workspace="${mode}-smoke"
   local output="$STATE_DIR/${mode}.json"
   local mode_state="$STATE_DIR/$mode"
+  local unsupported_args=()
+  if [ "$mode" != "user" ]; then
+    unsupported_args=(--unsupported)
+  fi
   "$CLI" create "$workspace" \
   --backend apple-vf \
   --image "$IMAGE" \
@@ -148,6 +152,8 @@ run_outbound_smoke() {
   --memory "${MICROAGENT_APPLEVF_NETWORK_MEMORY_MIB:-512}" \
   --cpus "${MICROAGENT_APPLEVF_NETWORK_CPUS:-2}" \
   --network "$mode" \
+  "${unsupported_args[@]+"${unsupported_args[@]}"}" \
+  --egress off \
   --service-command "sleep 300" >"$STATE_DIR/${mode}-create.json"
   "$CLI" start "$workspace" \
     --state-dir "$mode_state" \
@@ -217,7 +223,9 @@ YAML
   --state-dir "$STATIC_STATE" \
   --mke2fs "$MKE2FS" \
   --guest-init "$GUEST_INIT" \
-  --supervisor "$SUPERVISOR" >"$STATE_DIR/static-nat-create.json"
+  --supervisor "$SUPERVISOR" \
+  --unsupported \
+  --egress off >"$STATE_DIR/static-nat-create.json"
 "$CLI" start "$STATIC_WORKSPACE" \
   --state-dir "$STATIC_STATE" \
   --kernel "$KERNEL" \

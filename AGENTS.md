@@ -27,20 +27,24 @@ This repository owns the VM pieces:
 ## Platform support
 
 - Linux (`linux-kvm` / Firecracker) and macOS (`apple-vf` / Apple
-  Virtualization.framework) are the supported release targets.
+  Virtualization.framework) are the supported release targets. For shared
+  backend-neutral features, strive for parity across these two supported
+  backends by default. If parity is blocked by a real platform capability,
+  entitlement, API behavior, or supervisor boundary, document the blocker and
+  keep the backend-specific difference behind the supervisor boundary.
 - WSL is an intended compatibility lane through the Linux backend when the
   underlying Linux prerequisites are available. Keep it working when changes
   touch Linux host assumptions, and use intermittent WSL parity passes to catch
   drift. Do not create a separate WSL product contract or make WSL a standing
   release gate.
-- Windows Hyper-V (`windows-hyperv`) is experimental. After the current parity
-  cleanup, do not expand Hyper-V parity or make it release-blocking unless the
-  user explicitly scopes that work and there is a named owner for host access,
-  CI signal, docs, and maintenance.
+- Windows Hyper-V (`windows-hyperv`) is experimental. Do not use Hyper-V to set
+  the supported-platform parity bar, and do not expand Hyper-V parity or make
+  it release-blocking unless the user explicitly scopes that work and there is
+  a named owner for host access, CI signal, docs, and maintenance.
 - Keep backend-neutral request/response, AX, MCP, readiness, result, artifact,
-  and verification shapes stable where a backend implements a feature. Do not
-  treat backend-neutral protocol shape as a promise that every backend is a
-  required parity gate.
+  and verification shapes stable where a backend implements a feature. Treat
+  Linux and macOS as the parity targets for supported behavior; do not treat
+  experimental Hyper-V coverage as a required parity gate.
 
 ## Non-goals
 
