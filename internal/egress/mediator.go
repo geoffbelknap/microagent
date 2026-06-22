@@ -45,9 +45,9 @@ const maxTLSRecord = 1<<14 + 5
 // destination, sniff the host, enforce the allowlist, and forward or deny
 // fail-closed. OrigDst and Dial are injectable for tests.
 type Handler struct {
-	// Mode selects enforcement: "mediated" allows + audits every destination
-	// (MITM all TLS, nothing blocked); "strict" (or empty, the safe default)
-	// denies non-allowlisted destinations fail-closed.
+	// Mode selects enforcement: "guarded" (default) denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west on
+	// resolved IP while allowing public internet; "mediated" allows + audits every destination (MITM all TLS, nothing blocked);
+	// "strict" denies non-allowlisted destinations fail-closed; empty normalizes to "guarded".
 	Mode          string
 	Policy        *Policy
 	Passthrough   *Policy
