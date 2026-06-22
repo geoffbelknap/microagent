@@ -234,6 +234,12 @@ type HostSupport struct {
 	// `host setup-networking` can load them.
 	EgressTProxyReady          bool     `json:"egressTProxyReady,omitempty"`
 	EgressTProxyMissingModules []string `json:"egressTProxyMissingModules,omitempty"`
+
+	// ConfinementMode is the host VMM-process confinement posture ("off" until a
+	// backend implements it). ConfinementActive is true only when confinement is
+	// actually enforced for this host's backend.
+	ConfinementMode   string `json:"confinementMode,omitempty"`
+	ConfinementActive bool   `json:"confinementActive,omitempty"`
 }
 
 type KernelSupport struct {

@@ -976,7 +976,8 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 	if !strings.Contains(text, fmt.Sprintf(`"backend": "%s"`, hostBackend())) ||
 		!strings.Contains(text, `"kernel"`) ||
 		!strings.Contains(text, `"consoleAvailable": true`) ||
-		!strings.Contains(text, fmt.Sprintf(`"consoleMode": "%s"`, wantConsoleMode)) {
+		!strings.Contains(text, fmt.Sprintf(`"consoleMode": "%s"`, wantConsoleMode)) ||
+		!strings.Contains(text, `"confinementMode": "off"`) {
 		t.Fatalf("host output = %s", data)
 	}
 }
