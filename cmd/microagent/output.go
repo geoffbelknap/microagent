@@ -279,6 +279,11 @@ func writeDoctorResponse(stdout *os.File, resp vmkit.Response) error {
 			fmt.Fprintf(stdout, " (%s)", resp.Host.ConsoleMode)
 		}
 		fmt.Fprintln(stdout)
+		confinementState := "inactive"
+		if resp.Host.ConfinementActive {
+			confinementState = "active"
+		}
+		fmt.Fprintf(stdout, "Confinement: %s (%s)\n", nonEmpty(resp.Host.ConfinementMode, "off"), confinementState)
 		printNetworkingSection(stdout, resp.Host)
 	}
 	if resp.Kernel != nil {

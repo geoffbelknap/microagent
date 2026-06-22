@@ -367,6 +367,10 @@ func AugmentHostSupport(resp *vmkit.Response, opts Options) {
 	if resp.Host.Architecture == "" {
 		resp.Host.Architecture = opts.Arch
 	}
+	if resp.Host.ConfinementMode == "" {
+		resp.Host.ConfinementMode = "off"
+	}
+	// ConfinementActive stays false until a backend enforces confinement.
 	switch opts.Backend {
 	case vmkit.BackendAppleVF:
 		resp.Host.SupervisorPath = nonEmpty(opts.SupervisorPath, "microagent-applevf-supervisor")
