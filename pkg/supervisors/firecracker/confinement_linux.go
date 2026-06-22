@@ -111,30 +111,32 @@ type jailArtifact struct {
 // Firecracker process sees after pivot_root into the jail root. Staging the
 // artifacts (hard-link/bind-mount) happens elsewhere; this is only the map.
 type jailLayout struct {
-	Root       string
-	Kernel     jailArtifact
-	Rootfs     jailArtifact
-	Disks      []jailArtifact
-	ConfigFile jailArtifact
-	APISocket  jailArtifact
-	VsockUDS   jailArtifact
+	Root        string
+	Kernel      jailArtifact
+	Rootfs      jailArtifact
+	Firecracker jailArtifact
+	Disks       []jailArtifact
+	ConfigFile  jailArtifact
+	APISocket   jailArtifact
+	VsockUDS    jailArtifact
 }
 
 // confinedJailLayout derives the jail layout for a workspace. Pure: it reads
 // only opts (StateDir/Name) and cfg (kernel/rootfs/disk source paths) and
 // computes deterministic jail-relative guest paths. No filesystem effects.
-func confinedJailLayout(opts Options, cfg *vmkit.Config) jailLayout {
+func confinedJailLayout(opts Options, cfg *vmkit.Config, firecrackerPath string) jailLayout {
 	root := filepath.Join(opts.StateDir, opts.Name, "jail")
 	mk := func(id, source, rel string) jailArtifact {
 		return jailArtifact{ID: id, Source: source, Host: filepath.Join(root, rel), Guest: "/" + rel}
 	}
 	l := jailLayout{
-		Root:       root,
-		Kernel:     mk("", cfg.KernelPath, "kernel"),
-		Rootfs:     mk("rootfs", cfg.RootfsPath, "rootfs.ext4"),
-		ConfigFile: mk("", "", "firecracker.json"),
-		APISocket:  mk("", "", "run/firecracker-api.sock"),
-		VsockUDS:   mk("", "", "run/vsock.sock"),
+		Root:        root,
+		Kernel:      mk("", cfg.KernelPath, "kernel"),
+		Rootfs:      mk("rootfs", cfg.RootfsPath, "rootfs.ext4"),
+		Firecracker: mk("", firecrackerPath, "firecracker"),
+		ConfigFile:  mk("", "", "firecracker.json"),
+		APISocket:   mk("", "", "run/firecracker-api.sock"),
+		VsockUDS:    mk("", "", "run/vsock.sock"),
 	}
 	for _, d := range cfg.Disks {
 		l.Disks = append(l.Disks, mk(d.Name, d.Path, "disks/"+d.Name))
@@ -148,12 +150,12 @@ func confinedJailLayout(opts Options, cfg *vmkit.Config) jailLayout {
 // they are created/written in place later. Device nodes are bound inside the
 // launch namespace, not here.
 func stageJailArtifacts(l jailLayout) error {
-	for _, dir := range []string{l.Root, filepath.Dir(l.APISocket.Host), filepath.Dir(l.VsockUDS.Host)} {
+	for _, dir := range []string{l.Root, filepath.Join(l.Root, "dev"), filepath.Dir(l.APISocket.Host), filepath.Dir(l.VsockUDS.Host)} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return fmt.Errorf("jail mkdir %s: %w", dir, err)
 		}
 	}
-	sourced := append([]jailArtifact{l.Kernel, l.Rootfs}, l.Disks...)
+	sourced := append([]jailArtifact{l.Kernel, l.Rootfs, l.Firecracker}, l.Disks...)
 	for _, a := range sourced {
 		if a.Source == "" {
 			continue
@@ -187,4 +189,13 @@ func stageFile(src, dst string) error {
 	}
 	_ = f.Close()
 	return unix.Mount(src, dst, "", unix.MS_BIND, "")
+}
+
+// resolveConfinementMode resolves the effective confinement mode for this host
+// from the (normalized) knob, the effective uid, and whether unprivileged user
+// namespaces are available. It fails closed for an explicitly requested mode
+// the host cannot satisfy.
+func resolveConfinementMode(opts Options) (confinementMode, error) {
+	userNSOK, _ := unprivilegedUserNSEnabled()
+	return selectConfinementMode(normalizeConfinementKnob(opts.Confinement), os.Geteuid(), userNSOK)
 }
