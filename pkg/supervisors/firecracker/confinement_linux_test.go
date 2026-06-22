@@ -1,6 +1,10 @@
 package firecracker
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+)
 
 func TestNormalizeConfinementKnob(t *testing.T) {
 	cases := map[string]string{
@@ -50,5 +54,42 @@ func TestSelectConfinementMode(t *testing.T) {
 				t.Errorf("mode = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestConfinedJailLayout(t *testing.T) {
+	opts := Options{Name: "ws1", StateDir: "/state"}
+	cfg := &vmkit.Config{
+		KernelPath: "/images/vmlinux",
+		RootfsPath: "/state/ws1/rootfs.ext4",
+		Disks:      []vmkit.Disk{{Name: "data", Path: "/vol/data.img"}},
+	}
+	l := confinedJailLayout(opts, cfg)
+
+	if l.Root != "/state/ws1/jail" {
+		t.Fatalf("Root = %q, want /state/ws1/jail", l.Root)
+	}
+	checks := []struct {
+		name string
+		got  jailArtifact
+		want jailArtifact
+	}{
+		{"kernel", l.Kernel, jailArtifact{Source: "/images/vmlinux", Host: "/state/ws1/jail/kernel", Guest: "/kernel"}},
+		{"rootfs", l.Rootfs, jailArtifact{ID: "rootfs", Source: "/state/ws1/rootfs.ext4", Host: "/state/ws1/jail/rootfs.ext4", Guest: "/rootfs.ext4"}},
+		{"config", l.ConfigFile, jailArtifact{Host: "/state/ws1/jail/firecracker.json", Guest: "/firecracker.json"}},
+		{"api", l.APISocket, jailArtifact{Host: "/state/ws1/jail/run/firecracker-api.sock", Guest: "/run/firecracker-api.sock"}},
+		{"vsock", l.VsockUDS, jailArtifact{Host: "/state/ws1/jail/run/vsock.sock", Guest: "/run/vsock.sock"}},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %+v, want %+v", c.name, c.got, c.want)
+		}
+	}
+	if len(l.Disks) != 1 {
+		t.Fatalf("Disks len = %d, want 1", len(l.Disks))
+	}
+	wantDisk := jailArtifact{ID: "data", Source: "/vol/data.img", Host: "/state/ws1/jail/disks/data", Guest: "/disks/data"}
+	if l.Disks[0] != wantDisk {
+		t.Errorf("Disks[0] = %+v, want %+v", l.Disks[0], wantDisk)
 	}
 }

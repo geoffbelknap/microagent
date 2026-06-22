@@ -3,7 +3,10 @@ package firecracker
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // confinementEnv is the operator knob selecting VMM-process confinement for the
@@ -91,4 +94,48 @@ func selectConfinementMode(knob string, euid int, userNSEnabled bool) (confineme
 	default:
 		return confinementOff, fmt.Errorf("unknown confinement mode %q", knob)
 	}
+}
+
+// jailArtifact is one file/socket placed inside a confined workspace's jail.
+type jailArtifact struct {
+	ID     string // identifier (drive id for extra disks; empty otherwise)
+	Source string // original host path to stage from (empty for in-jail-created sockets/config)
+	Host   string // host path of the artifact under the jail root
+	Guest  string // path the jailed Firecracker process sees (absolute, rooted at the jail)
+}
+
+// jailLayout is the pure derivation of where a confined workspace's artifacts
+// live on the host (under the per-VM jail root) and the paths the jailed
+// Firecracker process sees after pivot_root into the jail root. Staging the
+// artifacts (hard-link/bind-mount) happens elsewhere; this is only the map.
+type jailLayout struct {
+	Root       string
+	Kernel     jailArtifact
+	Rootfs     jailArtifact
+	Disks      []jailArtifact
+	ConfigFile jailArtifact
+	APISocket  jailArtifact
+	VsockUDS   jailArtifact
+}
+
+// confinedJailLayout derives the jail layout for a workspace. Pure: it reads
+// only opts (StateDir/Name) and cfg (kernel/rootfs/disk source paths) and
+// computes deterministic jail-relative guest paths. No filesystem effects.
+func confinedJailLayout(opts Options, cfg *vmkit.Config) jailLayout {
+	root := filepath.Join(opts.StateDir, opts.Name, "jail")
+	mk := func(id, source, rel string) jailArtifact {
+		return jailArtifact{ID: id, Source: source, Host: filepath.Join(root, rel), Guest: "/" + rel}
+	}
+	l := jailLayout{
+		Root:       root,
+		Kernel:     mk("", cfg.KernelPath, "kernel"),
+		Rootfs:     mk("rootfs", cfg.RootfsPath, "rootfs.ext4"),
+		ConfigFile: mk("", "", "firecracker.json"),
+		APISocket:  mk("", "", "run/firecracker-api.sock"),
+		VsockUDS:   mk("", "", "run/vsock.sock"),
+	}
+	for _, d := range cfg.Disks {
+		l.Disks = append(l.Disks, mk(d.Name, d.Path, "disks/"+d.Name))
+	}
+	return l
 }
