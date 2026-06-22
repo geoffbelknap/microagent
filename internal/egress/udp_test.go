@@ -665,3 +665,176 @@ func mustPolicy(t *testing.T) *Policy {
 	}
 	return p
 }
+
+// TestGuardedUDP verifies the guarded-mode inside-deny path in handleUDPDatagram:
+//
+//   - guarded drops UDP to 169.254.169.254:123 → egress_udp_internal_deny, NO upstream DialUDP
+//   - guarded allows UDP to a public IP (203.0.113.9:123) → DialUDP called, egress_udp_allow
+//   - guarded + allowlisted internal (169.254.169.254 on the allowlist) → DialUDP called
+//   - mediated + internal (169.254.169.254) → DialUDP called (escape hatch intact)
+//   - DNS datagrams (port 53) to an inside address pass through without triggering inside-deny
+func TestGuardedUDP(t *testing.T) {
+	imds := netip.MustParseAddrPort("169.254.169.254:123")
+	public := netip.MustParseAddrPort("203.0.113.9:123")
+	guestSrc := netip.MustParseAddrPort("10.0.0.5:55000")
+
+	t.Run("guarded drops inside addr no dial", func(t *testing.T) {
+		dialed := false
+		pol, _ := NewPolicy(nil)
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:   egressModeGuarded,
+			Policy: pol,
+			Logger: log,
+			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+				dialed = true
+				return nil, nil
+			},
+			ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
+		}
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		p.handleUDPDatagram(guestSrc, imds, []byte("ping"))
+
+		if dialed {
+			t.Fatal("DialUDP called for inside addr under guarded (must fail closed)")
+		}
+		if p.flowCount() != 0 {
+			t.Fatalf("guarded inside deny created a flow (count=%d), must be dropped", p.flowCount())
+		}
+		assertEvent(t, log, "egress_udp_internal_deny")
+	})
+
+	t.Run("guarded allows public addr", func(t *testing.T) {
+		dialed := false
+		pol, _ := NewPolicy(nil)
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:   egressModeGuarded,
+			Policy: pol,
+			Logger: log,
+			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+				dialed = true
+				return newFakeUDPConn(nil), nil
+			},
+			ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
+		}
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		p.handleUDPDatagram(guestSrc, public, []byte("ping"))
+
+		if !dialed {
+			t.Fatal("DialUDP not called for public addr under guarded (must be allowed)")
+		}
+		assertEvent(t, log, "egress_udp_allow")
+	})
+
+	t.Run("guarded allowlisted inside overrides deny", func(t *testing.T) {
+		dialed := false
+		pol, _ := NewPolicy([]string{"169.254.169.254"})
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:   egressModeGuarded,
+			Policy: pol,
+			Logger: log,
+			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+				dialed = true
+				return newFakeUDPConn(nil), nil
+			},
+			ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
+		}
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		p.handleUDPDatagram(guestSrc, imds, []byte("ping"))
+
+		if !dialed {
+			t.Fatal("DialUDP not called for allowlisted inside addr under guarded (allowlist must override)")
+		}
+		assertEvent(t, log, "egress_udp_allow")
+	})
+
+	t.Run("mediated allows inside addr", func(t *testing.T) {
+		dialed := false
+		pol, _ := NewPolicy(nil)
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:   egressModeMediated,
+			Policy: pol,
+			Logger: log,
+			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+				dialed = true
+				return newFakeUDPConn(nil), nil
+			},
+			ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
+		}
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		p.handleUDPDatagram(guestSrc, imds, []byte("ping"))
+
+		if !dialed {
+			t.Fatal("DialUDP not called for inside addr under mediated (escape hatch must work)")
+		}
+		assertEvent(t, log, "egress_udp_allow")
+	})
+
+	t.Run("guarded DNS port 53 to inside addr not blocked by inside-deny", func(t *testing.T) {
+		// DNS (port 53) datagrams branch to the DNS handler before the inside-deny
+		// check — Task 5 will handle DNS under guarded; Task 4 must not touch that path.
+		// We use a valid DNS query (buildQuery) because handleDNS parses the payload;
+		// arbitrary bytes fail the parse and serveDNS drops without calling dnsForward,
+		// making it impossible to confirm the DNS branch was taken.
+		insideDNS := netip.MustParseAddrPort("169.254.169.254:53")
+		dialedUDP := false
+		// A policy that allows the query name so handleDNS forwards it (and calls dnsForward).
+		pol, _ := NewPolicy([]string{"example.com"})
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:      egressModeGuarded,
+			Policy:    pol,
+			Logger:    log,
+			NameCache: NewNameCache(),
+			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
+				dialedUDP = true
+				return nil, nil
+			},
+			ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
+		}
+		p := newUDPProxy(h)
+		defer p.closeAll()
+
+		// Inject a dnsForward that signals it was reached.
+		dnsHandled := make(chan struct{}, 1)
+		p.dnsForward = func(_ netip.AddrPort, _ []byte) ([]byte, error) {
+			select {
+			case dnsHandled <- struct{}{}:
+			default:
+			}
+			return nil, nil // drop the response; we only need to confirm the path
+		}
+
+		query := buildQuery(t, 0x1001, "example.com.", dnsmessage.TypeA)
+		p.handleUDPDatagram(guestSrc, insideDNS, query)
+
+		// Wait for the async DNS goroutine to complete.
+		select {
+		case <-dnsHandled:
+		case <-time.After(time.Second):
+			t.Fatal("dnsForward not called: DNS path was not taken for port-53 datagram to inside addr")
+		}
+
+		// The DNS path must be taken and DialUDP must NOT be called (DNS is one-shot).
+		if dialedUDP {
+			t.Fatal("DialUDP called for a DNS (port-53) datagram (must be one-shot, no flow)")
+		}
+		// egress_udp_internal_deny must NOT be logged — the DNS path exits before the inside-deny.
+		for _, e := range log.Events {
+			if e["event"] == "egress_udp_internal_deny" {
+				t.Fatalf("egress_udp_internal_deny logged for a DNS datagram (inside-deny must not apply on DNS path)")
+			}
+		}
+	})
+}
