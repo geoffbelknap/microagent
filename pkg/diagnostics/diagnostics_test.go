@@ -361,6 +361,49 @@ func TestAugmentHostSupportPreservesWindowsHyperVConsoleSupport(t *testing.T) {
 	}
 }
 
+func TestCheckFirecrackerReportsConfinementDefaults(t *testing.T) {
+	opts := Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"}
+	resp, err := CheckFirecracker(
+		opts,
+		FirecrackerProbe{
+			ResolveBinary:     func() (string, error) { return "/usr/local/bin/firecracker", nil },
+			ResolveSupervisor: func(Options) (string, error) { return "/usr/local/bin/microagent-firecracker-supervisor", nil },
+			ResolveGuestInit:  func(Options) (string, error) { return "/usr/local/libexec/microagent-guestinit-amd64", nil },
+			Stat: func(path string) (os.FileInfo, error) {
+				switch path {
+				case "/dev/kvm", "/dev/vhost-vsock", "/dev/net/tun":
+					return fakeFileInfo{name: filepath.Base(path)}, nil
+				default:
+					return nil, os.ErrNotExist
+				}
+			},
+			BinaryVersion: func(string) string { return "Firecracker v1.15.1" },
+			LookPath: func(name string) (string, error) {
+				if name == "pasta" {
+					return "/usr/bin/pasta", nil
+				}
+				return "", os.ErrNotExist
+			},
+			ReadFile:            func(path string) ([]byte, error) { return []byte("1\n"), nil },
+			ProbeUserNamespaces: func() error { return nil },
+		},
+	)
+	if err != nil {
+		t.Fatalf("CheckFirecracker: %v", err)
+	}
+	// AugmentHostSupport is the defaulting funnel; Check calls it after CheckFirecracker.
+	AugmentHostSupport(&resp, opts)
+	if resp.Host == nil {
+		t.Fatal("resp.Host is nil")
+	}
+	if resp.Host.ConfinementMode != "off" {
+		t.Errorf("ConfinementMode = %q, want \"off\"", resp.Host.ConfinementMode)
+	}
+	if resp.Host.ConfinementActive {
+		t.Error("ConfinementActive = true, want false (no enforcement implemented)")
+	}
+}
+
 func TestCheckFirecrackerGathersNetworkingFacts(t *testing.T) {
 	probe := FirecrackerProbe{
 		ResolveBinary:     func() (string, error) { return "/fc", nil },
