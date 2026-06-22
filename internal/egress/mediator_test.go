@@ -623,6 +623,228 @@ func assertEventFieldAbsent(t *testing.T, log *BufferLogger, event string, field
 	}
 }
 
+// TestGuardedTCP verifies the guarded-mode inside-deny path in Handle:
+//
+//   - guarded denies IMDS (169.254.169.254) → egress_internal_deny, no upstream dial
+//   - guarded denies RFC1918 (10.0.0.5) → egress_internal_deny, no upstream dial
+//   - guarded denies CGNAT (100.64.0.1) → egress_internal_deny, no upstream dial
+//   - guarded ALLOWS a public addr (93.184.216.34) → dial proceeds, no deny
+//   - guarded + allowlisted internal (10.0.0.5 on the allowlist) → allowed
+//   - mediated + internal (10.0.0.5) → allowed (escape hatch intact)
+func TestGuardedTCP(t *testing.T) {
+	t.Run("guarded denies IMDS no dial", func(t *testing.T) {
+		dialed := false
+		pol, _ := NewPolicy(nil)
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:         "guarded",
+			Policy:       pol,
+			Logger:       log,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("169.254.169.254:80"), nil },
+			Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
+			SniffTimeout: 300 * time.Millisecond,
+		}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go client.Write([]byte("GET / HTTP/1.1\r\nHost: 169.254.169.254\r\n\r\n"))
+		<-done
+		client.Close()
+		if dialed {
+			t.Fatal("upstream dialed for IMDS under guarded (must fail closed)")
+		}
+		assertEvent(t, log, "egress_internal_deny")
+	})
+
+	t.Run("guarded denies RFC1918 no dial", func(t *testing.T) {
+		dialed := false
+		pol, _ := NewPolicy(nil)
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:         "guarded",
+			Policy:       pol,
+			Logger:       log,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.0.0.5:443"), nil },
+			Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
+			SniffTimeout: 300 * time.Millisecond,
+		}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go client.Write([]byte("GET / HTTP/1.1\r\nHost: internal.example\r\n\r\n"))
+		<-done
+		client.Close()
+		if dialed {
+			t.Fatal("upstream dialed for RFC1918 under guarded (must fail closed)")
+		}
+		assertEvent(t, log, "egress_internal_deny")
+	})
+
+	t.Run("guarded denies CGNAT no dial", func(t *testing.T) {
+		dialed := false
+		pol, _ := NewPolicy(nil)
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:         "guarded",
+			Policy:       pol,
+			Logger:       log,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("100.64.0.1:443"), nil },
+			Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
+			SniffTimeout: 300 * time.Millisecond,
+		}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go client.Write([]byte("RAWPING\n"))
+		<-done
+		client.Close()
+		if dialed {
+			t.Fatal("upstream dialed for CGNAT under guarded (must fail closed)")
+		}
+		assertEvent(t, log, "egress_internal_deny")
+	})
+
+	t.Run("guarded allows public address", func(t *testing.T) {
+		up, _ := net.Listen("tcp", "127.0.0.1:0")
+		defer up.Close()
+		go func() {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			io.Copy(c, c) // echo
+			c.Close()
+		}()
+		upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+		pol, _ := NewPolicy([]string{"93.184.216.34"})
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:   "guarded",
+			Policy: pol,
+			Logger: log,
+			// OrigDst returns a public address (93.184.216.34) but we Dial
+			// the local echo server so the test does not need outbound internet.
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("93.184.216.34:80"), nil },
+			Dial:         func(network, addr string) (net.Conn, error) { return net.Dial(network, upAddr.String()) },
+			SniffTimeout: 300 * time.Millisecond,
+		}
+
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go func() {
+			client.Write([]byte("GET / HTTP/1.1\r\nHost: 93.184.216.34\r\n\r\n"))
+		}()
+		br := bufio.NewReader(client)
+		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+		line, err := br.ReadString('\n')
+		if err != nil || line != "GET / HTTP/1.1\r\n" {
+			t.Fatalf("echo = %q err=%v (public address must be forwarded in guarded mode)", line, err)
+		}
+		client.Close()
+		<-done
+		// Must be allowed, not denied.
+		for _, e := range log.Events {
+			if e["event"] == "egress_internal_deny" || e["event"] == "egress_deny" {
+				t.Fatalf("public address denied in guarded mode: %+v", e)
+			}
+		}
+		assertEvent(t, log, "egress_allow")
+	})
+
+	t.Run("guarded allows allowlisted internal address", func(t *testing.T) {
+		up, _ := net.Listen("tcp", "127.0.0.1:0")
+		defer up.Close()
+		go func() {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			io.Copy(c, c)
+			c.Close()
+		}()
+		upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+		// 10.0.0.5 is explicitly allowlisted — guarded must honor the exception.
+		pol, _ := NewPolicy([]string{"10.0.0.5"})
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:         "guarded",
+			Policy:       pol,
+			Logger:       log,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.0.0.5:80"), nil },
+			Dial:         func(network, addr string) (net.Conn, error) { return net.Dial(network, upAddr.String()) },
+			SniffTimeout: 300 * time.Millisecond,
+		}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go func() {
+			client.Write([]byte("GET / HTTP/1.1\r\nHost: 10.0.0.5\r\n\r\n"))
+		}()
+		br := bufio.NewReader(client)
+		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+		line, err := br.ReadString('\n')
+		if err != nil || line != "GET / HTTP/1.1\r\n" {
+			t.Fatalf("echo = %q err=%v (allowlisted internal must be forwarded in guarded mode)", line, err)
+		}
+		client.Close()
+		<-done
+		for _, e := range log.Events {
+			if e["event"] == "egress_internal_deny" || e["event"] == "egress_deny" {
+				t.Fatalf("allowlisted internal address denied in guarded mode: %+v", e)
+			}
+		}
+		assertEvent(t, log, "egress_allow")
+	})
+
+	t.Run("mediated allows internal address", func(t *testing.T) {
+		up, _ := net.Listen("tcp", "127.0.0.1:0")
+		defer up.Close()
+		go func() {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			io.Copy(c, c)
+			c.Close()
+		}()
+		upAddr := netip.MustParseAddrPort(up.Addr().String())
+
+		pol, _ := NewPolicy(nil)
+		log := &BufferLogger{}
+		h := &Handler{
+			Mode:         "mediated",
+			Policy:       pol,
+			Logger:       log,
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.0.0.5:80"), nil },
+			Dial:         func(network, addr string) (net.Conn, error) { return net.Dial(network, upAddr.String()) },
+			SniffTimeout: 300 * time.Millisecond,
+		}
+		client, server := net.Pipe()
+		done := make(chan struct{})
+		go func() { h.Handle(server); close(done) }()
+		go func() {
+			client.Write([]byte("GET / HTTP/1.1\r\nHost: 10.0.0.5\r\n\r\n"))
+		}()
+		br := bufio.NewReader(client)
+		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+		line, err := br.ReadString('\n')
+		if err != nil || line != "GET / HTTP/1.1\r\n" {
+			t.Fatalf("echo = %q err=%v (internal address must be forwarded in mediated mode)", line, err)
+		}
+		client.Close()
+		<-done
+		for _, e := range log.Events {
+			if e["event"] == "egress_internal_deny" || e["event"] == "egress_deny" {
+				t.Fatalf("internal address denied in mediated mode (escape hatch broken): %+v", e)
+			}
+		}
+		assertEvent(t, log, "egress_allow")
+	})
+}
+
 func TestIsInsideAddr(t *testing.T) {
 	inside := []string{
 		"169.254.169.254", "::ffff:169.254.169.254", // IMDS + IPv4-mapped IMDS
