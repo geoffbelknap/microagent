@@ -103,6 +103,7 @@ func TestEgressPolicyValidateForNetworkMode(t *testing.T) {
 		{"guarded", "bridged", true},
 		{"guarded", "isolated", false},
 		{"guarded", "user", false},
+		{"guarded", "", false},
 		{"mediated", "bridged", true},
 		{"mediated", "isolated", false},
 		{"mediated", "user", false},
