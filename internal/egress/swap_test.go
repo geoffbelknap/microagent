@@ -222,7 +222,7 @@ func TestInjectRequests_POSTWithBodyForwardsBodyIntact(t *testing.T) {
 	<-done
 
 	// The real secret must never leak into the audit log.
-	for _, ev := range log.Events {
+	for _, ev := range log.Snapshot() {
 		for k, v := range ev {
 			if s, ok := v.(string); ok && (s == "REALSECRET" || s == "Bearer REALSECRET") {
 				t.Fatalf("secret leaked into audit field %q=%q", k, s)
@@ -282,7 +282,7 @@ func TestInjectRequests_RewritesAuthHeader(t *testing.T) {
 
 	// Audit must record host/swap/type but never the secret or header value.
 	foundSwap := false
-	for _, ev := range log.Events {
+	for _, ev := range log.Snapshot() {
 		if ev["event"] == "egress_swap" {
 			foundSwap = true
 			if ev["host"] != "api.example.com" || ev["swap"] != "example" || ev["type"] != "static" {

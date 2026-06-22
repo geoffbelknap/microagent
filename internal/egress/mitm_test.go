@@ -276,7 +276,7 @@ func TestMITMSwapInjectsCredential(t *testing.T) {
 
 	assertEvent(t, log, "egress_swap")
 	// No audit field may carry the secret or the rendered value.
-	for _, ev := range log.Events {
+	for _, ev := range log.Snapshot() {
 		for k, v := range ev {
 			if s, ok := v.(string); ok && (s == "REALSECRET" || s == "Bearer REALSECRET" || s == "Bearer PLACEHOLDER") {
 				t.Fatalf("credential leaked into audit field %q=%q", k, s)
@@ -409,7 +409,7 @@ func TestHandlerSplicesPeerTLSWithoutMITM(t *testing.T) {
 	assertEventWithField(t, log, "egress_allow", "mitm", false)
 	assertEventWithField(t, log, "egress_allow", "peer", "builder")
 	// (c) MITM was never attempted: no upstream-verification error.
-	for _, e := range log.Events {
+	for _, e := range log.Snapshot() {
 		if e["event"] == "egress_mitm_upstream_error" || e["event"] == "egress_mitm_handshake_error" {
 			t.Fatalf("peer TLS unexpectedly took the MITM path: %+v", e)
 		}
@@ -599,12 +599,13 @@ func TestPeerAuditFieldsPresent(t *testing.T) {
 // event name AND has the expected field value.
 func assertEventWithField(t *testing.T, log *BufferLogger, event string, field string, value any) {
 	t.Helper()
-	for _, e := range log.Events {
+	snap := log.Snapshot()
+	for _, e := range snap {
 		if e["event"] == event && e[field] == value {
 			return
 		}
 	}
-	t.Fatalf("event %q with %s=%v not logged; got %+v", event, field, value, log.Events)
+	t.Fatalf("event %q with %s=%v not logged; got %+v", event, field, value, snap)
 }
 
 // TestMITMPassthroughSkipsMITM verifies that a host in the Passthrough policy

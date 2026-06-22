@@ -21,7 +21,7 @@ type EgressCaps struct {
 // 18: enforcement is external and inviolable; the governance hierarchy is
 // inviolable from below).
 type EgressPolicy struct {
-	Mode           string   // "mediated" | "strict" | "off"
+	Mode           string   // "guarded" | "mediated" | "strict" | "off"
 	Allow          []string // allowlisted egress destination hosts
 	Passthrough    []string // hosts to L4-splice (no MITM)
 	SwapConfigPath string   // path to the operator credential-swap config; may be empty
@@ -30,7 +30,7 @@ type EgressPolicy struct {
 }
 
 // NormalizeEgressPolicy returns a copy with Mode resolved via NormalizeEgressMode
-// (empty/unknown -> "mediated", the secure default) and Allow/Passthrough/DNS each
+// (empty/unknown -> "guarded", the secure default) and Allow/Passthrough/DNS each
 // trimmed of surrounding whitespace, empty entries dropped, duplicates removed,
 // original order preserved.
 func NormalizeEgressPolicy(p EgressPolicy) EgressPolicy {
@@ -58,9 +58,9 @@ func cleanList(in []string) []string {
 }
 
 // ValidateForNetworkMode rejects a policy that claims mediation on a network mode
-// that cannot mediate. Mediation on (mediated/strict) requires a mediating network
-// mode (user/nat/named) unless the workspace is isolated (no egress at all). Off
-// egress, isolated, and mediating modes all pass.
+// that cannot mediate. Mediation on (guarded/mediated/strict) requires a mediating
+// network mode (user/nat/named) unless the workspace is isolated (no egress at all).
+// Off egress, isolated, and mediating modes all pass.
 func (p EgressPolicy) ValidateForNetworkMode(networkMode string) error {
 	// Lowercase the isolated check to match NetworkModeMediates' case handling, so
 	// the fail-closed guard stays correct even if upstream mode validation is relaxed.
@@ -72,16 +72,16 @@ func (p EgressPolicy) ValidateForNetworkMode(networkMode string) error {
 }
 
 // Validate reports a policy that cannot be enforced. It returns an error when:
-//   - Mode is not one of mediated/strict/off (call NormalizeEgressPolicy first)
+//   - Mode is not one of guarded/mediated/strict/off (call NormalizeEgressPolicy first)
 //   - any Caps field is negative
 //
 // Allow/Passthrough/DNS are assumed already cleaned by NormalizeEgressPolicy.
 func (p EgressPolicy) Validate() error {
 	switch p.Mode {
-	case EgressModeMediated, EgressModeStrict, EgressModeOff:
+	case EgressModeGuarded, EgressModeMediated, EgressModeStrict, EgressModeOff:
 		// valid
 	default:
-		return fmt.Errorf("vmkit: invalid egress mode %q: must be one of mediated, strict, off", p.Mode)
+		return fmt.Errorf("vmkit: invalid egress mode %q: must be one of guarded, mediated, strict, off", p.Mode)
 	}
 	if p.Caps.MaxBytesPerSec < 0 {
 		return fmt.Errorf("vmkit: Caps.MaxBytesPerSec must be non-negative, got %d", p.Caps.MaxBytesPerSec)

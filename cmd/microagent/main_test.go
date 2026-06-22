@@ -7901,7 +7901,7 @@ func TestWriteDoctorResponseTextAppleVFNetworkingDoesNotSuggestLinuxSetup(t *tes
 
 func TestParseEgressMode(t *testing.T) {
 	cases := map[string]string{
-		"": "mediated", "mediated": "mediated",
+		"": "guarded", "guarded": "guarded", "mediated": "mediated",
 		"strict": "strict", "STRICT": "strict",
 		"off": "off", "open": "off", "disabled": "off",
 	}
@@ -8000,7 +8000,7 @@ func TestEgressPolicyFileRejectedWhenOff(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for --egress-policy with --egress off")
 	}
-	if !strings.Contains(err.Error(), "mediated or strict") {
+	if !strings.Contains(err.Error(), "mediated") || !strings.Contains(err.Error(), "strict") {
 		t.Fatalf("error %q should explain mediated/strict requirement", err)
 	}
 }
@@ -8040,5 +8040,81 @@ func TestEgressPolicyFileUnionWithManifest(t *testing.T) {
 	}
 	if !got["flag.example.com"] || !got["file.example.com"] {
 		t.Fatalf("CLI union missing entries: %v", opts.EgressAllow)
+	}
+}
+
+func TestParseEgressModeDefaults(t *testing.T) {
+	for in, want := range map[string]string{"": "guarded", "guarded": "guarded", "mediated": "mediated", "strict": "strict"} {
+		got, err := parseEgressMode(in)
+		if err != nil || got != want {
+			t.Errorf("parseEgressMode(%q)=%q,%v want %q", in, got, err, want)
+		}
+	}
+	if _, err := parseEgressMode("nonsense"); err == nil {
+		t.Error("expected error for unknown egress mode")
+	}
+}
+
+func TestRunRmForcesDiscard(t *testing.T) {
+	// run --rm must set opts.Keep = false (--rm is the explicit discard; currently
+	// it is a no-op that never touches opts.Keep, so this test should FAIL until
+	// the wiring is added).
+	opts, err := parseWorkspaceOptions("run", []string{
+		"--image", "docker.io/library/alpine:3.20",
+		"--rm",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions run --rm: %v", err)
+	}
+	if opts.Keep {
+		t.Error("run --rm: opts.Keep = true, want false (--rm must force discard)")
+	}
+}
+
+func TestRunKeepSetsKeep(t *testing.T) {
+	// run --keep must retain the workspace (opts.Keep = true).
+	opts, err := parseWorkspaceOptions("run", []string{
+		"--image", "docker.io/library/alpine:3.20",
+		"--keep",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions run --keep: %v", err)
+	}
+	if !opts.Keep {
+		t.Error("run --keep: opts.Keep = false, want true")
+	}
+}
+
+func TestRunRmAndKeepErrors(t *testing.T) {
+	// run --rm --keep must be rejected as a mutual exclusion error.
+	_, err := parseWorkspaceOptions("run", []string{
+		"--image", "docker.io/library/alpine:3.20",
+		"--rm",
+		"--keep",
+	})
+	if err == nil {
+		t.Error("run --rm --keep: expected error, got nil")
+	}
+}
+
+func TestCreateRmErrors(t *testing.T) {
+	// --rm is run-only; create --rm must be rejected.
+	_, err := parseWorkspaceOptions("create", []string{
+		"--image", "docker.io/library/alpine:3.20",
+		"--rm",
+	})
+	if err == nil {
+		t.Error("create --rm: expected error (run-only flag), got nil")
+	}
+}
+
+func TestStartRmErrors(t *testing.T) {
+	// --rm is run-only; start --rm must be rejected.
+	_, err := parseWorkspaceOptions("start", []string{
+		"--name", "test-ws",
+		"--rm",
+	})
+	if err == nil {
+		t.Error("start --rm: expected error (run-only flag), got nil")
 	}
 }

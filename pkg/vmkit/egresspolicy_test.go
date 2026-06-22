@@ -10,11 +10,12 @@ func TestNormalizeEgressPolicyModeDefaults(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"", "mediated"},
+		{"", "guarded"},
+		{"guarded", "guarded"},
 		{"  MEDIATED ", "mediated"},
 		{"strict", "strict"},
 		{"off", "off"},
-		{"bogus", "mediated"},
+		{"bogus", "guarded"},
 	}
 	for _, tc := range cases {
 		p := NormalizeEgressPolicy(EgressPolicy{Mode: tc.in})
@@ -99,6 +100,10 @@ func TestEgressPolicyValidateForNetworkMode(t *testing.T) {
 		networkMode string
 		wantErr     bool
 	}{
+		{"guarded", "bridged", true},
+		{"guarded", "isolated", false},
+		{"guarded", "user", false},
+		{"guarded", "", false},
 		{"mediated", "bridged", true},
 		{"mediated", "isolated", false},
 		{"mediated", "user", false},

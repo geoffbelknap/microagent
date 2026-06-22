@@ -238,17 +238,32 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 	}
 
 	d := p.h.Policy.AllowHost(host)
-	mediated := p.h.Mode == "mediated"
-	allowed := d.Allow || mediated
-	unlisted := allowed && !d.Allow // permitted only by mediated mode
+	// inside is true when guarded mode classifies the resolved destination IP as
+	// an inside/infrastructure address. An explicitly allowlisted host overrides
+	// the inside-deny (d.Allow wins), mirroring the TCP path in Handle. mediated
+	// mode disables inside enforcement entirely (escape hatch intact). The check
+	// runs on the raw destination IP so SNI/hostname spoofing cannot bypass it.
+	inside := p.h.Mode == egressModeGuarded && isInsideAddr(origDst.Addr())
+	// In mediated mode every destination is allowed; strict (or empty) keeps
+	// the default-deny allowlist; guarded keeps the allowlist AND additionally
+	// denies non-allowlisted inside destinations fail-closed.
+	allowed := d.Allow || p.h.Mode == egressModeMediated || (p.h.Mode == egressModeGuarded && !inside)
+	unlisted := allowed && !d.Allow // not explicitly on the allowlist (mediated or guarded-public grant)
 
 	dst := origDst.String()
 	if !allowed {
 		// fail-closed: no upstream socket, drop the datagram.
-		p.h.Logger.Log("egress_udp_deny", map[string]any{
-			"host":   host,
-			"dst":    dst,
-			"reason": d.Reason,
+		event := "egress_udp_deny"
+		reason := d.Reason
+		if inside {
+			event = "egress_udp_internal_deny"
+			reason = "guarded: internal destination denied"
+		}
+		p.h.Logger.Log(event, map[string]any{
+			"host":     host,
+			"dst":      dst,
+			"reason":   reason,
+			"internal": inside,
 		})
 		return
 	}

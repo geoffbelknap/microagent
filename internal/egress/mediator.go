@@ -45,9 +45,9 @@ const maxTLSRecord = 1<<14 + 5
 // destination, sniff the host, enforce the allowlist, and forward or deny
 // fail-closed. OrigDst and Dial are injectable for tests.
 type Handler struct {
-	// Mode selects enforcement: "mediated" allows + audits every destination
-	// (MITM all TLS, nothing blocked); "strict" (or empty, the safe default)
-	// denies non-allowlisted destinations fail-closed.
+	// Mode selects enforcement: "guarded" (default) denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west on
+	// resolved IP while allowing public internet; "mediated" allows + audits every destination (MITM all TLS, nothing blocked);
+	// "strict" denies non-allowlisted destinations fail-closed; empty normalizes to "guarded".
 	Mode          string
 	Policy        *Policy
 	Passthrough   *Policy
@@ -284,6 +284,27 @@ func isEastWestAddr(a netip.Addr) bool {
 	return a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLoopback()
 }
 
+// Egress mode constants for the Handler.Mode field. These mirror the vmkit
+// constants without introducing a package dependency; they must stay in sync.
+const (
+	egressModeGuarded  = "guarded"
+	egressModeMediated = "mediated"
+)
+
+var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
+// isInsideAddr reports whether a is "the inside" — infrastructure the guest
+// must not reach under guarded mode. Matched on the resolved IP after Unmap so
+// IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) cannot bypass it.
+func isInsideAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	return a.IsLoopback() ||
+		a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
+		a.IsPrivate() || // RFC1918 + IPv6 ULA fc00::/7
+		a.IsUnspecified() ||
+		cgnatPrefix.Contains(a)
+}
+
 // Handle services one captured connection. It always closes conn.
 func (h *Handler) Handle(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
@@ -392,19 +413,37 @@ func (h *Handler) Handle(conn net.Conn) {
 		}
 	}
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(host).Allow
+	// inside is true when guarded mode classifies the resolved destination IP
+	// as an inside/infrastructure address (link-local, RFC1918, CGNAT, loopback,
+	// etc.). An explicitly allowlisted host or a passthrough host overrides the
+	// inside-deny, so an operator who allowlists an internal IP/name keeps
+	// reaching it. mediated mode disables inside enforcement entirely (escape
+	// hatch intact). The check runs on the raw destination IP, not the sniffed
+	// host, so SNI/Host spoofing cannot bypass it.
+	inside := h.Mode == egressModeGuarded && isInsideAddr(dst.Addr())
 	// In mediated mode every destination is allowed (and audited); strict (or
-	// empty) keeps the default-deny allowlist. allowed defaults to d.Allow when
-	// Mode is unset, so an unspecified mode is safe.
-	allowed := d.Allow || h.Mode == "mediated"
+	// empty) keeps the default-deny allowlist; guarded keeps the allowlist AND
+	// additionally denies non-allowlisted inside destinations fail-closed.
+	// allowed defaults to d.Allow when Mode is unset, so an unspecified mode is
+	// safe. The inside-deny is expressed as: guarded blocks the inside UNLESS
+	// explicitly allowlisted — i.e. the inside flag narrows guarded beyond the
+	// allowlist but the allowlist still wins.
+	allowed := d.Allow || h.Mode == egressModeMediated || (h.Mode == egressModeGuarded && !inside)
 	// unlisted marks a destination permitted only because of mediated mode (it
 	// is not on the allowlist) so the audit trail records the looser grant. A
 	// passthrough host is explicitly listed — and strict would allow it too — so
 	// it is never "unlisted".
 	unlisted := allowed && !d.Allow && !passthrough
 	if !allowed && !passthrough {
+		event := "egress_deny"
 		denyFields := map[string]any{"host": host, "dst": dst.String(), "reason": d.Reason}
 		addPeerFields(denyFields, peer, peerIP)
-		h.Logger.Log("egress_deny", denyFields)
+		if inside {
+			event = "egress_internal_deny"
+			denyFields["reason"] = "guarded: internal destination denied"
+			denyFields["internal"] = true
+		}
+		h.Logger.Log(event, denyFields)
 		return // fail-closed: no upstream dial
 	}
 	// MITM applies only to external/public TLS. A named-network peer destination

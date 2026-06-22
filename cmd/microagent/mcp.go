@@ -308,7 +308,7 @@ func mcpTools() []map[string]any {
 			"model_policy_file":         map[string]any{"type": "string"},
 			"model_policy_timeout":      map[string]any{"type": "string"},
 			"network":                   map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated"}},
-			"egress":                    map[string]any{"type": "string", "enum": []string{"mediated", "strict", "off"}, "description": "Egress mediation mode (default mediated)"},
+			"egress":                    map[string]any{"type": "string", "enum": []string{"guarded", "mediated", "strict", "off"}, "description": "Egress mediation mode (default guarded)"},
 			"egress_allow":              map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Allowlisted egress hosts (strict mode); .suffix matches subdomains"},
 			"egress_passthrough":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Egress hosts allowed without TLS interception"},
 			"egress_policy":             map[string]any{"type": "string", "description": "Path to an egress policy file (.yaml/.yml/.json)"},

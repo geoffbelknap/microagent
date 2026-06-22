@@ -13,8 +13,9 @@ import (
 func TestBufferLoggerRecordsEvents(t *testing.T) {
 	var b BufferLogger
 	b.Log("egress_deny", map[string]any{"host": "evil.com"})
-	if len(b.Events) != 1 || b.Events[0]["event"] != "egress_deny" || b.Events[0]["host"] != "evil.com" {
-		t.Fatalf("events = %+v", b.Events)
+	snap := b.Snapshot()
+	if len(snap) != 1 || snap[0]["event"] != "egress_deny" || snap[0]["host"] != "evil.com" {
+		t.Fatalf("events = %+v", snap)
 	}
 }
 

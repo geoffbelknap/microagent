@@ -30,6 +30,15 @@ func (b *BufferLogger) Log(event string, fields map[string]any) {
 	b.Events = append(b.Events, row)
 }
 
+// Snapshot returns a copy of the recorded events, safe to read concurrently with Log.
+func (b *BufferLogger) Snapshot() []map[string]any {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]map[string]any, len(b.Events))
+	copy(out, b.Events)
+	return out
+}
+
 // FileLogger appends one JSON object per event to an audit file.
 type FileLogger struct {
 	mu  sync.Mutex

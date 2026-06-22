@@ -293,6 +293,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		if waitErr != nil {
 			return result, waitErr
 		}
+		// Persistence contract: `run` is one-shot and discards its disk by default
+		// (--keep retains, --rm is the explicit discard). `create`+`start` are durable
+		// and persist; `delete` is the explicit removal for durable workspaces.
 		if !opts.Keep {
 			Cleanup(opts.StateDir, opts.Name)
 			result.SerialPath = ""

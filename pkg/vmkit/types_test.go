@@ -310,8 +310,10 @@ func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
 
 func TestNormalizeEgressMode(t *testing.T) {
 	cases := map[string]string{
-		"":         "mediated",
-		"  ":       "mediated",
+		"":         "guarded",
+		"  ":       "guarded",
+		"guarded":  "guarded",
+		"GUARDED":  "guarded",
 		"mediated": "mediated",
 		"MEDIATED": "mediated",
 		" strict ": "strict",
@@ -327,25 +329,40 @@ func TestNormalizeEgressMode(t *testing.T) {
 }
 
 func TestEgressMediationOn(t *testing.T) {
-	// Only an EXPLICIT "mediated" or "strict" provisions the mediator. The
-	// default ("mediated" for an unspecified mode) is set by NormalizeEgressMode
-	// at the high-level workspace chokepoints; EgressMediationOn merely decides
-	// whether to provision. This keeps EgressMediationOn decoupled from the
-	// default so the low-level raw create/start path (empty EgressMode, no
-	// CA-cert listener) is NOT force-mediated.
-	on := []string{"mediated", "MEDIATED", "strict", " strict "}
+	// "guarded", "mediated", and "strict" all provision the mediator.
+	on := []string{"guarded", "GUARDED", " guarded ", "mediated", "MEDIATED", "strict", " strict "}
 	for _, m := range on {
 		if !EgressMediationOn(m) {
 			t.Errorf("EgressMediationOn(%q) = false, want true", m)
 		}
 	}
 	// Empty/whitespace is OFF here (no provisioning) — it is the raw primitive's
-	// state. So is an explicit "off" and any unrecognized value.
+	// state; high-level callers normalize via NormalizeEgressMode first. "off"
+	// and any unrecognized value are also OFF.
 	off := []string{"", "  ", "off", "OFF", " off ", "open"}
 	for _, m := range off {
 		if EgressMediationOn(m) {
 			t.Errorf("EgressMediationOn(%q) = true, want false", m)
 		}
+	}
+}
+
+func TestNormalizeEgressModeGuardedDefault(t *testing.T) {
+	cases := map[string]string{
+		"":         EgressModeGuarded, // default flipped to guarded
+		"guarded":  EgressModeGuarded,
+		"mediated": EgressModeMediated, // escape hatch preserved
+		"strict":   EgressModeStrict,
+		"off":      EgressModeOff,
+		"bogus":    EgressModeGuarded, // unknown -> safe default
+	}
+	for in, want := range cases {
+		if got := NormalizeEgressMode(in); got != want {
+			t.Errorf("NormalizeEgressMode(%q)=%q want %q", in, got, want)
+		}
+	}
+	if !EgressMediationOn(EgressModeGuarded) {
+		t.Fatal("EgressMediationOn(guarded) must be true or the mediator is skipped (fail-open)")
 	}
 }
 
