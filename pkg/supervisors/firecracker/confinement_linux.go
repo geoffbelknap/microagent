@@ -12,7 +12,8 @@ import (
 )
 
 // confinementEnv is the operator knob selecting VMM-process confinement for the
-// Firecracker backend. Values: "auto" (default), "off", "jailer", "rootless".
+// Firecracker backend. Values: "off" (default, opt-in while confinement is being
+// brought up), "auto" (strongest available), "jailer", "rootless".
 const confinementEnv = "MICROAGENT_CONFINEMENT"
 
 // Knob string values (the operator-facing names).
@@ -44,24 +45,26 @@ func (m confinementMode) String() string {
 }
 
 // resolveConfinementKnob reads MICROAGENT_CONFINEMENT and normalizes it,
-// defaulting to "auto" when unset or unrecognized.
+// defaulting to "off" (opt-in) when unset or unrecognized.
 func resolveConfinementKnob() string {
 	return normalizeConfinementKnob(os.Getenv(confinementEnv))
 }
 
-// normalizeConfinementKnob lower-cases/trims the knob and maps anything
-// unrecognized (including empty) to "auto" — the safe default that resolves to
-// the strongest available mode at launch.
+// normalizeConfinementKnob lower-cases/trims the knob. Confinement is opt-in
+// while it is being brought up: anything unrecognized (including empty/unset)
+// maps to "off". Operators opt in explicitly with "auto" (strongest available),
+// "rootless", or "jailer". When confinement ships on-by-default this default
+// flips to "auto".
 func normalizeConfinementKnob(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case confinementOffKnob:
-		return confinementOffKnob
+	case confinementAuto:
+		return confinementAuto
 	case confinementJailerKnob:
 		return confinementJailerKnob
 	case confinementRootlessKnob:
 		return confinementRootlessKnob
 	default:
-		return confinementAuto
+		return confinementOffKnob
 	}
 }
 
@@ -198,4 +201,121 @@ func stageFile(src, dst string) error {
 func resolveConfinementMode(opts Options) (confinementMode, error) {
 	userNSOK, _ := unprivilegedUserNSEnabled()
 	return selectConfinementMode(normalizeConfinementKnob(opts.Confinement), os.Geteuid(), userNSOK)
+}
+
+// confinedExecArgs builds the argv passed to the unshare binary that launches
+// the supervisor's --confined-exec handler in a fresh user (when mapRoot) +
+// mount namespace; the handler sets up the jail and execs Firecracker. mapRoot
+// adds --map-root-user (skipped when already inside pasta's user namespace, so
+// we don't shadow its network setup). Mirrors forkMountExecArgs.
+func confinedExecArgs(mapRoot bool, supervisor, jailRoot, workDir, firecracker string, launchArgs []string) []string {
+	args := []string{}
+	if mapRoot {
+		args = append(args, "--map-root-user")
+	}
+	args = append(args,
+		"--mount",
+		supervisor, "--confined-exec",
+		"--jail-root", jailRoot,
+		"--work-dir", workDir,
+		"--", firecracker,
+	)
+	return append(args, launchArgs...)
+}
+
+// confinedExecDevices are the device nodes bound into the jail. The guest reaches
+// the host only through the mediated vsock + the (separately confined) network
+// device; KVM/tun/urandom are the minimum the VMM itself needs.
+var confinedExecDevices = []string{"/dev/kvm", "/dev/net/tun", "/dev/urandom"}
+
+// RunConfinedExec is the re-exec entry launched via unshare inside a new
+// user+mount namespace. It shares the workspace directory into the jail at /run
+// (so the host supervisor and the jailed Firecracker see the same live API/vsock
+// sockets), binds the device nodes Firecracker needs, pivot_roots into the jail,
+// sets no-new-privs, then execs Firecracker. The user namespace itself
+// deprivileges the process — root-in-userns maps to the unprivileged invoker on
+// the host — so a VMM escape lands outside the jail with no host privileges.
+func RunConfinedExec(args []string) error {
+	jailRoot, workDir := "", ""
+	i := 0
+	for i < len(args) {
+		switch args[i] {
+		case "--jail-root":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--jail-root requires a value")
+			}
+			jailRoot = args[i+1]
+			i += 2
+		case "--work-dir":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--work-dir requires a value")
+			}
+			workDir = args[i+1]
+			i += 2
+		case "--":
+			i++
+			goto run
+		default:
+			return fmt.Errorf("unexpected confined-exec argument %q", args[i])
+		}
+	}
+run:
+	rest := args[i:]
+	if jailRoot == "" || workDir == "" || len(rest) == 0 {
+		return fmt.Errorf("usage: --confined-exec --jail-root <dir> --work-dir <dir> -- <firecracker> [args...]")
+	}
+
+	// Keep our mounts from propagating back to the host mount namespace.
+	if err := unix.Mount("", "/", "", unix.MS_REC|unix.MS_PRIVATE, ""); err != nil {
+		return fmt.Errorf("make mounts private: %w", err)
+	}
+	// Socket coherence: bind the workspace dir into the jail at /run so the live
+	// API/vsock sockets Firecracker creates are the same files the host
+	// supervisor connects to (the one bind that's genuinely required).
+	runDir := filepath.Join(jailRoot, "run")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		return fmt.Errorf("mkdir jail /run: %w", err)
+	}
+	if err := unix.Mount(workDir, runDir, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
+		return fmt.Errorf("bind workspace dir into jail /run: %w", err)
+	}
+	// Bind the device nodes the VMM needs (rootless can't mknod).
+	for _, dev := range confinedExecDevices {
+		dst := filepath.Join(jailRoot, dev)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("mkdir for %s: %w", dev, err)
+		}
+		if f, err := os.OpenFile(dst, os.O_CREATE, 0o600); err == nil {
+			_ = f.Close()
+		}
+		if err := unix.Mount(dev, dst, "", unix.MS_BIND, ""); err != nil {
+			return fmt.Errorf("bind %s into jail: %w", dev, err)
+		}
+	}
+	// pivot_root requires the new root to be a mount point.
+	if err := unix.Mount(jailRoot, jailRoot, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
+		return fmt.Errorf("bind jail root onto itself: %w", err)
+	}
+	oldRoot := filepath.Join(jailRoot, ".oldroot")
+	if err := os.MkdirAll(oldRoot, 0o700); err != nil {
+		return fmt.Errorf("mkdir put_old: %w", err)
+	}
+	if err := unix.PivotRoot(jailRoot, oldRoot); err != nil {
+		return fmt.Errorf("pivot_root into jail: %w", err)
+	}
+	if err := unix.Chdir("/"); err != nil {
+		return fmt.Errorf("chdir to new root: %w", err)
+	}
+	if err := unix.Unmount("/.oldroot", unix.MNT_DETACH); err != nil {
+		return fmt.Errorf("detach old root: %w", err)
+	}
+	_ = os.Remove("/.oldroot")
+	// No new privileges for the VMM or anything it spawns.
+	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {
+		return fmt.Errorf("set no-new-privs: %w", err)
+	}
+	if err := unix.Exec(rest[0], rest, os.Environ()); err != nil {
+		return fmt.Errorf("exec firecracker in jail: %w", err)
+	}
+	return nil
 }

@@ -10,15 +10,15 @@ import (
 
 func TestNormalizeConfinementKnob(t *testing.T) {
 	cases := map[string]string{
-		"":         confinementAuto,
-		"   ":      confinementAuto,
+		"":         confinementOffKnob,
+		"   ":      confinementOffKnob,
 		"AUTO":     confinementAuto,
 		"auto":     confinementAuto,
 		"off":      confinementOffKnob,
 		" Off ":    confinementOffKnob,
 		"Jailer":   confinementJailerKnob,
 		"rootless": confinementRootlessKnob,
-		"nonsense": confinementAuto,
+		"nonsense": confinementOffKnob,
 	}
 	for in, want := range cases {
 		if got := normalizeConfinementKnob(in); got != want {

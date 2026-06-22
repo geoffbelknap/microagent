@@ -909,14 +909,33 @@ func ensureWorkspaceProcessesStopped(opts Options, state runtimeState) error {
 }
 
 func writeConfig(opts Options, req vmkit.Request) error {
+	kernelImage := req.Config.KernelPath
+	rootfsPath := req.Config.RootfsPath
+	vsockUDS := vsockSocketPath(opts)
+	diskPath := func(d vmkit.Disk) string { return d.Path }
+	if mode, _ := resolveConfinementMode(opts); mode != confinementOff {
+		// Confined: Firecracker runs inside the jail (pivot_root), so its config
+		// references jail-relative paths — static artifacts hard-linked in
+		// (/kernel, /rootfs.ext4, /disks/<name>) and the vsock UDS in the
+		// workspace dir bound at /run. The host-side path helpers are unchanged.
+		layout := confinedJailLayout(opts, req.Config, "")
+		kernelImage = layout.Kernel.Guest
+		rootfsPath = layout.Rootfs.Guest
+		vsockUDS = "/run/" + filepath.Base(vsockSocketPath(opts))
+		byName := make(map[string]string, len(layout.Disks))
+		for _, d := range layout.Disks {
+			byName[d.ID] = d.Guest
+		}
+		diskPath = func(d vmkit.Disk) string { return byName[d.Name] }
+	}
 	cfg := config{
 		BootSource: bootSource{
-			KernelImagePath: req.Config.KernelPath,
+			KernelImagePath: kernelImage,
 			BootArgs:        firecrackerBootArgs(req.Config),
 		},
 		Drives: []drive{{
 			DriveID:      "rootfs",
-			PathOnHost:   req.Config.RootfsPath,
+			PathOnHost:   rootfsPath,
 			IsRootDevice: true,
 			IsReadOnly:   false,
 		}},
@@ -929,7 +948,7 @@ func writeConfig(opts Options, req vmkit.Request) error {
 		cfg.Vsock = &vsockConfig{
 			VsockID:  "vsock0",
 			GuestCID: firecrackerGuestCID(opts),
-			UDSPath:  vsockSocketPath(opts),
+			UDSPath:  vsockUDS,
 		}
 	}
 	if iface, ok := firecrackerNetworkInterface(opts, req.Config); ok {
@@ -938,7 +957,7 @@ func writeConfig(opts Options, req vmkit.Request) error {
 	for _, disk := range req.Config.Disks {
 		cfg.Drives = append(cfg.Drives, drive{
 			DriveID:      disk.Name,
-			PathOnHost:   disk.Path,
+			PathOnHost:   diskPath(disk),
 			IsRootDevice: false,
 			IsReadOnly:   disk.Mode == "ro",
 		})

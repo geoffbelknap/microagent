@@ -252,7 +252,42 @@ func firecrackerLaunchCommand(ctx context.Context, opts Options, req vmkit.Reque
 			return exec.CommandContext(ctx, unsharePath, forkMountExecArgs(mapRoot, supervisor, src, dst, firecracker, launchArgs)...), nil
 		}
 	}
+	if mode, err := resolveConfinementMode(opts); err != nil {
+		return nil, fmt.Errorf("resolve confinement: %w", err)
+	} else if mode != confinementOff {
+		return confinedLaunchCommand(ctx, opts, req, firecracker)
+	}
 	return exec.CommandContext(ctx, firecracker, launchArgs...), nil
+}
+
+// confinedLaunchCommand builds the launch for a confined (rootless) workspace:
+// it stages the static artifacts into the jail and returns an unshare command
+// that runs the supervisor's --confined-exec handler, which jails and execs
+// Firecracker. Firecracker reads its config and sockets via the workspace dir
+// bound into the jail at /run, so the host-side path helpers are unchanged.
+func confinedLaunchCommand(ctx context.Context, opts Options, req vmkit.Request, firecracker string) (*exec.Cmd, error) {
+	layout := confinedJailLayout(opts, req.Config, firecracker)
+	if err := stageJailArtifacts(layout); err != nil {
+		return nil, fmt.Errorf("stage confined jail: %w", err)
+	}
+	unsharePath, err := exec.LookPath("unshare")
+	if err != nil {
+		return nil, fmt.Errorf("confinement requires the unshare binary (util-linux): %w", err)
+	}
+	supervisor, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve supervisor executable for confinement: %w", err)
+	}
+	// Already root inside pasta's user namespace? Don't map root again (it would
+	// shadow pasta's network setup) — only add the nested mount namespace.
+	mapRoot := !insideUserNetworkNamespace()
+	workDir := filepath.Join(opts.StateDir, opts.Name)
+	confinedArgs := []string{
+		"--api-sock", "/run/" + filepath.Base(apiSocketPath(opts)),
+		"--config-file", "/run/" + filepath.Base(configPath(opts)),
+	}
+	args := confinedExecArgs(mapRoot, supervisor, layout.Root, workDir, layout.Firecracker.Guest, confinedArgs)
+	return exec.CommandContext(ctx, unsharePath, args...), nil
 }
 
 // snapshotForkBind reports whether loading this snapshot into the given
