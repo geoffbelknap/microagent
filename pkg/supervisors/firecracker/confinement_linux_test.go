@@ -1,6 +1,8 @@
 package firecracker
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -91,5 +93,49 @@ func TestConfinedJailLayout(t *testing.T) {
 	wantDisk := jailArtifact{ID: "data", Source: "/vol/data.img", Host: "/state/ws1/jail/disks/data", Guest: "/disks/data"}
 	if l.Disks[0] != wantDisk {
 		t.Errorf("Disks[0] = %+v, want %+v", l.Disks[0], wantDisk)
+	}
+}
+
+func TestStageJailArtifactsHardlinks(t *testing.T) {
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src")
+	if err := os.MkdirAll(srcDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	kernelSrc := filepath.Join(srcDir, "vmlinux")
+	rootfsSrc := filepath.Join(srcDir, "rootfs.ext4")
+	for _, p := range []string{kernelSrc, rootfsSrc} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// State dir shares the tempdir filesystem with the sources, so staging
+	// hard-links (no EXDEV bind fallback).
+	opts := Options{Name: "ws1", StateDir: filepath.Join(tmp, "state")}
+	cfg := &vmkit.Config{KernelPath: kernelSrc, RootfsPath: rootfsSrc}
+	l := confinedJailLayout(opts, cfg)
+
+	if err := stageJailArtifacts(l); err != nil {
+		t.Fatalf("stageJailArtifacts: %v", err)
+	}
+	assertSameFile(t, kernelSrc, l.Kernel.Host)
+	assertSameFile(t, rootfsSrc, l.Rootfs.Host)
+	if fi, err := os.Stat(filepath.Dir(l.VsockUDS.Host)); err != nil || !fi.IsDir() {
+		t.Errorf("jail run dir not created: %v", err)
+	}
+}
+
+func assertSameFile(t *testing.T, a, b string) {
+	t.Helper()
+	fa, err := os.Stat(a)
+	if err != nil {
+		t.Fatalf("stat %s: %v", a, err)
+	}
+	fb, err := os.Stat(b)
+	if err != nil {
+		t.Fatalf("stat %s: %v", b, err)
+	}
+	if !os.SameFile(fa, fb) {
+		t.Errorf("%s and %s are not the same file (hard link expected)", a, b)
 	}
 }

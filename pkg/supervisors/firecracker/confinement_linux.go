@@ -1,12 +1,14 @@
 package firecracker
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
+	"golang.org/x/sys/unix"
 )
 
 // confinementEnv is the operator knob selecting VMM-process confinement for the
@@ -138,4 +140,51 @@ func confinedJailLayout(opts Options, cfg *vmkit.Config) jailLayout {
 		l.Disks = append(l.Disks, mk(d.Name, d.Path, "disks/"+d.Name))
 	}
 	return l
+}
+
+// stageJailArtifacts creates the jail directory tree and stages the
+// source-backed artifacts (kernel, rootfs, disks) into it. Sockets and the
+// config file have no source — only their parent directories are created here;
+// they are created/written in place later. Device nodes are bound inside the
+// launch namespace, not here.
+func stageJailArtifacts(l jailLayout) error {
+	for _, dir := range []string{l.Root, filepath.Dir(l.APISocket.Host), filepath.Dir(l.VsockUDS.Host)} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("jail mkdir %s: %w", dir, err)
+		}
+	}
+	sourced := append([]jailArtifact{l.Kernel, l.Rootfs}, l.Disks...)
+	for _, a := range sourced {
+		if a.Source == "" {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(a.Host), 0o700); err != nil {
+			return fmt.Errorf("jail mkdir %s: %w", filepath.Dir(a.Host), err)
+		}
+		if err := stageFile(a.Source, a.Host); err != nil {
+			return fmt.Errorf("stage %s -> %s: %w", a.Source, a.Host, err)
+		}
+	}
+	return nil
+}
+
+// stageFile hard-links src to dst (cheap, same-inode so guest writes to the
+// rootfs persist), removing any stale dst first. On a cross-device link error
+// it falls back to a read-write bind mount.
+func stageFile(src, dst string) error {
+	_ = os.Remove(dst)
+	err := os.Link(src, dst)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, unix.EXDEV) {
+		return err
+	}
+	// Different filesystem: a hard link is impossible, so bind-mount instead.
+	f, cerr := os.Create(dst)
+	if cerr != nil {
+		return cerr
+	}
+	_ = f.Close()
+	return unix.Mount(src, dst, "", unix.MS_BIND, "")
 }
