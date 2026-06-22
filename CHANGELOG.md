@@ -5,6 +5,8 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.8.1 - 2026-06-22
+
 ### guarded egress mode is now the default (behavior change)
 
 **Migration note:** the default egress mode changed from `mediated` to
