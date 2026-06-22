@@ -43,7 +43,7 @@ jobs:
       FIRECRACKER_VERSION: v1.16.0
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
