@@ -1098,7 +1098,7 @@ func TestStatusDoesNotTreatStartedRootfsMutationAsDivergence(t *testing.T) {
 // TestApplyManifestNormalizesEgressModeForStart asserts the start path's
 // manifest-load chokepoint carries the secure default into the request: a
 // manifest with an unspecified egress mode yields a started workspace that is
-// mediated (mediator provisioned + CA-cert vsock listener re-allocated), mirroring
+// guarded (mediator provisioned + CA-cert vsock listener re-allocated), mirroring
 // create. Start() does applyManifest(&opts) -> Request(opts); this exercises that
 // composition without spinning up a VM. INV1 (start side).
 func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
@@ -1111,10 +1111,10 @@ func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
 		CPUCount:   2,
 		Network:    vmkit.NetworkConfig{Mode: "user"},
 	}
-	// Manifest with an unspecified egress mode (the pre-flip / default case).
+	// Manifest with an unspecified egress mode (guarded is now the default).
 	applyManifest(&opts, Manifest{Network: NetworkSpec{Mode: "user"}})
-	if opts.EgressMode != vmkit.EgressModeMediated {
-		t.Fatalf("applyManifest left EgressMode = %q, want %q", opts.EgressMode, vmkit.EgressModeMediated)
+	if opts.EgressMode != vmkit.EgressModeGuarded {
+		t.Fatalf("applyManifest left EgressMode = %q, want %q", opts.EgressMode, vmkit.EgressModeGuarded)
 	}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {

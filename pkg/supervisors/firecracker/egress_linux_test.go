@@ -545,7 +545,7 @@ func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 	cases := map[string]string{
 		"mediated": "mediated",
 		"strict":   "strict",
-		"":         "mediated", // secure default normalization
+		"":         "guarded", // secure default normalization
 	}
 	for in, want := range cases {
 		args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", in, nil, nil, "", nil, "", "", egressCaps{})
