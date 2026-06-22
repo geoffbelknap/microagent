@@ -174,24 +174,30 @@ func stageJailArtifacts(l jailLayout) error {
 }
 
 // stageFile hard-links src to dst (cheap, same-inode so guest writes to the
-// rootfs persist), removing any stale dst first. On a cross-device link error
-// it falls back to a read-write bind mount.
+// rootfs persist), removing any stale dst first. A hard link can be rejected for
+// a file on another filesystem (EXDEV) or a protected hard link to a file we
+// don't own (EPERM under fs.protected_hardlinks — e.g. a root-owned firecracker
+// binary); in either case it copies instead. A host-side bind mount is not an
+// option: staging runs before the user namespace, so a rootless launcher has no
+// privilege to mount.
 func stageFile(src, dst string) error {
 	_ = os.Remove(dst)
 	err := os.Link(src, dst)
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, unix.EXDEV) {
+	if !errors.Is(err, unix.EXDEV) && !errors.Is(err, unix.EPERM) {
 		return err
 	}
-	// Different filesystem: a hard link is impossible, so bind-mount instead.
-	f, cerr := os.Create(dst)
-	if cerr != nil {
-		return cerr
+	if err := copyFile(src, dst); err != nil {
+		return err
 	}
-	_ = f.Close()
-	return unix.Mount(src, dst, "", unix.MS_BIND, "")
+	// copyFile creates dst with default perms; preserve the source mode so an
+	// executable (the firecracker binary) stays executable inside the jail.
+	if info, statErr := os.Stat(src); statErr == nil {
+		return os.Chmod(dst, info.Mode().Perm())
+	}
+	return nil
 }
 
 // resolveConfinementMode resolves the effective confinement mode for this host
