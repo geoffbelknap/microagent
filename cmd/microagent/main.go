@@ -1984,9 +1984,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var timeoutSeconds int
 	fs.IntVar(&timeoutSeconds, "timeout", int(opts.Timeout.Seconds()), "Run timeout in seconds")
 	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Idle TTL in seconds; the VM is reaped after this long with no exec/connect (activity renews). 0 = permanent")
-	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run")
+	fs.BoolVar(&opts.Keep, "keep", false, "Keep workspace state after run (run discards by default)")
 	rm := false
-	fs.BoolVar(&rm, "rm", false, "Remove workspace state after run")
+	fs.BoolVar(&rm, "rm", false, "Discard workspace state after run (explicit; this is the default for run)")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "Validate without writing state")
 	// --model-token is consumed by callers via flagValue pre-scan (it must never
 	// land in Options); register it so the flagset accepts it and shows it in
@@ -2246,6 +2246,9 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 	}
 	if command != "run" && rm {
 		return fmt.Errorf("%s does not support --rm", command)
+	}
+	if rm {
+		opts.Keep = false // --rm forces discard, authoritative over any prior Keep setting
 	}
 	opts.SerialInput = backendSupportsConsoleInput(opts.Backend)
 	if explicit.Spec && specPath == "" {
