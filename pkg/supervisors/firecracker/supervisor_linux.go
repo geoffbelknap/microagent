@@ -43,6 +43,10 @@ type Options struct {
 	Timeout            time.Duration
 	FirecrackerPath    string
 	ResolveFirecracker func() (string, error)
+	// Confinement selects the VMM-process confinement mode for this backend:
+	// "auto" (default), "off", "jailer", or "rootless". Resolved from
+	// MICROAGENT_CONFINEMENT. Inert until the launch path wires it in.
+	Confinement string
 }
 
 type Supervisor struct {
@@ -167,6 +171,18 @@ func hostResponse(opts Options) (vmkit.Response, error) {
 			Status:       "unknown",
 		},
 	}
+	// Report confinement honestly: only when a non-off mode actually resolves
+	// for this host's knob + facts (resolveConfinementMode fails closed, so a
+	// non-off result means the host supports and will apply it). While
+	// confinement is opt-in this is off unless MICROAGENT_CONFINEMENT is set.
+	confOpts := opts
+	if strings.TrimSpace(confOpts.Confinement) == "" {
+		confOpts.Confinement = resolveConfinementKnob()
+	}
+	if mode, err := resolveConfinementMode(confOpts); err == nil && mode != confinementOff {
+		resp.Host.ConfinementMode = mode.String()
+		resp.Host.ConfinementActive = true
+	}
 	if resolveErr != nil {
 		resp.Error = resolveErr.Error()
 		return resp, resolveErr
@@ -213,6 +229,9 @@ func (s Supervisor) normalizedOptions(req vmkit.Request) Options {
 	}
 	if opts.ResolveFirecracker == nil {
 		opts.ResolveFirecracker = ResolveBinary
+	}
+	if opts.Confinement == "" {
+		opts.Confinement = resolveConfinementKnob()
 	}
 	return opts
 }
@@ -902,14 +921,33 @@ func ensureWorkspaceProcessesStopped(opts Options, state runtimeState) error {
 }
 
 func writeConfig(opts Options, req vmkit.Request) error {
+	kernelImage := req.Config.KernelPath
+	rootfsPath := req.Config.RootfsPath
+	vsockUDS := vsockSocketPath(opts)
+	diskPath := func(d vmkit.Disk) string { return d.Path }
+	if mode, _ := resolveConfinementMode(opts); mode != confinementOff {
+		// Confined: Firecracker runs inside the jail (pivot_root), so its config
+		// references jail-relative paths — static artifacts hard-linked in
+		// (/kernel, /rootfs.ext4, /disks/<name>) and the vsock UDS in the
+		// workspace dir bound at /run. The host-side path helpers are unchanged.
+		layout := confinedJailLayout(opts, req.Config, "")
+		kernelImage = layout.Kernel.Guest
+		rootfsPath = layout.Rootfs.Guest
+		vsockUDS = "/run/" + filepath.Base(vsockSocketPath(opts))
+		byName := make(map[string]string, len(layout.Disks))
+		for _, d := range layout.Disks {
+			byName[d.ID] = d.Guest
+		}
+		diskPath = func(d vmkit.Disk) string { return byName[d.Name] }
+	}
 	cfg := config{
 		BootSource: bootSource{
-			KernelImagePath: req.Config.KernelPath,
+			KernelImagePath: kernelImage,
 			BootArgs:        firecrackerBootArgs(req.Config),
 		},
 		Drives: []drive{{
 			DriveID:      "rootfs",
-			PathOnHost:   req.Config.RootfsPath,
+			PathOnHost:   rootfsPath,
 			IsRootDevice: true,
 			IsReadOnly:   false,
 		}},
@@ -922,7 +960,7 @@ func writeConfig(opts Options, req vmkit.Request) error {
 		cfg.Vsock = &vsockConfig{
 			VsockID:  "vsock0",
 			GuestCID: firecrackerGuestCID(opts),
-			UDSPath:  vsockSocketPath(opts),
+			UDSPath:  vsockUDS,
 		}
 	}
 	if iface, ok := firecrackerNetworkInterface(opts, req.Config); ok {
@@ -931,7 +969,7 @@ func writeConfig(opts Options, req vmkit.Request) error {
 	for _, disk := range req.Config.Disks {
 		cfg.Drives = append(cfg.Drives, drive{
 			DriveID:      disk.Name,
-			PathOnHost:   disk.Path,
+			PathOnHost:   diskPath(disk),
 			IsRootDevice: false,
 			IsReadOnly:   disk.Mode == "ro",
 		})
