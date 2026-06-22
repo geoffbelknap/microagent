@@ -5,6 +5,25 @@ been cut into a release yet.
 
 ## Unreleased
 
+### guarded egress mode is now the default (behavior change)
+
+**Migration note:** the default egress mode changed from `mediated` to
+`guarded`. Workspaces that omit `--egress` now deny internal destinations
+(link-local/metadata 169.254/16, RFC1918, IPv6 ULA, CGNAT 100.64/10, loopback,
+and east-west peers on named networks) while still allowing the public internet
+freely with no allowlist required. DNS continues to resolve freely — the
+protection is applied at connect time on the resolved IP, which also defeats DNS
+rebinding attacks.
+
+To restore the previous allow-all behavior: `--egress mediated`.
+To permit a specific internal host: `--egress-allow <host-or-ip>`.
+
+New audit events:
+- `egress_internal_deny` — TCP connection denied to an inside address under
+  guarded mode; includes `dst` and `internal: true` fields.
+- `egress_udp_internal_deny` — UDP datagram denied to an inside address under
+  guarded mode; includes `dst` and `internal: true` fields.
+
 ### windows-hyperv snapshot is unsupported (documented limitation)
 
 - `snapshot create`, `start --from-snapshot`, and `create --from-snapshot` now
