@@ -189,7 +189,8 @@ fi
 if [ "$(uname -s)" = "Darwin" ]; then
   "$ROOT/scripts/dev/applevf-supervisor-build.sh" >/dev/null
   cp "$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor" "$supervisor_path"
-  codesign -s - -f --entitlements "$ROOT/supervisors/applevf/microagent-applevf-supervisor.entitlements" "$supervisor_path" >/dev/null
+  # Ad-hoc + hardened runtime + library validation (see applevf-supervisor-build.sh).
+  codesign -s - -f --options runtime,library --entitlements "$ROOT/supervisors/applevf/microagent-applevf-supervisor.entitlements" "$supervisor_path" >/dev/null
 fi
 
 if [ "$quiet" -eq 0 ]; then

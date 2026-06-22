@@ -361,6 +361,43 @@ func TestAugmentHostSupportPreservesWindowsHyperVConsoleSupport(t *testing.T) {
 	}
 }
 
+// The apple-vf supervisor's `host` response now carries the real confinement
+// posture (Spec B). AugmentHostSupport must pass it through unchanged — it only
+// defaults the mode to "off" when the supervisor reported nothing.
+func TestAugmentHostSupportPreservesAppleVFConfinement(t *testing.T) {
+	resp := vmkit.Response{
+		Backend: vmkit.BackendAppleVF,
+		Host: &vmkit.HostSupport{
+			Backend:           vmkit.BackendAppleVF,
+			ConfinementMode:   "seatbelt",
+			ConfinementActive: true,
+		},
+	}
+	AugmentHostSupport(&resp, Options{Backend: vmkit.BackendAppleVF, Arch: "arm64"})
+	if resp.Host.ConfinementMode != "seatbelt" {
+		t.Errorf("ConfinementMode = %q, want \"seatbelt\"", resp.Host.ConfinementMode)
+	}
+	if !resp.Host.ConfinementActive {
+		t.Error("ConfinementActive = false, want true (supervisor reported it active)")
+	}
+}
+
+// When the apple-vf supervisor reports no confinement (e.g. an older binary or
+// an error response with no Host), the honesty invariant requires "off"/false.
+func TestAugmentHostSupportDefaultsAppleVFConfinementOff(t *testing.T) {
+	resp := vmkit.Response{
+		Backend: vmkit.BackendAppleVF,
+		Host:    &vmkit.HostSupport{Backend: vmkit.BackendAppleVF},
+	}
+	AugmentHostSupport(&resp, Options{Backend: vmkit.BackendAppleVF, Arch: "arm64"})
+	if resp.Host.ConfinementMode != "off" {
+		t.Errorf("ConfinementMode = %q, want \"off\"", resp.Host.ConfinementMode)
+	}
+	if resp.Host.ConfinementActive {
+		t.Error("ConfinementActive = true, want false (nothing reported)")
+	}
+}
+
 func TestCheckFirecrackerReportsConfinementDefaults(t *testing.T) {
 	opts := Options{Backend: vmkit.BackendLinuxKVM, Arch: "amd64"}
 	resp, err := CheckFirecracker(

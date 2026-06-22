@@ -12,5 +12,11 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 
 swift build --package-path "$SUPERVISOR_DIR" --configuration release --disable-sandbox
-codesign -s - -f --entitlements "$ENTITLEMENTS" "$SUPERVISOR_BIN"
+# Ad-hoc signature (-s -) is intentional for local/dev: a real Developer-ID
+# identity + notarization is deferred to a distribution milestone. The hardened
+# runtime (-o runtime) and library validation (--options library) are the
+# layer-2 confinement posture and work with ad-hoc signing locally. Keep the
+# entitlement set minimal (only com.apple.security.virtualization) — never add
+# the app-sandbox or com.apple.vm.networking entitlements here.
+codesign -s - -f --options runtime,library --entitlements "$ENTITLEMENTS" "$SUPERVISOR_BIN"
 "$SUPERVISOR_BIN" <<< '{"command":"host"}'
