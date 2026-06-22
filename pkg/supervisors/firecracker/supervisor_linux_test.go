@@ -2029,7 +2029,7 @@ func TestFirecrackerBootArgsModelForward(t *testing.T) {
 }
 
 func TestUserNetworkArgsStopOptionParsingBeforeCommand(t *testing.T) {
-	args := userNetworkArgs("/usr/local/bin/sup", "/state/pasta.pid", `{"command":"run"}`)
+	args := userNetworkArgs("/usr/local/bin/sup", "/state/pasta.pid", `{"command":"run"}`, false)
 	want := []string{
 		"--config-net",
 		"--quiet",
@@ -2044,6 +2044,43 @@ func TestUserNetworkArgsStopOptionParsingBeforeCommand(t *testing.T) {
 	for i := range want {
 		if args[i] != want[i] {
 			t.Fatalf("userNetworkArgs[%d] = %q, want %q (full: %q)", i, args[i], want[i], args)
+		}
+	}
+}
+
+func TestUserNetworkArgsIPv4Only(t *testing.T) {
+	has := func(args []string, flag string) bool {
+		for _, a := range args {
+			if a == flag {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(userNetworkArgs("sup", "pid", "{}", true), "-4") {
+		t.Error("ipv4Only=true must pass -4 to pasta")
+	}
+	if has(userNetworkArgs("sup", "pid", "{}", false), "-4") {
+		t.Error("ipv4Only=false must not pass -4 to pasta")
+	}
+}
+
+func TestIsRoutableIPv6(t *testing.T) {
+	cases := []struct {
+		ip   string
+		want bool
+	}{
+		{"2606:4700::1111", true},
+		{"2001:db8::1", true},
+		{"fd7a:115c:a1e0::1", true}, // ULA (e.g. Tailscale) counts as routable
+		{"fe80::1", false},          // link-local
+		{"::1", false},              // loopback
+		{"10.0.0.1", false},         // IPv4
+		{"8.8.8.8", false},          // public IPv4
+	}
+	for _, c := range cases {
+		if got := isRoutableIPv6(net.ParseIP(c.ip)); got != c.want {
+			t.Errorf("isRoutableIPv6(%s) = %v, want %v", c.ip, got, c.want)
 		}
 	}
 }
