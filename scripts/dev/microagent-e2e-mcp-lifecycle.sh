@@ -165,12 +165,15 @@ def call(tool, arguments, timeout_note=""):
 
 
 def find_state(value):
-    # Lifecycle envelopes carry the state under event.state (control verbs) or
-    # response.event.state (create). Search both without pinning the wrapper.
+    # Lifecycle envelopes carry the state under event.state (control verbs),
+    # response.event.state (raw create), or a flattened top-level "state" (the
+    # compact create summary). Search all without pinning the wrapper.
     if isinstance(value, dict):
         event = value.get("event")
         if isinstance(event, dict) and "state" in event:
             return event["state"]
+        if isinstance(value.get("state"), str):
+            return value["state"]
         for key in ("response", "result"):
             nested = value.get(key)
             found = find_state(nested)
