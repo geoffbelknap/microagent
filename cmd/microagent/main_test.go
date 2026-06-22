@@ -7901,7 +7901,7 @@ func TestWriteDoctorResponseTextAppleVFNetworkingDoesNotSuggestLinuxSetup(t *tes
 
 func TestParseEgressMode(t *testing.T) {
 	cases := map[string]string{
-		"": "mediated", "mediated": "mediated",
+		"": "guarded", "guarded": "guarded", "mediated": "mediated",
 		"strict": "strict", "STRICT": "strict",
 		"off": "off", "open": "off", "disabled": "off",
 	}
@@ -8000,7 +8000,7 @@ func TestEgressPolicyFileRejectedWhenOff(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for --egress-policy with --egress off")
 	}
-	if !strings.Contains(err.Error(), "mediated or strict") {
+	if !strings.Contains(err.Error(), "mediated") || !strings.Contains(err.Error(), "strict") {
 		t.Fatalf("error %q should explain mediated/strict requirement", err)
 	}
 }
@@ -8040,5 +8040,17 @@ func TestEgressPolicyFileUnionWithManifest(t *testing.T) {
 	}
 	if !got["flag.example.com"] || !got["file.example.com"] {
 		t.Fatalf("CLI union missing entries: %v", opts.EgressAllow)
+	}
+}
+
+func TestParseEgressModeDefaults(t *testing.T) {
+	for in, want := range map[string]string{"": "guarded", "guarded": "guarded", "mediated": "mediated", "strict": "strict"} {
+		got, err := parseEgressMode(in)
+		if err != nil || got != want {
+			t.Errorf("parseEgressMode(%q)=%q,%v want %q", in, got, err, want)
+		}
+	}
+	if _, err := parseEgressMode("nonsense"); err == nil {
+		t.Error("expected error for unknown egress mode")
 	}
 }
