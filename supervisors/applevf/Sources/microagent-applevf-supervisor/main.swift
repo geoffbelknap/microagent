@@ -135,6 +135,11 @@ struct HostSupport: Codable {
     var supervisorAvailable: Bool?
     var consoleAvailable: Bool?
     var consoleMode: String?
+    // VMM-process confinement posture (Spec B). confinementMode is this build's
+    // posture ("seatbelt"); confinementActive is true only when a self-check has
+    // verified the Seatbelt profile actually applies on this host.
+    var confinementMode: String?
+    var confinementActive: Bool?
 }
 
 struct ReadinessSignal: Codable {
@@ -355,6 +360,13 @@ func main() -> Int32 {
 
 func runUtilityCommandIfPresent() throws -> Int32? {
     let args = Array(CommandLine.arguments.dropFirst())
+    // --confinement-selfcheck applies the Seatbelt profile to this throwaway
+    // process and exits 0 iff sandbox_init succeeds on this host. hostSupport()
+    // spawns it so ConfinementActive only ever reports true when confinement is
+    // verified to apply here (honesty invariant).
+    if args == ["--confinement-selfcheck"] {
+        return runConfinementSelfCheck()
+    }
     guard args.count == 2, args[0] == "--network-switch-json" else {
         return nil
     }
@@ -873,7 +885,9 @@ func hostSupport() -> HostSupport {
         supervisorPath: currentExecutablePath(),
         supervisorAvailable: true,
         consoleAvailable: true,
-        consoleMode: "interactive"
+        consoleMode: "interactive",
+        confinementMode: confinementMode,
+        confinementActive: confinementActiveOnThisHost()
     )
 }
 
@@ -1981,6 +1995,10 @@ func runVM(_ request: Request) throws {
         throw ProtocolError.invalid("Apple Virtualization is not available on this host")
     }
     if #available(macOS 13.0, *) {
+        // Confine this detached VM child before any VM resources are created
+        // (Spec B). Fail-closed: if the Seatbelt sandbox cannot be applied, the
+        // VM does not start.
+        try applyConfinement(identity: identity, config: runtimeConfig, qos: QOS_CLASS_UTILITY)
         let vmConfig = try virtualMachineConfiguration(identity: identity, config: runtimeConfig, serialMode: .detached)
         try vmConfig.validate()
 
@@ -2035,6 +2053,9 @@ func runConsole(_ request: Request) throws {
         throw ProtocolError.invalid("Apple Virtualization is not available on this host")
     }
     if #available(macOS 13.0, *) {
+        // Confine the console VM child too (Spec B). User-initiated QoS keeps the
+        // interactive session responsive. Fail-closed on sandbox failure.
+        try applyConfinement(identity: identity, config: runtimeConfig, qos: QOS_CLASS_USER_INITIATED)
         let vmConfig = try virtualMachineConfiguration(identity: identity, config: runtimeConfig, serialMode: .standardIO)
         try vmConfig.validate()
 
