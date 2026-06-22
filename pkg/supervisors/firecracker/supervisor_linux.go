@@ -171,6 +171,18 @@ func hostResponse(opts Options) (vmkit.Response, error) {
 			Status:       "unknown",
 		},
 	}
+	// Report confinement honestly: only when a non-off mode actually resolves
+	// for this host's knob + facts (resolveConfinementMode fails closed, so a
+	// non-off result means the host supports and will apply it). While
+	// confinement is opt-in this is off unless MICROAGENT_CONFINEMENT is set.
+	confOpts := opts
+	if strings.TrimSpace(confOpts.Confinement) == "" {
+		confOpts.Confinement = resolveConfinementKnob()
+	}
+	if mode, err := resolveConfinementMode(confOpts); err == nil && mode != confinementOff {
+		resp.Host.ConfinementMode = mode.String()
+		resp.Host.ConfinementActive = true
+	}
 	if resolveErr != nil {
 		resp.Error = resolveErr.Error()
 		return resp, resolveErr

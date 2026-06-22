@@ -154,3 +154,18 @@ func TestResolveConfinementModeOff(t *testing.T) {
 		t.Errorf("mode = %v, want off", mode)
 	}
 }
+
+func TestHostResponseConfinementOffByDefault(t *testing.T) {
+	// Confinement is opt-in: with the knob off, doctor must not claim it active.
+	t.Setenv(confinementEnv, "off")
+	resp, _ := hostResponse(Options{FirecrackerPath: "/bin/true"})
+	if resp.Host == nil {
+		t.Fatal("host support missing")
+	}
+	if resp.Host.ConfinementActive {
+		t.Error("ConfinementActive = true, want false when confinement is off")
+	}
+	if resp.Host.ConfinementMode != "" {
+		t.Errorf("ConfinementMode = %q, want empty when off", resp.Host.ConfinementMode)
+	}
+}
