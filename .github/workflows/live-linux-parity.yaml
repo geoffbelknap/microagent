@@ -89,8 +89,8 @@ jobs:
           MICROAGENT_FIRECRACKER_SUPERVISOR: ${{ github.workspace }}/.build/dev/microagent-firecracker-supervisor
         run: .build/dev/microagent --json doctor
 
-      - name: Run full Linux E2E suite
-        run: scripts/dev/microagent-e2e.sh
-
       - name: Firecracker rootless confinement smoke
         run: scripts/dev/firecracker-confined-smoke.sh
+
+      - name: Run full Linux E2E suite
+        run: scripts/dev/microagent-e2e.sh
