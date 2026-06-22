@@ -297,6 +297,79 @@ func TestHandleDNSParseErrorReturnsError(t *testing.T) {
 	}
 }
 
+// TestGuardedDNSRebind asserts that in guarded mode a query for a name that
+// resolves to an internal IP (169.254.169.254, a link-local/metadata address)
+// is still forwarded and answered — no egress_dns_deny is emitted. The
+// connect-time IP deny (Task 3/4) is the authoritative rebinding protection;
+// the DNS layer must not duplicate it.
+func TestGuardedDNSRebind(t *testing.T) {
+	log := &BufferLogger{}
+	h := &Handler{Mode: egressModeGuarded, Logger: log, NameCache: NewNameCache()}
+
+	// Simulate a response where metadata.internal. resolves to 169.254.169.254.
+	internalIP := [4]byte{169, 254, 169, 254}
+	want := buildResponseWithA(t, 0x0010, "metadata.internal.", "metadata.internal.",
+		internalIP, 60)
+
+	forwardCalled := false
+	forward := func(r netip.AddrPort, q []byte) ([]byte, error) {
+		forwardCalled = true
+		return want, nil
+	}
+
+	query := buildQuery(t, 0x0010, "metadata.internal.", dnsmessage.TypeA)
+	resolver := netip.MustParseAddrPort("1.1.1.1:53")
+
+	resp, err := h.handleDNS(query, resolver, forward)
+	if err != nil {
+		t.Fatalf("handleDNS: %v", err)
+	}
+	if !forwardCalled {
+		t.Error("forward was NOT called in guarded mode; want forwarded (rebinding protection is connect-time, not DNS)")
+	}
+	if string(resp) != string(want) {
+		t.Error("handleDNS did not return the forwarded response verbatim")
+	}
+	// Must NOT emit egress_dns_deny — guarded allows all name resolution.
+	for _, ev := range log.Events {
+		if ev["event"] == "egress_dns_deny" {
+			t.Error("egress_dns_deny emitted in guarded mode; want no DNS deny")
+		}
+	}
+	assertEvent(t, log, "egress_dns_allow")
+}
+
+// TestGuardedDNSPublicName asserts that guarded mode resolves ordinary public
+// names freely (non-allowlisted names are forwarded, not refused).
+func TestGuardedDNSPublicName(t *testing.T) {
+	log := &BufferLogger{}
+	h := &Handler{Mode: egressModeGuarded, Logger: log, NameCache: NewNameCache()}
+
+	want := buildResponseWithA(t, 0x0011, "example.com.", "example.com.",
+		[4]byte{93, 184, 216, 34}, 300)
+
+	forwardCalled := false
+	forward := func(r netip.AddrPort, q []byte) ([]byte, error) {
+		forwardCalled = true
+		return want, nil
+	}
+
+	query := buildQuery(t, 0x0011, "example.com.", dnsmessage.TypeA)
+	resolver := netip.MustParseAddrPort("8.8.8.8:53")
+
+	resp, err := h.handleDNS(query, resolver, forward)
+	if err != nil {
+		t.Fatalf("handleDNS: %v", err)
+	}
+	if !forwardCalled {
+		t.Error("forward was NOT called in guarded mode for public name; want forwarded")
+	}
+	if string(resp) != string(want) {
+		t.Error("handleDNS did not return the forwarded response verbatim")
+	}
+	assertEvent(t, log, "egress_dns_allow")
+}
+
 var errTestForward = errTestForwardErr{}
 
 type errTestForwardErr struct{}
