@@ -91,3 +91,6 @@ jobs:
 
       - name: Run full Linux E2E suite
         run: scripts/dev/microagent-e2e.sh
+
+      - name: Firecracker rootless confinement smoke
+        run: scripts/dev/firecracker-confined-smoke.sh
