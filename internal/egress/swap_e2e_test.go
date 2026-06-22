@@ -233,7 +233,8 @@ func TestE2E_CredentialSwap_SecretNeverCrossesBoundary(t *testing.T) {
 		placeholderCred,
 		"PLACEHOLDER-DO-NOT-USE",
 	}
-	for _, ev := range m.log.Events {
+	logSnap := m.log.Snapshot()
+	for _, ev := range logSnap {
 		for k, v := range ev {
 			s, ok := v.(string)
 			if !ok {
@@ -249,7 +250,7 @@ func TestE2E_CredentialSwap_SecretNeverCrossesBoundary(t *testing.T) {
 
 	// --- Assertion 4: egress_swap fired naming the entry (no value carried) ---
 	foundSwap := false
-	for _, ev := range m.log.Events {
+	for _, ev := range logSnap {
 		if ev["event"] != "egress_swap" {
 			continue
 		}
@@ -265,6 +266,6 @@ func TestE2E_CredentialSwap_SecretNeverCrossesBoundary(t *testing.T) {
 		}
 	}
 	if !foundSwap {
-		t.Fatalf("no egress_swap audit event; got %+v", m.log.Events)
+		t.Fatalf("no egress_swap audit event; got %+v", logSnap)
 	}
 }

@@ -256,15 +256,11 @@ func waitForEvent(t *testing.T, log *BufferLogger, event string, within time.Dur
 	t.Helper()
 	deadline := time.Now().Add(within)
 	for {
-		log.mu.Lock()
-		for _, e := range log.Events {
+		for _, e := range log.Snapshot() {
 			if e["event"] == event {
-				row := e
-				log.mu.Unlock()
-				return row
+				return e
 			}
 		}
-		log.mu.Unlock()
 		if time.Now().After(deadline) {
 			t.Fatalf("event %q not logged within %v", event, within)
 		}

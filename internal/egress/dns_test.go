@@ -331,7 +331,7 @@ func TestGuardedDNSRebind(t *testing.T) {
 		t.Error("handleDNS did not return the forwarded response verbatim")
 	}
 	// Must NOT emit egress_dns_deny — guarded allows all name resolution.
-	for _, ev := range log.Events {
+	for _, ev := range log.Snapshot() {
 		if ev["event"] == "egress_dns_deny" {
 			t.Error("egress_dns_deny emitted in guarded mode; want no DNS deny")
 		}

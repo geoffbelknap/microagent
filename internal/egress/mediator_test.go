@@ -231,7 +231,7 @@ func TestHandlerLoopGuardDropsOwnBindAddr(t *testing.T) {
 	}
 	assertEvent(t, log, "egress_loop_guard")
 	// And it must NOT be audited as an allow (which is what produced the flood).
-	for _, e := range log.Events {
+	for _, e := range log.Snapshot() {
 		if e["event"] == "egress_allow" {
 			t.Fatalf("self-loop destination wrongly audited egress_allow: %+v", e)
 		}
@@ -601,19 +601,20 @@ func TestHandlerEnforcesConcurrencyCap(t *testing.T) {
 
 func assertEvent(t *testing.T, log *BufferLogger, event string) {
 	t.Helper()
-	for _, e := range log.Events {
+	snap := log.Snapshot()
+	for _, e := range snap {
 		if e["event"] == event {
 			return
 		}
 	}
-	t.Fatalf("event %q not logged; got %+v", event, log.Events)
+	t.Fatalf("event %q not logged; got %+v", event, snap)
 }
 
 // assertEventFieldAbsent fails if any logged event of the given name carries the
 // named field at all (regardless of value).
 func assertEventFieldAbsent(t *testing.T, log *BufferLogger, event string, field string) {
 	t.Helper()
-	for _, e := range log.Events {
+	for _, e := range log.Snapshot() {
 		if e["event"] != event {
 			continue
 		}
@@ -745,7 +746,7 @@ func TestGuardedTCP(t *testing.T) {
 		client.Close()
 		<-done
 		// Must be allowed, not denied.
-		for _, e := range log.Events {
+		for _, e := range log.Snapshot() {
 			if e["event"] == "egress_internal_deny" || e["event"] == "egress_deny" {
 				t.Fatalf("public address denied in guarded mode: %+v", e)
 			}
@@ -791,7 +792,7 @@ func TestGuardedTCP(t *testing.T) {
 		}
 		client.Close()
 		<-done
-		for _, e := range log.Events {
+		for _, e := range log.Snapshot() {
 			if e["event"] == "egress_internal_deny" || e["event"] == "egress_deny" {
 				t.Fatalf("allowlisted internal address denied in guarded mode: %+v", e)
 			}
@@ -836,7 +837,7 @@ func TestGuardedTCP(t *testing.T) {
 		}
 		client.Close()
 		<-done
-		for _, e := range log.Events {
+		for _, e := range log.Snapshot() {
 			if e["event"] == "egress_internal_deny" || e["event"] == "egress_deny" {
 				t.Fatalf("internal address denied in mediated mode (escape hatch broken): %+v", e)
 			}

@@ -317,9 +317,7 @@ func TestUDPFlowIdleClose(t *testing.T) {
 }
 
 func eventLogged(log *BufferLogger, event string) bool {
-	log.mu.Lock()
-	defer log.mu.Unlock()
-	for _, e := range log.Events {
+	for _, e := range log.Snapshot() {
 		if e["event"] == event {
 			return true
 		}
@@ -831,7 +829,7 @@ func TestGuardedUDP(t *testing.T) {
 			t.Fatal("DialUDP called for a DNS (port-53) datagram (must be one-shot, no flow)")
 		}
 		// egress_udp_internal_deny must NOT be logged — the DNS path exits before the inside-deny.
-		for _, e := range log.Events {
+		for _, e := range log.Snapshot() {
 			if e["event"] == "egress_udp_internal_deny" {
 				t.Fatalf("egress_udp_internal_deny logged for a DNS datagram (inside-deny must not apply on DNS path)")
 			}
