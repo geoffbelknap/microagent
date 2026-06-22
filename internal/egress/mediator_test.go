@@ -622,3 +622,23 @@ func assertEventFieldAbsent(t *testing.T, log *BufferLogger, event string, field
 		}
 	}
 }
+
+func TestIsInsideAddr(t *testing.T) {
+	inside := []string{
+		"169.254.169.254", "::ffff:169.254.169.254", // IMDS + IPv4-mapped IMDS
+		"169.254.170.2", "10.0.0.1", "172.16.5.5", "192.168.1.1",
+		"fc00::1", "fe80::1", "127.0.0.1", "::1",
+		"100.64.0.1", "100.127.255.255", "0.0.0.0",
+	}
+	outside := []string{"8.8.8.8", "1.1.1.1", "93.184.216.34", "100.63.255.255", "2606:4700:4700::1111"}
+	for _, s := range inside {
+		if !isInsideAddr(netip.MustParseAddr(s)) {
+			t.Errorf("%s should be inside", s)
+		}
+	}
+	for _, s := range outside {
+		if isInsideAddr(netip.MustParseAddr(s)) {
+			t.Errorf("%s should be outside", s)
+		}
+	}
+}

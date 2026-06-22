@@ -284,6 +284,20 @@ func isEastWestAddr(a netip.Addr) bool {
 	return a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLoopback()
 }
 
+var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
+// isInsideAddr reports whether a is "the inside" — infrastructure the guest
+// must not reach under guarded mode. Matched on the resolved IP after Unmap so
+// IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) cannot bypass it.
+func isInsideAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	return a.IsLoopback() ||
+		a.IsLinkLocalUnicast() || a.IsLinkLocalMulticast() ||
+		a.IsPrivate() || // RFC1918 + IPv6 ULA fc00::/7
+		a.IsUnspecified() ||
+		cgnatPrefix.Contains(a)
+}
+
 // Handle services one captured connection. It always closes conn.
 func (h *Handler) Handle(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
