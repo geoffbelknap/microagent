@@ -264,10 +264,22 @@ start_supervise_background supervise-always "$STATE_DIR/supervise-always.json" \
   --interval 1 \
   --max-restarts 2
 SUPERVISE_PID="$STARTED_SUPERVISE_PID"
+# Each `stop` performs an intentional guest shutdown: the workspace command
+# (sleep 300) is killed and exits non-zero, but guest init marks the result
+# powered_off so the supervisor observes a clean `stopped` and restarts under
+# the `always` policy. Two stops drive exactly two restarts, exhausting the
+# --max-restarts 2 budget; the supervisor then exits with final_state=stopped.
+# The waits below are race-free by construction: wait_for_state polls with a
+# deadline until each restart is back to `running`, and `wait "$SUPERVISE_PID"`
+# blocks until the supervisor has written its terminal state and exited before
+# the final status is read. A regression that misclassified an intentional
+# shutdown as `failed` would surface as final_state != stopped.
 wait_for_state supervise-always running "$STATE_DIR/status-always-running-1.json"
 "$CLI" stop supervise-always --state-dir "$STATE_DIR" >"$STATE_DIR/stop-always-1.json"
 wait_for_state supervise-always running "$STATE_DIR/status-always-running-2.json"
 "$CLI" stop supervise-always --state-dir "$STATE_DIR" >"$STATE_DIR/stop-always-2.json"
+# `set -e` makes a non-zero supervisor exit abort the smoke; a clean
+# restart-budget exhaustion returns 0.
 wait "$SUPERVISE_PID"
 SUPERVISE_PID=""
 "$CLI" status supervise-always --state-dir "$STATE_DIR" >"$STATE_DIR/status-always-final.json"
@@ -399,6 +411,8 @@ never = read_json("supervise-never.json")
 never_status = read_json("status-never.json")
 on_failure = read_json("supervise-on-failure.json")
 always = read_json("supervise-always.json")
+always_running_1 = read_json("status-always-running-1.json")
+always_running_2 = read_json("status-always-running-2.json")
 always_status = read_json("status-always-final.json")
 cancel_after_kill = read_json("status-cancel-after-supervise-kill.json")
 cancel_stopped = read_json("status-cancel-stopped.json")
@@ -426,6 +440,12 @@ if always.get("policy") != "always" or always.get("restarts") != 2 or always.get
     raise SystemExit(always)
 if always.get("final_state") != "stopped":
     raise SystemExit(always)
+# Both intentional stops must have been classified as clean restarts: each one
+# brings the workspace back to `running` rather than tripping a terminal
+# `failed`, which is the regression this sub-test guards.
+for status in (always_running_1, always_running_2):
+    if status.get("event", {}).get("state") != "running":
+        raise SystemExit(status)
 if always_status.get("event", {}).get("state") != "stopped":
     raise SystemExit(always_status)
 if cancel_after_kill.get("event", {}).get("state") != "running":
