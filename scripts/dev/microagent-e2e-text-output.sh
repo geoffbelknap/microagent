@@ -36,6 +36,9 @@ esac
 
 cleanup() {
   status="$?"
+  if [ -n "${STANDIN_PID:-}" ]; then
+    kill "$STANDIN_PID" 2>/dev/null || true
+  fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   if [ "$status" -eq 0 ] && [ "$KEEP_VAR" != "1" ]; then
     rm -rf "$STATE_DIR"
@@ -151,6 +154,18 @@ cat >"$STATE_DIR/$WORKSPACE/event.json" <<JSON
 }
 JSON
 
+# Stand-in for the workspace's firecracker: a live process whose argv carries the
+# workspace state path so the status reconcile (pid liveness + argv ownership)
+# treats the VM as alive and reports it running, instead of reaping the seeded
+# state. Only Linux's supervisor reconciles this way; elsewhere e2e_host_pid is fine.
+if [ "$HOST_BACKEND" = "linux-kvm" ]; then
+  ( exec -a "$STATE_DIR/$WORKSPACE" sleep 600 ) &
+  STANDIN_PID=$!
+  WORKSPACE_PID=$STANDIN_PID
+else
+  WORKSPACE_PID="$(e2e_host_pid)"
+fi
+
 cat >"$STATE_DIR/$WORKSPACE/runtime.json" <<JSON
 {
   "event": {
@@ -184,7 +199,7 @@ cat >"$STATE_DIR/$WORKSPACE/runtime.json" <<JSON
       "routes": ["default"]
     }
   },
-  "pid": $(e2e_host_pid),
+  "pid": $WORKSPACE_PID,
   "serialLogPath": "$json_state_dir/$WORKSPACE/serial.log",
   "startedAt": "$now",
   "updatedAt": "$now",
