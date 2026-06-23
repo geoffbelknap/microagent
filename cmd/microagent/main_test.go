@@ -1370,9 +1370,7 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 		"--rootfs", "/tmp/rootfs.ext4",
 		"--state-dir", "/tmp/state",
 		"--backend", hostBackend(),
-		"--network", "bridged",
-		"--unsupported",
-		"--network-interface", "en0",
+		"--network", "user",
 		"--publish", "127.0.0.1:8080:80/tcp",
 	}))
 	if err != nil {
@@ -1381,11 +1379,8 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 	if req.Config.Network == nil {
 		t.Fatal("network config is nil")
 	}
-	if req.Config.Network.Mode != "bridged" {
-		t.Fatalf("network mode = %q, want bridged", req.Config.Network.Mode)
-	}
-	if req.Config.Network.Interface != "en0" {
-		t.Fatalf("network interface = %q, want en0", req.Config.Network.Interface)
+	if req.Config.Network.Mode != "user" {
+		t.Fatalf("network mode = %q, want user", req.Config.Network.Mode)
 	}
 	if len(req.Config.Network.PortForwards) != 1 {
 		t.Fatalf("port forwards len = %d, want 1", len(req.Config.Network.PortForwards))
@@ -1396,66 +1391,18 @@ func TestRequestForCommandParsesNetwork(t *testing.T) {
 	}
 }
 
-func TestRequestForCommandBridgedRequiresUnsupported(t *testing.T) {
-	base := []string{
-		"--id", "agent-1",
-		"--kernel", "/tmp/kernel",
-		"--rootfs", "/tmp/rootfs.ext4",
-		"--state-dir", "/tmp/state",
-		"--backend", hostBackend(),
-		"--network", "bridged",
-		"--network-interface", "en0",
-	}
-	_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs(base))
-	if err == nil {
-		t.Fatal("requestForCommand accepted bridged without --unsupported")
-	}
-	if !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("bridged rejection error = %q, want it to mention unsupported", err)
-	}
-
-	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs(append(base, "--unsupported")))
-	if err != nil {
-		t.Fatalf("requestForCommand bridged with --unsupported: %v", err)
-	}
-	if req.Config.Network == nil || !req.Config.Network.Unsupported {
-		t.Fatalf("network = %#v, want Unsupported true", req.Config.Network)
-	}
-}
-
-func TestBridgedStartEmitsUnsupportedWarning(t *testing.T) {
-	var buf bytes.Buffer
-	warnIfUnmediatedNetwork(&buf, "bridged")
-	got := buf.String()
-	if !strings.Contains(got, "UNSUPPORTED") {
-		t.Fatalf("bridged warning = %q, want it to contain UNSUPPORTED", got)
-	}
-	const want = "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.\n"
-	if got != want {
-		t.Fatalf("bridged warning = %q, want %q", got, want)
-	}
-}
-
-func TestNatNamedStartEmitsUnsupportedWarning(t *testing.T) {
-	for _, mode := range []string{"nat", "named"} {
-		var buf bytes.Buffer
-		warnIfUnmediatedNetwork(&buf, mode)
-		got := buf.String()
-		if !strings.Contains(got, "UNSUPPORTED") {
-			t.Fatalf("%s warning = %q, want it to contain UNSUPPORTED", mode, got)
-		}
-		if !strings.Contains(got, mode) {
-			t.Fatalf("%s warning = %q, want it to name the mode", mode, got)
-		}
-	}
-}
-
-func TestMediatedModesEmitNoWarning(t *testing.T) {
-	for _, mode := range []string{"user", "isolated", ""} {
-		var buf bytes.Buffer
-		warnIfUnmediatedNetwork(&buf, mode)
-		if buf.Len() != 0 {
-			t.Fatalf("mode %q emitted a warning: %q", mode, buf.String())
+func TestRequestForCommandRejectsRemovedNetworkModes(t *testing.T) {
+	for _, mode := range []string{"bridged", "nat", "named"} {
+		_, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
+			"--id", "agent-1",
+			"--kernel", "/tmp/kernel",
+			"--rootfs", "/tmp/rootfs.ext4",
+			"--state-dir", "/tmp/state",
+			"--backend", hostBackend(),
+			"--network", mode,
+		}))
+		if err == nil {
+			t.Fatalf("requestForCommand accepted removed network mode %q", mode)
 		}
 	}
 }
@@ -1481,13 +1428,11 @@ func captureHelp(t *testing.T, print func(*os.File)) string {
 	return out
 }
 
-// TestNetworkFlagHelpAgreesOnModeSet guards the drift that existed before this
-// change: the several --network help strings disagreed on which modes they
-// advertised. Every workspace-facing --network help must advertise exactly
-// {user, nat, isolated, named}, name the user-vs-nat trade-off, and never
-// re-advertise the quarantined bridged mode.
+// TestNetworkFlagHelpAgreesOnModeSet guards against drift across the several
+// --network help strings: every workspace-facing --network help must advertise
+// exactly {user, isolated} and never re-advertise a removed mode.
 func TestNetworkFlagHelpAgreesOnModeSet(t *testing.T) {
-	workspaceModes := []string{"user", "nat", "isolated", "named"}
+	workspaceModes := []string{"user", "isolated"}
 
 	// Flag help constants used by requestForCommand and parseWorkspaceOptions.
 	for _, c := range []struct {
@@ -1497,8 +1442,7 @@ func TestNetworkFlagHelpAgreesOnModeSet(t *testing.T) {
 		{"networkModeFlagHelp", networkModeFlagHelp},
 	} {
 		assertAdvertisesModes(t, c.name, c.help, workspaceModes)
-		assertTradeoffNamed(t, c.name, c.help)
-		assertExcludesBridged(t, c.name, c.help)
+		assertExcludesRemovedModes(t, c.name, c.help)
 	}
 
 	// Heredoc help text printed by the workspace-facing help commands.
@@ -1515,27 +1459,17 @@ func TestNetworkFlagHelpAgreesOnModeSet(t *testing.T) {
 			t.Fatalf("%s: no -network help block found", c.name)
 		}
 		assertAdvertisesModes(t, c.name, help, workspaceModes)
-		assertTradeoffNamed(t, c.name, help)
-		assertExcludesBridged(t, c.name, help)
+		assertExcludesRemovedModes(t, c.name, help)
 	}
 
-	// The perf/measured-boot help advertises the disposable-workspace subset
-	// (no named), but must still name the user-vs-nat trade-off and exclude
-	// bridged so the modes stay consistent with the workspace help.
-	perfModes := []string{"user", "nat", "isolated"}
-	assertAdvertisesModes(t, "networkModePerfFlagHelp", networkModePerfFlagHelp, perfModes)
-	assertTradeoffNamed(t, "networkModePerfFlagHelp", networkModePerfFlagHelp)
-	assertExcludesBridged(t, "networkModePerfFlagHelp", networkModePerfFlagHelp)
-	if strings.Contains(networkModePerfFlagHelp, "named") {
-		t.Fatalf("networkModePerfFlagHelp advertises named; measured boots run disposable workspaces: %q", networkModePerfFlagHelp)
-	}
+	assertAdvertisesModes(t, "networkModePerfFlagHelp", networkModePerfFlagHelp, workspaceModes)
+	assertExcludesRemovedModes(t, "networkModePerfFlagHelp", networkModePerfFlagHelp)
 	perfHelp := networkHelpBlock(captureHelp(t, printPerfHelp))
 	if perfHelp == "" {
 		t.Fatal("printPerfHelp: no -network help block found")
 	}
-	assertAdvertisesModes(t, "printPerfHelp", perfHelp, perfModes)
-	assertTradeoffNamed(t, "printPerfHelp", perfHelp)
-	assertExcludesBridged(t, "printPerfHelp", perfHelp)
+	assertAdvertisesModes(t, "printPerfHelp", perfHelp, workspaceModes)
+	assertExcludesRemovedModes(t, "printPerfHelp", perfHelp)
 }
 
 // networkHelpBlock extracts the -network option help (its line plus any
@@ -1571,20 +1505,12 @@ func assertAdvertisesModes(t *testing.T, name, help string, modes []string) {
 	}
 }
 
-func assertTradeoffNamed(t *testing.T, name, help string) {
+func assertExcludesRemovedModes(t *testing.T, name, help string) {
 	t.Helper()
-	if !strings.Contains(help, "rootless") {
-		t.Fatalf("%s does not name the user (rootless) trade-off: %q", name, help)
-	}
-	if !strings.Contains(help, "kernel-speed") {
-		t.Fatalf("%s does not name the nat (kernel-speed) trade-off: %q", name, help)
-	}
-}
-
-func assertExcludesBridged(t *testing.T, name, help string) {
-	t.Helper()
-	if strings.Contains(help, "bridged") {
-		t.Fatalf("%s re-advertises the quarantined bridged mode: %q", name, help)
+	for _, mode := range []string{"bridged", "nat", "named"} {
+		if strings.Contains(help, mode) {
+			t.Fatalf("%s re-advertises the removed %q mode: %q", name, mode, help)
+		}
 	}
 }
 
@@ -2721,28 +2647,12 @@ func TestParseWorkspaceOptionsRejectsUnsupportedVolumeSource(t *testing.T) {
 	}
 }
 
-func TestParseWorkspaceOptionsNetworkNameImpliesNamedMode(t *testing.T) {
-	opts, err := parseWorkspaceOptions("create", []string{
-		"research",
-		"--network-name", "devnet",
-		"--unsupported", // named is gated as not-reliably-mediated
-	})
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if opts.Network.Mode != "named" || opts.Network.Name != "devnet" {
-		t.Fatalf("expected named mode for devnet, got mode=%q name=%q", opts.Network.Mode, opts.Network.Name)
-	}
-}
-
-func TestParseWorkspaceOptionsNetworkNameConflictsWithMode(t *testing.T) {
-	_, err := parseWorkspaceOptions("create", []string{
-		"research",
-		"--network", "nat",
-		"--network-name", "devnet",
-	})
-	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
-		t.Fatalf("err = %v, want named/mode conflict", err)
+func TestParseWorkspaceOptionsRejectsRemovedNetworkModes(t *testing.T) {
+	for _, mode := range []string{"bridged", "nat", "named"} {
+		_, err := parseWorkspaceOptions("create", []string{"research", "--network", mode})
+		if err == nil {
+			t.Fatalf("parseWorkspaceOptions accepted removed network mode %q", mode)
+		}
 	}
 }
 
@@ -2842,8 +2752,7 @@ resources:
   cpuCount: 3
   sizeMiB: 12288
 network:
-  mode: nat
-  unsupported: true
+  mode: user
   forwards:
     - host: 127.0.0.1
       hostPort: 8080
@@ -2905,7 +2814,7 @@ files:
 	if opts.MemoryMiB != 3072 || opts.CPUCount != 3 || opts.SizeMiB != 12288 {
 		t.Fatalf("resources = memory %d cpus %d size %d", opts.MemoryMiB, opts.CPUCount, opts.SizeMiB)
 	}
-	if opts.Network.Mode != "nat" || len(opts.Network.PortForwards) != 1 || opts.Network.PortForwards[0].HostPort != 8080 || len(opts.Network.DNS) != 1 {
+	if opts.Network.Mode != "user" || len(opts.Network.PortForwards) != 1 || opts.Network.PortForwards[0].HostPort != 8080 || len(opts.Network.DNS) != 1 {
 		t.Fatalf("network = %#v", opts.Network)
 	}
 	if opts.Mediation == nil || !opts.Mediation.Required || opts.Mediation.Port != 2048 || opts.Mediation.Target != "127.0.0.1:9900" {
@@ -3718,7 +3627,7 @@ func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
 		CPUCount:      2,
 		SizeMiB:       1024,
 		Network: vmkit.NetworkConfig{
-			Mode: "nat",
+			Mode: "user",
 			PortForwards: []vmkit.PortForward{
 				{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
 			},
@@ -3733,7 +3642,7 @@ func TestRunNetworkReportsManifestAndRuntimeNetwork(t *testing.T) {
 			KernelPath: "/tmp/kernel",
 			RootfsPath: "/tmp/rootfs.ext4",
 			StateDir:   dir,
-			Network:    &vmkit.NetworkConfig{Mode: "nat", IP: "192.168.64.2", Routes: []string{"0.0.0.0/0"}},
+			Network:    &vmkit.NetworkConfig{Mode: "user", IP: "192.168.64.2", Routes: []string{"0.0.0.0/0"}},
 		},
 	}
 	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
@@ -3892,7 +3801,7 @@ func TestStatusReportsRuntimeNetworkAssignment(t *testing.T) {
 		MemoryMiB:     512,
 		CPUCount:      2,
 		SizeMiB:       1024,
-		Network:       vmkit.NetworkConfig{Mode: "nat"},
+		Network:       vmkit.NetworkConfig{Mode: "user"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3903,7 +3812,7 @@ func TestStatusReportsRuntimeNetworkAssignment(t *testing.T) {
 			RootfsPath: "/tmp/rootfs.ext4",
 			StateDir:   dir,
 			Network: &vmkit.NetworkConfig{
-				Mode:    "nat",
+				Mode:    "user",
 				IP:      "10.43.12.2/29",
 				Subnet:  "10.43.12.0/29",
 				Gateway: "10.43.12.1",
@@ -5922,165 +5831,6 @@ func TestWindowsHyperVExecSmoke(t *testing.T) {
 	}
 }
 
-// windowsHostElevated reports whether the current process holds the local
-// administrator rights that creating a private HNS network requires. `net
-// session` only succeeds for an elevated token, matching the e2e-lib gate.
-func windowsHostElevated() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	return exec.CommandContext(ctx, "net", "session").Run() == nil
-}
-
-// namedNetworkMemberIP reads a workspace's allocated address on a named network
-// straight from the backend-neutral registry index, the same source the
-// firecracker named-network e2e inspects.
-func namedNetworkMemberIP(t *testing.T, stateDir, networkName, workspace string) string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(stateDir, "networks", "index.json"))
-	if err != nil {
-		t.Fatalf("read network index: %v", err)
-	}
-	var idx struct {
-		Networks []struct {
-			Name    string `json:"name"`
-			Members []struct {
-				Workspace string `json:"workspace"`
-				IP        string `json:"ip"`
-			} `json:"members"`
-		} `json:"networks"`
-	}
-	if err := json.Unmarshal(data, &idx); err != nil {
-		t.Fatalf("parse network index: %v\n%s", err, data)
-	}
-	for _, n := range idx.Networks {
-		if n.Name != networkName {
-			continue
-		}
-		for _, m := range n.Members {
-			if m.Workspace == workspace {
-				return m.IP
-			}
-		}
-	}
-	return ""
-}
-
-// TestWindowsHyperVNamedNetworkSmoke proves the windows-hyperv named-network
-// path end to end on a real Hyper-V host: `network create`, two workspaces join
-// the same private network with `--network-name`, each gets a distinct stable
-// 10.44.x member IP on a shared HNS network, and one reaches the other by IP
-// over the guest NIC. The network is private (no NAT egress), so this exercises
-// the static-IPAM HNS realization, not the managed NAT path. Creating the
-// private HNS network needs elevation, so the smoke skips when the host token is
-// not elevated rather than failing closed on a permission error.
-func TestWindowsHyperVNamedNetworkSmoke(t *testing.T) {
-	if os.Getenv("MICROAGENT_WINDOWS_HYPERV_SMOKE") != "1" {
-		t.Skip("set MICROAGENT_WINDOWS_HYPERV_SMOKE=1 to run the Windows Hyper-V named-network smoke test")
-	}
-	if !windowsHostElevated() {
-		t.Skip("named-network HNS realization requires an elevated (administrator) host")
-	}
-	kernelPath := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_KERNEL"))
-	if kernelPath == "" {
-		t.Fatal("MICROAGENT_WINDOWS_HYPERV_KERNEL is required")
-	}
-	imageRef := strings.TrimSpace(os.Getenv("MICROAGENT_WINDOWS_HYPERV_IMAGE"))
-	if imageRef == "" {
-		imageRef = "docker.io/library/busybox:1.36"
-	}
-	dir := t.TempDir()
-	cliPath := filepath.Join(dir, "microagent.exe")
-	guestInitPath := filepath.Join(dir, "microagent-guestinit")
-	buildCmd(t, filepath.Join("..", ".."), cliPath, "./cmd/microagent", "", "")
-	buildCmd(t, filepath.Join("..", ".."), guestInitPath, "./cmd/microagent-guestinit", "linux", "amd64")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
-	defer cancel()
-
-	netName := "whvnet"
-	netSubnet := "10.44.91.0/24"
-	suffix := time.Now().UnixNano() % 1000000000
-	web := fmt.Sprintf("whv-net-web-%d", suffix)
-	db := fmt.Sprintf("whv-net-db-%d", suffix)
-
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		defer cleanupCancel()
-		for _, ws := range []string{web, db} {
-			_, _ = runExternalOutput(cleanupCtx, cliPath, "kill", ws, "--state-dir", dir)
-			_, _ = runExternalOutput(cleanupCtx, cliPath, "delete", ws, "--state-dir", dir, "--yes", "--force")
-		}
-		_, _ = runExternalOutput(cleanupCtx, cliPath, "network", "delete", netName, "--state-dir", dir, "--force")
-	})
-
-	runExternal(t, ctx, cliPath, "network", "create", netName, "--subnet", netSubnet, "--state-dir", dir)
-
-	for _, ws := range []string{web, db} {
-		workspaceOpts := workspace.Options{
-			Name:            ws,
-			Backend:         vmkit.BackendWindowsHyperV,
-			Architecture:    "amd64",
-			StateDir:        dir,
-			KernelPath:      kernelPath,
-			GuestInitPath:   guestInitPath,
-			ImageRef:        imageRef,
-			ServiceCommand:  "sleep 600",
-			PrepareForStart: true,
-			MemoryMiB:       512,
-			CPUCount:        2,
-			Network:         vmkit.NetworkConfig{Mode: "named", Name: netName},
-		}
-		if _, err := workspace.BuildRootfs(ctx, workspaceOpts); err != nil {
-			t.Fatalf("BuildRootfs %s: %v", ws, err)
-		}
-		if err := workspace.WriteManifest(workspaceOpts); err != nil {
-			t.Fatalf("WriteManifest %s: %v", ws, err)
-		}
-		runExternal(t, ctx, cliPath, "start", ws, "--state-dir", dir, "--kernel", kernelPath)
-		waitForWorkspaceState(t, dir, ws, vmkit.StateRunning, 45*time.Second)
-		execReadyDeadline := time.Now().Add(60 * time.Second)
-		for {
-			status, err := workspace.Status(workspace.Options{Name: ws, Backend: vmkit.BackendWindowsHyperV, StateDir: dir})
-			if err != nil {
-				t.Fatalf("Status %s: %v", ws, err)
-			}
-			if status.Readiness != nil && status.Readiness.ExecReady.Ready {
-				break
-			}
-			if time.Now().After(execReadyDeadline) {
-				logWindowsHyperVSmokeState(t, dir, ws)
-				t.Fatalf("%s exec readiness = %#v", ws, status.Readiness)
-			}
-			time.Sleep(500 * time.Millisecond)
-		}
-	}
-
-	webIP := namedNetworkMemberIP(t, dir, netName, web)
-	dbIP := namedNetworkMemberIP(t, dir, netName, db)
-	if webIP == "" || dbIP == "" {
-		t.Fatalf("members did not receive stable IPs: web=%q db=%q", webIP, dbIP)
-	}
-	if webIP == dbIP {
-		t.Fatalf("members share an address %q, want distinct IPs", webIP)
-	}
-	for _, ip := range []string{webIP, dbIP} {
-		if !strings.HasPrefix(ip, "10.44.91.") {
-			t.Fatalf("member IP %q is outside the network subnet %s", ip, netSubnet)
-		}
-	}
-
-	// Cross-VM reachability over the shared private HNS network: web pings db's
-	// member IP. The guest NIC may settle a moment after the exec service, so
-	// allow a brief retry window inside the guest.
-	out := runExternal(t, ctx, cliPath, "exec", web, "--state-dir", dir, "--",
-		"sh", "-c", fmt.Sprintf(`for i in $(seq 1 10); do ping -c2 -w5 %s >/tmp/p 2>&1 && { echo PING_OK; cat /tmp/p; exit 0; }; sleep 1; done; echo PING_FAIL; cat /tmp/p; exit 1`, dbIP))
-	if !strings.Contains(string(out), "PING_OK") {
-		logWindowsHyperVSmokeState(t, dir, web)
-		logWindowsHyperVSmokeState(t, dir, db)
-		t.Fatalf("cross-VM ping web(%s) -> db(%s) failed:\n%s", webIP, dbIP, out)
-	}
-}
-
 func TestResolveModelRunnerCustomCommandAllowsEnvMetadata(t *testing.T) {
 	t.Setenv(modelrunner.EnvModelRunnerName, "runner-x")
 	t.Setenv(modelrunner.EnvModelRunnerHealthPath, "/ready")
@@ -7859,12 +7609,10 @@ func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
 		OK:      true,
 		Backend: "linux-kvm",
 		Host: &vmkit.HostSupport{
-			Backend:                "linux-kvm",
-			Architecture:           "amd64",
-			IPForwardEnabled:       true,
-			IsolatedNetworkReady:   true,
-			UserNetworkReady:       true,
-			PrivilegedNetworkReady: false, // cap missing
+			Backend:              "linux-kvm",
+			Architecture:         "amd64",
+			IsolatedNetworkReady: true,
+			UserNetworkReady:     true,
 		},
 	}
 	if err := writeDoctorResponse(f, resp); err != nil {
@@ -7872,11 +7620,11 @@ func TestWriteDoctorResponseTextIncludesNetworkingSection(t *testing.T) {
 	}
 	data, _ := os.ReadFile(f.Name())
 	out := string(data)
-	if !strings.Contains(out, "Networking:") {
-		t.Errorf("expected a Networking section, got:\n%s", out)
+	if !strings.Contains(out, "Networking: isolated ready, user ready") {
+		t.Errorf("expected a Networking section advertising isolated+user, got:\n%s", out)
 	}
-	if !strings.Contains(out, "setup-networking") {
-		t.Errorf("expected remediation hint, got:\n%s", out)
+	if strings.Contains(out, "setup-networking") {
+		t.Errorf("doctor must not reference the removed setup-networking command, got:\n%s", out)
 	}
 }
 
@@ -7907,7 +7655,7 @@ func TestWriteDoctorResponseTextAppleVFNetworkingDoesNotSuggestLinuxSetup(t *tes
 	}
 	data, _ := os.ReadFile(f.Name())
 	out := string(data)
-	if !strings.Contains(out, "Networking: isolated ready, user/nat ready") {
+	if !strings.Contains(out, "Networking: isolated ready, user ready") {
 		t.Errorf("expected apple-vf networking readiness, got:\n%s", out)
 	}
 	if strings.Contains(out, "setup-networking") {

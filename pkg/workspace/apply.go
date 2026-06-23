@@ -159,7 +159,6 @@ func LivePortForwardHostOnlyChange(oldNetwork, newNetwork vmkit.NetworkConfig) b
 	oldNetwork = NormalizeNetworkConfig(oldNetwork)
 	newNetwork = NormalizeNetworkConfig(newNetwork)
 	if oldNetwork.Mode != newNetwork.Mode ||
-		oldNetwork.Interface != newNetwork.Interface ||
 		!reflect.DeepEqual(oldNetwork.DNS, newNetwork.DNS) ||
 		!reflect.DeepEqual(oldNetwork.Routes, newNetwork.Routes) ||
 		oldNetwork.IP != newNetwork.IP ||

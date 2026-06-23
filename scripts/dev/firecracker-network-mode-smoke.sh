@@ -16,8 +16,6 @@ cleanup() {
     "$CLI" delete user-smoke --state-dir "$STATE_DIR/user" >/dev/null 2>&1 || true
     "$CLI" stop isolated-smoke --state-dir "$STATE_DIR/isolated" >/dev/null 2>&1 || true
     "$CLI" delete isolated-smoke --state-dir "$STATE_DIR/isolated" >/dev/null 2>&1 || true
-    "$CLI" stop bridged-smoke --state-dir "$STATE_DIR/bridged" >/dev/null 2>&1 || true
-    "$CLI" delete bridged-smoke --state-dir "$STATE_DIR/bridged" >/dev/null 2>&1 || true
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_FIRECRACKER_NETWORK_SMOKE:-0}" != "1" ]; then
@@ -96,22 +94,21 @@ print(result["path"])
 PY
 )"
 
-if [ "$(id -u)" -ne 0 ]; then
-  "$CLI" run \
-    --backend linux-kvm \
-    --image "$IMAGE" \
-    --arch amd64 \
-    --exec "wget -qO- -T 10 http://example.com >/tmp/user.out && echo USER_OUTBOUND_READY || echo USER_OUTBOUND_FAILED" \
-    --kernel "$kernel_path" \
-    --guest-init "$GUEST_INIT" \
-    --state-dir "$STATE_DIR/user-run" \
-    --size-mib 128 \
-    --result-port 0 \
-    --timeout 30 \
-    --network user \
-    --keep >"$STATE_DIR/user.json"
+"$CLI" run \
+  --backend linux-kvm \
+  --image "$IMAGE" \
+  --arch amd64 \
+  --exec "wget -qO- -T 10 http://example.com >/tmp/user.out && echo USER_OUTBOUND_READY || echo USER_OUTBOUND_FAILED" \
+  --kernel "$kernel_path" \
+  --guest-init "$GUEST_INIT" \
+  --state-dir "$STATE_DIR/user-run" \
+  --size-mib 128 \
+  --result-port 0 \
+  --timeout 30 \
+  --network user \
+  --keep >"$STATE_DIR/user.json"
 
-  python3 - "$STATE_DIR/user.json" <<'PY'
+python3 - "$STATE_DIR/user.json" <<'PY'
 import json
 import sys
 
@@ -131,43 +128,6 @@ if runtime.get("mode") == "user" and runtime.get("ip") == "":
     raise SystemExit(runtime)
 PY
 
-  e2e_skip "nat and bridged portions of this smoke require root so the supervisor can pass CAP_NET_ADMIN to Firecracker"
-fi
-
-"$CLI" run \
-  --backend linux-kvm \
-  --image "$IMAGE" \
-  --arch amd64 \
-  --exec "wget -qO- -T 10 http://example.com >/tmp/nat.out && echo NAT_OUTBOUND_READY || echo NAT_OUTBOUND_FAILED" \
-  --kernel "$kernel_path" \
-  --guest-init "$GUEST_INIT" \
-  --state-dir "$STATE_DIR/nat-run" \
-  --size-mib 128 \
-  --result-port 0 \
-  --timeout 30 \
-  --network nat \
-  --keep >"$STATE_DIR/nat.json"
-
-python3 - "$STATE_DIR/nat.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    result = json.load(f)
-if result["response"]["event"]["state"] != "stopped":
-    raise SystemExit(result)
-stdout = (result.get("result") or {}).get("stdout") or ""
-if "NAT_OUTBOUND_FAILED" in stdout:
-    raise SystemExit(stdout)
-if "NAT_OUTBOUND_READY" not in stdout:
-    raise SystemExit(stdout)
-if result["network"]["mode"] != "nat":
-    raise SystemExit(result["network"])
-runtime = ((result.get("response") or {}).get("network") or {})
-if runtime.get("mode") == "nat" and runtime.get("ip") == "":
-    raise SystemExit(runtime)
-PY
-
 if "$CLI" create isolated-publish \
   --image "$IMAGE" \
   --arch amd64 \
@@ -181,7 +141,7 @@ if "$CLI" create isolated-publish \
   echo "isolated publish unexpectedly succeeded" >&2
   exit 1
 fi
-grep -q "network.portForwards require user, nat, or bridged mode" "$STATE_DIR/isolated-publish.err"
+grep -q "network.portForwards require user mode" "$STATE_DIR/isolated-publish.err"
 
 "$CLI" create isolated-smoke \
   --image "$IMAGE" \
@@ -226,88 +186,4 @@ if not any(entry["name"] == "isolated-smoke" and entry["network"] == "isolated" 
     raise SystemExit(ps)
 PY
 
-if "$CLI" create bridged-missing-interface \
-  --image "$IMAGE" \
-  --arch amd64 \
-  --kernel "$kernel_path" \
-  --guest-init "$GUEST_INIT" \
-  --state-dir "$STATE_DIR/bridged-missing" \
-  --size-mib 128 \
-  --result-port 0 \
-  --network bridged >"$STATE_DIR/bridged-missing.json" 2>"$STATE_DIR/bridged-missing.err"; then
-  echo "bridged missing interface unexpectedly succeeded" >&2
-  exit 1
-fi
-python3 - "$STATE_DIR/bridged-missing.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    result = json.load(f)
-err = result.get("response", {}).get("error", "")
-if result.get("response", {}).get("ok") is not False:
-    raise SystemExit(result)
-if "firecracker network.interface is required for bridged mode" not in err:
-    raise SystemExit(result)
-PY
-
-BRIDGE_RESULT="host-prerequisite-not-configured"
-if [ -n "${MICROAGENT_FIRECRACKER_BRIDGE_INTERFACE:-}" ]; then
-  bridge="$MICROAGENT_FIRECRACKER_BRIDGE_INTERFACE"
-  "$CLI" run \
-    --backend linux-kvm \
-    --image "$IMAGE" \
-    --arch amd64 \
-    --exec "echo BRIDGED_READY" \
-    --kernel "$kernel_path" \
-    --guest-init "$GUEST_INIT" \
-    --state-dir "$STATE_DIR/bridged" \
-    --size-mib 128 \
-    --result-port 0 \
-    --timeout 30 \
-    --network bridged \
-    --network-interface "$bridge" \
-    --keep >"$STATE_DIR/bridged.json"
-  python3 - "$STATE_DIR/bridged.json" "$bridge" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    result = json.load(f)
-if result["response"]["event"]["state"] != "stopped":
-    raise SystemExit(result)
-if "BRIDGED_READY" not in result["serial_log"]:
-    raise SystemExit(result["serial_log"])
-if result["network"]["mode"] != "bridged" or result["network"].get("interface") != sys.argv[2]:
-    raise SystemExit(result["network"])
-PY
-  BRIDGE_RESULT="booted-on-$bridge"
-else
-  if "$CLI" create bridged-nonbridge \
-    --image "$IMAGE" \
-    --arch amd64 \
-    --kernel "$kernel_path" \
-    --guest-init "$GUEST_INIT" \
-    --state-dir "$STATE_DIR/bridged-nonbridge" \
-    --size-mib 128 \
-    --result-port 0 \
-    --network bridged \
-    --network-interface lo >"$STATE_DIR/bridged-nonbridge.json" 2>"$STATE_DIR/bridged-nonbridge.err"; then
-    echo "bridged nonbridge interface unexpectedly succeeded" >&2
-    exit 1
-  fi
-  python3 - "$STATE_DIR/bridged-nonbridge.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    result = json.load(f)
-err = result.get("response", {}).get("error", "")
-if result.get("response", {}).get("ok") is not False:
-    raise SystemExit(result)
-if 'firecracker bridged network.interface "lo" must be a Linux bridge' not in err:
-    raise SystemExit(result)
-PY
-fi
-
-echo "firecracker network mode smoke passed; bridged $BRIDGE_RESULT"
+echo "firecracker network mode smoke passed"

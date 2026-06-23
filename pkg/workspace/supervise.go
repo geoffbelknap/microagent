@@ -234,7 +234,7 @@ func supervisedOptions(opts SuperviseOptions) (Options, error) {
 		workspaceOpts.Profile = manifest.Profile
 	}
 	workspaceOpts.RestartPolicy = NormalizeRestartPolicy(manifest.Restart)
-	if manifest.Network.Mode != "" || manifest.Network.Interface != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" {
+	if manifest.Network.Mode != "" || len(manifest.Network.PortForwards) != 0 || len(manifest.Network.DNS) != 0 || len(manifest.Network.Routes) != 0 || manifest.Network.IP != "" || manifest.Network.Subnet != "" || manifest.Network.Gateway != "" {
 		workspaceOpts.Network = NetworkConfigFromSpec(manifest.Network)
 	}
 	if manifest.Resources.MemoryMiB != 0 {

@@ -4,7 +4,7 @@ description: How microagent captures, audits, and controls everything a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-22_
+_Last updated: 2026-06-23_
 
 Egress mediation is microagent's transparent control point for **everything a
 workspace sends to the network**. The host captures the guest's outbound
@@ -21,11 +21,9 @@ to?" and, when you want it, "what is it allowed to talk to?".
 > word "mediation". See [networking](/concepts/networking/#mediation-channel) for
 > the channel.
 
-Egress mediation is implemented by the Firecracker backend on Linux. It does not
-apply to the [unsupported `bridged` mode](/concepts/networking/), which gives the
-guest its own L2 presence and bypasses mediation entirely - that is exactly why
-`bridged` is hidden, requires `--unsupported`, and is outside microagent's
-security model.
+Egress mediation is implemented by the Firecracker backend on Linux. It runs in
+the [`user` network mode](/concepts/networking/)'s per-VM user namespace, the
+only mode that carries network egress.
 
 > **Migration note (behavior change):** the default egress mode changed from
 > `mediated` to `guarded`. Workspaces that omit `--egress` now deny internal
@@ -130,35 +128,36 @@ Mediation is not TCP-only. Under `guarded`, `mediated`, and `strict`:
   before any connection is even attempted.**
 
 Destinations are policed by **hostname**, not just IP: the SNI of a TLS
-connection, the HTTP `Host` header, a name the guest resolved through the
-mediator, or - on a [named network](/concepts/networking/#named-networks) - a
-peer workspace's name. Guest IPv4 traffic that is neither TCP nor UDP (ICMP and
+connection, the HTTP `Host` header, or a name the guest resolved through the
+mediator. Guest IPv4 traffic that is neither TCP nor UDP (ICMP and
 the like) carries no allowlistable destination and is dropped and audited rather
 than forwarded. Guest IPv6 egress is dropped fail-closed while v4-only mediation
 ships, so nothing slips past the v4 capture.
 
 ### Host requirement: TPROXY (and fail-closed)
 
-UDP and DNS mediation depend on the host's TPROXY netfilter modules
-(`nft_tproxy`, `nf_tproxy_ipv4`, `xt_socket`, `nf_socket_ipv4`) and a few kernel
-sysctls. A rootless workspace cannot load these itself, so:
+UDP and DNS mediation run inside the workspace's own user namespace and depend
+on the host's TPROXY netfilter modules (`nft_tproxy`, `nf_tproxy_ipv4`,
+`xt_socket`, `nf_socket_ipv4`). A rootless workspace cannot load these itself,
+so:
 
 - [`microagent doctor`](/cli/doctor/) reports whether the TPROXY modules are
   loaded or built in.
-- [`microagent host setup-networking`](/cli/host/) loads the modules and sets the
-  sysctls once, as root.
+- Load the modules once, as root, with
+  `sudo modprobe nft_tproxy nf_tproxy_ipv4 xt_socket nf_socket_ipv4`. With the
+  modules present, the workspace's netns installs its own TPROXY rules.
 
 If a `guarded`, `mediated`, or `strict` workspace lands on a host where TPROXY
 is not available, the workspace **fails closed - it refuses to start** rather
 than running with an unmediated UDP/DNS channel. The error names the fix:
 
 ```text
-egress: UDP mediation (TPROXY) unavailable for workspace research — run 'microagent host setup-networking' or use --egress off
+egress: UDP mediation (TPROXY) unavailable for workspace research — load the TPROXY kernel modules or use --egress off
 ```
 
-Run `microagent host setup-networking`, or drop to `--egress off` if you
-genuinely want no mediation. This fail-closed behavior is the point: an
-enforcement failure can never silently widen what the agent can do.
+Load the TPROXY kernel modules, or drop to `--egress off` if you genuinely want
+no mediation. This fail-closed behavior is the point: an enforcement failure can
+never silently widen what the agent can do.
 
 ## Allow vs passthrough
 

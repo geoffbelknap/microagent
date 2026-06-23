@@ -1,5 +1,4 @@
 import Foundation
-import Security
 #if canImport(ObjectiveC)
 import ObjectiveC
 #endif
@@ -71,15 +70,12 @@ struct MediationConfig: Codable {
 
 struct NetworkConfig: Codable {
     var mode: String
-    var interface: String?
-    var name: String?
     var portForwards: [PortForward]?
     var dns: [String]?
     var routes: [String]?
     var ip: String?
     var subnet: String?
     var gateway: String?
-    var hosts: [String]?
 }
 
 struct PortForward: Codable {
@@ -248,8 +244,6 @@ let maxResultSocketBytes = 16 * 1024 * 1024
 let secretsListenerTarget = "secrets://serve"
 let secretsProtocolVersion = "secrets.v1"
 let maxSecretsMessageBytes = 8 * 1024 * 1024
-let namedNetworkSwitchPrefix = "microagent-net-"
-let namedNetworkSwitchIdleSeconds: TimeInterval = 30
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
 let encoder = JSONEncoder()
@@ -268,68 +262,6 @@ struct RuntimeState: Codable {
     var error: String?
 }
 
-struct NamedNetworkMember: Codable {
-    var workspace: String
-    var ip: String
-}
-
-struct NamedNetworkRecord: Codable {
-    var name: String
-    var subnet: String
-    var gateway: String
-    var createdAt: String?
-    var members: [NamedNetworkMember]?
-
-    enum CodingKeys: String, CodingKey {
-        case name
-        case subnet
-        case gateway
-        case createdAt = "created_at"
-        case members
-    }
-}
-
-struct NamedNetworkIndex: Codable {
-    var networks: [NamedNetworkRecord]
-}
-
-struct NamedNetworkSwitchSpec: Codable {
-    var name: String
-    var socketPath: String
-}
-
-struct IPv4Prefix {
-    var network: UInt32
-    var bits: Int
-
-    var firstHost: UInt32 {
-        network + 1
-    }
-
-    var lastUsableHost: UInt32 {
-        if bits >= 31 {
-            return network
-        }
-        return broadcast - 1
-    }
-
-    var broadcast: UInt32 {
-        network | ~mask
-    }
-
-    var mask: UInt32 {
-        bits == 0 ? 0 : UInt32.max << UInt32(32 - bits)
-    }
-
-    func contains(_ ip: UInt32) -> Bool {
-        (ip & mask) == network
-    }
-}
-
-struct NamedNetworkRuntime {
-    var config: NetworkConfig
-}
-
 struct ApplyAck: Codable {
     var runtimeID: String
     var observedAt: String
@@ -338,7 +270,7 @@ struct ApplyAck: Codable {
 
 func main() -> Int32 {
     do {
-        if let code = try runUtilityCommandIfPresent() {
+        if let code = runUtilityCommandIfPresent() {
             return code
         }
         let request = try readRequest()
@@ -358,7 +290,7 @@ func main() -> Int32 {
     }
 }
 
-func runUtilityCommandIfPresent() throws -> Int32? {
+func runUtilityCommandIfPresent() -> Int32? {
     let args = Array(CommandLine.arguments.dropFirst())
     // --confinement-selfcheck applies the Seatbelt profile to this throwaway
     // process and exits 0 iff sandbox_init succeeds on this host. hostSupport()
@@ -367,12 +299,7 @@ func runUtilityCommandIfPresent() throws -> Int32? {
     if args == ["--confinement-selfcheck"] {
         return runConfinementSelfCheck()
     }
-    guard args.count == 2, args[0] == "--network-switch-json" else {
-        return nil
-    }
-    let spec = try decoder.decode(NamedNetworkSwitchSpec.self, from: Data(args[1].utf8))
-    try runNamedNetworkSwitch(spec: spec)
-    return 0
+    return nil
 }
 
 func readRequest() throws -> Request {
@@ -784,16 +711,10 @@ func validateNetworkConfig(_ network: NetworkConfig?) throws {
     }
     let mode = normalizedNetworkMode(network)
     switch mode {
-    case "user", "nat", "isolated", "bridged", "named":
+    case "user", "isolated":
         break
     default:
-        throw ProtocolError.invalid("network.mode must be user, nat, isolated, bridged, or named")
-    }
-    if mode == "named" {
-        let name = network.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if name.isEmpty {
-            throw ProtocolError.invalid("named network requires network.name")
-        }
+        throw ProtocolError.invalid("network.mode must be user or isolated")
     }
     let ip = network.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let gateway = network.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -803,32 +724,11 @@ func validateNetworkConfig(_ network: NetworkConfig?) throws {
             throw ProtocolError.invalid("Apple VF static networking requires network.ip and network.gateway")
         }
     }
-    #if canImport(Virtualization)
-    if mode == "bridged" {
-        if #available(macOS 13.0, *) {
-            // This code path is valid Virtualization.framework usage, but Apple
-            // gates it behind a restricted entitlement that open-source projects
-            // cannot self-sign into existence. Local sudo does not help.
-            guard hasEntitlement("com.apple.vm.networking") else {
-                throw ProtocolError.invalid("Apple VF bridged networking is blocked by Apple's restricted com.apple.vm.networking entitlement. Open-source builds cannot self-sign it, and sudo will not bypass the check.")
-            }
-            _ = try bridgedInterface(named: network.interface)
-        }
-    }
-    #endif
-}
-
-func hasEntitlement(_ name: String) -> Bool {
-    guard let task = SecTaskCreateFromSelf(nil),
-          let value = SecTaskCopyValueForEntitlement(task, name as CFString, nil) else {
-        return false
-    }
-    return (value as? Bool) == true
 }
 
 func normalizedNetworkMode(_ network: NetworkConfig?) -> String {
     let mode = network?.mode.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    return mode.isEmpty ? "nat" : mode
+    return mode.isEmpty ? "user" : mode
 }
 
 func stateConfig(_ config: Config?) throws -> Config {
@@ -2167,7 +2067,6 @@ func livePortForwardHostOnlyChange(oldConfig: Config, newConfig: Config) -> Bool
     let oldNetwork = oldConfig.network
     let newNetwork = newConfig.network
     if oldNetwork?.mode != newNetwork?.mode ||
-        oldNetwork?.interface != newNetwork?.interface ||
         (oldNetwork?.dns ?? []) != (newNetwork?.dns ?? []) ||
         (oldNetwork?.routes ?? []) != (newNetwork?.routes ?? []) ||
         oldNetwork?.ip != newNetwork?.ip {
@@ -2393,20 +2292,16 @@ func linuxKernelCommandLine(for config: Config) -> String {
         args.append("microagent_model_fwd=\(modelGuestPort):\(modelVsockPort)")
     }
     switch normalizedNetworkMode(config.network) {
-    case "user", "nat", "bridged", "named":
+    case "user":
         let ip = config.network?.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let gateway = config.network?.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let dns = config.network?.dns?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
-        let hosts = config.network?.hosts?.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } ?? []
         if !ip.isEmpty && !gateway.isEmpty {
             args.append("microagent_net_if=eth0")
             args.append("microagent_net_ip=\(ip)")
             args.append("microagent_net_gw=\(gateway)")
             if !dns.isEmpty {
                 args.append("microagent_net_dns=\(dns.joined(separator: ","))")
-            }
-            if !hosts.isEmpty {
-                args.append("microagent_net_hosts=\(hosts.joined(separator: ","))")
             }
         } else {
             args.append("ip=dhcp")
@@ -2530,462 +2425,25 @@ func guestExecPort(_ config: Config) -> UInt16 {
 }
 
 func runtimeConfigForStart(identity: Identity, config: Config) throws -> Config {
-    guard normalizedNetworkMode(config.network) == "named" else {
-        return config
-    }
-    var runtimeConfig = config
-    runtimeConfig.network = try namedNetworkRuntimeConfig(identity: identity, config: config).config
-    return runtimeConfig
-}
-
-func namedNetworkRuntimeConfig(identity: Identity, config: Config) throws -> NamedNetworkRuntime {
-    guard var network = config.network else {
-        throw ProtocolError.invalid("named network requires network config")
-    }
-    let name = network.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    if name.isEmpty {
-        throw ProtocolError.invalid("named network requires network.name")
-    }
-    let workspace = identity.runtimeID.trimmingCharacters(in: .whitespacesAndNewlines)
-    if workspace.isEmpty {
-        throw ProtocolError.invalid("named network requires identity.runtimeID")
-    }
-    var index = try readNamedNetworkIndex(stateDir: config.stateDir)
-    guard let recordIndex = index.networks.firstIndex(where: { $0.name == name }) else {
-        throw ProtocolError.invalid("join named network: network \(name) not found")
-    }
-    var record = index.networks[recordIndex]
-    let ip = try joinNamedNetwork(record: &record, workspace: workspace)
-    index.networks[recordIndex] = record
-    try writeNamedNetworkIndex(stateDir: config.stateDir, index: index)
-    let prefix = try parseIPv4Prefix(record.subnet)
-    network.mode = "named"
-    network.name = name
-    network.ip = "\(uint32ToIPv4(ip))/\(prefix.bits)"
-    network.subnet = record.subnet
-    network.gateway = record.gateway
-    network.hosts = namedNetworkHosts(record)
-    return NamedNetworkRuntime(config: network)
-}
-
-func namedNetworkIndexPath(stateDir: String) -> URL {
-    URL(fileURLWithPath: stateDir).appendingPathComponent("networks").appendingPathComponent("index.json")
-}
-
-func readNamedNetworkIndex(stateDir: String) throws -> NamedNetworkIndex {
-    let path = namedNetworkIndexPath(stateDir: stateDir)
-    if !FileManager.default.fileExists(atPath: path.path) {
-        return NamedNetworkIndex(networks: [])
-    }
-    return try JSONDecoder().decode(NamedNetworkIndex.self, from: Data(contentsOf: path))
-}
-
-func writeNamedNetworkIndex(stateDir: String, index: NamedNetworkIndex) throws {
-    var sorted = index
-    sorted.networks.sort { $0.name < $1.name }
-    let path = namedNetworkIndexPath(stateDir: stateDir)
-    try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-    let localEncoder = JSONEncoder()
-    localEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    try localEncoder.encode(sorted).write(to: path, options: .atomic)
-}
-
-func joinNamedNetwork(record: inout NamedNetworkRecord, workspace: String) throws -> UInt32 {
-    let prefix = try parseIPv4Prefix(record.subnet)
-    for member in record.members ?? [] where member.workspace == workspace {
-        return try parseIPv4(member.ip)
-    }
-    let gateway = try parseIPv4(record.gateway)
-    var used = Set<UInt32>([gateway])
-    for member in record.members ?? [] {
-        if let ip = try? parseIPv4(member.ip) {
-            used.insert(ip)
-        }
-    }
-    var candidate = prefix.firstHost
-    while candidate <= prefix.lastUsableHost {
-        if prefix.contains(candidate) && !used.contains(candidate) {
-            var members = record.members ?? []
-            members.append(NamedNetworkMember(workspace: workspace, ip: uint32ToIPv4(candidate)))
-            record.members = members
-            return candidate
-        }
-        if candidate == UInt32.max {
-            break
-        }
-        candidate += 1
-    }
-    throw ProtocolError.invalid("network \(record.name) subnet \(record.subnet) has no free address")
-}
-
-func namedNetworkHosts(_ record: NamedNetworkRecord) -> [String] {
-    (record.members ?? []).map { "\($0.workspace):\($0.ip)" }
-}
-
-func parseIPv4Prefix(_ value: String) throws -> IPv4Prefix {
-    let parts = value.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "/", omittingEmptySubsequences: false)
-    guard parts.count == 2, let bits = Int(parts[1]), bits >= 0, bits <= 30 else {
-        throw ProtocolError.invalid("invalid IPv4 subnet \(value)")
-    }
-    let addr = try parseIPv4(String(parts[0]))
-    let mask = bits == 0 ? UInt32(0) : UInt32.max << UInt32(32 - bits)
-    return IPv4Prefix(network: addr & mask, bits: bits)
-}
-
-func parseIPv4(_ value: String) throws -> UInt32 {
-    let octets = value.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ".", omittingEmptySubsequences: false)
-    guard octets.count == 4 else {
-        throw ProtocolError.invalid("invalid IPv4 address \(value)")
-    }
-    var out: UInt32 = 0
-    for part in octets {
-        guard let n = UInt8(part) else {
-            throw ProtocolError.invalid("invalid IPv4 address \(value)")
-        }
-        out = (out << 8) | UInt32(n)
-    }
-    return out
-}
-
-func uint32ToIPv4(_ value: UInt32) -> String {
-    "\(UInt8((value >> 24) & 0xff)).\(UInt8((value >> 16) & 0xff)).\(UInt8((value >> 8) & 0xff)).\(UInt8(value & 0xff))"
-}
-
-func namedNetworkSocketKey(stateDir: String, name: String) -> String {
-    var hash: UInt64 = 14695981039346656037
-    for byte in (stateDir + "\u{0}" + name).utf8 {
-        hash ^= UInt64(byte)
-        hash &*= 1099511628211
-    }
-    return String(format: "%016llx", hash)
-}
-
-func namedNetworkSwitchSocketPath(stateDir: String, name: String) -> String {
-    "/tmp/\(namedNetworkSwitchPrefix)\(namedNetworkSocketKey(stateDir: stateDir, name: name)).sock"
-}
-
-func namedNetworkEndpointSocketPath(identity: Identity, config: Config, name: String) -> String {
-    let runtime = identity.runtimeID.filter { $0.isLetter || $0.isNumber || $0 == "-" }.prefix(40)
-    return "/tmp/\(namedNetworkSwitchPrefix)\(namedNetworkSocketKey(stateDir: config.stateDir, name: name))-\(runtime).sock"
-}
-
-func sockaddrPathLimit() -> Int {
-    MemoryLayout.size(ofValue: sockaddr_un().sun_path)
-}
-
-func withSockaddrUn<T>(path: String, _ body: (UnsafePointer<sockaddr>, socklen_t) throws -> T) throws -> T {
-    let bytes = Array(path.utf8)
-    guard bytes.count < sockaddrPathLimit() else {
-        throw ProtocolError.invalid("Unix socket path is too long: \(path)")
-    }
-    var addr = sockaddr_un()
-    #if canImport(Darwin)
-    let length = MemoryLayout.offset(of: \sockaddr_un.sun_path)! + bytes.count + 1
-    addr.sun_len = UInt8(length)
-    #else
-    let length = MemoryLayout.offset(of: \sockaddr_un.sun_path)! + bytes.count + 1
-    #endif
-    addr.sun_family = sa_family_t(AF_UNIX)
-    withUnsafeMutableBytes(of: &addr.sun_path) { raw in
-        for (idx, byte) in bytes.enumerated() {
-            raw[idx] = byte
-        }
-        raw[bytes.count] = 0
-    }
-    return try withUnsafePointer(to: &addr) { ptr in
-        try ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-            try body($0, socklen_t(length))
-        }
-    }
-}
-
-func sockaddrUnPath(_ addr: sockaddr_un, length: socklen_t) -> String {
-    let offset = MemoryLayout.offset(of: \sockaddr_un.sun_path)!
-    let count = max(0, min(Int(length) - offset, sockaddrPathLimit()))
-    if count == 0 {
-        return ""
-    }
-    var bytes: [UInt8] = []
-    var copy = addr
-    withUnsafeBytes(of: &copy.sun_path) { raw in
-        for idx in 0..<count {
-            let byte = raw[idx]
-            if byte == 0 {
-                break
-            }
-            bytes.append(byte)
-        }
-    }
-    return String(bytes: bytes, encoding: .utf8) ?? ""
-}
-
-func setSocketBuffer(fd: Int32, option: Int32, size: Int32) {
-    var value = size
-    _ = setsockopt(fd, SOL_SOCKET, option, &value, socklen_t(MemoryLayout<Int32>.size))
-}
-
-func connectedDatagramSocket(localPath: String, remotePath: String) throws -> Int32 {
-    let fd = socket(AF_UNIX, SOCK_DGRAM, 0)
-    if fd < 0 {
-        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-    }
-    do {
-        setSocketBuffer(fd: fd, option: SO_SNDBUF, size: 262144)
-        setSocketBuffer(fd: fd, option: SO_RCVBUF, size: 1048576)
-        _ = unlink(localPath)
-        try withSockaddrUn(path: localPath) { addr, len in
-            if bind(fd, addr, len) != 0 {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-        }
-        try withSockaddrUn(path: remotePath) { addr, len in
-            if connect(fd, addr, len) != 0 {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-        }
-        return fd
-    } catch {
-        close(fd)
-        _ = unlink(localPath)
-        throw error
-    }
-}
-
-func canConnectUnixDatagram(path: String) -> Bool {
-    let fd = socket(AF_UNIX, SOCK_DGRAM, 0)
-    if fd < 0 {
-        return false
-    }
-    defer { close(fd) }
-    return (try? withSockaddrUn(path: path) { addr, len in connect(fd, addr, len) == 0 }) ?? false
-}
-
-func ensureNamedNetworkSwitch(config: Config, name: String) throws -> String {
-    let socketPath = namedNetworkSwitchSocketPath(stateDir: config.stateDir, name: name)
-    if canConnectUnixDatagram(path: socketPath) {
-        return socketPath
-    }
-    let lockPath = "/tmp/\(namedNetworkSwitchPrefix)\(namedNetworkSocketKey(stateDir: config.stateDir, name: name)).lock"
-    let lockFD = open(lockPath, O_CREAT | O_RDWR, 0o600)
-    if lockFD < 0 {
-        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-    }
-    defer { close(lockFD) }
-    if flock(lockFD, LOCK_EX) != 0 {
-        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-    }
-    defer { _ = flock(lockFD, LOCK_UN) }
-    if canConnectUnixDatagram(path: socketPath) {
-        return socketPath
-    }
-    _ = unlink(socketPath)
-    let spec = NamedNetworkSwitchSpec(name: name, socketPath: socketPath)
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: currentExecutablePath())
-    process.arguments = ["--network-switch-json", try requestJSONValue(spec)]
-    process.standardInput = FileHandle.nullDevice
-    process.standardOutput = FileHandle.nullDevice
-    process.standardError = FileHandle.nullDevice
-    try process.run()
-    let deadline = Date().addingTimeInterval(2)
-    while Date() < deadline {
-        if canConnectUnixDatagram(path: socketPath) {
-            return socketPath
-        }
-        usleep(20_000)
-    }
-    throw ProtocolError.invalid("named network \(name) switch did not become ready")
-}
-
-func requestJSONValue<T: Encodable>(_ value: T) throws -> String {
-    let localEncoder = JSONEncoder()
-    localEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    let data = try localEncoder.encode(value)
-    return String(data: data, encoding: .utf8) ?? "{}"
-}
-
-@available(macOS 13.0, *)
-final class NamedNetworkFileHandleAttachment {
-    let socketPath: String
-    let fileHandle: FileHandle
-    let attachment: VZFileHandleNetworkDeviceAttachment
-
-    init(identity: Identity, config: Config, name: String) throws {
-        let switchPath = try ensureNamedNetworkSwitch(config: config, name: name)
-        socketPath = namedNetworkEndpointSocketPath(identity: identity, config: config, name: name)
-        let fd = try connectedDatagramSocket(localPath: socketPath, remotePath: switchPath)
-        fileHandle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: fileHandle)
-        attachment.maximumTransmissionUnit = 1500
-        _ = socketPath.withCString { ptr in
-            send(fd, ptr, 0, 0)
-        }
-    }
-
-    deinit {
-        _ = try? fileHandle.close()
-        _ = unlink(socketPath)
-    }
-}
-
-func runNamedNetworkSwitch(spec: NamedNetworkSwitchSpec) throws {
-    let fd = socket(AF_UNIX, SOCK_DGRAM, 0)
-    if fd < 0 {
-        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-    }
-    defer {
-        close(fd)
-        _ = unlink(spec.socketPath)
-    }
-    setSocketBuffer(fd: fd, option: SO_SNDBUF, size: 262144)
-    setSocketBuffer(fd: fd, option: SO_RCVBUF, size: 1048576)
-    _ = unlink(spec.socketPath)
-    try withSockaddrUn(path: spec.socketPath) { addr, len in
-        if bind(fd, addr, len) != 0 {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-        }
-    }
-    var endpoints = Set<String>()
-    var macTable: [String: String] = [:]
-    var lastEndpointAt = Date()
-    var timeout = timeval(tv_sec: Int(namedNetworkSwitchIdleSeconds), tv_usec: 0)
-    _ = setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-    var buffer = [UInt8](repeating: 0, count: 65535)
-    while true {
-        var from = sockaddr_un()
-        var fromLen = socklen_t(MemoryLayout<sockaddr_un>.size)
-        let n = withUnsafeMutablePointer(to: &from) { fromPtr in
-            fromPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
-                recvfrom(fd, &buffer, buffer.count, 0, sa, &fromLen)
-            }
-        }
-        if n < 0 {
-            if errno == EAGAIN || errno == EWOULDBLOCK {
-                endpoints = endpoints.filter { canConnectUnixDatagram(path: $0) }
-                if endpoints.isEmpty && Date().timeIntervalSince(lastEndpointAt) >= namedNetworkSwitchIdleSeconds {
-                    return
-                }
-                continue
-            }
-            if errno == EINTR {
-                continue
-            }
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-        }
-        let sender = sockaddrUnPath(from, length: fromLen)
-        if sender.isEmpty {
-            continue
-        }
-        endpoints.insert(sender)
-        lastEndpointAt = Date()
-        if n < 14 {
-            continue
-        }
-        let frame = Array(buffer[0..<n])
-        let dst = macString(frame[0..<6])
-        let src = macString(frame[6..<12])
-        macTable[src] = sender
-        let targets: [String]
-        if isBroadcastMAC(frame[0..<6]) || isMulticastMAC(frame[0..<6]) {
-            targets = endpoints.filter { $0 != sender }
-        } else if let known = macTable[dst], known != sender {
-            targets = [known]
-        } else {
-            targets = endpoints.filter { $0 != sender }
-        }
-        for target in targets {
-            do {
-                try sendDatagram(fd: fd, frame: frame, path: target)
-            } catch {
-                endpoints.remove(target)
-                macTable = macTable.filter { $0.value != target }
-            }
-        }
-    }
-}
-
-func sendDatagram(fd: Int32, frame: [UInt8], path: String) throws {
-    try frame.withUnsafeBytes { raw in
-        try withSockaddrUn(path: path) { addr, len in
-            let sent = sendto(fd, raw.baseAddress, frame.count, 0, addr, len)
-            if sent < 0 {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
-            }
-        }
-    }
-}
-
-func macString(_ bytes: ArraySlice<UInt8>) -> String {
-    bytes.map { String(format: "%02x", $0) }.joined(separator: ":")
-}
-
-func isBroadcastMAC(_ bytes: ArraySlice<UInt8>) -> Bool {
-    bytes.allSatisfy { $0 == 0xff }
-}
-
-func isMulticastMAC(_ bytes: ArraySlice<UInt8>) -> Bool {
-    guard let first = bytes.first else {
-        return false
-    }
-    return (first & 0x01) == 0x01
+    return config
 }
 
 @available(macOS 13.0, *)
 func networkDevices(for config: Config, identity: Identity) throws -> [VZVirtioNetworkDeviceConfiguration] {
     switch normalizedNetworkMode(config.network) {
-    case "user", "nat":
+    case "user":
         // Apple Virtualization.framework's VZNATNetworkDeviceAttachment runs in
         // user space inside the framework, so it already provides the
         // unprivileged outbound-only semantics that "user" mode promises on
-        // Linux via pasta. Map both "user" and "nat" to it on macOS.
+        // Linux via pasta.
         let device = VZVirtioNetworkDeviceConfiguration()
         device.attachment = VZNATNetworkDeviceAttachment()
         return [device]
     case "isolated":
         return []
-    case "bridged":
-        let device = VZVirtioNetworkDeviceConfiguration()
-        device.attachment = VZBridgedNetworkDeviceAttachment(interface: try bridgedInterface(named: config.network?.interface))
-        return [device]
-    case "named":
-        let name = config.network?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let fileHandleAttachment = try NamedNetworkFileHandleAttachment(identity: identity, config: config, name: name)
-        let device = VZVirtioNetworkDeviceConfiguration()
-        device.attachment = fileHandleAttachment.attachment
-        objc_setAssociatedObject(device, Unmanaged.passUnretained(device).toOpaque(), fileHandleAttachment, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        return [device]
     default:
-        throw ProtocolError.invalid("network.mode must be user, nat, isolated, bridged, or named")
+        throw ProtocolError.invalid("network.mode must be user or isolated")
     }
-}
-
-@available(macOS 13.0, *)
-func bridgedInterface(named rawName: String?) throws -> VZBridgedNetworkInterface {
-    let requested = rawName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    let interfaces = VZBridgedNetworkInterface.networkInterfaces
-    guard !interfaces.isEmpty else {
-        throw ProtocolError.invalid("no bridged network interfaces are available")
-    }
-    if requested.isEmpty {
-        let available = bridgedInterfaceList(interfaces)
-        throw ProtocolError.invalid("network.interface is required for bridged mode; available interfaces: \(available)")
-    }
-    if let match = interfaces.first(where: { $0.identifier == requested || $0.localizedDisplayName == requested }) {
-        return match
-    }
-    let available = bridgedInterfaceList(interfaces)
-    throw ProtocolError.invalid("bridged network interface \(requested) was not found; available interfaces: \(available)")
-}
-
-@available(macOS 13.0, *)
-func bridgedInterfaceList(_ interfaces: [VZBridgedNetworkInterface]) -> String {
-    interfaces.map { iface in
-        let displayName = iface.localizedDisplayName ?? ""
-        if displayName.isEmpty {
-            return iface.identifier
-        }
-        return "\(iface.identifier)(\(displayName))"
-    }.joined(separator: ", ")
 }
 
 func configureRawTerminal(_ fileHandle: FileHandle) {

@@ -19,7 +19,6 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
-	"golang.org/x/sys/unix"
 )
 
 func TestDialGuestVsockUsesFirecrackerConnectHandshake(t *testing.T) {
@@ -324,7 +323,7 @@ func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 			CPUCount:    2,
 			SerialInput: true,
 			Network: &vmkit.NetworkConfig{
-				Mode:   "nat",
+				Mode:   "user",
 				IP:     "10.43.1.2/29",
 				Subnet: "10.43.1.0/29",
 			},
@@ -373,7 +372,7 @@ func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 	if resp.Result == nil || resp.Result.ExitCode != 0 || resp.Result.CompletedAt != "2026-05-02T00:00:01Z" || resp.Result.Stdout != "ok\n" {
 		t.Fatalf("result = %#v", resp.Result)
 	}
-	if resp.Network == nil || resp.Network.Mode != "nat" || resp.Network.IP != "10.43.1.2/29" {
+	if resp.Network == nil || resp.Network.Mode != "user" || resp.Network.IP != "10.43.1.2/29" {
 		t.Fatalf("network = %#v", resp.Network)
 	}
 	if resp.Mediation == nil || !resp.Mediation.Required || !resp.Mediation.FailClosed {
@@ -423,10 +422,12 @@ func TestValidateFirecrackerConfigAcceptsUserNetworkMode(t *testing.T) {
 	}
 }
 
-func TestValidateFirecrackerConfigRejectsBridgedWithoutInterface(t *testing.T) {
-	err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: "bridged"}})
-	if err == nil || !strings.Contains(err.Error(), "network.interface is required") {
-		t.Fatalf("validateFirecrackerConfig err = %v", err)
+func TestValidateFirecrackerConfigRejectsRemovedNetworkModes(t *testing.T) {
+	for _, mode := range []string{"bridged", "nat", "named"} {
+		err := validateFirecrackerConfig(&vmkit.Config{Network: &vmkit.NetworkConfig{Mode: mode}})
+		if err == nil || !strings.Contains(err.Error(), "unsupported") {
+			t.Fatalf("validateFirecrackerConfig(%q) err = %v", mode, err)
+		}
 	}
 }
 
@@ -455,44 +456,7 @@ func TestSupervisorCheckAcceptsIsolatedFirecrackerNetworkMode(t *testing.T) {
 	}
 }
 
-func TestWriteConfigAddsBridgedNetworkInterface(t *testing.T) {
-	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
-	req := vmkit.Request{
-		Identity: &vmkit.Identity{
-			RequestID: "req-1",
-			RuntimeID: "agent-1",
-			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendLinuxKVM,
-		},
-		Config: &vmkit.Config{
-			KernelPath: "/tmp/kernel",
-			RootfsPath: "/tmp/rootfs.ext4",
-			StateDir:   opts.StateDir,
-			MemoryMiB:  512,
-			CPUCount:   2,
-			Network:    &vmkit.NetworkConfig{Mode: "bridged", Interface: "br0"},
-		},
-	}
-	if err := writeConfig(opts, req); err != nil {
-		t.Fatalf("writeConfig: %v", err)
-	}
-	var cfg config
-	data, err := os.ReadFile(configPath(opts))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.NetworkInterfaces) != 1 {
-		t.Fatalf("network interfaces = %#v", cfg.NetworkInterfaces)
-	}
-	if cfg.NetworkInterfaces[0].IfaceID != "eth0" || cfg.NetworkInterfaces[0].HostDevName == "" || cfg.NetworkInterfaces[0].GuestMAC == "" {
-		t.Fatalf("network interface = %#v", cfg.NetworkInterfaces[0])
-	}
-}
-
-func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
+func TestWriteConfigAddsUserNetworkInterfaceAndBootArgs(t *testing.T) {
 	opts := Options{Name: "agent-1", StateDir: t.TempDir()}
 	req := vmkit.Request{
 		Identity: &vmkit.Identity{
@@ -510,7 +474,7 @@ func TestWriteConfigAddsNATNetworkInterfaceAndBootArgs(t *testing.T) {
 			ShellPort:  24279,
 			ExecPort:   25279,
 			Network: &vmkit.NetworkConfig{
-				Mode:    "nat",
+				Mode:    "user",
 				IP:      "10.43.12.2/29",
 				Gateway: "10.43.12.1",
 				DNS:     []string{"1.1.1.1", "8.8.8.8"},
@@ -637,111 +601,16 @@ func TestFirecrackerNetworkSetupDoesNotExecIPOrIPTables(t *testing.T) {
 	}
 }
 
-func TestEnsureNetAdminInheritableRejectsMissingInheritable(t *testing.T) {
-	oldGetCaps := getProcessCapabilities
-	oldGetEUID := getEffectiveUID
-	oldAddInheritable := addInheritableCapability
-	t.Cleanup(func() {
-		getProcessCapabilities = oldGetCaps
-		getEffectiveUID = oldGetEUID
-		addInheritableCapability = oldAddInheritable
-	})
-	getEffectiveUID = func() int { return 1000 }
-	addInheritableCapability = func(int) error {
-		t.Fatal("addInheritableCapability called without CAP_SETPCAP")
-		return nil
+func TestFirecrackerSysProcAttrSetsPgidOnlyWhenDetached(t *testing.T) {
+	if attr := firecrackerSysProcAttr(false); attr != nil {
+		t.Fatalf("foreground attr = %#v", attr)
 	}
-	getProcessCapabilities = func() (processCapabilities, error) {
-		mask := uint64(1) << uint(unix.CAP_NET_ADMIN)
-		return processCapabilities{
-			Effective: mask,
-			Permitted: mask,
-		}, nil
-	}
-	err := ensureNetAdminInheritable()
-	if err == nil {
-		t.Fatal("ensureNetAdminInheritable accepted missing inheritable CAP_NET_ADMIN")
-	}
-	if !strings.Contains(err.Error(), "effective, permitted, and inheritable") || strings.Contains(err.Error(), "Operation not permitted") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestEnsureNetAdminInheritableAddsInheritableWithSetPCAP(t *testing.T) {
-	oldGetCaps := getProcessCapabilities
-	oldGetEUID := getEffectiveUID
-	oldAddInheritable := addInheritableCapability
-	t.Cleanup(func() {
-		getProcessCapabilities = oldGetCaps
-		getEffectiveUID = oldGetEUID
-		addInheritableCapability = oldAddInheritable
-	})
-	getEffectiveUID = func() int { return 1000 }
-	netAdmin := uint64(1) << uint(unix.CAP_NET_ADMIN)
-	setPCAP := uint64(1) << uint(unix.CAP_SETPCAP)
-	added := false
-	getProcessCapabilities = func() (processCapabilities, error) {
-		caps := processCapabilities{
-			Effective: netAdmin | setPCAP,
-			Permitted: netAdmin | setPCAP,
-		}
-		if added {
-			caps.Inheritable = netAdmin
-		}
-		return caps, nil
-	}
-	addInheritableCapability = func(capability int) error {
-		if capability != unix.CAP_NET_ADMIN {
-			t.Fatalf("capability = %d, want CAP_NET_ADMIN", capability)
-		}
-		added = true
-		return nil
-	}
-	if err := ensureNetAdminInheritable(); err != nil {
-		t.Fatalf("ensureNetAdminInheritable: %v", err)
-	}
-	if !added {
-		t.Fatal("addInheritableCapability was not called")
-	}
-}
-
-func TestEnsureNetAdminInheritableAcceptsEIP(t *testing.T) {
-	oldGetCaps := getProcessCapabilities
-	oldGetEUID := getEffectiveUID
-	oldAddInheritable := addInheritableCapability
-	t.Cleanup(func() {
-		getProcessCapabilities = oldGetCaps
-		getEffectiveUID = oldGetEUID
-		addInheritableCapability = oldAddInheritable
-	})
-	getEffectiveUID = func() int { return 1000 }
-	addInheritableCapability = func(int) error {
-		t.Fatal("addInheritableCapability called for complete EIP set")
-		return nil
-	}
-	getProcessCapabilities = func() (processCapabilities, error) {
-		mask := uint64(1) << uint(unix.CAP_NET_ADMIN)
-		return processCapabilities{
-			Effective:   mask,
-			Permitted:   mask,
-			Inheritable: mask,
-		}, nil
-	}
-	if err := ensureNetAdminInheritable(); err != nil {
-		t.Fatalf("ensureNetAdminInheritable: %v", err)
-	}
-}
-
-func TestFirecrackerSysProcAttrAddsAmbientNetAdminOnlyForNetworkedVMs(t *testing.T) {
-	if attr := firecrackerSysProcAttr(false, false); attr != nil {
-		t.Fatalf("isolated attr = %#v", attr)
-	}
-	attr := firecrackerSysProcAttr(true, true)
+	attr := firecrackerSysProcAttr(true)
 	if attr == nil || !attr.Setpgid {
-		t.Fatalf("networked detached attr = %#v", attr)
+		t.Fatalf("detached attr = %#v", attr)
 	}
-	if len(attr.AmbientCaps) != 1 || attr.AmbientCaps[0] != uintptr(unix.CAP_NET_ADMIN) {
-		t.Fatalf("ambient caps = %#v", attr.AmbientCaps)
+	if len(attr.AmbientCaps) != 0 {
+		t.Fatalf("detached attr must carry no ambient caps, got %#v", attr.AmbientCaps)
 	}
 }
 
@@ -1631,27 +1500,6 @@ func TestPrepareSnapshotRestoreRejectsKernelSkew(t *testing.T) {
 	}
 }
 
-func TestPrepareSnapshotRestoreRejectsBridged(t *testing.T) {
-	dir := t.TempDir()
-	opts := Options{Name: "agent-1", StateDir: dir}
-	snapDir := vmkit.SnapshotDir(dir, "agent-1", "base")
-	if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{Tag: "base"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(snapDir, vmkit.SnapshotRootfsName), []byte("snap"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	req := vmkit.Request{
-		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
-		Config:   &vmkit.Config{KernelPath: filepath.Join(dir, "k"), RootfsPath: filepath.Join(dir, "rootfs.ext4"), StateDir: dir, Network: &vmkit.NetworkConfig{Mode: "bridged", Interface: "br0"}},
-		Tag:      "base",
-	}
-	err := prepareSnapshotRestore(opts, req)
-	if err == nil || !strings.Contains(err.Error(), "bridged") {
-		t.Fatalf("err = %v, want bridged rejection", err)
-	}
-}
-
 func snapshotSourceRequest(t *testing.T, dir string) vmkit.Request {
 	t.Helper()
 	kernel := filepath.Join(dir, "kernel")
@@ -1676,7 +1524,7 @@ func snapshotSourceRequest(t *testing.T, dir string) vmkit.Request {
 			StateDir:   dir,
 			MemoryMiB:  512,
 			CPUCount:   2,
-			Network:    &vmkit.NetworkConfig{Mode: "nat", IP: "10.43.0.2/29"},
+			Network:    &vmkit.NetworkConfig{Mode: "user", IP: "10.43.0.2/29"},
 		},
 	}
 }
@@ -1725,7 +1573,7 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Tag != "snap-1" || manifest.NetworkMode != "nat" || manifest.VCPUCount != 2 || manifest.MemoryMiB != 512 {
+	if manifest.Tag != "snap-1" || manifest.NetworkMode != "user" || manifest.VCPUCount != 2 || manifest.MemoryMiB != 512 {
 		t.Fatalf("manifest = %#v", manifest)
 	}
 	if manifest.KernelSHA256 == "" {

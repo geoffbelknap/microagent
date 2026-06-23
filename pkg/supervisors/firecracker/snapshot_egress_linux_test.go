@@ -58,7 +58,7 @@ func mediatedRuntimeState(mode string, allow, passthrough []string) runtimeState
 			EgressMode:        mode,
 			EgressAllow:       allow,
 			EgressPassthrough: passthrough,
-			Network:           &vmkit.NetworkConfig{Mode: "nat", IP: "10.43.1.2/29", Gateway: "10.43.1.1", Subnet: "10.43.1.0/29"},
+			Network:           &vmkit.NetworkConfig{Mode: "user", IP: "10.43.1.2/29", Gateway: "10.43.1.1", Subnet: "10.43.1.0/29"},
 		},
 	}
 }
@@ -375,7 +375,7 @@ func TestProvisionEgressFailsClosedOnCAFingerprintMismatch(t *testing.T) {
 	certPEMBefore, _, _ := writePersistedCA(t, wsDir)
 
 	cfg := &vmkit.Config{EgressMode: vmkit.EgressModeStrict, EgressAllow: []string{"api.github.com"}}
-	pid, rules, err := provisionEgressMediation(opts, cfg, "nat", "microtap0", "10.44.1.1", "10.44.1.0/24", nil, true, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	pid, rules, err := provisionEgressMediation(opts, cfg, "microtap0", "10.44.1.1", "10.44.1.0/24", true, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	if err == nil {
 		t.Fatal("expected fail-closed error on CA fingerprint mismatch, got nil")
 	}
@@ -478,7 +478,7 @@ func TestProvisionEgressReusesPersistedCAOnRestore(t *testing.T) {
 	gateway := "127.0.0.1"
 	subnet := "127.0.0.0/8"
 	cfg := &vmkit.Config{EgressMode: vmkit.EgressModeStrict, EgressAllow: []string{"api.github.com"}}
-	pid, rules, err := provisionEgressMediation(opts, cfg, "nat", "lo", gateway, subnet, nil, true, sha)
+	pid, rules, err := provisionEgressMediation(opts, cfg, "lo", gateway, subnet, true, sha)
 	if err != nil {
 		t.Skipf("provision egress reuse e2e: host could not provision mediation (likely missing TPROXY prereqs): %v", err)
 	}

@@ -50,5 +50,5 @@ func EgressTProxyRemediation(host *vmkit.HostSupport) string {
 	if host == nil || host.EgressTProxyReady {
 		return ""
 	}
-	return "UDP egress mediation needs TPROXY; run `microagent host setup-networking`"
+	return "UDP egress mediation needs TPROXY kernel modules; load them (e.g. `modprobe nft_tproxy`) or build them into the kernel"
 }

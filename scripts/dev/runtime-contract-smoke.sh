@@ -127,7 +127,7 @@ manifest = {
     "profile": "small",
     "restart": "never",
     "resources": {"memory_mib": 512, "cpu_count": 2, "size_mib": 1024},
-    "network": {"mode": "nat"},
+    "network": {"mode": "user"},
     "mediation": {
         "enabled": True,
         "required": True,
@@ -184,7 +184,7 @@ runtime = {
         "cpuCount": 2,
         "disks": [{"name": "workspace", "path": disk, "mountpoint": "/workspace", "mode": "rw"}],
         "mediation": manifest["mediation"],
-        "network": {"mode": "nat"},
+        "network": {"mode": "user"},
         "serialInput": True,
     },
     "serialLogPath": os.path.join(runtime_dir, "serial.log"),

@@ -372,8 +372,6 @@ func humanSpecFieldError(msg string) string {
 
 func specHasNetwork(network NetworkSpec) bool {
 	return network.Mode != "" ||
-		network.Interface != "" ||
-		network.Name != "" ||
 		len(network.PortForwards) != 0 ||
 		len(network.DNS) != 0 ||
 		len(network.Routes) != 0 ||

@@ -4,7 +4,7 @@ description: Show one workspace's state, readiness, and verification detail.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-23_
 
 ```text
 microagent [--json] status <name> [--state-dir <dir>]
@@ -56,12 +56,12 @@ the readiness, verification, and network blocks:
     "mediationReady": { "ready": false }
   },
   "network": {
-    "mode": "nat",
+    "mode": "user",
     "portForwards": [
       { "protocol": "tcp", "host": "127.0.0.1", "hostPort": 8080, "guestPort": 80 }
     ],
     "runtime": {
-      "mode": "nat",
+      "mode": "user",
       "ip": "10.43.12.2/29",
       "gateway": "10.43.12.1",
       "dns": ["1.1.1.1"]

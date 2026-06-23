@@ -4,7 +4,7 @@ description: Task-shaped walkthroughs - pick the thing you want to do and follow
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-23_
 
 Each guide takes one task from start to finish with runnable commands and real
 output. If you want flag-by-flag detail instead, see the [CLI
@@ -28,7 +28,7 @@ reference](/cli/); for the ideas behind the commands, see
 
 ## Connect things
 
-- [Connect workspaces on a named network](/guides/networking/) - put an app and a database on one subnet so they reach and resolve each other by name.
+- [Networking](/guides/networking/) - give a workspace outbound access and publish a guest port back to the host.
 - [Allowlist and passthrough egress](/guides/egress-allowlist/) - confine a workspace to a known set of destinations with `strict`, and let cert-pinned endpoints through with passthrough.
 - [Serve microagent over MCP](/guides/mcp-server/) - register `microagent serve mcp` in Claude Code or another MCP client and drive workspaces with tools.
 

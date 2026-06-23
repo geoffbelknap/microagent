@@ -17,9 +17,6 @@ else
 fi
 GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
 WORKSPACE="nats-e2e"
-NAT_WORKSPACE="nat-outbound"
-BRIDGED_WORKSPACE="bridged-ready"
-STATIC_WORKSPACE="static-net"
 APPLY_WORKSPACE="apply-stopped"
 PUBLISH_ALIAS_WORKSPACE="publish-alias"
 ARTIFACT_DIR="$STATE_DIR/artifacts"
@@ -29,37 +26,20 @@ IMAGE_CACHE_POLICY="${MICROAGENT_E2E_IMAGE_CACHE_POLICY:-auto}"
 if [ -z "${MICROAGENT_E2E_IMAGE_CACHE_POLICY+x}" ] && [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" = "1" ]; then
   IMAGE_CACHE_POLICY="refresh"
 fi
-BRIDGE_NAME="${MICROAGENT_E2E_BRIDGE:-}"
-DELETE_BRIDGE=0
-ORIGINAL_IP_FORWARD=""
 
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    "$CLI" stop "$NAT_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-    "$CLI" stop "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-    "$CLI" stop "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     "$CLI" stop "$APPLY_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     "$CLI" stop "$PUBLISH_ALIAS_WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     if [ "$status" -eq 0 ]; then
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$NAT_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$BRIDGED_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
-      "$CLI" delete "$STATIC_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$APPLY_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$PUBLISH_ALIAS_WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$WORKSPACE" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     else
       "$CLI" stop "$WORKSPACE" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     fi
-  fi
-  if command -v ip >/dev/null 2>&1; then
-    if [ "$DELETE_BRIDGE" = "1" ] && [ -n "$BRIDGE_NAME" ]; then
-      ip link delete "$BRIDGE_NAME" type bridge >/dev/null 2>&1 || true
-    fi
-  fi
-  if [ -n "$ORIGINAL_IP_FORWARD" ] && [ -e /proc/sys/net/ipv4/ip_forward ]; then
-    sysctl -w "net.ipv4.ip_forward=$ORIGINAL_IP_FORWARD" >/dev/null 2>&1 || true
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_NETWORKING:-0}" != "1" ]; then
@@ -78,7 +58,7 @@ case "$(uname -s):$(uname -m)" in
     ;;
 esac
 
-for required in pasta getcap ip debugfs; do
+for required in pasta debugfs; do
   if ! command -v "$required" >/dev/null 2>&1; then
     e2e_skip "$required is required for microagent E2E networking"
   fi
@@ -143,11 +123,6 @@ export GOMODCACHE="${GOMODCACHE:-$STATE_DIR/gomodcache}"
 export GOFLAGS="${GOFLAGS:-} -modcacherw"
 export MICROAGENT_FIRECRACKER="$firecracker"
 export MICROAGENT_FIRECRACKER_SUPERVISOR="$SUPERVISOR"
-
-supervisor_has_network_caps() {
-  caps="$(getcap "$SUPERVISOR" 2>/dev/null || true)"
-  [[ "$caps" == *cap_net_admin* && "$caps" == *cap_setpcap* ]]
-}
 
 wait_for_status_ready() {
   workspace="$1"
@@ -606,64 +581,12 @@ PY
     if [ "$ROOT/pkg/supervisors/firecracker/supervisor_linux.go" -nt "$SUPERVISOR" ] || [ "$ROOT/cmd/microagent-firecracker-supervisor/main_linux.go" -nt "$SUPERVISOR" ]; then
       echo "rebuilding stale cached Firecracker supervisor at $SUPERVISOR" >&2
       go build -buildvcs=false -o "$SUPERVISOR" ./cmd/microagent-firecracker-supervisor
-      if ! command -v setcap >/dev/null 2>&1 || ! setcap cap_net_admin,cap_setpcap+ep "$SUPERVISOR" >/dev/null 2>&1; then
-        cat >&2 <<EOF
-cached Firecracker supervisor was rebuilt and needs file capabilities restored.
-
-Run:
-  sudo setcap cap_net_admin,cap_setpcap+ep $SUPERVISOR
-
-Then run:
-  scripts/dev/microagent-e2e.sh networking
-EOF
-        exit "$E2E_SKIP_EXIT"
-      fi
     fi
   elif [ ! -x "$SUPERVISOR" ]; then
     e2e_skip "MICROAGENT_FIRECRACKER_SUPERVISOR is not executable: $SUPERVISOR"
   fi
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" ./cmd/microagent-guestinit
 )
-
-if [ "$SUPERVISOR" = "$DEFAULT_SUPERVISOR" ] && caps="$(getcap "$SUPERVISOR" 2>/dev/null)" && [ -n "$caps" ]; then
-  echo "temporary supervisor unexpectedly has file capabilities: $caps" >&2
-  exit 1
-fi
-
-if [ "$(id -u)" -ne 0 ]; then
-  if ! supervisor_has_network_caps; then
-    cat >&2 <<EOF
-microagent E2E networking needs one-time Linux host setup for practical nat and bridged coverage.
-
-Run:
-  scripts/dev/microagent-e2e-linux-network-setup.sh
-
-Then run:
-  scripts/dev/microagent-e2e.sh networking
-EOF
-    exit "$E2E_SKIP_EXIT"
-  fi
-  if [ -z "$BRIDGE_NAME" ]; then
-    BRIDGE_NAME="microagent0"
-  fi
-  if [ ! -e "/sys/class/net/$BRIDGE_NAME/bridge" ]; then
-    e2e_skip "microagent E2E bridge $BRIDGE_NAME does not exist; run scripts/dev/microagent-e2e-linux-network-setup.sh"
-  fi
-  if [ -e /proc/sys/net/ipv4/ip_forward ] && [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "1" ]; then
-    e2e_skip "net.ipv4.ip_forward must be 1; run scripts/dev/microagent-e2e-linux-network-setup.sh"
-  fi
-else
-  if [ -z "$BRIDGE_NAME" ]; then
-    BRIDGE_NAME="brmae2e$((RANDOM % 10000))"
-    DELETE_BRIDGE=1
-  fi
-  if [ -e /proc/sys/net/ipv4/ip_forward ]; then
-    ORIGINAL_IP_FORWARD="$(cat /proc/sys/net/ipv4/ip_forward)"
-    if [ "$ORIGINAL_IP_FORWARD" != "1" ]; then
-      sysctl -w net.ipv4.ip_forward=1 >/dev/null
-    fi
-  fi
-fi
 
 "$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" <<'PY'
@@ -773,165 +696,7 @@ if "$CLI" create \
   echo "isolated network publish unexpectedly succeeded" >&2
   exit 1
 fi
-grep -qi "network.portForwards require user, nat, or bridged mode" "$STATE_DIR/isolated-publish.err"
-
-prepare_cached_workspace "$NAT_WORKSPACE" '{"mode":"nat"}' '{}' "$STATE_DIR/nat-create.json"
-"$CLI" start "$NAT_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/nat-start.json"
-wait_for_status_ready "$NAT_WORKSPACE" "$STATE_DIR/nat-status-running.json"
-"$CLI" connect "$NAT_WORKSPACE" \
-  --state-dir "$STATE_DIR" \
-  --send "wget -qO- -T 10 http://example.com >/tmp/nat.out && echo NAT_OUTBOUND_READY || echo NAT_OUTBOUND_FAILED; sync" \
-  --ready-timeout 30 \
-  --timeout 15 >"$STATE_DIR/nat-connect.txt"
-"$CLI" halt "$NAT_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/nat-halt.json"
-"$CLI" delete "$NAT_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/nat-delete.json"
-
-python3 - "$STATE_DIR/nat-create.json" "$STATE_DIR/nat-status-running.json" "$STATE_DIR/nat-connect.txt" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    create = json.load(f)
-with open(sys.argv[2], "r", encoding="utf-8") as f:
-    status = json.load(f)
-with open(sys.argv[3], "r", encoding="utf-8", errors="replace") as f:
-    console = f.read()
-if create.get("response", {}).get("event", {}).get("state") != "prepared":
-    raise SystemExit(create)
-if status.get("event", {}).get("state") != "running":
-    raise SystemExit(status)
-runtime = (status.get("network") or {}).get("runtime") or {}
-if runtime.get("mode") != "nat":
-    raise SystemExit(status.get("network"))
-if "NAT_OUTBOUND_READY" not in console:
-    raise SystemExit(console)
-PY
-
-if [ "$DELETE_BRIDGE" = "1" ]; then
-  ip link add "$BRIDGE_NAME" type bridge
-fi
-if [ "$(id -u)" -eq 0 ]; then
-  ip link set "$BRIDGE_NAME" up
-fi
-prepare_cached_workspace "$BRIDGED_WORKSPACE" "{\"mode\":\"bridged\",\"interface\":\"$BRIDGE_NAME\"}" '{}' "$STATE_DIR/bridged-create.json"
-"$CLI" start "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/bridged-start.json"
-wait_for_status_ready "$BRIDGED_WORKSPACE" "$STATE_DIR/bridged-status-running.json"
-"$CLI" connect "$BRIDGED_WORKSPACE" \
-  --state-dir "$STATE_DIR" \
-  --send "echo BRIDGED_READY; sync" \
-  --ready-timeout 30 \
-  --timeout 15 >"$STATE_DIR/bridged-connect.txt"
-"$CLI" halt "$BRIDGED_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/bridged-halt.json"
-"$CLI" delete "$BRIDGED_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/bridged-delete.json"
-
-python3 - "$STATE_DIR/bridged-create.json" "$STATE_DIR/bridged-status-running.json" "$STATE_DIR/bridged-connect.txt" "$BRIDGE_NAME" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    create = json.load(f)
-with open(sys.argv[2], "r", encoding="utf-8") as f:
-    status = json.load(f)
-with open(sys.argv[3], "r", encoding="utf-8", errors="replace") as f:
-    console = f.read()
-bridge = sys.argv[4]
-if create.get("response", {}).get("event", {}).get("state") != "prepared":
-    raise SystemExit(create)
-if status.get("event", {}).get("state") != "running":
-    raise SystemExit(status)
-if "BRIDGED_READY" not in console:
-    raise SystemExit(console)
-network = create.get("network") or {}
-if network.get("mode") != "bridged" or network.get("interface") != bridge:
-    raise SystemExit(network)
-PY
-
-if "$CLI" create \
-  --id bridged-missing-interface \
-  --backend linux-kvm \
-  --kernel "$kernel_path" \
-  --rootfs "$(cached_image_rootfs_path)" \
-  --state-dir "$STATE_DIR/bridged-missing-interface" \
-  --network bridged >"$STATE_DIR/bridged-missing-interface.json" 2>"$STATE_DIR/bridged-missing-interface.err"; then
-  echo "bridged network without interface unexpectedly succeeded" >&2
-  exit 1
-fi
-python3 - "$STATE_DIR/bridged-missing-interface.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    result = json.load(f)
-err = result.get("error", result.get("response", {}).get("error", ""))
-ok = result.get("ok", result.get("response", {}).get("ok"))
-if ok is not False:
-    raise SystemExit(result)
-if "firecracker network.interface is required for bridged mode" not in err:
-    raise SystemExit(result)
-PY
-
-if "$CLI" create \
-  --id bridged-nonbridge \
-  --backend linux-kvm \
-  --kernel "$kernel_path" \
-  --rootfs "$(cached_image_rootfs_path)" \
-  --state-dir "$STATE_DIR/bridged-nonbridge" \
-  --network bridged \
-  --network-interface lo >"$STATE_DIR/bridged-nonbridge.json" 2>"$STATE_DIR/bridged-nonbridge.err"; then
-  echo "bridged nonbridge interface unexpectedly succeeded" >&2
-  exit 1
-fi
-python3 - "$STATE_DIR/bridged-nonbridge.json" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    result = json.load(f)
-err = result.get("error", result.get("response", {}).get("error", ""))
-ok = result.get("ok", result.get("response", {}).get("ok"))
-if ok is not False:
-    raise SystemExit(result)
-if 'bridged network.interface "lo" must be a Linux bridge' not in err:
-    raise SystemExit(result)
-PY
-
-prepare_cached_workspace "$STATIC_WORKSPACE" '{"mode":"nat","ip":"10.43.240.2/29","subnet":"10.43.240.0/29","gateway":"10.43.240.1","dns":["1.1.1.1","8.8.8.8"],"routes":["0.0.0.0/0 via 10.43.240.1"]}' '{}' "$STATE_DIR/static-create.json"
-"$CLI" start "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" --kernel "$kernel_path" >"$STATE_DIR/static-start.json"
-wait_for_status_ready "$STATIC_WORKSPACE" "$STATE_DIR/static-status-running.json"
-"$CLI" network "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/static-network-running.json"
-"$CLI" connect "$STATIC_WORKSPACE" \
-  --state-dir "$STATE_DIR" \
-  --send "grep -q '10.43.240.2' /proc/net/fib_trie; grep -q 'nameserver 1.1.1.1' /etc/resolv.conf; wget -qO- -T 10 http://example.com >/tmp/static-outbound.html; echo STATIC_NET_READY; sync" \
-  --ready-timeout 30 \
-  --timeout 15 >"$STATE_DIR/static-connect.txt"
-"$CLI" halt "$STATIC_WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/static-halt.json"
-"$CLI" delete "$STATIC_WORKSPACE" --yes --state-dir "$STATE_DIR" >"$STATE_DIR/static-delete.json"
-python3 - "$STATE_DIR/static-create.json" "$STATE_DIR/static-network-running.json" "$STATE_DIR/static-status-running.json" "$STATE_DIR/static-connect.txt" <<'PY'
-import json
-import sys
-
-with open(sys.argv[1], "r", encoding="utf-8") as f:
-    create = json.load(f)
-with open(sys.argv[2], "r", encoding="utf-8") as f:
-    network = json.load(f)
-with open(sys.argv[3], "r", encoding="utf-8") as f:
-    status = json.load(f)
-with open(sys.argv[4], "r", encoding="utf-8", errors="replace") as f:
-    console = f.read()
-
-declared = create.get("network") or {}
-runtime = network.get("runtime") or {}
-status_runtime = (status.get("network") or {}).get("runtime") or {}
-for item in (declared, runtime, status_runtime):
-    if item.get("mode") != "nat" or item.get("ip") != "10.43.240.2/29" or item.get("gateway") != "10.43.240.1":
-        raise SystemExit({"network": network, "status": status, "create": create})
-    if item.get("subnet") != "10.43.240.0/29" or item.get("dns") != ["1.1.1.1", "8.8.8.8"]:
-        raise SystemExit({"network": network, "status": status, "create": create})
-    if item.get("routes") != ["0.0.0.0/0 via 10.43.240.1"]:
-        raise SystemExit({"network": network, "status": status, "create": create})
-if "STATIC_NET_READY" not in console:
-    raise SystemExit(console)
-PY
+grep -qi "network.portForwards require user mode" "$STATE_DIR/isolated-publish.err"
 
 prepare_cached_workspace "$WORKSPACE" "{\"mode\":\"user\",\"port_forwards\":[{\"protocol\":\"tcp\",\"host\":\"127.0.0.1\",\"hostPort\":$nats_port,\"guestPort\":4222},{\"protocol\":\"tcp\",\"host\":\"127.0.0.1\",\"hostPort\":$monitor_port,\"guestPort\":8222}]}" '{"egress":[{"name":"report","path":"/report.json"}]}' "$STATE_DIR/create.json"
 write_guest_run_config "$STATE_DIR/run-nats.json" "$nats_port" 4222 "$monitor_port" 8222

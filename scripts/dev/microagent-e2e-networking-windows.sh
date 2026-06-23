@@ -22,7 +22,6 @@ STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-networking-whv.XXXXXX")"
 CLI="$STATE_DIR/microagent.exe"
 WS_ISOLATED="net-whv-isolated"
 WS_NAT="net-whv-nat"
-WS_BRIDGED="net-whv-bridged"
 KEEP_VAR="${MICROAGENT_KEEP_MICROAGENT_E2E_NETWORKING:-0}"
 IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f}"
 KERNEL="$HOME/.microagent/kernels/windows-hyperv/amd64/Image"
@@ -31,7 +30,7 @@ PUBLISH_PORT="${MICROAGENT_E2E_PUBLISH_PORT:-18099}"
 cleanup() {
   status="$?"
   if [ -x "$CLI" ]; then
-    for ws in "$WS_ISOLATED" "$WS_NAT" "$WS_BRIDGED"; do
+    for ws in "$WS_ISOLATED" "$WS_NAT"; do
       "$CLI" kill "$ws" --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
       "$CLI" delete "$ws" --yes --state-dir "$STATE_DIR" >/dev/null 2>&1 || true
     done
@@ -132,7 +131,7 @@ expect_failure invalid-mode "network.mode" \
   "$CLI" create bad-mode --dry-run --image "$IMAGE" --network made-up --state-dir "$STATE_DIR"
 expect_failure invalid-publish "publish" \
   "$CLI" create bad-publish --dry-run --image "$IMAGE" --network user --publish bad-mapping --state-dir "$STATE_DIR"
-expect_failure publish-isolated "user, nat, or bridged" \
+expect_failure publish-isolated "require user mode" \
   "$CLI" create bad-isolated-publish --dry-run --image "$IMAGE" --network isolated --publish "127.0.0.1:$PUBLISH_PORT:8080" --state-dir "$STATE_DIR"
 
 e2e_step "isolated mode boots with no NIC and a working loopback"
@@ -235,30 +234,5 @@ if curl -fsS --max-time 3 "http://127.0.0.1:$PUBLISH_PORT/" >/dev/null 2>&1; the
   e2e_fail "published port still serves after halt"
 fi
 "$CLI" delete "$WS_NAT" --yes --state-dir "$STATE_DIR" >/dev/null
-
-# Bridged mode attaches the guest to a pre-existing named HNS network rather
-# than the managed NAT. Networks that serve addresses over DHCP at boot (an
-# external vSwitch, or the built-in ICS "Default Switch") do not statically
-# allocate an endpoint IP, so the guest must DHCP on its NIC. The built-in
-# Default Switch is the portable DHCP-serving network to verify against; hosts
-# without it (some runners) log the segment as deferred.
-if powershell.exe -NoProfile -Command "if (@(Get-VMSwitch -Name 'Default Switch' -ErrorAction SilentlyContinue).Count -gt 0) { exit 0 } else { exit 1 }" >/dev/null 2>&1; then
-  e2e_step "bridged mode DHCPs a guest NIC on the named HNS network"
-  "$CLI" create "$WS_BRIDGED" --image "$IMAGE" --network bridged --network-interface "Default Switch" --size-mib 512 \
-    --service-command "sleep 120" --state-dir "$STATE_DIR" >"$STATE_DIR/create-bridged.json"
-  test "$(json_get "$STATE_DIR/create-bridged.json" network.mode)" = "bridged"
-  "$CLI" start "$WS_BRIDGED" --state-dir "$STATE_DIR" >"$STATE_DIR/start-bridged.json"
-  wait_for_ready "$WS_BRIDGED" "$STATE_DIR/status-bridged.json"
-  # The guest NIC must be addressed via DHCP with a default route, not left
-  # down and unconfigured the way it was before the ip=dhcp fallback.
-  "$CLI" exec "$WS_BRIDGED" --state-dir "$STATE_DIR" -- \
-    sh -c "for i in \$(seq 1 15); do ifconfig eth0 | grep -q 'inet addr:' && break; sleep 1; done; ifconfig eth0; route -n" >"$STATE_DIR/exec-bridged-net.txt"
-  grep -q "inet addr:" "$STATE_DIR/exec-bridged-net.txt" || e2e_fail "bridged guest NIC has no DHCP address: $(cat "$STATE_DIR/exec-bridged-net.txt")"
-  grep -Eq "^0\.0\.0\.0[[:space:]]" "$STATE_DIR/exec-bridged-net.txt" || e2e_fail "bridged guest has no default route: $(cat "$STATE_DIR/exec-bridged-net.txt")"
-  "$CLI" halt "$WS_BRIDGED" --state-dir "$STATE_DIR" >/dev/null
-  "$CLI" delete "$WS_BRIDGED" --yes --state-dir "$STATE_DIR" >/dev/null
-else
-  e2e_log "bridged segment deferred: no 'Default Switch' HNS network on this host to bridge against"
-fi
 
 echo "microagent windows-hyperv networking E2E passed"

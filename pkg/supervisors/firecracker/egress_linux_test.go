@@ -12,7 +12,6 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/egressprereq"
-	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/google/nftables/expr"
 	"github.com/vishvananda/netlink"
@@ -492,10 +491,10 @@ func TestVerifyEgressTProxyPrereqsFailClosed(t *testing.T) {
 // TestProvisionEgressMediationOffIsNoOp documents the gate the shared helper uses
 // before touching any host state: when egress mediation is off it returns
 // (0, nil, nil) without minting a CA, spawning a mediator, or installing any
-// rule. Both prepareTAPNATForStart (nat/user) and prepareNamedNetworkForStart
-// (named) call the helper unconditionally and rely on this early return for the
-// unmediated/off path — so it is safe to exercise without root or a netns. A nil
-// config (the low-level raw create/start path) takes the same no-op path.
+// rule. prepareTAPNATForStart (user mode) calls the helper unconditionally and
+// relies on this early return for the unmediated/off path — so it is safe to
+// exercise without root or a netns. A nil config (the low-level raw create/start
+// path) takes the same no-op path.
 func TestProvisionEgressMediationOffIsNoOp(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: t.TempDir()}
 	cases := []*vmkit.Config{
@@ -504,17 +503,15 @@ func TestProvisionEgressMediationOffIsNoOp(t *testing.T) {
 		{EgressMode: ""},
 	}
 	for _, cfg := range cases {
-		for _, mode := range []string{"nat", "user", "named"} {
-			pid, rules, err := provisionEgressMediation(opts, cfg, mode, "microtap0", "10.44.1.1", "10.44.1.0/24", nil, false, "")
-			if err != nil {
-				t.Fatalf("mode %q cfg %+v: unexpected error: %v", mode, cfg, err)
-			}
-			if pid != 0 {
-				t.Errorf("mode %q cfg %+v: pid = %d, want 0 (no mediator spawned)", mode, cfg, pid)
-			}
-			if rules != nil {
-				t.Errorf("mode %q cfg %+v: rules = %+v, want nil (no rules installed)", mode, cfg, rules)
-			}
+		pid, rules, err := provisionEgressMediation(opts, cfg, "microtap0", "10.44.1.1", "10.44.1.0/24", false, "")
+		if err != nil {
+			t.Fatalf("cfg %+v: unexpected error: %v", cfg, err)
+		}
+		if pid != 0 {
+			t.Errorf("cfg %+v: pid = %d, want 0 (no mediator spawned)", cfg, pid)
+		}
+		if rules != nil {
+			t.Errorf("cfg %+v: rules = %+v, want nil (no rules installed)", cfg, rules)
 		}
 	}
 }
@@ -642,27 +639,6 @@ func TestEgressMediatorArgsThreadsCaps(t *testing.T) {
 		if _, ok := argValue(bare, flag); ok {
 			t.Errorf("zero caps emitted %s: %v", flag, bare)
 		}
-	}
-}
-
-// TestNamedNetworkPeersExcludesSelf proves the roster handed to the mediator
-// contains every OTHER member as name=ip and omits this workspace's own entry —
-// the mediator never reverse-resolves a flow to "self".
-func TestNamedNetworkPeersExcludesSelf(t *testing.T) {
-	record := network.Record{
-		Name:    "team",
-		Subnet:  "10.44.1.0/24",
-		Gateway: "10.44.1.1",
-		Members: []network.Member{
-			{Workspace: "self", IP: "10.44.1.2"},
-			{Workspace: "builder", IP: "10.44.1.3"},
-			{Workspace: "db", IP: "10.44.1.4"},
-		},
-	}
-	got := namedNetworkPeers(record, "self")
-	want := []string{"builder=10.44.1.3", "db=10.44.1.4"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("namedNetworkPeers = %v, want %v (self must be excluded)", got, want)
 	}
 }
 

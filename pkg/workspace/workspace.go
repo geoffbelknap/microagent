@@ -154,19 +154,12 @@ type Spec struct {
 
 type NetworkSpec struct {
 	Mode         string              `json:"mode,omitempty" yaml:"mode,omitempty"`
-	Interface    string              `json:"interface,omitempty" yaml:"interface,omitempty"`
-	Name         string              `json:"name,omitempty" yaml:"name,omitempty"`
 	PortForwards []vmkit.PortForward `json:"port_forwards,omitempty" yaml:"forwards,omitempty"`
 	DNS          []string            `json:"dns,omitempty" yaml:"dns,omitempty"`
 	Routes       []string            `json:"routes,omitempty" yaml:"routes,omitempty"`
 	IP           string              `json:"ip,omitempty" yaml:"ip,omitempty"`
 	Subnet       string              `json:"subnet,omitempty" yaml:"subnet,omitempty"`
 	Gateway      string              `json:"gateway,omitempty" yaml:"gateway,omitempty"`
-	// Unsupported persists the operator acknowledgement that an unsupported,
-	// unmediated network mode (currently only "bridged") was knowingly selected.
-	// Without it, a bridged manifest is rejected again at start, so the
-	// acknowledgement must survive the create→persist→start round-trip.
-	Unsupported bool `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
 }
 
 type Disk struct {
@@ -600,8 +593,6 @@ func NormalizeNetworkConfig(network vmkit.NetworkConfig) vmkit.NetworkConfig {
 	if network.Mode == "" {
 		network.Mode = DefaultNetworkMode
 	}
-	network.Interface = strings.TrimSpace(network.Interface)
-	network.Name = strings.TrimSpace(network.Name)
 	network.IP = strings.TrimSpace(network.IP)
 	network.Subnet = strings.TrimSpace(network.Subnet)
 	network.Gateway = strings.TrimSpace(network.Gateway)
@@ -619,30 +610,24 @@ func NetworkSpecFromConfig(network vmkit.NetworkConfig) NetworkSpec {
 	network = NormalizeNetworkConfig(network)
 	return NetworkSpec{
 		Mode:         network.Mode,
-		Interface:    network.Interface,
-		Name:         network.Name,
 		PortForwards: append([]vmkit.PortForward{}, network.PortForwards...),
 		DNS:          append([]string{}, network.DNS...),
 		Routes:       append([]string{}, network.Routes...),
 		IP:           network.IP,
 		Subnet:       network.Subnet,
 		Gateway:      network.Gateway,
-		Unsupported:  network.Unsupported,
 	}
 }
 
 func NetworkConfigFromSpec(spec NetworkSpec) vmkit.NetworkConfig {
 	return NormalizeNetworkConfig(vmkit.NetworkConfig{
 		Mode:         spec.Mode,
-		Interface:    spec.Interface,
-		Name:         spec.Name,
 		PortForwards: append([]vmkit.PortForward{}, spec.PortForwards...),
 		DNS:          append([]string{}, spec.DNS...),
 		Routes:       append([]string{}, spec.Routes...),
 		IP:           spec.IP,
 		Subnet:       spec.Subnet,
 		Gateway:      spec.Gateway,
-		Unsupported:  spec.Unsupported,
 	})
 }
 
@@ -913,10 +898,10 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	// "strict"; empty already normalized to "mediated" above) AND the network
 	// mode actually runs the mediator. The vsock listener serves the
 	// per-workspace CA public cert to the guest at boot so guestinit can install
-	// it into the trust store before any HTTPS traffic. "bridged" (quarantined,
-	// unmediated) and "isolated" (no egress) never start a mediator — even with
-	// EgressMode=mediated/strict — so allocating the CA listener there would tell
-	// the guest to trust a CA for a mediator that will never exist (dead state).
+	// it into the trust store before any HTTPS traffic. "isolated" (no egress)
+	// never starts a mediator — even with EgressMode=mediated/strict — so
+	// allocating the CA listener there would tell the guest to trust a CA for a
+	// mediator that will never exist (dead state).
 	var caCertPort uint32
 	if vmkit.EgressMediationOn(opts.EgressMode) && vmkit.NetworkModeMediates(opts.Network.Mode) {
 		caCertPort = DefaultCACertPort

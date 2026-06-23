@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-23_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -167,49 +167,7 @@ For repeatable deployments, prefer digest-pinned image refs such as
 
 `microagent doctor` reports each of these - start there to find the missing piece.
 
-If your host doesn't allow unprivileged user namespaces and you can't change that policy, fall back to `--network nat` with the supervisor cap setup (see [Firecracker `nat` guest can't reach the internet](#firecracker-nat-guest-cant-reach-the-internet) below).
-
-### Apple VF `bridged` mode fails closed before start
-
-```text
-error: networking entitlement (com.apple.vm.networking) required for bridged mode
-```
-
-Apple gates native bridged networking behind the restricted `com.apple.vm.networking` entitlement. Open-source builds can't self-sign it, and `sudo` doesn't bypass the check.
-
-Fixes:
-
-- **Use a different mode.** `nat` and `isolated` work without the entitlement. Most agent workloads only need `nat` for outbound traffic and `--publish` for inbound TCP. Bridged is for cases where the workspace needs its own L2 presence on the host network.
-- **Sign the supervisor with the entitlement.** Possible if you have an Apple Developer account with the right capabilities. Out of scope for this project; consult Apple's docs.
-
-### Firecracker `bridged` fails with "host-prerequisite-not-configured"
-
-`bridged` mode needs both:
-
-- The named host interface to actually be a Linux bridge - not a regular interface, not loopback.
-- `CAP_NET_ADMIN` in the supervisor process and inherited by Firecracker, or root.
-
-Fixes:
-
-- Create a bridge if you don't have one: `sudo ip link add br0 type bridge && sudo ip link set br0 up`.
-- Run as root, or grant the supervisor binary the narrow capabilities it needs: `sudo setcap cap_net_admin,cap_setpcap+ep /path/to/microagent-firecracker-supervisor`. The supervisor will add `CAP_NET_ADMIN` to its inheritable set before launching Firecracker.
-
-If neither prerequisite is reachable in your environment, use `--network user` for unprivileged outbound networking or `--network isolated` when the guest does not need network access.
-
-### Firecracker `nat` guest can't reach the internet
-
-Firecracker `nat` needs host routing and firewall support. The supervisor
-creates a TAP, assigns a `10.43.x.0/29` subnet, and installs nftables
-MASQUERADE/FORWARD rules. If any prerequisite is missing, startup should fail
-closed with a clear error; if outbound still fails, check the host:
-
-- `sysctl net.ipv4.ip_forward` must report `net.ipv4.ip_forward = 1`
-- the host kernel must support nftables
-- the supervisor needs `CAP_NET_ADMIN` in its effective, permitted, and
-  inheritable sets so Firecracker can inherit it. Run as root, or grant the
-  supervisor `cap_net_admin,cap_setpcap+ep`.
-- host firewall managers such as `ufw` or `firewalld` must not block forwarding
-  from the `magtap*` device or remove rules in the `inet microagent` table
+If your host doesn't allow unprivileged user namespaces and you can't change that policy, use `--network isolated` when the guest does not need network access.
 
 Use `microagent --json network <name>` to inspect the runtime IP, subnet,
 gateway, DNS, and route that were assigned to the guest.
@@ -232,25 +190,26 @@ Fixes:
 ### A `mediated` or `strict` workspace fails to start with a TPROXY error
 
 ```text
-egress: UDP mediation (TPROXY) unavailable for workspace research — run 'microagent host setup-networking' or use --egress off
+egress: UDP mediation (TPROXY) unavailable for workspace research — load the TPROXY kernel modules or use --egress off
 ```
 
-[Egress mediation](/concepts/egress-mediation/) mediates UDP and DNS via Linux
-TPROXY, which needs kernel modules (`nft_tproxy`, `nf_tproxy_ipv4`, `xt_socket`,
-`nf_socket_ipv4`) and a few sysctls that a rootless workspace can't load itself.
-When they're missing, a `mediated` or `strict` workspace **fails closed** - it
-refuses to start rather than run with an unmediated UDP/DNS channel.
+[Egress mediation](/concepts/egress-mediation/) runs inside the workspace's own
+user namespace and mediates UDP and DNS via Linux TPROXY, which needs kernel
+modules (`nft_tproxy`, `nf_tproxy_ipv4`, `xt_socket`, `nf_socket_ipv4`) that a
+rootless workspace can't load itself. When they're missing, a `mediated` or
+`strict` workspace **fails closed** - it refuses to start rather than run with
+an unmediated UDP/DNS channel.
 
 Fixes:
 
-- **Provision the host once, as root:** `microagent host setup-networking` loads
-  the modules and sets the sysctls. `microagent doctor` reports whether they're
-  in place.
+- **Load the kernel modules once, as root:**
+  `sudo modprobe nft_tproxy nf_tproxy_ipv4 xt_socket nf_socket_ipv4`. Once the
+  modules are present the workspace's netns can install its own TPROXY rules.
+  `microagent doctor` reports whether they're in place.
 - **Drop mediation** if you genuinely don't want it: `--egress off`.
 
 This is the intended fail-closed behavior - an enforcement gap never silently
-widens what the agent can reach. See [`host`](/cli/host/) and
-[`doctor`](/cli/doctor/).
+widens what the agent can reach. See [`doctor`](/cli/doctor/).
 
 ### An allowed host's TLS connection fails
 

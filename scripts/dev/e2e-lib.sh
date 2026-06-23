@@ -187,39 +187,7 @@ e2e_have_vm() {
   esac
 }
 
-# e2e_have_ip_forward: IPv4 forwarding enabled (or we are root and can enable it).
-e2e_have_ip_forward() {
-  if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo 0)" = "1" ]; then
-    return 0
-  fi
-  e2e_is_root
-}
-
-# e2e_have_netpriv: can this host run privileged TAP/bridge networking?
-# Linux only: needs a VM, the ability to gain CAP_NET_ADMIN (root, or a
-# pre-granted capability set), and IPv4 forwarding.
-e2e_have_netpriv() {
-  [ "$(uname -s)" = "Linux" ] || return 1
-  e2e_have_vm || return 1
-  e2e_have_ip_forward || return 1
-  # Operator override: set when you hold CAP_NET_ADMIN without uid 0 (file caps,
-  # a capability-granting sudo/namespace, or a privileged CI runner).
-  if [ "${MICROAGENT_E2E_ALLOW_NETPRIV:-0}" = "1" ]; then
-    return 0
-  fi
-  if e2e_is_root; then
-    return 0
-  fi
-  # Non-root: only if CAP_NET_ADMIN is in the EFFECTIVE set (the "Current:" line),
-  # not merely the bounding set. The supervisor needs it effective to pass to the VM.
-  if command -v capsh >/dev/null 2>&1 && capsh --print 2>/dev/null | grep '^Current:' | grep -q 'cap_net_admin'; then
-    return 0
-  fi
-  return 1
-}
-
 e2e_require_vm() { e2e_have_vm || e2e_skip "no microVM backend available (need /dev/kvm + a microagent install that bundles firecracker, or MICROAGENT_FIRECRACKER, on Linux amd64; or macOS on Apple silicon)"; }
-e2e_require_netpriv() { e2e_have_netpriv || e2e_skip "privileged networking unavailable (need root/CAP_NET_ADMIN + net.ipv4.ip_forward=1 on Linux)"; }
 e2e_require_linux() { [ "$(uname -s)" = "Linux" ] || e2e_skip "Linux-only scenario"; }
 
 # e2e_wait_exec_ready <cli> <state-dir> <ws> [timeout-sec]: poll status until the

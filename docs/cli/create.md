@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-18_
+_Last updated: 2026-06-23_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -78,7 +78,7 @@ resources:
   cpuCount: 2
   sizeMiB: 8192
 network:
-  mode: nat
+  mode: user
   forwards:
     - host: 127.0.0.1
       hostPort: 8080
@@ -236,9 +236,7 @@ The complete set:
 | `--arch <arch>` | Guest architecture |
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always`. Enforced by [`supervise`](/cli/supervise/) |
-| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `named` |
-| `--network-interface <if>` | Host interface identifier or display name (only used by the unsupported `bridged` mode) |
-| `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
+| `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 | `-p <mapping>` | Alias for `--publish` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
@@ -270,11 +268,6 @@ The complete set:
 | `--dry-run` | Validate config without creating |
 | `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
 
-On Apple VF, `--network bridged` also requires a supervisor signed with Apple's
-restricted `com.apple.vm.networking` entitlement. Open-source builds cannot
-self-sign that entitlement, and `sudo` does not bypass the check. Local ad-hoc
-supervisors fail closed with a clear error.
-
 See [global flags](/cli/#global-flags) for `--text`/`--output`/`--mode`/`--supervisor` and the global `--json` output flag (distinct from the `--json` request-input flag above).
 
 ## Fork from a snapshot
@@ -288,16 +281,12 @@ A Firecracker snapshot binds its vsock socket to the source workspace's path, so
 each fork runs Firecracker in a private mount namespace that maps the fork's own
 directory over the source's, and the fork takes its own host-side service ports
 while bridging them to the guest's snapshot ports. This is currently implemented
-only for the Firecracker backend; the snapshot kernel must match and bridged
-networking is unsupported. In-flight guest
+only for the Firecracker backend; the snapshot kernel must match. In-flight guest
 connections do not survive the fork - the guest process must reconnect.
 
-For forks with networking, use `user` mode (pasta): every fork resumes with the
-snapshot's recorded guest IP, and user-mode gives each fork its own network
-namespace, so any number of forks run concurrently without colliding. `nat`
-forks run in the shared host network namespace and inherit `nat`'s
-`CAP_NET_ADMIN` requirement, so a `nat` fork is single-instance - concurrent
-forks of a networked workspace should use `user` mode.
+Networked forks use `user` mode (pasta): every fork resumes with the
+snapshot's recorded guest IP, and user-mode gives each fork its own per-VM
+network namespace, so any number of forks run concurrently without colliding.
 
 ## Image references
 

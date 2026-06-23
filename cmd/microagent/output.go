@@ -311,16 +311,12 @@ func printNetworkingSection(stdout *os.File, host *vmkit.HostSupport) {
 	}
 	if host.Backend == vmkit.BackendAppleVF {
 		networkReady := host.FrameworkAvailable && host.VirtualizationSupported && host.SupervisorAvailable
-		fmt.Fprintf(stdout, "Networking: isolated %s, user/nat %s\n", ready(networkReady), ready(networkReady))
+		fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n", ready(networkReady), ready(networkReady))
 		return
 	}
-	fmt.Fprintf(stdout, "Networking: isolated %s, user %s, nat/bridged/named %s\n",
+	fmt.Fprintf(stdout, "Networking: isolated %s, user %s\n",
 		ready(host.IsolatedNetworkReady),
-		ready(host.UserNetworkReady),
-		ready(host.PrivilegedNetworkReady))
-	if hint := diagnostics.NetworkRemediation(host); hint != "" {
-		fmt.Fprintf(stdout, "  %s\n", hint)
-	}
+		ready(host.UserNetworkReady))
 	if host.Backend == vmkit.BackendLinuxKVM {
 		status := "PASS"
 		if !host.EgressTProxyReady {
@@ -660,9 +656,6 @@ func writeNetworkResult(stdout *os.File, result workspaceNetworkResult) error {
 
 func writeNetworkConfig(stdout *os.File, label string, network vmkit.NetworkConfig) {
 	fmt.Fprintf(stdout, "%s: %s\n", label, network.Mode)
-	if network.Interface != "" {
-		fmt.Fprintf(stdout, "Interface: %s\n", network.Interface)
-	}
 	if network.IP != "" {
 		fmt.Fprintf(stdout, "IP: %s\n", network.IP)
 	}

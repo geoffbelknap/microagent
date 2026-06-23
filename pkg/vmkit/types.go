@@ -157,23 +157,14 @@ type MediationConfig struct {
 }
 
 type NetworkConfig struct {
-	Mode         string        `json:"mode" yaml:"mode"`
-	Interface    string        `json:"interface,omitempty" yaml:"interface,omitempty"`
-	Name         string        `json:"name,omitempty" yaml:"name,omitempty"`
-	PortForwards []PortForward `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
-	DNS          []string      `json:"dns,omitempty" yaml:"dns,omitempty"`
-	Routes       []string      `json:"routes,omitempty" yaml:"routes,omitempty"`
-	IP           string        `json:"ip,omitempty" yaml:"ip,omitempty"`
-	Subnet       string        `json:"subnet,omitempty" yaml:"subnet,omitempty"`
-	Gateway      string        `json:"gateway,omitempty" yaml:"gateway,omitempty"`
-	// Hosts carries "name:ip" entries for the guest /etc/hosts so members of a
-	// named network resolve each other. Populated by the supervisor at start.
-	Hosts   []string       `json:"hosts,omitempty" yaml:"hosts,omitempty"`
-	Runtime *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
-	// Unsupported acknowledges that the operator knowingly selected an
-	// unsupported, unmediated network mode (currently only "bridged"). It is
-	// set by the CLI --unsupported flag and gates ValidateNetworkConfig.
-	Unsupported bool `json:"unsupported,omitempty" yaml:"unsupported,omitempty"`
+	Mode         string         `json:"mode" yaml:"mode"`
+	PortForwards []PortForward  `json:"portForwards,omitempty" yaml:"forwards,omitempty"`
+	DNS          []string       `json:"dns,omitempty" yaml:"dns,omitempty"`
+	Routes       []string       `json:"routes,omitempty" yaml:"routes,omitempty"`
+	IP           string         `json:"ip,omitempty" yaml:"ip,omitempty"`
+	Subnet       string         `json:"subnet,omitempty" yaml:"subnet,omitempty"`
+	Gateway      string         `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	Runtime      *NetworkConfig `json:"runtime,omitempty" yaml:"-"`
 }
 
 type PortForward struct {
@@ -220,18 +211,12 @@ type HostSupport struct {
 	UserNamespacesAvailable bool   `json:"userNamespacesAvailable,omitempty"`
 	TunAvailable            bool   `json:"tunAvailable,omitempty"`
 
-	// Privileged-networking readiness (Linux/Firecracker). nat/bridged/named
-	// require IPv4 forwarding and the supervisor binary holding CAP_NET_ADMIN.
-	IPForwardEnabled          bool `json:"ipForwardEnabled,omitempty"`
-	SupervisorNetAdminCapable bool `json:"supervisorNetAdminCapable,omitempty"`
-	IsolatedNetworkReady      bool `json:"isolatedNetworkReady,omitempty"`
-	UserNetworkReady          bool `json:"userNetworkReady,omitempty"`
-	PrivilegedNetworkReady    bool `json:"privilegedNetworkReady,omitempty"`
+	IsolatedNetworkReady bool `json:"isolatedNetworkReady,omitempty"`
+	UserNetworkReady     bool `json:"userNetworkReady,omitempty"`
 
 	// EgressTProxyReady reports whether the kernel modules UDP egress mediation
-	// (TPROXY) needs are loaded or built-in. Needed for both user and nat egress
-	// modes. When false, EgressTProxyMissingModules lists what is absent so
-	// `host setup-networking` can load them.
+	// (TPROXY) needs are loaded or built-in. Needed for user-mode egress. When
+	// false, EgressTProxyMissingModules lists what is absent.
 	EgressTProxyReady          bool     `json:"egressTProxyReady,omitempty"`
 	EgressTProxyMissingModules []string `json:"egressTProxyMissingModules,omitempty"`
 
@@ -537,16 +522,15 @@ func EgressMediationOn(mode string) bool {
 }
 
 // NetworkModeMediates reports whether the given network mode actually runs the
-// egress mediator. Only "user", "nat", and "named" route guest egress through
-// the mediator (provisionEgressMediation runs for those modes). "bridged"
-// (quarantined, explicitly unmediated) and "isolated" (no egress at all) never
-// start a mediator, so even with EgressMode=mediated/strict there is no mediator
+// egress mediator. Only "user" routes guest egress through the mediator
+// (provisionEgressMediation runs for it). "isolated" (no egress at all) never
+// starts a mediator, so even with EgressMode=mediated/strict there is no mediator
 // to install a CA for. An empty mode resolves to the "user" default — which
 // mediates. Used to avoid telling the guest to trust a CA for a mediator that
 // will never exist (dead state).
 func NetworkModeMediates(mode string) bool {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", "user", "nat", "named":
+	case "", "user":
 		return true
 	default:
 		return false
@@ -578,31 +562,12 @@ func ValidateNetworkConfig(network NetworkConfig) error {
 		mode = "user"
 	}
 	switch mode {
-	case "user", "nat", "isolated", "bridged", "named":
+	case "user", "isolated":
 	default:
-		return fmt.Errorf("network.mode must be user, nat, isolated, bridged, or named")
-	}
-	// nat/named/bridged are gated behind an explicit --unsupported acknowledgement:
-	// transparent egress mediation is only reliable in the per-netns user/pasta path,
-	// so the host-netns modes are not guaranteed-mediated and default to fail-closed
-	// (refused) rather than silently running unmediated. bridged additionally bypasses
-	// mediation by design.
-	if !network.Unsupported {
-		switch mode {
-		case "bridged":
-			return fmt.Errorf("bridged networking is unsupported and unmediated; pass --unsupported to use it anyway")
-		case "nat", "named":
-			return fmt.Errorf("%s networking is unsupported and not reliably egress-mediated (only user mode is); pass --unsupported to use it anyway", mode)
-		}
-	}
-	if mode == "named" && strings.TrimSpace(network.Name) == "" {
-		return fmt.Errorf("network.mode named requires a network name")
-	}
-	if strings.TrimSpace(network.Name) != "" && mode != "named" {
-		return fmt.Errorf("network.name requires named mode")
+		return fmt.Errorf("network.mode must be user or isolated")
 	}
 	if mode == "isolated" && len(network.PortForwards) != 0 {
-		return fmt.Errorf("network.portForwards require user, nat, or bridged mode")
+		return fmt.Errorf("network.portForwards require user mode")
 	}
 	hostPorts := map[string]bool{}
 	for i, forward := range network.PortForwards {

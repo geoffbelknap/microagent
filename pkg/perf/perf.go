@@ -21,9 +21,9 @@ type BootOptions struct {
 	Mke2fsPath     string
 	SupervisorPath string
 	// NetworkMode selects the workspace network mode for each measured boot
-	// (user, nat, isolated, bridged). Empty means the backend default. An
-	// isolated boot needs no host network privileges, which matters on
-	// windows-hyperv where user/nat HNS setup requires elevation.
+	// (user, isolated). Empty means the backend default. An isolated boot needs
+	// no host network privileges, which matters on windows-hyperv where user
+	// HNS setup requires elevation.
 	NetworkMode string
 	Iterations  int
 	Timeout     time.Duration

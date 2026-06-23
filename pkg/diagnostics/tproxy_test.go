@@ -52,8 +52,8 @@ func TestDeriveTProxyModuleReadinessMissing(t *testing.T) {
 		t.Errorf("missing = %v, want 3 modules", host.EgressTProxyMissingModules)
 	}
 	hint := EgressTProxyRemediation(host)
-	if !strings.Contains(hint, "TPROXY") || !strings.Contains(hint, "microagent host setup-networking") {
-		t.Errorf("remediation = %q, want TPROXY + setup-networking hint", hint)
+	if !strings.Contains(hint, "TPROXY") || !strings.Contains(hint, "modprobe") {
+		t.Errorf("remediation = %q, want TPROXY + modprobe hint", hint)
 	}
 }
 
