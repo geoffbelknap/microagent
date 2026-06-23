@@ -1780,6 +1780,21 @@ python3 -c 'import json,sys; req=json.load(sys.stdin); open(%q, "w").write(json.
 	}
 }
 
+// startWorkspaceReferencingProcess spawns a long-lived process whose argv carries
+// the workspace's state path, so the status reconcile (which checks firecracker
+// liveness) sees the VM as alive and reports it running instead of reaping it to a
+// terminal state. Returns its pid.
+func startWorkspaceReferencingProcess(t *testing.T, stateDir, name string) int {
+	t.Helper()
+	vm := exec.Command("sleep", "300")
+	vm.Args = []string{filepath.Join(stateDir, name), "300"}
+	if err := vm.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = vm.Process.Kill(); _, _ = vm.Process.Wait() })
+	return vm.Process.Pid
+}
+
 func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 	dir := t.TempDir()
 	req := vmkit.Request{
@@ -1798,7 +1813,7 @@ func TestRunStatusUsesWorkspaceStateDefaults(t *testing.T) {
 			CPUCount:   2,
 		},
 	}
-	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, req, vmkit.StateRunning, 123, ""); err != nil {
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research", Backend: vmkit.BackendAppleVF}, req, vmkit.StateRunning, startWorkspaceReferencingProcess(t, dir, "research"), ""); err != nil {
 		t.Fatalf("writeWorkspaceProcessState: %v", err)
 	}
 	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", RestartPolicy: "always", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
@@ -1989,7 +2004,7 @@ func TestStatusReportsReadinessSignals(t *testing.T) {
 			CPUCount:   2,
 		},
 	}
-	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, startWorkspaceReferencingProcess(t, dir, "research"), ""); err != nil {
 		t.Fatal(err)
 	}
 	stdoutPath := filepath.Join(dir, "stdout.json")
@@ -4239,7 +4254,7 @@ func TestStatusReportsMediationReadiness(t *testing.T) {
 			Mediation:  &mediation,
 		},
 	}
-	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, 123, ""); err != nil {
+	if err := writeWorkspaceProcessState(workspaceOptions{StateDir: dir, Name: "research"}, req, vmkit.StateRunning, startWorkspaceReferencingProcess(t, dir, "research"), ""); err != nil {
 		t.Fatal(err)
 	}
 	stdoutPath := filepath.Join(dir, "stdout.json")
