@@ -347,7 +347,16 @@ func TestInspectReturnsRuntimeMetadata(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "agent-1", "result.json"), []byte(result), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeProcessState(opts, req, vmkit.StateRunning, 1234, ""); err != nil {
+	// A genuinely-running workspace: a live process whose argv carries the
+	// workspace state path, so the inspect liveness check sees firecracker as
+	// alive and returns runtime metadata instead of reconciling it to stopped.
+	vm := exec.Command("sleep", "3600")
+	vm.Args = []string{filepath.Join(dir, opts.Name), "3600"}
+	if err := vm.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = vm.Process.Kill(); _, _ = vm.Process.Wait() })
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vm.Process.Pid, ""); err != nil {
 		t.Fatal(err)
 	}
 	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
@@ -2139,6 +2148,35 @@ func TestCompanionShouldExitConditions(t *testing.T) {
 			t.Fatal("companionShouldExit = false for missing runtime state, want true")
 		}
 	})
+}
+
+// A workspace recorded as running whose firecracker process is gone must be
+// reconciled by inspect, not reported as still running. The guest here exited
+// non-zero via a reset-path shutdown (no "System halted"/"Power down" serial
+// marker), so reconciliation must trigger on PID liveness, not GuestHalted —
+// otherwise supervise's WaitForSupervised polls inspect forever and hangs.
+func TestInspectReconcilesDeadVM(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, deadProcessPID(t), ""); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(dir, "agent-1", "result.json")
+	if err := os.WriteFile(resultPath, []byte(`{"exit_code":42}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := inspectWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Event == nil || resp.Event.State != vmkit.StateFailed {
+		t.Fatalf("inspectWorkspace = %+v, want state failed (dead VM must be reconciled, not reported running)", resp.Event)
+	}
 }
 
 func TestRunPortForwarderExitsWhenVMProcessDies(t *testing.T) {
