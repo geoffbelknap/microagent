@@ -5,53 +5,58 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
-# Each entry: name:script:platform:requirement
+# Each entry: name:script:platform:requirement:tier
 #   platform    = all | linux | darwin (selected only on a matching host)
 #   requirement = none | vm
 #     none    - always runnable (no microVM boot needed)
 #     vm      - needs a microVM backend (skip-with-reason when absent)
+#   tier        = portable | core | broad | quarantine
+#     portable  - no-VM scenarios (run on every PR in the portable job)
+#     core      - seven backend-neutral VM scenarios run on every PR
+#     broad     - remaining VM scenarios (nightly / release)
+#     quarantine - temporarily disabled scenarios
 SCENARIOS=(
-  "coverage-matrix:scripts/dev/microagent-e2e-coverage-matrix.sh:all:none"
-  "contract:scripts/dev/runtime-contract-smoke.sh:all:none"
-  "help-usage:scripts/dev/microagent-e2e-help-usage.sh:all:none"
-  "mcp-stdio:scripts/dev/microagent-e2e-mcp.sh:all:none"
-  "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all:none"
-  "text-output:scripts/dev/microagent-e2e-text-output.sh:all:none"
-  "init:scripts/dev/microagent-e2e-init.sh:all:none"
-  "mcp-lifecycle:scripts/dev/microagent-e2e-mcp-lifecycle.sh:all:vm"
-  "survive-reboot:scripts/dev/microagent-e2e-survive-reboot.sh:all:vm"
-  "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all:vm"
-  "lifecycle-deep:scripts/dev/microagent-e2e-lifecycle.sh:all:vm"
-  "networking-deep:scripts/dev/microagent-e2e-networking-contract.sh:all:vm"
-  "transport-deep:scripts/dev/microagent-e2e-transport.sh:all:vm"
-  "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all:vm"
-  "volumes:scripts/dev/microagent-e2e-volumes.sh:all:vm"
-  "commit-images:scripts/dev/microagent-e2e-commit.sh:all:vm"
-  "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm"
-  "health:scripts/dev/microagent-e2e-health.sh:all:vm"
-  "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm"
-  "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm"
-  "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm"
-  "model-mediation-runner:scripts/dev/microagent-e2e-model-mediation-runner.sh:linux:vm"
-  "model-mediation-runner-fake:scripts/dev/microagent-e2e-model-mediation-runner-fake.sh:linux:vm"
-  "model-mediation-pressure-ci:scripts/dev/microagent-e2e-model-mediation-pressure-ci.sh:linux:vm"
-  "model-mediation-llamacpp:scripts/dev/microagent-e2e-model-mediation-llamacpp.sh:linux:vm"
-  "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm"
-  "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
-  "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm"
-  "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:linux:vm"
-  "windows-hyperv-lifecycle-host:scripts/dev/microagent-e2e-windows-hyperv-lifecycle-host.sh:windows:vm"
-  "windows-hyperv-connect-host:scripts/dev/microagent-e2e-windows-hyperv-connect-host.sh:windows:vm"
-  "windows-hyperv-exec-host:scripts/dev/microagent-e2e-windows-hyperv-exec-host.sh:windows:vm"
-  "windows-hyperv-transport-host:scripts/dev/microagent-e2e-windows-hyperv-transport-host.sh:windows:vm"
-  "windows-hyperv-model-host:scripts/dev/microagent-e2e-windows-hyperv-model-host.sh:windows:vm"
-  "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin:vm"
-  "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin:vm"
-  "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin:vm"
-  "applevf-workspace-connect:scripts/dev/applevf-workspace-connect-smoke.sh:darwin:vm"
-  "applevf-network-mode:scripts/dev/applevf-network-mode-smoke.sh:darwin:vm"
-  "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin:vm"
-  "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin:vm"
+  "coverage-matrix:scripts/dev/microagent-e2e-coverage-matrix.sh:all:none:portable"
+  "contract:scripts/dev/runtime-contract-smoke.sh:all:none:portable"
+  "help-usage:scripts/dev/microagent-e2e-help-usage.sh:all:none:portable"
+  "mcp-stdio:scripts/dev/microagent-e2e-mcp.sh:all:none:portable"
+  "registry-auth:scripts/dev/microagent-e2e-registry-auth.sh:all:none:portable"
+  "text-output:scripts/dev/microagent-e2e-text-output.sh:all:none:portable"
+  "init:scripts/dev/microagent-e2e-init.sh:all:none:portable"
+  "mcp-lifecycle:scripts/dev/microagent-e2e-mcp-lifecycle.sh:all:vm:core"
+  "survive-reboot:scripts/dev/microagent-e2e-survive-reboot.sh:all:vm:broad"
+  "public-surface:scripts/dev/microagent-e2e-public-surface.sh:all:vm:broad"
+  "lifecycle-deep:scripts/dev/microagent-e2e-lifecycle.sh:all:vm:core"
+  "networking-deep:scripts/dev/microagent-e2e-networking-contract.sh:all:vm:core"
+  "transport-deep:scripts/dev/microagent-e2e-transport.sh:all:vm:core"
+  "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all:vm:core"
+  "volumes:scripts/dev/microagent-e2e-volumes.sh:all:vm:broad"
+  "commit-images:scripts/dev/microagent-e2e-commit.sh:all:vm:broad"
+  "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm:core"
+  "health:scripts/dev/microagent-e2e-health.sh:all:vm:broad"
+  "exec-stream:scripts/dev/microagent-e2e-exec-stream.sh:all:vm:core"
+  "model-serving:scripts/dev/microagent-e2e-model.sh:all:vm:broad"
+  "model-mediation:scripts/dev/microagent-e2e-model-mediation.sh:linux:vm:broad"
+  "model-mediation-runner:scripts/dev/microagent-e2e-model-mediation-runner.sh:linux:vm:broad"
+  "model-mediation-runner-fake:scripts/dev/microagent-e2e-model-mediation-runner-fake.sh:linux:vm:broad"
+  "model-mediation-pressure-ci:scripts/dev/microagent-e2e-model-mediation-pressure-ci.sh:linux:vm:broad"
+  "model-mediation-llamacpp:scripts/dev/microagent-e2e-model-mediation-llamacpp.sh:linux:vm:broad"
+  "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm:broad"
+  "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm:broad"
+  "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm:broad"
+  "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:linux:vm:broad"
+  "windows-hyperv-lifecycle-host:scripts/dev/microagent-e2e-windows-hyperv-lifecycle-host.sh:windows:vm:broad"
+  "windows-hyperv-connect-host:scripts/dev/microagent-e2e-windows-hyperv-connect-host.sh:windows:vm:broad"
+  "windows-hyperv-exec-host:scripts/dev/microagent-e2e-windows-hyperv-exec-host.sh:windows:vm:broad"
+  "windows-hyperv-transport-host:scripts/dev/microagent-e2e-windows-hyperv-transport-host.sh:windows:vm:broad"
+  "windows-hyperv-model-host:scripts/dev/microagent-e2e-windows-hyperv-model-host.sh:windows:vm:broad"
+  "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin:vm:broad"
+  "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin:vm:broad"
+  "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin:vm:broad"
+  "applevf-workspace-connect:scripts/dev/applevf-workspace-connect-smoke.sh:darwin:vm:broad"
+  "applevf-network-mode:scripts/dev/applevf-network-mode-smoke.sh:darwin:vm:broad"
+  "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin:vm:broad"
+  "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin:vm:broad"
 )
 
 # Each entry: scenario|coverage|backends|feature summary.
@@ -330,7 +335,7 @@ scenario_meta() {
   esac
 }
 
-# scenario_field <name> <index>: print field 2=script, 3=platform, 4=requirement.
+# scenario_field <name> <index>: print field 2=script, 3=platform, 4=requirement, 5=tier.
 scenario_field() {
   wanted="$(canonical_scenario "$1")"
   for entry in "${SCENARIOS[@]}"; do
@@ -340,11 +345,14 @@ scenario_field() {
       f_script="${rest%%:*}"
       rest="${rest#*:}"
       f_platform="${rest%%:*}"
-      f_req="${rest#*:}"
+      rest="${rest#*:}"
+      f_req="${rest%%:*}"
+      f_tier="${rest#*:}"
       case "$2" in
         2) printf '%s\n' "$f_script" ;;
         3) printf '%s\n' "$f_platform" ;;
         4) printf '%s\n' "${f_req:-vm}" ;;
+        5) printf '%s\n' "${f_tier:-broad}" ;;
       esac
       return 0
     fi
@@ -355,6 +363,7 @@ scenario_field() {
 scenario_script() { scenario_field "$1" 2; }
 scenario_platform() { scenario_field "$1" 3; }
 scenario_requirement() { scenario_field "$1" 4; }
+scenario_tier() { scenario_field "$1" 5; }
 
 canonical_scenario() {
   case "$1" in
@@ -404,7 +413,8 @@ list_scenarios() {
       name="${entry%%:*}"
       rest="${entry#*:}"; rest="${rest#*:}"
       platform="${rest%%:*}"
-      req="${rest#*:}"
+      rest="${rest#*:}"
+      req="${rest%%:*}"
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$name" "$platform" "${req:-vm}" \
         "$(scenario_meta "$name" coverage)" \
@@ -418,7 +428,8 @@ list_scenarios() {
     name="${entry%%:*}"
     rest="${entry#*:}"; rest="${rest#*:}"
     platform="${rest%%:*}"
-    req="${rest#*:}"
+    rest="${rest#*:}"
+    req="${rest%%:*}"
     printf '%-28s %-8s %-8s %-16s %-20s %s\n' \
       "$name" "$platform" "${req:-vm}" \
       "$(scenario_meta "$name" coverage)" \
@@ -467,6 +478,32 @@ while [ "$#" -gt 0 ]; do
       ;;
     --list)
       list_scenarios
+      exit 0
+      ;;
+    --list-tier)
+      if [ "$#" -lt 2 ]; then
+        echo "--list-tier requires a tier name (portable, core, broad, quarantine)" >&2
+        exit 2
+      fi
+      _list_tier="$2"
+      shift 2
+      for _entry in "${SCENARIOS[@]}"; do
+        _lname="${_entry%%:*}"
+        if [ "$(scenario_tier "$_lname")" = "$_list_tier" ]; then
+          printf '%s\n' "$_lname"
+        fi
+      done
+      exit 0
+      ;;
+    --list-tier=*)
+      _list_tier="${1#*=}"
+      shift
+      for _entry in "${SCENARIOS[@]}"; do
+        _lname="${_entry%%:*}"
+        if [ "$(scenario_tier "$_lname")" = "$_list_tier" ]; then
+          printf '%s\n' "$_lname"
+        fi
+      done
       exit 0
       ;;
     --matrix)
