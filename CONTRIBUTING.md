@@ -51,26 +51,41 @@ make smoke
 make smoke-rootfs
 ```
 
-The hosted CI workflow runs the portable microagent E2E scenarios:
+The hosted CI is layered into tiers (all on GitHub-hosted runners):
 
-```bash
-scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output init
-```
+- **Tier 0 — PR gate (`.github/workflows/ci.yaml`):** Go tests + lint, docs/shell
+  checks, and the *portable* (no-VM) E2E scenarios. Fast, deterministic, blocks
+  merge:
+  ```bash
+  scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output init
+  ```
+- **Tier 1 — core E2E (`.github/workflows/e2e-core.yaml`):** runs on every PR. One
+  isolated parallel job per *core* VM scenario (`scripts/dev/microagent-e2e.sh
+  --list-tier core`), each with one automatic retry. Blocks merge.
+- **Tier 2 — full E2E (`.github/workflows/e2e-full.yaml`):** the *broad* scenario
+  set, one job per scenario, run nightly, on release tags, and on demand via the
+  `run-full-ci` PR label. Gates releases, not every PR. A non-blocking
+  **quarantine** lane (`--list-tier quarantine`) holds known-flaky scenarios —
+  tracked, never blocking — until fixed.
 
-Live backend validation is split by host capability:
+Reliability comes from per-scenario isolation plus condition-based waits (the
+`e2e_wait_*` helpers in `e2e-lib.sh`, tunable via `MICROAGENT_E2E_WAIT_TIMEOUT`),
+not runner horsepower; if a job still flakes, escalating its `runs-on` to a
+larger runner is a one-line change.
 
-- Hosted CI is the portable gate. It should not assume KVM, Hyper-V, or Apple
-  Virtualization.framework access.
-- Linux release parity is gated by `.github/workflows/live-linux-parity.yaml`
-  on trusted `main` pushes or manual dispatch on a self-hosted runner labeled
-  `linux`, `x64`, and `kvm`.
-- macOS Apple VF parity is a local/mac-agent lane unless a self-hosted Apple
-  silicon runner is explicitly available. Hosted macOS runners are not treated
-  as the release source of truth for Virtualization.framework behavior.
-- Windows Hyper-V remains experimental and gated by its own self-hosted
-  Windows runner when available.
+Other lanes:
 
-Run the live Linux lane on the self-hosted KVM runner:
+- macOS Apple VF parity runs in `ci.yaml` (the `macos-supervisor` job); a
+  self-hosted Apple-silicon runner is the release source of truth for
+  Virtualization.framework behavior.
+- Windows Hyper-V remains experimental, gated by its own self-hosted Windows
+  runner when available.
+
+> **Cutover:** `.github/workflows/live-linux-parity.yaml` (the legacy monolithic
+> suite) runs in parallel as a safety net during the transition; it is retired
+> once `e2e-full` is green over several consecutive nights.
+
+Run the full suite locally:
 
 ```bash
 scripts/dev/microagent-e2e.sh

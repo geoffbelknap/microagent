@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
 . "$ROOT/scripts/dev/e2e-lib.sh"
 
 # Streaming structured exec (exec --stream): the guest delivers stdout/stderr as
@@ -144,7 +145,7 @@ exec_ws() { ws="$1"; shift; "$CLI" exec "$ws" --state-dir "$STATE_DIR" "$@"; }
 
 create_workspace || { cat "$STATE_DIR/create.json"; e2e_fail "create"; }
 run_cli start "$WS" >/dev/null 2>&1 || e2e_fail "start"
-e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$WS" || e2e_fail "exec service never became ready"
+e2e_wait_exec_ready "$CLI" "$STATE_DIR" "$WS" "${MICROAGENT_E2E_WAIT_TIMEOUT:-60}" || e2e_fail "exec service never became ready"
 
 e2e_step "exec --stream delivers all stdout lines"
 # shellcheck disable=SC2016  # $i is expanded by the guest shell, not the host

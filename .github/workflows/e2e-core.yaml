@@ -1,0 +1,61 @@
+name: E2E core
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-core:
+    name: Generate core scenario matrix
+    runs-on: ubuntu-latest
+    outputs:
+      scenarios: ${{ steps.gen.outputs.scenarios }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Generate scenario list
+        id: gen
+        run: |
+          echo "scenarios=$(scripts/dev/microagent-e2e.sh --list-tier core | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+
+  core:
+    name: core / ${{ matrix.scenario }}
+    needs: matrix-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(needs.matrix-core.outputs.scenarios) }}
+    env:
+      MICROAGENT_E2E_WAIT_TIMEOUT: "180"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup microagent KVM environment
+        uses: ./.github/actions/setup-microagent-kvm
+
+      - name: Run ${{ matrix.scenario }} (1 retry)
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          scripts/dev/microagent-e2e.sh "$SCENARIO" || {
+            echo "::warning::retrying flaky scenario $SCENARIO"
+            scripts/dev/microagent-e2e.sh "$SCENARIO"
+          }
+
+  e2e-core:
+    name: E2E core (gate)
+    needs: core
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate
+        run: '[ "${{ needs.core.result }}" = "success" ] || exit 1'
