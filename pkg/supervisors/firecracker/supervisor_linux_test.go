@@ -2360,3 +2360,35 @@ func TestEnsureCanDeleteRejectsDeadVMWithLiveCompanions(t *testing.T) {
 		t.Fatalf("ensureCanDelete error = %v, want port forwarder running error", err)
 	}
 }
+
+func TestProcessIdentityReferencesWorkspace(t *testing.T) {
+	const ws = "/state/feature-matrix"
+	cases := []struct {
+		name      string
+		cmdline   []byte
+		mountinfo []byte
+		wsPath    string
+		want      bool
+	}{
+		{"unconfined argv carries ws path",
+			[]byte("/usr/bin/firecracker\x00--api-sock\x00/state/feature-matrix/run/api.sock\x00"), nil, ws, true},
+		{"confined jail bind in mountinfo (jail-relative argv)",
+			[]byte("/firecracker\x00--config-file\x00/run/firecracker.json\x00"),
+			[]byte("277 268 253:1 /state/feature-matrix/jail / rw - ext4 /dev/vda1 rw\n"), ws, true},
+		{"neither references the workspace (reused pid)",
+			[]byte("/firecracker\x00--config-file\x00/run/firecracker.json\x00"),
+			[]byte("100 1 8:1 / / rw - ext4 /dev/sda1 rw\n"), ws, false},
+		{"another workspace's jail does not match (reuse-safe)", nil,
+			[]byte("277 268 253:1 /state/other-ws/jail / rw - ext4 /dev/vda1 rw\n"), ws, false},
+		{"prefix-name workspace jail does not match", nil,
+			[]byte("277 268 253:1 /state/feature-matrix-2/jail / rw - ext4 /dev/vda1 rw\n"), ws, false},
+		{"empty workspace path", []byte("/firecracker\x00"), nil, "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := processIdentityReferencesWorkspace(tc.cmdline, tc.mountinfo, tc.wsPath); got != tc.want {
+				t.Errorf("processIdentityReferencesWorkspace = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
