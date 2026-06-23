@@ -6787,7 +6787,7 @@ func TestRunListListsWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runList([]string{"--state-dir", dir}, stdout)
+	err = runList(context.Background(), []string{"--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -6827,7 +6827,7 @@ func TestRunListCanPrintHumanOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runList([]string{"--state-dir", dir}, stdout)
+	err = runList(context.Background(), []string{"--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -6943,7 +6943,7 @@ func TestRunPSFiltersStoppedWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = runPS([]string{"--state-dir", dir}, stdout)
+	err = runPS(context.Background(), []string{"--state-dir", dir}, stdout)
 	if closeErr := stdout.Close(); closeErr != nil {
 		t.Fatal(closeErr)
 	}
