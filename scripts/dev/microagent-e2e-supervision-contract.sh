@@ -108,7 +108,7 @@ wait_for_state() {
   workspace="$1"
   wanted="$2"
   output="$3"
-  deadline="$((SECONDS + 60))"
+  deadline="$((SECONDS + ${MICROAGENT_E2E_WAIT_TIMEOUT:-60}))"
   while true; do
     "$CLI" status "$workspace" --state-dir "$STATE_DIR" >"$output" 2>"$output.err" || true
     if python3 - "$output" "$wanted" <<'PY'
@@ -144,7 +144,7 @@ process_is_active() {
 
 wait_for_process_exit() {
   pid="$1"
-  deadline="$((SECONDS + 20))"
+  deadline="$((SECONDS + ${MICROAGENT_E2E_WAIT_TIMEOUT:-20}))"
   while process_is_active "$pid"; do
     if [ "$SECONDS" -ge "$deadline" ]; then
       echo "process $pid did not exit" >&2

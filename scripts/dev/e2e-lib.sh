@@ -194,7 +194,7 @@ e2e_require_linux() { [ "$(uname -s)" = "Linux" ] || e2e_skip "Linux-only scenar
 # guest exec service answers, so exec calls don't race the boot. Readiness is
 # probed on demand at each status call.
 e2e_wait_exec_ready() {
-  cli="$1"; sd="$2"; ws="$3"; timeout="${4:-60}"; i=0
+  cli="$1"; sd="$2"; ws="$3"; timeout="${4:-${MICROAGENT_E2E_WAIT_TIMEOUT:-60}}"; i=0
   while [ "$i" -lt "$timeout" ]; do
     if "$cli" --json status "$ws" --state-dir "$sd" 2>/dev/null | grep -A2 '"execReady"' | grep -q '"ready": true'; then
       return 0
