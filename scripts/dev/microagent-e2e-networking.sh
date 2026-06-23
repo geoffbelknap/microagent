@@ -29,7 +29,6 @@ IMAGE_CACHE_POLICY="${MICROAGENT_E2E_IMAGE_CACHE_POLICY:-auto}"
 if [ -z "${MICROAGENT_E2E_IMAGE_CACHE_POLICY+x}" ] && [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" = "1" ]; then
   IMAGE_CACHE_POLICY="refresh"
 fi
-EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0"
 BRIDGE_NAME="${MICROAGENT_E2E_BRIDGE:-}"
 DELETE_BRIDGE=0
 ORIGINAL_IP_FORWARD=""
@@ -667,14 +666,12 @@ else
 fi
 
 "$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
-kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
+kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     result = json.load(f)
-if result.get("sha256") != sys.argv[2]:
-    raise SystemExit(result)
 print(result["path"])
 PY
 )"

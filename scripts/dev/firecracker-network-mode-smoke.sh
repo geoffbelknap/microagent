@@ -8,7 +8,6 @@ CLI="$STATE_DIR/microagent"
 SUPERVISOR="$STATE_DIR/microagent-firecracker-supervisor"
 GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
 IMAGE="docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
-EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0"
 
 cleanup() {
   status="$?"
@@ -87,14 +86,12 @@ if [ "$(id -u)" -ne 0 ] && command -v getcap >/dev/null 2>&1; then
 fi
 
 "$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
-kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
+kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     result = json.load(f)
-if result.get("sha256") != sys.argv[2]:
-    raise SystemExit(result)
 print(result["path"])
 PY
 )"

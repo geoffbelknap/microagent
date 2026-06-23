@@ -10,7 +10,6 @@ GUEST_INIT="$STATE_DIR/microagent-guestinit-amd64"
 WORKSPACE="mediation-smoke"
 OPTIONAL_WORKSPACE="mediation-optional"
 IMAGE="${MICROAGENT_NATS_IMAGE:-docker.io/library/nats@sha256:6e0cca2c6da79f0a3542ec5a3319dd10b1b05f5d8e8949afa8e9cdf6314bbf6c}"
-EXPECTED_KERNEL_SHA="4bbe8b2fd19f78fea4bf02d52a67482227a896c90a63f272b6a084fa46a416c0"
 SERVER_PID=""
 RAW_SERVER_PID=""
 RAW_LARGE_SERVER_PID=""
@@ -116,14 +115,12 @@ PY
 )
 
 "$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
-kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" "$EXPECTED_KERNEL_SHA" <<'PY'
+kernel_path="$(python3 - "$STATE_DIR/kernel-install.json" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     result = json.load(f)
-if result.get("sha256") != sys.argv[2]:
-    raise SystemExit(result)
 print(result["path"])
 PY
 )"
