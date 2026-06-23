@@ -192,10 +192,10 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 		return runArtifact(ctx, args[1:], stdout)
 	}
 	if args[0] == "list" || args[0] == "ls" {
-		return runList(args[1:], stdout)
+		return runList(ctx, args[1:], stdout)
 	}
 	if args[0] == "ps" {
-		return runPS(args[1:], stdout)
+		return runPS(ctx, args[1:], stdout)
 	}
 	if args[0] == "gc" {
 		return runGC(ctx, args[1:], stdout)
@@ -925,7 +925,7 @@ func pendingModelRelease(stateDir, name, backend string) func() {
 	}
 }
 
-func runList(args []string, stdout *os.File) error {
+func runList(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -940,10 +940,14 @@ func runList(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	reconcileLiveWorkspaces(ctx, opts.StateDir, entries)
+	if entries, err = workspace.List(opts.StateDir); err != nil {
+		return err
+	}
 	return writeWorkspaceList(stdout, entries)
 }
 
-func runPS(args []string, stdout *os.File) error {
+func runPS(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
 	fs := flag.NewFlagSet("ps", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -958,18 +962,55 @@ func runPS(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	reconcileLiveWorkspaces(ctx, opts.StateDir, entries)
+	if entries, err = workspace.List(opts.StateDir); err != nil {
+		return err
+	}
 	return writeWorkspaceList(stdout, filterRunningWorkspaces(entries))
+}
+
+// isLiveRecordedState reports whether a recorded state claims the VM is still
+// alive — the states whose truth must be re-checked against the running process
+// before status/ps/list report them, since a recorded "running" can be stale.
+func isLiveRecordedState(state vmkit.VMState) bool {
+	switch state {
+	case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused, vmkit.StateQuarantined, vmkit.StateStopping:
+		return true
+	}
+	return false
 }
 
 func filterRunningWorkspaces(entries []workspaceListEntry) []workspaceListEntry {
 	filtered := entries[:0]
 	for _, entry := range entries {
-		switch vmkit.VMState(entry.State) {
-		case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused, vmkit.StateQuarantined, vmkit.StateStopping:
+		if isLiveRecordedState(vmkit.VMState(entry.State)) {
 			filtered = append(filtered, entry)
 		}
 	}
 	return filtered
+}
+
+// reconcileLiveWorkspaces reaps any listed workspace recorded as live whose
+// firecracker process is gone, persisting its true terminal state, so ps/list
+// report reality instead of a stale "running". Best-effort and idempotent:
+// reconcile failures and healthy VMs leave the recorded state untouched.
+func reconcileLiveWorkspaces(ctx context.Context, stateDir string, entries []workspaceListEntry) {
+	supervisorPath := defaultSupervisorPath(hostBackend())
+	for _, entry := range entries {
+		if !isLiveRecordedState(vmkit.VMState(entry.State)) {
+			continue
+		}
+		backend := entry.Backend
+		if backend == "" {
+			backend = hostBackend()
+		}
+		_, _ = workspace.Inspect(ctx, workspaceOptions{
+			StateDir:       stateDir,
+			Name:           entry.Name,
+			Backend:        backend,
+			SupervisorPath: supervisorPath,
+		})
+	}
 }
 
 // runGC sweeps the host for VMs recorded as running whose firecracker process
@@ -1143,6 +1184,16 @@ func runWorkspaceStateCommand(ctx context.Context, command string, args []string
 		resp, err := workspace.Status(workspaceOpts)
 		if err != nil {
 			return err
+		}
+		// Reconcile a possibly-dead VM (reap if its firecracker is gone) so status
+		// reports reality, not a stale "running". Only worth a supervisor round-trip
+		// when the recorded state still claims to be live; best-effort otherwise.
+		if resp.Event != nil && isLiveRecordedState(resp.Event.State) {
+			if _, ierr := workspace.Inspect(ctx, workspaceOpts); ierr == nil {
+				if reread, rerr := workspace.Status(workspaceOpts); rerr == nil {
+					resp = reread
+				}
+			}
 		}
 		return writeResponse(stdout, resp)
 	}

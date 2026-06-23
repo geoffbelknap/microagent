@@ -3250,7 +3250,7 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		}
 		return responseFromEvent(event, ""), nil
 	}
-	if state.Event.State == vmkit.StateRunning && GuestHalted(serialLogPath(opts)) {
+	if state.Event.State == vmkit.StateRunning && (GuestHalted(serialLogPath(opts)) || !firecrackerAlive(state, opts)) {
 		resultWait := time.Duration(0)
 		if runtimeHasResultListener(opts, state) {
 			resultWait = 2 * time.Second
@@ -3285,6 +3285,15 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 	return responseFromRuntimeState(opts, state), nil
 }
 
+// firecrackerAlive reports whether the recorded VMM PID is genuinely this
+// workspace's firecracker. A live PID alone isn't proof — PIDs get reused — so
+// it must still carry this workspace's argv. False means the VM is gone (crashed,
+// killed, or exited cleanly) and the workspace is stale.
+func firecrackerAlive(state runtimeState, opts Options) bool {
+	a, _ := processActive(state.PID)
+	return a && processReferencesWorkspace(state.PID, opts)
+}
+
 // gcWorkspace reconciles one workspace against reality: if it's recorded as
 // running but its firecracker process is gone (crashed, OOM-killed, host
 // rebooted, or an orphaned supervisor), it's stale — reap any lingering
@@ -3307,8 +3316,7 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	// A live PID alone isn't proof of life — PIDs get reused (including by gc's
 	// own freshly-spawned supervisor). The VM is healthy only if the recorded
 	// PID is alive AND still carries this workspace's argv.
-	a, _ := processActive(state.PID)
-	alive := a && processReferencesWorkspace(state.PID, opts)
+	alive := firecrackerAlive(state, opts)
 	expired := leaseExpired(state, opts)
 	if alive && !expired {
 		return responseFromRuntimeState(opts, state), nil
