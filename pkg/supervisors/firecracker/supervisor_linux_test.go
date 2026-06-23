@@ -331,6 +331,94 @@ func TestGuestHaltedStateClassifiesPowerOffAsStopped(t *testing.T) {
 	}
 }
 
+// TestInspectClassifiesStoppingWorkspaceAsStopped covers the host-`stop` race:
+// when an intentional stop records Stopping before killing firecracker, the
+// supervise loop's inspect re-classification of the now-dead firecracker must
+// resolve to Stopped — not Failed from the killed command's non-zero
+// result.json. A workspace dying the same way WITHOUT the Stopping intent (a
+// genuine crash) must still classify as Failed.
+func TestInspectClassifiesStoppingWorkspaceAsStopped(t *testing.T) {
+	cases := []struct {
+		name      string
+		stopping  bool
+		wantState vmkit.VMState
+	}{
+		{name: "stopping intent resolves dead firecracker to stopped", stopping: true, wantState: vmkit.StateStopped},
+		{name: "no stopping intent classifies the killed command as failed", stopping: false, wantState: vmkit.StateFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := Options{Name: "agent-1", StateDir: dir}
+			req := vmkit.Request{
+				Command: "run",
+				Identity: &vmkit.Identity{
+					RequestID: "req-1",
+					RuntimeID: "agent-1",
+					Role:      vmkit.RoleWorkload,
+					Backend:   vmkit.BackendLinuxKVM,
+				},
+				Config: &vmkit.Config{StateDir: dir},
+			}
+			if err := os.MkdirAll(filepath.Join(dir, "agent-1"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// The killed workspace command left a non-zero result: guestHaltedState
+			// would classify this Failed unless the stop intent overrides it.
+			result := `{"exit_code":143,"error":"signal: killed"}`
+			if err := os.WriteFile(filepath.Join(dir, "agent-1", "result.json"), []byte(result), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// Record the workspace Running with a firecracker PID that is dead and
+			// does not reference this workspace, so inspect's liveness check sees
+			// firecracker as gone and enters the reclassification branch.
+			deadPID := unusedPID(t)
+			if err := writeProcessState(opts, req, vmkit.StateRunning, deadPID, ""); err != nil {
+				t.Fatal(err)
+			}
+			if tc.stopping {
+				state, err := readRuntimeState(opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := persistStopIntent(opts, state); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			resp, err := inspectWorkspace(opts)
+			if err != nil {
+				t.Fatalf("inspectWorkspace: %v", err)
+			}
+			if resp.Event == nil || resp.Event.State != tc.wantState {
+				t.Fatalf("inspect state = %#v, want %q", resp.Event, tc.wantState)
+			}
+			persisted, err := readRuntimeState(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Event.State != tc.wantState {
+				t.Fatalf("persisted state = %q, want %q", persisted.Event.State, tc.wantState)
+			}
+		})
+	}
+}
+
+// unusedPID returns a PID that is not currently a live process, so liveness
+// checks treat it as a dead firecracker.
+func unusedPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("spawn throwaway process: %v", err)
+	}
+	pid := cmd.ProcessState.Pid()
+	if pid <= 0 {
+		t.Fatalf("throwaway pid = %d", pid)
+	}
+	return pid
+}
+
 func TestRuntimeHasResultListener(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{StateDir: dir, Name: "demo"}

@@ -324,6 +324,14 @@ type runtimeState struct {
 	UpdatedAt         string                   `json:"updatedAt"`
 	Readiness         vmkit.RuntimeReadiness   `json:"readiness,omitempty"`
 	Error             string                   `json:"error,omitempty"`
+	// Stopping records that a clean host-initiated stop/halt was requested while
+	// the workspace was still Running. It is set before firecracker is signaled,
+	// so the supervise loop's inspect re-classification (which would otherwise read
+	// the killed command's non-zero result.json and report Failed) instead resolves
+	// an intentional stop to Stopped once firecracker is actually dead. It is moot
+	// once a terminal state is written, and a fresh Start writes a new runtime state
+	// without it.
+	Stopping bool `json:"stopping,omitempty"`
 }
 
 type guestResult struct {
@@ -713,6 +721,18 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	state, err := readRuntimeState(opts)
 	if err != nil {
 		return vmkit.Response{}, err
+	}
+	// Record stop intent before signaling firecracker, but only for clean stops
+	// (Stopped/Halted) — not for the failure writes below. This closes the race
+	// window where a concurrent supervise-loop inspect could read the killed
+	// command's non-zero result.json and mis-classify the intentional stop as
+	// Failed: once Stopping is on disk, inspect/gc resolve a dead firecracker to
+	// Stopped. Best-effort: a write failure here must not block the stop itself.
+	cleanStop := finalState == vmkit.StateStopped || finalState == vmkit.StateHalted
+	if cleanStop && state.Event.State == vmkit.StateRunning && !state.Stopping {
+		if err := persistStopIntent(opts, state); err == nil {
+			state.Stopping = true
+		}
 	}
 	if state.PID == 0 {
 		if state.PortForwardPID != 0 {
@@ -2951,7 +2971,17 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		if runtimeHasResultListener(opts, state) {
 			resultWait = 2 * time.Second
 		}
-		finalState, errorText := guestHaltedState(opts, resultWait)
+		// An intentional host stop records Stopping before signaling firecracker.
+		// Now that firecracker is dead, the stop has completed: classify it as a
+		// clean Stopped rather than re-reading the killed command's non-zero
+		// result.json (which guestHaltedState would report as Failed). A genuine
+		// crash (Stopping==false) still classifies via guestHaltedState. This is
+		// gated inside the fc-dead branch, so a still-alive fc yields no premature
+		// reclassification or restart.
+		finalState, errorText := vmkit.StateStopped, ""
+		if !state.Stopping {
+			finalState, errorText = guestHaltedState(opts, resultWait)
+		}
 		// Only signal the recorded pid if it is still THIS workspace's firecracker.
 		// A pid we no longer own (recycled by an unrelated process) must not be
 		// signaled: signalProcessGroup targets the pid's group and would kill an
@@ -3035,7 +3065,11 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	// never-recorded pid that still looks "alive") has no clean exit, so it stays
 	// Stopped.
 	finalState, detail := vmkit.StateStopped, reapReason
-	if !alive {
+	// A workspace mid-intentional-stop (Stopping recorded before firecracker was
+	// signaled) must resolve to Stopped, not the killed command's failure —
+	// consistent with inspectWorkspace. Only honor the guest exit code for a
+	// genuine, unrequested exit.
+	if !alive && !state.Stopping {
 		if s, errText := guestHaltedState(opts, 0); s == vmkit.StateFailed {
 			finalState, detail = s, errText
 		}
@@ -3448,6 +3482,18 @@ func readRuntimeState(opts Options) (runtimeState, error) {
 		return state, err
 	}
 	return state, json.Unmarshal(data, &state)
+}
+
+// persistStopIntent records, in the still-Running runtime state, that a clean
+// host stop/halt is in progress. It re-writes the runtime file in place
+// (preserving every PID, network device, and firewall rule) with Stopping set,
+// so a concurrent inspect/gc re-classification of the soon-to-be-dead
+// firecracker resolves the intentional stop to Stopped instead of the killed
+// command's failure. It must be called BEFORE firecracker is signaled.
+func persistStopIntent(opts Options, state runtimeState) error {
+	state.Stopping = true
+	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	return writeJSONFile(filepath.Join(opts.StateDir, opts.Name, "runtime.json"), state)
 }
 
 func readEvent(opts Options) (eventFile, error) {
