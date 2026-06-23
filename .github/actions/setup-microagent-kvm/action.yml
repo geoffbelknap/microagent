@@ -1,0 +1,52 @@
+name: Setup microagent KVM environment
+description: >
+  Installs Go, configures KVM access, installs firecracker, and builds the
+  microagent stack into .build/dev. Used by tiered e2e jobs.
+
+inputs:
+  firecracker-version:
+    description: Firecracker release tag to install
+    default: v1.16.0
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: "1.26.4"
+        cache-dependency-path: go.mod
+
+    - name: Allow unprivileged user namespaces
+      shell: bash
+      # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor;
+      # pasta needs them for firecracker user-mode networking.
+      run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+    - name: Grant the runner user KVM access
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        ls -l /dev/kvm
+
+    - name: Install firecracker
+      shell: bash
+      run: |
+        curl -fsSL "https://github.com/firecracker-microvm/firecracker/releases/download/${{ inputs.firecracker-version }}/firecracker-${{ inputs.firecracker-version }}-x86_64.tgz" -o /tmp/firecracker.tgz
+        tar -xzf /tmp/firecracker.tgz -C /tmp
+        sudo install "/tmp/release-${{ inputs.firecracker-version }}-x86_64/firecracker-${{ inputs.firecracker-version }}-x86_64" /usr/local/bin/firecracker
+        firecracker --version
+
+    - name: Build microagent stack
+      shell: bash
+      run: |
+        mkdir -p .build/dev
+        go build -buildvcs=false -o .build/dev/microagent ./cmd/microagent
+        go build -buildvcs=false -o .build/dev/microagent-firecracker-supervisor ./cmd/microagent-firecracker-supervisor
+        GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o .build/dev/microagent-guestinit-amd64 ./cmd/microagent-guestinit
+
+    - name: Export supervisor path
+      shell: bash
+      run: echo "MICROAGENT_FIRECRACKER_SUPERVISOR=${{ github.workspace }}/.build/dev/microagent-firecracker-supervisor" >> "$GITHUB_ENV"
