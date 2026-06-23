@@ -162,8 +162,9 @@ func hostResponse(opts Options) (vmkit.Response, error) {
 	}
 	// Report confinement honestly: only when a non-off mode actually resolves
 	// for this host's knob + facts (resolveConfinementMode fails closed, so a
-	// non-off result means the host supports and will apply it). While
-	// confinement is opt-in this is off unless MICROAGENT_CONFINEMENT is set.
+	// non-off result means the host supports and will apply it). Confinement is
+	// on by default ("auto"); this is off only on hosts that support neither a
+	// root jailer nor rootless user namespaces, or when explicitly disabled.
 	confOpts := opts
 	if strings.TrimSpace(confOpts.Confinement) == "" {
 		confOpts.Confinement = resolveConfinementKnob()

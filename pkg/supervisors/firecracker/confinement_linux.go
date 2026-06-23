@@ -12,8 +12,8 @@ import (
 )
 
 // confinementEnv is the operator knob selecting VMM-process confinement for the
-// Firecracker backend. Values: "off" (default, opt-in while confinement is being
-// brought up), "auto" (strongest available), "jailer", "rootless".
+// Firecracker backend. Values: "auto" (default; strongest mode the host
+// supports, falling back to off), "jailer", "rootless", "off" (opt out).
 const confinementEnv = "MICROAGENT_CONFINEMENT"
 
 // Knob string values (the operator-facing names).
@@ -45,26 +45,27 @@ func (m confinementMode) String() string {
 }
 
 // resolveConfinementKnob reads MICROAGENT_CONFINEMENT and normalizes it,
-// defaulting to "off" (opt-in) when unset or unrecognized.
+// defaulting to "auto" (on-by-default; strongest mode the host supports,
+// falling back to off) when unset.
 func resolveConfinementKnob() string {
 	return normalizeConfinementKnob(os.Getenv(confinementEnv))
 }
 
-// normalizeConfinementKnob lower-cases/trims the knob. Confinement is opt-in
-// while it is being brought up: anything unrecognized (including empty/unset)
-// maps to "off". Operators opt in explicitly with "auto" (strongest available),
-// "rootless", or "jailer". When confinement ships on-by-default this default
-// flips to "auto".
+// normalizeConfinementKnob lower-cases/trims the knob. Confinement is
+// on-by-default: empty/unset (and any unrecognized value) maps to "auto" — the
+// strongest mode the host supports, falling back to off where it supports
+// neither a root jailer nor rootless user namespaces. Operators opt out
+// explicitly with "off", or pin a specific posture with "jailer"/"rootless".
 func normalizeConfinementKnob(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case confinementAuto:
-		return confinementAuto
+	case confinementOffKnob:
+		return confinementOffKnob
 	case confinementJailerKnob:
 		return confinementJailerKnob
 	case confinementRootlessKnob:
 		return confinementRootlessKnob
 	default:
-		return confinementOffKnob
+		return confinementAuto
 	}
 }
 
