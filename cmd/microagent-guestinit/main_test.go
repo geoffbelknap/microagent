@@ -375,6 +375,87 @@ func TestApplyKernelConfigModelFwd(t *testing.T) {
 	}
 }
 
+func TestShutdownCoordinatorPowerOffWinsAndMarks(t *testing.T) {
+	// captureSends records every result the coordinator emits so the test can
+	// assert the final/authoritative result without a live vsock connection.
+	type capture struct {
+		results []result
+	}
+
+	withCapture := func(t *testing.T) (*capture, func()) {
+		t.Helper()
+		cap := &capture{}
+		prev := sendResultFunc
+		sendResultFunc = func(_ uint32, res result) error {
+			cap.results = append(cap.results, res)
+			return nil
+		}
+		return cap, func() { sendResultFunc = prev }
+	}
+
+	t.Run("power-off before command result suppresses the killed result", func(t *testing.T) {
+		cap, restore := withCapture(t)
+		defer restore()
+		c := &shutdownCoordinator{}
+
+		c.emitPowerOffResult(0, result{})
+		sent := c.emitCommandResult(0, result{ExitCode: 143, Error: "signal: killed"})
+
+		if sent {
+			t.Fatal("emitCommandResult sent a result after power-off claimed emission")
+		}
+		if len(cap.results) != 1 {
+			t.Fatalf("emitted %d results, want exactly 1 (the power-off result)", len(cap.results))
+		}
+		if !cap.results[0].PoweredOff {
+			t.Fatal("emitted result is not marked powered_off")
+		}
+		if cap.results[0].ExitedAt == "" {
+			t.Fatal("power-off result missing exited_at timestamp")
+		}
+	})
+
+	t.Run("power-off after command result still has the last word", func(t *testing.T) {
+		cap, restore := withCapture(t)
+		defer restore()
+		c := &shutdownCoordinator{}
+
+		// The command is killed by the shutdown and emits first; the power
+		// handler fires immediately after and must overwrite it on the host.
+		sent := c.emitCommandResult(0, result{ExitCode: 143, Error: "signal: killed"})
+		c.emitPowerOffResult(0, result{})
+
+		if !sent {
+			t.Fatal("emitCommandResult should send when no power-off has claimed yet")
+		}
+		if len(cap.results) != 2 {
+			t.Fatalf("emitted %d results, want 2 (killed result then power-off result)", len(cap.results))
+		}
+		last := cap.results[len(cap.results)-1]
+		if !last.PoweredOff {
+			t.Fatal("final emitted result is not marked powered_off")
+		}
+	})
+
+	t.Run("command failure without power-off is emitted unmarked", func(t *testing.T) {
+		cap, restore := withCapture(t)
+		defer restore()
+		c := &shutdownCoordinator{}
+
+		sent := c.emitCommandResult(0, result{ExitCode: 1, Error: "boom"})
+
+		if !sent {
+			t.Fatal("emitCommandResult should send a genuine failure")
+		}
+		if len(cap.results) != 1 {
+			t.Fatalf("emitted %d results, want 1", len(cap.results))
+		}
+		if cap.results[0].PoweredOff {
+			t.Fatal("genuine failure must not be marked powered_off")
+		}
+	})
+}
+
 func TestShutdownResetFirst(t *testing.T) {
 	if !shutdownResetFirst("console=ttyS0 microagent_shutdown=reset root=/dev/vda") {
 		t.Fatal("expected reset-first when microagent_shutdown=reset is present")

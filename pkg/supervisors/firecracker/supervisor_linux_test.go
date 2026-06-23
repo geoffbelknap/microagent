@@ -284,6 +284,53 @@ func TestGuestHaltedStateWaitsForDelayedFailureResult(t *testing.T) {
 	}
 }
 
+func TestGuestHaltedStateClassifiesPowerOffAsStopped(t *testing.T) {
+	cases := []struct {
+		name       string
+		result     string
+		wantState  vmkit.VMState
+		wantDetail string
+	}{
+		{
+			name:      "powered off with non-zero exit classifies as stopped",
+			result:    `{"exit_code":143,"error":"signal: killed","powered_off":true}`,
+			wantState: vmkit.StateStopped,
+		},
+		{
+			name:       "non-zero exit without power-off marker stays failed",
+			result:     `{"exit_code":143,"error":"signal: killed"}`,
+			wantState:  vmkit.StateFailed,
+			wantDetail: "signal: killed",
+		},
+		{
+			name:      "clean zero exit classifies as stopped",
+			result:    `{"exit_code":0}`,
+			wantState: vmkit.StateStopped,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			opts := Options{StateDir: dir, Name: "demo"}
+			if err := os.MkdirAll(filepath.Join(dir, "demo"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "demo", "result.json"), []byte(tc.result), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			state, detail := guestHaltedState(opts, 0)
+
+			if state != tc.wantState {
+				t.Fatalf("state = %q, want %q", state, tc.wantState)
+			}
+			if tc.wantDetail != "" && detail != tc.wantDetail {
+				t.Fatalf("detail = %q, want %q", detail, tc.wantDetail)
+			}
+		})
+	}
+}
+
 func TestRuntimeHasResultListener(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{StateDir: dir, Name: "demo"}

@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -68,6 +70,80 @@ type result struct {
 	Stdout    string `json:"stdout,omitempty"`
 	Stderr    string `json:"stderr,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// PoweredOff records that the run ended because init received an
+	// intentional power-off signal (busybox poweroff/halt/reboot, or a
+	// host-initiated graceful shutdown) rather than because the workspace
+	// command exited on its own. The supervisor classifies a powered-off run
+	// as stopped regardless of the interrupted command's exit code; without
+	// this marker the killed command's non-zero code would misclassify an
+	// intentional shutdown as failed.
+	PoweredOff bool `json:"powered_off,omitempty"`
+}
+
+// shutdownCoordinator serializes the workspace command's result emission with
+// the power-signal handler's. Both run() (when its command exits or is killed)
+// and the power-signal handler race to write result.json over vsock; whichever
+// holds the mutex emits, and a power-off — being an intentional shutdown —
+// always wins: once poweringOff is set, run()'s emission of the killed
+// command's (non-zero) result is suppressed, and the power handler emits a
+// powered_off=true result before halting the system.
+type shutdownCoordinator struct {
+	mu          sync.Mutex
+	poweringOff bool
+}
+
+// emitCommandResult sends the workspace command's result unless a power-off has
+// already claimed emission. It reports whether the result was sent.
+func (c *shutdownCoordinator) emitCommandResult(port uint32, res result) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.poweringOff {
+		return false
+	}
+	_ = sendResultFunc(port, res)
+	return true
+}
+
+// emitPowerOffResult marks the run as intentionally powered off and emits a
+// powered_off=true result. It takes priority over any command result: if run()
+// has not yet emitted, its later emitCommandResult call is suppressed; if run()
+// already emitted the killed command's result, this overwrites it on the host
+// so the final result.json carries the power-off marker.
+func (c *shutdownCoordinator) emitPowerOffResult(port uint32, res result) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.poweringOff = true
+	res.PoweredOff = true
+	if res.ExitedAt == "" {
+		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	_ = sendResultFunc(port, res)
+}
+
+var shutdown shutdownCoordinator
+
+// sendResultFunc is the result-emission seam; indirected so tests can observe
+// what the coordinator emits without a live vsock connection.
+var sendResultFunc = sendResult
+
+// resultPort holds the vsock port run() emits the result on, published as an
+// atomic so the power-signal handler (started before the config is read) can
+// emit a powered_off result on the same channel. Zero until the config is read,
+// and the same zero-port semantics as sendResult (a no-op) apply before then.
+var resultPort atomic.Uint32
+
+// poweroffFunc is the actual system halt; indirected so tests can exercise the
+// power-signal handler's result-emission without halting the test process.
+var poweroffFunc = poweroff
+
+// handlePowerSignal performs the intentional-shutdown path: it records a
+// powered_off result on the result channel (so the supervisor classifies the
+// run as stopped, not by the killed command's exit code) and then halts.
+func handlePowerSignal() {
+	shutdown.emitPowerOffResult(resultPort.Load(), result{
+		ExitedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	poweroffFunc()
 }
 
 func main() {
@@ -111,7 +187,7 @@ func run() int {
 		signal.Notify(signals, unix.SIGUSR1, unix.SIGUSR2, unix.SIGTERM)
 		sig := <-signals
 		log.Printf("microagent-init: received %s; powering off", sig)
-		poweroff()
+		handlePowerSignal()
 	}()
 	if err := ensureGuestDevices(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -126,6 +202,10 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
+	// Publish the result port so a power-off signal arriving from here on can
+	// emit a powered_off result on the same channel run() uses, instead of the
+	// killed workspace command's non-zero exit being the last word.
+	resultPort.Store(cfg.Port)
 	// A maintenance boot serves file operations only: secrets stay
 	// unmaterialized (nothing should read them, and the host did not start
 	// a secrets listener for this boot).
@@ -164,7 +244,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = sendResult(cfg.Port, res)
+		_ = shutdown.emitCommandResult(cfg.Port, res)
 		return code
 	}
 	if err := configureBootNetwork(); err != nil {
@@ -173,7 +253,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = sendResult(cfg.Port, res)
+		_ = shutdown.emitCommandResult(cfg.Port, res)
 		return code
 	}
 	if err := configureKernelDHCPNetwork(); err != nil {
@@ -182,7 +262,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = sendResult(cfg.Port, res)
+		_ = shutdown.emitCommandResult(cfg.Port, res)
 		return code
 	}
 	if err := configureKernelDHCPDNS(); err != nil {
@@ -191,7 +271,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = sendResult(cfg.Port, res)
+		_ = shutdown.emitCommandResult(cfg.Port, res)
 		return code
 	}
 	if err := configureHostname(cfg.Hostname); err != nil {
@@ -200,7 +280,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = sendResult(cfg.Port, res)
+		_ = shutdown.emitCommandResult(cfg.Port, res)
 		return code
 	}
 	if err := startTCPVsockBridges(cfg.Env); err != nil {
@@ -209,7 +289,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = sendResult(cfg.Port, res)
+		_ = shutdown.emitCommandResult(cfg.Port, res)
 		return code
 	}
 	if err := startConfiguredHostForwards(cfg); err != nil {
@@ -218,7 +298,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = sendResult(cfg.Port, res)
+		_ = shutdown.emitCommandResult(cfg.Port, res)
 		return code
 	}
 	if cfg.ModelGuestPort != 0 && cfg.ModelVsockPort != 0 {
@@ -232,7 +312,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, err)
 		res.ExitCode = code
 		res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		_ = sendResult(cfg.Port, res)
+		_ = shutdown.emitCommandResult(cfg.Port, res)
 		return code
 	}
 	if err := startStructuredExecService(cfg.ExecPort, guestEnv(cfg.Env)); err != nil {
@@ -252,7 +332,7 @@ func run() int {
 			fmt.Fprintln(os.Stderr, err)
 			res.ExitCode = code
 			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			_ = sendResult(cfg.Port, res)
+			_ = shutdown.emitCommandResult(cfg.Port, res)
 			return code
 		}
 		if err := execServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
@@ -267,7 +347,7 @@ func run() int {
 			fmt.Fprintln(os.Stderr, err)
 			res.ExitCode = code
 			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			_ = sendResult(cfg.Port, res)
+			_ = shutdown.emitCommandResult(cfg.Port, res)
 			return code
 		}
 		if err := runManagedServiceCommand(cfg.Command, guestEnv(cfg.Env)); err != nil {
@@ -284,7 +364,7 @@ func run() int {
 			fmt.Fprintln(os.Stderr, err)
 			res.ExitCode = code
 			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			_ = sendResult(cfg.Port, res)
+			_ = shutdown.emitCommandResult(cfg.Port, res)
 			return code
 		}
 		log.Printf("microagent-init: handing off to %v", command)
@@ -307,7 +387,7 @@ func run() int {
 			fmt.Fprintln(os.Stderr, err)
 			res.ExitCode = code
 			res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-			_ = sendResult(cfg.Port, res)
+			_ = shutdown.emitCommandResult(cfg.Port, res)
 			return code
 		}
 		if err := runInteractiveShells(guestEnv(cfg.Env), cfg.ConsoleShell); err != nil {
@@ -318,9 +398,10 @@ func run() int {
 	}
 	res.ExitCode = code
 	res.ExitedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	if err := sendResult(cfg.Port, res); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-	}
+	// Route through the coordinator: if a power-off signal already claimed
+	// emission (the command was killed by an intentional shutdown), the
+	// powered_off result is authoritative and this non-zero result is dropped.
+	_ = shutdown.emitCommandResult(cfg.Port, res)
 	return code
 }
 

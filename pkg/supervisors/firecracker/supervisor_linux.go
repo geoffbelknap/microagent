@@ -333,6 +333,12 @@ type guestResult struct {
 	Stdout    string `json:"stdout,omitempty"`
 	Stderr    string `json:"stderr,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// PoweredOff is set by guest init when the run ended because of an
+	// intentional power-off (busybox poweroff/halt/reboot or a host-initiated
+	// graceful shutdown), not because the workspace command exited on its own.
+	// When set, the run is a clean stop regardless of the interrupted command's
+	// exit code.
+	PoweredOff bool `json:"powered_off,omitempty"`
 }
 
 func prepareWorkspace(opts Options, req vmkit.Request) error {
@@ -3085,10 +3091,17 @@ func guestHaltedState(opts Options, waitForResult time.Duration) (vmkit.VMState,
 		}
 		if err == nil {
 			var result struct {
-				ExitCode int    `json:"exit_code"`
-				Error    string `json:"error"`
+				ExitCode   int    `json:"exit_code"`
+				Error      string `json:"error"`
+				PoweredOff bool   `json:"powered_off"`
 			}
 			if err := json.Unmarshal(data, &result); err == nil {
+				// An intentional power-off is a clean stop even when the
+				// workspace command it interrupted was killed and reported a
+				// non-zero exit code. Classify by the marker, not the code.
+				if result.PoweredOff {
+					return vmkit.StateStopped, ""
+				}
 				if result.ExitCode == 0 {
 					return vmkit.StateStopped, ""
 				}
