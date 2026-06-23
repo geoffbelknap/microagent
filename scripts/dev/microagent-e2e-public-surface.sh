@@ -1221,7 +1221,7 @@ assert_json "$STATE_DIR/status-missing-runtime.json" "data.get('readiness', {}).
 assert_json "$STATE_DIR/status-malformed-runtime.json" "data.get('event', {}).get('state') == 'stopped'"
 expect_failure malformed-runtime-start "invalid\\|character\\|json" \
   "$CLI" start malformed-runtime --state-dir "$STATE_DIR" --kernel "$kernel_path"
-"$CLI" --json ps --state-dir "$STATE_DIR" >"$STATE_DIR/ps-partial-state.json"
+"$CLI" --json list --state-dir "$STATE_DIR" >"$STATE_DIR/ps-partial-state.json"
 assert_json "$STATE_DIR/ps-partial-state.json" "any(item.get('name') == 'partial-state' and item.get('state') == 'unknown' for item in data.get('workspaces', []))"
 "$CLI" --json delete partial-state --yes --state-dir "$STATE_DIR" >"$STATE_DIR/delete-partial-state.json"
 assert_json "$STATE_DIR/delete-partial-state.json" "data.get('event', {}).get('state') == 'stopped'"
