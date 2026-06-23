@@ -199,6 +199,13 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 					_ = writeProcessState(opts, req, vmkit.StateFailed, 0, wrapped.Error())
 					return failedResponse(req, wrapped.Error()), wrapped
 				}
+				// Leave an event-driven per-VM reaper (as startProcess does for the
+				// isolated path): when firecracker exits it reconciles the workspace to
+				// its terminal state and reaps companions/network without waiting for a
+				// status read or gc sweep. Best-effort.
+				if _, err := startDeadmanProcess(opts); err != nil {
+					fmt.Fprintf(os.Stderr, "start workspace reaper %s: %v\n", opts.Name, err)
+				}
 				return eventResponse(req, vmkit.StateRunning, ""), nil
 			}
 		case <-timer.C:
