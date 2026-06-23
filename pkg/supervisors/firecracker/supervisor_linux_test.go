@@ -2108,6 +2108,45 @@ func deadProcessPID(t *testing.T) int {
 	return pid
 }
 
+func TestWaitForProcessExitEvent(t *testing.T) {
+	// Returns true promptly (event-driven) when the watched process exits.
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	done := make(chan bool, 1)
+	go func() { done <- waitForProcessExitEvent(context.Background(), pid, 10*time.Second) }()
+	time.Sleep(150 * time.Millisecond)
+	_ = cmd.Process.Kill()
+	_, _ = cmd.Process.Wait()
+	select {
+	case got := <-done:
+		if !got {
+			t.Fatal("waitForProcessExitEvent = false on process exit, want true")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("waitForProcessExitEvent did not return within 3s of the process exiting")
+	}
+
+	// An already-dead pid returns true immediately (ESRCH).
+	if !waitForProcessExitEvent(context.Background(), pid, time.Second) {
+		t.Fatal("waitForProcessExitEvent = false for a dead pid, want true")
+	}
+
+	// A canceled context returns false rather than blocking out the budget.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	live2 := exec.Command("sleep", "30")
+	if err := live2.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = live2.Process.Kill(); _, _ = live2.Process.Wait() }()
+	if waitForProcessExitEvent(ctx, live2.Process.Pid, 5*time.Second) {
+		t.Fatal("waitForProcessExitEvent = true on canceled context, want false")
+	}
+}
+
 func TestCompanionShouldExitConditions(t *testing.T) {
 	live := startSleepProcess(t)
 	dead := deadProcessPID(t)

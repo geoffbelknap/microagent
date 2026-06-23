@@ -652,6 +652,12 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		// Detached start succeeded: the mediator stays up as a recorded companion
 		// (reaped later by stop/halt/quarantine), so disarm the deferred reaper.
 		egressMediatorRunning = false
+		// Leave an event-driven per-VM reaper: when firecracker exits it reconciles
+		// the workspace to its terminal state (and reaps companions + transient
+		// network) without waiting for a status read or gc sweep. Best-effort.
+		if _, err := startDeadmanProcess(opts); err != nil {
+			fmt.Fprintf(os.Stderr, "start workspace reaper %s: %v\n", opts.Name, err)
+		}
 		return eventResponse(req, vmkit.StateRunning, ""), nil
 	}
 	waitErr := waitForeground(ctx, cmd, serialLogPath(opts), opts.Timeout)
@@ -2396,20 +2402,20 @@ func portForwarderLogPath(opts Options) string {
 	return filepath.Join(opts.StateDir, opts.Name, "port-forward.log")
 }
 
-// RunDeadman is the per-VM idle watcher, spawned only when a lease is declared
-// (--ttl). It periodically reconciles the workspace through gcWorkspace, which
-// reaps the VM once it has been idle past its lease (renewed by exec/shell use) or
-// its firecracker has died. The deadman's own PID is never recorded in runtime
-// state, so the reap's teardown cannot kill it; it observes the resulting Stopped
-// state and exits. The gc sweep remains the on-demand backstop.
+// RunDeadman is the per-VM reaper spawned for every backgrounded (start) VM. It
+// waits event-driven on firecracker's exit (via a pidfd) and reconciles the
+// workspace through gcWorkspace the instant it dies — recording the terminal
+// state and reaping companion processes + transient network without waiting for a
+// status read or gc sweep. For a leased VM (--ttl) it also re-checks on an idle
+// cadence so an idle-but-alive VM is reaped at its deadline. The deadman's own PID
+// is never recorded in runtime state, so the reap's teardown cannot kill it; it
+// observes the resulting Stopped/Failed state and exits. The gc sweep remains the
+// on-demand backstop.
 func RunDeadman(ctx context.Context, opts Options) error {
 	for {
 		state, err := readRuntimeState(opts)
 		if err != nil {
 			return nil // runtime state gone — nothing to watch
-		}
-		if state.Config.LeaseSeconds <= 0 {
-			return nil // no declared bound — don't busy-loop
 		}
 		if state.Event.State != vmkit.StateRunning {
 			return nil // stopped / halted / failed — done
@@ -2417,10 +2423,13 @@ func RunDeadman(ctx context.Context, opts Options) error {
 		if _, err := gcWorkspace(opts); err != nil {
 			fmt.Fprintf(os.Stderr, "deadman reconcile %s: %v\n", opts.Name, err)
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(deadmanPollInterval(state.Config.LeaseSeconds)):
+		// Block until firecracker exits — observed event-driven through a pidfd, so
+		// a dead VM is reaped within milliseconds rather than on a poll tick — or,
+		// for a leased VM, until the idle re-check cadence elapses, whichever comes
+		// first. An unleased VM has no idle deadline, so this is purely the exit
+		// wait; the next loop's gcWorkspace then records the terminal state.
+		if !waitForProcessExitEvent(ctx, state.PID, deadmanBudget(state.Config.LeaseSeconds)) {
+			return ctx.Err() // context canceled
 		}
 	}
 }
@@ -2436,6 +2445,68 @@ func deadmanPollInterval(leaseSeconds int) time.Duration {
 		d = 60 * time.Second
 	}
 	return d
+}
+
+// deadmanBudget is how long the deadman blocks per cycle before re-reconciling.
+// For a leased VM it tracks the idle re-check cadence; an unleased VM has no idle
+// deadline, so it is just a coarse safety re-check — the pidfd wait detects a real
+// exit instantly regardless of this bound.
+func deadmanBudget(leaseSeconds int) time.Duration {
+	if leaseSeconds <= 0 {
+		return 30 * time.Second
+	}
+	return deadmanPollInterval(leaseSeconds)
+}
+
+// waitForProcessExitEvent blocks until the process exits — observed event-driven
+// through a pidfd, no polling — or budget elapses, whichever comes first. It
+// returns false only when ctx is canceled. A vanished pid (ESRCH) returns true
+// immediately so the caller reconciles now; kernels without pidfd fall back to a
+// plain ctx-aware sleep.
+func waitForProcessExitEvent(ctx context.Context, pid int, budget time.Duration) bool {
+	if pid <= 0 {
+		return sleepCtx(ctx, budget)
+	}
+	fd, err := unix.PidfdOpen(pid, 0)
+	if err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return true // already gone — reconcile now
+		}
+		return sleepCtx(ctx, budget) // no pidfd support — coarse fallback
+	}
+	defer func() { _ = unix.Close(fd) }()
+	deadline := time.Now().Add(budget)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return true
+		}
+		if remaining > time.Second {
+			remaining = time.Second // chunk so ctx cancellation is observed promptly
+		}
+		n, perr := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, int(remaining.Milliseconds()))
+		if ctx.Err() != nil {
+			return false
+		}
+		if perr != nil {
+			if errors.Is(perr, syscall.EINTR) {
+				continue
+			}
+			return true // treat a poll error as "re-check now"
+		}
+		if n > 0 {
+			return true // POLLIN: the process exited
+		}
+	}
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
 }
 
 func deadmanLogPath(opts Options) string {
@@ -2928,11 +2999,8 @@ func RunPortForwarder(ctx context.Context, opts Options) error {
 		listeners = append(listeners, listener)
 		go servePortForward(listener, vsockSocketPath(opts), uint32(forward.GuestPort))
 	}
-	if state.Config.LeaseSeconds > 0 {
-		if _, err := startDeadmanProcess(opts); err != nil {
-			fmt.Fprintf(os.Stderr, "start deadman watcher: %v\n", err)
-		}
-	}
+	// The per-VM reaper is started once at detached-start success (startProcess /
+	// startUserNetworkProcess); this companion only watches for its own exit.
 	watchWorkspaceRuntime(ctx, opts)
 	for _, listener := range listeners {
 		_ = listener.Close()
@@ -3328,6 +3396,17 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	if alive && expired {
 		reapReason = "reaped by gc: lifetime lease expired"
 	}
+	// A VMM that exited on its own carries a guest exit code: honor it so a failed
+	// guest is recorded Failed (and restart-on-failure can act on it), matching the
+	// inspect path, not Stopped. A forced teardown (lease expiry, or a reused/
+	// never-recorded pid that still looks "alive") has no clean exit, so it stays
+	// Stopped.
+	finalState, detail := vmkit.StateStopped, reapReason
+	if !alive {
+		if s, errText := guestHaltedState(opts, 0); s == vmkit.StateFailed {
+			finalState, detail = s, errText
+		}
+	}
 	if state.PID != 0 {
 		_ = signalProcessGroup(state.PID, syscall.SIGKILL)
 	}
@@ -3344,7 +3423,7 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	cleanupTransientNetworkDevices(state.NetworkDevices)
 	cleanupUserNetworkProcess(opts)
 	req := runtimeStateRequest(vmkit.Request{}, state)
-	if err := writeProcessStateWithProcessesAndNetwork(opts, req, vmkit.StateStopped, 0, 0, 0, 0, nil, nil, reapReason); err != nil {
+	if err := writeProcessStateWithProcessesAndNetwork(opts, req, finalState, 0, 0, 0, 0, nil, nil, detail); err != nil {
 		return vmkit.Response{}, err
 	}
 	state, err = readRuntimeState(opts)
