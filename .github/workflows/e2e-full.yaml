@@ -1,0 +1,92 @@
+name: E2E full
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: Generate full scenario matrix
+    runs-on: ubuntu-latest
+    outputs:
+      broad: ${{ steps.gen.outputs.broad }}
+      quarantine: ${{ steps.gen.outputs.quarantine }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Generate scenario lists
+        id: gen
+        run: |
+          echo "broad=$(scripts/dev/microagent-e2e.sh --list-tier broad | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+          echo "quarantine=$(scripts/dev/microagent-e2e.sh --list-tier quarantine | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+
+  broad:
+    name: broad / ${{ matrix.scenario }}
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name != 'pull_request' || github.event.label.name == 'run-full-ci'
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(needs.matrix.outputs.broad) }}
+    env:
+      MICROAGENT_E2E_WAIT_TIMEOUT: "180"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup microagent KVM environment
+        uses: ./.github/actions/setup-microagent-kvm
+
+      - name: Run ${{ matrix.scenario }} (1 retry)
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          scripts/dev/microagent-e2e.sh "$SCENARIO" || {
+            echo "::warning::retrying flaky scenario $SCENARIO"
+            scripts/dev/microagent-e2e.sh "$SCENARIO"
+          }
+
+  quarantine:
+    name: quarantine / ${{ matrix.scenario }}
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: (github.event_name != 'pull_request' || github.event.label.name == 'run-full-ci') && needs.matrix.outputs.quarantine != '[]'
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(needs.matrix.outputs.quarantine) }}
+    env:
+      MICROAGENT_E2E_WAIT_TIMEOUT: "180"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup microagent KVM environment
+        uses: ./.github/actions/setup-microagent-kvm
+
+      - name: Run ${{ matrix.scenario }} (1 retry)
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: |
+          scripts/dev/microagent-e2e.sh "$SCENARIO" || {
+            echo "::warning::retrying flaky scenario $SCENARIO"
+            scripts/dev/microagent-e2e.sh "$SCENARIO"
+          }
