@@ -4,7 +4,7 @@ description: Checkpoint a running workspace, restore it in place, or fork copies
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-23_
 
 A snapshot freezes a workspace - guest memory, device state, and disk - at
 one moment. This guide takes one, rolls back to it, and forks independent
@@ -82,10 +82,9 @@ checkpoint-1
 ```
 
 The fork diverges; the source doesn't notice. Fork as many as you like from
-one tag - pay for boot and setup once, stamp out warm copies. For forks with
-networking, use `user` mode (the default): each fork gets its own network
-namespace, so any number run concurrently. `nat` forks share the host
-namespace and are single-instance.
+one tag - pay for boot and setup once, stamp out warm copies. Networked forks
+use `user` mode (the default): each fork gets its own per-VM network namespace,
+so any number run concurrently.
 
 ## 5. Know the contract
 

@@ -443,33 +443,24 @@ func TestCheckFirecrackerReportsConfinementDefaults(t *testing.T) {
 
 func TestCheckFirecrackerGathersNetworkingFacts(t *testing.T) {
 	probe := FirecrackerProbe{
-		ResolveBinary:     func() (string, error) { return "/fc", nil },
-		ResolveSupervisor: func(Options) (string, error) { return "/sup", nil },
-		ResolveGuestInit:  func(Options) (string, error) { return "/init", nil },
-		Stat:              func(string) (os.FileInfo, error) { return nil, nil },
-		BinaryVersion:     func(string) string { return "Firecracker v1.0.0" },
-		LookPath:          func(string) (string, error) { return "/usr/bin/pasta", nil },
-		ReadFile: func(path string) ([]byte, error) {
-			if path == "/proc/sys/net/ipv4/ip_forward" {
-				return []byte("1\n"), nil
-			}
-			return nil, os.ErrNotExist
-		},
-		ReadBinaryCapabilities: func(path string) (bool, error) { return true, nil },
-		ProbeUserNamespaces:    func() error { return nil },
+		ResolveBinary:       func() (string, error) { return "/fc", nil },
+		ResolveSupervisor:   func(Options) (string, error) { return "/sup", nil },
+		ResolveGuestInit:    func(Options) (string, error) { return "/init", nil },
+		Stat:                func(string) (os.FileInfo, error) { return nil, nil },
+		BinaryVersion:       func(string) string { return "Firecracker v1.0.0" },
+		LookPath:            func(string) (string, error) { return "/usr/bin/pasta", nil },
+		ReadFile:            func(path string) ([]byte, error) { return nil, os.ErrNotExist },
+		ProbeUserNamespaces: func() error { return nil },
 	}
 	resp, err := CheckFirecracker(Options{Backend: "linux-kvm", Arch: "amd64"}, probe)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !resp.Host.IPForwardEnabled {
-		t.Error("expected IPForwardEnabled")
+	if !resp.Host.IsolatedNetworkReady {
+		t.Error("expected IsolatedNetworkReady")
 	}
-	if !resp.Host.SupervisorNetAdminCapable {
-		t.Error("expected SupervisorNetAdminCapable")
-	}
-	if !resp.Host.PrivilegedNetworkReady {
-		t.Error("expected PrivilegedNetworkReady when forward+cap present")
+	if !resp.Host.UserNetworkReady {
+		t.Error("expected UserNetworkReady when passt + user namespaces present")
 	}
 }
 

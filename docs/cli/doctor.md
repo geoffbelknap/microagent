@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-23_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -34,11 +34,10 @@ Console: available (interactive)
 Kernel: installed (/home/user/.microagent/kernels/linux-kvm/amd64/vmlinux)
 ```
 
-The `Networking:` line is backend-specific. Linux reports `isolated`, `user`,
-and `nat/bridged/named` readiness and may suggest
-`microagent host setup-networking` for privileged Linux networking. Apple VF
-reports its local `isolated` and `user/nat` readiness and does not suggest that
-Linux-only setup command.
+The `Networking:` line is backend-specific. Linux reports `isolated` and `user`
+readiness, including whether `pasta`, unprivileged user namespaces, and
+`/dev/net/tun` are present for `user` mode. Apple VF reports its local
+`isolated` and `user` readiness.
 
 `doctor` shares the structured shape with [`host`](/cli/host/): `microagent
 --json doctor` returns the same `vmkit.Response` with `ok`, `backend`, `host`,

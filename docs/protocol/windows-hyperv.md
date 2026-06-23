@@ -4,7 +4,7 @@ description: Run Linux guests on Windows through HCS - no WSL, no QEMU.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-23_
 
 If you want Linux guests on a Windows host - without WSL and without QEMU -
 this page documents the `windows-hyperv` backend. It talks to
@@ -95,9 +95,7 @@ Windows Hyper-V uses HNS/HCN networking for guest NIC attachment:
 | Mode | Behavior |
 |---|---|
 | `user` | uses the managed `microagent-nat` HNS NAT network |
-| `nat` | uses the managed `microagent-nat` HNS NAT network |
 | `isolated` | starts without an external network adapter |
-| `bridged` | attaches to the named HNS network or Hyper-V switch from `network.interface`; the guest takes the endpoint's static address when the network allocates one, otherwise it DHCPs |
 
 The managed NAT network uses `192.168.127.0/24` with gateway
 `192.168.127.1`. Runtime network details, including the HNS network and
@@ -108,14 +106,6 @@ bridge accepted connections to the guest through Hyper-V sockets using the
 configured `hostPort` as the Hyper-V socket service. The guest-side init then
 proxies that stream to the configured `guestPort`. The listener helper is torn
 down during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
-
-Bridged mode fails closed unless `network.interface` names an existing HNS
-network or Hyper-V switch. If the named network statically allocates an
-endpoint address at attach time (a managed NAT-style network), the guest is
-configured with that static address; if it does not (an external vSwitch, or
-the built-in ICS `Default Switch`, which serve addresses over DHCP), the guest
-DHCPs on its NIC instead. Endpoint cleanup runs when foreground `run` completes
-and during `quarantine`, `halt`, `stop`, `kill`, and `delete`.
 
 ## Structured exec
 
@@ -182,15 +172,9 @@ object and marks `readiness.resultReady.ready` true.
 
 ## Current limitations
 
-- `bridged` networking requires `network.interface` to name an existing HNS
-  network or Hyper-V switch and fails closed when it is missing. The DHCP path
-  (guest addressed by the bridged network) is live-verified against the
-  built-in ICS `Default Switch`; bridging to an external vSwitch on the
-  physical LAN follows the same path but is exercised manually, since hosted CI
-  runners have no external switch. `user`, `nat`, and `isolated` are all
-  live-verified.
-- HNS `user`/`nat`/`bridged` segments need an elevated host to provision or
-  attach HNS networks.
+- `user` and `isolated` are live-verified.
+- The HNS `user` segment needs an elevated host to provision or attach HNS
+  networks.
 - `survive-reboot` registers a Scheduled Task when run elevated; an unelevated
   host surfaces the manual `schtasks` command to register instead.
 - `pause`/`resume` freeze and thaw a running workspace's vCPUs in place via
@@ -202,9 +186,6 @@ object and marks `readiness.resultReady.ready` true.
   save memory (`Save-VM`, checkpoints) belong to VMMS, which this backend
   deliberately does not use. Snapshot commands fail closed; use `commit` (a
   distributable image) or `clone` (a disk copy) instead.
-- Named networks are supported: `network create`/`ls`/`delete` plus
-  `--network named --network-name <n>` back onto a private HNS network with
-  static IPAM (members share a subnet and address each other).
 - Direct supervisor `console` is a deliberate non-goal on every backend; use
   `microagent connect`, which is the interactive contract.
 

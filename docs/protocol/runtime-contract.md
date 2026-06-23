@@ -4,7 +4,7 @@ description: Depend on one set of runtime semantics across backend implementatio
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-23_
 
 If you are building an agent runtime on top of microagent, this page defines
 the semantics you can rely on across backend implementations where they expose
@@ -78,7 +78,7 @@ contract so clients share one vocabulary; availability is per host.
 **Connection-reset contract:** restoring or forking a snapshot re-establishes
 host networking fresh, so in-flight guest connections - outbound TCP and live
 vsock sessions (exec/shell/mediation) - do not survive. The guest process must
-reconnect. Bridged networking is unsupported for snapshot/fork.
+reconnect.
 
 ## Contract command
 

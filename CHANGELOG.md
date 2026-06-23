@@ -5,6 +5,22 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Drop bridged/named/nat networking — user + isolated only
+
+Removed the three host-netns network modes (`bridged`, `named`, `nat`) and the
+entire privileged-networking subsystem they depended on: host TAP/bridge
+creation, host nftables NAT, host-netns TPROXY provisioning, and the
+`CAP_NET_ADMIN`/`setcap` requirement. Along with them go the
+`microagent host setup-networking` command, the `network create/list/delete`
+subcommands, the `network.create`/`network.list`/`network.delete` and
+`host.networking.setup` MCP tools, and the `--unsupported`,
+`--network-interface`, `--network-name`, and `--peer` flags.
+
+What remains: `user` networking (pasta per-VM user namespace on Linux, VZNAT on
+macOS — both unprivileged) and `isolated`. Egress mediation is unchanged in
+behavior but now runs only inside the per-VM user-mode netns, so it no longer
+needs any privileged host setup.
+
 ## v0.8.1 - 2026-06-22
 
 ### guarded egress mode is now the default (behavior change)

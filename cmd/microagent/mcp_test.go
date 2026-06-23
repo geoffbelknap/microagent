@@ -57,11 +57,11 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 		"workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.estimate_cost",
 		"artifacts.list", "artifacts.get",
 		"snapshot.create", "snapshot.list", "snapshot.delete",
-		"network.inspect", "network.create", "network.list", "network.delete",
+		"network.inspect",
 		"volume.create", "volume.list", "volume.inspect", "volume.delete",
 		"images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune",
 		"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate",
-		"profiles.list", "host.inspect", "doctor.check", "host.networking.setup", "contract.get", "kernel.verify", "kernel.install", "rootfs.build",
+		"profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "kernel.install", "rootfs.build",
 		"cp",
 	} {
 		if !names[name] {
@@ -380,16 +380,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "snapshot", "delete", "demo", "before-upgrade", "-state-dir", "/tmp/state"},
 		},
 		{
-			name: "network.create",
-			args: map[string]any{"name": "devnet", "subnet": "10.44.9.0/24"},
-			want: []string{"--mode=ax", "network", "create", "devnet", "-subnet", "10.44.9.0/24"},
-		},
-		{
-			name: "network.delete",
-			args: map[string]any{"name": "devnet", "force": true},
-			want: []string{"--mode=ax", "network", "delete", "devnet", "-force"},
-		},
-		{
 			name: "volume.create",
 			args: map[string]any{"name": "data", "size_mib": float64(2048)},
 			want: []string{"--mode=ax", "volume", "create", "data", "-size-mib", "2048"},
@@ -433,11 +423,6 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			name: "doctor.check",
 			args: map[string]any{"backend": "linux-kvm"},
 			want: []string{"--mode=ax", "doctor", "-backend", "linux-kvm"},
-		},
-		{
-			name: "host.networking.setup",
-			args: map[string]any{"action": "revert"},
-			want: []string{"--mode=ax", "host", "setup-networking", "-revert"},
 		},
 		{
 			name: "contract.get",
@@ -499,7 +484,7 @@ func TestMCPDeletePreview(t *testing.T) {
 }
 
 func TestMCPManagementDeletePreview(t *testing.T) {
-	for _, tool := range []string{"network.delete", "volume.delete", "snapshot.delete", "images.delete", "images.prune"} {
+	for _, tool := range []string{"volume.delete", "snapshot.delete", "images.delete", "images.prune"} {
 		t.Run(tool, func(t *testing.T) {
 			args := map[string]any{"name": "demo", "tag": "snap", "image": "example.com/acme/demo:old", "preview": true, "force": true, "delete_files": true}
 			result, err := runMCPTool(context.Background(), tool, args)

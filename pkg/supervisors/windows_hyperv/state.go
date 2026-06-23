@@ -835,14 +835,12 @@ func validateNetwork(req vmkit.Request) error {
 	if req.Config == nil || req.Config.Network == nil {
 		return nil
 	}
-	network := *req.Config.Network
-	if network.Mode == "bridged" && network.Interface == "" {
-		return fmt.Errorf("bridged network requires network.interface")
+	switch strings.TrimSpace(req.Config.Network.Mode) {
+	case "", "user", "isolated":
+		return nil
+	default:
+		return fmt.Errorf("hyperv network.mode %q is unsupported; use user or isolated", req.Config.Network.Mode)
 	}
-	if network.Mode == "named" && strings.TrimSpace(network.Name) == "" {
-		return fmt.Errorf("named network requires network.name")
-	}
-	return nil
 }
 
 func writeRuntimeTransition(req vmkit.Request, state vmkit.VMState, detail, errorText string) (vmkit.Event, error) {

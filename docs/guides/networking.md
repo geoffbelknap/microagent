@@ -1,134 +1,63 @@
 ---
-title: Connect workspaces on a named network
-description: Put an app and a database on one named network so they reach and resolve each other by name.
+title: Networking
+description: Give a workspace outbound access and publish a guest port back to the host.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-23_
 
-Two workspaces, one subnet: an app called `web` that reaches a database
-called `db` by name. That's where this guide ends up. A named network is
-microagent's managed analog of a Docker user-defined network: declare it once,
-join workspaces by name.
+A workspace has one of two network modes: `user` (the default) gives the guest
+unprivileged outbound IPv4 plus any TCP ports you publish, and `isolated` gives
+it no network device at all. This guide covers the common `user`-mode tasks. For
+the mechanics under each backend, read [networking concepts](/concepts/networking/);
+for controlling and auditing what the guest may reach, read
+[egress mediation](/concepts/egress-mediation/).
 
-> **Named networks are currently unsupported and not reliably egress-mediated.**
-> Linux named networks run in the host network namespace, where transparent
-> egress capture does not work reliably. Apple VF named networks use a private
-> userspace L2 switch, but are not currently transparently mediated. Named mode
-> is gated behind `--unsupported` and is not covered by microagent's security
-> model. For mediated egress, use the default `user` mode. See
-> [networking concepts](/concepts/networking/).
+## Outbound access (the default)
 
-On Firecracker/Linux, named-network attachment needs the same host setup as
-`nat` mode: `net.ipv4.ip_forward=1` and `CAP_NET_ADMIN` in the supervisor.
-Check and apply that once:
+`user` mode is the default, so a plain workspace can already reach the network:
 
 ```bash
-microagent host setup-networking --check
-microagent host setup-networking
+microagent create research --image docker.io/library/python:3.12
+microagent start research
+microagent exec research -- curl -sS https://example.com >/dev/null && echo ok
 ```
 
-The registry commands below run anywhere. Apple VF/macOS does not need that
-Linux host setup for named networks; it attaches members to a microagent-owned
-userspace L2 switch through `VZFileHandleNetworkDeviceAttachment` and does not
-use Apple's vmnet entitlement.
+On Firecracker/Linux the workspace runs inside its own unprivileged user
+namespace, with `pasta` providing outbound NAT in user space - no host `setcap`,
+`ip_forward`, or bridge setup. On Apple VF/macOS it uses the native
+Virtualization.framework NAT attachment.
 
-## 1. Create the network
+## Publish a guest port to the host
+
+Use `--publish` to expose a guest TCP port on the host. Repeat it per port:
 
 ```bash
-microagent network create devnet --subnet 10.44.50.0/24
-```
-
-```text
-Created network "devnet" (10.44.50.0/24, gateway 10.44.50.1)
-```
-
-This is a registry record - no host devices exist until a member starts. Omit
-`--subnet` to auto-allocate a `/24` from `10.44.0.0/16`.
-
-## 2. Join the members
-
-`--network-name` on `create` or `run` joins a workspace to the network:
-
-```bash
-microagent create db  --image docker.io/library/postgres:16 \
-  --network-name devnet --publish 127.0.0.1:5432:5432/tcp --unsupported
 microagent create web --image docker.io/library/python:3.12 \
-  --network-name devnet --unsupported
-microagent start db
+  --publish 127.0.0.1:8080:80/tcp
 microagent start web
+curl -sS http://127.0.0.1:8080/
 ```
 
-Each member gets a stable address from the subnet (`db` → `10.44.50.2`,
-`web` → `10.44.50.3`; `.1` is the gateway), persisted in the registry so it
-survives stop and start. Firecracker brings up a shared managed Linux bridge;
-Apple VF brings up a userspace L2 switch for peer traffic. Linux named networks
-route outbound egress through the gateway with NAT; Apple VF named networks are
-private peer segments and do not add NAT egress.
+The host listens on the declared address and port, the supervisor bridges the
+connection over the backend's transport, and guest init forwards it to the
+requested guest port. See [run a service](/guides/run-a-service/) for a worked
+example.
 
-Check membership and runtime addresses:
+## No network at all
+
+When a workspace should have no network access, use `isolated`:
 
 ```bash
-microagent network list
-microagent --json network web
+microagent create offline --image docker.io/library/python:3.12 --network isolated
 ```
 
-```text
-NAME                 SUBNET             GATEWAY         MEMBERS
-devnet               10.44.50.0/24      10.44.50.1      2
-```
-
-## 3. Reach the peer by name
-
-`/etc/hosts` inside each member is populated at boot from the member set, so
-names just work:
-
-```bash
-microagent exec web -- ping -c2 db
-microagent exec web -- sh -c "nc -z db 5432 && echo db-reachable"
-```
-
-```text
-db-reachable
-```
-
-(The `ping` output is trimmed - shown is the second command's confirmation.)
-
-Point the app's connection string at `db` (for example
-`postgres://db:5432/...`) - the name resolves to the peer's stable address.
-
-## 4. Mind the boot order
-
-`/etc/hosts` is a boot-time snapshot: a member knows the peers that existed
-when it booted. Start `db` first and `web` resolves it immediately, but `db`
-won't have `web` in its hosts file until `db` restarts. Reachability *by IP*
-is always order-independent - it's one L2 segment.
-
-To refresh an earlier member after newcomers join, restart it:
-
-```bash
-microagent halt db
-microagent start db    # db now resolves web too
-```
-
-For a set of long-lived members that all need each other's names, start them
-all, then do one restart pass - or let each service retry resolution, which
-database clients already do.
-
-## Clean up
-
-```bash
-microagent halt web && microagent delete web --yes
-microagent halt db && microagent delete db --yes
-microagent network delete devnet
-```
-
-Deleting a workspace frees its address; backend host-side attachment state is
-reaped when the last member stops. `network delete` fails closed while members
-remain - `--force` overrides.
+Isolated workspaces reject `--publish` before the request leaves the CLI -
+there's no guest network for a forward to reach.
 
 ## What's next
 
-- **All five network modes and the backend matrix** - [Networking](/concepts/networking/).
+- **Both network modes and the backend matrix** - [Networking](/concepts/networking/).
 - **The `network` command surface** - the [`network`](/cli/network/) reference.
-- **Publish a member's port to the host** - [run a service](/guides/run-a-service/).
+- **Publish a service's port to the host** - [run a service](/guides/run-a-service/).
+- **Control and audit what the guest reaches** - [egress mediation](/concepts/egress-mediation/).

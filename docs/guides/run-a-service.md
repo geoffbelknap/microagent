@@ -4,7 +4,7 @@ description: Run Postgres in a workspace with a published port, a named volume, 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-23_
 
 This guide gets Postgres 17 running in a microVM, reachable from the host on
 `127.0.0.1:5432`, with its data on a named volume that survives halt and
@@ -121,5 +121,5 @@ with [`kill`](/cli/kill/)). `volume delete` last: it removes the data for real.
 ## What's next
 
 - **More on volumes, disks, and bundles** - [volumes and data](/guides/volumes-and-data/).
-- **Put an app workspace next to this database** - [connect workspaces on a named network](/guides/networking/).
+- **Give a workspace outbound access and publish a port** - [networking](/guides/networking/).
 - **Port-forward mechanics and network modes** - [Networking](/concepts/networking/).

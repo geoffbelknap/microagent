@@ -116,10 +116,9 @@ the substrate they sit on.
 It also does not expose container-engine APIs, compose projects, pods,
 privileged mode, namespace/device controls, or host directory bind mounts.
 MicroAgent accepts only the subset that maps cleanly to a microVM boundary —
-including [named volumes](docs/concepts/storage.md) and
-[named networks](docs/concepts/networking.md#named-networks) as the microVM
-analogs of their container counterparts (single-attach managed disks; a managed
-bridge with stable IPs and `/etc/hosts` resolution), but never the
+including [named volumes](docs/concepts/storage.md) (single-attach managed
+disks) and [user-mode networking](docs/concepts/networking.md) (unprivileged
+outbound NAT with published ports), plus a fully `isolated` mode, but never the
 daemon-managed, concurrently-shared container models.
 
 ## Docs

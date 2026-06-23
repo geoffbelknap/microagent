@@ -102,9 +102,8 @@ Beyond the contract/lifecycle/networking/transport/supervision lanes, dedicated
 scenarios cover each shipped feature: `init` (project scaffold, no VM),
 `volumes` (named-volume registry + attach-by-name persistence + single-attach),
 `commit-images` (rootfs → OCI commit into the local layout), `health` (health
-probe config + boot), `exec-stream` (streaming structured exec),
-`survive-reboot` (boot-unit install/uninstall), and `named-network` (two VMs on
-a managed bridge with `/etc/hosts` resolution).
+probe config + boot), `exec-stream` (streaming structured exec), and
+`survive-reboot` (boot-unit install/uninstall).
 
 ### Model mediation validation
 
@@ -158,21 +157,16 @@ reason** instead of failing when a prerequisite is missing:
 scripts/dev/microagent-e2e.sh
 ```
 
-A preflight line reports `os/arch/wsl/vm/netpriv`, and a final
+A preflight line reports `os/arch/wsl/vm`, and a final
 `PASSED / SKIPPED / FAILED` summary tells you exactly what was validated. Each
 scenario declares a requirement:
 
 - `none` — always runs (CLI surfaces, scaffold).
 - `vm` — needs a microVM backend; skips with a reason when `/dev/kvm` +
   Firecracker (Linux) or Apple Virtualization.framework (macOS) is absent.
-- `netpriv` — privileged Linux networking (`named-network`); needs root /
-  `CAP_NET_ADMIN` and `net.ipv4.ip_forward=1`, otherwise skips.
 
 On **WSL2**, enable nested virtualization and `/dev/kvm` to exercise the `vm`
-lane; run as root (or `sudo`) for the `netpriv` lane. If you hold
-`CAP_NET_ADMIN` without uid 0 (granted file caps, a capability-granting sandbox,
-or a privileged CI runner), set `MICROAGENT_E2E_ALLOW_NETPRIV=1` to opt the
-privileged lane in. Run `microagent doctor` for a capability readout.
+lane. Run `microagent doctor` for a capability readout.
 
 Live Firecracker tests must run outside sandboxed environments on Linux hosts
 with KVM, `/dev/kvm`, `/dev/vhost-vsock`, `/dev/net/tun`, Firecracker on
@@ -194,14 +188,11 @@ scripts/dev/microagent-e2e.sh \
 ```
 
 Before release, the Apple VF lane must pass portable public CLI behavior,
-lifecycle/substrate, connect/logs/ps, NAT/user/isolated networking, TCP publish,
+lifecycle/substrate, connect/logs/ps, user/isolated networking, TCP publish,
 mediation/vsock transport, supervision/restart behavior, quarantine cleanup,
 results, artifacts, attached disks, and text/JSON output on an Apple silicon
 host. The `applevf-*` scenarios are targeted backend diagnostics for narrower
-failures; `applevf-direct-console` is a direct-supervisor smoke check. Bridged
-mode is release-relevant only on hosts with Apple's restricted
-`com.apple.vm.networking` entitlement; public ad-hoc builds should instead prove
-the fail-closed entitlement error.
+failures; `applevf-direct-console` is a direct-supervisor smoke check.
 
 ## Pull Requests
 

@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-23_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -155,9 +155,7 @@ The complete set:
 | `--output n=/guest/path` | Declare an output artifact path |
 | `--file <path>` | Workspace spec file; flags override matching spec fields |
 | `--restart <policy>` | Restart policy for kept/named runs: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `user`, `nat`, `isolated`, or `named` |
-| `--network-interface <if>` | Host interface identifier or display name (only used by the unsupported `bridged` mode) |
-| `--network-name <name>` | Join a user-defined [named network](/cli/network/) by name (implies named mode) |
+| `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--publish <mapping>` | Forward `[host:]hostPort:guestPort[/tcp]` |
 | `-p <mapping>` | Alias for `--publish` |
 | `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |

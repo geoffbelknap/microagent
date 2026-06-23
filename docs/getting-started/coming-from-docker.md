@@ -4,7 +4,7 @@ description: Map the Docker commands you already know to their microagent equiva
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-23_
 
 If you think in Docker commands, most of your muscle memory carries over. The
 big difference: each "container" is a real microVM with its own kernel, and
@@ -26,7 +26,7 @@ first, then covers what is intentionally different.
 | `docker logs web` | `microagent logs web` | Captured serial console output. `-f` follows. |
 | `docker images` | `microagent image list` | Lists local image records. |
 | `docker commit web REF` | `microagent commit web REF` | Snapshots a stopped workspace's rootfs into an OCI image. |
-| `docker network create/ls/rm` | `microagent network create/list/delete` | Workspaces join a named network with `--network-name`. |
+| `docker network inspect web` | `microagent network web` | Inspect a workspace's network. microagent has two modes: `user` (default outbound NAT plus published ports) and `isolated`. |
 | `docker volume create/ls/inspect/rm` | `microagent volume create/list/status/delete` | Named volumes are managed ext4 disks. Attach with `-v data:/work`. |
 
 The familiar flags work where they map cleanly to microVM behavior: `-e`

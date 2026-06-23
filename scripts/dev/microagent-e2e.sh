@@ -7,10 +7,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Each entry: name:script:platform:requirement
 #   platform    = all | linux | darwin (selected only on a matching host)
-#   requirement = none | vm | netpriv
+#   requirement = none | vm
 #     none    - always runnable (no microVM boot needed)
 #     vm      - needs a microVM backend (skip-with-reason when absent)
-#     netpriv - needs privileged Linux networking (root/CAP_NET_ADMIN + ip_forward)
 SCENARIOS=(
   "coverage-matrix:scripts/dev/microagent-e2e-coverage-matrix.sh:all:none"
   "contract:scripts/dev/runtime-contract-smoke.sh:all:none"
@@ -39,16 +38,13 @@ SCENARIOS=(
   "model-mediation-llamacpp:scripts/dev/microagent-e2e-model-mediation-llamacpp.sh:linux:vm"
   "model-mediation-vllm:scripts/dev/microagent-e2e-model-mediation-vllm.sh:linux:vm"
   "firecracker-lifecycle-host:scripts/dev/microagent-e2e-lifecycle-matrix.sh:linux:vm"
-  "firecracker-networking-host:scripts/dev/microagent-e2e-networking.sh:linux:vm"
   "firecracker-transport-host:scripts/dev/microagent-e2e-mediation.sh:linux:vm"
   "firecracker-supervision-host:scripts/dev/microagent-e2e-supervision.sh:linux:vm"
-  "named-network:scripts/dev/microagent-e2e-named-network.sh:linux:netpriv"
   "windows-hyperv-lifecycle-host:scripts/dev/microagent-e2e-windows-hyperv-lifecycle-host.sh:windows:vm"
   "windows-hyperv-connect-host:scripts/dev/microagent-e2e-windows-hyperv-connect-host.sh:windows:vm"
   "windows-hyperv-exec-host:scripts/dev/microagent-e2e-windows-hyperv-exec-host.sh:windows:vm"
   "windows-hyperv-transport-host:scripts/dev/microagent-e2e-windows-hyperv-transport-host.sh:windows:vm"
   "windows-hyperv-model-host:scripts/dev/microagent-e2e-windows-hyperv-model-host.sh:windows:vm"
-  "windows-hyperv-named-network-host:scripts/dev/microagent-e2e-windows-hyperv-named-network-host.sh:windows:vm"
   "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin:vm"
   "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin:vm"
   "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin:vm"
@@ -92,21 +88,18 @@ SCENARIO_COVERAGE=(
   "model-mediation-llamacpp|host-specific|linux-kvm|Opt-in production run --model mediation matrix with the llama.cpp runner"
   "model-mediation-vllm|host-specific|linux-kvm|Opt-in production run --model mediation matrix with a real vLLM GPU runner"
   "firecracker-lifecycle-host|backend-specific|linux-kvm|Firecracker lifecycle host mechanics"
-  "firecracker-networking-host|backend-specific|linux-kvm|Firecracker TAP, bridge, NAT, helper mechanics"
   "firecracker-transport-host|backend-specific|linux-kvm|Firecracker /dev/vhost-vsock and helper mechanics"
   "firecracker-supervision-host|backend-specific|linux-kvm|Firecracker helper PID cleanup mechanics"
-  "named-network|host-specific|linux-kvm|Linux privileged named-network bridge and DNS"
   "windows-hyperv-lifecycle-host|backend-specific|windows-hyperv|Hyper-V boot, structured result delivery over hv_sock"
   "windows-hyperv-connect-host|backend-specific|windows-hyperv|Hyper-V socket shell connect and readiness"
   "windows-hyperv-exec-host|backend-specific|windows-hyperv|Structured exec bridge: buffered, stream, exit codes, readiness"
   "windows-hyperv-transport-host|backend-specific|windows-hyperv|Mediation channel over Hyper-V socket listener helpers"
   "windows-hyperv-model-host|backend-specific|windows-hyperv|run/start --model pairing and the guest model URL bridge with a stand-in engine (no llama.cpp)"
-  "windows-hyperv-named-network-host|host-specific|windows-hyperv|Private named network: two workspaces join, get stable 10.44.x IPs on a shared HNS network, reach each other by IP"
   "applevf-boot|backend-specific|apple-vf|Apple VF boot smoke"
   "applevf-direct-console|backend-specific|apple-vf|Apple VF direct supervisor console input"
   "applevf-substrate|backend-specific|apple-vf|Apple VF lifecycle substrate smoke"
   "applevf-workspace-connect|backend-specific|apple-vf|Apple VF connect/logs/ps smoke"
-  "applevf-network-mode|backend-specific|apple-vf|Apple VF user/nat/isolated/bridged network modes"
+  "applevf-network-mode|backend-specific|apple-vf|Apple VF user/isolated network modes"
   "applevf-publish|backend-specific|apple-vf|Apple VF TCP publish forwarding"
   "applevf-vsock-diagnostic|backend-specific|apple-vf|Apple VF mediation and virtio-vsock diagnostics"
 )
@@ -131,8 +124,7 @@ E2E_MATRIX=(
   "halt/quarantine/stop/kill/delete|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface,lifecycle-deep,supervision-deep|Lifecycle controls and cleanup"
   "clone/cp|backend-neutral|linux-kvm,apple-vf,windows-hyperv|lifecycle-deep|Stopped workspace copy and clone semantics; windows-hyperv cp rides a guest maintenance boot over exec"
   "apply|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep|Supported spec changes"
-  "network status/modes/publish|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|Portable modes plus backend publish mechanics; windows-hyperv HNS segments need an elevated host"
-  "network create/list/delete named|host-specific|linux-kvm,windows-hyperv|named-network,windows-hyperv-named-network-host|Privileged Linux named bridge and elevated windows-hyperv private HNS network; not Apple VF portable"
+  "network status/modes/publish|backend-neutral|linux-kvm,apple-vf,windows-hyperv|networking-deep,applevf-network-mode,applevf-publish|user/isolated modes plus backend publish mechanics"
   "volume create/list/status/delete|backend-neutral|linux-kvm,apple-vf,windows-hyperv|volumes|Managed volume lifecycle and attach semantics (ext4, or VHD-wrapped ext4 on windows-hyperv)"
   "commit/image|backend-neutral|linux-kvm,apple-vf,windows-hyperv|commit-images,lifecycle-deep,public-surface|Local OCI image records, tag/delete/prune, commit"
   "registry auth|portable|none|registry-auth|Private registry credential discovery"
@@ -226,12 +218,8 @@ Scenarios:
                     MICROAGENT_E2E_MODEL_MEDIATION_VLLM=1.
   survive-reboot     supervise --install/--uninstall boot-unit generation
                      (systemd user unit / launchd plist); no real reboot.
-  named-network      Two workspaces on a managed named-network bridge: stable
-                     IPs, cross-VM reach by IP and by name. Privileged (netpriv).
   firecracker-lifecycle-host
                     Firecracker/Linux host mechanics probe behind lifecycle.
-  firecracker-networking-host
-                    Firecracker/Linux TAP, bridge, NAT, and helper mechanics.
   firecracker-transport-host
                     Firecracker/Linux /dev/vhost-vsock and helper mechanics.
   firecracker-supervision-host
@@ -243,7 +231,7 @@ Scenarios:
   applevf-workspace-connect
                     Apple VF workspace connect/logs/ps smoke
   applevf-network-mode
-                    Apple VF user/nat/isolated/bridged check and outbound smoke
+                    Apple VF user/isolated network mode check and outbound smoke
   applevf-publish    Apple VF TCP publish forwarding smoke
   applevf-vsock-diagnostic
                     Apple VF mediation and virtio-vsock diagnostic smoke
@@ -302,21 +290,15 @@ Environment:
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO=<dir> points at a vLLM checkout.
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_IMAGE=<ref> overrides the guest curl image.
   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_OUT_DIR=<dir> stores vLLM reports.
-  MICROAGENT_E2E_ALLOW_NETPRIV=1 opts the privileged networking lane in when you
-    hold CAP_NET_ADMIN without uid 0 (file caps / capability-granting sandbox).
   MICROAGENT_E2E_HEARTBEAT=<seconds> sets the "still running" heartbeat interval
     for long scenarios (default 20; scenarios faster than this stay quiet).
 
-Scenarios that need a microVM backend (or privileged networking) skip with a
-reason when the host lacks the prerequisite; a preflight line and a final
-PASSED/SKIPPED/FAILED summary report what was validated.
+Scenarios that need a microVM backend skip with a reason when the host lacks the
+prerequisite; a preflight line and a final PASSED/SKIPPED/FAILED summary report
+what was validated.
   MICROAGENT_FIRECRACKER_SUPERVISOR=<path> uses a prepared supervisor binary.
-  MICROAGENT_E2E_BRIDGE=<name> uses a prepared Linux bridge for bridged tests.
   MICROAGENT_APPLEVF_SUPERVISOR=<path> uses a prepared Apple VF supervisor binary.
   MICROAGENT_APPLEVF_KERNEL=<path> uses a prepared Apple VF Linux ARM64 kernel.
-
-Linux nat/bridged setup:
-  scripts/dev/microagent-e2e-linux-network-setup.sh
 
 Apple VF setup:
   scripts/dev/applevf-supervisor-build.sh
@@ -591,12 +573,11 @@ fi
 
 # Preflight: probe host capabilities once so the summary explains skips.
 have_vm=no; e2e_have_vm && have_vm=yes
-have_netpriv=no; e2e_have_netpriv && have_netpriv=yes
 is_wsl=no; e2e_is_wsl && is_wsl=yes
-printf 'microagent E2E preflight: os=%s arch=%s wsl=%s vm=%s netpriv=%s\n' \
-  "$(e2e_friendly_os)" "$(uname -m)" "$is_wsl" "$have_vm" "$have_netpriv"
+printf 'microagent E2E preflight: os=%s arch=%s wsl=%s vm=%s\n' \
+  "$(e2e_friendly_os)" "$(uname -m)" "$is_wsl" "$have_vm"
 if [ "$have_vm" = "no" ]; then
-  printf '  (no microVM backend: vm/netpriv scenarios will SKIP. Run microagent doctor for details.)\n'
+  printf '  (no microVM backend: vm scenarios will SKIP. Run microagent doctor for details.)\n'
 fi
 printf 'microagent E2E suite: %s\n' "${selected[*]}"
 
@@ -626,11 +607,6 @@ for name in "${selected[@]}"; do
   if [ "$requirement" = "vm" ] && [ "$have_vm" = "no" ]; then
     printf '\n==> %s\n.. SKIP (no microVM backend)\n' "$name"
     skipped+=("$name (no vm)")
-    continue
-  fi
-  if [ "$requirement" = "netpriv" ] && [ "$have_netpriv" = "no" ]; then
-    printf '\n==> %s\n.. SKIP (privileged networking not enabled)\n   To enable: microagent host setup-networking, then run as root or set MICROAGENT_E2E_ALLOW_NETPRIV=1\n' "$name"
-    skipped+=("$name (no netpriv)")
     continue
   fi
 
@@ -672,11 +648,6 @@ printf '\n==== microagent E2E summary (%ss) ====\n' "$((end_suite - start_suite)
 printf 'PASSED:  %s\n' "${#passed[@]}"
 printf 'SKIPPED: %s%s\n' "${#skipped[@]}" "$([ "${#skipped[@]}" -gt 0 ] && printf '  [%s]' "${skipped[*]}")"
 printf 'FAILED:  %s%s\n' "${#failed[@]}" "$([ "${#failed[@]}" -gt 0 ] && printf '  [%s]' "${failed[*]}")"
-if [ "${#skipped[@]}" -gt 0 ]; then
-  printf '\nTo unlock skipped scenarios:\n'
-  printf '  nat/bridged networking:  scripts/dev/microagent-e2e-linux-network-setup.sh, then re-run\n'
-  printf '  named-network (netpriv): microagent host setup-networking, then run as root\n'
-fi
 if [ "${#failed[@]}" -gt 0 ]; then
   exit 1
 fi

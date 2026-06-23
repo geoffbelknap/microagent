@@ -273,17 +273,7 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	if usernsIssue != "" {
 		issues = append(issues, usernsIssue)
 	}
-	if probe.ReadFile != nil {
-		if data, err := probe.ReadFile("/proc/sys/net/ipv4/ip_forward"); err == nil {
-			host.IPForwardEnabled = strings.TrimSpace(string(data)) == "1"
-		}
-	}
-	if probe.ReadBinaryCapabilities != nil && host.SupervisorPath != "" {
-		if ok, err := probe.ReadBinaryCapabilities(host.SupervisorPath); err == nil {
-			host.SupervisorNetAdminCapable = ok
-		}
-	}
-	DeriveNetworkReadiness(host)
+	deriveNetworkReadiness(host)
 	deriveTProxyModuleReadiness(host, tproxyModuleProbe{readFile: probe.ReadFile, statDir: probe.StatModule})
 	host.ConsoleAvailable = true
 	host.ConsoleMode = "interactive"

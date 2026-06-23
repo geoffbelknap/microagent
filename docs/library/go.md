@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-22_
+_Last updated: 2026-06-23_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -377,7 +377,6 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent volume` | `volume.Create` / `volume.List` / `volume.Get` / `volume.Remove` / `volume.Attach` |
 | `microagent secret check` | `secret.DefaultRegistry` / `secret.Registry.Check` |
 | `microagent doctor` / `microagent host` | [`diagnostics.Check`](#diagnostics-api) |
-| `microagent host setup-networking` | `diagnostics.DeriveNetworkReadiness` / `diagnostics.NetworkRemediation` (CLI applies `setcap` + `ip_forward`) |
 | `microagent contract` | `vmkit.NewRuntimeContract` |
 | `microagent kernel install` / `microagent kernel verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
 | `microagent rootfs build` | `rootfs.Builder.Build` |

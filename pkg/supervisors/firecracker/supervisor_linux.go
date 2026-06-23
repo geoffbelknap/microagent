@@ -24,7 +24,6 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
-	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	execclient "github.com/geoffbelknap/microagent/pkg/workspace/exec/client"
@@ -128,20 +127,10 @@ func validateFirecrackerConfig(config *vmkit.Config) error {
 		mode = "user"
 	}
 	switch mode {
-	case "user", "nat", "isolated":
+	case "user", "isolated":
 		return nil
-	case "named":
-		if strings.TrimSpace(config.Network.Name) == "" {
-			return fmt.Errorf("firecracker network.mode named requires a network name")
-		}
-		return nil
-	case "bridged":
-		if strings.TrimSpace(config.Network.Interface) == "" {
-			return fmt.Errorf("firecracker network.interface is required for bridged mode")
-		}
-		return validateLinuxBridge(strings.TrimSpace(config.Network.Interface))
 	default:
-		return fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, bridged, or named", mode)
+		return fmt.Errorf("firecracker network.mode %q is unsupported; use user or isolated", mode)
 	}
 }
 
@@ -386,14 +375,6 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		}
 		path = resolved
 	}
-	_, needsNetworkCapabilities := firecrackerNetworkInterface(opts, req.Config)
-	needsAmbientNetworkCapabilities := needsNetworkCapabilities && networkMode(req.Config) != "user"
-	if needsAmbientNetworkCapabilities {
-		if err := ensureNetAdminInheritable(); err != nil {
-			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
-			return failedResponse(req, err.Error()), err
-		}
-	}
 	// On a snapshot restore/fork (req.Tag != "") the egress mediator must be
 	// re-armed with the SAME per-workspace CA the guest's baked trust store was
 	// built against, NOT a freshly minted one. Read the recorded CA fingerprint
@@ -518,7 +499,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	if serialInput != nil {
 		cmd.Stdin = serialInput
 	}
-	cmd.SysProcAttr = firecrackerSysProcAttr(detached, needsAmbientNetworkCapabilities)
+	cmd.SysProcAttr = firecrackerSysProcAttr(detached)
 	if err := cmd.Start(); err != nil {
 		cleanupTransientFirewallRules(firewallRules)
 		cleanupTransientNetworkDevices(networkDevices)
@@ -1017,8 +998,7 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 	if config != nil && config.ModelGuestPort != 0 && config.ModelVsockPort != 0 {
 		args = append(args, fmt.Sprintf("microagent_model_fwd=%d:%d", config.ModelGuestPort, config.ModelVsockPort))
 	}
-	mode := networkMode(config)
-	if (mode == "nat" || mode == "user" || mode == "named") && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
+	if networkMode(config) == "user" && config != nil && config.Network != nil && config.Network.IP != "" && config.Network.Gateway != "" {
 		args = append(args,
 			"microagent_net_if=eth0",
 			"microagent_net_ip="+config.Network.IP,
@@ -1026,9 +1006,6 @@ func firecrackerBootArgs(config *vmkit.Config) string {
 		)
 		if len(config.Network.DNS) != 0 {
 			args = append(args, "microagent_net_dns="+strings.Join(config.Network.DNS, ","))
-		}
-		if len(config.Network.Hosts) != 0 {
-			args = append(args, "microagent_net_hosts="+strings.Join(config.Network.Hosts, ","))
 		}
 	}
 	return strings.Join(args, " ")
@@ -1186,8 +1163,7 @@ func hasVsockListeners(config *vmkit.Config) bool {
 }
 
 func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInterface, bool) {
-	mode := networkMode(config)
-	if mode != "bridged" && mode != "nat" && mode != "user" && mode != "named" {
+	if networkMode(config) != "user" {
 		return networkInterface{}, false
 	}
 	return networkInterface{
@@ -1197,15 +1173,11 @@ func firecrackerNetworkInterface(opts Options, config *vmkit.Config) (networkInt
 	}, true
 }
 
-func firecrackerSysProcAttr(detached, needsNetworkCapabilities bool) *syscall.SysProcAttr {
-	if !detached && !needsNetworkCapabilities {
+func firecrackerSysProcAttr(detached bool) *syscall.SysProcAttr {
+	if !detached {
 		return nil
 	}
-	attr := &syscall.SysProcAttr{Setpgid: detached}
-	if needsNetworkCapabilities {
-		attr.AmbientCaps = []uintptr{uintptr(unix.CAP_NET_ADMIN)}
-	}
-	return attr
+	return &syscall.SysProcAttr{Setpgid: detached}
 }
 
 func requestWithRuntimeNetwork(req vmkit.Request, runtimeNetwork *vmkit.NetworkConfig) vmkit.Request {
@@ -1232,30 +1204,9 @@ func prepareNetworkForStart(opts Options, config *vmkit.Config, restore bool, ex
 		return nil, nil, nil, 0, nil
 	case "user":
 		return prepareUserNetworkForStart(opts, config, restore, expectedCASHA)
-	case "nat":
-		return prepareNATForStart(opts, config, restore, expectedCASHA)
-	case "named":
-		return prepareNamedNetworkForStart(opts, config, restore, expectedCASHA)
-	case "bridged":
 	default:
-		return nil, nil, nil, 0, fmt.Errorf("firecracker network.mode %q is unsupported; use user, nat, isolated, bridged, or named", networkMode(config))
+		return nil, nil, nil, 0, fmt.Errorf("firecracker network.mode %q is unsupported; use user or isolated", networkMode(config))
 	}
-	bridge := strings.TrimSpace(config.Network.Interface)
-	if err := validateLinuxBridge(bridge); err != nil {
-		return nil, nil, nil, 0, err
-	}
-	device := transientNetworkDevice{Name: tapName(opts), Mode: "tap", Interface: bridge, Created: true}
-	if err := createBridgeTap(device.Name, bridge); err != nil {
-		return nil, nil, nil, 0, err
-	}
-	return []transientNetworkDevice{device}, nil, nil, 0, nil
-}
-
-func prepareNATForStart(opts Options, config *vmkit.Config, restore bool, expectedCASHA string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
-	if err := requireIPv4Forwarding(); err != nil {
-		return nil, nil, nil, 0, err
-	}
-	return prepareTAPNATForStart(opts, config, "nat", restore, expectedCASHA)
 }
 
 func prepareUserNetworkForStart(opts Options, config *vmkit.Config, restore bool, expectedCASHA string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
@@ -1309,7 +1260,7 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string, rest
 	}
 	network := runtimeNetworkConfig(config, plan.Subnet, plan.GuestCIDR, plan.Gateway)
 	network.Mode = mode
-	egressPID, egressRules, err := provisionEgressMediation(opts, config, mode, tap, plan.Gateway, plan.Subnet, nil, restore, expectedCASHA)
+	egressPID, egressRules, err := provisionEgressMediation(opts, config, tap, plan.Gateway, plan.Subnet, restore, expectedCASHA)
 	if err != nil {
 		cleanupTransientFirewallRules(rules)
 		cleanupTransientNetworkDevices(cleanupDevices)
@@ -1329,19 +1280,13 @@ func prepareTAPNATForStart(opts Options, config *vmkit.Config, mode string, rest
 // it is a no-op: it returns (0, nil, nil) and the guest's egress is unmediated.
 //
 // Fail-closed: on ANY failure it tears down everything IT started (CA files,
-// mediator process, TPROXY ip rule/route in user mode) and returns the error.
-// It does NOT touch the caller's tap or base NAT rules — the caller unwinds those
-// with its own cleanupTransient* discipline, exactly as the inline path did.
+// mediator process, TPROXY ip rule/route) and returns the error. It does NOT
+// touch the caller's tap or base NAT rules — the caller unwinds those with its
+// own cleanupTransient* discipline, exactly as the inline path did.
 //
-// mode selects the TPROXY prerequisite ownership model and must be "user" or a
-// host-netns mode ("nat", "named"):
-//   - "user" (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
-//     reaped with the ephemeral netns; we provision them here.
-//   - host-netns modes ("nat", "named"): those are host-global infra owned by
-//     `host setup-networking`; we only VERIFY them (fail-closed if absent) and
-//     install just the per-workspace nft tproxy rule. Anything other than "user"
-//     takes this verify-only path.
-func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gateway, subnet string, peers []string, restore bool, expectedCASHA string) (int, []transientFirewallRule, error) {
+// This runs only for user (pasta) mode: the TPROXY sysctls/ip-rule/local-route
+// are netns-local and reaped with the ephemeral netns, so we provision them here.
+func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, subnet string, restore bool, expectedCASHA string) (int, []transientFirewallRule, error) {
 	if config == nil || !vmkit.EgressMediationOn(config.EgressMode) {
 		return 0, nil, nil
 	}
@@ -1356,7 +1301,7 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gat
 	if caErr != nil {
 		return 0, nil, caErr
 	}
-	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, config.EgressSwapConfigPath, peers, caCertPath, caKeyPath, egressCapsFromConfig(config))
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, egressCapsFromConfig(config))
 	if eerr != nil {
 		cleanupCA()
 		return 0, nil, eerr
@@ -1377,19 +1322,14 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gat
 	// so the start aborts rather than booting a guest whose UDP escapes the
 	// mediator.
 	//
-	// netnsLocal distinguishes the two prerequisite ownership models:
-	//   - user (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
-	//     reaped with the ephemeral netns; we provision them here.
-	//   - host-netns modes (nat, named): those are host-global infra owned by
-	//     `host setup-networking`; we only VERIFY them (fail-closed if absent) and
-	//     install just the per-workspace nft tproxy rule.
-	netnsLocal := mode == "user"
-	undoRouting, perr := prepareEgressTProxyNetns(netnsLocal, egressTProxyMark, egressTProxyTable)
+	// user (pasta) mode: the sysctls/ip-rule/local-route are netns-local and
+	// reaped with the ephemeral netns; we provision them here.
+	undoRouting, perr := prepareEgressTProxyNetns(true, egressTProxyMark, egressTProxyTable)
 	if perr != nil {
 		terminateAuxProcess(pid)
 		cleanupCA()
 		cleanupTransientFirewallRules(rules)
-		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, perr)
+		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — ensure the host kernel provides TPROXY support (e.g. the nft_tproxy/xt_TPROXY module) or use --egress off: %w", opts.Name, perr)
 	}
 	mediatorAddr := netip.AddrPortFrom(netip.MustParseAddr(gateway), uint16(port))
 	tproxy, terr := installEgressTProxyRule(tap, subnet, egressTProxyMark, mediatorAddr)
@@ -1398,14 +1338,13 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, mode, tap, gat
 		terminateAuxProcess(pid)
 		cleanupCA()
 		cleanupTransientFirewallRules(rules)
-		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — run 'microagent host setup-networking' or use --egress off: %w", opts.Name, terr)
+		return 0, nil, fmt.Errorf("egress: UDP mediation (TPROXY) unavailable for workspace %s — ensure the host kernel provides TPROXY support (e.g. the nft_tproxy/xt_TPROXY module) or use --egress off: %w", opts.Name, terr)
 	}
 	// The nft tproxy rule joins the returned rules slice so the standard firewall
 	// teardown (stop/quarantine/failed-start) removes it. The ip rule/local route
-	// are NOT firewall rules: in user mode they vanish with the ephemeral pasta
-	// netns (no per-stop teardown needed); in host-netns modes they are host infra
-	// we did not create here (undoRouting is a no-op). undoRouting is therefore
-	// only meaningful on the failure paths above.
+	// are NOT firewall rules: they vanish with the ephemeral pasta netns (no
+	// per-stop teardown needed). undoRouting is therefore only meaningful on the
+	// failure paths above.
 	rules = append(rules, tproxy)
 
 	// Fail-closed IPv6 drop. The REDIRECT/TPROXY steering above is IPv4-only
@@ -1517,180 +1456,6 @@ func acquireEgressCA(opts Options, restore bool, expectedCASHA string) (caCertPa
 	return caCertPath, caKeyPath, cleanup, nil
 }
 
-// prepareNamedNetworkForStart joins a workspace to a user-defined named network:
-// it allocates a stable address from the network's subnet, ensures the shared
-// Linux bridge exists with the gateway address, attaches a TAP to the bridge,
-// installs masquerade rules for outbound traffic, and returns a runtime network
-// config carrying /etc/hosts entries for every member so they resolve by name.
-func prepareNamedNetworkForStart(opts Options, config *vmkit.Config, restore bool, expectedCASHA string) ([]transientNetworkDevice, []transientFirewallRule, *vmkit.NetworkConfig, int, error) {
-	if err := requireIPv4Forwarding(); err != nil {
-		return nil, nil, nil, 0, err
-	}
-	name := strings.TrimSpace(config.Network.Name)
-	record, err := network.Get(opts.StateDir, name)
-	if err != nil {
-		return nil, nil, nil, 0, fmt.Errorf("join named network: %w", err)
-	}
-	ip, err := network.Join(opts.StateDir, name, opts.Name)
-	if err != nil {
-		return nil, nil, nil, 0, fmt.Errorf("allocate address on network %q: %w", name, err)
-	}
-	// Refresh the record so the /etc/hosts entries include this member.
-	record, err = network.Get(opts.StateDir, name)
-	if err != nil {
-		return nil, nil, nil, 0, err
-	}
-	prefix, err := subnetPrefixLen(record.Subnet)
-	if err != nil {
-		return nil, nil, nil, 0, err
-	}
-
-	bridge := bridgeName(name)
-	if err := ensureNetworkBridge(bridge, record.Gateway, prefix); err != nil {
-		return nil, nil, nil, 0, err
-	}
-	tap := tapName(opts)
-	device := transientNetworkDevice{Name: tap, Mode: "tap", Interface: bridge, Created: true}
-	if err := createBridgeTap(tap, bridge); err != nil {
-		return nil, nil, nil, 0, networkPrivilegeError("attach firecracker tap to network bridge "+bridge, err)
-	}
-	cleanupDevices := []transientNetworkDevice{device}
-	rules, err := installNATFirewallRules(tap, record.Subnet)
-	if err != nil {
-		cleanupTransientFirewallRules(rules)
-		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, 0, err
-	}
-
-	// Full egress mediation (CA + mediator + TCP REDIRECT + UDP TPROXY) so all
-	// guest egress — including east-west VM↔VM traffic within the named bridge —
-	// is captured by the mediator. A named network runs in the HOST netns (like
-	// nat, not pasta), so the helper takes the host-global verify-only TPROXY path.
-	// Fail-closed: the helper unwinds its own provisioning on error; we still tear
-	// down the tap and base NAT rules we created above, mirroring the nat path.
-	//
-	// Hand the mediator the named-network peer roster (every OTHER member's
-	// name↔IP) so it reverse-resolves a bare-IP east-west destination to the peer's
-	// workspace name and polices it by name under the same default-deny allowlist.
-	egressPID, egressRules, err := provisionEgressMediation(opts, config, "named", tap, record.Gateway, record.Subnet, namedNetworkPeers(record, opts.Name), restore, expectedCASHA)
-	if err != nil {
-		cleanupTransientFirewallRules(rules)
-		cleanupTransientNetworkDevices(cleanupDevices)
-		return nil, nil, nil, 0, err
-	}
-	rules = append(rules, egressRules...)
-
-	runtime := vmkit.NetworkConfig{
-		Mode:    "named",
-		Name:    name,
-		IP:      ip + "/" + strconv.Itoa(prefix),
-		Subnet:  record.Subnet,
-		Gateway: record.Gateway,
-		Routes:  []string{"0.0.0.0/0 via " + record.Gateway},
-		Hosts:   namedNetworkHosts(record),
-	}
-	if config.Network != nil && len(config.Network.DNS) != 0 {
-		runtime.DNS = config.Network.DNS
-	} else {
-		runtime.DNS = []string{"1.1.1.1", "8.8.8.8"}
-	}
-	return cleanupDevices, rules, &runtime, egressPID, nil
-}
-
-// namedNetworkHosts renders one "name:ip" entry per member for the guest
-// /etc/hosts file.
-func namedNetworkHosts(record network.Record) []string {
-	hosts := make([]string, 0, len(record.Members))
-	for _, m := range record.Members {
-		hosts = append(hosts, m.Workspace+":"+m.IP)
-	}
-	return hosts
-}
-
-// namedNetworkPeers renders the egress mediator's peer roster as "name=ip" pairs,
-// one per OTHER member of the network (this workspace's own entry is excluded —
-// the mediator never reverse-resolves a flow to "self"). The mediator uses it to
-// police east-west VM↔VM traffic by the peer's workspace name under the same
-// default-deny allowlist as external hosts.
-func namedNetworkPeers(record network.Record, self string) []string {
-	peers := make([]string, 0, len(record.Members))
-	for _, m := range record.Members {
-		if m.Workspace == self {
-			continue
-		}
-		peers = append(peers, m.Workspace+"="+m.IP)
-	}
-	return peers
-}
-
-// bridgeName derives a stable, valid (<=15 char) Linux bridge name for a named
-// network. The "mbr" prefix marks it as microagent-managed so cleanup may reap
-// it without touching operator-provided bridges used by bridged mode.
-func bridgeName(networkName string) string {
-	sum := sha1.Sum([]byte(networkName))
-	return fmt.Sprintf("mbr%x", sum[:4])
-}
-
-func isManagedNetworkBridge(name string) bool {
-	return strings.HasPrefix(name, "mbr") && len(name) == 11
-}
-
-func subnetPrefixLen(subnet string) (int, error) {
-	_, parsed, err := net.ParseCIDR(subnet)
-	if err != nil {
-		return 0, fmt.Errorf("parse network subnet %q: %w", subnet, err)
-	}
-	ones, _ := parsed.Mask.Size()
-	return ones, nil
-}
-
-// ensureNetworkBridge creates the shared bridge if absent, assigns the gateway
-// address, and brings it up. It is idempotent so concurrent member starts and
-// restarts converge on the same bridge.
-func ensureNetworkBridge(bridge, gateway string, prefix int) error {
-	link, err := netlink.LinkByName(bridge)
-	if err != nil {
-		if !linkNotFoundError(err) {
-			return networkPrivilegeError("inspect network bridge "+bridge, err)
-		}
-		if err := netlink.LinkAdd(&netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: bridge}}); err != nil && !alreadyExistsError(err) {
-			return networkPrivilegeError("create network bridge "+bridge, err)
-		}
-		link, err = netlink.LinkByName(bridge)
-		if err != nil {
-			return networkPrivilegeError("inspect network bridge "+bridge, err)
-		}
-	}
-	gwCIDR := gateway + "/" + strconv.Itoa(prefix)
-	addr, err := netlink.ParseAddr(gwCIDR)
-	if err != nil {
-		return fmt.Errorf("parse network bridge address %s: %w", gwCIDR, err)
-	}
-	if err := netlink.AddrAdd(link, addr); err != nil && !alreadyExistsError(err) {
-		return networkPrivilegeError("assign network bridge address "+gwCIDR, err)
-	}
-	if err := netlink.LinkSetUp(link); err != nil {
-		return networkPrivilegeError("bring network bridge "+bridge+" up", err)
-	}
-	return nil
-}
-
-// reapNetworkBridgeIfEmpty deletes a microagent-managed network bridge once it
-// has no remaining enslaved interfaces, so a stopped last member leaves no
-// orphan bridge. Best-effort: any error is non-fatal to teardown.
-func reapNetworkBridgeIfEmpty(bridge string) {
-	if !isManagedNetworkBridge(bridge) {
-		return
-	}
-	entries, err := os.ReadDir(filepath.Join("/sys/class/net", bridge, "brif"))
-	if err != nil || len(entries) > 0 {
-		return
-	}
-	if link, err := netlink.LinkByName(bridge); err == nil {
-		_ = netlink.LinkDel(link)
-	}
-}
-
 type tapNATAddress struct {
 	Subnet    string
 	GuestCIDR string
@@ -1776,53 +1541,6 @@ func runtimeNetworkConfig(config *vmkit.Config, subnet, ip, gateway string) vmki
 	return network
 }
 
-func validateLinuxBridge(name string) error {
-	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("firecracker network.interface is required for bridged mode")
-	}
-	if strings.Contains(name, "/") || strings.Contains(name, "\x00") || len(name) > 15 {
-		return fmt.Errorf("firecracker bridged network.interface %q is not a valid Linux interface name", name)
-	}
-	if _, err := os.Stat(filepath.Join("/sys/class/net", name)); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("firecracker bridged network.interface %q does not exist", name)
-		}
-		return fmt.Errorf("inspect firecracker bridged network.interface %q: %w", name, err)
-	}
-	if _, err := os.Stat(filepath.Join("/sys/class/net", name, "bridge")); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("firecracker bridged network.interface %q must be a Linux bridge", name)
-		}
-		return fmt.Errorf("inspect firecracker bridged network.interface %q bridge state: %w", name, err)
-	}
-	return nil
-}
-
-func createBridgeTap(tap, bridge string) error {
-	if err := createTap(tap); err != nil {
-		return networkPrivilegeError("create firecracker tap "+tap, err)
-	}
-	tapLink, err := netlink.LinkByName(tap)
-	if err != nil {
-		_ = deleteTap(tap)
-		return networkPrivilegeError("inspect firecracker tap "+tap, err)
-	}
-	bridgeLink, err := netlink.LinkByName(bridge)
-	if err != nil {
-		_ = deleteTap(tap)
-		return fmt.Errorf("inspect firecracker bridge %q: %w", bridge, err)
-	}
-	if err := netlink.LinkSetMaster(tapLink, bridgeLink); err != nil {
-		_ = deleteTap(tap)
-		return networkPrivilegeError(fmt.Sprintf("attach firecracker tap %q to bridge %q", tap, bridge), err)
-	}
-	if err := netlink.LinkSetUp(tapLink); err != nil {
-		_ = deleteTap(tap)
-		return networkPrivilegeError("bring firecracker tap "+tap+" up", err)
-	}
-	return nil
-}
-
 func createTap(name string) error {
 	if _, err := netlink.LinkByName(name); err == nil {
 		return fmt.Errorf("network link %q already exists", name)
@@ -1834,17 +1552,6 @@ func createTap(name string) error {
 		Mode:      netlink.TUNTAP_MODE_TAP,
 		Flags:     netlink.TUNTAP_DEFAULTS | netlink.TUNTAP_NO_PI,
 	})
-}
-
-func requireIPv4Forwarding() error {
-	data, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
-	if err != nil {
-		return fmt.Errorf("inspect net.ipv4.ip_forward for firecracker nat networking: %w", err)
-	}
-	if strings.TrimSpace(string(data)) != "1" {
-		return fmt.Errorf("firecracker nat networking requires net.ipv4.ip_forward=1 on the host")
-	}
-	return nil
 }
 
 func enableNamespaceIPv4Forwarding() error {
@@ -2069,9 +1776,6 @@ func cleanupTransientNetworkDevices(devices []transientNetworkDevice) {
 				continue
 			}
 			_ = deleteTap(device.Name)
-			// For named networks the TAP is enslaved to a shared managed bridge;
-			// reap that bridge once this was its last member.
-			reapNetworkBridgeIfEmpty(device.Interface)
 		}
 	}
 }
@@ -2243,92 +1947,10 @@ func linkNotFoundError(err error) bool {
 	return errors.As(err, &notFound)
 }
 
-type processCapabilities struct {
-	Effective   uint64
-	Permitted   uint64
-	Inheritable uint64
-}
-
-var getProcessCapabilities = currentProcessCapabilities
-var addInheritableCapability = currentAddInheritableCapability
-var getEffectiveUID = os.Geteuid
-
-func currentProcessCapabilities() (processCapabilities, error) {
-	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
-	data := [2]unix.CapUserData{}
-	if err := unix.Capget(&header, &data[0]); err != nil {
-		return processCapabilities{}, err
-	}
-	return processCapabilities{
-		Effective:   capabilityWords(data[0].Effective, data[1].Effective),
-		Permitted:   capabilityWords(data[0].Permitted, data[1].Permitted),
-		Inheritable: capabilityWords(data[0].Inheritable, data[1].Inheritable),
-	}, nil
-}
-
-func capabilityWords(low, high uint32) uint64 {
-	return uint64(low) | uint64(high)<<32
-}
-
-func currentAddInheritableCapability(capability int) error {
-	if capability < 0 || capability >= 64 {
-		return fmt.Errorf("invalid Linux capability %d", capability)
-	}
-	header := unix.CapUserHeader{Version: unix.LINUX_CAPABILITY_VERSION_3}
-	data := [2]unix.CapUserData{}
-	if err := unix.Capget(&header, &data[0]); err != nil {
-		return err
-	}
-	index := capability / 32
-	bit := uint32(1) << uint(capability%32)
-	data[index].Inheritable |= bit
-	return unix.Capset(&header, &data[0])
-}
-
-func ensureNetAdminInheritable() error {
-	if getEffectiveUID() == 0 {
-		return nil
-	}
-	caps, err := getProcessCapabilities()
-	if err != nil {
-		return fmt.Errorf("inspect firecracker supervisor capabilities: %w", err)
-	}
-	if hasCapability(caps.Effective, unix.CAP_NET_ADMIN) &&
-		hasCapability(caps.Permitted, unix.CAP_NET_ADMIN) &&
-		hasCapability(caps.Inheritable, unix.CAP_NET_ADMIN) {
-		return nil
-	}
-	if hasCapability(caps.Effective, unix.CAP_NET_ADMIN) &&
-		hasCapability(caps.Permitted, unix.CAP_NET_ADMIN) &&
-		hasCapability(caps.Effective, unix.CAP_SETPCAP) &&
-		hasCapability(caps.Permitted, unix.CAP_SETPCAP) {
-		if err := addInheritableCapability(unix.CAP_NET_ADMIN); err != nil {
-			return fmt.Errorf("add CAP_NET_ADMIN to firecracker supervisor inheritable capability set: %w", err)
-		}
-		caps, err = getProcessCapabilities()
-		if err != nil {
-			return fmt.Errorf("inspect firecracker supervisor capabilities after inheritable update: %w", err)
-		}
-		if hasCapability(caps.Effective, unix.CAP_NET_ADMIN) &&
-			hasCapability(caps.Permitted, unix.CAP_NET_ADMIN) &&
-			hasCapability(caps.Inheritable, unix.CAP_NET_ADMIN) {
-			return nil
-		}
-	}
-	return fmt.Errorf("firecracker nat and bridged networking require CAP_NET_ADMIN in the supervisor effective, permitted, and inheritable capability sets so Firecracker can inherit it; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, use --network user for unprivileged outbound networking, or use --network isolated if outbound network is not needed")
-}
-
-func hasCapability(caps uint64, capability int) bool {
-	if capability < 0 || capability >= 64 {
-		return false
-	}
-	return caps&(uint64(1)<<uint(capability)) != 0
-}
-
 func networkPrivilegeError(action string, err error) error {
 	text := strings.ToLower(err.Error())
 	if errors.Is(err, syscall.EPERM) || strings.Contains(text, "operation not permitted") || strings.Contains(text, "permission denied") {
-		return fmt.Errorf("%s: firecracker nat and bridged networking require CAP_NET_ADMIN to create TAP devices, configure NAT, and let Firecracker attach the TAP; run as root, launch microagent with CAP_NET_ADMIN in effective/permitted/inheritable sets, use --network user for unprivileged outbound networking, or use --network isolated if outbound network is not needed: %w", action, err)
+		return fmt.Errorf("%s: firecracker user networking creates a TAP device inside an unprivileged user network namespace; this host may lack unprivileged user namespaces or /dev/net/tun — use --network isolated if outbound network is not needed: %w", action, err)
 	}
 	return fmt.Errorf("%s: %w", action, err)
 }

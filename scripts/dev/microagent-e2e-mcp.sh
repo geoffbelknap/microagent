@@ -79,7 +79,6 @@ required = {
     "workspace.stats",
     "models.pull",
     "models.serve",
-    "host.networking.setup",
     "kernel.install",
     "rootfs.build",
 }

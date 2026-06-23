@@ -10,8 +10,7 @@ if [ ! -r "$KERNEL" ] && [ -r "$HOME/.microagent/kernels/apple-vf/Image" ]; then
 fi
 IMAGE="${MICROAGENT_APPLEVF_BOOT_IMAGE:-docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6}"
 ARCH="${MICROAGENT_APPLEVF_BOOT_ARCH:-arm64}"
-NETWORK_MODE="${MICROAGENT_APPLEVF_BOOT_NETWORK_MODE:-nat}"
-NETWORK_INTERFACE="${MICROAGENT_APPLEVF_BOOT_NETWORK_INTERFACE:-}"
+NETWORK_MODE="${MICROAGENT_APPLEVF_BOOT_NETWORK_MODE:-user}"
 STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/microagent-applevf-boot.XXXXXX")"
 RESULT="$STATE_DIR/result.json"
 GUEST_INIT="$STATE_DIR/microagent-guestinit"
@@ -67,9 +66,6 @@ RUN_ARGS=(
   --guest-init "$GUEST_INIT"
   --supervisor "$SUPERVISOR"
 )
-if [ -n "$NETWORK_INTERFACE" ]; then
-  RUN_ARGS+=(--network-interface "$NETWORK_INTERFACE")
-fi
 
 "$STATE_DIR/microagent" "${RUN_ARGS[@]}" >"$RESULT"
 

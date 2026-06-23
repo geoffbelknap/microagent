@@ -866,12 +866,6 @@ type networkBootConfig struct {
 	IP        string
 	Gateway   string
 	DNS       []string
-	Hosts     []hostEntry
-}
-
-type hostEntry struct {
-	Name string
-	IP   string
 }
 
 func startTCPVsockBridges(env []string) error {
@@ -911,10 +905,28 @@ func startHostForwards(forwards []hostForward) error {
 }
 
 func startConfiguredHostForwards(cfg config) error {
+	// The bridge binds one vsock listener per GuestPort (that is the port the
+	// host forwarder targets), so collapse forwards that share a GuestPort -- a
+	// single guest bridge already serves every host port pointed at it. Without
+	// this, two host ports mapped to one guest port would double-bind and fail.
+	forwards := dedupeHostForwardsByGuestPort(cfg.HostForwards)
 	if cfg.Mode == "service" && len(cfg.Command) > 0 {
-		return startHostForwardHelpers(cfg.HostForwards)
+		return startHostForwardHelpers(forwards)
 	}
-	return startHostForwards(cfg.HostForwards)
+	return startHostForwards(forwards)
+}
+
+func dedupeHostForwardsByGuestPort(forwards []hostForward) []hostForward {
+	seen := make(map[uint16]bool, len(forwards))
+	out := make([]hostForward, 0, len(forwards))
+	for _, f := range forwards {
+		if f.GuestPort == 0 || seen[f.GuestPort] {
+			continue
+		}
+		seen[f.GuestPort] = true
+		out = append(out, f)
+	}
+	return out
 }
 
 func startShellHelper(port uint16, shellPath string, env []string) error {
@@ -1201,15 +1213,21 @@ func openHostForwardListener(forward hostForward) (int, error) {
 	}
 	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
 	if err != nil {
-		return -1, fmt.Errorf("open vsock listener for host port %d: %w", forward.HostPort, err)
+		return -1, fmt.Errorf("open vsock listener for guest port %d: %w", forward.GuestPort, err)
 	}
-	if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(forward.HostPort)}); err != nil {
+	// Bind the vsock port the host-side forwarder actually targets. RunPortForwarder
+	// (servePortForward) connects to vsock GuestPort, so the bridge must listen on
+	// GuestPort here -- not HostPort, which is only meaningful on the host. When
+	// HostPort==GuestPort the two coincide; when they differ (the common
+	// `--publish hostPort:guestPort` case) binding HostPort left the forwarder's
+	// vsock target unbound, so every inbound connection reset.
+	if err := unix.Bind(fd, &unix.SockaddrVM{CID: unix.VMADDR_CID_ANY, Port: uint32(forward.GuestPort)}); err != nil {
 		_ = unix.Close(fd)
-		return -1, fmt.Errorf("bind vsock listener for host port %d: %w", forward.HostPort, err)
+		return -1, fmt.Errorf("bind vsock listener for guest port %d: %w", forward.GuestPort, err)
 	}
 	if err := unix.Listen(fd, 128); err != nil {
 		_ = unix.Close(fd)
-		return -1, fmt.Errorf("listen on vsock host port %d: %w", forward.HostPort, err)
+		return -1, fmt.Errorf("listen on vsock guest port %d: %w", forward.GuestPort, err)
 	}
 	return fd, nil
 }
@@ -1343,33 +1361,6 @@ func configureBootNetwork() error {
 		}
 		log.Println("microagent-init: resolv.conf written")
 	}
-	if len(cfg.Hosts) != 0 {
-		if err := writeHostsFile(cfg.Hosts); err != nil {
-			return err
-		}
-		log.Printf("microagent-init: /etc/hosts written with %d named-network entries", len(cfg.Hosts))
-	}
-	return nil
-}
-
-// writeHostsFile writes /etc/hosts with the standard loopback entries plus one
-// line per named-network member so members resolve each other by name.
-func writeHostsFile(hosts []hostEntry) error {
-	var b strings.Builder
-	b.WriteString("127.0.0.1\tlocalhost\n")
-	b.WriteString("::1\tlocalhost ip6-localhost ip6-loopback\n")
-	for _, h := range hosts {
-		if net.ParseIP(h.IP) == nil {
-			return fmt.Errorf("invalid host entry IP %q", h.IP)
-		}
-		b.WriteString(h.IP)
-		b.WriteByte('\t')
-		b.WriteString(h.Name)
-		b.WriteByte('\n')
-	}
-	if err := os.WriteFile("/etc/hosts", []byte(b.String()), 0o644); err != nil {
-		return fmt.Errorf("write /etc/hosts: %w", err)
-	}
 	return nil
 }
 
@@ -1396,17 +1387,6 @@ func readNetworkBootConfig() (networkBootConfig, error) {
 		if dns != "" {
 			cfg.DNS = append(cfg.DNS, dns)
 		}
-	}
-	for _, entry := range strings.Split(values["microagent_net_hosts"], ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		name, ip, ok := strings.Cut(entry, ":")
-		if !ok || strings.TrimSpace(name) == "" || strings.TrimSpace(ip) == "" {
-			continue
-		}
-		cfg.Hosts = append(cfg.Hosts, hostEntry{Name: strings.TrimSpace(name), IP: strings.TrimSpace(ip)})
 	}
 	return cfg, nil
 }

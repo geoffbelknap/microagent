@@ -4,7 +4,7 @@ description: Speak the JSON protocol backend supervisors implement - requests, r
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-23_
 
 If you are implementing a supervisor, calling one directly, or debugging what
 a backend returned, this page is the protocol reference. Backend supervisors
@@ -54,7 +54,7 @@ backend-neutral runtime contract.
       }
     ],
     "network": {
-      "mode": "nat",
+      "mode": "user",
       "portForwards": [
         {
           "protocol": "tcp",
@@ -79,12 +79,11 @@ backend-neutral runtime contract.
 request order. Each entry has `name`, `path`, `mountpoint`, and `mode` (`ro` or
 `rw`).
 
-`config.network.mode` is declarative. The recognized modes are `user`, `nat`,
-`isolated`, and `bridged`; this is not a closed three-value set. Which modes a
-given backend implements, and what each one does, is backend-specific - see the
-[Firecracker](/protocol/firecracker/), [Apple VF](/protocol/applevf/), and
-[Windows Hyper-V](/protocol/windows-hyperv/) pages. Bridged backends may require
-`config.network.interface`. Port
+`config.network.mode` is declarative. The recognized modes are `user` and
+`isolated`. Which modes a given backend implements, and what each one does, is
+backend-specific - see the [Firecracker](/protocol/firecracker/),
+[Apple VF](/protocol/applevf/), and [Windows Hyper-V](/protocol/windows-hyperv/)
+pages. Port
 forwards use `protocol`, optional `host`, `hostPort`, and `guestPort`.
 `config.mediation` declares the agent-to-host control-plane channel. Required
 mediation must set `failClosed: true`; if the channel is unavailable or broken,

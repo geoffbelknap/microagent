@@ -27,7 +27,6 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
-	"github.com/geoffbelknap/microagent/pkg/network"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/superviseunit"
@@ -74,11 +73,8 @@ const (
 
 const (
 	// networkModeFlagHelp is the single source of truth for the --network flag
-	// help shown by every command that exposes a workspace network mode. It
-	// names the user-vs-nat trade-off so the rootless default and the
-	// privileged kernel-speed alternative are both obvious. bridged is
-	// quarantined and intentionally absent from the advertised set.
-	networkModeFlagHelp = "Network mode: user (rootless, unprivileged user namespace; default), nat (kernel-speed, needs CAP_NET_ADMIN/root), isolated (no network), or named (shared bridge)"
+	// help shown by every command that exposes a workspace network mode.
+	networkModeFlagHelp = "Network mode: user (rootless, unprivileged user namespace; default) or isolated (no network)"
 )
 
 func main() {
@@ -371,8 +367,6 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.Var(&disks, "disk", "Attach disk name=path:/mount:ro|rw")
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	networkMode := fs.String("network", defaultNetworkMode, networkModeFlagHelp)
-	networkInterface := fs.String("network-interface", "", "Host interface for bridged network mode")
-	networkUnsupported := fs.Bool("unsupported", false, "Acknowledge selecting an unsupported, not-reliably-mediated network mode (bridged, nat, named)")
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
@@ -385,7 +379,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return vmkit.Request{Command: "host"}, nil
 	case "create":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, *networkUnsupported, publishes)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -396,7 +390,7 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 		}
 		return req, nil
 	case "start":
-		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, *networkInterface, *networkUnsupported, publishes)
+		req, err := requestFromFlagsOrJSON(jsonPath, args, identity, config, disks, vsocks, *networkMode, publishes)
 		if err != nil {
 			return vmkit.Request{}, err
 		}
@@ -469,7 +463,6 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
-	warnIfUnmediatedNetwork(os.Stderr, opts.Network.Mode)
 
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
@@ -1286,8 +1279,6 @@ func runDeleteWorkspace(ctx context.Context, opts workspaceOptions, yes, force b
 		// attached to a deleted workspace. Best-effort: a stale holder is
 		// reclaimed on next attach regardless.
 		_ = volume.DetachAll(opts.StateDir, opts.Name)
-		// Leave any named networks so a deleted workspace frees its address.
-		_ = network.LeaveAll(opts.StateDir, opts.Name)
 	}
 	return resp, err
 }
@@ -1486,21 +1477,6 @@ func parseForkSnapshotRef(ref string) (string, string, error) {
 	return source, tag, nil
 }
 
-// warnIfUnmediatedNetwork emits a loud, single-line warning to w when the
-// effective network mode is one of the unsupported, not-reliably-mediated modes
-// (bridged, nat, named). It is fired once per start/run from the CLI so the
-// operator sees it in their terminal. These modes still work (behind
-// --unsupported); this only makes the risk impossible to miss. The supported,
-// mediated modes (user, isolated) emit nothing.
-func warnIfUnmediatedNetwork(w io.Writer, mode string) {
-	switch strings.TrimSpace(mode) {
-	case "bridged":
-		fmt.Fprintln(w, "⚠ bridged networking is UNSUPPORTED — it bypasses egress mediation and may be broken or removed. Not covered by microagent's security model.")
-	case "nat", "named":
-		fmt.Fprintf(w, "⚠ %s networking is UNSUPPORTED — egress mediation is not reliable in this mode; use the default user mode for mediated egress. Not covered by microagent's security model.\n", strings.TrimSpace(mode))
-	}
-}
-
 func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	profileExplicit := hasFlagValue(args, "profile")
 	memoryExplicit := hasFlagValue(args, "memory")
@@ -1595,10 +1571,6 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	// (halt/stop/kill/delete). A manifest read error is tolerated;
 	// workspace.Start surfaces it properly.
 	if manifest, err := workspace.ReadManifest(opts.StateDir, opts.Name); err == nil {
-		// The effective network mode on start comes from the persisted manifest,
-		// not a CLI flag; warn off the manifest so a bridged workspace is flagged
-		// on every boot.
-		warnIfUnmediatedNetwork(os.Stderr, manifest.Network.Mode)
 		var manifestRunner workspace.ModelRunnerSpec
 		if manifest.ModelRunner != nil {
 			manifestRunner = *manifest.ModelRunner
@@ -2017,9 +1989,6 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Profile, "profile", opts.Profile, "Resource profile")
 	fs.StringVar(&opts.RestartPolicy, "restart", opts.RestartPolicy, "Restart policy: never, on-failure, or always")
 	fs.StringVar(&opts.Network.Mode, "network", opts.Network.Mode, networkModeFlagHelp)
-	fs.StringVar(&opts.Network.Interface, "network-interface", opts.Network.Interface, "Host interface for bridged network mode")
-	fs.StringVar(&opts.Network.Name, "network-name", opts.Network.Name, "Join a user-defined named network by name")
-	fs.BoolVar(&opts.Network.Unsupported, "unsupported", opts.Network.Unsupported, "Acknowledge selecting an unsupported, not-reliably-mediated network mode (bridged, nat, named)")
 	mediationMapping := ""
 	fs.StringVar(&mediationMapping, "mediation", "", "Required mediation vsock mapping port=host:port")
 	mediationOptional := false
@@ -2272,16 +2241,6 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 		return err
 	}
 	opts.RestartPolicy = normalizeRestartPolicy(opts.RestartPolicy)
-	// --network-name selects a user-defined named network; it implies named mode
-	// unless the operator explicitly chose a different mode (which is a conflict).
-	if strings.TrimSpace(opts.Network.Name) != "" {
-		switch strings.TrimSpace(opts.Network.Mode) {
-		case "", defaultNetworkMode, "named":
-			opts.Network.Mode = "named"
-		default:
-			return fmt.Errorf("--network-name cannot be combined with --network %s; named networks use their own managed bridge", opts.Network.Mode)
-		}
-	}
 	opts.Network = normalizeNetworkConfig(opts.Network)
 	if err := vmkit.ValidateNetworkConfig(opts.Network); err != nil {
 		return err
@@ -3301,7 +3260,7 @@ func workspaceHasGuestCommand(opts workspaceOptions) bool {
 	return workspace.HasGuestCommand(opts)
 }
 
-func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, networkInterface string, networkUnsupported bool, publishes []string) (vmkit.Request, error) {
+func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Identity, config vmkit.Config, disks []string, vsocks []string, networkMode string, publishes []string) (vmkit.Request, error) {
 	if jsonPath != "" {
 		if len(args) != 0 {
 			return vmkit.Request{}, fmt.Errorf("--json does not accept positional request paths")
@@ -3335,7 +3294,7 @@ func requestFromFlagsOrJSON(jsonPath string, args []string, identity vmkit.Ident
 		})
 	}
 	config.VsockListeners = listeners
-	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, Interface: networkInterface, Unsupported: networkUnsupported, PortForwards: portForwards})
+	network := normalizeNetworkConfig(vmkit.NetworkConfig{Mode: networkMode, PortForwards: portForwards})
 	if err := vmkit.ValidateNetworkConfig(network); err != nil {
 		return vmkit.Request{}, err
 	}
@@ -3392,8 +3351,6 @@ func reorderFlagArgs(args []string) []string {
 		"-profile":                   true,
 		"-restart":                   true,
 		"-network":                   true,
-		"-network-interface":         true,
-		"-network-name":              true,
 		"-mediation":                 true,
 		"-publish":                   true,
 		"-p":                         true,
@@ -4000,7 +3957,6 @@ Commands:
   delete               Delete a workspace
   contract             Show backend-neutral runtime contract
   host                 Report host capabilities
-  host setup-networking  Enable nat/named networking (Linux; needs root). --check / --revert
   doctor               Check the host
   rootfs build         Build a rootfs from an OCI image
   version              Print the version
@@ -4036,12 +3992,8 @@ Options:
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
   -network <mode>       Network mode:
-                         user (rootless, unprivileged user namespace; default),
-                         nat (kernel-speed, needs CAP_NET_ADMIN/root),
-                         isolated (no network), or named (shared bridge)
-  -network-interface <if>
-                         Host interface for bridged network mode
-  -network-name <name>  Join a user-defined named network by name
+                         user (rootless, unprivileged user namespace; default)
+                         or isolated (no network)
   -memory <MiB>         Memory in MiB; defaults to 512 for workspaces
   -cpus <n>             CPU count
   -vsock p=host:port    Add a vsock mapping
@@ -4084,12 +4036,8 @@ Options:
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
   -network <mode>       Network mode:
-                         user (rootless, unprivileged user namespace; default),
-                         nat (kernel-speed, needs CAP_NET_ADMIN/root),
-                         isolated (no network), or named (shared bridge)
-  -network-interface <if>
-                         Host interface for bridged network mode
-  -network-name <name>  Join a user-defined named network by name
+                         user (rootless, unprivileged user namespace; default)
+                         or isolated (no network)
   -p host:guest[/tcp]   Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
@@ -4170,12 +4118,8 @@ Options:
   -profile <name>       Resource profile: tiny, small, medium, or large
   -restart <policy>     Restart policy: never, on-failure, or always
   -network <mode>       Network mode:
-                         user (rootless, unprivileged user namespace; default),
-                         nat (kernel-speed, needs CAP_NET_ADMIN/root),
-                         isolated (no network), or named (shared bridge)
-  -network-interface <if>
-                         Host interface for bridged network mode
-  -network-name <name>  Join a user-defined named network by name
+                         user (rootless, unprivileged user namespace; default)
+                         or isolated (no network)
   -p host:guest[/tcp]   Publish a TCP port
   -publish host:guest[/tcp]
                          Publish a TCP port

@@ -4,7 +4,7 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-23_
 
 microagent's supported host targets are Linux and macOS. Linux uses
 Firecracker, and macOS uses Apple Virtualization.framework. WSL is an intended
@@ -20,9 +20,9 @@ fails before it builds a rootfs or talks to a supervisor.
 
 | Backend | Host OS | Maturity | Networking modes | Requirements | Notes |
 |---|---|---|---|---|---|
-| `linux-kvm` | Linux | Supported | `user`, `nat`, `isolated`, `bridged`, `named`, TCP `--publish` | `/dev/kvm`, `/dev/vhost-vsock`, `/dev/net/tun`, `firecracker`, `pasta` for `user` networking | Reference implementation; importable as a Go package. WSL uses this backend when the Linux prerequisites are exposed. |
-| `apple-vf` | macOS (Apple silicon) | Supported | `user`, `nat`, `isolated`, TCP `--publish`; `bridged` entitlement-gated | Virtualization.framework, Swift supervisor binary | NAT is macOS-managed; no `named` networks yet |
-| `windows-hyperv` | Windows | Experimental | `user`/`nat` (HNS NAT), `isolated`, `bridged` (named HNS network/switch), TCP `--publish` | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
+| `linux-kvm` | Linux | Supported | `user`, `isolated`, TCP `--publish` | `/dev/kvm`, `/dev/vhost-vsock`, `/dev/net/tun`, `firecracker`, `pasta` for `user` networking | Reference implementation; importable as a Go package. WSL uses this backend when the Linux prerequisites are exposed. |
+| `apple-vf` | macOS (Apple silicon) | Supported | `user`, `isolated`, TCP `--publish` | Virtualization.framework, Swift supervisor binary | NAT is macOS-managed |
+| `windows-hyperv` | Windows | Experimental | `user` (HNS NAT), `isolated`, TCP `--publish` | Hyper-V / Host Compute Service | Linux guests without WSL or QEMU |
 
 Implemented backends expose the same backend-neutral request and response
 structures where they implement a feature. The mechanics under each verb differ
@@ -66,10 +66,8 @@ calls out a WSL-specific behavior.
   invocation per request - there is no resident daemon process on macOS.
   Override with `--supervisor` or `MICROAGENT_APPLEVF_SUPERVISOR`.
 - Supports interactive `connect` and `connect --send`.
-- Supports `user`, `nat`, `isolated`, and TCP `--publish` (`user` and `nat`
-  both use Apple's native NAT attachment). Native bridged networking
-  is implemented, but public builds fail closed because Apple gates it behind
-  the restricted `com.apple.vm.networking` entitlement.
+- Supports `user`, `isolated`, and TCP `--publish` (`user` uses Apple's native
+  NAT attachment).
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
 
@@ -84,7 +82,7 @@ calls out a WSL-specific behavior.
 - Supports the full lifecycle: `host`, `check`, `prepare`, `run`, `start`,
   `inspect`, `connect`, `halt`, `quarantine`, `stop`, `kill`, and `delete`.
   `clone`, `cp`, artifacts, and `commit` ride guest-mediated maintenance boots.
-- Supports `user`/`nat` (HNS NAT) and `isolated` networking plus published TCP
+- Supports `user` (HNS NAT) and `isolated` networking plus published TCP
   ports through Hyper-V socket bridging. Live `apply` of host-bind forward
   changes is supported.
 - Supports structured [`exec`](/cli/exec/) (buffered and `--stream`) through a
@@ -97,8 +95,7 @@ calls out a WSL-specific behavior.
   [`connect`](/cli/connect/), which is the interactive contract on every
   backend.
 - See [Windows Hyper-V supervisor](/protocol/windows-hyperv/) for protocol
-  details and current limitations (bridged mode attaches to a named HNS network
-  or Hyper-V switch; pause/resume and named networks are supported; snapshots
+  details and current limitations (pause/resume is supported; snapshots
   are not supported — HCS-direct VMs have no guest-memory save-state).
 
 ## Checking your host

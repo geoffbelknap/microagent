@@ -4,7 +4,7 @@ description: List running workspaces.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-23_
 
 ```text
 microagent ps [--state-dir <dir>]
@@ -27,7 +27,7 @@ Text output uses the same columns as `list`:
 
 ```text
 NAME                     STATE        BACKEND      PROFILE      NETWORK    RESTART
-research                 running      firecracker  medium       nat        on-failure
+research                 running      firecracker  medium       user       on-failure
 ```
 
 When no VMs are live, the text output is:

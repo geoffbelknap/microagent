@@ -2,7 +2,6 @@ package vmkit
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -235,36 +234,10 @@ func TestValidateNetworkConfigAcceptsUserMode(t *testing.T) {
 	}
 }
 
-func TestBridgedRequiresUnsupported(t *testing.T) {
-	err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged"})
-	if err == nil {
-		t.Fatal("ValidateNetworkConfig accepted bridged without unsupported ack")
-	}
-	if !strings.Contains(err.Error(), "unsupported") {
-		t.Fatalf("ValidateNetworkConfig bridged error = %q, want it to mention unsupported", err)
-	}
-	if err := ValidateNetworkConfig(NetworkConfig{Mode: "bridged", Unsupported: true}); err != nil {
-		t.Fatalf("ValidateNetworkConfig bridged with unsupported ack: %v", err)
-	}
-}
-
-func TestNatNamedRequireUnsupported(t *testing.T) {
-	for _, mode := range []string{"nat", "named"} {
-		cfg := NetworkConfig{Mode: mode}
-		if mode == "named" {
-			cfg.Name = "netA"
-		}
-		if err := ValidateNetworkConfig(cfg); err == nil {
-			t.Fatalf("ValidateNetworkConfig accepted %s without unsupported ack", mode)
-		} else if !strings.Contains(err.Error(), "unsupported") {
-			t.Fatalf("ValidateNetworkConfig %s error = %q, want it to mention unsupported", mode, err)
-		}
-		ack := NetworkConfig{Mode: mode, Unsupported: true}
-		if mode == "named" {
-			ack.Name = "netA"
-		}
-		if err := ValidateNetworkConfig(ack); err != nil {
-			t.Fatalf("ValidateNetworkConfig %s with unsupported ack: %v", mode, err)
+func TestValidateNetworkConfigRejectsUnsupportedModes(t *testing.T) {
+	for _, mode := range []string{"bridged", "nat", "named"} {
+		if err := ValidateNetworkConfig(NetworkConfig{Mode: mode}); err == nil {
+			t.Fatalf("ValidateNetworkConfig accepted unsupported mode %q", mode)
 		}
 	}
 }
@@ -283,8 +256,7 @@ func TestValidateNetworkConfigRejectsIsolatedPortForwards(t *testing.T) {
 
 func TestValidateNetworkConfigRejectsUnsupportedPortForwardProtocol(t *testing.T) {
 	cfg := NetworkConfig{
-		Mode:        "nat",
-		Unsupported: true,
+		Mode: "user",
 		PortForwards: []PortForward{
 			{Protocol: "udp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
 		},
@@ -296,8 +268,7 @@ func TestValidateNetworkConfigRejectsUnsupportedPortForwardProtocol(t *testing.T
 
 func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
 	cfg := NetworkConfig{
-		Mode:        "nat",
-		Unsupported: true,
+		Mode: "user",
 		PortForwards: []PortForward{
 			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 80},
 			{Protocol: "tcp", Host: "127.0.0.1", HostPort: 8080, GuestPort: 8080},
@@ -369,15 +340,15 @@ func TestNormalizeEgressModeGuardedDefault(t *testing.T) {
 func TestNetworkModeMediates(t *testing.T) {
 	// Modes that route guest egress through the mediator (plus the empty default,
 	// which resolves to "user").
-	mediates := []string{"", "  ", "user", "USER", " nat ", "named"}
+	mediates := []string{"", "  ", "user", "USER"}
 	for _, m := range mediates {
 		if !NetworkModeMediates(m) {
 			t.Errorf("NetworkModeMediates(%q) = false, want true", m)
 		}
 	}
-	// "bridged" (quarantined, unmediated) and "isolated" (no egress) never run a
-	// mediator, so they must NOT be considered mediatable.
-	notMediates := []string{"bridged", "BRIDGED", " bridged ", "isolated", "ISOLATED"}
+	// "isolated" (no egress) never runs a mediator, so it must NOT be considered
+	// mediatable.
+	notMediates := []string{"isolated", "ISOLATED", " isolated "}
 	for _, m := range notMediates {
 		if NetworkModeMediates(m) {
 			t.Errorf("NetworkModeMediates(%q) = true, want false", m)

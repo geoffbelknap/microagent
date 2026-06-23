@@ -2,9 +2,8 @@
 // mediation (TPROXY) depends on. These values are the single source of truth
 // shared by three consumers so they can never drift apart:
 //
-//   - the Firecracker supervisor, which VERIFIES them (fail-closed) before
-//     starting a nat-mode mediated workspace;
-//   - `microagent host setup-networking`, which PROVISIONS them once as root;
+//   - the Firecracker supervisor, which provisions them in the per-VM
+//     user-mode netns before starting a mediated workspace;
 //   - `microagent doctor`, which REPORTS whether the kernel modules are loaded.
 //
 // The package is a dependency-free leaf (no other microagent imports, no build
@@ -19,9 +18,8 @@ import "strings"
 // TProxyMark is the fwmark stamped on TPROXY-steered datagrams. The ip rule
 // (fwmark TProxyMark -> table TProxyTable) plus the local route in that table
 // deliver the marked packet to the mediator's transparent socket on lo. It is a
-// fixed value (not per-workspace): in user (pasta) mode it is netns-local, and
-// in nat mode it is host-global infrastructure provisioned once, so a single
-// stable value is correct and collision-free across workspaces.
+// fixed value (not per-workspace): in user (pasta) mode it is netns-local, so a
+// single stable value is correct and collision-free across workspaces.
 const TProxyMark uint32 = 0x1
 
 // TProxyTable is the policy routing table that holds the
@@ -29,10 +27,10 @@ const TProxyMark uint32 = 0x1
 const TProxyTable = 100
 
 // TProxyModules are the kernel modules TPROXY egress mediation requires. A
-// rootless user namespace cannot modprobe, so these must be loaded by root once
-// (via `host setup-networking`). They are needed for BOTH user and nat egress
-// modes. A module compiled into the kernel (built-in, not loadable) counts as
-// present — see ParseLoadedModules / builtin detection in the consumers.
+// rootless user namespace cannot modprobe, so these must already be loaded (or
+// built into the kernel) on the host. They are needed for user-mode egress. A
+// module compiled into the kernel (built-in, not loadable) counts as present —
+// see ParseLoadedModules / builtin detection in the consumers.
 var TProxyModules = []string{
 	"nft_tproxy",
 	"nf_tproxy_ipv4",
@@ -42,8 +40,7 @@ var TProxyModules = []string{
 
 // TProxySysctls are the kernel knobs TPROXY delivery to a local transparent
 // socket on lo requires. In user (pasta) mode these are set per-netns at runtime
-// and are not a host concern; in nat mode they are host-global infrastructure
-// that `host setup-networking` provisions and the supervisor verifies.
+// by the supervisor and are not a host concern.
 //
 //   - route_localnet: allow routing of 0.0.0.0/8 (the local TPROXY route on lo)
 //   - rp_filter=0: the spoofed-source reply leg would otherwise be dropped by

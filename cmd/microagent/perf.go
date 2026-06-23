@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	// networkModePerfFlagHelp mirrors networkModeFlagHelp for measured boots,
-	// which run disposable workspaces and so omit named (shared bridge); an
+	// networkModePerfFlagHelp mirrors networkModeFlagHelp for measured boots; an
 	// empty value falls back to the backend default.
-	networkModePerfFlagHelp = "Network mode for measured boots: user (rootless, unprivileged user namespace), nat (kernel-speed, needs CAP_NET_ADMIN/root), or isolated (no network); empty uses the backend default"
+	networkModePerfFlagHelp = "Network mode for measured boots: user (rootless, unprivileged user namespace) or isolated (no network); empty uses the backend default"
 )
 
 type perfBootOptions = perf.BootOptions
@@ -223,8 +222,7 @@ Boot options:
   -mke2fs <path>        mke2fs binary path
   -supervisor <path>    Override the supervisor path
   -network <mode>       Network mode for measured boots:
-                         user (rootless, unprivileged user namespace),
-                         nat (kernel-speed, needs CAP_NET_ADMIN/root), or
+                         user (rootless, unprivileged user namespace) or
                          isolated (no network); empty uses the backend default
 
 Footprint options:

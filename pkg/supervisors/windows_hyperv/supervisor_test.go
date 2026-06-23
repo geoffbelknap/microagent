@@ -895,7 +895,7 @@ func TestStartCommandRecordsRuntimeNetworkState(t *testing.T) {
 			NetworkID:         "network-1",
 			NetworkEndpointID: "endpoint-1",
 			RuntimeNetwork: &vmkit.NetworkConfig{
-				Mode:    "nat",
+				Mode:    "user",
 				IP:      "192.168.127.2",
 				Subnet:  "192.168.127.0/24",
 				Gateway: "192.168.127.1",
@@ -916,7 +916,7 @@ func TestStartCommandRecordsRuntimeNetworkState(t *testing.T) {
 			KernelPath: "C:\\microagent\\Image",
 			RootfsPath: "C:\\microagent\\rootfs.vhd",
 			StateDir:   stateDir,
-			Network:    &vmkit.NetworkConfig{Mode: "nat"},
+			Network:    &vmkit.NetworkConfig{Mode: "user"},
 		},
 	}
 	resp, err := (Supervisor{adapter: adapter}).Do(context.Background(), req)
@@ -928,33 +928,8 @@ func TestStartCommandRecordsRuntimeNetworkState(t *testing.T) {
 	if state.NetworkID != "network-1" || state.NetworkEndpointID != "endpoint-1" {
 		t.Fatalf("runtime network IDs = %q %q", state.NetworkID, state.NetworkEndpointID)
 	}
-	if state.Config.Network == nil || state.Config.Network.Mode != "nat" || state.Config.Network.IP != "192.168.127.2" || state.Config.Network.Gateway != "192.168.127.1" {
+	if state.Config.Network == nil || state.Config.Network.Mode != "user" || state.Config.Network.IP != "192.168.127.2" || state.Config.Network.Gateway != "192.168.127.1" {
 		t.Fatalf("runtime network = %#v", state.Config.Network)
-	}
-}
-
-func TestStartCommandRejectsWindowsHyperVBridgedWithoutInterface(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("windows-hyperv start path is windows-only")
-	}
-	req := vmkit.Request{
-		Command: "start",
-		Identity: &vmkit.Identity{
-			RequestID: "req-1",
-			RuntimeID: "agent-1",
-			Role:      vmkit.RoleWorkload,
-			Backend:   vmkit.BackendWindowsHyperV,
-		},
-		Config: &vmkit.Config{
-			KernelPath: "C:\\microagent\\Image",
-			RootfsPath: "C:\\microagent\\rootfs.vhd",
-			StateDir:   t.TempDir(),
-			Network:    &vmkit.NetworkConfig{Mode: "bridged"},
-		},
-	}
-	resp, err := (Supervisor{adapter: &fakeAdapter{}}).Do(context.Background(), req)
-	if err == nil || resp.OK || !strings.Contains(resp.Error, "bridged network requires network.interface") {
-		t.Fatalf("start resp=%#v err=%v", resp, err)
 	}
 }
 
@@ -1020,7 +995,7 @@ func TestRunCommandCleansUpNetworkAfterForegroundResult(t *testing.T) {
 		network: networkAttachment{
 			NetworkID:         "network-1",
 			NetworkEndpointID: "endpoint-1",
-			RuntimeNetwork:    &vmkit.NetworkConfig{Mode: "nat"},
+			RuntimeNetwork:    &vmkit.NetworkConfig{Mode: "user"},
 		},
 	}
 	req := vmkit.Request{
@@ -1035,7 +1010,7 @@ func TestRunCommandCleansUpNetworkAfterForegroundResult(t *testing.T) {
 			KernelPath:     "C:\\microagent\\Image",
 			RootfsPath:     "C:\\microagent\\rootfs.vhd",
 			StateDir:       stateDir,
-			Network:        &vmkit.NetworkConfig{Mode: "nat"},
+			Network:        &vmkit.NetworkConfig{Mode: "user"},
 			VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(stateDir, "agent-1", "result.json")}},
 		},
 	}
@@ -1173,7 +1148,7 @@ func TestStartCommandLaunchesListenerHelperForPublishedPortForwards(t *testing.T
 			RootfsPath: "C:\\microagent\\rootfs.vhd",
 			StateDir:   stateDir,
 			Network: &vmkit.NetworkConfig{
-				Mode:         "nat",
+				Mode:         "user",
 				PortForwards: []vmkit.PortForward{{Protocol: "tcp", Host: "127.0.0.1", HostPort: 18080, GuestPort: 8080}},
 			},
 		},
@@ -1259,7 +1234,7 @@ func TestStopCleansUpRuntimeNetworkState(t *testing.T) {
 	startReq.Command = "start"
 	startReq.Config.KernelPath = "C:\\microagent\\Image"
 	startReq.Config.RootfsPath = "C:\\microagent\\rootfs.vhd"
-	startReq.Config.Network = &vmkit.NetworkConfig{Mode: "nat"}
+	startReq.Config.Network = &vmkit.NetworkConfig{Mode: "user"}
 	if _, err := writeRuntimeTransitionWithComputeIDsNetwork(startReq, vmkit.StateRunning, "serial="+serialLogPath(startReq), "", "fake", "11111111-1111-1111-1111-111111111111", "network-1", "endpoint-1"); err != nil {
 		t.Fatalf("write runtime state: %v", err)
 	}

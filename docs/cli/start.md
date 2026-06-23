@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-23_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -95,8 +95,7 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 rootfs back to the snapshot's copy and loads the snapshot's memory and device
 state, so the guest resumes exactly where it was checkpointed. This is currently
 implemented only for the Firecracker backend and the snapshot's kernel must
-match the workspace kernel (the load is rejected on kernel skew). Bridged
-networking is not supported for restore; use user, nat, or isolated.
+match the workspace kernel (the load is rejected on kernel skew).
 
 In-flight guest connections do not survive a restore - outbound TCP and live
 vsock sessions (exec/shell/mediation) are reset and the guest process must

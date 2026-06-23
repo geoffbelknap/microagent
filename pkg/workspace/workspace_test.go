@@ -25,7 +25,7 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 		CPUCount:       2,
 		ResultPort:     1024,
 		SerialInput:    true,
-		Network:        vmkit.NetworkConfig{Mode: "nat"},
+		Network:        vmkit.NetworkConfig{Mode: "user"},
 		VsockListeners: []vmkit.VsockListener{{Port: 2048, Target: "/tmp/service.sock"}},
 		Disks: []Disk{{
 			Name:       "work",
@@ -69,7 +69,7 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	if len(req.Config.Disks) != 1 || req.Config.Disks[0].Mountpoint != "/work" {
 		t.Fatalf("Disks = %#v", req.Config.Disks)
 	}
-	if req.Config.Network == nil || req.Config.Network.Mode != "nat" {
+	if req.Config.Network == nil || req.Config.Network.Mode != "user" {
 		t.Fatalf("Network = %#v", req.Config.Network)
 	}
 	if req.Config.ShellPort != ShellPortForName("agent-1") {
@@ -142,29 +142,27 @@ func TestDefaultOptionsUseUserNetworkMode(t *testing.T) {
 	}
 }
 
-func TestNetworkSpecRoundTripPreservesUnsupportedAck(t *testing.T) {
-	spec := NetworkSpecFromConfig(vmkit.NetworkConfig{Mode: "bridged", Unsupported: true})
-	if !spec.Unsupported {
-		t.Fatalf("NetworkSpecFromConfig dropped the unsupported ack: %#v", spec)
+func TestNetworkSpecRoundTripPreservesUserMode(t *testing.T) {
+	spec := NetworkSpecFromConfig(vmkit.NetworkConfig{Mode: "user"})
+	if spec.Mode != "user" {
+		t.Fatalf("NetworkSpecFromConfig changed the mode: %#v", spec)
 	}
 	cfg := NetworkConfigFromSpec(spec)
-	if !cfg.Unsupported {
-		t.Fatalf("NetworkConfigFromSpec dropped the unsupported ack: %#v", cfg)
+	if cfg.Mode != "user" {
+		t.Fatalf("NetworkConfigFromSpec changed the mode: %#v", cfg)
 	}
 	if err := vmkit.ValidateNetworkConfig(cfg); err != nil {
-		t.Fatalf("round-tripped bridged+unsupported config failed validation: %v", err)
+		t.Fatalf("round-tripped user config failed validation: %v", err)
 	}
 }
 
-func TestNetworkSpecBridgedWithoutAckStillRejectedAtStart(t *testing.T) {
-	// A persisted or hand-written bridged manifest WITHOUT the ack must still be
-	// rejected — the quarantine holds across the manifest round-trip.
-	cfg := NetworkConfigFromSpec(NetworkSpec{Mode: "bridged"})
-	if cfg.Unsupported {
-		t.Fatalf("bridged spec without ack should not set Unsupported: %#v", cfg)
-	}
-	if err := vmkit.ValidateNetworkConfig(cfg); err == nil {
-		t.Fatal("bridged config without the unsupported ack passed validation")
+func TestNetworkSpecRemovedModeRejectedAtStart(t *testing.T) {
+	// A persisted or hand-written manifest naming a removed mode must be rejected.
+	for _, mode := range []string{"bridged", "nat", "named"} {
+		cfg := NetworkConfigFromSpec(NetworkSpec{Mode: mode})
+		if err := vmkit.ValidateNetworkConfig(cfg); err == nil {
+			t.Fatalf("removed network mode %q passed validation", mode)
+		}
 	}
 }
 
@@ -741,12 +739,12 @@ func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
 }
 
 // TestRequestAllocatesCACertForMediatedNetworkModes confirms the mediatable
-// network modes (user, nat, named, and the empty default) DO allocate the
-// CA-cert listener when egress mediation is on — guarding that the new
-// network-mode gate did not over-tighten and suppress the listener for modes
-// that actually run the mediator.
+// network modes (user and the empty default) DO allocate the CA-cert listener
+// when egress mediation is on — guarding that the network-mode gate did not
+// over-tighten and suppress the listener for modes that actually run the
+// mediator.
 func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
-	for _, mode := range []string{"", "user", "nat", "named"} {
+	for _, mode := range []string{"", "user"} {
 		opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeMediated}
 		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
@@ -762,19 +760,17 @@ func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
 	}
 }
 
-// TestRequestFailsClosedMediatedOnBridged asserts that Request returns an error
-// when a mediated egress policy is combined with a network mode that cannot
-// mediate (bridged). The guard fires at the manifest→config boundary before any
-// other egress-dependent work, so the start fails closed instead of running
-// unmediated.
-func TestRequestFailsClosedMediatedOnBridged(t *testing.T) {
+// TestRequestFailsClosedOnRemovedNetworkMode asserts that Request returns an
+// error when a removed network mode (e.g. bridged) is requested — the mode is no
+// longer supported, so the start fails closed instead of running unmediated.
+func TestRequestFailsClosedOnRemovedNetworkMode(t *testing.T) {
 	for _, egressMode := range []string{"", "mediated", "strict"} {
 		opts := Options{
 			Name:       "a",
 			Backend:    vmkit.BackendLinuxKVM,
 			KernelPath: "/k",
 			StateDir:   t.TempDir(),
-			Network:    vmkit.NetworkConfig{Mode: "bridged", Unsupported: true},
+			Network:    vmkit.NetworkConfig{Mode: "bridged"},
 			EgressMode: egressMode,
 		}
 		_, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")

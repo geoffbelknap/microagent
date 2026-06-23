@@ -4,7 +4,7 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-23_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
@@ -221,10 +221,7 @@ the minimum shape is:
 | `snapshot.create` | Create a backend snapshot when supported |
 | `snapshot.list` | List workspace snapshots |
 | `snapshot.delete` | Delete a workspace snapshot, with optional preview |
-| `network.inspect` | Inspect a named microVM network |
-| `network.create` | Create a named microVM network record |
-| `network.list` | List named microVM network records |
-| `network.delete` | Delete a named microVM network record, with optional preview and force |
+| `network.inspect` | Inspect a workspace's network |
 | `volume.create` | Create a named managed ext4 volume |
 | `volume.list` | List named managed volumes |
 | `volume.inspect` | Inspect a named managed volume |
@@ -247,7 +244,6 @@ the minimum shape is:
 | `profiles.list` | List resource profiles |
 | `host.inspect` | Report host capabilities |
 | `doctor.check` | Run host diagnostics |
-| `host.networking.setup` | Apply or revert Linux privileged networking after preview confirmation |
 | `contract.get` | Return the backend-neutral runtime contract |
 | `kernel.verify` | Verify a kernel artifact |
 | `kernel.install` | Install a kernel artifact after preview confirmation |
@@ -276,13 +272,13 @@ polling. `workspace.events` accepts `limit` and `after_index`, and returns
 `next_after_index`; pass that value as the next `after_index` to poll for
 new events without a long-running `events --follow` call.
 
-`workspace.delete`, `network.delete`, `volume.delete`, `snapshot.delete`,
+`workspace.delete`, `volume.delete`, `snapshot.delete`,
 `images.delete`, and `images.prune` accept `preview: true` to return the
 actions that would be taken without changing host state. Mutating tools accept
 an optional `idempotency_key`; tools that are not inherently idempotent replay
 the first successful MCP envelope for a client-supplied key.
 
-`host.networking.setup`, `kernel.install`, and `rootfs.build` use a stricter
+`kernel.install` and `rootfs.build` use a stricter
 preview-confirm contract. Call the tool with `preview: true` first, inspect the
 returned `actions`, then call the same tool with `confirm_token` set to the
 returned `confirmation_token`. Calls without the matching token fail before

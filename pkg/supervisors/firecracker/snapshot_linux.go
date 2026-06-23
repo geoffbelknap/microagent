@@ -423,9 +423,8 @@ func waitForAPISocket(ctx context.Context, sock string, timeout time.Duration) e
 // prepareSnapshotRestore validates that a snapshot can be loaded into this
 // workspace and rolls the workspace rootfs back to the snapshot's coherent
 // copy. It rejects a kernel mismatch (the snapshot is bound to the kernel it
-// was taken against) and bridged networking (a fork would collide on the shared
-// L2; restore shares the rejection for a single, predictable contract). It runs
-// once on the host before any user-network namespace re-exec.
+// was taken against). It runs once on the host before any user-network
+// namespace re-exec.
 func prepareSnapshotRestore(opts Options, req vmkit.Request) error {
 	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag)
 	manifest, err := vmkit.ReadSnapshotManifest(dir)
@@ -434,9 +433,6 @@ func prepareSnapshotRestore(opts Options, req vmkit.Request) error {
 			return fmt.Errorf("snapshot %q not found for workspace %s", req.Tag, opts.Name)
 		}
 		return err
-	}
-	if networkMode(req.Config) == "bridged" {
-		return fmt.Errorf("snapshot restore does not support bridged networking; use user, nat, or isolated")
 	}
 	if manifest.KernelSHA256 != "" {
 		sha, err := fileSHA256(req.Config.KernelPath)

@@ -34,10 +34,10 @@ const nftFilterPreroutingChain = "MICROAGENT-FILTER-PREROUTING"
 
 // egressTProxyMark / egressTProxyTable are the fwmark stamped on TPROXY-steered
 // datagrams and the policy routing table the local route lives in. They alias
-// the authoritative values in pkg/egressprereq, which `host setup-networking`
-// also provisions and `doctor` reports against — sharing the constants is what
-// keeps the supervisor's verify and the provisioner from ever drifting apart.
-// See egressprereq.TProxyMark for why a single fixed value is correct.
+// the authoritative values in pkg/egressprereq, which `doctor` also reports
+// against — sharing the constants is what keeps the supervisor's per-netns
+// provisioning and the doctor report from ever drifting apart. See
+// egressprereq.TProxyMark for why a single fixed value is correct.
 const (
 	egressTProxyMark  = egressprereq.TProxyMark
 	egressTProxyTable = egressprereq.TProxyTable
@@ -443,8 +443,8 @@ func installEgressTProxyRule(tap, subnet string, mark uint32, mediator netip.Add
 
 // egressTProxySysctls are the per-namespace knobs TPROXY delivery to a local
 // transparent socket on lo requires (proven by the rootless spike). They alias
-// the authoritative map in pkg/egressprereq so the supervisor verifies exactly
-// the sysctl keys/values `host setup-networking` provisions:
+// the authoritative map in pkg/egressprereq so the supervisor provisions exactly
+// the sysctl keys/values the per-VM user-mode netns needs:
 //   - route_localnet: allow routing of 0.0.0.0/8 (the local TPROXY route on lo)
 //   - rp_filter=0: the spoofed-source reply leg would otherwise be dropped by
 //     reverse-path filtering
@@ -453,9 +453,8 @@ func installEgressTProxyRule(tap, subnet string, mark uint32, mediator netip.Add
 var egressTProxySysctls = egressprereq.TProxySysctls
 
 // setEgressTProxySysctls writes the TPROXY sysctls. In the user (pasta) netns
-// these are namespace-local and reaped with the netns; in host (nat) mode they
-// are host-global infrastructure and must be provisioned by `host
-// setup-networking`, not toggled per-workspace (see prepareEgressTProxyNetns).
+// these are namespace-local and reaped with the netns (see
+// prepareEgressTProxyNetns).
 func setEgressTProxySysctls() error {
 	for path, want := range egressTProxySysctls {
 		if err := writeSysctlIfNeeded(path, want); err != nil {
@@ -553,12 +552,11 @@ func delEgressTProxyRouting(mark uint32, table int) {
 //     namespace-local and reaped when the ephemeral netns dies; we still install
 //     them here (the netns starts clean) and return a teardown that unwinds them
 //     so an early start failure leaves nothing dangling.
-//   - nat (host) mode: netnsLocal == false. The rule/route/sysctls are
+//   - host-global mode: netnsLocal == false. The rule/route/sysctls are
 //     host-global. We do NOT toggle them per-workspace (that would race sibling
 //     workspaces and leave host state to refcount); instead we VERIFY the
-//     prerequisites are present and fail-closed pointing at `host
-//     setup-networking` if not. The returned teardown is a no-op (host infra is
-//     not owned by a single workspace).
+//     prerequisites are present and fail-closed if not. The returned teardown is
+//     a no-op (host infra is not owned by a single workspace).
 func prepareEgressTProxyNetns(netnsLocal bool, mark uint32, table int) (func(), error) {
 	if !netnsLocal {
 		if err := verifyEgressTProxyHostPrereqs(mark, table); err != nil {
@@ -576,8 +574,7 @@ func prepareEgressTProxyNetns(netnsLocal bool, mark uint32, table int) (func(), 
 }
 
 // verifyEgressTProxyHostPrereqs checks (without mutating) that the host-global
-// TPROXY prerequisites are in place for nat mode. These are owned by `host
-// setup-networking` (Task 3.3c). A missing prerequisite is fail-closed: the
+// TPROXY prerequisites are in place. A missing prerequisite is fail-closed: the
 // caller wraps the error with the operator-facing remediation hint.
 func verifyEgressTProxyHostPrereqs(mark uint32, table int) error {
 	return verifyEgressTProxyPrereqs(mark, table, os.ReadFile, func() ([]netlink.Rule, error) {

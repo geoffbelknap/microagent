@@ -100,13 +100,8 @@ assert_stdout_contains perf-help "Measure workspace performance" "$CLI" perf --h
 assert_stdout_contains kernel-help "Advanced kernel commands" "$CLI" kernel --help
 assert_stdout_contains rootfs-help "Build a rootfs from an OCI image" "$CLI" rootfs --help
 assert_output_contains rootfs-build-help "Usage of rootfs build:" "$CLI" rootfs build --help
-assert_stdout_contains linux-network-setup-help "--check" "$ROOT/scripts/dev/microagent-e2e-linux-network-setup.sh" --help
-if [ "$(uname -s)" = "Linux" ]; then
-  assert_stdout_contains linux-network-setup-check "microagent E2E Linux network setup check" "$ROOT/scripts/dev/microagent-e2e-linux-network-setup.sh" --check
-fi
 
 expect_failure_contains unknown-command "unknown command: definitely-not-a-command" "$CLI" definitely-not-a-command
-expect_failure_contains linux-network-setup-unknown "unknown option: --definitely-not-an-option" "$ROOT/scripts/dev/microagent-e2e-linux-network-setup.sh" --definitely-not-an-option
 expect_failure_contains run-missing-image "run requires --image" "$CLI" run --name missing-image --state-dir "$STATE_DIR"
 expect_failure_contains run-exec-positional-conflict "both --exec and positional command" "$CLI" run --image example.com/acme/image:latest --exec true echo --state-dir "$STATE_DIR"
 expect_failure_contains run-rm-keep-conflict "both --rm and --keep" "$CLI" run --rm --keep example.com/acme/image:latest true --state-dir "$STATE_DIR"
@@ -121,7 +116,7 @@ expect_failure_contains run-privileged-unsupported "microVM boundary" "$CLI" run
 expect_failure_contains run-pod-unsupported "does not implement pods" "$CLI" run --pod new:demo example.com/acme/image:latest true
 expect_failure_contains run-mount-bind-unsupported "does not expose host bind mounts" "$CLI" run --mount type=bind,source="$STATE_DIR/host-bind",target=/workspace example.com/acme/image:latest true
 expect_failure_contains run-cap-unsupported "namespace, capability, device, or security-opt controls" "$CLI" run --cap-add NET_ADMIN example.com/acme/image:latest true
-expect_failure_contains run-publish-alias-isolated "network.portForwards require user, nat, or bridged mode" "$CLI" run -p 127.0.0.1:18080:8080/tcp --network isolated example.com/acme/image:latest true --state-dir "$STATE_DIR"
+expect_failure_contains run-publish-alias-isolated "network.portForwards require user mode" "$CLI" run -p 127.0.0.1:18080:8080/tcp --network isolated example.com/acme/image:latest true --state-dir "$STATE_DIR"
 expect_failure_contains cp-usage "usage: microagent cp" "$CLI" cp only-one-arg --state-dir "$STATE_DIR"
 expect_failure_contains artifact-usage "usage: microagent artifact get" "$CLI" artifact get only two --state-dir "$STATE_DIR"
 expect_failure_contains image-delete-usage "usage: microagent image delete" "$CLI" image delete --state-dir "$STATE_DIR"

@@ -357,10 +357,7 @@ func mcpTools() []map[string]any {
 		mcpTool("snapshot.create", "Create a backend snapshot for a workspace when supported.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "tag": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("snapshot.list", "List snapshots for a workspace.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("snapshot.delete", "Delete a workspace snapshot.", []string{"name", "tag"}, map[string]any{"name": map[string]any{"type": "string"}, "tag": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "preview": map[string]any{"type": "boolean"}}),
-		mcpTool("network.inspect", "Inspect a named microVM network record.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("network.create", "Create a named microVM network record.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "subnet": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
-		mcpTool("network.list", "List named microVM network records.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
-		mcpTool("network.delete", "Delete a named microVM network record.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}, "force": map[string]any{"type": "boolean"}, "preview": map[string]any{"type": "boolean"}}),
+		mcpTool("network.inspect", "Inspect a workspace's network.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("volume.create", "Create a named managed ext4 volume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "size_mib": map[string]any{"type": "integer"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("volume.list", "List named managed volumes.", nil, map[string]any{"state_dir": map[string]any{"type": "string"}}),
 		mcpTool("volume.inspect", "Inspect one named managed volume.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -417,7 +414,6 @@ func mcpTools() []map[string]any {
 		mcpTool("profiles.list", "List resource profiles.", nil, nil),
 		mcpTool("host.inspect", "Report host capabilities for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
 		mcpTool("doctor.check", "Run host diagnostics for the selected backend.", nil, map[string]any{"backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "supervisor": map[string]any{"type": "string"}}),
-		mcpTool("host.networking.setup", "Apply or revert Linux privileged networking setup after preview confirmation.", nil, map[string]any{"action": map[string]any{"type": "string", "enum": []string{"apply", "revert"}}, "preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}}),
 		mcpTool("contract.get", "Return the backend-neutral runtime contract.", nil, nil),
 		mcpTool("kernel.verify", "Verify the configured or supplied kernel artifact.", nil, map[string]any{"path": map[string]any{"type": "string"}, "sha256": map[string]any{"type": "string"}, "backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}}),
 		mcpTool("kernel.install", "Install a kernel artifact after preview confirmation.", nil, map[string]any{"url": map[string]any{"type": "string"}, "from": map[string]any{"type": "string"}, "sha256": map[string]any{"type": "string"}, "out": map[string]any{"type": "string"}, "backend": map[string]any{"type": "string"}, "arch": map[string]any{"type": "string"}, "preview": map[string]any{"type": "boolean"}, "confirm_token": map[string]any{"type": "string"}}),
@@ -645,9 +641,9 @@ func readinessSignalSchema() map[string]any {
 
 func mcpToolSideEffects(name string) []string {
 	switch name {
-	case "host.networking.setup", "kernel.install", "rootfs.build":
+	case "kernel.install", "rootfs.build":
 		return []string{"host_state"}
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
 		return []string{"host_state", "workspace_state"}
 	case "models.pull", "models.remove", "models.prune", "models.serve", "models.stop":
 		return []string{"host_state"}
@@ -658,11 +654,11 @@ func mcpToolSideEffects(name string) []string {
 
 func mcpToolIdempotency(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
+	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
-	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
-	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "network.list", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -675,8 +671,8 @@ func mcpToolPrincipalScope(name string) []string {
 		return []string{"workspace.lifecycle"}
 	case "snapshot.create", "snapshot.list", "snapshot.delete":
 		return []string{"workspace.snapshot"}
-	case "network.inspect", "network.create", "network.list", "network.delete":
-		return []string{"network.read", "network.write"}
+	case "network.inspect":
+		return []string{"network.read"}
 	case "volume.create", "volume.list", "volume.inspect", "volume.delete":
 		return []string{"volume.read", "volume.write"}
 	case "images.pull", "images.list", "images.push", "images.tag", "images.delete", "images.prune":
@@ -685,7 +681,7 @@ func mcpToolPrincipalScope(name string) []string {
 		return []string{"workspace.files"}
 	case "models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate":
 		return []string{"models.read", "models.write"}
-	case "host.networking.setup", "kernel.install", "rootfs.build":
+	case "kernel.install", "rootfs.build":
 		return []string{"host.write"}
 	case "host.inspect", "doctor.check", "contract.get", "kernel.verify", "profiles.list":
 		return []string{"host.read"}
@@ -698,8 +694,6 @@ func mcpToolCostClass(name string) string {
 	switch name {
 	case "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.serve", "kernel.install", "rootfs.build":
 		return "host_compute_and_storage"
-	case "host.networking.setup":
-		return "host_privileged"
 	case "cp", "artifacts.get", "models.remove", "models.prune", "models.stop":
 		return "host_io"
 	default:
@@ -827,7 +821,7 @@ func requireConfirmedMCPHostMutation(name string, args map[string]any) (map[stri
 
 func mcpHostMutationTool(name string) bool {
 	switch name {
-	case "host.networking.setup", "kernel.install", "rootfs.build":
+	case "kernel.install", "rootfs.build":
 		return true
 	default:
 		return false
@@ -836,15 +830,6 @@ func mcpHostMutationTool(name string) bool {
 
 func mcpHostMutationActions(name string, args map[string]any) []string {
 	switch name {
-	case "host.networking.setup":
-		action := stringArg(args, "action")
-		if action == "" {
-			action = "apply"
-		}
-		if action == "revert" {
-			return []string{"revert Linux privileged networking setup"}
-		}
-		return []string{"enable Linux ip_forward", "grant CAP_NET_ADMIN to the supervisor binary"}
 	case "kernel.install":
 		return []string{"download or copy kernel artifact", "write kernel artifact to host path", "verify sha256 when supplied or defaulted"}
 	case "rootfs.build":
@@ -955,7 +940,7 @@ func previewDestructiveMCPTool(name string, args map[string]any) map[string]any 
 			"timing_ms":         int64(0),
 			"principal_context": principalContextArg(args),
 		}
-	case "network.delete", "volume.delete":
+	case "volume.delete":
 		return map[string]any{
 			"result": map[string]any{
 				"preview": true,
@@ -1213,7 +1198,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 
 func mcpMutationTool(name string) bool {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "network.create", "network.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "host.networking.setup", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return true
 	default:
 		return false
@@ -1435,26 +1420,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		return appendOptionalFlag([]string{"--mode=ax", "network", "status", stringArg(args, "name")}, "-state-dir", stateDir), nil
-	case "network.create":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--mode=ax", "network", "create", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		cli = appendOptionalFlag(cli, "-subnet", stringArg(args, "subnet"))
-		return cli, nil
-	case "network.list":
-		return appendOptionalFlag([]string{"--mode=ax", "network", "list"}, "-state-dir", stateDir), nil
-	case "network.delete":
-		if err := requireToolArgs(args, name, "name"); err != nil {
-			return nil, err
-		}
-		cli := []string{"--mode=ax", "network", "delete", stringArg(args, "name")}
-		cli = appendOptionalFlag(cli, "-state-dir", stateDir)
-		if boolArg(args, "force") {
-			cli = append(cli, "-force")
-		}
-		return cli, nil
 	case "volume.create":
 		if err := requireToolArgs(args, name, "name"); err != nil {
 			return nil, err
@@ -1533,16 +1498,6 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli = appendOptionalFlag(cli, "-backend", stringArg(args, "backend"))
 		cli = appendOptionalFlag(cli, "-arch", stringArg(args, "arch"))
 		cli = appendOptionalFlag(cli, "-supervisor", stringArg(args, "supervisor"))
-		return cli, nil
-	case "host.networking.setup":
-		cli := []string{"--mode=ax", "host", "setup-networking"}
-		switch stringArg(args, "action") {
-		case "", "apply":
-		case "revert":
-			cli = append(cli, "-revert")
-		default:
-			return nil, fmt.Errorf("host.networking.setup action must be apply or revert")
-		}
 		return cli, nil
 	case "contract.get":
 		return []string{"--mode=ax", "contract"}, nil

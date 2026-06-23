@@ -104,7 +104,6 @@ required_features = {
     "clone/cp",
     "apply",
     "network status/modes/publish",
-    "network create/list/delete named",
     "volume create/list/status/delete",
     "commit/image",
     "registry auth",
