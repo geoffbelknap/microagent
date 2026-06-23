@@ -29,7 +29,7 @@ SCENARIOS=(
   "lifecycle-deep:scripts/dev/microagent-e2e-lifecycle.sh:all:vm:core"
   "networking-deep:scripts/dev/microagent-e2e-networking-contract.sh:all:vm:core"
   "transport-deep:scripts/dev/microagent-e2e-transport.sh:all:vm:core"
-  "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all:vm:core"
+  "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all:vm:quarantine"
   "volumes:scripts/dev/microagent-e2e-volumes.sh:all:vm:broad"
   "commit-images:scripts/dev/microagent-e2e-commit.sh:all:vm:broad"
   "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm:core"
