@@ -10,15 +10,15 @@ import (
 
 func TestNormalizeConfinementKnob(t *testing.T) {
 	cases := map[string]string{
-		"":         confinementOffKnob,
-		"   ":      confinementOffKnob,
+		"":         confinementAuto,
+		"   ":      confinementAuto,
 		"AUTO":     confinementAuto,
 		"auto":     confinementAuto,
 		"off":      confinementOffKnob,
 		" Off ":    confinementOffKnob,
 		"Jailer":   confinementJailerKnob,
 		"rootless": confinementRootlessKnob,
-		"nonsense": confinementOffKnob,
+		"nonsense": confinementAuto,
 	}
 	for in, want := range cases {
 		if got := normalizeConfinementKnob(in); got != want {
@@ -155,8 +155,9 @@ func TestResolveConfinementModeOff(t *testing.T) {
 	}
 }
 
-func TestHostResponseConfinementOffByDefault(t *testing.T) {
-	// Confinement is opt-in: with the knob off, doctor must not claim it active.
+func TestHostResponseConfinementInactiveWhenOff(t *testing.T) {
+	// Confinement is on by default; with the knob explicitly "off", doctor must
+	// not claim it active.
 	t.Setenv(confinementEnv, "off")
 	resp, _ := hostResponse(Options{FirecrackerPath: "/bin/true"})
 	if resp.Host == nil {
