@@ -2218,6 +2218,39 @@ func TestInspectReconcilesDeadVM(t *testing.T) {
 	}
 }
 
+// A workspace recorded running whose pid has been recycled by an unrelated live
+// process (firecrackerAlive=false: the pid no longer carries this workspace's
+// argv) must reconcile to a terminal state WITHOUT signaling that pid -- doing so
+// SIGTERMs an innocent process group. This previously killed the e2e harness,
+// which seeds the workspace pid to its own shell ($$).
+func TestInspectDoesNotSignalReusedPID(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	victim := exec.Command("sleep", "30")
+	if err := victim.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = victim.Process.Kill(); _, _ = victim.Process.Wait() }()
+	req := vmkit.Request{
+		Command:  "run",
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessState(opts, req, vmkit.StateRunning, victim.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := inspectWorkspace(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Event == nil || resp.Event.State == vmkit.StateRunning {
+		t.Fatalf("inspectWorkspace did not reconcile a stale workspace: %+v", resp.Event)
+	}
+	if active, _ := processActive(victim.Process.Pid); !active {
+		t.Fatal("reconcile signaled an unrelated (pid-reused) process; it must only signal this workspace's own firecracker")
+	}
+}
+
 func TestRunPortForwarderExitsWhenVMProcessDies(t *testing.T) {
 	dir := t.TempDir()
 	port := freeTCPPort(t)

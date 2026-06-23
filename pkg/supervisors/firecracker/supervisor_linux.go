@@ -3324,7 +3324,12 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 			resultWait = 2 * time.Second
 		}
 		finalState, errorText := guestHaltedState(opts, resultWait)
-		if state.PID != 0 {
+		// Only signal the recorded pid if it is still THIS workspace's firecracker.
+		// A pid we no longer own (recycled by an unrelated process) must not be
+		// signaled: signalProcessGroup targets the pid's group and would kill an
+		// innocent bystander. A genuinely dead pid won't reference us either, so the
+		// guard is a safe no-op there too.
+		if state.PID != 0 && processReferencesWorkspace(state.PID, opts) {
 			_ = signalProcessGroup(state.PID, syscall.SIGTERM)
 			_ = waitForProcessExit(context.Background(), state.PID, 5*time.Second)
 		}
@@ -3407,7 +3412,10 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 			finalState, detail = s, errText
 		}
 	}
-	if state.PID != 0 {
+	// Only kill the recorded pid if it is still THIS workspace's firecracker (see
+	// inspectWorkspace): a recycled pid belongs to an unrelated process and must
+	// not be signaled.
+	if state.PID != 0 && processReferencesWorkspace(state.PID, opts) {
 		_ = signalProcessGroup(state.PID, syscall.SIGKILL)
 	}
 	if state.PortForwardPID != 0 {
