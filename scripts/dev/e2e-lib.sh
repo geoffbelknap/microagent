@@ -205,6 +205,47 @@ e2e_wait_exec_ready() {
   return 1
 }
 
+# e2e_wait_state <cli> <state-dir> <ws> <wanted-state> [timeout]: poll status
+# until .event.state equals the wanted state.
+e2e_wait_state() {
+  cli="$1"; sd="$2"; ws="$3"; want="$4"; timeout="${5:-${MICROAGENT_E2E_WAIT_TIMEOUT:-90}}"; i=0
+  while [ "$i" -lt "$timeout" ]; do
+    if "$cli" --json status "$ws" --state-dir "$sd" 2>/dev/null \
+         | python3 -c 'import sys,json;d=json.load(sys.stdin);sys.exit(0 if (d.get("event") or {}).get("state")==sys.argv[1] else 1)' "$want" 2>/dev/null; then
+      return 0
+    fi
+    sleep 1; i=$((i + 1))
+  done
+  return 1
+}
+
+# e2e_wait_terminal <cli> <state-dir> <ws> [timeout]: poll status until
+# .event.state is any of stopped, failed, or halted.
+e2e_wait_terminal() {
+  cli="$1"; sd="$2"; ws="$3"; timeout="${4:-${MICROAGENT_E2E_WAIT_TIMEOUT:-90}}"; i=0
+  while [ "$i" -lt "$timeout" ]; do
+    if "$cli" --json status "$ws" --state-dir "$sd" 2>/dev/null \
+         | python3 -c 'import sys,json;d=json.load(sys.stdin);sys.exit(0 if (d.get("event") or {}).get("state") in ("stopped","failed","halted") else 1)' 2>/dev/null; then
+      return 0
+    fi
+    sleep 1; i=$((i + 1))
+  done
+  return 1
+}
+
+# e2e_wait_host_port <host:port> [timeout]: poll until a TCP connect succeeds.
+e2e_wait_host_port() {
+  addr="$1"; timeout="${2:-${MICROAGENT_E2E_WAIT_TIMEOUT:-90}}"; i=0
+  host="${addr%:*}"; port="${addr##*:}"
+  while [ "$i" -lt "$timeout" ]; do
+    if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('$host',$port)); s.close()" 2>/dev/null; then
+      return 0
+    fi
+    sleep 1; i=$((i + 1))
+  done
+  return 1
+}
+
 # e2e_windows_hyperv_host_probe <gate-env> <package> <run-pattern>: run a
 # gated windows-hyperv Go smoke as a host probe scenario. Installs the
 # default kernel when missing and stages the guest init the smokes expect.
