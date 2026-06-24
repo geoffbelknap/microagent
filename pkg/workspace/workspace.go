@@ -66,7 +66,7 @@ type Options struct {
 	SecretEnvFiles       []string          // dotenv file paths (plaintext, re-read each start)
 	OnDemandSecrets      map[string]string // name -> reference (lazy, never materialized)
 	SecretsAudit         bool              // append every access to the audit log
-	EgressMode           string            // "mediated", "strict", or "off" (empty = mediated, the secure default)
+	EgressMode           string            // "guarded" (default; deny-the-inside), "mediated", "strict", or "off" (empty = guarded)
 	EgressAllow          []string          // allowlisted egress destination hosts
 	EgressPassthrough    []string          // allowed hosts that are NOT TLS-intercepted
 	EgressSwapConfigPath string            // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
