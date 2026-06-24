@@ -3066,7 +3066,7 @@ func debugSupLog(opts Options, msg string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	fmt.Fprintf(f, "%s pid=%d %s\n", time.Now().Format("15:04:05.000000"), os.Getpid(), msg)
 }
 
