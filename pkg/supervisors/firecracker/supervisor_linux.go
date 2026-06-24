@@ -730,7 +730,15 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	// Failed: once Stopping is on disk, inspect/gc resolve a dead firecracker to
 	// Stopped. Best-effort: a write failure here must not block the stop itself.
 	cleanStop := finalState == vmkit.StateStopped || finalState == vmkit.StateHalted
-	if cleanStop && state.Event.State == vmkit.StateRunning && !state.Stopping {
+	// Record stop intent whenever we are about to kill a LIVE firecracker for an
+	// intentional clean stop — keyed on actual liveness, not the event label.
+	// Under confinement / slow boots a just-restarted VM can be alive but still
+	// transitional (not yet labeled Running) when the next stop fires; gating on
+	// the label alone misses the intent there, and the classifier then reads the
+	// killed command's non-zero result.json and mis-labels the stop as Failed. A
+	// genuine crash (firecracker already dead) leaves Stopping unset, so it still
+	// classifies via guestHaltedState.
+	if cleanStop && !state.Stopping && firecrackerAlive(state, opts) {
 		if err := persistStopIntent(opts, state); err == nil {
 			state.Stopping = true
 		}
@@ -2967,7 +2975,7 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		}
 		return responseFromEvent(event, ""), nil
 	}
-	if state.Event.State == vmkit.StateRunning && (GuestHalted(serialLogPath(opts)) || !firecrackerAlive(state, opts)) {
+	if (state.Event.State == vmkit.StateRunning || state.Stopping) && (GuestHalted(serialLogPath(opts)) || !firecrackerAlive(state, opts)) {
 		resultWait := time.Duration(0)
 		if runtimeHasResultListener(opts, state) {
 			resultWait = 2 * time.Second
