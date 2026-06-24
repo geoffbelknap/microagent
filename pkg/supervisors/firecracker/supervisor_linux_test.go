@@ -135,6 +135,11 @@ printf 'got:%s\n' "$line"
 			StateDir:        dir,
 			FirecrackerPath: fakeFirecracker,
 			Timeout:         2 * time.Second,
+			// Exercises serial-input plumbing with a fake firecracker, not
+			// confinement; pin it off so it doesn't take the (now default-on)
+			// confined launch path, which can't unshare/pivot_root under plain
+			// `go test`.
+			Confinement: "off",
 		}}).Do(context.Background(), req)
 		if err != nil {
 			done <- err
