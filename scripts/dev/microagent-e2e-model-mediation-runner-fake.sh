@@ -37,6 +37,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$ROOT/scripts/dev/microagent-model-mediation-pressure-presets.sh"
 
 CLI="${MICROAGENT_CLI:-$(e2e_exe "$ROOT/.build/dev/microagent")}"
+# Probe workspaces boot a microVM, which needs a guest kernel. A dev box already
+# has one; a fresh CI runner does not, so install the default backend's kernel
+# (idempotent, auto-detects the platform backend) and skip if it cannot be
+# fetched — matching how the core scenarios provision their kernel.
+if ! "$CLI" kernel install >/dev/null 2>&1; then
+  e2e_skip "kernel install failed (no kernel for probe microVMs)"
+fi
 OUT_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_OUT_DIR:-/tmp/microagent-e2e-model-mediation-runner-fake-$(date +%Y%m%d%H%M%S)}"
 STATE_DIR="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_STATE_DIR:-$OUT_DIR/state}"
 KEEP_FAILED="${MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE_KEEP:-${MICROAGENT_KEEP_MICROAGENT_E2E_MODEL_MEDIATION_RUNNER_FAKE:-0}}"
