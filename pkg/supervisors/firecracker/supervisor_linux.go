@@ -738,7 +738,9 @@ func stopWorkspace(ctx context.Context, opts Options, req vmkit.Request, signal 
 	// killed command's non-zero result.json and mis-labels the stop as Failed. A
 	// genuine crash (firecracker already dead) leaves Stopping unset, so it still
 	// classifies via guestHaltedState.
-	if cleanStop && !state.Stopping && firecrackerAlive(state, opts) {
+	fcAlive := firecrackerAlive(state, opts)
+	debugSupLog(opts, fmt.Sprintf("STOP finalState=%s eventState=%s stoppingBefore=%v cleanStop=%v fcAlive=%v pid=%d", finalState, state.Event.State, state.Stopping, cleanStop, fcAlive, state.PID))
+	if cleanStop && !state.Stopping && fcAlive {
 		if err := persistStopIntent(opts, state); err == nil {
 			state.Stopping = true
 		}
@@ -2987,10 +2989,17 @@ func inspectWorkspace(opts Options) (vmkit.Response, error) {
 		// crash (Stopping==false) still classifies via guestHaltedState. This is
 		// gated inside the fc-dead branch, so a still-alive fc yields no premature
 		// reclassification or restart.
+		// Re-read for the freshest stop intent (see gcWorkspace): a concurrent
+		// stop may have recorded Stopping between our snapshot and the fc dying.
+		if fresh, err := readRuntimeState(opts); err == nil {
+			state.Stopping = fresh.Stopping
+			state.Event.State = fresh.Event.State
+		}
 		finalState, errorText := vmkit.StateStopped, ""
-		if !state.Stopping {
+		if !state.Stopping && state.Event.State != vmkit.StateStopped && state.Event.State != vmkit.StateHalted {
 			finalState, errorText = guestHaltedState(opts, resultWait)
 		}
+		debugSupLog(opts, fmt.Sprintf("INSPECT-RECLASSIFY eventState=%s stopping=%v -> %s err=%q", state.Event.State, state.Stopping, finalState, errorText))
 		// Only signal the recorded pid if it is still THIS workspace's firecracker.
 		// A pid we no longer own (recycled by an unrelated process) must not be
 		// signaled: signalProcessGroup targets the pid's group and would kill an
@@ -3034,6 +3043,22 @@ func firecrackerAlive(state runtimeState, opts Options) bool {
 	return a && processReferencesWorkspace(state.PID, opts)
 }
 
+// debugSupLog appends a diagnostic line to the per-workspace sup-debug.log when
+// MICROAGENT_DEBUG_SUPERVISE is set. Multiple processes (supervise loop, gc,
+// stop) append concurrently; O_APPEND keeps each line intact. TEMPORARY
+// instrumentation for the confined supervise-always classification race.
+func debugSupLog(opts Options, msg string) {
+	if os.Getenv("MICROAGENT_DEBUG_SUPERVISE") == "" {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(opts.StateDir, opts.Name, "sup-debug.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s pid=%d %s\n", time.Now().Format("15:04:05.000000"), os.Getpid(), msg)
+}
+
 // gcWorkspace reconciles one workspace against reality: if it's recorded as
 // running but its firecracker process is gone (crashed, OOM-killed, host
 // rebooted, or an orphaned supervisor), it's stale — reap any lingering
@@ -3073,16 +3098,22 @@ func gcWorkspace(opts Options) (vmkit.Response, error) {
 	// inspect path, not Stopped. A forced teardown (lease expiry, or a reused/
 	// never-recorded pid that still looks "alive") has no clean exit, so it stays
 	// Stopped.
+	// A concurrent stop can record intent (or write a terminal Stopped) between
+	// our snapshot and firecracker actually dying — persistStopIntent runs before
+	// the SIGTERM, so once the pid is gone the intent is already on disk. Re-read
+	// so we honor the freshest value rather than a stale snapshot that raced ahead
+	// of the stop and would mis-classify the killed command as Failed.
+	if fresh, err := readRuntimeState(opts); err == nil {
+		state.Stopping = fresh.Stopping
+		state.Event.State = fresh.Event.State
+	}
 	finalState, detail := vmkit.StateStopped, reapReason
-	// A workspace mid-intentional-stop (Stopping recorded before firecracker was
-	// signaled) must resolve to Stopped, not the killed command's failure —
-	// consistent with inspectWorkspace. Only honor the guest exit code for a
-	// genuine, unrequested exit.
-	if !alive && !state.Stopping {
+	if !alive && !state.Stopping && state.Event.State != vmkit.StateStopped && state.Event.State != vmkit.StateHalted {
 		if s, errText := guestHaltedState(opts, 0); s == vmkit.StateFailed {
 			finalState, detail = s, errText
 		}
 	}
+	debugSupLog(opts, fmt.Sprintf("GC-REAP eventState=%s stopping=%v alive=%v expired=%v -> %s (%s)", state.Event.State, state.Stopping, alive, expired, finalState, detail))
 	// Only kill the recorded pid if it is still THIS workspace's firecracker (see
 	// inspectWorkspace): a recycled pid belongs to an unrelated process and must
 	// not be signaled.
@@ -3227,6 +3258,7 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 	if req.Identity == nil || req.Config == nil {
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
+	debugSupLog(opts, fmt.Sprintf("WRITE state=%s pid=%d err=%q (resets Stopping)", state, pid, errorText))
 	dir := filepath.Join(opts.StateDir, opts.Name)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -3502,6 +3534,7 @@ func readRuntimeState(opts Options) (runtimeState, error) {
 func persistStopIntent(opts Options, state runtimeState) error {
 	state.Stopping = true
 	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	debugSupLog(opts, fmt.Sprintf("PERSIST-STOP-INTENT eventState=%s pid=%d", state.Event.State, state.PID))
 	return writeJSONFile(filepath.Join(opts.StateDir, opts.Name, "runtime.json"), state)
 }
 

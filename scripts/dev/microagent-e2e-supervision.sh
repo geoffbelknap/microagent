@@ -284,6 +284,13 @@ wait "$SUPERVISE_PID"
 SUPERVISE_PID=""
 "$CLI" status supervise-always --state-dir "$STATE_DIR" >"$STATE_DIR/status-always-final.json"
 "$CLI" logs supervise-always --state-dir "$STATE_DIR" >"$STATE_DIR/logs-always.txt"
+if [ -n "${MICROAGENT_DEBUG_SUPERVISE:-}" ]; then
+  echo "===== supervise-always sup-debug.log ====="
+  cat "$STATE_DIR/supervise-always/sup-debug.log" 2>/dev/null || echo "(no debug log)"
+  echo "===== supervise-always.json ====="
+  cat "$STATE_DIR/supervise-always.json" 2>/dev/null
+  echo "===== end supervise-always debug ====="
+fi
 
 "$CLI" create supervise-cancel \
   --image "$IMAGE" \
