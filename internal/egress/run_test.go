@@ -294,7 +294,7 @@ func TestServeServesUDP(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Serve(ctx, ln, Options{
-			Mode:    "mediated", // bare-IP host allowed (not that we reach allow here)
+			Mode:    "guarded", // bare-IP host (not that we reach allow here)
 			Logger:  log,
 			OrigDst: func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("127.0.0.1:9"), nil },
 			UDPListen: func(_ netip.AddrPort) (*net.UDPConn, error) {
@@ -343,7 +343,7 @@ func TestServeFailsClosedOnUDPListenError(t *testing.T) {
 	wantErr := errors.New("no TPROXY capability")
 	log := &BufferLogger{}
 	err := Serve(context.Background(), ln, Options{
-		Mode:    "mediated",
+		Mode:    "guarded",
 		Logger:  log,
 		OrigDst: func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("127.0.0.1:9"), nil },
 		UDPListen: func(_ netip.AddrPort) (*net.UDPConn, error) {
@@ -396,7 +396,8 @@ func TestServeFailsClosedWhenCapsExhausted(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Serve(ctx, ln, Options{
-			Mode:      "mediated",
+			Mode:      "strict",
+			Allow:     []string{upAddr.Addr().String()}, // allowlist the loopback upstream so the flow reaches the cap
 			Logger:    log,
 			OrigDst:   func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
 			Ready:     &strings.Builder{},

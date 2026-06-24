@@ -1961,15 +1961,15 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var secretsAudit bool
 	fs.BoolVar(&secretsAudit, "secrets-audit", false, "Append every secret access to the workspace audit log")
 	var egressMode string
-	fs.StringVar(&egressMode, "egress", "", "Egress mediation: guarded (default; deny the inside, allow public), mediated (allow-all + audit), strict (allowlist), off")
+	fs.StringVar(&egressMode, "egress", "", "Egress mediation: guarded (default; deny the inside, allow public), strict (allowlist), off")
 	var egressAllow multiFlag
 	fs.Var(&egressAllow, "egress-allow", "Allowlisted egress destination host (repeatable)")
 	var egressPassthrough multiFlag
 	fs.Var(&egressPassthrough, "egress-passthrough", "Allowed egress host that is not TLS-intercepted (repeatable)")
 	var egressPolicy string
-	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress guarded, mediated, or strict)")
+	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress guarded or strict)")
 	var egressSwapConfig string
-	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress guarded, mediated, or strict)")
+	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress guarded or strict)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2140,7 +2140,7 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		// off there is nothing to apply it to, so reject rather than silently
 		// ignore (which would mislead the operator into believing it took effect).
 		if mode == vmkit.EgressModeOff {
-			return fmt.Errorf("--egress-policy: an egress policy file requires --egress guarded, mediated, or strict")
+			return fmt.Errorf("--egress-policy: an egress policy file requires --egress guarded or strict")
 		}
 		pf, err := egress.LoadPolicyFile(egressPolicy)
 		if err != nil {
@@ -2160,7 +2160,7 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		// mediation off there is no mediator to inject it, so reject rather than
 		// silently ignore (mirroring --egress-policy).
 		if mode == vmkit.EgressModeOff {
-			return fmt.Errorf("--egress-swap-config: credential swap requires --egress guarded, mediated, or strict")
+			return fmt.Errorf("--egress-swap-config: credential swap requires --egress guarded or strict")
 		}
 		opts.EgressSwapConfigPath = trimmed
 	}
@@ -3824,14 +3824,12 @@ func parseEgressMode(v string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "", "guarded":
 		return vmkit.EgressModeGuarded, nil
-	case "mediated":
-		return vmkit.EgressModeMediated, nil
 	case "strict":
 		return vmkit.EgressModeStrict, nil
 	case "off", "open", "disabled":
 		return vmkit.EgressModeOff, nil
 	default:
-		return "", fmt.Errorf("--egress must be guarded, mediated, strict, or off: %q", v)
+		return "", fmt.Errorf("--egress must be guarded, strict, or off: %q", v)
 	}
 }
 
@@ -4042,7 +4040,7 @@ Options:
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
   -egress <mode>        Egress mediation: guarded (default, deny inside),
-                         mediated (allow-all+audit), strict (deny non-allowlisted), or off
+                         strict (deny non-allowlisted), or off
   -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
   -egress-passthrough <host>
                          Allowed egress host that is not TLS-intercepted (repeatable)
@@ -4126,7 +4124,7 @@ Options:
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
   -egress <mode>        Egress mediation: guarded (default, deny inside),
-                         mediated (allow-all+audit), strict (deny non-allowlisted), or off
+                         strict (deny non-allowlisted), or off
   -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
   -egress-passthrough <host>
                          Allowed egress host that is not TLS-intercepted (repeatable)

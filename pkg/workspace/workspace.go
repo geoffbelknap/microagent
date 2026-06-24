@@ -32,7 +32,7 @@ const (
 	DefaultSecretsControlPort  = 1028
 	// DefaultCACertPort is the host vsock port the guest connects to at boot to
 	// fetch the per-workspace egress CA certificate. Allocated whenever egress
-	// mediation is on ("mediated" or "strict").
+	// mediation is on ("guarded" or "strict").
 	DefaultCACertPort    = 1030
 	DefaultShellPortBase = 22000
 	DefaultShellPortSpan = 20000
@@ -66,7 +66,7 @@ type Options struct {
 	SecretEnvFiles       []string          // dotenv file paths (plaintext, re-read each start)
 	OnDemandSecrets      map[string]string // name -> reference (lazy, never materialized)
 	SecretsAudit         bool              // append every access to the audit log
-	EgressMode           string            // "mediated", "strict", or "off" (empty = mediated, the secure default)
+	EgressMode           string            // "guarded" (default; deny-the-inside), "strict", or "off" (empty = guarded)
 	EgressAllow          []string          // allowlisted egress destination hosts
 	EgressPassthrough    []string          // allowed hosts that are NOT TLS-intercepted
 	EgressSwapConfigPath string            // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
@@ -894,8 +894,8 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if secretsPort != 0 {
 		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
 	}
-	// CACertPort is allocated whenever egress mediation is on ("mediated" or
-	// "strict"; empty already normalized to "mediated" above) AND the network
+	// CACertPort is allocated whenever egress mediation is on ("guarded" or
+	// "strict"; empty already normalized to "guarded" above) AND the network
 	// mode actually runs the mediator. The vsock listener serves the
 	// per-workspace CA public cert to the guest at boot so guestinit can install
 	// it into the trust store before any HTTPS traffic. "isolated" (no egress)

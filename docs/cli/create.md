@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-24_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -241,11 +241,11 @@ The complete set:
 | `-p <mapping>` | Alias for `--publish` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
-| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `mediated` (default; capture and audit everything, block nothing), `strict` (deny non-allowlisted), or `off`. Persisted with the workspace |
+| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `guarded` (default; deny the inside, allow public), `strict` (deny non-allowlisted), or `off`. Persisted with the workspace |
 | `--egress-allow <host>` | Allowlisted egress destination (TLS-intercepted). Repeatable; an exact host or a `.suffix` matching the apex and subdomains. See the [allowlist how-to](/guides/egress-allowlist/) |
 | `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted (forwarded opaquely). Repeatable. For cert-pinned / mTLS endpoints |
-| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress mediated` or `strict` |
-| `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mediated` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress guarded` or `strict` |
+| `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress guarded` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
 | `--model <ref>` | Pair the workspace with a locally served HuggingFace GGUF model; the ref is persisted so every `start` re-pairs, and `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are injected into the guest. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
 | `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom`; persisted with the workspace |

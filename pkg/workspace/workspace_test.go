@@ -663,11 +663,11 @@ func TestEgressDefaultsToGuarded(t *testing.T) {
 	}
 }
 
-// TestRequestAllocatesCACertForMediated mirrors the strict path: a workspace in
-// "mediated" mode must allocate the CA-cert vsock listener and port (previously
+// TestRequestAllocatesCACertForGuarded mirrors the strict path: a workspace in
+// "guarded" mode must allocate the CA-cert vsock listener and port (previously
 // only "strict" did).
-func TestRequestAllocatesCACertForMediated(t *testing.T) {
-	for _, mode := range []string{vmkit.EgressModeMediated, vmkit.EgressModeStrict} {
+func TestRequestAllocatesCACertForGuarded(t *testing.T) {
+	for _, mode := range []string{vmkit.EgressModeGuarded, vmkit.EgressModeStrict} {
 		opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 			Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: mode}
 		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
@@ -705,19 +705,16 @@ func TestRequestNoCACertForOff(t *testing.T) {
 
 // TestRequestNoCACertForNonMediatedNetworkMode asserts that the isolated network
 // mode (no egress) does NOT allocate the CA-cert vsock listener or port even
-// when EgressMode is mediated/strict. The guest is isolated — there is no
+// when EgressMode is guarded/strict. The guest is isolated — there is no
 // mediator — so allocating the CA-cert listener would tell the guest to trust a
 // CA for a mediator that will never exist (dead state).
-//
-// Note: bridged+mediated/strict combinations are now rejected outright by
-// ValidateForNetworkMode (fail-closed); see TestRequestFailsClosedMediatedOnBridged.
 func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
 	cases := []struct {
 		name       string
 		network    vmkit.NetworkConfig
 		egressMode string
 	}{
-		{"isolated-mediated", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeMediated},
+		{"isolated-guarded", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeGuarded},
 		{"isolated-strict", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeStrict},
 	}
 	for _, tc := range cases {
@@ -746,7 +743,7 @@ func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
 func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
 	for _, mode := range []string{"", "user"} {
 		opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
-			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeMediated}
+			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeGuarded}
 		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 		if err != nil {
 			t.Fatalf("network mode %q: Request: %v", mode, err)
@@ -764,7 +761,7 @@ func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
 // error when a removed network mode (e.g. bridged) is requested — the mode is no
 // longer supported, so the start fails closed instead of running unmediated.
 func TestRequestFailsClosedOnRemovedNetworkMode(t *testing.T) {
-	for _, egressMode := range []string{"", "mediated", "strict"} {
+	for _, egressMode := range []string{"", "guarded", "strict"} {
 		opts := Options{
 			Name:       "a",
 			Backend:    vmkit.BackendLinuxKVM,

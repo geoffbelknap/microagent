@@ -21,7 +21,7 @@ const ReadyMarker = "egress_ready"
 
 // Options configures the mediator listener.
 type Options struct {
-	Mode         string // "guarded" (default, deny private ranges) or "mediated" (allow+audit all) or "strict" (deny non-allowlisted) or "" (normalizes to guarded)
+	Mode         string // "guarded" (default, deny private ranges) or "strict" (deny non-allowlisted) or "" (normalizes to guarded)
 	BindHost     string
 	BindPort     int
 	Allow        []string

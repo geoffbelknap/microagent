@@ -240,15 +240,14 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 	d := p.h.Policy.AllowHost(host)
 	// inside is true when guarded mode classifies the resolved destination IP as
 	// an inside/infrastructure address. An explicitly allowlisted host overrides
-	// the inside-deny (d.Allow wins), mirroring the TCP path in Handle. mediated
-	// mode disables inside enforcement entirely (escape hatch intact). The check
+	// the inside-deny (d.Allow wins), mirroring the TCP path in Handle. The check
 	// runs on the raw destination IP so SNI/hostname spoofing cannot bypass it.
 	inside := p.h.Mode == egressModeGuarded && isInsideAddr(origDst.Addr())
-	// In mediated mode every destination is allowed; strict (or empty) keeps
-	// the default-deny allowlist; guarded keeps the allowlist AND additionally
-	// denies non-allowlisted inside destinations fail-closed.
-	allowed := d.Allow || p.h.Mode == egressModeMediated || (p.h.Mode == egressModeGuarded && !inside)
-	unlisted := allowed && !d.Allow // not explicitly on the allowlist (mediated or guarded-public grant)
+	// strict (or empty) keeps the default-deny allowlist; guarded keeps the
+	// allowlist AND additionally denies non-allowlisted inside destinations
+	// fail-closed.
+	allowed := d.Allow || (p.h.Mode == egressModeGuarded && !inside)
+	unlisted := allowed && !d.Allow // not explicitly on the allowlist (guarded-public grant)
 
 	dst := origDst.String()
 	if !allowed {

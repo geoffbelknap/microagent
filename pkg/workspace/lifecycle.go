@@ -1369,7 +1369,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.SecretsAudit = manifest.SecretsAudit
 	// Normalize the egress mode loaded from the manifest so a workspace whose
 	// manifest carries an unspecified mode is started with the explicit secure
-	// default ("mediated"); Request() then re-allocates the CA-cert vsock
+	// default ("guarded"); Request() then re-allocates the CA-cert vsock
 	// listener on start, mirroring create.
 	opts.EgressMode = vmkit.NormalizeEgressMode(manifest.EgressMode)
 	opts.EgressAllow = manifest.EgressAllow

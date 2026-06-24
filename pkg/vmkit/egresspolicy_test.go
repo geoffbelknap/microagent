@@ -12,7 +12,7 @@ func TestNormalizeEgressPolicyModeDefaults(t *testing.T) {
 	}{
 		{"", "guarded"},
 		{"guarded", "guarded"},
-		{"  MEDIATED ", "mediated"},
+		{"  GUARDED ", "guarded"},
 		{"strict", "strict"},
 		{"off", "off"},
 		{"bogus", "guarded"},
@@ -55,7 +55,7 @@ func TestNormalizeEgressPolicyCleansLists(t *testing.T) {
 
 func TestEgressPolicyValidateOK(t *testing.T) {
 	p := NormalizeEgressPolicy(EgressPolicy{
-		Mode:  "mediated",
+		Mode:  "guarded",
 		Allow: []string{"api.example.com"},
 		Caps: EgressCaps{
 			MaxBytesPerSec:     1024,
@@ -72,7 +72,7 @@ func TestEgressPolicyValidateOK(t *testing.T) {
 
 func TestEgressPolicyValidateRejectsNegativeCap(t *testing.T) {
 	p := NormalizeEgressPolicy(EgressPolicy{
-		Mode: "mediated",
+		Mode: "guarded",
 		Caps: EgressCaps{
 			MaxTotalBytes: -1,
 		},
@@ -103,12 +103,9 @@ func TestEgressPolicyValidateForNetworkMode(t *testing.T) {
 		{"guarded", "isolated", false},
 		{"guarded", "user", false},
 		{"guarded", "", false},
-		{"mediated", "isolated", false},
-		{"mediated", "user", false},
-		{"mediated", "", false},
 		{"strict", "user", false},
 		{"off", "isolated", false},
-		{"mediated", "Isolated", false}, // case-insensitive isolated check (defense-in-depth)
+		{"guarded", "Isolated", false}, // case-insensitive isolated check (defense-in-depth)
 	}
 	for _, tc := range cases {
 		p := EgressPolicy{Mode: tc.mode}

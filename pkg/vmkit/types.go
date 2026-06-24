@@ -481,35 +481,30 @@ func ValidateConfig(config *Config) error {
 // Egress mode constants. An empty/unspecified mode is the secure default and
 // resolves to EgressModeGuarded.
 const (
-	EgressModeGuarded  = "guarded"
-	EgressModeMediated = "mediated"
-	EgressModeStrict   = "strict"
-	EgressModeOff      = "off"
+	EgressModeGuarded = "guarded"
+	EgressModeStrict  = "strict"
+	EgressModeOff     = "off"
 )
 
 // NormalizeEgressMode collapses an egress mode string to one of the canonical
-// values: "guarded", "mediated", "strict", or "off". Empty/whitespace resolves
-// to "guarded" — the secure default. This is the single normalization
-// chokepoint: once applied, downstream code only ever sees the four canonical
-// values.
+// values: "guarded", "strict", or "off". Empty/whitespace (and any unrecognized
+// value) resolves to "guarded" — the secure default. This is the single
+// normalization chokepoint: once applied, downstream code only ever sees the
+// three canonical values.
 func NormalizeEgressMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case EgressModeGuarded:
-		return EgressModeGuarded
-	case EgressModeMediated:
-		return EgressModeMediated
 	case EgressModeStrict:
 		return EgressModeStrict
 	case EgressModeOff:
 		return EgressModeOff
-	default: // empty or unrecognized -> safe default
+	default: // empty, "guarded", or unrecognized -> safe default
 		return EgressModeGuarded
 	}
 }
 
 // EgressMediationOn reports whether the given egress mode provisions the
 // mediator (mint CA, spawn mediator, install REDIRECT, allocate the CA-cert
-// vsock listener). "guarded", "mediated", and "strict" are all ON. An
+// vsock listener). "guarded" and "strict" are both ON. An
 // empty/unspecified mode is OFF here on purpose: "default" is set by
 // NormalizeEgressMode at the high-level workspace chokepoints, while
 // EgressMediationOn decides whether to *provision*. The low-level raw
@@ -518,7 +513,7 @@ func NormalizeEgressMode(mode string) string {
 // with a CA the guest never receives).
 func EgressMediationOn(mode string) bool {
 	m := strings.ToLower(strings.TrimSpace(mode))
-	return m == EgressModeGuarded || m == EgressModeMediated || m == EgressModeStrict
+	return m == EgressModeGuarded || m == EgressModeStrict
 }
 
 // NetworkModeMediates reports whether the given network mode actually runs the

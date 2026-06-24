@@ -175,7 +175,7 @@ func TestSnapshotManifestFromStateFailsClosedOnMissingCA(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(stateDir, opts.Name), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	state := mediatedRuntimeState(vmkit.EgressModeMediated, nil, nil)
+	state := mediatedRuntimeState(vmkit.EgressModeGuarded, nil, nil)
 	if _, err := snapshotManifestFromState("snap-1", state, opts, false); err == nil {
 		t.Fatal("expected error snapshotting mediated workspace with missing CA, got nil")
 	}
@@ -183,7 +183,7 @@ func TestSnapshotManifestFromStateFailsClosedOnMissingCA(t *testing.T) {
 
 // TestSnapshotManifestFromStateSkipsCAForIsolatedNetwork proves that an
 // isolated workspace can be snapshotted even when its stored egress posture was
-// normalized to mediated. Isolated workspaces do not run the mediator or mint a
+// normalized to guarded. Isolated workspaces do not run the mediator or mint a
 // CA, so requiring egress-ca.pem here made every isolated snapshot fail closed.
 func TestSnapshotManifestFromStateSkipsCAForIsolatedNetwork(t *testing.T) {
 	stateDir := t.TempDir()
@@ -195,7 +195,7 @@ func TestSnapshotManifestFromStateSkipsCAForIsolatedNetwork(t *testing.T) {
 		Config: vmkit.Config{
 			CPUCount:   2,
 			MemoryMiB:  512,
-			EgressMode: vmkit.EgressModeMediated,
+			EgressMode: vmkit.EgressModeGuarded,
 			Network:    &vmkit.NetworkConfig{Mode: "isolated"},
 		},
 	}

@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-24_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -187,7 +187,7 @@ Fixes:
 
 ## Egress mediation
 
-### A `mediated` or `strict` workspace fails to start with a TPROXY error
+### A `guarded` or `strict` workspace fails to start with a TPROXY error
 
 ```text
 egress: UDP mediation (TPROXY) unavailable for workspace research — load the TPROXY kernel modules or use --egress off
@@ -196,7 +196,7 @@ egress: UDP mediation (TPROXY) unavailable for workspace research — load the T
 [Egress mediation](/concepts/egress-mediation/) runs inside the workspace's own
 user namespace and mediates UDP and DNS via Linux TPROXY, which needs kernel
 modules (`nft_tproxy`, `nf_tproxy_ipv4`, `xt_socket`, `nf_socket_ipv4`) that a
-rootless workspace can't load itself. When they're missing, a `mediated` or
+rootless workspace can't load itself. When they're missing, a `guarded` or
 `strict` workspace **fails closed** - it refuses to start rather than run with
 an unmediated UDP/DNS channel.
 
@@ -218,7 +218,7 @@ typically surfacing as a client-side certificate error in the guest, or an
 `egress_mitm_handshake_error` / `egress_mitm_upstream_error` record in
 `microagent egress <name>`.
 
-Cause: under the default `mediated` mode (and for any allowed host under
+Cause: under the default `guarded` mode (and for any allowed host under
 `strict`), microagent **MITMs the TLS** with a per-workspace CA. Some clients
 reject the injected CA's leaf certificate:
 

@@ -73,13 +73,13 @@ func TestHandlerDenyFailsClosed(t *testing.T) {
 	assertEvent(t, log, "egress_deny")
 }
 
-// TestMediatedAllowsUnlisted proves the Mode field's two behaviors against a
-// host that is NOT on the allowlist:
-//   - Mode "mediated": the connection is forwarded (L4 splice roundtrips) and
-//     logged egress_allow with unlisted=true.
+// TestGuardedAllowsUnlisted proves the Mode field's two behaviors against a
+// public host that is NOT on the allowlist:
+//   - Mode "guarded": the connection is forwarded (L4 splice roundtrips) and
+//     logged egress_allow with unlisted=true (the guarded-public grant).
 //   - Mode "strict": the same host is denied (egress_deny, no upstream dial).
-func TestMediatedAllowsUnlisted(t *testing.T) {
-	t.Run("mediated forwards unlisted", func(t *testing.T) {
+func TestGuardedAllowsUnlisted(t *testing.T) {
+	t.Run("guarded forwards unlisted public", func(t *testing.T) {
 		up, _ := net.Listen("tcp", "127.0.0.1:0")
 		defer up.Close()
 		go func() {
@@ -95,11 +95,13 @@ func TestMediatedAllowsUnlisted(t *testing.T) {
 		pol, _ := NewPolicy([]string{"allowed.example.com"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:         "mediated",
-			Policy:       pol,
-			Logger:       log,
-			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
-			Dial:         net.Dial,
+			Mode:   "guarded",
+			Policy: pol,
+			Logger: log,
+			// OrigDst returns a public address (not on the allowlist) but we Dial
+			// the local echo server so the test needs no outbound internet.
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("93.184.216.34:80"), nil },
+			Dial:         func(network, addr string) (net.Conn, error) { return net.Dial(network, upAddr.String()) },
 			SniffTimeout: 500 * time.Millisecond,
 		}
 
@@ -113,7 +115,7 @@ func TestMediatedAllowsUnlisted(t *testing.T) {
 		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
 		line, err := br.ReadString('\n')
 		if err != nil || line != "GET / HTTP/1.1\r\n" {
-			t.Fatalf("echo = %q err=%v (unlisted host must be forwarded in mediated mode)", line, err)
+			t.Fatalf("echo = %q err=%v (unlisted public host must be forwarded in guarded mode)", line, err)
 		}
 		client.Close()
 		<-done
@@ -145,14 +147,14 @@ func TestMediatedAllowsUnlisted(t *testing.T) {
 	})
 }
 
-// TestMediatedPassthroughNotUnlisted proves that a passthrough host in mediated
+// TestPassthroughNotUnlisted proves that a passthrough host in guarded
 // mode is L4-spliced (forwarded, not MITM'd) and its egress_allow audit record
 // does NOT carry unlisted: a passthrough host is explicitly listed, and strict
 // would allow it too, so it is not an "unlisted" grant. This guards the
 // `unlisted := allowed && !d.Allow && !passthrough` refinement (INV4). The host
 // is intentionally NOT on the main allowlist (Policy), so without the
-// `&& !passthrough` term it would wrongly be flagged unlisted in mediated mode.
-func TestMediatedPassthroughNotUnlisted(t *testing.T) {
+// `&& !passthrough` term it would wrongly be flagged unlisted.
+func TestPassthroughNotUnlisted(t *testing.T) {
 	up, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer up.Close()
 	go func() {
@@ -169,7 +171,7 @@ func TestMediatedPassthroughNotUnlisted(t *testing.T) {
 	passthrough, _ := NewPolicy([]string{"raw.example.com"})
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:         "mediated",
+		Mode:         "guarded",
 		Policy:       pol,
 		Passthrough:  passthrough,
 		Logger:       log,
@@ -200,15 +202,15 @@ func TestMediatedPassthroughNotUnlisted(t *testing.T) {
 // connection whose recovered original destination equals the mediator's own bind
 // address (the mediator dialing itself — a readiness probe or residual self-dial)
 // is dropped and audited egress_loop_guard, and NO upstream Dial is attempted.
-// Without the guard, in mediated mode this would be forwarded to the listener and
-// spin into an unbounded self-loop. Guards against the observed TPROXY self-loop.
+// Without the guard this would be forwarded to the listener and spin into an
+// unbounded self-loop. Guards against the observed TPROXY self-loop.
 func TestHandlerLoopGuardDropsOwnBindAddr(t *testing.T) {
 	bind := netip.MustParseAddrPort("10.43.7.1:43517")
 	dialed := false
-	pol, _ := NewPolicy(nil)
+	pol, _ := NewPolicy([]string{"10.43.7.1"}) // allowlist the bind IP so only the loop guard (not the inside-deny) can stop the self-loop
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:     "mediated", // mediated allows everything: only the guard can stop the self-loop
+		Mode:     "guarded", // the loop guard fires before the policy decision
 		Policy:   pol,
 		Logger:   log,
 		BindAddr: bind,
@@ -306,7 +308,7 @@ func TestTCPRawIPByName(t *testing.T) {
 		client.Close()
 		<-done
 		assertEvent(t, log, "egress_allow")
-		// Matched by hostname, not mediated mode: not "unlisted".
+		// Matched by hostname, not the guarded-public grant: not "unlisted".
 		assertEventFieldAbsent(t, log, "egress_allow", "unlisted")
 	})
 
@@ -498,11 +500,13 @@ func TestHandlerEnforcesByteCap(t *testing.T) {
 	pol, _ := NewPolicy([]string{"api.github.com"})
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:         "mediated",
-		Policy:       pol,
-		Logger:       log,
-		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
-		Dial:         net.Dial,
+		Mode:   "guarded",
+		Policy: pol,
+		Logger: log,
+		// OrigDst returns a public address (guarded allows it) but we Dial the
+		// local sink so the test needs no outbound internet.
+		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("93.184.216.34:80"), nil },
+		Dial:         func(network, addr string) (net.Conn, error) { return net.Dial(network, upAddr.String()) },
 		SniffTimeout: 300 * time.Millisecond,
 		Limits:       Limits{MaxTotalBytes: 1024},
 	}
@@ -553,13 +557,15 @@ func TestHandlerEnforcesConcurrencyCap(t *testing.T) {
 	log := &BufferLogger{}
 	var dials int32
 	h := &Handler{
-		Mode:    "mediated",
-		Policy:  pol,
-		Logger:  log,
-		OrigDst: func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+		Mode:   "guarded",
+		Policy: pol,
+		Logger: log,
+		// OrigDst returns a public address (guarded allows it) but we Dial the
+		// local upstream so the test needs no outbound internet.
+		OrigDst: func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("93.184.216.34:80"), nil },
 		Dial: func(network, addr string) (net.Conn, error) {
 			atomic.AddInt32(&dials, 1)
-			return net.Dial(network, addr)
+			return net.Dial(network, upAddr.String())
 		},
 		SniffTimeout: 300 * time.Millisecond,
 		Limits:       Limits{MaxConcurrentConns: 1},
@@ -631,7 +637,6 @@ func assertEventFieldAbsent(t *testing.T, log *BufferLogger, event string, field
 //   - guarded denies CGNAT (100.64.0.1) → egress_internal_deny, no upstream dial
 //   - guarded ALLOWS a public addr (93.184.216.34) → dial proceeds, no deny
 //   - guarded + allowlisted internal (10.0.0.5 on the allowlist) → allowed
-//   - mediated + internal (10.0.0.5) → allowed (escape hatch intact)
 func TestGuardedTCP(t *testing.T) {
 	t.Run("guarded denies IMDS no dial", func(t *testing.T) {
 		dialed := false
@@ -795,51 +800,6 @@ func TestGuardedTCP(t *testing.T) {
 		for _, e := range log.Snapshot() {
 			if e["event"] == "egress_internal_deny" || e["event"] == "egress_deny" {
 				t.Fatalf("allowlisted internal address denied in guarded mode: %+v", e)
-			}
-		}
-		assertEvent(t, log, "egress_allow")
-	})
-
-	t.Run("mediated allows internal address", func(t *testing.T) {
-		up, _ := net.Listen("tcp", "127.0.0.1:0")
-		defer up.Close()
-		go func() {
-			c, err := up.Accept()
-			if err != nil {
-				return
-			}
-			io.Copy(c, c)
-			c.Close()
-		}()
-		upAddr := netip.MustParseAddrPort(up.Addr().String())
-
-		pol, _ := NewPolicy(nil)
-		log := &BufferLogger{}
-		h := &Handler{
-			Mode:         "mediated",
-			Policy:       pol,
-			Logger:       log,
-			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.0.0.5:80"), nil },
-			Dial:         func(network, addr string) (net.Conn, error) { return net.Dial(network, upAddr.String()) },
-			SniffTimeout: 300 * time.Millisecond,
-		}
-		client, server := net.Pipe()
-		done := make(chan struct{})
-		go func() { h.Handle(server); close(done) }()
-		go func() {
-			client.Write([]byte("GET / HTTP/1.1\r\nHost: 10.0.0.5\r\n\r\n"))
-		}()
-		br := bufio.NewReader(client)
-		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
-		line, err := br.ReadString('\n')
-		if err != nil || line != "GET / HTTP/1.1\r\n" {
-			t.Fatalf("echo = %q err=%v (internal address must be forwarded in mediated mode)", line, err)
-		}
-		client.Close()
-		<-done
-		for _, e := range log.Snapshot() {
-			if e["event"] == "egress_internal_deny" || e["event"] == "egress_deny" {
-				t.Fatalf("internal address denied in mediated mode (escape hatch broken): %+v", e)
 			}
 		}
 		assertEvent(t, log, "egress_allow")

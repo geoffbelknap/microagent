@@ -56,7 +56,7 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 	replies := make(chan capturedReply, 4)
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:   "mediated",
+		Mode:   "guarded",
 		Policy: mustPolicy(t),
 		Logger: log,
 		// DialUDP ignores origDst and dials the real echo server so we can
@@ -95,7 +95,7 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 
 // TestUDPStrictDeniesUnlisted proves strict mode drops a datagram to a
 // non-allowlisted origDst (no DialUDP call) and audits egress_udp_deny, while
-// mediated mode forwards it (egress_udp_allow, unlisted:true).
+// guarded mode forwards it (egress_udp_allow, unlisted:true).
 func TestUDPStrictDeniesUnlisted(t *testing.T) {
 	// Non-DNS ports: :53 routes to the DNS resolver-filter (covered by
 	// TestUDPRoutesDNSToHandler); these drive the generic UDP flow policy path.
@@ -149,13 +149,13 @@ func TestUDPStrictDeniesUnlisted(t *testing.T) {
 		assertEventFieldAbsent(t, log, "egress_udp_allow", "unlisted")
 	})
 
-	t.Run("mediated allows unlisted", func(t *testing.T) {
+	t.Run("guarded allows unlisted", func(t *testing.T) {
 		echoAddr, cleanup := udpEchoServer(t)
 		defer cleanup()
 		pol, _ := NewPolicy([]string{"203.0.113.9"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   "mediated",
+			Mode:   "guarded",
 			Policy: pol,
 			Logger: log,
 			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -182,7 +182,7 @@ func TestUDPFlowTableBounded(t *testing.T) {
 
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:   "mediated",
+		Mode:   "guarded",
 		Policy: mustPolicy(t),
 		Logger: log,
 		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -272,7 +272,7 @@ func TestUDPFlowIdleClose(t *testing.T) {
 	closed := make(chan struct{}, 1)
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:   "mediated",
+		Mode:   "guarded",
 		Policy: mustPolicy(t),
 		Logger: log,
 		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -334,7 +334,7 @@ func TestUDPProxyLoopGuardDropsOwnBindAddr(t *testing.T) {
 	dialed := false
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:     "mediated",
+		Mode:     "guarded",
 		Policy:   mustPolicy(t),
 		Logger:   log,
 		BindAddr: bind,
@@ -512,7 +512,7 @@ func TestDNSForwardDoesNotStallOtherDatagrams(t *testing.T) {
 
 	replies := make(chan capturedReply, 4)
 	h := &Handler{
-		Mode:      "mediated",
+		Mode:      "guarded",
 		Policy:    mustPolicy(t),
 		Logger:    &BufferLogger{},
 		NameCache: NewNameCache(),
@@ -620,7 +620,7 @@ func TestStrictUDPByName(t *testing.T) {
 		p.handleUDPDatagram(netip.MustParseAddrPort("10.0.0.5:52100"), dst, []byte("ping"))
 
 		assertEvent(t, log, "egress_udp_allow")
-		// Allowed by hostname match, not mediated mode: not "unlisted".
+		// Allowed by hostname match, not guarded mode: not "unlisted".
 		assertEventFieldAbsent(t, log, "egress_udp_allow", "unlisted")
 		if p.flowCount() != 1 {
 			t.Fatalf("flowCount = %d, want 1 (flow created for allowed UDP)", p.flowCount())
@@ -669,7 +669,6 @@ func mustPolicy(t *testing.T) *Policy {
 //   - guarded drops UDP to 169.254.169.254:123 → egress_udp_internal_deny, NO upstream DialUDP
 //   - guarded allows UDP to a public IP (203.0.113.9:123) → DialUDP called, egress_udp_allow
 //   - guarded + allowlisted internal (169.254.169.254 on the allowlist) → DialUDP called
-//   - mediated + internal (169.254.169.254) → DialUDP called (escape hatch intact)
 //   - DNS datagrams (port 53) to an inside address pass through without triggering inside-deny
 func TestGuardedUDP(t *testing.T) {
 	imds := netip.MustParseAddrPort("169.254.169.254:123")
@@ -750,31 +749,6 @@ func TestGuardedUDP(t *testing.T) {
 
 		if !dialed {
 			t.Fatal("DialUDP not called for allowlisted inside addr under guarded (allowlist must override)")
-		}
-		assertEvent(t, log, "egress_udp_allow")
-	})
-
-	t.Run("mediated allows inside addr", func(t *testing.T) {
-		dialed := false
-		pol, _ := NewPolicy(nil)
-		log := &BufferLogger{}
-		h := &Handler{
-			Mode:   egressModeMediated,
-			Policy: pol,
-			Logger: log,
-			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
-				dialed = true
-				return newFakeUDPConn(nil), nil
-			},
-			ReplyTo: func(_, _ netip.AddrPort, _ []byte) error { return nil },
-		}
-		p := newUDPProxy(h)
-		defer p.closeAll()
-
-		p.handleUDPDatagram(guestSrc, imds, []byte("ping"))
-
-		if !dialed {
-			t.Fatal("DialUDP not called for inside addr under mediated (escape hatch must work)")
 		}
 		assertEvent(t, log, "egress_udp_allow")
 	})
