@@ -335,6 +335,22 @@ func mcpTools() []map[string]any {
 			"model_policy_timeout":      map[string]any{"type": "string"},
 		}),
 		mcpTool("workspace.exec", "Run a structured command in a running workspace.", []string{"name"}, workspaceExecInputSchema()),
+		mcpTool("workspace.dispatch", "Run one task in a fresh, isolated, single-use workspace under egress guardrails, then tear it down. Returns the guest result plus a mediator-written summary of what the workspace reached on the network, so a caller can judge whether the task stayed on-intent. Ideal for delegating untrusted or parallel work to its own machine.", []string{"image"}, map[string]any{
+			"image":              map[string]any{"type": "string", "description": "OCI image to boot"},
+			"exec":               map[string]any{"type": "string", "description": "Command to run in the workspace"},
+			"state_dir":          map[string]any{"type": "string"},
+			"timeout":            map[string]any{"type": "string", "description": "Max wall-clock for the task (e.g. 5m)"},
+			"network":            map[string]any{"type": "string", "enum": []string{"user", "nat", "isolated"}},
+			"egress":             map[string]any{"type": "string", "enum": []string{"guarded", "strict", "off"}, "description": "Egress mediation mode (default guarded)"},
+			"egress_allow":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Allowlisted egress hosts; .suffix matches subdomains"},
+			"egress_passthrough": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Egress hosts allowed without TLS interception"},
+			"egress_policy":      map[string]any{"type": "string", "description": "Path to an egress policy file (.yaml/.yml/.json)"},
+			"egress_swap_config": map[string]any{"type": "string", "description": "Credential-swap config path; mediator injects the real secret host-side so the guest never holds it"},
+			"secret":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Secrets delivered to tmpfs /run/secrets, each NAME=scheme:ref"},
+			"secret_on_demand":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; never written to tmpfs"},
+			"secrets_env_file":   map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
+			"secrets_audit":      map[string]any{"type": "boolean", "description": "Append every secret access to the workspace audit log"},
+		}),
 		mcpTool("workspace.halt", "Halt a workspace and preserve disk state.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.stop", "Stop a workspace runtime.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
 		mcpTool("workspace.kill", "Force stop a workspace runtime.", []string{"name"}, map[string]any{"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"}}),
@@ -643,7 +659,7 @@ func mcpToolSideEffects(name string) []string {
 	switch name {
 	case "kernel.install", "rootfs.build":
 		return []string{"host_state"}
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "cp", "artifacts.get":
 		return []string{"host_state", "workspace_state"}
 	case "models.pull", "models.remove", "models.prune", "models.serve", "models.stop":
 		return []string{"host_state"}
@@ -656,7 +672,7 @@ func mcpToolIdempotency(name string) string {
 	switch name {
 	case "workspace.create", "workspace.start", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "snapshot.delete":
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
-	case "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.dispatch", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
 	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
@@ -667,7 +683,7 @@ func mcpToolIdempotency(name string) string {
 
 func mcpToolPrincipalScope(name string) []string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit":
 		return []string{"workspace.lifecycle"}
 	case "snapshot.create", "snapshot.list", "snapshot.delete":
 		return []string{"workspace.snapshot"}
@@ -692,7 +708,7 @@ func mcpToolPrincipalScope(name string) []string {
 
 func mcpToolCostClass(name string) string {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.serve", "kernel.install", "rootfs.build":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.serve", "kernel.install", "rootfs.build":
 		return "host_compute_and_storage"
 	case "cp", "artifacts.get", "models.remove", "models.prune", "models.stop":
 		return "host_io"
@@ -1198,7 +1214,7 @@ func mcpIdempotencyCacheKey(name string, args map[string]any) string {
 
 func mcpMutationTool(name string) bool {
 	switch name {
-	case "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "snapshot.delete", "volume.create", "volume.delete", "images.pull", "images.push", "images.tag", "images.delete", "images.prune", "models.pull", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return true
 	default:
 		return false
@@ -1278,6 +1294,20 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		cli := []string{"--mode=ax", "start", stringArg(args, "name")}
 		var err error
 		cli, err = appendMCPWorkspaceModelFlags(cli, args)
+		if err != nil {
+			return nil, err
+		}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
+	case "workspace.dispatch":
+		if err := requireToolArgs(args, name, "image"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "dispatch", stringArg(args, "image")}
+		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
+		cli = appendOptionalFlag(cli, "-network", stringArg(args, "network"))
+		cli = appendOptionalFlag(cli, "-timeout", stringArg(args, "timeout"))
+		var err error
+		cli, err = appendMCPWorkspaceEgressSecretFlags(cli, args)
 		if err != nil {
 			return nil, err
 		}
