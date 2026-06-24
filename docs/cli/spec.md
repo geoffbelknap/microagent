@@ -14,7 +14,7 @@ should live in the repo; use flags for one-off overrides.
 
 Pass it with `--file` to `create` (auto-discovered as `microagent.yaml` /
 `microagent.yml`), or explicitly to [`run`](/cli/run/) and
-`dispatch` for one-shot work. With the optional `agent:` block
+[`dispatch`](/cli/dispatch/) for one-shot work. With the optional `agent:` block
 (below), a spec doubles as an **Agentfile** — a build-free recipe for running an
 agent in an isolated workspace.
 

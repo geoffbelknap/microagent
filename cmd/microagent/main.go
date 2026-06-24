@@ -4056,6 +4056,7 @@ Usage:
 
 Commands:
   run                  Run something once and discard state
+  dispatch             Run one task in an isolated workspace; return result + egress audit
   create               Create a persistent workspace
   start                Boot a workspace
   exec                 Run a structured command in a workspace
@@ -4093,6 +4094,7 @@ func printFullHelp(stdout *os.File) {
 Commands:
   init                 Scaffold a starter agent project
   run                  Run a command
+  dispatch             Run one task in a fresh isolated workspace; return result + egress audit
   create               Create a workspace
   apply                Apply supported workspace spec changes
   clone                Clone a stopped workspace
