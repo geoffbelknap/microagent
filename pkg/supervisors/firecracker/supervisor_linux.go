@@ -3053,8 +3053,11 @@ func firecrackerAlive(state runtimeState, opts Options) bool {
 
 // debugSupLog appends a diagnostic line to the per-workspace sup-debug.log when
 // MICROAGENT_DEBUG_SUPERVISE is set. Multiple processes (supervise loop, gc,
-// stop) append concurrently; O_APPEND keeps each line intact. TEMPORARY
-// instrumentation for the confined supervise-always classification race.
+// stop) append concurrently; O_APPEND keeps each line intact. Off by default
+// (zero cost); flip the env to trace the stop/inspect/gc/write sequence when
+// debugging a supervise lifecycle or classification race — these subsystems
+// produce subtle timing bugs and re-instrumenting from scratch each time is
+// wasted work.
 func debugSupLog(opts Options, msg string) {
 	if os.Getenv("MICROAGENT_DEBUG_SUPERVISE") == "" {
 		return

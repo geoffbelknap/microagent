@@ -33,7 +33,6 @@ jobs:
         scenario: ${{ fromJSON(needs.matrix-core.outputs.scenarios) }}
     env:
       MICROAGENT_E2E_WAIT_TIMEOUT: "180"
-      MICROAGENT_DEBUG_SUPERVISE: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
