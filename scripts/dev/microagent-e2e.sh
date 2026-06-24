@@ -30,6 +30,7 @@ SCENARIOS=(
   "networking-deep:scripts/dev/microagent-e2e-networking-contract.sh:all:vm:core"
   "transport-deep:scripts/dev/microagent-e2e-transport.sh:all:vm:core"
   "supervision-deep:scripts/dev/microagent-e2e-supervision-contract.sh:all:vm:core"
+  "dispatch:scripts/dev/microagent-e2e-dispatch.sh:linux:vm:core"
   "volumes:scripts/dev/microagent-e2e-volumes.sh:all:vm:broad"
   "commit-images:scripts/dev/microagent-e2e-commit.sh:all:vm:broad"
   "secrets:scripts/dev/microagent-e2e-secrets.sh:all:vm:core"
@@ -80,6 +81,7 @@ SCENARIO_COVERAGE=(
   "networking-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|network modes, publish, apply, quarantine, cached image/network paths"
   "transport-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|mediation and vsock transport contract"
   "supervision-deep|backend-neutral|linux-kvm,apple-vf,windows-hyperv|restart supervision, signal, failure, cleanup"
+  "dispatch|backend-specific|linux-kvm|one-shot delegated work in a fresh isolated workspace; returns guest result plus the mediator-written egress audit receipt, then tears down"
   "volumes|backend-neutral|linux-kvm,apple-vf,windows-hyperv|volume create/list/status/delete, attach persistence, single attach"
   "commit-images|backend-neutral|linux-kvm,apple-vf,windows-hyperv|commit stopped rootfs into local OCI image layout"
   "secrets|backend-neutral|linux-kvm,apple-vf,windows-hyperv|secret check, materialized secrets, on-demand secrets, audit records"
@@ -182,6 +184,9 @@ Scenarios:
   transport-deep     Backend-neutral mediation/vsock transport feature contract.
   supervision-deep   Backend-neutral restart supervision, signal, failure, and
                      cleanup feature contract.
+  dispatch           One-shot delegated work in a fresh, isolated workspace:
+                     guest result plus the mediator-written egress audit
+                     receipt, then teardown.
   init               Agent scaffold (no VM): generated files, providers,
                      --force, and that the generated spec validates.
   volumes            Named-volume registry, ext4 backing, attach-by-name

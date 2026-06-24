@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // EgressEvent is one decision recorded by the egress mediator's audit log
@@ -93,4 +94,49 @@ func egressString(raw map[string]any, key string) string {
 		return v
 	}
 	return ""
+}
+
+// EgressAuditSummary is a high-level rollup of a workspace's egress mediator
+// decisions — enough for a caller to judge whether a dispatched task stayed
+// on-intent (what it reached, what was denied) without reading the raw log.
+// Because the underlying audit is written by the mediator, outside the guest's
+// control, the summary is a trustworthy record the guest cannot forge.
+type EgressAuditSummary struct {
+	DecisionCount int            `json:"decision_count"`
+	ByEvent       map[string]int `json:"by_event,omitempty"`
+	AllowByHost   map[string]int `json:"allow_by_host,omitempty"`
+	DenyByHost    map[string]int `json:"deny_by_host,omitempty"`
+}
+
+// SummarizeEgressAudit rolls a workspace's egress decisions into an
+// EgressAuditSummary. allow/deny are recognized by event-name suffix so the
+// TCP/UDP/DNS variants fold into one per-host verdict view; the destination
+// host (or dst when no hostname was seen) is the key.
+func SummarizeEgressAudit(events []EgressEvent) EgressAuditSummary {
+	s := EgressAuditSummary{DecisionCount: len(events), ByEvent: map[string]int{}}
+	allow := map[string]int{}
+	deny := map[string]int{}
+	for _, ev := range events {
+		s.ByEvent[ev.Event]++
+		host := ev.Host
+		if host == "" {
+			host = ev.Dst
+		}
+		if host == "" {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(ev.Event, "_allow"):
+			allow[host]++
+		case strings.HasSuffix(ev.Event, "_deny"):
+			deny[host]++
+		}
+	}
+	if len(allow) > 0 {
+		s.AllowByHost = allow
+	}
+	if len(deny) > 0 {
+		s.DenyByHost = deny
+	}
+	return s
 }

@@ -159,6 +159,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "run" {
 		return runWorkspace(ctx, args[1:], stdout)
 	}
+	if args[0] == "dispatch" {
+		return runDispatch(ctx, args[1:], stdout)
+	}
 	if args[0] == "compose" {
 		return fmt.Errorf("compose-style multi-workspace projects are not supported; run one MicroAgent workspace at a time and keep orchestration outside microagent")
 	}
@@ -476,6 +479,100 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 		return encodeErr
 	}
 	return err
+}
+
+// runDispatch is `run` for delegated, single-use work: it boots a throwaway
+// workspace under the chosen egress guardrails, runs the command, and returns
+// the guest result together with a summary of what the workspace reached on the
+// network (the mediator-written audit). The workspace is torn down before it
+// returns. Mirrors runWorkspace's option parsing; the difference is the
+// audit-bearing result and the one-shot teardown in workspace.RunDispatch.
+func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
+	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+		printDispatchHelp(stdout)
+		return nil
+	}
+	modelToken, _ := flagValue(args, "model-token")
+
+	opts, err := parseWorkspaceOptions("dispatch", args)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(opts.ExecCommand) == "" && !opts.UseImageCommand {
+		return fmt.Errorf("dispatch requires IMAGE [COMMAND...] or --exec")
+	}
+	if opts.Name == "" {
+		opts.Name = fmt.Sprintf("dispatch-%d", time.Now().UnixNano())
+	}
+	if err := validateWorkspaceName(opts.Name); err != nil {
+		return err
+	}
+
+	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
+	if err != nil {
+		return err
+	}
+	defer releaseModel()
+
+	result, err := workspace.RunDispatch(ctx, opts)
+	if encodeErr := writeDispatchResult(stdout, result); encodeErr != nil {
+		return encodeErr
+	}
+	return err
+}
+
+func writeDispatchResult(stdout *os.File, result workspace.DispatchResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	if result.FinalState != "" {
+		fmt.Fprintf(stdout, "State: %s\n", result.FinalState)
+	}
+	if result.Result != nil {
+		fmt.Fprintf(stdout, "Exit: %d\n", result.Result.ExitCode)
+		if result.Result.Stdout != "" {
+			fmt.Fprint(stdout, result.Result.Stdout)
+			if !strings.HasSuffix(result.Result.Stdout, "\n") {
+				fmt.Fprintln(stdout)
+			}
+		}
+	}
+	// The "what did it do on the network" receipt — mediator-written, so the
+	// guest cannot forge it.
+	a := result.Audit
+	fmt.Fprintf(stdout, "Egress: %d decision(s)\n", a.DecisionCount)
+	for host, n := range a.AllowByHost {
+		fmt.Fprintf(stdout, "  allow %s (%d)\n", host, n)
+	}
+	for host, n := range a.DenyByHost {
+		fmt.Fprintf(stdout, "  deny  %s (%d)\n", host, n)
+	}
+	return nil
+}
+
+func printDispatchHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent dispatch — run one task in a fresh, isolated, single-use workspace
+
+Usage:
+  microagent dispatch IMAGE [COMMAND...] [flags]
+
+Boots a throwaway microVM under the egress guardrails you choose, runs the
+command, and returns its result AND a summary of what it reached on the network
+— the mediator-written audit, so you can see whether it stayed on-intent — then
+tears the workspace down. One-shot: nothing persists.
+
+Common flags (same as run):
+  --egress <mode>              guarded (default; deny-the-inside) | strict | off
+  --egress-allow <host>        allowlisted destination (repeatable)
+  --egress-swap-config <path>  inject a credential host-side; the guest never holds it
+  --secret NAME=<ref>          deliver a secret to the guest tmpfs (repeatable)
+  --exec <command>             command to run (alternative to positional COMMAND)
+  --json                       machine-readable result + audit
+
+Example:
+  microagent dispatch docker.io/library/python:3.12 python -c 'print(2+2)'
+`)
 }
 
 // ensureModelPairing resolves modelRefRaw, pulls the blob if it is missing from
@@ -2039,7 +2136,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if fs.NArg() != 0 {
 		if command == "create" && fs.NArg() == 1 && opts.Name == "" {
 			opts.Name = fs.Arg(0)
-		} else if command == "run" {
+		} else if command == "run" || command == "dispatch" {
 			if err := applyContainerRunArgs(&opts, fs.Args()); err != nil {
 				return workspaceOptions{}, err
 			}
@@ -2218,7 +2315,7 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 			return fmt.Errorf("%s requires --image", command)
 		}
 	}
-	if command == "run" && strings.TrimSpace(opts.ExecCommand) == "" {
+	if (command == "run" || command == "dispatch") && strings.TrimSpace(opts.ExecCommand) == "" {
 		opts.UseImageCommand = true
 	}
 	if err := validateConsoleShell(opts.ConsoleShell); err != nil {
@@ -2251,10 +2348,10 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 	if opts.UseImageCommand && strings.TrimSpace(opts.ServiceCommand) != "" {
 		return fmt.Errorf("%s cannot use both --image-command and --service-command", command)
 	}
-	if command == "run" && rm && opts.Keep {
-		return fmt.Errorf("run cannot use both --rm and --keep")
+	if (command == "run" || command == "dispatch") && rm && opts.Keep {
+		return fmt.Errorf("%s cannot use both --rm and --keep", command)
 	}
-	if command != "run" && rm {
+	if command != "run" && command != "dispatch" && rm {
 		return fmt.Errorf("%s does not support --rm", command)
 	}
 	if rm {
