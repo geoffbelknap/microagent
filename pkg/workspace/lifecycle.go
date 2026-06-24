@@ -970,6 +970,13 @@ func materializeCredSwapConfig(opts *Options) error {
 	if len(opts.CredSwapProviders) == 0 {
 		return nil
 	}
+	// cred-swap is performed by the egress mediator (host-side MITM injection),
+	// which only runs in guarded/strict. With egress off there is no mediator to
+	// inject the key, so the swap would silently do nothing — fail loud. This is
+	// the library backstop for direct Go-API callers; the CLI catches it earlier.
+	if vmkit.NormalizeEgressMode(opts.EgressMode) == vmkit.EgressModeOff {
+		return fmt.Errorf("cred-swap: credential swap requires egress guarded or strict, not off")
+	}
 	cfg := egress.SwapConfigFile{Swaps: map[string]egress.SwapEntry{}}
 	// Merge an operator-supplied swap config first so generated provider entries
 	// are added on top of it (collision below catches an overlapping name).

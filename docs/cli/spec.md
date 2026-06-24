@@ -4,13 +4,19 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-24_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
 each field corresponds to a `create` flag, and when both are given, CLI flags
 override matching spec fields. Use the file when the workspace definition
 should live in the repo; use flags for one-off overrides.
+
+Pass it with `--file` to `create` (auto-discovered as `microagent.yaml` /
+`microagent.yml`), or explicitly to [`run`](/cli/run/) and
+`dispatch` for one-shot work. With the optional `agent:` block
+(below), a spec doubles as an **Agentfile** — a build-free recipe for running an
+agent in an isolated workspace.
 
 ```yaml
 name: research
@@ -67,7 +73,30 @@ bundles:
 outputs:
   - name: report
     path: /workspace/report.json
+agent:
+  entry: python /app/agent.py
+  egress: strict
+  allow: [api.anthropic.com]
+  cred-swap: [anthropic]
 ```
+
+## Agentfile: the `agent:` block
+
+The optional `agent:` block turns a spec into an **Agentfile** — it carries the
+few agent-defining knobs the rest of the spec cannot express, while base image,
+dependency install, files, and env reuse the normal top-level fields. There is no
+image to build: `microagent dispatch --file agent.yaml` pulls the thin base, runs
+`setup` in the booted guest, drops `files`, and runs `entry` under the egress
+envelope — installing the SDK at boot rather than baking a fat image. See
+[examples/agents](https://github.com/geoffbelknap/microagent/tree/main/examples/agents).
+
+```bash
+microagent dispatch --file agent.yaml
+```
+
+CLI flags override the block (e.g. `--egress strict` beats `agent.egress`,
+`--exec` beats `agent.entry`); `agent.allow` and `agent.cred-swap` union with the
+corresponding flags.
 
 ## Usage
 
@@ -134,6 +163,10 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `disks` | Existing ext4 disks to attach |
 | `bundles` | Tar bundles to build into ext4 disks and attach |
 | `outputs` | Declared output artifact paths inside the workspace |
+| `agent.entry` | The agent's run command (the one-shot exec); a CLI `--exec` overrides it |
+| `agent.egress` | Egress mode: `guarded`, `strict`, or `off`; a CLI `--egress` overrides it |
+| `agent.allow` | Extra egress hosts to allowlist; unioned with `--egress-allow` |
+| `agent.cred-swap` | Built-in providers to inject host-side, each `PROVIDER[=env:NAME\|file:PATH\|vault:PATH]` (reference only, never a literal); unioned with `--cred-swap`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
 
 ## Related
 

@@ -1,0 +1,22 @@
+# Agentfile: an OpenAI Agents SDK agent in an isolated microVM.
+#
+#   microagent dispatch --file examples/agents/openai-agent/agent.yaml
+#
+# No image to build: the thin python base is pulled, the SDK is installed at boot,
+# agent.py is dropped in, and it runs under guarded egress with the OpenAI API key
+# injected host-side (the guest only ever holds the placeholder below).
+name: openai-agent
+image: docker.io/library/python:3.12-slim
+setup:
+  - run: pip install --no-cache-dir openai-agents
+files:
+  - src: agent.py
+    dst: /app/agent.py
+env:
+  # Placeholder only. cred-swap REPLACES the Authorization header host-side with
+  # the real key; this just lets the SDK start. Never put a real key here.
+  OPENAI_API_KEY: "sk-placeholder-cred-swap-overwrites-this"
+agent:
+  entry: python /app/agent.py
+  egress: guarded
+  cred-swap: [openai]

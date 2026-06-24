@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"gopkg.in/yaml.v3"
 )
@@ -118,6 +119,11 @@ func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions)
 		}
 		opts.SetupCommands = setupCommands
 	}
+	if spec.Agent.Declared() {
+		if err := applyAgentSpec(opts, spec.Agent); err != nil {
+			return err
+		}
+	}
 	opts.Env = MergeEnv(opts.Env, spec.Env)
 	files, err := ValidateFiles(spec.Files, baseDir)
 	if err != nil {
@@ -134,6 +140,38 @@ func ApplySpec(opts *Options, spec Spec, baseDir string, apply SpecApplyOptions)
 		return err
 	}
 	opts.Outputs = append(opts.Outputs, outputs...)
+	return nil
+}
+
+// applyAgentSpec maps the Agentfile `agent:` block onto Options. It carries the
+// three knobs the rest of the Spec cannot express: the one-shot entry command,
+// the egress envelope, and cred-swap. It is additive and defers to values
+// already on Options (e.g. a CLI flag applied before the spec wins): entry only
+// fills an empty ExecCommand, allow/cred-swap union with what is there.
+func applyAgentSpec(opts *Options, agent AgentSpec) error {
+	if entry := strings.TrimSpace(agent.Entry); entry != "" && strings.TrimSpace(opts.ExecCommand) == "" {
+		opts.ExecCommand = entry
+	}
+	if mode := strings.ToLower(strings.TrimSpace(agent.Egress)); mode != "" {
+		switch mode {
+		case vmkit.EgressModeGuarded, vmkit.EgressModeStrict, vmkit.EgressModeOff:
+			opts.EgressMode = mode
+		default:
+			return fmt.Errorf("agent egress %q must be guarded, strict, or off", agent.Egress)
+		}
+	}
+	if len(agent.Allow) != 0 {
+		opts.EgressAllow = egress.DedupeHosts(append(append([]string(nil), opts.EgressAllow...), agent.Allow...))
+	}
+	for _, raw := range agent.CredSwap {
+		provider, ok, err := ParseCredSwapProvider(raw)
+		if err != nil {
+			return err
+		}
+		if ok {
+			opts.CredSwapProviders = append(opts.CredSwapProviders, provider)
+		}
+	}
 	return nil
 }
 

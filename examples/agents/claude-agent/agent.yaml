@@ -1,0 +1,26 @@
+# Agentfile: a Claude Agent SDK agent in an isolated microVM.
+#
+#   microagent dispatch --file examples/agents/claude-agent/agent.yaml
+#
+# No image to build: the thin python base is pulled, the SDK is installed at boot,
+# agent.py is dropped in, and it runs under guarded egress with the Anthropic API
+# key injected host-side (the guest only ever holds the placeholder below).
+#
+# NOTE: claude-agent-sdk bundles the Claude Code CLI and shells out to it. If your
+# environment needs Node.js for the bundled CLI, add it to setup (e.g. a node base
+# image, or `apt-get install -y nodejs`). Validate with your key — see README.
+name: claude-agent
+image: docker.io/library/python:3.12-slim
+setup:
+  - run: pip install --no-cache-dir claude-agent-sdk
+files:
+  - src: agent.py
+    dst: /app/agent.py
+env:
+  # Placeholder only. cred-swap REPLACES the x-api-key header host-side with the
+  # real key; this just lets the SDK start. Never put a real key here.
+  ANTHROPIC_API_KEY: "sk-ant-placeholder-cred-swap-overwrites-this"
+agent:
+  entry: python /app/agent.py
+  egress: guarded
+  cred-swap: [anthropic]
