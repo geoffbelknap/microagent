@@ -636,6 +636,14 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 				_ = serialInput.Close()
 			}
 			_ = serialLog.Close()
+			// An intentional stop can SIGTERM firecracker inside this detached
+			// startup window — that's a clean stop, not a launch failure. The stop
+			// records intent (and writes its terminal state) before signaling, so if
+			// intent is on disk (or a terminal Stopped/Halted is already recorded),
+			// defer to the stop instead of overwriting it with Failed.
+			if fresh, ferr := readRuntimeState(opts); ferr == nil && (fresh.Stopping || fresh.Event.State == vmkit.StateStopped || fresh.Event.State == vmkit.StateHalted) {
+				return eventResponse(req, vmkit.StateStopped, ""), nil
+			}
 			errorText := fmt.Sprintf("%s; serial log: %s", err.Error(), serialLogPath(opts))
 			_ = writeProcessState(opts, runtimeReq, vmkit.StateFailed, 0, errorText)
 			return failedResponse(req, errorText), fmt.Errorf("%s", errorText)
