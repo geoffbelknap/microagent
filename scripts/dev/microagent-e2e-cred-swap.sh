@@ -128,4 +128,51 @@ assert "api.anthropic.com" in allow, f"manifest egress_allow = {allow}, want api
 print("cred-swap: --cred-swap generated a valid swap config, booted under strict, persisted entry + allowlist")
 PY
 
+# --- Agentfile path: the agent: block on a workspace spec must produce the SAME
+# wiring as the flags above, proving `dispatch/run --file agent.yaml` works. Kept
+# hermetic: a trivial echo entry, no boot-time package install. ---
+echo "==> cred-swap (Agentfile --file)"
+AGENT_WS="cred-swap-agentfile"
+cat >"$STATE_DIR/agent.yaml" <<EOF
+name: $AGENT_WS
+image: $IMAGE
+agent:
+  entry: echo cred-swap-agentfile-ok
+  egress: strict
+  cred-swap: [anthropic]
+EOF
+
+"$CLI" --mode=ax run \
+  --file "$STATE_DIR/agent.yaml" \
+  --keep \
+  --state-dir "$STATE_DIR" >"$STATE_DIR/agentfile-run.json"
+
+python3 - \
+  "$STATE_DIR/agentfile-run.json" \
+  "$STATE_DIR/workspaces/$AGENT_WS/cred-swap.yaml" \
+  "$STATE_DIR/workspaces/$AGENT_WS/workspace.json" <<'PY'
+import json, sys
+
+run_path, swap_path, manifest_path = sys.argv[1:4]
+
+with open(run_path) as f:
+    run = json.load(f)
+res = run.get("result") or {}
+assert res.get("exit_code") == 0, f"expected exit_code 0, got {res.get('exit_code')}: {res}"
+assert "cred-swap-agentfile-ok" in (res.get("stdout") or ""), f"marker missing: {res.get('stdout')!r}"
+
+with open(swap_path) as f:
+    swap_text = f.read()
+for needle in ("anthropic", "static", "x-api-key", "env:ANTHROPIC_API_KEY", "api.anthropic.com"):
+    assert needle in swap_text, f"Agentfile cred-swap.yaml missing {needle!r}:\n{swap_text}"
+
+with open(manifest_path) as f:
+    manifest = json.load(f)
+assert (manifest.get("egress_swap_config_path") or "").endswith("cred-swap.yaml"), manifest.get("egress_swap_config_path")
+assert manifest.get("egress_mode") == "strict", f"egress_mode = {manifest.get('egress_mode')!r}, want strict (from agent.egress)"
+assert "api.anthropic.com" in (manifest.get("egress_allow") or []), manifest.get("egress_allow")
+
+print("cred-swap: Agentfile agent: block produced the same swap config + strict egress + allowlist as flags")
+PY
+
 echo "microagent E2E cred-swap passed"

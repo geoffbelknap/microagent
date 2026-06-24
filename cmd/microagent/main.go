@@ -457,6 +457,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	warnEgressOff(opts.EgressMode)
 	if strings.TrimSpace(opts.ExecCommand) == "" && !opts.UseImageCommand {
 		return fmt.Errorf("run requires IMAGE [COMMAND...] or --exec")
 	}
@@ -498,6 +499,7 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	warnEgressOff(opts.EgressMode)
 	if strings.TrimSpace(opts.ExecCommand) == "" && !opts.UseImageCommand {
 		return fmt.Errorf("dispatch requires IMAGE [COMMAND...] or --exec")
 	}
@@ -1885,6 +1887,7 @@ func runHighLevelCreate(ctx context.Context, args []string, stdout *os.File) err
 	if err != nil {
 		return err
 	}
+	warnEgressOff(opts.EgressMode)
 	opts.Progress = rootfsProgress(stdout, "create")
 	if opts.DryRun {
 		if opts.Name == "" {
@@ -2037,7 +2040,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&opts.Name, "name", opts.Name, "Workspace name")
 	fs.StringVar(&opts.Name, "id", opts.Name, "Workspace ID")
 	fs.StringVar(&opts.ImageRef, "image", opts.ImageRef, "OCI image reference")
-	fs.StringVar(&opts.ExecCommand, "exec", "", "Shell command to run as guest init")
+	fs.StringVar(&opts.ExecCommand, "exec", opts.ExecCommand, "Shell command to run as guest init")
 	fs.StringVar(&opts.ServiceCommand, "service-command", opts.ServiceCommand, "Long-running shell command to run as the VM service")
 	fs.StringVar(&opts.Entrypoint, "entrypoint", opts.Entrypoint, "Shell command to run when the workspace starts")
 	fs.BoolVar(&opts.UseImageCommand, "image-command", opts.UseImageCommand, "Run the image Entrypoint/Cmd when creating a prepared workspace")
@@ -2228,13 +2231,25 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 }
 
 func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string, credSwap multiFlag) error {
-	mode, err := parseEgressMode(egressMode)
-	if err != nil {
-		return err
+	// Mode precedence: an explicit --egress flag wins; otherwise keep any value a
+	// workspace spec (Agentfile `agent.egress`) already applied; otherwise default
+	// to guarded (the secure default, matching parseEgressMode("")).
+	if strings.TrimSpace(egressMode) != "" {
+		mode, err := parseEgressMode(egressMode)
+		if err != nil {
+			return err
+		}
+		opts.EgressMode = mode
+	} else if strings.TrimSpace(opts.EgressMode) == "" {
+		opts.EgressMode = vmkit.EgressModeGuarded
 	}
-	opts.EgressMode = mode
-	allowHosts := splitCommaHosts([]string(egressAllow))
-	passthroughHosts := splitCommaHosts([]string(egressPassthrough))
+	mode := opts.EgressMode
+	// Allow/passthrough are additive: default-deny means flags, a spec, a policy
+	// file, and the manifest can only ADD reachability, never remove it, so they
+	// combine by union. Seed with the flag hosts unioned with whatever the spec
+	// already applied to Options.
+	allowHosts := append(splitCommaHosts([]string(egressAllow)), opts.EgressAllow...)
+	passthroughHosts := append(splitCommaHosts([]string(egressPassthrough)), opts.EgressPassthrough...)
 	if strings.TrimSpace(egressPolicy) != "" {
 		// A policy file only enforces against a running mediator; with mediation
 		// off there is nothing to apply it to, so reject rather than silently
@@ -2246,10 +2261,6 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		if err != nil {
 			return err
 		}
-		// Precedence is additive/union: default-deny means a policy file can only
-		// ADD reachability, never remove it, so flags + file + manifest combine by
-		// union. Append the file's hosts to the flag-supplied hosts; they later
-		// union with the manifest in OptionsFromManifest/applyManifest.
 		allowHosts = append(allowHosts, pf.Allow...)
 		passthroughHosts = append(passthroughHosts, pf.Passthrough...)
 	}
@@ -2264,47 +2275,61 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		}
 		opts.EgressSwapConfigPath = trimmed
 	}
+	// cred-swap from flags unions with any a spec already declared.
 	providers, err := parseCredSwapFlags(credSwap)
 	if err != nil {
 		return err
 	}
-	if len(providers) > 0 {
-		// Like --egress-swap-config, cred-swap injects a real secret host-side at
-		// the mediator; with mediation off there is no mediator to inject it.
-		if mode == vmkit.EgressModeOff {
-			return fmt.Errorf("--cred-swap: credential swap requires --egress guarded or strict")
-		}
-		opts.CredSwapProviders = providers
+	opts.CredSwapProviders = append(opts.CredSwapProviders, providers...)
+	if len(opts.CredSwapProviders) > 0 && mode == vmkit.EgressModeOff {
+		// cred-swap is performed by the mediator (host-side MITM injection), which
+		// only runs in guarded/strict; with egress off there is no mediator to
+		// inject the key, so the swap would silently do nothing. Fail loud. Checked
+		// against the merged set so a spec-sourced cred-swap is caught too.
+		return fmt.Errorf("--cred-swap: credential swap requires --egress guarded or strict")
 	}
 	return nil
 }
 
 // parseCredSwapFlags parses repeatable `--cred-swap PROVIDER[=ref]` specs into
-// resolved CredSwapProvider entries. It fails fast: an unknown provider or a
-// literal (non-reference) key is rejected here, before any file is written or
+// resolved CredSwapProvider entries via the shared workspace parser (same one the
+// Agentfile `agent.cred-swap` block uses). It fails fast: an unknown provider or
+// a literal (non-reference) key is rejected here, before any file is written or
 // audit entry made, so a secret pasted on the command line never gets processed.
-// The actual swap-config file is generated later, at workspace prep.
 func parseCredSwapFlags(credSwap multiFlag) ([]workspace.CredSwapProvider, error) {
 	if len(credSwap) == 0 {
 		return nil, nil
 	}
 	providers := make([]workspace.CredSwapProvider, 0, len(credSwap))
 	for _, raw := range credSwap {
-		spec := strings.TrimSpace(raw)
-		if spec == "" {
-			continue
-		}
-		provider, ref, _ := strings.Cut(spec, "=")
-		provider = strings.TrimSpace(provider)
-		ref = strings.TrimSpace(ref)
-		// Validate the provider name and key reference up front (this rejects a
-		// literal secret); the returned entry is rebuilt at prep time.
-		if _, _, err := egress.ProviderSwapEntry(provider, ref); err != nil {
+		provider, ok, err := workspace.ParseCredSwapProvider(raw)
+		if err != nil {
 			return nil, err
 		}
-		providers = append(providers, workspace.CredSwapProvider{Provider: provider, Ref: ref})
+		if ok {
+			providers = append(providers, provider)
+		}
 	}
 	return providers, nil
+}
+
+// egressOffWarning returns a one-line operator notice when egress mediation is
+// off — unrestricted network, no allowlist, no audit, no cred-swap. It is empty
+// for guarded/strict. Printed to stderr at launch so turning mediation off is
+// never silent (it's effectively yolo mode).
+func egressOffWarning(mode string) string {
+	if mode != vmkit.EgressModeOff {
+		return ""
+	}
+	return "⚠ egress off: this workspace has unrestricted network access — no mediation, no audit, no cred-swap (yolo mode)."
+}
+
+// warnEgressOff prints the egress-off notice to stderr if applicable. Stderr, so
+// it never pollutes the stdout result (including MCP/--mode=ax JSON).
+func warnEgressOff(mode string) {
+	if w := egressOffWarning(mode); w != "" {
+		fmt.Fprintln(os.Stderr, w)
+	}
 }
 
 func applyStorageOptionFlags(opts *workspaceOptions, volumeFlags, diskFlags, bundleFlags, outputFlags multiFlag) error {
@@ -2480,17 +2505,24 @@ func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
 }
 
 func workspaceSpecPath(command string, args []string) string {
-	if command != "create" {
+	switch command {
+	case "create", "run", "dispatch":
+	default:
 		return ""
 	}
 	if value, ok := flagValue(args, "file"); ok {
 		return value
 	}
-	if _, err := os.Stat("microagent.yaml"); err == nil {
-		return "microagent.yaml"
-	}
-	if _, err := os.Stat("microagent.yml"); err == nil {
-		return "microagent.yml"
+	// Auto-discover a workspace spec only for create — the durable, declarative
+	// path. run/dispatch require an explicit --file so a stray microagent.yaml in
+	// the working directory never silently alters a one-shot invocation.
+	if command == "create" {
+		if _, err := os.Stat("microagent.yaml"); err == nil {
+			return "microagent.yaml"
+		}
+		if _, err := os.Stat("microagent.yml"); err == nil {
+			return "microagent.yml"
+		}
 	}
 	return ""
 }

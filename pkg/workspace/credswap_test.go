@@ -150,3 +150,26 @@ func TestMaterializeCredSwapConfigNoOp(t *testing.T) {
 		t.Fatalf("cred-swap.yaml should not exist, stat err = %v", err)
 	}
 }
+
+// TestMaterializeCredSwapConfigRejectsEgressOff is the library backstop: cred-swap
+// with egress off can never inject (no mediator runs), so it must fail loud even
+// for a direct Go-API caller that bypasses the CLI guard. No file is written.
+func TestMaterializeCredSwapConfigRejectsEgressOff(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{
+		Name:              "demo",
+		StateDir:          dir,
+		EgressMode:        "off",
+		CredSwapProviders: []CredSwapProvider{{Provider: "anthropic"}},
+	}
+	err := materializeCredSwapConfig(&opts)
+	if err == nil {
+		t.Fatal("materializeCredSwapConfig accepted cred-swap with egress off; want rejection")
+	}
+	if !strings.Contains(err.Error(), "guarded or strict") {
+		t.Fatalf("error = %q, want it to require guarded or strict", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "workspaces", "demo", "cred-swap.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("cred-swap.yaml should not be written on rejection, stat err = %v", statErr)
+	}
+}

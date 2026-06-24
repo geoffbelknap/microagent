@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
@@ -144,6 +145,27 @@ type CredSwapProvider struct {
 	Ref      string // optional key reference; empty falls back to the provider default
 }
 
+// ParseCredSwapProvider parses one `PROVIDER[=ref]` spec into a CredSwapProvider,
+// failing fast on an unknown provider or a literal (non-reference) key so a
+// pasted secret never gets processed. It is the single parser shared by the CLI
+// flag and the Agentfile `agent.cred-swap` block. An empty spec returns ok=false
+// with no error so callers can skip blank entries.
+func ParseCredSwapProvider(spec string) (CredSwapProvider, bool, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return CredSwapProvider{}, false, nil
+	}
+	provider, ref, _ := strings.Cut(spec, "=")
+	provider = strings.TrimSpace(provider)
+	ref = strings.TrimSpace(ref)
+	// Validate the provider name and key reference up front (rejects a literal);
+	// the resolved entry is rebuilt at workspace prep by materializeCredSwapConfig.
+	if _, _, err := egress.ProviderSwapEntry(provider, ref); err != nil {
+		return CredSwapProvider{}, false, err
+	}
+	return CredSwapProvider{Provider: provider, Ref: ref}, true, nil
+}
+
 type Spec struct {
 	Name           string                `yaml:"name"`
 	ImageRef       string                `yaml:"image"`
@@ -167,6 +189,34 @@ type Spec struct {
 	Bundles        []Disk                `yaml:"bundles"`
 	Outputs        []Output              `yaml:"outputs"`
 	Files          []File                `yaml:"files"`
+	Agent          AgentSpec             `yaml:"agent"`
+}
+
+// AgentSpec is the optional `agent:` block of a workspace Spec — the "Agentfile"
+// surface. It carries only the agent-defining knobs the rest of the Spec cannot
+// express today; everything else (base image, dependency install, files, env)
+// reuses existing top-level Spec fields. There is no image build: a Spec with an
+// agent block is realized into a live workspace (pull thin base → run setup →
+// drop files → exec entry under the egress envelope), not into an image.
+type AgentSpec struct {
+	// Entry is the agent's one-shot run command (maps to Options.ExecCommand).
+	Entry string `yaml:"entry"`
+	// Egress is the egress mediation mode: guarded | strict | off.
+	Egress string `yaml:"egress"`
+	// Allow lists extra egress hosts to allowlist, unioned with any from flags.
+	Allow []string `yaml:"allow"`
+	// CredSwap lists built-in providers to inject host-side, each PROVIDER[=ref]
+	// (reference only, never a literal secret). See Options.CredSwapProviders.
+	CredSwap []string `yaml:"cred-swap"`
+}
+
+// Declared reports whether the agent block carries any field, so an empty block
+// is a no-op rather than forcing egress/exec defaults.
+func (a AgentSpec) Declared() bool {
+	return strings.TrimSpace(a.Entry) != "" ||
+		strings.TrimSpace(a.Egress) != "" ||
+		len(a.Allow) != 0 ||
+		len(a.CredSwap) != 0
 }
 
 type NetworkSpec struct {
