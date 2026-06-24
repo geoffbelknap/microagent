@@ -4,7 +4,7 @@ description: How microagent captures, audits, and controls everything a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-24_
 
 Egress mediation is microagent's transparent control point for **everything a
 workspace sends to the network**. The host captures the guest's outbound
