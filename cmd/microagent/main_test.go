@@ -7665,7 +7665,7 @@ func TestWriteDoctorResponseTextAppleVFNetworkingDoesNotSuggestLinuxSetup(t *tes
 
 func TestParseEgressMode(t *testing.T) {
 	cases := map[string]string{
-		"": "guarded", "guarded": "guarded", "mediated": "mediated",
+		"": "guarded", "guarded": "guarded",
 		"strict": "strict", "STRICT": "strict",
 		"off": "off", "open": "off", "disabled": "off",
 	}
@@ -7675,8 +7675,11 @@ func TestParseEgressMode(t *testing.T) {
 			t.Fatalf("parseEgressMode(%q)=%q,%v want %q", in, got, err, want)
 		}
 	}
-	if _, err := parseEgressMode("bogus"); err == nil {
-		t.Fatal("expected error for bogus mode")
+	// "mediated" was removed: it is no longer a valid mode and must error.
+	for _, bad := range []string{"bogus", "mediated"} {
+		if _, err := parseEgressMode(bad); err == nil {
+			t.Fatalf("expected error for %q mode", bad)
+		}
 	}
 }
 
@@ -7738,7 +7741,7 @@ func TestEgressPolicyFileJSON(t *testing.T) {
 	policy := writeEgressPolicyFile(t, "policy.json", `{"allow":["api.github.com"],"passthrough":["raw.example.com"]}`)
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
-		"--egress", "mediated",
+		"--egress", "guarded",
 		"--egress-policy", policy,
 	})
 	if err != nil {
@@ -7764,8 +7767,8 @@ func TestEgressPolicyFileRejectedWhenOff(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for --egress-policy with --egress off")
 	}
-	if !strings.Contains(err.Error(), "mediated") || !strings.Contains(err.Error(), "strict") {
-		t.Fatalf("error %q should explain mediated/strict requirement", err)
+	if !strings.Contains(err.Error(), "guarded") || !strings.Contains(err.Error(), "strict") {
+		t.Fatalf("error %q should explain guarded/strict requirement", err)
 	}
 }
 
@@ -7808,7 +7811,7 @@ func TestEgressPolicyFileUnionWithManifest(t *testing.T) {
 }
 
 func TestParseEgressModeDefaults(t *testing.T) {
-	for in, want := range map[string]string{"": "guarded", "guarded": "guarded", "mediated": "mediated", "strict": "strict"} {
+	for in, want := range map[string]string{"": "guarded", "guarded": "guarded", "strict": "strict"} {
 		got, err := parseEgressMode(in)
 		if err != nil || got != want {
 			t.Errorf("parseEgressMode(%q)=%q,%v want %q", in, got, err, want)

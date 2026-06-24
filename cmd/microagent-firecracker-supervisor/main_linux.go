@@ -114,7 +114,7 @@ func parseEgressMediatorOptions(args []string) (egress.Options, error) {
 	var maxBPS, maxBytes, auditMaxBytes int64
 	var maxConns int
 	var auditMaxBackups int
-	fs.StringVar(&mode, "mode", "", "Enforcement mode: guarded (default; deny-the-inside), mediated (allow+audit all), or strict (default-deny allowlist)")
+	fs.StringVar(&mode, "mode", "", "Enforcement mode: guarded (default; deny-the-inside) or strict (default-deny allowlist)")
 	fs.StringVar(&bindHost, "bind-host", "127.0.0.1", "Bind host")
 	fs.IntVar(&bindPort, "bind-port", 0, "Bind port")
 	fs.StringVar(&auditLog, "audit-log", "", "JSONL audit log path")

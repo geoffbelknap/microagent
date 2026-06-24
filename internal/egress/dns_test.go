@@ -233,10 +233,10 @@ func TestHandleDNSStrictAllowsAndCaches(t *testing.T) {
 	assertEventFieldAbsent(t, log, "egress_dns_allow", "unlisted")
 }
 
-func TestHandleDNSMediatedForwardsAndCachesUnlisted(t *testing.T) {
+func TestHandleDNSGuardedForwardsAndCachesUnlisted(t *testing.T) {
 	pol, _ := NewPolicy([]string{"unrelated.example.com"})
 	log := &BufferLogger{}
-	h := &Handler{Mode: "mediated", Policy: pol, Logger: log, NameCache: NewNameCache()}
+	h := &Handler{Mode: "guarded", Policy: pol, Logger: log, NameCache: NewNameCache()}
 
 	want := buildResponseWithA(t, 0x0003, "whatever.example.com.", "whatever.example.com.",
 		[4]byte{198, 51, 100, 4}, 120)
@@ -254,7 +254,7 @@ func TestHandleDNSMediatedForwardsAndCachesUnlisted(t *testing.T) {
 		t.Fatalf("handleDNS: %v", err)
 	}
 	if !forwardCalled {
-		t.Error("forward was NOT called in mediated mode; want forwarded")
+		t.Error("forward was NOT called in guarded mode; want forwarded")
 	}
 	if string(resp) != string(want) {
 		t.Error("handleDNS did not return the forwarded response verbatim")
@@ -263,7 +263,7 @@ func TestHandleDNSMediatedForwardsAndCachesUnlisted(t *testing.T) {
 	if !ok || host != "whatever.example.com" {
 		t.Errorf("HostForIP = (%q,%v), want (%q,true)", host, ok, "whatever.example.com")
 	}
-	// Allowed only via mediated mode (not on the allowlist): unlisted:true.
+	// Allowed only via guarded mode (not on the allowlist): unlisted:true.
 	assertEventWithField(t, log, "egress_dns_allow", "unlisted", true)
 }
 
@@ -286,7 +286,7 @@ func TestHandleDNSForwardErrorAudited(t *testing.T) {
 
 func TestHandleDNSParseErrorReturnsError(t *testing.T) {
 	log := &BufferLogger{}
-	h := &Handler{Mode: "mediated", Logger: log, NameCache: NewNameCache()}
+	h := &Handler{Mode: "guarded", Logger: log, NameCache: NewNameCache()}
 	forward := func(netip.AddrPort, []byte) ([]byte, error) {
 		t.Fatal("forward must not be called on a parse error")
 		return nil, nil

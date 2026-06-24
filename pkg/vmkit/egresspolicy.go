@@ -21,7 +21,7 @@ type EgressCaps struct {
 // 18: enforcement is external and inviolable; the governance hierarchy is
 // inviolable from below).
 type EgressPolicy struct {
-	Mode           string   // "guarded" | "mediated" | "strict" | "off"
+	Mode           string   // "guarded" | "strict" | "off"
 	Allow          []string // allowlisted egress destination hosts
 	Passthrough    []string // hosts to L4-splice (no MITM)
 	SwapConfigPath string   // path to the operator credential-swap config; may be empty
@@ -72,16 +72,16 @@ func (p EgressPolicy) ValidateForNetworkMode(networkMode string) error {
 }
 
 // Validate reports a policy that cannot be enforced. It returns an error when:
-//   - Mode is not one of guarded/mediated/strict/off (call NormalizeEgressPolicy first)
+//   - Mode is not one of guarded/strict/off (call NormalizeEgressPolicy first)
 //   - any Caps field is negative
 //
 // Allow/Passthrough/DNS are assumed already cleaned by NormalizeEgressPolicy.
 func (p EgressPolicy) Validate() error {
 	switch p.Mode {
-	case EgressModeGuarded, EgressModeMediated, EgressModeStrict, EgressModeOff:
+	case EgressModeGuarded, EgressModeStrict, EgressModeOff:
 		// valid
 	default:
-		return fmt.Errorf("vmkit: invalid egress mode %q: must be one of guarded, mediated, strict, off", p.Mode)
+		return fmt.Errorf("vmkit: invalid egress mode %q: must be one of guarded, strict, off", p.Mode)
 	}
 	if p.Caps.MaxBytesPerSec < 0 {
 		return fmt.Errorf("vmkit: Caps.MaxBytesPerSec must be non-negative, got %d", p.Caps.MaxBytesPerSec)

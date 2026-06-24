@@ -11,7 +11,7 @@ microagent egress <name> [--follow] [--state-dir <dir>]
 ```
 
 `egress` surfaces the egress mediator's audit log for a workspace, oldest first.
-Egress mediation is **on by default** (mode `mediated`; the other modes are
+Egress mediation is **on by default** (mode `guarded`; the other modes are
 `strict` and `off`), so every workspace whose mediator has made a decision has
 this record. Each line is one decision the mediator made: `egress_allow` /
 `egress_deny` for connections, the `egress_mitm_*` records for TLS

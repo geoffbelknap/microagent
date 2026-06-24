@@ -540,9 +540,9 @@ func argValues(args []string, flag string) []string {
 
 func TestEgressMediatorArgsIncludesMode(t *testing.T) {
 	cases := map[string]string{
-		"mediated": "mediated",
-		"strict":   "strict",
-		"":         "guarded", // secure default normalization
+		"guarded": "guarded",
+		"strict":  "strict",
+		"":        "guarded", // secure default normalization
 	}
 	for in, want := range cases {
 		args := egressMediatorArgs("10.43.7.1", 41000, "/state/ws/egress-access.jsonl", in, nil, nil, "", nil, "", "", egressCaps{})
@@ -643,16 +643,16 @@ func TestEgressMediatorArgsThreadsCaps(t *testing.T) {
 }
 
 // TestEgressMediationGatesProvisioning documents the guard that prepareTAPNATForStart
-// uses to decide whether to provision the mediator: only an EXPLICIT mediated or
+// uses to decide whether to provision the mediator: only an EXPLICIT guarded or
 // strict mode provisions. An empty mode does NOT — the high-level workspace
-// chokepoints set the "mediated" default via NormalizeEgressMode before the config
+// chokepoints set the "guarded" default via NormalizeEgressMode before the config
 // reaches the supervisor, while the low-level raw create/start path leaves
 // EgressMode empty (and allocates no CA-cert listener), so the supervisor must not
 // mediate it; otherwise it would MITM the guest's TLS with a CA the guest never
 // receives. off never provisions.
 func TestEgressMediationGatesProvisioning(t *testing.T) {
-	if !vmkit.EgressMediationOn(vmkit.EgressModeMediated) {
-		t.Error("mediated must provision the mediator")
+	if !vmkit.EgressMediationOn(vmkit.EgressModeGuarded) {
+		t.Error("guarded must provision the mediator")
 	}
 	if !vmkit.EgressMediationOn(vmkit.EgressModeStrict) {
 		t.Error("strict must provision the mediator")

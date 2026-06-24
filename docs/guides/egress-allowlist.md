@@ -10,9 +10,10 @@ This guide shows how to set a workspace's egress allowlist and passthrough set.
 For the ideas behind it - the three modes, the MITM trust model, UDP/DNS
 mediation - read [Egress mediation](/concepts/egress-mediation/) first.
 
-By default (`--egress mediated`) a workspace can reach anything, and every
-connection is captured and audited. To **confine** it to a known set of
-destinations, switch to `strict` and declare what it may reach.
+By default (`--egress guarded`) a workspace can reach the public internet
+freely while internal destinations are denied, and every connection is captured
+and audited. To **confine** it to a known set of destinations, switch to
+`strict` and declare what it may reach.
 
 ## Confine a workspace with `strict`
 
@@ -70,9 +71,9 @@ as `--egress-allow`.
 - A **passthrough** host's TLS is left intact, so microagent records *that* the
   connection happened but **cannot see the payload.**
 
-Passthrough is also meaningful under the default `mediated` mode: everything is
-already reachable there, but marking a host passthrough stops microagent from
-MITM'ing it. If an allowed host's TLS is failing, passthrough is usually the fix
+Passthrough is also meaningful under the default `guarded` mode: public
+destinations are already reachable there, but marking a host passthrough stops
+microagent from MITM'ing it. If an allowed host's TLS is failing, passthrough is usually the fix
 - see [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails).
 
 ## Reusable lists: the policy file
@@ -102,7 +103,7 @@ microagent create research --egress strict --egress-policy egress.yaml
 - It is decoded strictly: an unknown top-level key (a typo like `allowed:`) or an
   empty list entry is an error, so a misconfiguration fails closed rather than
   silently leaving a host unreachable.
-- A policy file requires `--egress mediated` or `--egress strict`; passing one
+- A policy file requires `--egress guarded` or `--egress strict`; passing one
   with `--egress off` is rejected (mediation is off, so there is nothing to
   allow).
 

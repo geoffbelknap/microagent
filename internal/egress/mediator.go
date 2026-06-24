@@ -46,8 +46,8 @@ const maxTLSRecord = 1<<14 + 5
 // fail-closed. OrigDst and Dial are injectable for tests.
 type Handler struct {
 	// Mode selects enforcement: "guarded" (default) denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west on
-	// resolved IP while allowing public internet; "mediated" allows + audits every destination (MITM all TLS, nothing blocked);
-	// "strict" denies non-allowlisted destinations fail-closed; empty normalizes to "guarded".
+	// resolved IP while allowing public internet; "strict" denies non-allowlisted destinations fail-closed; empty
+	// normalizes to "guarded".
 	Mode          string
 	Policy        *Policy
 	Passthrough   *Policy
@@ -284,12 +284,9 @@ func isEastWestAddr(a netip.Addr) bool {
 	return a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLoopback()
 }
 
-// Egress mode constants for the Handler.Mode field. These mirror the vmkit
-// constants without introducing a package dependency; they must stay in sync.
-const (
-	egressModeGuarded  = "guarded"
-	egressModeMediated = "mediated"
-)
+// Egress mode constant for the Handler.Mode field. Mirrors the vmkit constant
+// without introducing a package dependency; they must stay in sync.
+const egressModeGuarded = "guarded"
 
 var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
@@ -417,19 +414,17 @@ func (h *Handler) Handle(conn net.Conn) {
 	// as an inside/infrastructure address (link-local, RFC1918, CGNAT, loopback,
 	// etc.). An explicitly allowlisted host or a passthrough host overrides the
 	// inside-deny, so an operator who allowlists an internal IP/name keeps
-	// reaching it. mediated mode disables inside enforcement entirely (escape
-	// hatch intact). The check runs on the raw destination IP, not the sniffed
+	// reaching it. The check runs on the raw destination IP, not the sniffed
 	// host, so SNI/Host spoofing cannot bypass it.
 	inside := h.Mode == egressModeGuarded && isInsideAddr(dst.Addr())
-	// In mediated mode every destination is allowed (and audited); strict (or
-	// empty) keeps the default-deny allowlist; guarded keeps the allowlist AND
-	// additionally denies non-allowlisted inside destinations fail-closed.
-	// allowed defaults to d.Allow when Mode is unset, so an unspecified mode is
-	// safe. The inside-deny is expressed as: guarded blocks the inside UNLESS
-	// explicitly allowlisted — i.e. the inside flag narrows guarded beyond the
-	// allowlist but the allowlist still wins.
-	allowed := d.Allow || h.Mode == egressModeMediated || (h.Mode == egressModeGuarded && !inside)
-	// unlisted marks a destination permitted only because of mediated mode (it
+	// strict (or empty) keeps the default-deny allowlist; guarded keeps the
+	// allowlist AND additionally denies non-allowlisted inside destinations
+	// fail-closed. allowed defaults to d.Allow when Mode is unset, so an
+	// unspecified mode is safe. The inside-deny is expressed as: guarded blocks
+	// the inside UNLESS explicitly allowlisted — i.e. the inside flag narrows
+	// guarded beyond the allowlist but the allowlist still wins.
+	allowed := d.Allow || (h.Mode == egressModeGuarded && !inside)
+	// unlisted marks a destination permitted only because of guarded mode (it
 	// is not on the allowlist) so the audit trail records the looser grant. A
 	// passthrough host is explicitly listed — and strict would allow it too — so
 	// it is never "unlisted".

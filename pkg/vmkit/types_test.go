@@ -285,8 +285,6 @@ func TestNormalizeEgressMode(t *testing.T) {
 		"  ":       "guarded",
 		"guarded":  "guarded",
 		"GUARDED":  "guarded",
-		"mediated": "mediated",
-		"MEDIATED": "mediated",
 		" strict ": "strict",
 		"strict":   "strict",
 		"off":      "off",
@@ -300,8 +298,8 @@ func TestNormalizeEgressMode(t *testing.T) {
 }
 
 func TestEgressMediationOn(t *testing.T) {
-	// "guarded", "mediated", and "strict" all provision the mediator.
-	on := []string{"guarded", "GUARDED", " guarded ", "mediated", "MEDIATED", "strict", " strict "}
+	// "guarded" and "strict" both provision the mediator.
+	on := []string{"guarded", "GUARDED", " guarded ", "strict", " strict "}
 	for _, m := range on {
 		if !EgressMediationOn(m) {
 			t.Errorf("EgressMediationOn(%q) = false, want true", m)
@@ -320,12 +318,11 @@ func TestEgressMediationOn(t *testing.T) {
 
 func TestNormalizeEgressModeGuardedDefault(t *testing.T) {
 	cases := map[string]string{
-		"":         EgressModeGuarded, // default flipped to guarded
-		"guarded":  EgressModeGuarded,
-		"mediated": EgressModeMediated, // escape hatch preserved
-		"strict":   EgressModeStrict,
-		"off":      EgressModeOff,
-		"bogus":    EgressModeGuarded, // unknown -> safe default
+		"":        EgressModeGuarded, // default flipped to guarded
+		"guarded": EgressModeGuarded,
+		"strict":  EgressModeStrict,
+		"off":     EgressModeOff,
+		"bogus":   EgressModeGuarded, // unknown -> safe default
 	}
 	for in, want := range cases {
 		if got := NormalizeEgressMode(in); got != want {

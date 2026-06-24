@@ -148,11 +148,11 @@ func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(
 
 	listed := h.Policy != nil && h.Policy.AllowHost(qname).Allow
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(qname).Allow
-	mediated := h.Mode == egressModeMediated || h.Mode == egressModeGuarded
-	allowed := mediated || listed || passthrough
-	// unlisted marks a name permitted only because of mediated mode (it is on no
-	// allowlist), so the audit trail records the looser grant — mirroring the TCP
-	// and UDP paths.
+	permissive := h.Mode == egressModeGuarded
+	allowed := permissive || listed || passthrough
+	// unlisted marks a name permitted only because guarded mode resolves names
+	// freely (it is on no allowlist), so the audit trail records the looser grant
+	// — mirroring the TCP and UDP paths.
 	unlisted := allowed && !listed && !passthrough
 
 	dnsFields := func() map[string]any {

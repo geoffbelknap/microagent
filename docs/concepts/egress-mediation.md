@@ -25,15 +25,13 @@ Egress mediation is implemented by the Firecracker backend on Linux. It runs in
 the [`user` network mode](/concepts/networking/)'s per-VM user namespace, the
 only mode that carries network egress.
 
-> **Migration note (behavior change):** the default egress mode changed from
-> `mediated` to `guarded`. Workspaces that omit `--egress` now deny internal
-> destinations (link-local/metadata 169.254/16, RFC1918, IPv6 ULA, CGNAT
-> 100.64/10, loopback, and east-west peers) while still allowing the public
-> internet freely. To restore the previous allow-all behavior set
-> `--egress mediated`; to permit a specific internal host use
-> `--egress-allow <host-or-ip>`.
+> **Migration note (behavior change):** the default egress mode is `guarded`.
+> Workspaces that omit `--egress` deny internal destinations
+> (link-local/metadata 169.254/16, RFC1918, IPv6 ULA, CGNAT 100.64/10,
+> loopback, and east-west peers) while still allowing the public internet
+> freely. To permit a specific internal host use `--egress-allow <host-or-ip>`.
 
-## The four modes
+## The three modes
 
 A workspace's egress posture is set with `--egress` on
 [`create`](/cli/create/) or [`run`](/cli/run/):
@@ -41,8 +39,7 @@ A workspace's egress posture is set with `--egress` on
 | Mode | What happens | Default |
 |---|---|---|
 | `guarded` | Denies "the inside" (link-local/metadata 169.254/16, RFC1918, IPv6 ULA, CGNAT 100.64/10, loopback, east-west peers) on the **resolved destination IP**; allows the public internet with **no allowlist required**. DNS resolves freely — the inside protection is enforced at connect time, which also defeats DNS rebinding. | **Yes** |
-| `mediated` | **All** guest egress is mediated and audited, but **nothing is blocked**. TCP is intercepted (TLS is MITM'd), UDP is captured, DNS is resolved and recorded. Allow-all + audit. Explicit opt-in; was the default in earlier releases. | No |
-| `strict` | Same capture as `mediated`, but **deny anything not on the allowlist**, and the mediator is the **only DNS resolver** — non-allowlisted names get REFUSED before any connection is attempted. | No |
+| `strict` | **Deny anything not on the allowlist**, and the mediator is the **only DNS resolver** — non-allowlisted names get REFUSED before any connection is attempted. | No |
 | `off` | No mediation. The guest's network device is wired straight to the chosen [network mode](/concepts/networking/). | No |
 
 `guarded` is the default: omit `--egress` and the workspace can reach the
@@ -50,14 +47,11 @@ public internet freely, but any attempt to connect to an internal address is
 denied and audited. `--egress open` and `--egress disabled` are accepted aliases
 for `off`; an empty value resolves to `guarded`.
 
-The practical difference between `guarded` and `mediated` is **inside
-enforcement**. Both see everything; `guarded` denies internal destinations
-(and audits the attempt), `mediated` permits everything (and tells you what it
-saw). Reach for `mediated` when you need the agent to reach an internal
-service and do not want an allowlist; reach for `guarded` (the default) when
-you want the public internet available without any allowlist but need the host
-and internal infrastructure protected. Reach for `strict` when you want the
-agent confined to an explicit set of destinations.
+Reach for `guarded` (the default) when you want the public internet available
+without any allowlist but need the host and internal infrastructure protected;
+to grant access to a specific internal host, add it with `--egress-allow`.
+Reach for `strict` when you want the agent confined to an explicit set of
+destinations.
 
 ### Allowlist exception under guarded
 
@@ -65,15 +59,14 @@ An operator can permit a specific internal host or IP while keeping the guarded
 default by using `--egress-allow <host-or-ip>`. An explicitly allowlisted
 destination overrides the inside-deny: `d.Allow` wins. This lets you grant
 access to exactly one internal service (e.g. a sidecar on `10.0.0.5`) without
-opening the entire internal address space. To allow all internal destinations
-restore the old default with `--egress mediated`.
+opening the entire internal address space.
 
 Every decision in every mode is recorded. See
 [Where decisions are recorded](#where-decisions-are-recorded).
 
-## Mediated means microagent reads your TLS
+## Mediation means microagent reads your TLS
 
-Be clear-eyed about what `mediated` and `guarded` (the default) do for
+Be clear-eyed about what `guarded` (the default) and `strict` do for
 intercepted connections: the mediator performs a
 **man-in-the-middle (MITM)** on the guest's outbound TLS. For an allowed,
 intercepted connection the mediator terminates the guest's TLS, opens its own
@@ -111,13 +104,13 @@ fingerprint does not match, rather than silently breaking the guest's trust.
 
 ## UDP and DNS mediation
 
-Mediation is not TCP-only. Under `guarded`, `mediated`, and `strict`:
+Mediation is not TCP-only. Under `guarded` and `strict`:
 
 - **UDP** is captured transparently (via Linux TPROXY) and forwarded, with each
   datagram flow audited. In `guarded` mode, UDP datagrams to inside addresses
   are denied and recorded as `egress_udp_internal_deny`.
 - **DNS** is mediated by making the mediator the guest's resolver. In `guarded`
-  and `mediated` mode every query is forwarded to the real resolver and the
+  mode every query is forwarded to the real resolver and the
   answers are recorded (the name-to-IP mappings are also used to police later
   flows by hostname). In `guarded` mode DNS resolves freely — even for names
   that point at internal IPs — but the resulting TCP/UDP connection is denied
@@ -147,7 +140,7 @@ so:
   `sudo modprobe nft_tproxy nf_tproxy_ipv4 xt_socket nf_socket_ipv4`. With the
   modules present, the workspace's netns installs its own TPROXY rules.
 
-If a `guarded`, `mediated`, or `strict` workspace lands on a host where TPROXY
+If a `guarded` or `strict` workspace lands on a host where TPROXY
 is not available, the workspace **fails closed - it refuses to start** rather
 than running with an unmediated UDP/DNS channel. The error names the fix:
 
@@ -181,7 +174,7 @@ as a connection, you just can't inspect what crossed it. See
 the symptom that tells you to use it.
 
 In `strict` mode, both allow and passthrough entries are reachable; everything
-else is denied. In `guarded` and `mediated` mode public destinations are already
+else is denied. In `guarded` mode public destinations are already
 reachable (the allowlist is not required), but marking a host passthrough still
 matters - it stops microagent from MITM'ing that host's TLS. An `--egress-allow`
 entry in `guarded` mode additionally overrides the inside-deny for that specific
@@ -203,7 +196,7 @@ guest](/guides/secrets/); reach for credential swap when you want the agent to
 use a credential it should never be able to read.
 
 Enable it with `--egress-swap-config <path>` on [`run`](/cli/run/) or
-[`create`](/cli/create/) — it requires `--egress guarded`, `mediated`, or
+[`create`](/cli/create/) — it requires `--egress guarded` or
 `strict`, and the target host must be allowlisted. The file declares named swap entries:
 
 ```yaml
@@ -254,7 +247,7 @@ are:
 | `egress_loop_guard` | The mediator's own forwarding leg, dropped to avoid a self-loop |
 
 An `unlisted: true` field marks a destination permitted only because of
-`guarded` or `mediated` mode (it is on no allowlist), so the audit distinguishes
+`guarded` mode's public grant (it is on no allowlist), so the audit distinguishes
 the looser grant from an explicitly allowlisted one. This audit log is a separate stream
 from lifecycle [`events`](/cli/events/): `events` is how the workspace got to its
 state, `egress` is what it tried to reach and how the mediator ruled.

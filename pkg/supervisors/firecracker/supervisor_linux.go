@@ -2223,7 +2223,7 @@ func startDeadmanProcess(opts Options) (int, error) {
 // passthrough lists hosts whose TLS is forwarded opaquely (not intercepted).
 // egressMediatorArgs builds the argv for the detached
 // `microagent-firecracker-supervisor --egress-mediator` child. Pure (no I/O) so
-// it can be unit-tested. The mode ("mediated"/"strict") is threaded to the
+// it can be unit-tested. The mode ("guarded"/"strict") is threaded to the
 // mediator via --mode; an empty mode is normalized to the secure default.
 // egressCaps carries the bounded-operations caps (ASK tenet 8) from the workspace
 // Config into egressMediatorArgs. All fields default to zero = unlimited (current
