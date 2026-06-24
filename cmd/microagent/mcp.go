@@ -313,6 +313,7 @@ func mcpTools() []map[string]any {
 			"egress_passthrough":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Egress hosts allowed without TLS interception"},
 			"egress_policy":             map[string]any{"type": "string", "description": "Path to an egress policy file (.yaml/.yml/.json)"},
 			"egress_swap_config":        map[string]any{"type": "string", "description": "Credential-swap config path; mediator injects the real secret host-side so the guest never holds it"},
+			"cred_swap":                 map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Inject a built-in provider's API key host-side: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). Guest never holds the key; reference only, never a literal"},
 			"secret":                    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Secrets delivered to tmpfs /run/secrets, each NAME=scheme:ref"},
 			"secret_on_demand":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; fetched at runtime, never written to tmpfs"},
 			"secrets_env_file":          map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
@@ -346,6 +347,7 @@ func mcpTools() []map[string]any {
 			"egress_passthrough": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Egress hosts allowed without TLS interception"},
 			"egress_policy":      map[string]any{"type": "string", "description": "Path to an egress policy file (.yaml/.yml/.json)"},
 			"egress_swap_config": map[string]any{"type": "string", "description": "Credential-swap config path; mediator injects the real secret host-side so the guest never holds it"},
+			"cred_swap":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Inject a built-in provider's API key host-side: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). Guest never holds the key; reference only, never a literal"},
 			"secret":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Secrets delivered to tmpfs /run/secrets, each NAME=scheme:ref"},
 			"secret_on_demand":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; never written to tmpfs"},
 			"secrets_env_file":   map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
@@ -1872,6 +1874,7 @@ func appendMCPWorkspaceEgressSecretFlags(cli []string, args map[string]any) ([]s
 	}{
 		{"egress_allow", "-egress-allow"},
 		{"egress_passthrough", "-egress-passthrough"},
+		{"cred_swap", "-cred-swap"},
 		{"secret", "-secret"},
 		{"secret_on_demand", "-secret-on-demand"},
 	} {

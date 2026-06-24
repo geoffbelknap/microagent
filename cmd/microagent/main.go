@@ -566,6 +566,7 @@ Common flags (same as run):
   --egress <mode>              guarded (default; deny-the-inside) | strict | off
   --egress-allow <host>        allowlisted destination (repeatable)
   --egress-swap-config <path>  inject a credential host-side; the guest never holds it
+  --cred-swap PROVIDER[=ref]   inject a built-in provider API key host-side (e.g. anthropic); reference only
   --secret NAME=<ref>          deliver a secret to the guest tmpfs (repeatable)
   --exec <command>             command to run (alternative to positional COMMAND)
   --json                       machine-readable result + audit
@@ -2067,6 +2068,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress guarded or strict)")
 	var egressSwapConfig string
 	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress guarded or strict)")
+	var credSwap multiFlag
+	fs.Var(&credSwap, "cred-swap", "Inject a provider API key host-side for a built-in provider: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). The guest never holds the key; reference only, never a literal. Repeatable; requires --egress guarded or strict")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2150,7 +2153,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := applySetupEnvSecretOptionFlags(&opts, setupCommands, setupFiles, envVars, secretFlags, secretsEnvFile, secretOnDemandFlags, secretsAudit); err != nil {
 		return workspaceOptions{}, err
 	}
-	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig); err != nil {
+	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap); err != nil {
 		return workspaceOptions{}, err
 	}
 	if err := applyStorageOptionFlags(&opts, volumeFlags, diskFlags, bundleFlags, outputFlags); err != nil {
@@ -2224,7 +2227,7 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 	return nil
 }
 
-func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string) error {
+func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string, credSwap multiFlag) error {
 	mode, err := parseEgressMode(egressMode)
 	if err != nil {
 		return err
@@ -2261,7 +2264,47 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		}
 		opts.EgressSwapConfigPath = trimmed
 	}
+	providers, err := parseCredSwapFlags(credSwap)
+	if err != nil {
+		return err
+	}
+	if len(providers) > 0 {
+		// Like --egress-swap-config, cred-swap injects a real secret host-side at
+		// the mediator; with mediation off there is no mediator to inject it.
+		if mode == vmkit.EgressModeOff {
+			return fmt.Errorf("--cred-swap: credential swap requires --egress guarded or strict")
+		}
+		opts.CredSwapProviders = providers
+	}
 	return nil
+}
+
+// parseCredSwapFlags parses repeatable `--cred-swap PROVIDER[=ref]` specs into
+// resolved CredSwapProvider entries. It fails fast: an unknown provider or a
+// literal (non-reference) key is rejected here, before any file is written or
+// audit entry made, so a secret pasted on the command line never gets processed.
+// The actual swap-config file is generated later, at workspace prep.
+func parseCredSwapFlags(credSwap multiFlag) ([]workspace.CredSwapProvider, error) {
+	if len(credSwap) == 0 {
+		return nil, nil
+	}
+	providers := make([]workspace.CredSwapProvider, 0, len(credSwap))
+	for _, raw := range credSwap {
+		spec := strings.TrimSpace(raw)
+		if spec == "" {
+			continue
+		}
+		provider, ref, _ := strings.Cut(spec, "=")
+		provider = strings.TrimSpace(provider)
+		ref = strings.TrimSpace(ref)
+		// Validate the provider name and key reference up front (this rejects a
+		// literal secret); the returned entry is rebuilt at prep time.
+		if _, _, err := egress.ProviderSwapEntry(provider, ref); err != nil {
+			return nil, err
+		}
+		providers = append(providers, workspace.CredSwapProvider{Provider: provider, Ref: ref})
+	}
+	return providers, nil
 }
 
 func applyStorageOptionFlags(opts *workspaceOptions, volumeFlags, diskFlags, bundleFlags, outputFlags multiFlag) error {
@@ -3521,6 +3564,7 @@ func reorderFlagArgs(args []string) []string {
 		"-egress-passthrough":        true,
 		"-egress-policy":             true,
 		"-egress-swap-config":        true,
+		"-cred-swap":                 true,
 	}
 	var flags []string
 	var positional []string
@@ -4144,6 +4188,8 @@ Options:
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
+  -cred-swap PROVIDER[=ref]
+                         Inject a built-in provider API key host-side (e.g. anthropic, openai); reference only, never a literal (repeatable)
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable)
   -secret-on-demand NAME=<scheme>:<ref>
@@ -4228,6 +4274,8 @@ Options:
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
+  -cred-swap PROVIDER[=ref]
+                         Inject a built-in provider API key host-side (e.g. anthropic, openai); reference only, never a literal (repeatable)
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable)
   -secret-on-demand NAME=<scheme>:<ref>
