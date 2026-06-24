@@ -3626,19 +3626,39 @@ func processActive(pid int) (bool, error) {
 }
 
 // processReferencesWorkspace reports whether the live process pid is actually
-// this workspace's own (firecracker/pasta/companion) — its argv references the
-// workspace state directory. This guards the gc liveness check against PID
-// reuse: a recycled pid is alive but won't carry the workspace path.
+// this workspace's own (firecracker/pasta/companion). This guards the gc
+// liveness check against PID reuse: a recycled pid is alive but won't reference
+// this workspace.
+//
+// An unconfined process carries the workspace state path in its argv. A confined
+// (VMM-process confinement) firecracker is pivot_root'd into the jail and exec'd
+// with jail-relative argv, so the workspace path is absent from its cmdline —
+// but its mount namespace binds the per-workspace jail root (<workspace>/jail),
+// which appears in its mountinfo. Either match is reuse-safe: a recycled
+// unrelated pid carries neither.
 func processReferencesWorkspace(pid int, opts Options) bool {
 	if pid <= 0 {
 		return false
 	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil {
+	cmdline, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	mountinfo, _ := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid))
+	return processIdentityReferencesWorkspace(cmdline, mountinfo, filepath.Join(opts.StateDir, opts.Name))
+}
+
+// processIdentityReferencesWorkspace is the pure matcher behind
+// processReferencesWorkspace: the workspace state path appears in an unconfined
+// process's argv (NUL-separated cmdline), or the per-workspace jail root
+// (<workspace>/jail) appears in a confined firecracker's mountinfo (its
+// pivot_root'd mount namespace binds that jail). Either is reuse-safe — a
+// recycled unrelated pid carries neither.
+func processIdentityReferencesWorkspace(cmdline, mountinfo []byte, wsPath string) bool {
+	if wsPath == "" {
 		return false
 	}
-	cmd := strings.ReplaceAll(string(data), "\x00", " ")
-	return strings.Contains(cmd, filepath.Join(opts.StateDir, opts.Name))
+	if strings.Contains(strings.ReplaceAll(string(cmdline), "\x00", " "), wsPath) {
+		return true
+	}
+	return strings.Contains(string(mountinfo), filepath.Join(wsPath, "jail"))
 }
 
 // leaseExpired reports whether a workspace declared a lifetime lease
