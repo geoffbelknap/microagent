@@ -210,6 +210,27 @@ swaps:
     key_ref: env:OPENAI_API_KEY   # resolved on the host; never enters the guest
 ```
 
+### Provider shorthand: `--cred-swap`
+
+For the common case — a built-in LLM/API provider — `--cred-swap PROVIDER[=ref]`
+generates the entry above for you. `--cred-swap openai` allowlists `api.openai.com`,
+injects `Authorization: Bearer {key}`, and resolves the key from `env:OPENAI_API_KEY`;
+add `=ref` to point at a different reference (`env:NAME`, `file:PATH`, or
+`vault:PATH`). The reference is never a literal secret — a literal is rejected up
+front so it can't land in shell history. Built-in providers: `anthropic`, `openai`,
+`gemini`, `groq`, `openrouter`, `deepseek`. The flag is repeatable and composes with
+`--egress-swap-config` (entries are merged; a name collision is an error).
+
+```bash
+microagent dispatch --egress strict --cred-swap anthropic \
+  some-image  node agent.js     # agent calls api.anthropic.com with a key it never sees
+```
+
+This protects the **task credentials** a guest uses, not the agent's own auth: a
+prompt-injected agent can't exfiltrate a key it never holds. It does not make the
+workspace leakproof — it bounds one blast radius (this credential), and you still
+choose the egress envelope around it.
+
 ## Bounded operations
 
 The mediator can enforce per-workspace caps so a mediated workspace's egress is

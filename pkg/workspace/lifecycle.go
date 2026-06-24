@@ -17,9 +17,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
+	"gopkg.in/yaml.v3"
 )
 
 type Result struct {
@@ -102,6 +104,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("create cannot use both image command and service command")
 	}
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
+		return Result{}, err
+	}
+	if err := materializeCredSwapConfig(&opts); err != nil {
 		return Result{}, err
 	}
 	if err := EnsureCanCreate(opts); err != nil {
@@ -253,6 +258,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		opts.ImageRef = DefaultImage(opts.Architecture)
 	}
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
+		return Result{}, err
+	}
+	if err := materializeCredSwapConfig(&opts); err != nil {
 		return Result{}, err
 	}
 	disks, err := PrepareDisks(ctx, opts)
@@ -940,6 +948,75 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 		disks = append(disks, disk)
 	}
 	return disks, nil
+}
+
+// materializeCredSwapConfig resolves opts.CredSwapProviders into a generated
+// credential-swap config file and wires it into the egress fields. It is the
+// library-side realization of the `--cred-swap PROVIDER` surface: for each
+// provider it (1) unions the provider's egress host(s) into EgressAllow so the
+// mediator permits the connection and (2) builds a static swap entry. The
+// entries are merged with any operator-supplied EgressSwapConfigPath (union by
+// name; a name collision is an error so nothing is silently overwritten),
+// marshaled to YAML, and written to a durable per-workspace path
+// (<StateDir>/workspaces/<name>/cred-swap.yaml) which becomes the new
+// EgressSwapConfigPath. The path must be durable, not process-tied: it is
+// persisted in the manifest and snapshot manifest and re-read by the mediator
+// on restart/restore.
+//
+// Only references (env:/file:/vault:) are written — never the secret value. The
+// mediator resolves the reference host-side at request time, so the guest never
+// holds the key. This is a no-op when no providers are declared.
+func materializeCredSwapConfig(opts *Options) error {
+	if len(opts.CredSwapProviders) == 0 {
+		return nil
+	}
+	cfg := egress.SwapConfigFile{Swaps: map[string]egress.SwapEntry{}}
+	// Merge an operator-supplied swap config first so generated provider entries
+	// are added on top of it (collision below catches an overlapping name).
+	if existing := strings.TrimSpace(opts.EgressSwapConfigPath); existing != "" {
+		data, err := os.ReadFile(existing)
+		if err != nil {
+			return fmt.Errorf("cred-swap: read --egress-swap-config %q: %w", existing, err)
+		}
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("cred-swap: parse --egress-swap-config %q: %w", existing, err)
+		}
+		if cfg.Swaps == nil {
+			cfg.Swaps = map[string]egress.SwapEntry{}
+		}
+	}
+	var hosts []string
+	for _, p := range opts.CredSwapProviders {
+		entry, entryHosts, err := egress.ProviderSwapEntry(p.Provider, p.Ref)
+		if err != nil {
+			return err
+		}
+		name := strings.ToLower(strings.TrimSpace(p.Provider))
+		if _, exists := cfg.Swaps[name]; exists {
+			return fmt.Errorf("cred-swap: swap entry %q already defined (collides with an --egress-swap-config entry or a repeated --cred-swap)", name)
+		}
+		cfg.Swaps[name] = entry
+		hosts = append(hosts, entryHosts...)
+	}
+	// The guest must be allowed to reach the provider host for the injected
+	// credential to matter; union into the allowlist (dedupe with what's already
+	// there) before the egress policy is built.
+	opts.EgressAllow = egress.DedupeHosts(append(append([]string(nil), opts.EgressAllow...), hosts...))
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("cred-swap: marshal config: %w", err)
+	}
+	workspaceDir := filepath.Join(opts.StateDir, "workspaces", opts.Name)
+	if err := os.MkdirAll(workspaceDir, 0o700); err != nil {
+		return err
+	}
+	outPath := filepath.Join(workspaceDir, "cred-swap.yaml")
+	if err := os.WriteFile(outPath, data, 0o600); err != nil {
+		return fmt.Errorf("cred-swap: write %q: %w", outPath, err)
+	}
+	opts.EgressSwapConfigPath = outPath
+	return nil
 }
 
 func WriteManifest(opts Options) error {

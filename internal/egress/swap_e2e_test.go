@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // realSecret is the live credential the host side injects. It must never appear
@@ -46,13 +48,31 @@ type mediatorWithSwap struct {
 // dials, so the SNI-scoped injection path fires.
 func startMediatorWithSwap(t *testing.T, swapDomain string) *mediatorWithSwap {
 	t.Helper()
+	return startMediatorWithSwapConfig(t, swapDomain, `swaps:
+  e2e:
+    type: static
+    domains: ["`+swapDomain+`"]
+    header: Authorization
+    format: "Bearer {key}"
+    key_ref: "env:E2E_KEY"
+`, "Authorization", "e2e")
+}
 
-	// Upstream records the Authorization header it actually received and replies
-	// "ok". The channel is buffered so the handler never blocks.
+// startMediatorWithSwapConfig is the generalized harness: swapYAML is the swap
+// config the mediator loads (its single entry must be named swapName and inject
+// captureHeader), and captureHeader is the request header the upstream records
+// so a test can assert what the mediator actually injected. This lets the same
+// data path be driven by a hand-written Authorization/Bearer swap or by a
+// provider-registry entry (e.g. anthropic's x-api-key/"{key}").
+func startMediatorWithSwapConfig(t *testing.T, swapDomain, swapYAML, captureHeader, swapName string) *mediatorWithSwap {
+	t.Helper()
+
+	// Upstream records the swapped header it actually received and replies "ok".
+	// The channel is buffered so the handler never blocks.
 	gotAuth := make(chan string, 1)
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
-		case gotAuth <- r.Header.Get("Authorization"):
+		case gotAuth <- r.Header.Get(captureHeader):
 		default:
 		}
 		fmt.Fprint(w, "ok")
@@ -71,16 +91,9 @@ func startMediatorWithSwap(t *testing.T, swapDomain string) *mediatorWithSwap {
 		t.Fatalf("NewPolicy: %v", err)
 	}
 
-	// A single static swap for swapDomain: render "Bearer {key}" with the real
-	// secret resolved from env:E2E_KEY (a fake resolver, no real env read).
-	tbl, err := LoadSwapTable([]byte(`swaps:
-  e2e:
-    type: static
-    domains: ["` + swapDomain + `"]
-    header: Authorization
-    format: "Bearer {key}"
-    key_ref: "env:E2E_KEY"
-`))
+	// The swap table comes from the caller's YAML; its key_ref resolves to the
+	// real secret via a fake resolver (no real env read).
+	tbl, err := LoadSwapTable([]byte(swapYAML))
 	if err != nil {
 		upstream.Close()
 		t.Fatalf("LoadSwapTable: %v", err)
@@ -131,7 +144,7 @@ func startMediatorWithSwap(t *testing.T, swapDomain string) *mediatorWithSwap {
 		mediatorAddr:   ln.Addr().String(),
 		gotAuth:        gotAuth,
 		log:            log,
-		swapName:       "e2e",
+		swapName:       swapName,
 		handleDone:     handleDone,
 		closeUpstream:  upstream.Close,
 		closeListener:  func() { ln.Close() },
@@ -267,5 +280,94 @@ func TestE2E_CredentialSwap_SecretNeverCrossesBoundary(t *testing.T) {
 	}
 	if !foundSwap {
 		t.Fatalf("no egress_swap audit event; got %+v", logSnap)
+	}
+}
+
+// TestE2E_CredSwapProviderEntry_InjectsProviderHeader proves the `--cred-swap`
+// surface end-to-end at the data-path level: an entry built by the provider
+// registry (ProviderSwapEntry, the core of materializeCredSwapConfig) and
+// marshaled exactly as the generated cred-swap.yaml is, loads into the mediator
+// and injects the real credential into the provider's OWN header and format.
+// anthropic is deliberately chosen because it uses x-api-key with a bare "{key}"
+// format (not Authorization/Bearer) — so this also guards against the registry
+// header/format ever silently regressing to the generic default.
+func TestE2E_CredSwapProviderEntry_InjectsProviderHeader(t *testing.T) {
+	// The upstream test cert covers api.example.com (see the marquee test), so the
+	// data path uses that host while the entry's header/format come straight from
+	// the anthropic registry definition — which is what this test guards.
+	const swapDomain = "api.example.com"
+
+	// Build the entry the way `--cred-swap anthropic=env:E2E_KEY` does, then
+	// marshal it into a cred-swap.yaml exactly as materializeCredSwapConfig would.
+	entry, hosts, err := ProviderSwapEntry("anthropic", "env:E2E_KEY")
+	if err != nil {
+		t.Fatalf("ProviderSwapEntry: %v", err)
+	}
+	if len(hosts) != 1 || hosts[0] != "api.anthropic.com" {
+		t.Fatalf("provider hosts = %v, want [api.anthropic.com]", hosts)
+	}
+	if entry.Header != "x-api-key" || entry.Format != "{key}" {
+		t.Fatalf("anthropic entry header/format = %q/%q, want x-api-key/{key}", entry.Header, entry.Format)
+	}
+	// Rebind only the destination to the cert-covered host; the header/format/
+	// key_ref under test are unchanged.
+	entry.Domains = []string{swapDomain}
+	yamlBytes, err := yaml.Marshal(SwapConfigFile{Swaps: map[string]SwapEntry{"anthropic": entry}})
+	if err != nil {
+		t.Fatalf("marshal generated cred-swap.yaml: %v", err)
+	}
+
+	m := startMediatorWithSwapConfig(t, swapDomain, string(yamlBytes), "x-api-key", "anthropic")
+	defer m.closeUpstream()
+	defer m.closeListener()
+
+	rawConn, err := net.DialTimeout("tcp", m.mediatorAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("dial mediator: %v", err)
+	}
+	defer rawConn.Close()
+	clientTLS := tls.Client(rawConn, m.guestTLSConfig)
+	if err := clientTLS.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	if err := clientTLS.Handshake(); err != nil {
+		t.Fatalf("client TLS handshake: %v", err)
+	}
+
+	// The guest carries only a worthless placeholder in the provider header.
+	const placeholderKey = "PLACEHOLDER-NOT-A-KEY"
+	req := "GET / HTTP/1.1\r\nHost: " + swapDomain + "\r\nx-api-key: " + placeholderKey + "\r\nConnection: close\r\n\r\n"
+	if _, err := io.WriteString(clientTLS, req); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	respBytes, err := io.ReadAll(clientTLS)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	resp := string(respBytes)
+
+	var upstreamKey string
+	select {
+	case upstreamKey = <-m.gotAuth:
+	case <-time.After(3 * time.Second):
+		t.Fatal("upstream never received the request")
+	}
+	clientTLS.Close()
+	select {
+	case <-m.handleDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle did not return after client close")
+	}
+
+	// anthropic's format is bare "{key}", so the upstream must receive exactly the
+	// real secret in x-api-key — never the placeholder, never a "Bearer " wrapper.
+	if upstreamKey != realSecret {
+		t.Fatalf("upstream x-api-key = %q, want the real secret %q (injected by the registry entry)", upstreamKey, realSecret)
+	}
+	if strings.Contains(upstreamKey, placeholderKey) {
+		t.Fatalf("placeholder leaked upstream as the credential: %q", upstreamKey)
+	}
+	if strings.Contains(resp, realSecret) {
+		t.Fatalf("real secret leaked into guest-visible response bytes:\n%s", resp)
 	}
 }

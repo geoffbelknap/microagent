@@ -70,32 +70,40 @@ type Options struct {
 	EgressAllow          []string          // allowlisted egress destination hosts
 	EgressPassthrough    []string          // allowed hosts that are NOT TLS-intercepted
 	EgressSwapConfigPath string            // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
-	Files                []File
-	Profile              string
-	RestartPolicy        string
-	Backend              string
-	KernelPath           string
-	StateDir             string
-	SupervisorPath       string
-	GuestInitPath        string
-	Mke2fsPath           string
-	Architecture         string
-	MemoryMiB            int
-	CPUCount             int
-	SizeMiB              int64
-	Network              vmkit.NetworkConfig
-	Mediation            *vmkit.MediationConfig
-	Health               Health
-	Timeout              time.Duration
-	LeaseSeconds         int
-	ResultPort           uint32
-	ShellPort            uint16
-	ExecPort             uint16
-	GuestShellPort       uint16
-	GuestExecPort        uint16
-	Disks                []Disk
-	Outputs              []Output
-	VsockListeners       []vmkit.VsockListener
+	// CredSwapProviders are parsed `--cred-swap PROVIDER[=ref]` specs. They are a
+	// convenience surface over EgressSwapConfigPath: at workspace prep they are
+	// resolved against the built-in provider registry, their hosts are unioned
+	// into EgressAllow, and the resulting entries are written to a generated
+	// per-workspace cred-swap config which becomes EgressSwapConfigPath. They
+	// protect the TASK credentials a guest uses (provider API keys), never the
+	// host's own auth; the guest never holds the key.
+	CredSwapProviders []CredSwapProvider
+	Files             []File
+	Profile           string
+	RestartPolicy     string
+	Backend           string
+	KernelPath        string
+	StateDir          string
+	SupervisorPath    string
+	GuestInitPath     string
+	Mke2fsPath        string
+	Architecture      string
+	MemoryMiB         int
+	CPUCount          int
+	SizeMiB           int64
+	Network           vmkit.NetworkConfig
+	Mediation         *vmkit.MediationConfig
+	Health            Health
+	Timeout           time.Duration
+	LeaseSeconds      int
+	ResultPort        uint32
+	ShellPort         uint16
+	ExecPort          uint16
+	GuestShellPort    uint16
+	GuestExecPort     uint16
+	Disks             []Disk
+	Outputs           []Output
+	VsockListeners    []vmkit.VsockListener
 	// ModelTarget, when non-empty, is the host TCP address (host:port) of a paired
 	// model server. It is realized as a guest→host vsock channel and a guest
 	// forwarder. Orchestration (starting the runner) happens in the CLI layer.
@@ -125,6 +133,15 @@ type Options struct {
 	Verification    *vmkit.RuntimeVerification
 	Progress        rootfs.ProgressFunc
 	UseImageCommand bool
+}
+
+// CredSwapProvider is one parsed `--cred-swap PROVIDER[=ref]` spec: a built-in
+// provider name and an optional credential reference (env:/file:/vault:, never a
+// literal). It is resolved into a static swap entry at workspace prep time; see
+// Options.CredSwapProviders and materializeCredSwapConfig.
+type CredSwapProvider struct {
+	Provider string // built-in provider name (e.g. "anthropic", "openai")
+	Ref      string // optional key reference; empty falls back to the provider default
 }
 
 type Spec struct {

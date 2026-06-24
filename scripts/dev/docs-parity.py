@@ -163,6 +163,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "Command",
         "ConfigDisks",
         "CopyFile",
+        "CredSwapProvider",
         "DefaultHostname",
         "DefaultImage",
         "DefaultWorkspaceImageArm64",
