@@ -1587,8 +1587,12 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		FailClosed: true,
 	}
 	req, err := workspaceRequest(workspaceOptions{
-		Name:           "agent-1",
-		Backend:        "apple-vf",
+		Name:    "agent-1",
+		Backend: vmkit.BackendLinuxKVM,
+		// linux-kvm has a host-datapath capture provider, so the secure-default
+		// (unspecified -> guarded) egress mode allocates the CA-cert listener.
+		// apple-vf has no capture provider yet, so it would (correctly) allocate
+		// no CA listener — see pkg/vmkit egress capture negotiation tests.
 		KernelPath:     "/tmp/kernel",
 		MemoryMiB:      512,
 		CPUCount:       2,
@@ -1600,7 +1604,8 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		t.Fatalf("workspaceRequest: %v", err)
 	}
 	// result + enforcer + mediation listeners, plus the CA-cert listener that
-	// egress mediation (the secure default for an unspecified mode) allocates.
+	// egress mediation (the secure default for an unspecified mode) allocates
+	// on a backend with a capture provider.
 	if len(req.Config.VsockListeners) != 4 {
 		t.Fatalf("VsockListeners len = %d, want 4: %#v", len(req.Config.VsockListeners), req.Config.VsockListeners)
 	}
