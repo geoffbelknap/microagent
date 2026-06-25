@@ -36,6 +36,12 @@ if [ ! -x "$SUPERVISOR" ]; then
   e2e_skip "supervisor is not executable at $SUPERVISOR; run scripts/dev/applevf-supervisor-build.sh"
 fi
 
+codesign -dvv "$SUPERVISOR" >"$STATE_DIR/codesign.txt" 2>&1 || true
+codesign -d --entitlements :- "$SUPERVISOR" >"$STATE_DIR/entitlements.plist" 2>/dev/null || true
+if grep -q "Signature=adhoc" "$STATE_DIR/codesign.txt"; then
+  echo "warning: supervisor is ad-hoc signed; set MICROAGENT_APPLEVF_CODESIGN_IDENTITY to test a Team ID signature" >&2
+fi
+
 if command -v mke2fs >/dev/null 2>&1; then
   MKE2FS="$(command -v mke2fs)"
 elif [ -x /opt/homebrew/opt/e2fsprogs/sbin/mke2fs ]; then
