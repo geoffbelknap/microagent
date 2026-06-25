@@ -81,13 +81,17 @@ This repository owns the VM pieces:
   implementation of workspace semantics, validation, capability gates, or
   backend policy.
 - Every user-facing workspace feature must have a library-owned contract before
-  it is considered done. Classify it as all-backend, capability-gated,
-  host-tooling, or explicitly experimental; do not let Linux-only behavior land
-  as an implicit product default.
-- If a feature is not supported on a backend, expose that through a named
-  capability gate and a structured unsupported result from the shared library
-  path. Do not bury support decisions in CLI parsing, MCP handlers, or
-  supervisor-specific command branches.
+  it is considered done. Treat every microagent feature as backend-neutral in
+  product intent by default; backend-specific code is an implementation detail
+  behind the library and supervisor boundaries.
+- If a supported backend cannot implement a feature yet, record it as an
+  explicit backend gap in the library contract with status, reason, and the
+  named capability or implementation blocker. Expose unsupported behavior as a
+  structured result from the shared library path. Do not bury support decisions
+  in CLI parsing, MCP handlers, or supervisor-specific command branches.
+- Do not introduce Linux-only or macOS-only product features. If a platform API
+  makes parity hard, land the shared contract plus explicit gap record first,
+  then close the backend implementation gap as follow-up work.
 - Keep CLI, AX, and MCP surfaces on the same library path. A feature available
   through one adapter should either be available through the others or have a
   documented contract reason for the difference.
@@ -145,8 +149,8 @@ This repository owns the VM pieces:
   be named as such.
 - When adding or changing a user-facing workspace feature, add or update tests
   that prove the feature is declared in the library contract, mapped consistently
-  from CLI and MCP adapters, and either implemented or explicitly
-  capability-gated for Linux KVM and Apple VF.
+  from CLI and MCP adapters, and implemented for Linux KVM and Apple VF or
+  recorded as an explicit backend gap with structured unsupported behavior.
 - Before fresh live runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to
   identify preserved stale state. Delete only after confirming the candidates
   are test-owned and safe.

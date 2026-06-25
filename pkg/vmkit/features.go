@@ -3,10 +3,9 @@ package vmkit
 type FeatureScope string
 
 const (
-	FeatureAllBackends     FeatureScope = "all-backends"
-	FeatureCapabilityGated FeatureScope = "capability-gated"
-	FeatureHostTooling     FeatureScope = "host-tooling"
-	FeatureExperimental    FeatureScope = "experimental"
+	FeatureBackendNeutral FeatureScope = "backend-neutral"
+	FeatureHostTooling    FeatureScope = "host-tooling"
+	FeatureExperimental   FeatureScope = "experimental"
 )
 
 type FeatureCapability string
@@ -26,12 +25,24 @@ type FeatureContract struct {
 	CLICommands  []string          `json:"cliCommands,omitempty"`
 	MCPTools     []string          `json:"mcpTools,omitempty"`
 	Backends     []FeatureBackend  `json:"backends"`
+	Gaps         []FeatureGap      `json:"gaps,omitempty"`
 }
 
 type FeatureBackend struct {
-	Backend   string `json:"backend"`
-	Supported bool   `json:"supported"`
-	Reason    string `json:"reason,omitempty"`
+	Backend  string `json:"backend"`
+	Required bool   `json:"required"`
+	Ready    bool   `json:"ready"`
+	Status   string `json:"status"`
+	Reason   string `json:"reason,omitempty"`
+	GapID    string `json:"gapId,omitempty"`
+}
+
+type FeatureGap struct {
+	ID         string            `json:"id"`
+	Backend    string            `json:"backend"`
+	Status     string            `json:"status"`
+	Capability FeatureCapability `json:"capability,omitempty"`
+	Reason     string            `json:"reason"`
 }
 
 func FeatureContracts() []FeatureContract {
@@ -40,7 +51,7 @@ func FeatureContracts() []FeatureContract {
 			ID:           "workspace.lifecycle",
 			Description:  "create, start, inspect, stop, halt, kill, quarantine, delete, list, and clone workspaces with structured state transitions",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureAllBackends,
+			Scope:        FeatureBackendNeutral,
 			CLICommands:  []string{"create", "start", "status", "stop", "halt", "kill", "quarantine", "delete", "list", "ps", "clone"},
 			MCPTools:     []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.stop", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"},
 		},
@@ -48,7 +59,7 @@ func FeatureContracts() []FeatureContract {
 			ID:           "workspace.dispatch",
 			Description:  "run one isolated task with structured result and egress reporting",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureAllBackends,
+			Scope:        FeatureBackendNeutral,
 			CLICommands:  []string{"dispatch", "run"},
 			MCPTools:     []string{"workspace.dispatch"},
 		},
@@ -56,7 +67,7 @@ func FeatureContracts() []FeatureContract {
 			ID:           "workspace.exec",
 			Description:  "run structured exec requests against a running workspace",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureCapabilityGated,
+			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilityStructuredExec,
 			CLICommands:  []string{"exec", "connect"},
 			MCPTools:     []string{"workspace.exec"},
@@ -65,7 +76,7 @@ func FeatureContracts() []FeatureContract {
 			ID:           "workspace.observability",
 			Description:  "read workspace result, logs, events, stats, egress audit, and network metadata",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureAllBackends,
+			Scope:        FeatureBackendNeutral,
 			CLICommands:  []string{"result", "logs", "events", "stats", "egress", "network status"},
 			MCPTools:     []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress", "network.inspect"},
 		},
@@ -73,7 +84,7 @@ func FeatureContracts() []FeatureContract {
 			ID:           "workspace.apply",
 			Description:  "apply supported workspace spec changes, including live host-bind reloads when the backend supports them",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureCapabilityGated,
+			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilityLiveNetworkApply,
 			CLICommands:  []string{"apply"},
 			MCPTools:     []string{"workspace.apply"},
@@ -82,7 +93,7 @@ func FeatureContracts() []FeatureContract {
 			ID:           "workspace.files",
 			Description:  "copy files, read declared artifacts, and commit stopped workspace rootfs state",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureAllBackends,
+			Scope:        FeatureBackendNeutral,
 			CLICommands:  []string{"cp", "artifact", "commit"},
 			MCPTools:     []string{"cp", "artifacts.list", "artifacts.get", "workspace.commit"},
 		},
@@ -90,16 +101,25 @@ func FeatureContracts() []FeatureContract {
 			ID:           "workspace.snapshot",
 			Description:  "pause/resume, create snapshots, restore from snapshots, and fork from snapshots",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureCapabilityGated,
+			Scope:        FeatureBackendNeutral,
 			Capability:   FeatureCapabilitySnapshot,
 			CLICommands:  []string{"pause", "resume", "snapshot", "start --from-snapshot", "create --from-snapshot"},
 			MCPTools:     []string{"workspace.pause", "workspace.resume", "snapshot.create", "snapshot.list", "snapshot.delete"},
+			Gaps: []FeatureGap{
+				{
+					ID:         "gap.apple-vf.snapshot",
+					Backend:    BackendAppleVF,
+					Status:     "open",
+					Capability: FeatureCapabilitySnapshot,
+					Reason:     "Apple VF snapshot/pause/resume/fork is intended backend-neutral work but the supervisor does not yet save and restore VZVirtualMachine state.",
+				},
+			},
 		},
 		{
 			ID:           "workspace.model",
 			Description:  "pair workspaces with local model runners and model mediation policy",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureAllBackends,
+			Scope:        FeatureBackendNeutral,
 			CLICommands:  []string{"model"},
 			MCPTools:     []string{"models.pull", "models.list", "models.remove", "models.prune", "models.serve", "models.stop", "models.runners", "models.policy.validate", "models.policy.evaluate"},
 		},
@@ -107,7 +127,7 @@ func FeatureContracts() []FeatureContract {
 			ID:           "workspace.cost",
 			Description:  "estimate workspace resource cost from declared resources",
 			OwnerPackage: "pkg/workspace",
-			Scope:        FeatureAllBackends,
+			Scope:        FeatureBackendNeutral,
 			MCPTools:     []string{"workspace.estimate_cost"},
 		},
 		{
@@ -161,23 +181,34 @@ func FeatureBackendSupport(feature FeatureContract) []FeatureBackend {
 	backends := []string{BackendAppleVF, BackendLinuxKVM, BackendWindowsHyperV}
 	out := make([]FeatureBackend, 0, len(backends))
 	for _, backend := range backends {
-		supported, reason := BackendSupportsFeature(backend, feature)
-		out = append(out, FeatureBackend{Backend: backend, Supported: supported, Reason: reason})
+		ready, reason := BackendSupportsFeature(backend, feature)
+		status := "ready"
+		gapID := ""
+		if !ready {
+			status = "unsupported"
+			if gap, ok := featureGapForBackend(feature, backend); ok {
+				status = gap.Status
+				reason = gap.Reason
+				gapID = gap.ID
+			}
+		}
+		out = append(out, FeatureBackend{Backend: backend, Required: backendRequiredForFeature(backend, feature), Ready: ready, Status: status, Reason: reason, GapID: gapID})
 	}
 	return out
 }
 
 func BackendSupportsFeature(backend string, feature FeatureContract) (bool, string) {
 	switch feature.Scope {
-	case FeatureAllBackends, FeatureHostTooling:
+	case FeatureBackendNeutral, FeatureHostTooling:
 		if !IsKnownBackend(backend) {
 			return false, "unknown backend"
+		}
+		if feature.Capability != "" {
+			return backendSupportsCapability(backend, feature.Capability)
 		}
 		return true, ""
 	case FeatureExperimental:
 		return backend == BackendWindowsHyperV, "experimental feature"
-	case FeatureCapabilityGated:
-		return backendSupportsCapability(backend, feature.Capability)
 	default:
 		return false, "unknown feature scope"
 	}
@@ -224,6 +255,22 @@ func backendSupportsCapability(backend string, capability FeatureCapability) (bo
 		return false, "unknown capability"
 	}
 	return false, string(capability) + " capability is not supported"
+}
+
+func backendRequiredForFeature(backend string, feature FeatureContract) bool {
+	if feature.Scope == FeatureExperimental {
+		return backend == BackendWindowsHyperV
+	}
+	return backend == BackendAppleVF || backend == BackendLinuxKVM
+}
+
+func featureGapForBackend(feature FeatureContract, backend string) (FeatureGap, bool) {
+	for _, gap := range feature.Gaps {
+		if gap.Backend == backend {
+			return gap, true
+		}
+	}
+	return FeatureGap{}, false
 }
 
 func IsKnownBackend(backend string) bool {

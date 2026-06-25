@@ -29,11 +29,14 @@ func TestFeatureContractsDeclareBackendSupport(t *testing.T) {
 			if !IsKnownBackend(backend.Backend) {
 				t.Fatalf("%s includes unknown backend %q", feature.ID, backend.Backend)
 			}
+			if backend.Required && !backend.Ready && backend.GapID == "" {
+				t.Fatalf("%s requires %s but has no explicit gap record: %#v", feature.ID, backend.Backend, backend)
+			}
 		}
 	}
 }
 
-func TestSnapshotFeatureIsExplicitlyCapabilityGated(t *testing.T) {
+func TestSnapshotFeatureIsBackendNeutralWithExplicitAppleVFGap(t *testing.T) {
 	feature, ok := FeatureForCLICommand("snapshot")
 	if !ok {
 		t.Fatal("snapshot CLI command is not mapped to a feature contract")
@@ -41,12 +44,22 @@ func TestSnapshotFeatureIsExplicitlyCapabilityGated(t *testing.T) {
 	if feature.ID != "workspace.snapshot" {
 		t.Fatalf("snapshot feature = %q, want workspace.snapshot", feature.ID)
 	}
-	if feature.Scope != FeatureCapabilityGated || feature.Capability != FeatureCapabilitySnapshot {
-		t.Fatalf("snapshot scope/capability = %s/%s, want capability-gated/Snapshot", feature.Scope, feature.Capability)
+	if feature.Scope != FeatureBackendNeutral || feature.Capability != FeatureCapabilitySnapshot {
+		t.Fatalf("snapshot scope/capability = %s/%s, want backend-neutral/Snapshot", feature.Scope, feature.Capability)
 	}
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
 	assertFeatureSupport(t, feature, BackendAppleVF, false)
 	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
+	var appleVF FeatureBackend
+	for _, backend := range feature.Backends {
+		if backend.Backend == BackendAppleVF {
+			appleVF = backend
+			break
+		}
+	}
+	if !appleVF.Required || appleVF.Ready || appleVF.Status != "open" || appleVF.GapID != "gap.apple-vf.snapshot" {
+		t.Fatalf("apple-vf snapshot support = %#v, want required open gap", appleVF)
+	}
 }
 
 func TestFeatureLookupCoversRepresentativeAdapters(t *testing.T) {
