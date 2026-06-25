@@ -111,7 +111,7 @@ func FeatureContracts() []FeatureContract {
 					Backend:    BackendAppleVF,
 					Status:     "open",
 					Capability: FeatureCapabilitySnapshot,
-					Reason:     "Apple VF snapshot/pause/resume/fork is intended backend-neutral work but the supervisor does not yet save and restore VZVirtualMachine state.",
+					Reason:     "Apple VF pause/resume runtime control exists in the supervisor, but snapshot create/restore/fork remains open until the supervisor can save and restore VZVirtualMachine state with validated restore and fork semantics.",
 				},
 			},
 		},

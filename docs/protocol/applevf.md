@@ -4,7 +4,7 @@ description: Drive the macOS backend executable - one JSON request in, one respo
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-25_
 
 If you run microagent on macOS, or you want to drive Virtualization.framework
 from a language that isn't Swift, this page documents the executable that
@@ -55,9 +55,11 @@ Apple VF process boundary.
 
 ### Commands
 
-Apple VF implements the full shared command set: `host`, `check`, `prepare`,
-`run`, `start`, `console`, `inspect`, `halt`, `quarantine`, `stop`, `kill`,
-and `delete`.
+Apple VF implements these supervisor commands: `host`, `check`, `prepare`,
+`run`, `start`, `console`, `inspect`, `halt`, `quarantine`, `pause`, `resume`,
+`stop`, `kill`, and `delete`. Apple VF does not yet implement `snapshot`
+create, restore, or fork; that capability remains gated by the
+backend-neutral runtime contract while `gap.apple-vf.snapshot` is open.
 
 `host` does not require `identity` or `config`. `inspect`, `halt`,
 `quarantine`, `stop`, `kill`, and `delete` require `identity` and
@@ -68,6 +70,11 @@ the full config.
 state that preserves disk state and event history while severing host-side
 network and mediation paths. A quarantined workspace must be halted, stopped,
 or killed before it can be started again.
+
+`pause` and `resume` are live controls handled inside the Apple VF supervisor
+process that owns the `VZVirtualMachine`. The command process writes a runtime
+control request, signals the live process, waits for an acknowledgement, and
+only then records `paused` or `running`.
 
 For a running workspace, `quarantine` is handled inside the live Apple VF
 supervisor process. The command process sends a control signal and waits for an

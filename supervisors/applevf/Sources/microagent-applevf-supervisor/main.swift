@@ -21,6 +21,7 @@ enum VMState: String, Codable {
     case prepared
     case starting
     case running
+    case paused
     case stopped
     case halted
     case quarantined
@@ -247,8 +248,11 @@ let supervisorLogFileName = "supervisor.log"
 let quarantineAckFileName = "quarantine.ack.json"
 let applyRequestFileName = "apply.request.json"
 let applyAckFileName = "apply.ack.json"
+let runtimeControlRequestFileName = "runtime-control.request.json"
+let runtimeControlAckFileName = "runtime-control.ack.json"
 let quarantineControlSignal = SIGUSR1
 let applyControlSignal = SIGUSR2
+let runtimeControlSignal = SIGHUP
 let maxSocketConnections = 128
 let maxResultSocketBytes = 16 * 1024 * 1024
 let secretsListenerTarget = "secrets://serve"
@@ -276,6 +280,17 @@ struct RuntimeState: Codable {
 
 struct ApplyAck: Codable {
     var runtimeID: String
+    var observedAt: String
+    var error: String?
+}
+
+struct RuntimeControlRequest: Codable {
+    var action: String
+}
+
+struct RuntimeControlAck: Codable {
+    var runtimeID: String
+    var action: String
     var observedAt: String
     var error: String?
 }
@@ -382,7 +397,7 @@ func handle(_ request: Request) throws -> Response {
         let identity = try validatedIdentity(request.identity)
         let config = try stateConfig(request.config)
         var event = try readEvent(identity: identity, stateDir: config.stateDir) ?? Event(identity: identity, state: .unknown, detail: nil, observedAt: Date())
-        if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), !processAlive(runtime.pid), event.state == .starting || event.state == .running {
+        if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), !processAlive(runtime.pid), event.state == .starting || event.state == .running || event.state == .paused {
             event = Event(identity: event.identity, state: .stopped, detail: event.detail, observedAt: Date())
             try writeState(event: event, config: runtime.config)
             try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: runtime.error)
@@ -397,6 +412,10 @@ func handle(_ request: Request) throws -> Response {
         return try stateOnly(request, state: .halted, detail: nil)
     case "quarantine":
         return try quarantine(request)
+    case "pause":
+        return try pauseLive(request)
+    case "resume":
+        return try resumeLive(request)
     case "apply":
         return try applyLive(request)
     case "kill":
@@ -415,11 +434,51 @@ func handle(_ request: Request) throws -> Response {
     }
 }
 
+func pauseLive(_ request: Request) throws -> Response {
+    return try runtimeControl(request, action: "pause", requiredState: .running, nextState: .paused, detail: "apple-vf virtual machine paused")
+}
+
+func resumeLive(_ request: Request) throws -> Response {
+    return try runtimeControl(request, action: "resume", requiredState: .paused, nextState: .running, detail: "apple-vf virtual machine resumed")
+}
+
+func runtimeControl(_ request: Request, action: String, requiredState: VMState, nextState: VMState, detail: String) throws -> Response {
+    let identity = try validatedIdentity(request.identity)
+    let config = try stateConfig(request.config)
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir) else {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
+    }
+    guard runtime.event.state == requiredState else {
+        throw ProtocolError.invalid("\(action) requires state \(requiredState.rawValue), got \(runtime.event.state.rawValue)")
+    }
+    guard processAlive(runtime.pid), let pid = runtime.pid else {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
+    }
+    let requestPath = runtimeControlRequestPath(identity: identity, stateDir: runtime.config.stateDir)
+    let ackPath = runtimeControlAckPath(identity: identity, stateDir: runtime.config.stateDir)
+    try? FileManager.default.removeItem(at: ackPath)
+    try encoder.encode(RuntimeControlRequest(action: action)).write(to: requestPath, options: .atomic)
+    if kill(pid, runtimeControlSignal) != 0 && errno != ESRCH {
+        throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
+    }
+    let ack = try waitForRuntimeControlAck(path: ackPath, action: action, timeout: 5.0)
+    if let error = ack.error, !error.isEmpty {
+        throw ProtocolError.invalid(error)
+    }
+    let event = Event(identity: identity, state: nextState, detail: detail, observedAt: Date())
+    try writeState(event: event, config: runtime.config)
+    try writeRuntimeState(event: event, config: runtime.config, pid: pid, error: nil)
+    return response(event: event, config: runtime.config, error: nil)
+}
+
 func applyLive(_ request: Request) throws -> Response {
     let identity = try validatedIdentity(request.identity)
     let config = try validatedConfig(request.config)
     guard let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), processAlive(runtime.pid), let pid = runtime.pid else {
         throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
+    }
+    guard runtime.event.state == .running else {
+        throw ProtocolError.invalid("apply requires state running, got \(runtime.event.state.rawValue)")
     }
     guard livePortForwardHostOnlyChange(oldConfig: runtime.config, newConfig: config) else {
         throw ProtocolError.invalid("live network apply only supports host bind changes for existing port forwards; stop and start \(identity.runtimeID) to apply this change")
@@ -484,6 +543,20 @@ func waitForQuarantineAck(path: URL, timeout: TimeInterval) throws {
     throw ProtocolError.invalid("apple-vf quarantine control did not acknowledge before timeout")
 }
 
+func waitForRuntimeControlAck(path: URL, action: String, timeout: TimeInterval) throws -> RuntimeControlAck {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if FileManager.default.fileExists(atPath: path.path) {
+            let ack = try decoder.decode(RuntimeControlAck.self, from: Data(contentsOf: path))
+            if ack.action == action {
+                return ack
+            }
+        }
+        usleep(20_000)
+    }
+    throw ProtocolError.invalid("apple-vf \(action) control did not acknowledge before timeout")
+}
+
 func gcWorkspace(_ request: Request) throws -> Response {
     let identity = try validatedIdentity(request.identity)
     let config = try stateConfig(request.config)
@@ -491,7 +564,7 @@ func gcWorkspace(_ request: Request) throws -> Response {
         let event = try readEvent(identity: identity, stateDir: config.stateDir) ?? Event(identity: identity, state: .unknown, detail: nil, observedAt: Date())
         return response(event: event, config: config, error: nil)
     }
-    guard runtime.event.state == .running || runtime.event.state == .starting else {
+    guard runtime.event.state == .running || runtime.event.state == .starting || runtime.event.state == .paused else {
         return response(event: runtime.event, config: runtime.config, error: nil)
     }
     let alive = processAlive(runtime.pid)
@@ -523,7 +596,7 @@ func runDeadman(_ request: Request) -> Int32 {
         guard let lease = runtime.config.leaseSeconds, lease > 0 else {
             return 0
         }
-        guard runtime.event.state == .running || runtime.event.state == .starting else {
+        guard runtime.event.state == .running || runtime.event.state == .starting || runtime.event.state == .paused else {
             return 0
         }
         do {
@@ -762,6 +835,8 @@ func ensureCanStart(identity: Identity, stateDir: String) throws {
         return
     case .quarantined:
         throw ProtocolError.invalid("workspace \(identity.runtimeID) is quarantined; halt, stop, or kill it before start")
+    case .paused:
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is paused; resume it before start")
     case .starting, .running:
         throw ProtocolError.invalid("workspace \(identity.runtimeID) is already \(runtime.event.state.rawValue)")
     }
@@ -851,6 +926,14 @@ func applyAckPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(applyAckFileName)
 }
 
+func runtimeControlRequestPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(runtimeControlRequestFileName)
+}
+
+func runtimeControlAckPath(identity: Identity, stateDir: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(runtimeControlAckFileName)
+}
+
 func resultPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent("result.json")
 }
@@ -885,7 +968,7 @@ func readiness(event: Event, config: Config) -> RuntimeReadiness {
         resultReady: ReadinessSignal(),
         mediationReady: ReadinessSignal()
     )
-    if event.state == .running || event.state == .halted || event.state == .stopped || event.state == .quarantined {
+    if event.state == .running || event.state == .paused || event.state == .halted || event.state == .stopped || event.state == .quarantined {
         readiness.guestReady = ReadinessSignal(ready: true, observedAt: event.observedAt, detail: "workspace reached runtime state \(event.state.rawValue)", error: nil)
     }
     if event.state == .running, config.serialInput == true {
@@ -1730,6 +1813,81 @@ final class ApplyController {
     }
 }
 
+@available(macOS 14.0, *)
+final class RuntimeControlController {
+    private let identity: Identity
+    private let config: Config
+    private let vm: VZVirtualMachine
+    private var source: DispatchSourceSignal?
+
+    init(identity: Identity, config: Config, vm: VZVirtualMachine) {
+        self.identity = identity
+        self.config = config
+        self.vm = vm
+    }
+
+    func start() {
+        signal(runtimeControlSignal, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: runtimeControlSignal, queue: .main)
+        source.setEventHandler { [weak self] in
+            self?.applyControlRequest()
+        }
+        source.resume()
+        self.source = source
+    }
+
+    private func applyControlRequest() {
+        let requestPath = runtimeControlRequestPath(identity: identity, stateDir: config.stateDir)
+        let ackPath = runtimeControlAckPath(identity: identity, stateDir: config.stateDir)
+        let action: String
+        do {
+            let request = try decoder.decode(RuntimeControlRequest.self, from: Data(contentsOf: requestPath))
+            action = request.action
+        } catch {
+            writeAck(path: ackPath, action: "unknown", error: String(describing: error))
+            return
+        }
+
+        switch action {
+        case "pause":
+            pauseVM(path: ackPath)
+        case "resume":
+            resumeVM(path: ackPath)
+        default:
+            writeAck(path: ackPath, action: action, error: "unknown runtime control action \(action)")
+        }
+    }
+
+    private func pauseVM(path: URL) {
+        vm.pause { [weak self] result in
+            switch result {
+            case .success:
+                self?.writeAck(path: path, action: "pause", error: nil)
+            case .failure(let error):
+                self?.writeAck(path: path, action: "pause", error: error.localizedDescription)
+            }
+        }
+    }
+
+    private func resumeVM(path: URL) {
+        vm.resume { [weak self] result in
+            switch result {
+            case .success:
+                self?.writeAck(path: path, action: "resume", error: nil)
+            case .failure(let error):
+                self?.writeAck(path: path, action: "resume", error: error.localizedDescription)
+            }
+        }
+    }
+
+    private func writeAck(path: URL, action: String, error: String?) {
+        let ack = RuntimeControlAck(runtimeID: identity.runtimeID, action: action, observedAt: ISO8601DateFormatter().string(from: Date()), error: error)
+        if let data = try? encoder.encode(ack) {
+            try? data.write(to: path, options: .atomic)
+        }
+    }
+}
+
 @available(macOS 13.0, *)
 final class CACertSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
     private let path: String
@@ -2017,8 +2175,10 @@ func runVM(_ request: Request) throws {
         let publishForwarder = try installTCPPublishForwarder(vm: vm, config: runtimeConfig)
         let quarantineController = QuarantineController(identity: identity, config: runtimeConfig, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
         let applyController = ApplyController(identity: identity, config: runtimeConfig, publishForwarder: publishForwarder)
+        let runtimeControlController = RuntimeControlController(identity: identity, config: runtimeConfig, vm: vm)
         quarantineController.start()
         applyController.start()
+        runtimeControlController.start()
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
@@ -2041,7 +2201,7 @@ func runVM(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController, applyController)) {
+        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController, applyController, runtimeControlController)) {
             CFRunLoopRun()
         }
     } else {
@@ -2077,8 +2237,10 @@ func runConsole(_ request: Request) throws {
         let publishForwarder = try installTCPPublishForwarder(vm: vm, config: runtimeConfig)
         let quarantineController = QuarantineController(identity: identity, config: runtimeConfig, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
         let applyController = ApplyController(identity: identity, config: runtimeConfig, publishForwarder: publishForwarder)
+        let runtimeControlController = RuntimeControlController(identity: identity, config: runtimeConfig, vm: vm)
         quarantineController.start()
         applyController.start()
+        runtimeControlController.start()
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
         vm.start { result in
@@ -2097,7 +2259,7 @@ func runConsole(_ request: Request) throws {
         if let startError {
             throw startError
         }
-        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController, applyController)) {
+        withExtendedLifetime((delegate, socketListeners, publishForwarder, quarantineController, applyController, runtimeControlController)) {
             CFRunLoopRun()
         }
     } else {
