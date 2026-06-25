@@ -1895,6 +1895,10 @@ func runVM(_ request: Request) throws {
         throw ProtocolError.invalid("Apple Virtualization is not available on this host")
     }
     if #available(macOS 13.0, *) {
+        // Spawn the host-fd egress datapath BEFORE confinement so it runs
+        // unsandboxed (the Seatbelt profile is inherited by children and is
+        // loopback-only; the datapath needs full network access to NAT).
+        try prepareHostFDEgressBeforeConfinement()
         // Confine this detached VM child before any VM resources are created
         // (Spec B). Fail-closed: if the Seatbelt sandbox cannot be applied, the
         // VM does not start.
@@ -1953,6 +1957,8 @@ func runConsole(_ request: Request) throws {
         throw ProtocolError.invalid("Apple Virtualization is not available on this host")
     }
     if #available(macOS 13.0, *) {
+        // Spawn the host-fd egress datapath before confinement (see runVM).
+        try prepareHostFDEgressBeforeConfinement()
         // Confine the console VM child too (Spec B). User-initiated QoS keeps the
         // interactive session responsive. Fail-closed on sandbox failure.
         try applyConfinement(identity: identity, config: runtimeConfig, qos: QOS_CLASS_USER_INITIATED)
