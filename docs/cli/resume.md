@@ -4,7 +4,7 @@ description: Thaw a paused workspace back to running, exactly where it was.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-25_
 
 ```text
 microagent resume <name> [--state-dir <dir>]
@@ -18,8 +18,7 @@ forwarding, and vsock paths intact. After resume, [`exec`](/cli/exec/),
 
 `resume` requires the workspace to be paused - to boot a halted or stopped
 workspace from disk, use [`start`](/cli/start/). Pause/resume is implemented on
-Firecracker and the experimental Windows Hyper-V backend; on Apple VF it is
-planned, not yet implemented.
+Firecracker and Apple VF.
 
 ## Examples
 

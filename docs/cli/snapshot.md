@@ -59,8 +59,7 @@ microagent snapshot delete research pre-upgrade
 
 `snapshot create` checkpoints a running or paused workspace. Firecracker
 requires the VM be paused before a snapshot is written, so a running workspace
-is briefly auto-paused, snapshotted, and resumed (the pause appears in the
-event history as `running → paused → running`). An already-paused workspace is
+is briefly auto-paused, snapshotted, and resumed. An already-paused workspace is
 snapshotted in place and left paused.
 
 The manifest records the image reference, network mode, the guest IP to

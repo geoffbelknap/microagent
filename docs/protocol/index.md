@@ -4,7 +4,7 @@ description: Speak the JSON protocol backend supervisors implement - requests, r
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-25_
 
 If you are implementing a supervisor, calling one directly, or debugging what
 a backend returned, this page is the protocol reference. Backend supervisors
@@ -102,8 +102,8 @@ consumers should treat it as closed by default.
 | `inspect` | Read latest state | identity and `config.stateDir` |
 | `halt` | Clean disk-preserving shutdown | identity and `config.stateDir` |
 | `quarantine` | Sever host-side network and mediation without stopping the guest | identity and `config.stateDir` |
-| `pause` / `resume` | Freeze/thaw a running workspace's vCPUs (Firecracker; capability-gated) | identity and `config.stateDir` |
-| `snapshot` | Capture a memory-plus-disk checkpoint (Firecracker; capability-gated) | identity, `config.stateDir`, and `tag` |
+| `pause` / `resume` | Freeze/thaw a running workspace's vCPUs (capability-gated) | identity and `config.stateDir` |
+| `snapshot` | Capture a memory-plus-disk checkpoint (capability-gated; restore/fork support is backend-specific) | identity, `config.stateDir`, and `tag` |
 | `stop` | Graceful stop | identity and `config.stateDir` |
 | `kill` | Hard stop | identity and `config.stateDir` |
 | `delete` | Remove backend runtime state | identity and `config.stateDir` |

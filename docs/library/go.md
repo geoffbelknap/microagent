@@ -235,7 +235,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
 | `workspace.Control` | Halt, quarantine, stop, kill, or delete a workspace |
-| `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place (Firecracker) |
+| `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place (Firecracker and Apple VF) |
 | `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace (Firecracker) |
 | `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it (Firecracker) |
 | `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side) |

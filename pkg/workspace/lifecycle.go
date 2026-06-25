@@ -554,8 +554,8 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 }
 
 func unsupportedControlCapability(backend, command string) (vmkit.Response, error) {
-	if (command == "pause" || command == "resume") && !vmkit.BackendCapabilities(backend).Snapshot {
-		err := fmt.Errorf("%s is not supported on the %s backend; requires Snapshot capability", command, backend)
+	if (command == "pause" || command == "resume") && !vmkit.BackendCapabilities(backend).PauseResume {
+		err := fmt.Errorf("%s is not supported on the %s backend; requires PauseResume capability", command, backend)
 		return vmkit.Response{OK: false, Backend: backend, Error: err.Error()}, err
 	}
 	return vmkit.Response{}, nil
@@ -587,7 +587,7 @@ func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotMani
 	if strings.TrimSpace(tag) == "" {
 		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot tag is required")
 	}
-	if !vmkit.BackendCapabilities(opts.Backend).Snapshot {
+	if !vmkit.BackendCapabilities(opts.Backend).SnapshotCreate {
 		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot is not supported on the %s backend", opts.Backend)
 	}
 	req := vmkit.Request{

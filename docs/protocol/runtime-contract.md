@@ -4,7 +4,7 @@ description: Depend on one set of runtime semantics across backend implementatio
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-25_
 
 If you are building an agent runtime on top of microagent, this page defines
 the semantics you can rely on across backend implementations where they expose
@@ -69,9 +69,13 @@ the disk-state `halt`/`start`:
   workspace from it.
 
 These are capability-gated, not universal. A backend advertises support through
-`microagent --json host`: `pauseResumeAvailable` and `snapshotAvailable` are
-`true` on Firecracker and absent/false on Apple VF and Windows Hyper-V, which
-return a structured unsupported error for these commands (the same pattern as
+`microagent --json host`: `pauseResumeAvailable` covers pause/resume,
+`snapshotCreateAvailable` covers snapshot artifact creation, and
+`snapshotAvailable` covers the full create/restore/fork snapshot feature set.
+Firecracker reports all three. Apple VF reports pause/resume availability on
+supported macOS hosts, while snapshot fields remain false until live confined
+snapshot validation passes. Windows Hyper-V reports these as absent/false.
+Unsupported commands return a structured unsupported error (the same pattern as
 console input). The `paused` state and the commands stay in the backend-neutral
 contract so clients share one vocabulary; availability is per host.
 

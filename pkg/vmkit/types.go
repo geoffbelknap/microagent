@@ -203,6 +203,7 @@ type HostSupport struct {
 	KVMAvailable            bool   `json:"kvmAvailable,omitempty"`
 	VsockAvailable          bool   `json:"vsockAvailable,omitempty"`
 	PauseResumeAvailable    bool   `json:"pauseResumeAvailable,omitempty"`
+	SnapshotCreateAvailable bool   `json:"snapshotCreateAvailable,omitempty"`
 	SnapshotAvailable       bool   `json:"snapshotAvailable,omitempty"`
 	ConsoleAvailable        bool   `json:"consoleAvailable"`
 	ConsoleMode             string `json:"consoleMode,omitempty"`

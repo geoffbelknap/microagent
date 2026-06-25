@@ -76,23 +76,24 @@ func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
 	}
 }
 
-func TestPauseAndResumeRequireSnapshotCapability(t *testing.T) {
+func TestPauseAndResumeUseDedicatedCapability(t *testing.T) {
 	resp, err := unsupportedControlCapability(vmkit.BackendAppleVF, "pause")
-	if err == nil || !strings.Contains(err.Error(), "requires Snapshot capability") {
-		t.Fatalf("Pause err = %v, want Snapshot capability error", err)
-	}
-	if resp.OK || resp.Backend != vmkit.BackendAppleVF || !strings.Contains(resp.Error, "requires Snapshot capability") {
-		t.Fatalf("Pause resp = %#v, want structured unsupported response", resp)
+	if err != nil || resp.Error != "" {
+		t.Fatalf("Apple VF pause err=%v resp=%#v, want supported", err, resp)
 	}
 	resp, err = unsupportedControlCapability(vmkit.BackendAppleVF, "resume")
-	if err == nil || !strings.Contains(err.Error(), "requires Snapshot capability") {
-		t.Fatalf("Resume err = %v, want Snapshot capability error", err)
-	}
-	if resp.OK || resp.Backend != vmkit.BackendAppleVF || !strings.Contains(resp.Error, "requires Snapshot capability") {
-		t.Fatalf("Resume resp = %#v, want structured unsupported response", resp)
+	if err != nil || resp.Error != "" {
+		t.Fatalf("Apple VF resume err=%v resp=%#v, want supported", err, resp)
 	}
 	if resp, err := unsupportedControlCapability(vmkit.BackendLinuxKVM, "pause"); err != nil || resp.Error != "" {
 		t.Fatalf("Linux pause capability err=%v resp=%#v, want supported", err, resp)
+	}
+	resp, err = unsupportedControlCapability(vmkit.BackendWindowsHyperV, "pause")
+	if err == nil || !strings.Contains(err.Error(), "requires PauseResume capability") {
+		t.Fatalf("Windows pause err = %v, want PauseResume capability error", err)
+	}
+	if resp.OK || resp.Backend != vmkit.BackendWindowsHyperV || !strings.Contains(resp.Error, "requires PauseResume capability") {
+		t.Fatalf("Windows pause resp = %#v, want structured unsupported response", resp)
 	}
 }
 

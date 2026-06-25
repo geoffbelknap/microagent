@@ -142,7 +142,7 @@ E2E_MATRIX=(
   "secrets|backend-neutral|linux-kvm,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
   "health|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
   "supervise|backend-neutral|linux-kvm,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
-  "snapshot/pause/resume|backend-specific|linux-kvm,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
+  "snapshot/pause/resume|backend-specific|linux-kvm,apple-vf,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker, Apple VF, and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); full memory snapshot create/restore/fork is still Firecracker-only"
   "model|backend-neutral|linux-kvm,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
   "perf|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
