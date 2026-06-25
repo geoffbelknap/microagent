@@ -59,6 +59,7 @@ SCENARIOS=(
   "applevf-network-mode:scripts/dev/applevf-network-mode-smoke.sh:darwin:vm:broad"
   "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin:vm:broad"
   "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin:vm:broad"
+  "applevf-save-restore-config:scripts/dev/applevf-save-restore-config-check.sh:darwin:vm:broad"
 )
 
 # Each entry: scenario|coverage|backends|feature summary.
@@ -111,6 +112,7 @@ SCENARIO_COVERAGE=(
   "applevf-network-mode|backend-specific|apple-vf|Apple VF user/isolated network modes"
   "applevf-publish|backend-specific|apple-vf|Apple VF TCP publish forwarding"
   "applevf-vsock-diagnostic|backend-specific|apple-vf|Apple VF mediation and virtio-vsock diagnostics"
+  "applevf-save-restore-config|backend-specific|apple-vf|Apple VF VZ save/restore configuration support probe"
 )
 
 # Each entry: feature|classification|required backends|covering scenarios|notes.
@@ -247,6 +249,8 @@ Scenarios:
   applevf-publish    Apple VF TCP publish forwarding smoke
   applevf-vsock-diagnostic
                     Apple VF mediation and virtio-vsock diagnostic smoke
+  applevf-save-restore-config
+                    Apple VF VZ save/restore configuration support probe
 
 Environment:
   --keep or MICROAGENT_E2E_KEEP=1 keeps failed and successful scenario state directories.

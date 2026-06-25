@@ -326,7 +326,47 @@ func runUtilityCommandIfPresent() -> Int32? {
     if args == ["--confinement-selfcheck"] {
         return runConfinementSelfCheck()
     }
+    if args.first == "--save-restore-config-check" {
+        return runSaveRestoreConfigCheck(args: Array(args.dropFirst()))
+    }
     return nil
+}
+
+func runSaveRestoreConfigCheck(args: [String]) -> Int32 {
+    do {
+        let request: Request
+        if args.count == 2 && args[0] == "--request" {
+            request = try decoder.decode(Request.self, from: Data(contentsOf: URL(fileURLWithPath: args[1])))
+        } else if args.count == 2 && args[0] == "--request-json" {
+            request = try decoder.decode(Request.self, from: Data(args[1].utf8))
+        } else {
+            throw ProtocolError.invalid("usage: --save-restore-config-check (--request <path>|--request-json <json>)")
+        }
+        let identity = try validatedIdentity(request.identity)
+        let config = try validatedConfig(request.config)
+        let runtimeConfig = try runtimeConfigForStart(identity: identity, config: config)
+        #if canImport(Virtualization)
+        guard hostSupport().virtualizationSupported else {
+            throw ProtocolError.invalid("Apple Virtualization is not available on this host")
+        }
+        if #available(macOS 14.0, *) {
+            try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
+            defer { closeHostFDEgress() }
+            let vmConfig = try virtualMachineConfiguration(identity: identity, config: runtimeConfig, serialMode: .detached)
+            try vmConfig.validate()
+            try vmConfig.validateSaveRestoreSupport()
+            let event = Event(identity: identity, state: .prepared, detail: "save/restore supported", observedAt: Date())
+            write(response(event: event, config: runtimeConfig, error: nil))
+            return 0
+        }
+        throw ProtocolError.invalid("Apple VF save/restore requires macOS 14 or newer")
+        #else
+        throw ProtocolError.invalid("Virtualization.framework is not available in this build")
+        #endif
+    } catch {
+        write(Response(ok: false, backend: backendName, error: String(describing: error)))
+        return 1
+    }
 }
 
 func readRequest() throws -> Request {
