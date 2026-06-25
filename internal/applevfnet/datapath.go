@@ -94,6 +94,31 @@ func Run(ctx context.Context, conn *os.File, cfg Config) error {
 	return gw.pumpInbound()
 }
 
+// RunFromFD is the subprocess entry point: it runs the datapath over an
+// already-open datagram socket fd (inherited from the Swift supervisor) using a
+// string gateway IP/MAC, so callers need not depend on gVisor types. gatewayMAC
+// may be empty for a default.
+func RunFromFD(ctx context.Context, fdNum int, gatewayIP, gatewayMAC string, logf func(string, ...any)) error {
+	ip := net.ParseIP(gatewayIP)
+	if ip == nil || ip.To4() == nil {
+		return fmt.Errorf("applevfnet: gateway IP %q must be IPv4", gatewayIP)
+	}
+	cfg := Config{GatewayIP: tcpip.AddrFromSlice(ip.To4()), Logf: logf}
+	if gatewayMAC != "" {
+		hw, err := net.ParseMAC(gatewayMAC)
+		if err != nil {
+			return fmt.Errorf("applevfnet: gateway MAC %q: %w", gatewayMAC, err)
+		}
+		cfg.GatewayMAC = tcpip.LinkAddress(hw)
+	}
+	conn := os.NewFile(uintptr(fdNum), "applevf-egress-datapath")
+	if conn == nil {
+		return fmt.Errorf("applevfnet: fd %d is not a valid file", fdNum)
+	}
+	defer conn.Close()
+	return Run(ctx, conn, cfg)
+}
+
 func newGateway(ctx context.Context, conn *os.File, cfg Config) (*Gateway, error) {
 	if cfg.Dial == nil {
 		d := &net.Dialer{Timeout: 15 * time.Second}
