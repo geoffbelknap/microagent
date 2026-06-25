@@ -332,6 +332,9 @@ func runUtilityCommandIfPresent() -> Int32? {
     if args.first == "--save-restore-config-check" {
         return runSaveRestoreConfigCheck(args: Array(args.dropFirst()))
     }
+    if args.first == "--save-state-check" {
+        return runSaveStateCheck(args: Array(args.dropFirst()))
+    }
     return nil
 }
 
@@ -371,6 +374,155 @@ func runSaveRestoreConfigCheck(args: [String]) -> Int32 {
         return 1
     }
 }
+
+func runSaveStateCheck(args: [String]) -> Int32 {
+    do {
+        let parsed = try parseSaveStateCheckArgs(args)
+        let identity = try validatedIdentity(parsed.request.identity)
+        let config = try validatedConfig(parsed.request.config)
+        let runtimeConfig = try runtimeConfigForStart(identity: identity, config: config)
+        #if canImport(Virtualization)
+        guard hostSupport().virtualizationSupported else {
+            throw ProtocolError.invalid("Apple Virtualization is not available on this host")
+        }
+        if #available(macOS 14.0, *) {
+            try runSaveStateCheckVM(identity: identity, config: runtimeConfig, confined: parsed.confined, saveStatePath: parsed.saveStatePath)
+            let mode = parsed.confined ? "confined" : "unconfined"
+            let event = Event(identity: identity, state: .paused, detail: "saveMachineStateTo succeeded (\(mode))", observedAt: Date())
+            write(response(event: event, config: runtimeConfig, error: nil))
+            return 0
+        }
+        throw ProtocolError.invalid("Apple VF save state requires macOS 14 or newer")
+        #else
+        throw ProtocolError.invalid("Virtualization.framework is not available in this build")
+        #endif
+    } catch {
+        write(Response(ok: false, backend: backendName, error: String(describing: error)))
+        return 1
+    }
+}
+
+struct SaveStateCheckArgs {
+    var request: Request
+    var confined: Bool
+    var saveStatePath: String?
+}
+
+func parseSaveStateCheckArgs(_ args: [String]) throws -> SaveStateCheckArgs {
+    var request: Request?
+    var confined = true
+    var saveStatePath: String?
+    var i = 0
+    while i < args.count {
+        switch args[i] {
+        case "--request":
+            guard i + 1 < args.count else { throw ProtocolError.invalid("--request requires a path") }
+            request = try decoder.decode(Request.self, from: Data(contentsOf: URL(fileURLWithPath: args[i + 1])))
+            i += 2
+        case "--request-json":
+            guard i + 1 < args.count else { throw ProtocolError.invalid("--request-json requires JSON") }
+            request = try decoder.decode(Request.self, from: Data(args[i + 1].utf8))
+            i += 2
+        case "--mode":
+            guard i + 1 < args.count else { throw ProtocolError.invalid("--mode requires confined or unconfined") }
+            switch args[i + 1] {
+            case "confined":
+                confined = true
+            case "unconfined":
+                confined = false
+            default:
+                throw ProtocolError.invalid("--mode requires confined or unconfined")
+            }
+            i += 2
+        case "--save-state-path":
+            guard i + 1 < args.count else { throw ProtocolError.invalid("--save-state-path requires a path") }
+            saveStatePath = args[i + 1]
+            i += 2
+        default:
+            throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>]")
+        }
+    }
+    guard let request else {
+        throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>]")
+    }
+    return SaveStateCheckArgs(request: request, confined: confined, saveStatePath: saveStatePath)
+}
+
+#if canImport(Virtualization)
+@available(macOS 14.0, *)
+func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, saveStatePath: String?) throws {
+    try prepareHostFDEgressBeforeConfinement(config: config, identity: identity)
+    defer { closeHostFDEgress() }
+    if confined {
+        try applyConfinement(identity: identity, config: config, qos: QOS_CLASS_UTILITY)
+    }
+    let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, serialMode: .detached)
+    try vmConfig.validate()
+    try vmConfig.validateSaveRestoreSupport()
+    let vm = VZVirtualMachine(configuration: vmConfig)
+    let delegate = VMRunDelegate(identity: identity, config: config)
+    vm.delegate = delegate
+    let socketListeners = try installSocketListeners(vm: vm, identity: identity, config: config)
+    let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
+    let path = saveStatePath ?? runtimeDirectory(identity: identity, stateDir: config.stateDir).appendingPathComponent("save-state-check.vmstate").path
+    try withExtendedLifetime((delegate, socketListeners, publishForwarder)) {
+        try startPauseAndSave(vm: vm, saveStatePath: path)
+    }
+}
+
+@available(macOS 14.0, *)
+func startPauseAndSave(vm: VZVirtualMachine, saveStatePath: String) throws {
+    try waitForVZResult(timeout: 30.0) { complete in
+        vm.start { complete($0) }
+    }
+    Thread.sleep(forTimeInterval: 2.0)
+    try waitForVZResult(timeout: 10.0) { complete in
+        vm.pause { complete($0) }
+    }
+    let url = URL(fileURLWithPath: saveStatePath)
+    if FileManager.default.fileExists(atPath: url.path) {
+        try FileManager.default.removeItem(at: url)
+    }
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try waitForVZOptionalError(timeout: 30.0) { complete in
+        vm.saveMachineStateTo(url: url) { complete($0) }
+    }
+}
+
+func waitForVZResult(timeout: TimeInterval, operation: (@escaping (Result<Void, Error>) -> Void) -> Void) throws {
+    var result: Result<Void, Error>?
+    operation { completed in
+        result = completed
+    }
+    let deadline = Date().addingTimeInterval(timeout)
+    while result == nil && Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+    }
+    guard let result else {
+        throw ProtocolError.invalid("Virtualization operation timed out after \(timeout)s")
+    }
+    try result.get()
+}
+
+func waitForVZOptionalError(timeout: TimeInterval, operation: (@escaping (Error?) -> Void) -> Void) throws {
+    var completed = false
+    var failure: Error?
+    operation { error in
+        completed = true
+        failure = error
+    }
+    let deadline = Date().addingTimeInterval(timeout)
+    while !completed && Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+    }
+    guard completed else {
+        throw ProtocolError.invalid("Virtualization operation timed out after \(timeout)s")
+    }
+    if let failure {
+        throw failure
+    }
+}
+#endif
 
 func readRequest() throws -> Request {
     let args = Array(CommandLine.arguments.dropFirst())

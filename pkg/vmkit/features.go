@@ -111,7 +111,7 @@ func FeatureContracts() []FeatureContract {
 					Backend:    BackendAppleVF,
 					Status:     "open",
 					Capability: FeatureCapabilitySnapshot,
-					Reason:     "Apple VF pause/resume runtime control exists, and VZ save/restore config support validates, but live snapshot create is still blocked under Seatbelt confinement by VZ saveMachineState permission denied; restore/fork, materialized-secret purge/rehydrate, and mediated-egress restore/fork parity remain open.",
+					Reason:     "Apple VF pause/resume runtime control exists, and VZ save/restore config support validates, but live snapshot create is blocked because VZ saveMachineStateTo returns permission denied even in an unconfined ad-hoc-signed supervisor probe; restore/fork, materialized-secret purge/rehydrate, and mediated-egress restore/fork parity remain open.",
 				},
 			},
 		},
