@@ -140,6 +140,9 @@ struct HostSupport: Codable {
     var virtualizationSupported: Bool
     var supervisorPath: String?
     var supervisorAvailable: Bool?
+    var pauseResumeAvailable: Bool?
+    var snapshotCreateAvailable: Bool?
+    var snapshotAvailable: Bool?
     var consoleAvailable: Bool?
     var consoleMode: String?
     // VMM-process confinement posture (Spec B). confinementMode is this build's
@@ -911,6 +914,9 @@ func hostSupport() -> HostSupport {
         virtualizationSupported: supported,
         supervisorPath: currentExecutablePath(),
         supervisorAvailable: true,
+        pauseResumeAvailable: supported,
+        snapshotCreateAvailable: false,
+        snapshotAvailable: false,
         consoleAvailable: true,
         consoleMode: "interactive",
         confinementMode: confinementMode,
@@ -1858,7 +1864,10 @@ final class RuntimeControlController {
     private let identity: Identity
     private let config: Config
     private let vm: VZVirtualMachine
+    private let queue = DispatchQueue(label: "microagent.applevf.runtime-control", qos: .utility)
     private var source: DispatchSourceSignal?
+    private var timer: DispatchSourceTimer?
+    private var lastRequestData: Data?
 
     init(identity: Identity, config: Config, vm: VZVirtualMachine) {
         self.identity = identity
@@ -1867,35 +1876,57 @@ final class RuntimeControlController {
     }
 
     func start() {
+        lastRequestData = try? Data(contentsOf: runtimeControlRequestPath(identity: identity, stateDir: config.stateDir))
         signal(runtimeControlSignal, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: runtimeControlSignal, queue: .main)
+        let source = DispatchSource.makeSignalSource(signal: runtimeControlSignal, queue: queue)
         source.setEventHandler { [weak self] in
             self?.applyControlRequest()
         }
         source.resume()
         self.source = source
+
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            self?.applyControlRequest()
+        }
+        timer.resume()
+        self.timer = timer
     }
 
     private func applyControlRequest() {
         let requestPath = runtimeControlRequestPath(identity: identity, stateDir: config.stateDir)
         let ackPath = runtimeControlAckPath(identity: identity, stateDir: config.stateDir)
-        let action: String
+        let request: RuntimeControlRequest
         do {
-            let request = try decoder.decode(RuntimeControlRequest.self, from: Data(contentsOf: requestPath))
-            action = request.action
+            let data = try Data(contentsOf: requestPath)
+            if data == lastRequestData {
+                return
+            }
+            lastRequestData = data
+            request = try decoder.decode(RuntimeControlRequest.self, from: data)
         } catch {
             writeAck(path: ackPath, action: "unknown", error: String(describing: error))
             return
         }
 
-        switch action {
+        switch request.action {
         case "pause":
-            pauseVM(path: ackPath)
+            performOnMainRunLoop { [weak self] in
+                self?.pauseVM(path: ackPath)
+            }
         case "resume":
-            resumeVM(path: ackPath)
+            performOnMainRunLoop { [weak self] in
+                self?.resumeVM(path: ackPath)
+            }
         default:
-            writeAck(path: ackPath, action: action, error: "unknown runtime control action \(action)")
+            writeAck(path: ackPath, action: request.action, error: "unknown runtime control action \(request.action)")
         }
+    }
+
+    private func performOnMainRunLoop(_ block: @escaping () -> Void) {
+        CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue, block)
+        CFRunLoopWakeUp(CFRunLoopGetMain())
     }
 
     private func pauseVM(path: URL) {
