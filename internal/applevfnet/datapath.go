@@ -138,7 +138,7 @@ func RunFromFDConfig(ctx context.Context, fdNum int, gatewayIP, gatewayMAC strin
 	if conn == nil {
 		return fmt.Errorf("applevfnet: fd %d is not a valid file", fdNum)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return Run(ctx, conn, cfg)
 }
 
@@ -195,7 +195,7 @@ func (gw *Gateway) installForwarders() {
 		var wq waiter.Queue
 		ep, terr := r.CreateEndpoint(&wq)
 		if terr != nil {
-			outbound.Close()
+			_ = outbound.Close()
 			r.Complete(true)
 			return
 		}
@@ -221,7 +221,7 @@ func (gw *Gateway) installForwarders() {
 		}
 		outbound, err := gw.cfg.Dial(gw.ctx, "udp", dst)
 		if err != nil {
-			guest.Close()
+			_ = guest.Close()
 			gw.cfg.logf("apple-vf egress: dial udp %s: %v", dst, err)
 			return true // consume the datagram; nothing to splice it to
 		}
@@ -335,9 +335,9 @@ func (e *stackError) Error() string { return e.op + ": " + e.err.String() }
 // closing both when either direction ends.
 func splice(guest, host net.Conn) {
 	var once sync.Once
-	closeBoth := func() { once.Do(func() { guest.Close(); host.Close() }) }
-	go func() { defer closeBoth(); io.Copy(host, guest) }()
-	io.Copy(guest, host)
+	closeBoth := func() { once.Do(func() { _ = guest.Close(); _ = host.Close() }) }
+	go func() { defer closeBoth(); _, _ = io.Copy(host, guest) }()
+	_, _ = io.Copy(guest, host)
 	closeBoth()
 }
 
@@ -345,7 +345,7 @@ func splice(guest, host net.Conn) {
 // out after udpForwardTimeout of inactivity.
 func spliceUDP(guest, host net.Conn) {
 	var once sync.Once
-	closeBoth := func() { once.Do(func() { guest.Close(); host.Close() }) }
+	closeBoth := func() { once.Do(func() { _ = guest.Close(); _ = host.Close() }) }
 	copyOne := func(dst, src net.Conn) {
 		defer closeBoth()
 		buf := make([]byte, maxFrame)
