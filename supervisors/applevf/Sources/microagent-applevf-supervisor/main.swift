@@ -1075,18 +1075,24 @@ final class VMRunDelegate: NSObject, VZVirtualMachineDelegate {
     }
 
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
-        let result = try? readRuntimeResult(identity: identity, stateDir: config.stateDir)
-        if let result, result.exitCode != 0 {
-            updateRuntime(identity: identity, config: config, state: .failed, error: result.error ?? "guest exited with status \(result.exitCode)")
-        } else {
-            updateRuntime(identity: identity, config: config, state: .stopped, error: nil)
-        }
+        updateRuntimeAfterGuestResult(identity: identity, config: config)
+        closeHostFDEgress()
         CFRunLoopStop(CFRunLoopGetMain())
     }
 
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         updateRuntime(identity: identity, config: config, state: .failed, error: error.localizedDescription)
+        closeHostFDEgress()
         CFRunLoopStop(CFRunLoopGetMain())
+    }
+}
+
+func updateRuntimeAfterGuestResult(identity: Identity, config: Config) {
+    let result = try? readRuntimeResult(identity: identity, stateDir: config.stateDir)
+    if let result, result.exitCode != 0 {
+        updateRuntime(identity: identity, config: config, state: .failed, error: result.error ?? "guest exited with status \(result.exitCode)")
+    } else {
+        updateRuntime(identity: identity, config: config, state: .stopped, error: nil)
     }
 }
 
@@ -1285,11 +1291,13 @@ final class SocketConnectionResult: @unchecked Sendable {
 @available(macOS 13.0, *)
 final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
     private let path: String
+    private let onResultWritten: (() -> Void)?
     private let lock = NSLock()
     private var connections: [VZVirtioSocketConnection] = []
 
-    init(path: String) {
+    init(path: String, onResultWritten: (() -> Void)? = nil) {
         self.path = path
+        self.onResultWritten = onResultWritten
     }
 
     func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
@@ -1317,8 +1325,16 @@ final class ResultSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unc
                 }
                 break
             }
-            try? FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            if data.isEmpty {
+                return
+            }
+            do {
+                try FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
+                try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+                self.onResultWritten?()
+            } catch {
+                return
+            }
         }
         return true
     }
@@ -1899,6 +1915,7 @@ func runVM(_ request: Request) throws {
         // unsandboxed (the Seatbelt profile is inherited by children and is
         // loopback-only; the datapath needs full network access to NAT).
         try prepareHostFDEgressBeforeConfinement()
+        defer { closeHostFDEgress() }
         // Confine this detached VM child before any VM resources are created
         // (Spec B). Fail-closed: if the Seatbelt sandbox cannot be applied, the
         // VM does not start.
@@ -1959,6 +1976,7 @@ func runConsole(_ request: Request) throws {
     if #available(macOS 13.0, *) {
         // Spawn the host-fd egress datapath before confinement (see runVM).
         try prepareHostFDEgressBeforeConfinement()
+        defer { closeHostFDEgress() }
         // Confine the console VM child too (Spec B). User-initiated QoS keeps the
         // interactive session responsive. Fail-closed on sandbox failure.
         try applyConfinement(identity: identity, config: runtimeConfig, qos: QOS_CLASS_USER_INITIATED)
@@ -2031,7 +2049,13 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
             if normalizedFilePath(listenerConfig.target) != normalizedFilePath(resultPath(identity: identity, stateDir: config.stateDir).path) {
                 throw ProtocolError.invalid("vsock listener \(listenerConfig.port) target must be host:port or the runtime result path")
             }
-            delegate = ResultSocketDelegate(path: listenerConfig.target)
+            delegate = ResultSocketDelegate(path: listenerConfig.target, onResultWritten: {
+                if hostFDEgressEnabled() {
+                    updateRuntimeAfterGuestResult(identity: identity, config: config)
+                    closeHostFDEgress()
+                    CFRunLoopStop(CFRunLoopGetMain())
+                }
+            })
         }
         listener.delegate = delegate
         socket.setSocketListener(listener, forPort: listenerConfig.port)

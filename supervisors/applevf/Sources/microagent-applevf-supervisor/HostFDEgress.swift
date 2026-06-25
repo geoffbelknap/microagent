@@ -35,6 +35,7 @@ let hostFDGuestDNS = "1.1.1.1"
 // by networkDevices) before any VM thread runs, so the access is serialized.
 nonisolated(unsafe) var hostFDFrameEnd: Int32 = -1
 nonisolated(unsafe) var hostFDDatapath: Process?
+let hostFDTeardownLock = NSLock()
 
 func hostFDEgressEnabled() -> Bool {
     ProcessInfo.processInfo.environment["MICROAGENT_APPLEVF_HOSTFD"] == "1"
@@ -84,7 +85,10 @@ func prepareHostFDEgressBeforeConfinement() throws {
     // The datapath reads guest frames from its stdin (the peer socket end).
     proc.standardInput = FileHandle(fileDescriptor: datapathEnd, closeOnDealloc: false)
     proc.standardOutput = FileHandle.nullDevice
-    // standardError is inherited so datapath logs surface in the supervisor log.
+    // Do not inherit supervisor stderr: foreground supervisors are pipe-backed
+    // by the Go parent, and a long-lived datapath child holding that pipe open
+    // prevents cmd.Run from observing EOF even after the supervisor exits.
+    proc.standardError = FileHandle.nullDevice
     do {
         try proc.run()
     } catch {
@@ -96,6 +100,33 @@ func prepareHostFDEgressBeforeConfinement() throws {
     close(datapathEnd)
     hostFDFrameEnd = frameEnd
     hostFDDatapath = proc
+}
+
+func closeHostFDEgress() {
+    hostFDTeardownLock.lock()
+    let frameEnd = hostFDFrameEnd
+    let datapath = hostFDDatapath
+    hostFDFrameEnd = -1
+    hostFDDatapath = nil
+    hostFDTeardownLock.unlock()
+
+    if frameEnd >= 0 {
+        close(frameEnd)
+    }
+    guard let datapath else {
+        return
+    }
+    if datapath.isRunning {
+        datapath.terminate()
+        let exited = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .utility).async {
+            datapath.waitUntilExit()
+            exited.signal()
+        }
+        if exited.wait(timeout: .now() + 2) == .timedOut && datapath.isRunning {
+            kill(datapath.processIdentifier, SIGKILL)
+        }
+    }
 }
 
 // makeHostFDNetworkDevice attaches the framework end of the prepared socket as

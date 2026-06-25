@@ -86,3 +86,26 @@ func TestGatewayAnswersARP(t *testing.T) {
 		return // success
 	}
 }
+
+func TestRunReturnsOnContextCancel(t *testing.T) {
+	gwEnd, vmEnd := socketpair(t)
+	defer vmEnd.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, gwEnd, Config{
+			GatewayIP: tcpip.AddrFromSlice([]byte{192, 168, 127, 1}),
+		})
+	}()
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned error after context cancel: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after context cancel")
+	}
+}

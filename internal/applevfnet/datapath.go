@@ -19,6 +19,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	"gvisor.dev/gvisor/pkg/buffer"
@@ -91,7 +92,17 @@ func Run(ctx context.Context, conn *os.File, cfg Config) error {
 	defer gw.Close()
 	gw.wg.Add(1)
 	go gw.pumpOutbound()
-	return gw.pumpInbound()
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			closeFrameSocket(conn)
+		case <-done:
+		}
+	}()
+	err = gw.pumpInbound()
+	close(done)
+	return err
 }
 
 // RunFromFD is the subprocess entry point: it runs the datapath over an
@@ -248,9 +259,18 @@ func (gw *Gateway) pumpOutbound() {
 // Close stops the gateway.
 func (gw *Gateway) Close() {
 	gw.stop()
+	closeFrameSocket(gw.conn)
 	gw.ep.Close()
 	gw.stack.Close()
 	gw.wg.Wait()
+}
+
+func closeFrameSocket(conn *os.File) {
+	if conn == nil {
+		return
+	}
+	_ = syscall.Shutdown(int(conn.Fd()), syscall.SHUT_RDWR)
+	_ = conn.Close()
 }
 
 func addrString(a tcpip.Address) string {

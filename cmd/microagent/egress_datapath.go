@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/geoffbelknap/microagent/internal/applevfnet"
 )
@@ -30,8 +31,29 @@ func runEgressDatapath(ctx context.Context, args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	go exitWhenParentExits(ctx, os.Getppid(), func() { os.Exit(0) })
 	logf := func(format string, a ...any) {
 		fmt.Fprintf(os.Stderr, "egress-datapath: "+format+"\n", a...)
 	}
 	return applevfnet.RunFromFD(ctx, *fdNum, *gatewayIP, *gatewayMAC, logf)
+}
+
+func exitWhenParentExits(ctx context.Context, parentPID int, exit func()) {
+	if parentPID <= 1 {
+		exit()
+		return
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if ppid := os.Getppid(); ppid <= 1 || ppid != parentPID {
+				exit()
+				return
+			}
+		}
+	}
 }
