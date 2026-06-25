@@ -42,16 +42,16 @@ func TestNegotiateEgressCapture(t *testing.T) {
 			wantCoverage: EgressCoverageConstrained, wantUncovered: false, wantMediates: true,
 		},
 		{
-			name:    "apple-vf guarded is UNSUPPORTED and fully uncovered (no provider yet)",
+			name:    "apple-vf guarded user is supported+complete",
 			backend: BackendAppleVF, networkMode: "user", egressMode: "guarded",
-			wantProvider: EgressProviderNone, wantStatus: EgressProviderUnsupported,
-			wantCoverage: EgressCoverageUnsupported, wantUncovered: true, wantMediates: false,
+			wantProvider: EgressProviderAppleVFHostFD, wantStatus: EgressProviderSupported,
+			wantCoverage: EgressCoverageComplete, wantUncovered: false, wantMediates: true,
 		},
 		{
-			name:    "apple-vf strict is also unsupported+uncovered",
+			name:    "apple-vf strict user is supported+complete",
 			backend: BackendAppleVF, networkMode: "user", egressMode: "strict",
-			wantProvider: EgressProviderNone, wantStatus: EgressProviderUnsupported,
-			wantCoverage: EgressCoverageUnsupported, wantUncovered: true, wantMediates: false,
+			wantProvider: EgressProviderAppleVFHostFD, wantStatus: EgressProviderSupported,
+			wantCoverage: EgressCoverageComplete, wantUncovered: false, wantMediates: true,
 		},
 		{
 			name:    "egress off: no provider, no uncovered class, no mediation (any backend)",
@@ -103,17 +103,6 @@ func TestNegotiateEgressCapture(t *testing.T) {
 				t.Errorf("Mode = %q, want a canonical egress mode", r.Mode)
 			}
 		})
-	}
-}
-
-// TestNegotiateEgressCaptureNeverReturnsPlannedAppleVFProvider guards the
-// invariant that the host-fd provider is not reported until its datapath lands.
-func TestNegotiateEgressCaptureNeverReturnsPlannedAppleVFProvider(t *testing.T) {
-	for _, mode := range []string{"guarded", "strict", "off", ""} {
-		r := NegotiateEgressCapture(BackendAppleVF, "user", mode)
-		if r.Provider == EgressProviderAppleVFHostFD {
-			t.Fatalf("apple-vf reported the planned host-fd provider for mode %q before it is implemented", mode)
-		}
 	}
 }
 

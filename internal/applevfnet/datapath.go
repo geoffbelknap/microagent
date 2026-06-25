@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"syscall"
@@ -53,6 +54,10 @@ const (
 // through the egress mediator with the original destination preserved.
 type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
+// UDPHandlerFunc mediates one accepted guest UDP flow. src is the guest source
+// address and dst is the original destination the guest targeted.
+type UDPHandlerFunc func(ctx context.Context, guest net.Conn, src, dst netip.AddrPort)
+
 // Config parameterizes the gateway. GatewayIP is the guest's default gateway and
 // the stack's own address; GuestIP is informational (the guest configures its
 // own address via the supervisor's kernel cmdline).
@@ -61,6 +66,8 @@ type Config struct {
 	GatewayMAC tcpip.LinkAddress
 	// Dial opens host-side connections; defaults to a direct net.Dialer.
 	Dial DialFunc
+	// UDPHandler handles guest UDP flows. When nil, UDP uses Dial like TCP.
+	UDPHandler UDPHandlerFunc
 	// Logf logs operational events; defaults to no-op.
 	Logf func(format string, args ...any)
 }
@@ -110,11 +117,16 @@ func Run(ctx context.Context, conn *os.File, cfg Config) error {
 // string gateway IP/MAC, so callers need not depend on gVisor types. gatewayMAC
 // may be empty for a default.
 func RunFromFD(ctx context.Context, fdNum int, gatewayIP, gatewayMAC string, logf func(string, ...any)) error {
+	return RunFromFDConfig(ctx, fdNum, gatewayIP, gatewayMAC, Config{Logf: logf})
+}
+
+// RunFromFDConfig is RunFromFD with an explicit gateway config.
+func RunFromFDConfig(ctx context.Context, fdNum int, gatewayIP, gatewayMAC string, cfg Config) error {
 	ip := net.ParseIP(gatewayIP)
 	if ip == nil || ip.To4() == nil {
 		return fmt.Errorf("applevfnet: gateway IP %q must be IPv4", gatewayIP)
 	}
-	cfg := Config{GatewayIP: tcpip.AddrFromSlice(ip.To4()), Logf: logf}
+	cfg.GatewayIP = tcpip.AddrFromSlice(ip.To4())
 	if gatewayMAC != "" {
 		hw, err := net.ParseMAC(gatewayMAC)
 		if err != nil {
@@ -195,18 +207,25 @@ func (gw *Gateway) installForwarders() {
 	udpFwd := udp.NewForwarder(gw.stack, func(r *udp.ForwarderRequest) bool {
 		id := r.ID()
 		dst := net.JoinHostPort(addrString(id.LocalAddress), fmt.Sprint(id.LocalPort))
-		outbound, err := gw.cfg.Dial(gw.ctx, "udp", dst)
-		if err != nil {
-			gw.cfg.logf("apple-vf egress: dial udp %s: %v", dst, err)
-			return true // consume the datagram; nothing to splice it to
-		}
 		var wq waiter.Queue
 		ep, terr := r.CreateEndpoint(&wq)
 		if terr != nil {
-			outbound.Close()
 			return true
 		}
-		go spliceUDP(gonet.NewUDPConn(&wq, ep), outbound)
+		guest := gonet.NewUDPConn(&wq, ep)
+		if gw.cfg.UDPHandler != nil {
+			srcAP := addrPort(id.RemoteAddress, id.RemotePort)
+			dstAP := addrPort(id.LocalAddress, id.LocalPort)
+			go gw.cfg.UDPHandler(gw.ctx, guest, srcAP, dstAP)
+			return true
+		}
+		outbound, err := gw.cfg.Dial(gw.ctx, "udp", dst)
+		if err != nil {
+			guest.Close()
+			gw.cfg.logf("apple-vf egress: dial udp %s: %v", dst, err)
+			return true // consume the datagram; nothing to splice it to
+		}
+		go spliceUDP(guest, outbound)
 		return true
 	})
 	gw.stack.SetTransportProtocolHandler(udp.ProtocolNumber, udpFwd.HandlePacket)
@@ -275,6 +294,14 @@ func closeFrameSocket(conn *os.File) {
 
 func addrString(a tcpip.Address) string {
 	return net.IP(a.AsSlice()).String()
+}
+
+func addrPort(a tcpip.Address, port uint16) netip.AddrPort {
+	addr, ok := netip.AddrFromSlice(a.AsSlice())
+	if !ok {
+		return netip.AddrPort{}
+	}
+	return netip.AddrPortFrom(addr.Unmap(), port)
 }
 
 // newStack builds the userspace network stack with the protocol handlers the

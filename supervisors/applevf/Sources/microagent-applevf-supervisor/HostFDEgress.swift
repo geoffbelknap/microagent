@@ -17,9 +17,9 @@ import Virtualization
 // prepareHostFDEgressBeforeConfinement() runs first and stashes the framework
 // end of the socket for networkDevices to attach.
 //
-// S1 is opt-in behind MICROAGENT_APPLEVF_HOSTFD=1 so it does not disturb the
-// fail-closed default while the datapath is validated; S4 makes it the default
-// for mediated egress.
+// The host-fd provider is the default for mediated Apple VF user networking.
+// MICROAGENT_APPLEVF_HOSTFD=1 still enables the datapath for unmediated smoke
+// tests without changing the explicit egress=off native NAT behavior.
 
 // Static subnet for the host-fd gateway. The gateway owns .1; the guest is
 // configured with .2 via the kernel cmdline.
@@ -37,8 +37,15 @@ nonisolated(unsafe) var hostFDFrameEnd: Int32 = -1
 nonisolated(unsafe) var hostFDDatapath: Process?
 let hostFDTeardownLock = NSLock()
 
-func hostFDEgressEnabled() -> Bool {
-    ProcessInfo.processInfo.environment["MICROAGENT_APPLEVF_HOSTFD"] == "1"
+func hostFDEgressEnabled(config: Config? = nil) -> Bool {
+    if ProcessInfo.processInfo.environment["MICROAGENT_APPLEVF_HOSTFD"] == "1" {
+        return true
+    }
+    guard normalizedNetworkMode(config?.network) == "user" else {
+        return false
+    }
+    let mode = config?.egressMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "guarded"
+    return mode == "guarded" || mode == "strict"
 }
 
 // egressDatapathBinaryPath resolves the Go microagent binary that hosts the
@@ -57,8 +64,8 @@ func egressDatapathBinaryPath() throws -> String {
 // before applyConfinement so the datapath runs unsandboxed (full network access
 // for NAT, and able to exec). No-op when host-fd egress is disabled or already
 // prepared.
-func prepareHostFDEgressBeforeConfinement() throws {
-    guard hostFDEgressEnabled(), hostFDFrameEnd < 0 else { return }
+func prepareHostFDEgressBeforeConfinement(config: Config, identity: Identity) throws {
+    guard hostFDEgressEnabled(config: config), hostFDFrameEnd < 0 else { return }
     let bin = try egressDatapathBinaryPath()
 
     var fds: [Int32] = [-1, -1]
@@ -81,7 +88,27 @@ func prepareHostFDEgressBeforeConfinement() throws {
 
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: bin)
-    proc.arguments = ["--egress-datapath", "--fd", "0", "--gateway-ip", hostFDGatewayIP]
+    var args = [
+        "--egress-datapath",
+        "--fd", "0",
+        "--gateway-ip", hostFDGatewayIP,
+        "--state-dir", config.stateDir,
+        "--name", identity.runtimeID,
+        "--egress-mode", config.egressMode ?? "guarded",
+    ]
+    for host in config.egressAllow ?? [] {
+        args.append("--allow")
+        args.append(host)
+    }
+    for host in config.egressPassthrough ?? [] {
+        args.append("--passthrough")
+        args.append(host)
+    }
+    if let swap = config.egressSwapConfigPath, !swap.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        args.append("--swap-config")
+        args.append(swap)
+    }
+    proc.arguments = args
     // The datapath reads guest frames from its stdin (the peer socket end).
     proc.standardInput = FileHandle(fileDescriptor: datapathEnd, closeOnDealloc: false)
     proc.standardOutput = FileHandle.nullDevice

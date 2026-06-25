@@ -1,6 +1,8 @@
 package egress
 
 import (
+	"context"
+	"io"
 	"net"
 	"net/netip"
 	"sync"
@@ -32,6 +34,47 @@ const (
 type udpFlowKey struct {
 	src     netip.AddrPort
 	origDst netip.AddrPort
+}
+
+// HandleUDPConn mediates a single already-accepted UDP guest flow whose
+// original destination is known by the caller. It is used by host-owned
+// datapaths such as Apple VF host-fd where there is no Linux TPROXY socket, but
+// the datapath still has the guest source and original destination from its
+// userspace network stack.
+func (h *Handler) HandleUDPConn(ctx context.Context, guest net.Conn, src, origDst netip.AddrPort) {
+	defer func() { _ = guest.Close() }()
+	p := newUDPProxy(h)
+	defer p.closeAll()
+	p.replyTo = func(replyOrigDst, replyGuestSrc netip.AddrPort, payload []byte) error {
+		if replyOrigDst != origDst || replyGuestSrc != src {
+			return nil
+		}
+		_, err := guest.Write(payload)
+		return err
+	}
+	buf := make([]byte, maxUDPDatagram)
+	for {
+		_ = guest.SetReadDeadline(time.Now().Add(udpFlowIdle))
+		n, err := guest.Read(buf)
+		if n > 0 {
+			payload := make([]byte, n)
+			copy(payload, buf[:n])
+			p.handleUDPDatagram(src, origDst, payload)
+		}
+		if err != nil {
+			if ctx.Err() != nil || err == io.EOF || neTimeout(err) {
+				return
+			}
+			return
+		}
+	}
+}
+
+func neTimeout(err error) bool {
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return true
+	}
+	return false
 }
 
 // udpFlow is one live guest<->upstream UDP association. The upstream conn

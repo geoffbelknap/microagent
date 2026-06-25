@@ -1591,8 +1591,6 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		Backend: vmkit.BackendLinuxKVM,
 		// linux-kvm has a host-datapath capture provider, so the secure-default
 		// (unspecified -> guarded) egress mode allocates the CA-cert listener.
-		// apple-vf has no capture provider yet, so it would (correctly) allocate
-		// no CA listener — see pkg/vmkit egress capture negotiation tests.
 		KernelPath:     "/tmp/kernel",
 		MemoryMiB:      512,
 		CPUCount:       2,

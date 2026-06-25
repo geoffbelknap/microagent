@@ -55,6 +55,16 @@ struct Config: Codable {
     var onDemandSecrets: [SecretRef]?
     var secretsAudit: Bool?
     var secretsControlPort: UInt32?
+    var caCertPort: UInt32?
+    var egressMode: String?
+    var egressAllow: [String]?
+    var egressPassthrough: [String]?
+    var egressSwapConfigPath: String?
+    var egressMaxBytesPerSec: Int64?
+    var egressMaxTotalBytes: Int64?
+    var egressMaxConcurrentConns: Int32?
+    var egressAuditMaxBytes: Int64?
+    var egressAuditMaxBackups: Int?
     var modelGuestPort: UInt16?
     var modelVsockPort: UInt32?
     var serialInput: Bool?
@@ -242,7 +252,9 @@ let applyControlSignal = SIGUSR2
 let maxSocketConnections = 128
 let maxResultSocketBytes = 16 * 1024 * 1024
 let secretsListenerTarget = "secrets://serve"
+let caCertListenerTarget = "cacert://serve"
 let secretsProtocolVersion = "secrets.v1"
+let maxCACertBytes = 1 * 1024 * 1024
 let maxSecretsMessageBytes = 8 * 1024 * 1024
 let decoder = JSONDecoder()
 decoder.dateDecodingStrategy = .iso8601
@@ -1717,6 +1729,81 @@ final class ApplyController {
         }
     }
 }
+
+@available(macOS 13.0, *)
+final class CACertSocketDelegate: NSObject, VZVirtioSocketListenerDelegate, @unchecked Sendable {
+    private let path: String
+    private let lock = NSLock()
+    private var connections: [VZVirtioSocketConnection] = []
+
+    init(identity: Identity, config: Config) {
+        self.path = URL(fileURLWithPath: config.stateDir)
+            .appendingPathComponent(identity.runtimeID)
+            .appendingPathComponent("egress-ca.pem")
+            .path
+    }
+
+    func listener(_ listener: VZVirtioSocketListener, shouldAcceptNewConnection connection: VZVirtioSocketConnection, from socketDevice: VZVirtioSocketDevice) -> Bool {
+        if !retain(connection) {
+            connection.close()
+            return false
+        }
+        let fd = connection.fileDescriptor
+        DispatchQueue.global(qos: .utility).async {
+            defer {
+                connection.close()
+                self.release(connection)
+            }
+            self.handle(fd: fd)
+        }
+        return true
+    }
+
+    private func handle(fd: Int32) {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              !data.isEmpty,
+              data.count <= maxCACertBytes else {
+            return
+        }
+        var frame = Data([
+            UInt8((UInt32(data.count) >> 24) & 0xff),
+            UInt8((UInt32(data.count) >> 16) & 0xff),
+            UInt8((UInt32(data.count) >> 8) & 0xff),
+            UInt8(UInt32(data.count) & 0xff),
+        ])
+        frame.append(data)
+        _ = try? writeAll(fd: fd, data: frame)
+    }
+
+    private func retain(_ connection: VZVirtioSocketConnection) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if connections.count >= maxSocketConnections {
+            return false
+        }
+        connections.append(connection)
+        return true
+    }
+
+    private func release(_ connection: VZVirtioSocketConnection) {
+        lock.lock()
+        connections.removeAll { $0 === connection }
+        lock.unlock()
+    }
+}
+
+@available(macOS 13.0, *)
+extension CACertSocketDelegate: QuarantineClosable {
+    func quarantineClose() {
+        lock.lock()
+        let retainedConnections = connections
+        connections = []
+        lock.unlock()
+        for connection in retainedConnections {
+            connection.close()
+        }
+    }
+}
 #endif
 
 func resolveSecretsBundle(config: Config) throws -> SecretsBundle {
@@ -1914,7 +2001,7 @@ func runVM(_ request: Request) throws {
         // Spawn the host-fd egress datapath BEFORE confinement so it runs
         // unsandboxed (the Seatbelt profile is inherited by children and is
         // loopback-only; the datapath needs full network access to NAT).
-        try prepareHostFDEgressBeforeConfinement()
+        try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
         defer { closeHostFDEgress() }
         // Confine this detached VM child before any VM resources are created
         // (Spec B). Fail-closed: if the Seatbelt sandbox cannot be applied, the
@@ -1975,7 +2062,7 @@ func runConsole(_ request: Request) throws {
     }
     if #available(macOS 13.0, *) {
         // Spawn the host-fd egress datapath before confinement (see runVM).
-        try prepareHostFDEgressBeforeConfinement()
+        try prepareHostFDEgressBeforeConfinement(config: runtimeConfig, identity: identity)
         defer { closeHostFDEgress() }
         // Confine the console VM child too (Spec B). User-initiated QoS keeps the
         // interactive session responsive. Fail-closed on sandbox failure.
@@ -2043,6 +2130,8 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
         let delegate: VZVirtioSocketListenerDelegate
         if listenerConfig.target == secretsListenerTarget {
             delegate = try SecretsSocketDelegate(identity: identity, config: config)
+        } else if listenerConfig.target == caCertListenerTarget {
+            delegate = CACertSocketDelegate(identity: identity, config: config)
         } else if let target = try? parseTCPHostPort(listenerConfig.target) {
             delegate = TCPSocketDelegate(target: target)
         } else {
@@ -2050,7 +2139,7 @@ func installSocketListeners(vm: VZVirtualMachine, identity: Identity, config: Co
                 throw ProtocolError.invalid("vsock listener \(listenerConfig.port) target must be host:port or the runtime result path")
             }
             delegate = ResultSocketDelegate(path: listenerConfig.target, onResultWritten: {
-                if hostFDEgressEnabled() {
+                if hostFDEgressEnabled(config: config) {
                     updateRuntimeAfterGuestResult(identity: identity, config: config)
                     closeHostFDEgress()
                     CFRunLoopStop(CFRunLoopGetMain())
@@ -2322,7 +2411,7 @@ func linuxKernelCommandLine(for config: Config) -> String {
         args.append("microagent_model_fwd=\(modelGuestPort):\(modelVsockPort)")
     }
     switch normalizedNetworkMode(config.network) {
-    case "user" where hostFDEgressEnabled():
+    case "user" where hostFDEgressEnabled(config: config):
         // The host-fd gateway owns a fixed subnet; the guest is statically
         // configured to it regardless of any spec network fields.
         args.append("microagent_net_if=eth0")
@@ -2472,7 +2561,7 @@ func networkDevices(for config: Config, identity: Identity) throws -> [VZVirtioN
         // Host-fd egress capture provider (opt-in for S1): the guest NIC is a
         // host-owned socket driven by the microagent userspace gateway, so all
         // egress is captured and (with mediation) cannot bypass the mediator.
-        if hostFDEgressEnabled() {
+        if hostFDEgressEnabled(config: config) {
             return [try makeHostFDNetworkDevice()]
         }
         // Default: Apple Virtualization.framework's VZNATNetworkDeviceAttachment

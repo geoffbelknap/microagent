@@ -127,6 +127,24 @@ type Handler struct {
 	activeConns atomic.Int32
 }
 
+// EnableSwaps wires a loaded swap table onto the handler with the same
+// host-side resolver/cache setup used by Serve. It is for non-listener datapaths
+// that instantiate Handler directly while still reusing mediator policy logic.
+func (h *Handler) EnableSwaps(swaps *SwapTable) {
+	h.Swaps = swaps
+	if swaps == nil {
+		h.Resolver = nil
+		h.tokenCache = nil
+		return
+	}
+	h.tokenCache = newTokenCache()
+	h.Resolver = NewKeyResolver(func(msg string) {
+		if h.Logger != nil {
+			h.Logger.Log("egress_secret_warning", map[string]any{"warning": msg})
+		}
+	})
+}
+
 // addBytesOverCap adds n to the process-wide cumulative byte counter (shared by
 // the TCP splice and the UDP forward) and reports whether the cumulative total
 // has now exceeded MaxTotalBytes. When the cap is 0 (unlimited) it still tracks

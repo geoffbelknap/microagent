@@ -25,9 +25,8 @@ const (
 	// provider: guest-local OUTPUT REDIRECT to a shim over hvsock, enforced by
 	// a no-uplink topology.
 	EgressProviderHyperVGuestShim = "hyperv-guest-shim"
-	// EgressProviderAppleVFHostFD is the planned Apple VF host-datapath
-	// provider built on VZFileHandleNetworkDeviceAttachment. Not yet
-	// implemented, so negotiation never returns it until the datapath lands.
+	// EgressProviderAppleVFHostFD is the Apple VF host-datapath provider built
+	// on VZFileHandleNetworkDeviceAttachment.
 	EgressProviderAppleVFHostFD = "applevf-host-fd-gateway"
 )
 
@@ -222,23 +221,22 @@ func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptu
 			},
 		}
 	case BackendAppleVF:
-		// Native VZNAT exposes no microagent-owned capture point, and the guest
-		// keeps a direct NAT uplink — so nothing is mediated and every class is
-		// uncovered. The host-fd datapath provider (EgressProviderAppleVFHostFD)
-		// will replace this once it lands and passes no-bypass validation.
 		return EgressCaptureReport{
 			Mode:                mode,
-			Provider:            EgressProviderNone,
-			ProviderStatus:      EgressProviderUnsupported,
-			CoverageStatus:      EgressCoverageUnsupported,
-			EnforcementBoundary: EgressEnforcementUnmediated,
-			GuestRole:           EgressGuestNone,
-			Coverage:            uniformCoverage(EgressClassUncovered),
-			BypassResistance:    EgressBypassNone,
-			Limitations: []string{
-				"Apple VF native NAT has no accepted egress capture provider; egress is not mediated",
-				"host-fd datapath provider (applevf-host-fd-gateway) is planned",
+			Provider:            EgressProviderAppleVFHostFD,
+			ProviderStatus:      EgressProviderSupported,
+			CoverageStatus:      EgressCoverageComplete,
+			EnforcementBoundary: EgressEnforcementHostDatapath,
+			GuestRole:           EgressGuestOblivious,
+			Coverage: EgressCoverage{
+				TCP:           EgressClassMediate,
+				DNS:           EgressClassMediate,
+				UDP:           EgressClassMediate,
+				IPv6:          EgressClassDrop,
+				NonTCPUDPIPv4: EgressClassDrop,
 			},
+			OriginalDestination: EgressOriginalDestination{TCP: true, UDP: true},
+			BypassResistance:    EgressBypassHostEnforced,
 		}
 	default:
 		// Unknown backend fails closed: unsupported, everything uncovered.
