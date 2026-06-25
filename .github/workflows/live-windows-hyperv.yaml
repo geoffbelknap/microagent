@@ -10,10 +10,8 @@ on:
   schedule:
     # Nightly smoke against main (06:47 UTC), offset from live-linux-parity.
     - cron: "47 6 * * *"
-  push:
-    # Always gate release candidates and releases.
-    tags:
-      - "v*"
+  # windows-hyperv is an experimental backend (see platform-support.md), so it
+  # does not gate releases. Run it nightly and on demand, never on release tags.
 
 permissions:
   contents: read
