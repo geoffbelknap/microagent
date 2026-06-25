@@ -533,9 +533,8 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	default:
 		return vmkit.Response{}, fmt.Errorf("unsupported workspace control command: %s", command)
 	}
-	if (command == "pause" || command == "resume") && !vmkit.BackendCapabilities(opts.Backend).Snapshot {
-		err := fmt.Errorf("%s is not supported on the %s backend; requires Snapshot capability", command, opts.Backend)
-		return vmkit.Response{OK: false, Backend: opts.Backend, Error: err.Error()}, err
+	if resp, err := unsupportedControlCapability(opts.Backend, command); err != nil {
+		return resp, err
 	}
 	req := vmkit.Request{
 		Command: command,
@@ -552,6 +551,14 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+func unsupportedControlCapability(backend, command string) (vmkit.Response, error) {
+	if (command == "pause" || command == "resume") && !vmkit.BackendCapabilities(backend).Snapshot {
+		err := fmt.Errorf("%s is not supported on the %s backend; requires Snapshot capability", command, backend)
+		return vmkit.Response{OK: false, Backend: backend, Error: err.Error()}, err
+	}
+	return vmkit.Response{}, nil
 }
 
 // Pause freezes a running workspace's vCPUs while preserving memory and disk
