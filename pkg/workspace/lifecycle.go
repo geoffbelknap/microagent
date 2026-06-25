@@ -401,7 +401,16 @@ func Inspect(ctx context.Context, opts Options) (vmkit.Response, error) {
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	return Dispatch(ctx, opts, req)
+	resp, err := Dispatch(ctx, opts, req)
+	if resp.EgressCapture == nil {
+		networkMode := opts.Network.Mode
+		if req.Config != nil && req.Config.Network != nil {
+			networkMode = req.Config.Network.Mode
+		}
+		report := vmkit.NegotiateEgressCapture(opts.Backend, networkMode, opts.EgressMode)
+		resp.EgressCapture = &report
+	}
+	return resp, err
 }
 
 func Status(opts Options) (vmkit.Response, error) {
@@ -1631,6 +1640,8 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		}
 		resp.Network = &network
 		resp.Mediation = manifest.Mediation
+		report := vmkit.NegotiateEgressCapture(backend, network.Mode, manifest.EgressMode)
+		resp.EgressCapture = &report
 		artifacts := RuntimeArtifacts(manifest.Artifacts)
 		resp.Artifacts = &artifacts
 		resp.Verification = VerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest, eventFile.State)

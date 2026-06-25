@@ -315,6 +315,7 @@ type Response struct {
 	Mediation     *MediationConfig     `json:"mediation,omitempty"`
 	RestartPolicy string               `json:"restartPolicy,omitempty"`
 	Network       *NetworkConfig       `json:"network,omitempty"`
+	EgressCapture *EgressCaptureReport `json:"egressCapture,omitempty"`
 	Error         string               `json:"error,omitempty"`
 }
 

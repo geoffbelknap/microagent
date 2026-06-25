@@ -128,6 +128,11 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	if resp.Artifacts == nil || len(resp.Artifacts.Egress) != 1 {
 		t.Fatalf("artifacts = %#v", resp.Artifacts)
 	}
+	// Status surfaces the machine-readable egress capture report (provider +
+	// coverage), computed from the recorded backend/network/egress mode.
+	if resp.EgressCapture == nil || resp.EgressCapture.Provider == "" || resp.EgressCapture.Mode == "" {
+		t.Fatalf("status response missing egress capture report: %#v", resp.EgressCapture)
+	}
 	if _, err := os.Stat(filepath.Join(dir, "agency-task", "runtime.json")); err != nil {
 		t.Fatalf("runtime.json not written: %v", err)
 	}
