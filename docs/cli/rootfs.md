@@ -76,10 +76,13 @@ The complete set:
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
-For private registries, microagent reads standard registry credential
-configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
-including configured credential helpers. It does not store registry
-credentials.
+For private registries, microagent resolves credentials without any Docker
+dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with
+Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
+[`microagent registry login`](/cli/registry/)). Credential helpers are never
+executed, Docker's `~/.docker/config.json` is never read, and public images
+always pull anonymously. See [registry](/cli/registry/) for the resolution
+order.
 
 ## Exit status
 

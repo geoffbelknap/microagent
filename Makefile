@@ -77,6 +77,7 @@ ifeq ($(UNAME_S),Darwin)
 	scripts/dev/applevf-network-mode-smoke.sh
 	scripts/dev/applevf-publish-smoke.sh
 	scripts/dev/applevf-workspace-connect-smoke.sh
+	scripts/dev/applevf-live-boot-smoke.sh
 else ifeq ($(UNAME_S),Linux)
 	scripts/dev/microagent-e2e.sh
 else
@@ -153,4 +154,4 @@ signed-supervisor:
 	scripts/dev/applevf-supervisor-build.sh
 
 smoke-boot: signed-supervisor
-	scripts/dev/applevf-boot-smoke.sh
+	scripts/dev/applevf-live-boot-smoke.sh

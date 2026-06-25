@@ -286,14 +286,19 @@ func TestSplitRegistryReferenceNormalizesDefaultRegistryRefs(t *testing.T) {
 	}
 }
 
+// TestNewRepositoryUsesRegistryCredentialConfig verifies newRepository wires
+// the Docker-free credential resolver (pkg/registryauth) into the ORAS client.
+// Resolution semantics themselves are covered by registryauth's own tests.
 func TestNewRepositoryUsesRegistryCredentialConfig(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("DOCKER_CONFIG", dir)
+	t.Setenv("HOME", dir)
+	authPath := filepath.Join(dir, "auth.json")
 	encoded := base64.StdEncoding.EncodeToString([]byte("microagent-user:microagent-pass"))
 	configJSON := `{"auths":{"example.com":{"auth":"` + encoded + `"}}}`
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(configJSON), 0o600); err != nil {
+	if err := os.WriteFile(authPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("REGISTRY_AUTH_FILE", authPath)
 	repo, err := newRepository("example.com/acme/image")
 	if err != nil {
 		t.Fatalf("newRepository: %v", err)
@@ -312,8 +317,8 @@ func TestNewRepositoryUsesRegistryCredentialConfig(t *testing.T) {
 }
 
 func TestNewRepositoryAllowsAnonymousPullWithoutCredentialConfig(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("DOCKER_CONFIG", dir)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("REGISTRY_AUTH_FILE", "")
 	repo, err := newRepository("example.com/acme/image")
 	if err != nil {
 		t.Fatalf("newRepository: %v", err)
@@ -412,7 +417,10 @@ func TestBuilderRejectsPrivateRegistryWithoutCredentials(t *testing.T) {
 	}
 	registry := newPrivateRegistryFixture(t)
 	defer registry.close()
-	t.Setenv("DOCKER_CONFIG", t.TempDir())
+	// No credentials anywhere: isolate HOME (no ~/.microagent/auth.json) and
+	// clear REGISTRY_AUTH_FILE so the pull is anonymous and must be rejected.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("REGISTRY_AUTH_FILE", "")
 
 	dir := t.TempDir()
 	_, err := NewBuilder().Build(context.Background(), BuildRequest{
@@ -561,11 +569,11 @@ func (f *privateRegistryFixture) close() {
 
 func writeRegistryCredentialConfig(t *testing.T, host, username, password string) {
 	t.Helper()
-	dir := t.TempDir()
-	t.Setenv("DOCKER_CONFIG", dir)
+	authPath := filepath.Join(t.TempDir(), "auth.json")
+	t.Setenv("REGISTRY_AUTH_FILE", authPath)
 	encoded := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
 	configJSON := `{"auths":{"` + host + `":{"auth":"` + encoded + `"}}}`
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(configJSON), 0o600); err != nil {
+	if err := os.WriteFile(authPath, []byte(configJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
