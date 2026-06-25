@@ -8,19 +8,229 @@
 //
 // gVisor's tcpip stack is pure Go and portable to darwin; only its Linux
 // fdbased link endpoint is not, so this package supplies its own link endpoint
-// over the unix datagram socket shared with the Swift supervisor (added in a
-// later step).
+// (a channel endpoint pumped to/from the unix datagram socket shared with the
+// Swift supervisor — each datagram is one Ethernet frame).
 package applevfnet
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"sync"
+	"time"
+
+	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+	"gvisor.dev/gvisor/pkg/tcpip/header"
+	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
+	"gvisor.dev/gvisor/pkg/tcpip/link/ethernet"
 	"gvisor.dev/gvisor/pkg/tcpip/network/arp"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
+	"gvisor.dev/gvisor/pkg/waiter"
 )
+
+const (
+	// nicID is the single NIC the gateway drives.
+	nicID = tcpip.NICID(1)
+	// frameMTU is the guest link MTU; matches the Swift attachment's MTU.
+	frameMTU = 1500
+	// maxFrame bounds a single datagram read (Ethernet + MTU + slack).
+	maxFrame = 65536
+	// udpForwardTimeout idles a NAT'd UDP flow out after inactivity.
+	udpForwardTimeout = 60 * time.Second
+)
+
+// DialFunc opens a host-side connection for a guest flow. S1 uses a direct
+// net.Dialer (plain NAT to the real network); S2 swaps in a dialer that routes
+// through the egress mediator with the original destination preserved.
+type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// Config parameterizes the gateway. GatewayIP is the guest's default gateway and
+// the stack's own address; GuestIP is informational (the guest configures its
+// own address via the supervisor's kernel cmdline).
+type Config struct {
+	GatewayIP  tcpip.Address
+	GatewayMAC tcpip.LinkAddress
+	// Dial opens host-side connections; defaults to a direct net.Dialer.
+	Dial DialFunc
+	// Logf logs operational events; defaults to no-op.
+	Logf func(format string, args ...any)
+}
+
+// Gateway is a running host-fd datapath. Close stops it and releases the stack.
+type Gateway struct {
+	stack *stack.Stack
+	ep    *channel.Endpoint
+	conn  *os.File
+	cfg   Config
+	ctx   context.Context
+	stop  context.CancelFunc
+	wg    sync.WaitGroup
+}
+
+func (c Config) logf(format string, args ...any) {
+	if c.Logf != nil {
+		c.Logf(format, args...)
+	}
+}
+
+// Run builds the gateway over the given Ethernet-frame datagram socket (one
+// datagram per frame) and blocks until the socket closes or ctx is cancelled.
+func Run(ctx context.Context, conn *os.File, cfg Config) error {
+	gw, err := newGateway(ctx, conn, cfg)
+	if err != nil {
+		return err
+	}
+	defer gw.Close()
+	gw.wg.Add(1)
+	go gw.pumpOutbound()
+	return gw.pumpInbound()
+}
+
+func newGateway(ctx context.Context, conn *os.File, cfg Config) (*Gateway, error) {
+	if cfg.Dial == nil {
+		d := &net.Dialer{Timeout: 15 * time.Second}
+		cfg.Dial = d.DialContext
+	}
+	if cfg.GatewayMAC == "" {
+		cfg.GatewayMAC = tcpip.LinkAddress("\x0a\x00\x00\x00\x00\x01")
+	}
+	s := newStack()
+	ep := channel.New(512, frameMTU, cfg.GatewayMAC)
+	if err := s.CreateNIC(nicID, ethernet.New(ep)); err != nil {
+		return nil, &stackError{"create NIC", err}
+	}
+	// The gateway answers ARP for, and owns, GatewayIP.
+	protoAddr := tcpip.ProtocolAddress{
+		Protocol:          ipv4.ProtocolNumber,
+		AddressWithPrefix: cfg.GatewayIP.WithPrefix(),
+	}
+	if err := s.AddProtocolAddress(nicID, protoAddr, stack.AddressProperties{}); err != nil {
+		return nil, &stackError{"add gateway address", err}
+	}
+	// Promiscuous + spoofing let the stack accept guest packets addressed to any
+	// destination (so the forwarders catch connections to arbitrary hosts) and
+	// reply from the spoofed destination address.
+	if err := s.SetPromiscuousMode(nicID, true); err != nil {
+		return nil, &stackError{"promiscuous", err}
+	}
+	if err := s.SetSpoofing(nicID, true); err != nil {
+		return nil, &stackError{"spoofing", err}
+	}
+	s.AddRoute(tcpip.Route{Destination: header.IPv4EmptySubnet, NIC: nicID})
+
+	gctx, cancel := context.WithCancel(ctx)
+	gw := &Gateway{stack: s, ep: ep, conn: conn, cfg: cfg, ctx: gctx, stop: cancel}
+	gw.installForwarders()
+	return gw, nil
+}
+
+// installForwarders wires the TCP and UDP NAT forwarders: every guest connection
+// is accepted and spliced to a host-side connection opened by cfg.Dial.
+func (gw *Gateway) installForwarders() {
+	tcpFwd := tcp.NewForwarder(gw.stack, 0, 2048, func(r *tcp.ForwarderRequest) {
+		id := r.ID()
+		dst := net.JoinHostPort(addrString(id.LocalAddress), fmt.Sprint(id.LocalPort))
+		outbound, err := gw.cfg.Dial(gw.ctx, "tcp", dst)
+		if err != nil {
+			gw.cfg.logf("apple-vf egress: dial tcp %s: %v", dst, err)
+			r.Complete(true)
+			return
+		}
+		var wq waiter.Queue
+		ep, terr := r.CreateEndpoint(&wq)
+		if terr != nil {
+			outbound.Close()
+			r.Complete(true)
+			return
+		}
+		r.Complete(false)
+		go splice(gonet.NewTCPConn(&wq, ep), outbound)
+	})
+	gw.stack.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpFwd.HandlePacket)
+
+	udpFwd := udp.NewForwarder(gw.stack, func(r *udp.ForwarderRequest) bool {
+		id := r.ID()
+		dst := net.JoinHostPort(addrString(id.LocalAddress), fmt.Sprint(id.LocalPort))
+		outbound, err := gw.cfg.Dial(gw.ctx, "udp", dst)
+		if err != nil {
+			gw.cfg.logf("apple-vf egress: dial udp %s: %v", dst, err)
+			return true // consume the datagram; nothing to splice it to
+		}
+		var wq waiter.Queue
+		ep, terr := r.CreateEndpoint(&wq)
+		if terr != nil {
+			outbound.Close()
+			return true
+		}
+		go spliceUDP(gonet.NewUDPConn(&wq, ep), outbound)
+		return true
+	})
+	gw.stack.SetTransportProtocolHandler(udp.ProtocolNumber, udpFwd.HandlePacket)
+}
+
+// pumpInbound reads Ethernet frames from the socket and injects them into the
+// stack. It returns when the socket closes or ctx is cancelled.
+func (gw *Gateway) pumpInbound() error {
+	buf := make([]byte, maxFrame)
+	for {
+		n, err := gw.conn.Read(buf)
+		if err != nil {
+			if gw.ctx.Err() != nil || err == io.EOF {
+				return nil
+			}
+			return fmt.Errorf("apple-vf egress: read frame: %w", err)
+		}
+		if n == 0 {
+			continue
+		}
+		frame := make([]byte, n)
+		copy(frame, buf[:n])
+		pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
+			Payload: buffer.MakeWithData(frame),
+		})
+		gw.ep.InjectInbound(header.IPv4ProtocolNumber, pkt)
+		pkt.DecRef()
+	}
+}
+
+// pumpOutbound drains frames the stack emits and writes them to the socket.
+func (gw *Gateway) pumpOutbound() {
+	defer gw.wg.Done()
+	for {
+		pkt := gw.ep.ReadContext(gw.ctx)
+		if pkt == nil {
+			return
+		}
+		view := pkt.ToView()
+		_, err := gw.conn.Write(view.AsSlice())
+		view.Release()
+		pkt.DecRef()
+		if err != nil {
+			gw.cfg.logf("apple-vf egress: write frame: %v", err)
+			return
+		}
+	}
+}
+
+// Close stops the gateway.
+func (gw *Gateway) Close() {
+	gw.stop()
+	gw.ep.Close()
+	gw.stack.Close()
+	gw.wg.Wait()
+}
+
+func addrString(a tcpip.Address) string {
+	return net.IP(a.AsSlice()).String()
+}
 
 // newStack builds the userspace network stack with the protocol handlers the
 // gateway needs: IPv4 + ARP at the network layer; TCP, UDP, and ICMP at the
@@ -48,3 +258,38 @@ type stackError struct {
 }
 
 func (e *stackError) Error() string { return e.op + ": " + e.err.String() }
+
+// splice copies bidirectionally between a guest TCP conn and its host conn,
+// closing both when either direction ends.
+func splice(guest, host net.Conn) {
+	var once sync.Once
+	closeBoth := func() { once.Do(func() { guest.Close(); host.Close() }) }
+	go func() { defer closeBoth(); io.Copy(host, guest) }()
+	io.Copy(guest, host)
+	closeBoth()
+}
+
+// spliceUDP relays datagrams between a guest UDP flow and its host conn, idling
+// out after udpForwardTimeout of inactivity.
+func spliceUDP(guest, host net.Conn) {
+	var once sync.Once
+	closeBoth := func() { once.Do(func() { guest.Close(); host.Close() }) }
+	copyOne := func(dst, src net.Conn) {
+		defer closeBoth()
+		buf := make([]byte, maxFrame)
+		for {
+			_ = src.SetReadDeadline(time.Now().Add(udpForwardTimeout))
+			n, err := src.Read(buf)
+			if n > 0 {
+				if _, werr := dst.Write(buf[:n]); werr != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+	go copyOne(host, guest)
+	copyOne(guest, host)
+}
