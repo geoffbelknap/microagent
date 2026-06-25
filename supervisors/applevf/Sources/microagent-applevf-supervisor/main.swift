@@ -2292,6 +2292,13 @@ func linuxKernelCommandLine(for config: Config) -> String {
         args.append("microagent_model_fwd=\(modelGuestPort):\(modelVsockPort)")
     }
     switch normalizedNetworkMode(config.network) {
+    case "user" where hostFDEgressEnabled():
+        // The host-fd gateway owns a fixed subnet; the guest is statically
+        // configured to it regardless of any spec network fields.
+        args.append("microagent_net_if=eth0")
+        args.append("microagent_net_ip=\(hostFDGuestIP)")
+        args.append("microagent_net_gw=\(hostFDGatewayIP)")
+        args.append("microagent_net_dns=\(hostFDGuestDNS)")
     case "user":
         let ip = config.network?.ip?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let gateway = config.network?.gateway?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -2432,10 +2439,15 @@ func runtimeConfigForStart(identity: Identity, config: Config) throws -> Config 
 func networkDevices(for config: Config, identity: Identity) throws -> [VZVirtioNetworkDeviceConfiguration] {
     switch normalizedNetworkMode(config.network) {
     case "user":
-        // Apple Virtualization.framework's VZNATNetworkDeviceAttachment runs in
-        // user space inside the framework, so it already provides the
-        // unprivileged outbound-only semantics that "user" mode promises on
-        // Linux via pasta.
+        // Host-fd egress capture provider (opt-in for S1): the guest NIC is a
+        // host-owned socket driven by the microagent userspace gateway, so all
+        // egress is captured and (with mediation) cannot bypass the mediator.
+        if hostFDEgressEnabled() {
+            return [try makeHostFDNetworkDevice()]
+        }
+        // Default: Apple Virtualization.framework's VZNATNetworkDeviceAttachment
+        // runs in user space inside the framework, providing the unprivileged
+        // outbound-only semantics that "user" mode promises on Linux via pasta.
         let device = VZVirtioNetworkDeviceConfiguration()
         device.attachment = VZNATNetworkDeviceAttachment()
         return [device]
