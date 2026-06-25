@@ -81,6 +81,7 @@ type Gateway struct {
 	ctx   context.Context
 	stop  context.CancelFunc
 	wg    sync.WaitGroup
+	close sync.Once
 }
 
 func (c Config) logf(format string, args ...any) {
@@ -103,7 +104,7 @@ func Run(ctx context.Context, conn *os.File, cfg Config) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-			closeFrameSocket(conn)
+			gw.closeFrameSocket()
 		case <-done:
 		}
 	}()
@@ -278,18 +279,20 @@ func (gw *Gateway) pumpOutbound() {
 // Close stops the gateway.
 func (gw *Gateway) Close() {
 	gw.stop()
-	closeFrameSocket(gw.conn)
+	gw.closeFrameSocket()
 	gw.ep.Close()
 	gw.stack.Close()
 	gw.wg.Wait()
 }
 
-func closeFrameSocket(conn *os.File) {
-	if conn == nil {
-		return
-	}
-	_ = syscall.Shutdown(int(conn.Fd()), syscall.SHUT_RDWR)
-	_ = conn.Close()
+func (gw *Gateway) closeFrameSocket() {
+	gw.close.Do(func() {
+		if gw.conn == nil {
+			return
+		}
+		_ = syscall.Shutdown(int(gw.conn.Fd()), syscall.SHUT_RDWR)
+		_ = gw.conn.Close()
+	})
 }
 
 func addrString(a tcpip.Address) string {

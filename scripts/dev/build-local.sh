@@ -189,8 +189,10 @@ fi
 if [ "$(uname -s)" = "Darwin" ]; then
   "$ROOT/scripts/dev/applevf-supervisor-build.sh" >/dev/null
   cp "$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor" "$supervisor_path"
-  # Ad-hoc + hardened runtime + library validation (see applevf-supervisor-build.sh).
-  codesign -s - -f --options runtime,library --entitlements "$ROOT/supervisors/applevf/microagent-applevf-supervisor.entitlements" "$supervisor_path" >/dev/null
+  # Keep signing behavior aligned with applevf-supervisor-build.sh so local
+  # diagnostics can test either the default ad-hoc signature or a real Team ID
+  # identity via MICROAGENT_APPLEVF_CODESIGN_IDENTITY.
+  codesign -s "${MICROAGENT_APPLEVF_CODESIGN_IDENTITY:--}" -f --options "${MICROAGENT_APPLEVF_CODESIGN_OPTIONS:-runtime,library}" --entitlements "$ROOT/supervisors/applevf/microagent-applevf-supervisor.entitlements" "$supervisor_path" >/dev/null
 fi
 
 if [ "$quiet" -eq 0 ]; then
