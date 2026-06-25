@@ -187,12 +187,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// audit log (never secret material). With no swap table the Resolver stays
 	// nil and the request path is byte-identical to today; a live swap with a
 	// missing resolver would fail closed in Swapper.acquire regardless.
-	if swaps != nil {
-		h.tokenCache = newTokenCache()
-		h.Resolver = NewKeyResolver(func(msg string) {
-			logger.Log("egress_secret_warning", map[string]any{"warning": msg})
-		})
-	}
+	h.EnableSwaps(swaps)
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
 
 	// Mediation always includes UDP: open the transparent UDP socket on the same

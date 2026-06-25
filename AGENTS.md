@@ -76,9 +76,30 @@ This repository owns the VM pieces:
 - Keep public output structured and machine-readable.
 - Keep AX mode and MCP responses structured, typed, and stable enough for agent
   clients to consume without log scraping.
+- Put product behavior in library packages first. CLI commands and MCP tools
+  are adapters over `pkg/*` and `internal/*` APIs; they must not be the only
+  implementation of workspace semantics, validation, capability gates, or
+  backend policy.
+- Every user-facing workspace feature must have a library-owned contract before
+  it is considered done. Treat every microagent feature as backend-neutral in
+  product intent by default; backend-specific code is an implementation detail
+  behind the library and supervisor boundaries.
+- If a supported backend cannot implement a feature yet, record it as an
+  explicit backend gap in the library contract with status, reason, and the
+  named capability or implementation blocker. Expose unsupported behavior as a
+  structured result from the shared library path. Do not bury support decisions
+  in CLI parsing, MCP handlers, or supervisor-specific command branches.
+- Do not introduce Linux-only or macOS-only product features. If a platform API
+  makes parity hard, land the shared contract plus explicit gap record first,
+  then close the backend implementation gap as follow-up work.
+- Keep CLI, AX, and MCP surfaces on the same library path. A feature available
+  through one adapter should either be available through the others or have a
+  documented contract reason for the difference.
 - Keep the Apple VF supervisor usable from Go, Python, Rust, Node, and shell scripts.
 - Treat state changes as API output, not log strings.
-- Keep halt, quarantine, readiness, result, artifact, and verification semantics backend-neutral.
+- Keep halt, quarantine, readiness, result, artifact, verification, and new
+  backend-neutral feature semantics aligned across supported backends by
+  default.
 - Preserve explicit identity in requests, state files, and events.
 - Keep backend details behind supervisor boundaries.
 - Fail closed on invalid VM config.
@@ -126,6 +147,10 @@ This repository owns the VM pieces:
   Experimental Hyper-V runs are diagnostic unless explicitly scoped as part of
   the task. Backend-specific scenarios are host implementation probes and must
   be named as such.
+- When adding or changing a user-facing workspace feature, add or update tests
+  that prove the feature is declared in the library contract, mapped consistently
+  from CLI and MCP adapters, and implemented for Linux KVM and Apple VF or
+  recorded as an explicit backend gap with structured unsupported behavior.
 - Before fresh live runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to
   identify preserved stale state. Delete only after confirming the candidates
   are test-owned and safe.

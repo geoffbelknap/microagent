@@ -533,6 +533,9 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	default:
 		return vmkit.Response{}, fmt.Errorf("unsupported workspace control command: %s", command)
 	}
+	if resp, err := unsupportedControlCapability(opts.Backend, command); err != nil {
+		return resp, err
+	}
 	req := vmkit.Request{
 		Command: command,
 		Identity: &vmkit.Identity{
@@ -548,6 +551,14 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+func unsupportedControlCapability(backend, command string) (vmkit.Response, error) {
+	if (command == "pause" || command == "resume") && !vmkit.BackendCapabilities(backend).Snapshot {
+		err := fmt.Errorf("%s is not supported on the %s backend; requires Snapshot capability", command, backend)
+		return vmkit.Response{OK: false, Backend: backend, Error: err.Error()}, err
+	}
+	return vmkit.Response{}, nil
 }
 
 // Pause freezes a running workspace's vCPUs while preserving memory and disk
@@ -1532,6 +1543,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Stdout = supervisorLog
 	cmd.Stderr = supervisorLog
+	cmd.Env = supervisorEnvironment(opts)
 	cmd.SysProcAttr = detachedSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return vmkit.Response{}, err
@@ -1548,6 +1560,18 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		ObservedAt: time.Now().UTC(),
 	}
 	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
+}
+
+func supervisorEnvironment(opts Options) []string {
+	env := os.Environ()
+	if opts.Backend != vmkit.BackendAppleVF {
+		return env
+	}
+	exe, err := os.Executable()
+	if err != nil || strings.TrimSpace(exe) == "" {
+		return env
+	}
+	return append(env, "MICROAGENT_EGRESS_DATAPATH_BIN="+exe)
 }
 
 func requireReadableFile(path, name string) error {

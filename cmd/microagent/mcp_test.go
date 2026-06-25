@@ -164,6 +164,25 @@ func TestMCPToolSchemasDoNotEmitNullRequired(t *testing.T) {
 	}
 }
 
+func TestMCPToolsHaveLibraryFeatureContracts(t *testing.T) {
+	for _, tool := range mcpTools() {
+		name, ok := tool["name"].(string)
+		if !ok || name == "" {
+			t.Fatalf("tool missing name: %#v", tool)
+		}
+		if name == "microagent.ping" {
+			continue
+		}
+		feature, ok := vmkit.FeatureForMCPTool(name)
+		if !ok {
+			t.Fatalf("MCP tool %s has no library feature contract", name)
+		}
+		if feature.OwnerPackage == "" {
+			t.Fatalf("MCP tool %s maps to feature %s without owner package", name, feature.ID)
+		}
+	}
+}
+
 func TestPrintServeMCPHelpPointsToClientSetup(t *testing.T) {
 	var output bytes.Buffer
 	printServeMCPHelp(&output)

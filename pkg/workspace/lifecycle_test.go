@@ -76,6 +76,26 @@ func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
 	}
 }
 
+func TestPauseAndResumeRequireSnapshotCapability(t *testing.T) {
+	resp, err := unsupportedControlCapability(vmkit.BackendAppleVF, "pause")
+	if err == nil || !strings.Contains(err.Error(), "requires Snapshot capability") {
+		t.Fatalf("Pause err = %v, want Snapshot capability error", err)
+	}
+	if resp.OK || resp.Backend != vmkit.BackendAppleVF || !strings.Contains(resp.Error, "requires Snapshot capability") {
+		t.Fatalf("Pause resp = %#v, want structured unsupported response", resp)
+	}
+	resp, err = unsupportedControlCapability(vmkit.BackendAppleVF, "resume")
+	if err == nil || !strings.Contains(err.Error(), "requires Snapshot capability") {
+		t.Fatalf("Resume err = %v, want Snapshot capability error", err)
+	}
+	if resp.OK || resp.Backend != vmkit.BackendAppleVF || !strings.Contains(resp.Error, "requires Snapshot capability") {
+		t.Fatalf("Resume resp = %#v, want structured unsupported response", resp)
+	}
+	if resp, err := unsupportedControlCapability(vmkit.BackendLinuxKVM, "pause"); err != nil || resp.Error != "" {
+		t.Fatalf("Linux pause capability err=%v resp=%#v, want supported", err, resp)
+	}
+}
+
 func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{
