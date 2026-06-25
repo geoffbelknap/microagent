@@ -5,6 +5,21 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.8.2 - 2026-06-25
+
+### VMM-process confinement is on by default (behavior change)
+
+The Firecracker backend now confines the VMM process by default (`auto` mode) —
+the per-VM jailer (Linux) / Seatbelt (macOS) confinement that was opt-in is now
+the default for every workspace. Each microVM's VMM runs under a tightened
+filesystem, process, and capability boundary with hardened signing, so a guest
+escape is contained to the jail rather than the host. Confinement can still be
+disabled per workspace for backends or environments that don't support it.
+
+This closes the default-on confinement work (#11). It is paired with
+event-driven per-VM reaping and supervisor fixes so confined VMs are tracked and
+torn down reliably.
+
 ### Drop bridged/named/nat networking — user + isolated only
 
 Removed the three host-netns network modes (`bridged`, `named`, `nat`) and the
@@ -20,6 +35,39 @@ What remains: `user` networking (pasta per-VM user namespace on Linux, VZNAT on
 macOS — both unprivileged) and `isolated`. Egress mediation is unchanged in
 behavior but now runs only inside the per-VM user-mode netns, so it no longer
 needs any privileged host setup.
+
+### `dispatch` — one-shot delegated work with an egress audit receipt
+
+New `microagent dispatch <image> [command]` command: boot a throwaway microVM
+under the egress guardrails you choose, run one command, and get back its result
+**and** a mediator-written summary of everything it reached on the network — then
+the workspace is torn down. The audit is written outside the guest's control, so
+a prompt-injected or rogue task can neither forge nor suppress it. It is the
+one-call "delegate this to an isolated machine and tell me what it did"
+primitive. Use `run` for the same disposable boot without the receipt, or
+`create` for a named workspace that survives.
+
+### `--cred-swap <provider>` — one-word credential swap for built-in providers
+
+New repeatable `--cred-swap PROVIDER[=ref]` flag on `create`/`run`/`dispatch`
+(and a `cred_swap` param on the MCP `workspace.create`/`workspace.dispatch`
+tools). The guest can *use* a provider API key it can never read: the real secret
+is injected host-side at the mediator, the provider host is unioned into the
+egress allowlist, and the generated swap config is written to a durable
+per-workspace path so restart/restore/fork re-arm it. Requires `--egress guarded`
+or `strict`. Unknown providers and pasted literal secrets are rejected up front.
+Cred-swap protects the *task* credentials a guest uses, not the agent's own auth.
+
+### Agentfile — an `agent:` block on the workspace spec (build-free agents)
+
+A workspace spec can now carry an optional `agent:` block (entry, egress,
+cred-swap), and `--file` now drives `run`/`dispatch`, not just `create`. So
+`microagent dispatch --file agent.yaml` pulls a thin base, installs the SDK at
+boot, drops the agent script, and runs it under the egress envelope with
+cred-swap — no image build, no BuildKit. CLI flags override the spec; allow and
+cred-swap sets union. Turnkey example Agentfiles for the OpenAI Agents SDK and
+the Claude Agent SDK ship under `examples/agents/`. Turning egress fully `off`
+now emits a one-line stderr warning so disabling mediation is never silent.
 
 ## v0.8.1 - 2026-06-22
 
