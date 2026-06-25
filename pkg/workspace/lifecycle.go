@@ -533,6 +533,10 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	default:
 		return vmkit.Response{}, fmt.Errorf("unsupported workspace control command: %s", command)
 	}
+	if (command == "pause" || command == "resume") && !vmkit.BackendCapabilities(opts.Backend).Snapshot {
+		err := fmt.Errorf("%s is not supported on the %s backend; requires Snapshot capability", command, opts.Backend)
+		return vmkit.Response{OK: false, Backend: opts.Backend, Error: err.Error()}, err
+	}
 	req := vmkit.Request{
 		Command: command,
 		Identity: &vmkit.Identity{

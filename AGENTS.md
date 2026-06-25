@@ -76,9 +76,26 @@ This repository owns the VM pieces:
 - Keep public output structured and machine-readable.
 - Keep AX mode and MCP responses structured, typed, and stable enough for agent
   clients to consume without log scraping.
+- Put product behavior in library packages first. CLI commands and MCP tools
+  are adapters over `pkg/*` and `internal/*` APIs; they must not be the only
+  implementation of workspace semantics, validation, capability gates, or
+  backend policy.
+- Every user-facing workspace feature must have a library-owned contract before
+  it is considered done. Classify it as all-backend, capability-gated,
+  host-tooling, or explicitly experimental; do not let Linux-only behavior land
+  as an implicit product default.
+- If a feature is not supported on a backend, expose that through a named
+  capability gate and a structured unsupported result from the shared library
+  path. Do not bury support decisions in CLI parsing, MCP handlers, or
+  supervisor-specific command branches.
+- Keep CLI, AX, and MCP surfaces on the same library path. A feature available
+  through one adapter should either be available through the others or have a
+  documented contract reason for the difference.
 - Keep the Apple VF supervisor usable from Go, Python, Rust, Node, and shell scripts.
 - Treat state changes as API output, not log strings.
-- Keep halt, quarantine, readiness, result, artifact, and verification semantics backend-neutral.
+- Keep halt, quarantine, readiness, result, artifact, verification, and new
+  backend-neutral feature semantics aligned across supported backends by
+  default.
 - Preserve explicit identity in requests, state files, and events.
 - Keep backend details behind supervisor boundaries.
 - Fail closed on invalid VM config.
@@ -126,6 +143,10 @@ This repository owns the VM pieces:
   Experimental Hyper-V runs are diagnostic unless explicitly scoped as part of
   the task. Backend-specific scenarios are host implementation probes and must
   be named as such.
+- When adding or changing a user-facing workspace feature, add or update tests
+  that prove the feature is declared in the library contract, mapped consistently
+  from CLI and MCP adapters, and either implemented or explicitly
+  capability-gated for Linux KVM and Apple VF.
 - Before fresh live runs, use `scripts/dev/cleanup-temp.sh` in dry-run mode to
   identify preserved stale state. Delete only after confirming the candidates
   are test-owned and safe.
