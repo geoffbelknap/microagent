@@ -27,20 +27,22 @@ func writeFakeSnapshot(t *testing.T, stateDir, name, tag string, manifest Snapsh
 func TestSnapshotManifestRoundTrip(t *testing.T) {
 	dir := SnapshotDir(t.TempDir(), "agent-1", "snap-1")
 	manifest := SnapshotManifest{
-		Tag:            "snap-1",
-		ImageRef:       "docker.io/library/nats:latest",
-		NetworkMode:    "nat",
-		GuestIP:        "169.254.0.2",
-		KernelSHA256:   "abc123",
-		VCPUCount:      2,
-		MemoryMiB:      512,
-		CreatedAt:      "2026-06-01T00:00:00Z",
-		VsockUDSPath:   "/state/agent-1/vsock.sock",
-		ShellPort:      28365,
-		ExecPort:       48365,
-		NetworkIP:      "10.43.220.2/29",
-		NetworkGateway: "10.43.220.1",
-		NetworkSubnet:  "10.43.220.0/29",
+		Tag:                 "snap-1",
+		ImageRef:            "docker.io/library/nats:latest",
+		NetworkMode:         "nat",
+		GuestIP:             "169.254.0.2",
+		KernelSHA256:        "abc123",
+		VCPUCount:           2,
+		MemoryMiB:           512,
+		CreatedAt:           "2026-06-01T00:00:00Z",
+		VsockUDSPath:        "/state/agent-1/vsock.sock",
+		ShellPort:           28365,
+		ExecPort:            48365,
+		NetworkIP:           "10.43.220.2/29",
+		NetworkGateway:      "10.43.220.1",
+		NetworkSubnet:       "10.43.220.0/29",
+		SecretsMaterialized: true,
+		SecretsPurged:       true,
 	}
 	if err := WriteSnapshotManifest(dir, manifest); err != nil {
 		t.Fatal(err)
@@ -81,6 +83,34 @@ func TestSnapshotManifestRoundTripsEgress(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, manifest) {
 		t.Fatalf("round-trip = %#v, want %#v", got, manifest)
+	}
+}
+
+func TestMaterializedSecretsDeclared(t *testing.T) {
+	if MaterializedSecretsDeclared(&Config{}) {
+		t.Fatal("empty config should not need snapshot purge")
+	}
+	if !MaterializedSecretsDeclared(&Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}) {
+		t.Fatal("materialized --secret should need snapshot purge")
+	}
+	if !MaterializedSecretsDeclared(&Config{SecretEnvFiles: []string{"/tmp/app.env"}}) {
+		t.Fatal("materialized secrets env file should need snapshot purge")
+	}
+	if MaterializedSecretsDeclared(&Config{OnDemandSecrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}) {
+		t.Fatal("on-demand-only secrets should not need snapshot purge")
+	}
+}
+
+func TestValidateSnapshotSecretCaptureFailsClosed(t *testing.T) {
+	cfg := &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}
+	if err := ValidateSnapshotSecretCapture(cfg, false); err == nil {
+		t.Fatal("expected secret-bearing snapshot without purge to fail closed")
+	}
+	if err := ValidateSnapshotSecretCapture(cfg, true); err != nil {
+		t.Fatalf("purged secret-bearing snapshot should pass: %v", err)
+	}
+	if err := ValidateSnapshotSecretCapture(&Config{OnDemandSecrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}, false); err != nil {
+		t.Fatalf("on-demand-only snapshot should not require purge: %v", err)
 	}
 }
 

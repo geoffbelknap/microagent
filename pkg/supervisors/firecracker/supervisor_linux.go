@@ -544,7 +544,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		// before the source snapshot). Rehydrate it by re-fetching the bundle.
 		// Best-effort: the guest is already running, so a transient failure is
 		// retryable and should not kill a freshly restored VM.
-		if materializedSecretsDeclared(runtimeReq.Config) && runtimeReq.Config.SecretsControlPort != 0 {
+		if vmkit.MaterializedSecretsDeclared(runtimeReq.Config) && runtimeReq.Config.SecretsControlPort != 0 {
 			if err := rehydrateGuestSecrets(opts, runtimeReq.Config.SecretsControlPort); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: rehydrate secrets after restore failed: %v\n", err)
 			}

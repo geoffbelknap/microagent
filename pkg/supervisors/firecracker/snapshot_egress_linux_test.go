@@ -181,6 +181,22 @@ func TestSnapshotManifestFromStateFailsClosedOnMissingCA(t *testing.T) {
 	}
 }
 
+func TestSnapshotManifestFromStateRequiresSecretPurge(t *testing.T) {
+	opts := Options{Name: "ws", StateDir: t.TempDir()}
+	state := mediatedRuntimeState(vmkit.EgressModeOff, nil, nil)
+	state.Config.Secrets = []vmkit.SecretRef{{Name: "API", Ref: "env:TOKEN"}}
+	if _, err := snapshotManifestFromState("snap-1", state, opts, false); err == nil {
+		t.Fatal("expected secret-bearing manifest without purge to fail closed")
+	}
+	manifest, err := snapshotManifestFromState("snap-1", state, opts, true)
+	if err != nil {
+		t.Fatalf("snapshotManifestFromState with purge: %v", err)
+	}
+	if !manifest.SecretsMaterialized || !manifest.SecretsPurged {
+		t.Fatalf("manifest secret fields = materialized:%t purged:%t, want both true", manifest.SecretsMaterialized, manifest.SecretsPurged)
+	}
+}
+
 // TestSnapshotManifestFromStateSkipsCAForIsolatedNetwork proves that an
 // isolated workspace can be snapshotted even when its stored egress posture was
 // normalized to guarded. Isolated workspaces do not run the mediator or mint a
