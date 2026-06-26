@@ -114,6 +114,30 @@ func TestValidateSnapshotSecretCaptureFailsClosed(t *testing.T) {
 	}
 }
 
+func TestValidateSnapshotSecretRestoreFailsClosed(t *testing.T) {
+	manifest := SnapshotManifest{Tag: "base", SecretsMaterialized: true, SecretsPurged: true}
+	if err := ValidateSnapshotSecretRestore(manifest, nil); err == nil {
+		t.Fatal("expected missing restore config to fail closed")
+	}
+	if err := ValidateSnapshotSecretRestore(manifest, &Config{}); err == nil {
+		t.Fatal("expected missing materialized refs to fail closed")
+	}
+	if err := ValidateSnapshotSecretRestore(manifest, &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}); err == nil {
+		t.Fatal("expected missing secrets control port to fail closed")
+	}
+	cfg := &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}, SecretsControlPort: 1028}
+	if err := ValidateSnapshotSecretRestore(manifest, cfg); err != nil {
+		t.Fatalf("purged secret-bearing snapshot with rehydrate config should pass: %v", err)
+	}
+	manifest.SecretsPurged = false
+	if err := ValidateSnapshotSecretRestore(manifest, cfg); err == nil {
+		t.Fatal("expected unpurged secret-bearing snapshot to fail closed")
+	}
+	if err := ValidateSnapshotSecretRestore(SnapshotManifest{Tag: "old"}, &Config{}); err != nil {
+		t.Fatalf("snapshot without materialized secret marker should remain compatible: %v", err)
+	}
+}
+
 func TestListSnapshotsReturnsTagsWithSize(t *testing.T) {
 	stateDir := t.TempDir()
 	writeFakeSnapshot(t, stateDir, "agent-1", "snap-a", SnapshotManifest{Tag: "snap-a", MemoryMiB: 512, CreatedAt: "2026-06-01T00:00:00Z"}, 1024)

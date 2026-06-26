@@ -76,6 +76,37 @@ func TestSnapshotCreateAppleVFUsesExplicitBackendGap(t *testing.T) {
 	}
 }
 
+func TestApplyForkSecretManifestCopiesSecretRefsForRehydrate(t *testing.T) {
+	opts := Options{Name: "fork"}
+	source := Manifest{
+		Secrets:         []vmkit.SecretRef{{Name: "API", Ref: "env:API_TOKEN"}},
+		SecretEnvFiles:  []string{"/tmp/app.env"},
+		OnDemandSecrets: []vmkit.SecretRef{{Name: "DB", Ref: "env:DB_TOKEN"}},
+		SecretsAudit:    true,
+	}
+	snapshot := vmkit.SnapshotManifest{Tag: "base", SecretsMaterialized: true, SecretsPurged: true}
+	if err := applyForkSecretManifest(&opts, source, snapshot); err != nil {
+		t.Fatalf("applyForkSecretManifest: %v", err)
+	}
+	if opts.Secrets["API"] != "env:API_TOKEN" {
+		t.Fatalf("Secrets = %#v", opts.Secrets)
+	}
+	if len(opts.SecretEnvFiles) != 1 || opts.SecretEnvFiles[0] != "/tmp/app.env" {
+		t.Fatalf("SecretEnvFiles = %#v", opts.SecretEnvFiles)
+	}
+	if opts.OnDemandSecrets["DB"] != "env:DB_TOKEN" || !opts.SecretsAudit {
+		t.Fatalf("OnDemandSecrets = %#v SecretsAudit = %t", opts.OnDemandSecrets, opts.SecretsAudit)
+	}
+}
+
+func TestApplyForkSecretManifestFailsWithoutMaterializedRefs(t *testing.T) {
+	opts := Options{Name: "fork"}
+	snapshot := vmkit.SnapshotManifest{Tag: "base", SecretsMaterialized: true, SecretsPurged: true}
+	if err := applyForkSecretManifest(&opts, Manifest{}, snapshot); err == nil {
+		t.Fatal("expected missing source secret refs to fail closed")
+	}
+}
+
 func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{

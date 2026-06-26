@@ -710,6 +710,15 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		}
 		return Result{}, err
 	}
+	if manifest.SecretsMaterialized {
+		sourceManifest, err := ReadManifest(opts.StateDir, sourceWorkspace)
+		if err != nil {
+			return Result{}, fmt.Errorf("read source workspace manifest for secret-bearing snapshot: %w", err)
+		}
+		if err := applyForkSecretManifest(&opts, sourceManifest, manifest); err != nil {
+			return Result{}, err
+		}
+	}
 	if manifest.MemoryMiB > 0 {
 		opts.MemoryMiB = manifest.MemoryMiB
 		opts.SpecMemory = true
@@ -770,6 +779,28 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	}
 	opts.FromSnapshot = tag
 	return Start(ctx, opts)
+}
+
+func applyForkSecretManifest(opts *Options, source Manifest, snapshot vmkit.SnapshotManifest) error {
+	if !snapshot.SecretsMaterialized {
+		return nil
+	}
+	if len(source.Secrets) == 0 && len(source.SecretEnvFiles) == 0 {
+		return fmt.Errorf("snapshot %q requires source materialized secret references for fork rehydrate", snapshot.Tag)
+	}
+	opts.Secrets = make(map[string]string, len(source.Secrets))
+	for _, ref := range source.Secrets {
+		opts.Secrets[ref.Name] = ref.Ref
+	}
+	opts.SecretEnvFiles = append([]string(nil), source.SecretEnvFiles...)
+	if len(source.OnDemandSecrets) > 0 {
+		opts.OnDemandSecrets = make(map[string]string, len(source.OnDemandSecrets))
+		for _, ref := range source.OnDemandSecrets {
+			opts.OnDemandSecrets[ref.Name] = ref.Ref
+		}
+	}
+	opts.SecretsAudit = source.SecretsAudit
+	return nil
 }
 
 // copyForkEgressCA copies the source workspace's persisted egress CA cert and key

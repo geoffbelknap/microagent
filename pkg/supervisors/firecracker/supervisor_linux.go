@@ -401,12 +401,14 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	// unreadable during a restore.
 	restore := req.Tag != ""
 	expectedCASHA := ""
+	var restoreManifest *vmkit.SnapshotManifest
 	if restore {
 		manifest, merr := vmkit.ReadSnapshotManifest(vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag))
 		if merr != nil {
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, merr.Error())
 			return failedResponse(req, merr.Error()), merr
 		}
+		restoreManifest = &manifest
 		expectedCASHA = manifest.EgressCASHA256
 		// Re-apply the persisted bounded-operations caps (ASK tenet 8) so a restored
 		// workspace keeps the SAME bounds it was snapshotted under, just as the CA is
@@ -540,13 +542,23 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
 		}
-		// The restored/forked guest resumes with a zeroed /run/secrets (purged
-		// before the source snapshot). Rehydrate it by re-fetching the bundle.
-		// Best-effort: the guest is already running, so a transient failure is
-		// retryable and should not kill a freshly restored VM.
-		if vmkit.MaterializedSecretsDeclared(runtimeReq.Config) && runtimeReq.Config.SecretsControlPort != 0 {
+		// A snapshot that recorded materialized guest secrets resumes with
+		// zeroed /run/secrets (purged before memory capture). Rehydrate before
+		// the restored/forked workspace is considered running. Fail closed: do
+		// not leave a secret-bearing restore booted with silently missing
+		// materialized secrets.
+		if restoreManifest != nil && restoreManifest.SecretsMaterialized {
 			if err := rehydrateGuestSecrets(opts, runtimeReq.Config.SecretsControlPort); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: rehydrate secrets after restore failed: %v\n", err)
+				wrapped := fmt.Errorf("rehydrate secrets after snapshot restore: %w", err)
+				_ = cmd.Process.Kill()
+				cleanupTransientFirewallRules(firewallRules)
+				cleanupTransientNetworkDevices(networkDevices)
+				if serialInput != nil {
+					_ = serialInput.Close()
+				}
+				_ = serialLog.Close()
+				_ = writeProcessState(opts, req, vmkit.StateFailed, 0, wrapped.Error())
+				return failedResponse(req, wrapped.Error()), wrapped
 			}
 		}
 	}
