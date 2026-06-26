@@ -1168,6 +1168,69 @@ func TestQuarantinePreservesVMPIDAndSeversHostSideEffects(t *testing.T) {
 	}
 }
 
+func TestBackgroundTerminalWriteDoesNotDemoteQuarantine(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	startReq := vmkit.Request{
+		Command: "run",
+		Identity: &vmkit.Identity{
+			RequestID: "req-run",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendLinuxKVM,
+		},
+		Config: &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessStateWithProcessesAndNetwork(opts, startReq, vmkit.StateRunning, 1234, 0, 0, 0, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	quarantineReq := vmkit.Request{
+		Command: "quarantine",
+		Identity: &vmkit.Identity{
+			RequestID: "req-quarantine",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendLinuxKVM,
+		},
+		Config: &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessStateWithProcessesAndNetwork(opts, quarantineReq, vmkit.StateQuarantined, 1234, 0, 0, 0, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeProcessStateWithProcessesAndNetwork(opts, startReq, vmkit.StateStopped, 0, 0, 0, 0, nil, nil, "late run exit"); err != nil {
+		t.Fatal(err)
+	}
+	state, err := readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateQuarantined || state.Event.Identity.RequestID != "req-quarantine" {
+		t.Fatalf("state = %#v, want quarantine preserved", state.Event)
+	}
+
+	stopReq := vmkit.Request{
+		Command: "stop",
+		Identity: &vmkit.Identity{
+			RequestID: "req-stop",
+			RuntimeID: "agent-1",
+			Role:      vmkit.RoleWorkload,
+			Backend:   vmkit.BackendLinuxKVM,
+		},
+		Config: &vmkit.Config{StateDir: dir},
+	}
+	if err := writeProcessStateWithProcessesAndNetwork(opts, stopReq, vmkit.StateStopped, 0, 0, 0, 0, nil, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	state, err = readRuntimeState(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Event.State != vmkit.StateStopped || state.Event.Identity.RequestID != "req-stop" {
+		t.Fatalf("state = %#v, want explicit stop to leave quarantine", state.Event)
+	}
+}
+
 func TestEnsureCanDeleteRejectsRunningStateWithoutPID(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}

@@ -264,6 +264,49 @@ func TestManifestAndStatusLifecycleAreLibraryOwned(t *testing.T) {
 	}
 }
 
+func TestListIgnoresTerminalRuntimeOnlyRecords(t *testing.T) {
+	dir := t.TempDir()
+	writeState := func(name string, state vmkit.VMState) {
+		t.Helper()
+		opts := Options{StateDir: dir, Name: name}
+		req := vmkit.Request{
+			Identity: &vmkit.Identity{RequestID: "req-" + name, RuntimeID: name, Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+			Config:   &vmkit.Config{StateDir: dir},
+		}
+		if err := WriteProcessState(opts, req, state, 1234, ""); err != nil {
+			t.Fatalf("WriteProcessState(%s): %v", name, err)
+		}
+	}
+
+	writeState("deleted", vmkit.StateStopped)
+	writeState("live", vmkit.StateRunning)
+
+	entries, err := List(dir)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "live" {
+		t.Fatalf("entries = %#v, want only live runtime-only workspace", entries)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "workspaces", "saved"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeState("saved", vmkit.StateStopped)
+
+	entries, err = List(dir)
+	if err != nil {
+		t.Fatalf("List after saved manifest: %v", err)
+	}
+	got := map[string]string{}
+	for _, entry := range entries {
+		got[entry.Name] = entry.State
+	}
+	if len(got) != 2 || got["live"] != string(vmkit.StateRunning) || got["saved"] != string(vmkit.StateStopped) {
+		t.Fatalf("entries = %#v, want live runtime-only and saved terminal workspace", entries)
+	}
+}
+
 func TestDefaultHostnameSanitizesWorkspaceName(t *testing.T) {
 	tests := map[string]string{
 		"homebridge":            "homebridge",

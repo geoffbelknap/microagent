@@ -488,8 +488,19 @@ func List(stateDir string) ([]ListEntry, error) {
 			if !entry.IsDir() || entry.Name() == "build" || entry.Name() == "workspaces" {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(stateDir, entry.Name(), "event.json")); err == nil {
-				names[entry.Name()] = true
+			name := entry.Name()
+			if _, err := os.Stat(filepath.Join(stateDir, name, "event.json")); err != nil {
+				continue
+			}
+			if names[name] {
+				continue
+			}
+			event, err := ReadEvent(Options{StateDir: stateDir, Name: name})
+			if err != nil {
+				continue
+			}
+			if isLiveState(event.State) {
+				names[name] = true
 			}
 		}
 	} else if !os.IsNotExist(err) {
@@ -526,6 +537,15 @@ func List(stateDir string) ([]ListEntry, error) {
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+func isLiveState(state vmkit.VMState) bool {
+	switch state {
+	case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused, vmkit.StateQuarantined, vmkit.StateStopping:
+		return true
+	default:
+		return false
+	}
 }
 
 func Control(ctx context.Context, opts Options, command string) (vmkit.Response, error) {

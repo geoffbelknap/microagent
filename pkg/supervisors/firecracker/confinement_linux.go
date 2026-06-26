@@ -182,6 +182,9 @@ func stageJailArtifacts(l jailLayout) error {
 // option: staging runs before the user namespace, so a rootless launcher has no
 // privilege to mount.
 func stageFile(src, dst string) error {
+	if resolved, err := filepath.EvalSymlinks(src); err == nil {
+		src = resolved
+	}
 	_ = os.Remove(dst)
 	err := os.Link(src, dst)
 	if err == nil {
