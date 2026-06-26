@@ -237,7 +237,77 @@ struct Response: Codable {
     var result: RuntimeResult? = nil
     var mediation: MediationConfig? = nil
     var network: NetworkConfig? = nil
+    var saveStateCheck: SaveStateCheckDiagnostics? = nil
     var error: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case backend
+        case event
+        case host
+        case readiness
+        case result
+        case mediation
+        case network
+        case saveStateCheck = "save_state_check"
+        case error
+    }
+}
+
+struct SaveStateCheckStep: Codable {
+    var name: String
+    var ok: Bool
+    var detail: String?
+    var error: String?
+    var observedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case ok
+        case detail
+        case error
+        case observedAt = "observed_at"
+    }
+}
+
+struct SaveStateCheckDiagnostics: Codable {
+    var mode: String
+    var configShape: String
+    var saveStatePath: String
+    var destinationExistedBefore: Bool
+    var destinationParentExistsAfter: Bool?
+    var destinationExistsAfter: Bool?
+    var initialVMState: String?
+    var stateAfterStart: String?
+    var stateBeforePause: String?
+    var stateAfterPause: String?
+    var stateBeforeSave: String?
+    var stateAfterSave: String?
+    var steps: [SaveStateCheckStep]
+    var ok: Bool
+    var error: String?
+    var startedAt: Date
+    var completedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case mode
+        case configShape = "config_shape"
+        case saveStatePath = "save_state_path"
+        case destinationExistedBefore = "destination_existed_before"
+        case destinationParentExistsAfter = "destination_parent_exists_after"
+        case destinationExistsAfter = "destination_exists_after"
+        case initialVMState = "initial_vm_state"
+        case stateAfterStart = "state_after_start"
+        case stateBeforePause = "state_before_pause"
+        case stateAfterPause = "state_after_pause"
+        case stateBeforeSave = "state_before_save"
+        case stateAfterSave = "state_after_save"
+        case steps
+        case ok
+        case error
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+    }
 }
 
 let backendName = "apple-vf"
@@ -386,11 +456,17 @@ func runSaveStateCheck(args: [String]) -> Int32 {
             throw ProtocolError.invalid("Apple Virtualization is not available on this host")
         }
         if #available(macOS 14.0, *) {
-            try runSaveStateCheckVM(identity: identity, config: runtimeConfig, confined: parsed.confined, saveStatePath: parsed.saveStatePath)
             let mode = parsed.confined ? "confined" : "unconfined"
-            let event = Event(identity: identity, state: .paused, detail: "saveMachineStateTo succeeded (\(mode))", observedAt: Date())
-            write(response(event: event, config: runtimeConfig, error: nil))
-            return 0
+            let diagnostics = runSaveStateCheckVM(identity: identity, config: runtimeConfig, confined: parsed.confined, saveStatePath: parsed.saveStatePath, configShape: parsed.configShape)
+            if diagnostics.ok {
+                let event = Event(identity: identity, state: .paused, detail: "saveMachineStateTo succeeded (\(mode), \(parsed.configShape))", observedAt: Date())
+                var out = response(event: event, config: runtimeConfig, error: nil)
+                out.saveStateCheck = diagnostics
+                write(out)
+                return 0
+            }
+            write(Response(ok: false, backend: backendName, saveStateCheck: diagnostics, error: diagnostics.error ?? "saveMachineStateTo failed"))
+            return 1
         }
         throw ProtocolError.invalid("Apple VF save state requires macOS 14 or newer")
         #else
@@ -406,12 +482,14 @@ struct SaveStateCheckArgs {
     var request: Request
     var confined: Bool
     var saveStatePath: String?
+    var configShape: String
 }
 
 func parseSaveStateCheckArgs(_ args: [String]) throws -> SaveStateCheckArgs {
     var request: Request?
     var confined = true
     var saveStatePath: String?
+    var configShape = "full"
     var i = 0
     while i < args.count {
         switch args[i] {
@@ -438,54 +516,167 @@ func parseSaveStateCheckArgs(_ args: [String]) throws -> SaveStateCheckArgs {
             guard i + 1 < args.count else { throw ProtocolError.invalid("--save-state-path requires a path") }
             saveStatePath = args[i + 1]
             i += 2
+        case "--config-shape":
+            guard i + 1 < args.count else { throw ProtocolError.invalid("--config-shape requires full or minimal") }
+            switch args[i + 1] {
+            case "full", "minimal":
+                configShape = args[i + 1]
+            default:
+                throw ProtocolError.invalid("--config-shape requires full or minimal")
+            }
+            i += 2
         default:
-            throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>]")
+            throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>] [--config-shape full|minimal]")
         }
     }
     guard let request else {
-        throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>]")
+        throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>] [--config-shape full|minimal]")
     }
-    return SaveStateCheckArgs(request: request, confined: confined, saveStatePath: saveStatePath)
+    return SaveStateCheckArgs(request: request, confined: confined, saveStatePath: saveStatePath, configShape: configShape)
 }
 
 #if canImport(Virtualization)
 @available(macOS 14.0, *)
-func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, saveStatePath: String?) throws {
-    try prepareHostFDEgressBeforeConfinement(config: config, identity: identity)
-    defer { closeHostFDEgress() }
-    if confined {
-        try applyConfinement(identity: identity, config: config, qos: QOS_CLASS_UTILITY)
-    }
-    let vmConfig = try virtualMachineConfiguration(identity: identity, config: config, serialMode: .detached)
-    try vmConfig.validate()
-    try vmConfig.validateSaveRestoreSupport()
-    let vm = VZVirtualMachine(configuration: vmConfig)
-    let delegate = VMRunDelegate(identity: identity, config: config)
-    vm.delegate = delegate
-    let socketListeners = try installSocketListeners(vm: vm, identity: identity, config: config)
-    let publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
+func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, saveStatePath: String?, configShape: String) -> SaveStateCheckDiagnostics {
     let path = saveStatePath ?? runtimeDirectory(identity: identity, stateDir: config.stateDir).appendingPathComponent("save-state-check.vmstate").path
-    try withExtendedLifetime((delegate, socketListeners, publishForwarder)) {
-        try startPauseAndSave(vm: vm, saveStatePath: path)
+    let mode = confined ? "confined" : "unconfined"
+    var diagnostics = SaveStateCheckDiagnostics(
+        mode: mode,
+        configShape: configShape,
+        saveStatePath: path,
+        destinationExistedBefore: FileManager.default.fileExists(atPath: path),
+        destinationParentExistsAfter: nil,
+        destinationExistsAfter: nil,
+        initialVMState: nil,
+        stateAfterStart: nil,
+        stateBeforePause: nil,
+        stateAfterPause: nil,
+        stateBeforeSave: nil,
+        stateAfterSave: nil,
+        steps: [],
+        ok: false,
+        error: nil,
+        startedAt: Date(),
+        completedAt: nil
+    )
+    do {
+        if configShape == "full" {
+            try recordSaveStateStep(&diagnostics, name: "prepare-host-fd-egress") {
+                try prepareHostFDEgressBeforeConfinement(config: config, identity: identity)
+            }
+        }
+        defer {
+            if configShape == "full" {
+                closeHostFDEgress()
+            }
+        }
+        if confined {
+            try recordSaveStateStep(&diagnostics, name: "apply-confinement") {
+                try applyConfinement(identity: identity, config: config, qos: QOS_CLASS_UTILITY)
+            }
+        }
+        let vmConfig: VZVirtualMachineConfiguration
+        if configShape == "minimal" {
+            vmConfig = try minimalSaveStateConfiguration(config: config)
+        } else {
+            vmConfig = try virtualMachineConfiguration(identity: identity, config: config, serialMode: .detached)
+        }
+        try recordSaveStateStep(&diagnostics, name: "validate") {
+            try vmConfig.validate()
+        }
+        try recordSaveStateStep(&diagnostics, name: "validate-save-restore-support") {
+            try vmConfig.validateSaveRestoreSupport()
+        }
+        let vm = VZVirtualMachine(configuration: vmConfig)
+        diagnostics.initialVMState = describeVMState(vm)
+        let delegate = VMRunDelegate(identity: identity, config: config)
+        vm.delegate = delegate
+        let socketListeners: [SocketListenerHandle]
+        let publishForwarder: TCPPublishForwarder?
+        if configShape == "minimal" {
+            socketListeners = []
+            publishForwarder = nil
+        } else {
+            socketListeners = try installSocketListeners(vm: vm, identity: identity, config: config)
+            publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
+        }
+        try withExtendedLifetime((delegate, socketListeners, publishForwarder)) {
+            try startPauseAndSave(vm: vm, saveStatePath: path, diagnostics: &diagnostics)
+        }
+        diagnostics.ok = true
+    } catch {
+        diagnostics.error = String(describing: error)
     }
+    diagnostics.destinationParentExistsAfter = FileManager.default.fileExists(atPath: URL(fileURLWithPath: path).deletingLastPathComponent().path)
+    diagnostics.destinationExistsAfter = FileManager.default.fileExists(atPath: path)
+    diagnostics.completedAt = Date()
+    return diagnostics
 }
 
 @available(macOS 14.0, *)
-func startPauseAndSave(vm: VZVirtualMachine, saveStatePath: String) throws {
-    try waitForVZResult(timeout: 30.0) { complete in
-        vm.start { complete($0) }
+func minimalSaveStateConfiguration(config: Config) throws -> VZVirtualMachineConfiguration {
+    let vmConfig = VZVirtualMachineConfiguration()
+    vmConfig.platform = VZGenericPlatformConfiguration()
+    let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: config.kernelPath))
+    bootLoader.commandLine = "console=hvc0 root=/dev/vda rw init=/sbin/microagent-init"
+    vmConfig.bootLoader = bootLoader
+    vmConfig.cpuCount = config.cpuCount ?? 2
+    vmConfig.memorySize = UInt64(config.memoryMiB ?? 512) * 1024 * 1024
+    let attachment = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: config.rootfsPath), readOnly: false)
+    vmConfig.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
+    vmConfig.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+    vmConfig.networkDevices = []
+    vmConfig.socketDevices = []
+    vmConfig.serialPorts = []
+    return vmConfig
+}
+
+@available(macOS 14.0, *)
+func startPauseAndSave(vm: VZVirtualMachine, saveStatePath: String, diagnostics: inout SaveStateCheckDiagnostics) throws {
+    try recordSaveStateStep(&diagnostics, name: "start") {
+        try waitForVZResult(timeout: 30.0) { complete in
+            vm.start { complete($0) }
+        }
     }
+    diagnostics.stateAfterStart = describeVMState(vm)
     Thread.sleep(forTimeInterval: 2.0)
-    try waitForVZResult(timeout: 10.0) { complete in
-        vm.pause { complete($0) }
+    diagnostics.stateBeforePause = describeVMState(vm)
+    try recordSaveStateStep(&diagnostics, name: "pause") {
+        try waitForVZResult(timeout: 10.0) { complete in
+            vm.pause { complete($0) }
+        }
     }
+    diagnostics.stateAfterPause = describeVMState(vm)
     let url = URL(fileURLWithPath: saveStatePath)
     if FileManager.default.fileExists(atPath: url.path) {
-        try FileManager.default.removeItem(at: url)
+        try recordSaveStateStep(&diagnostics, name: "remove-existing-destination") {
+            try FileManager.default.removeItem(at: url)
+        }
     }
-    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try waitForVZOptionalError(timeout: 30.0) { complete in
-        vm.saveMachineStateTo(url: url) { complete($0) }
+    try recordSaveStateStep(&diagnostics, name: "prepare-destination-parent") {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    }
+    diagnostics.stateBeforeSave = describeVMState(vm)
+    try recordSaveStateStep(&diagnostics, name: "save-machine-state") {
+        try waitForVZOptionalError(timeout: 30.0) { complete in
+            vm.saveMachineStateTo(url: url) { complete($0) }
+        }
+    }
+    diagnostics.stateAfterSave = describeVMState(vm)
+}
+
+@available(macOS 13.0, *)
+func describeVMState(_ vm: VZVirtualMachine) -> String {
+    String(describing: vm.state)
+}
+
+func recordSaveStateStep(_ diagnostics: inout SaveStateCheckDiagnostics, name: String, operation: () throws -> Void) throws {
+    do {
+        try operation()
+        diagnostics.steps.append(SaveStateCheckStep(name: name, ok: true, detail: nil, error: nil, observedAt: Date()))
+    } catch {
+        diagnostics.steps.append(SaveStateCheckStep(name: name, ok: false, detail: nil, error: String(describing: error), observedAt: Date()))
+        throw error
     }
 }
 
