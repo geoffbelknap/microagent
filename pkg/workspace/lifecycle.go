@@ -319,6 +319,16 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := ValidateName(opts.Name); err != nil {
 		return Result{}, err
 	}
+	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
+		backend := opts.Backend
+		if backend == "" {
+			backend = DefaultOptions().Backend
+		}
+		if !vmkit.BackendCapabilities(backend).Snapshot {
+			feature, _ := vmkit.FeatureForCLICommand("start --from-snapshot")
+			return Result{}, vmkit.NewUnsupportedFeatureError(backend, feature, "snapshot restore (--from-snapshot)")
+		}
+	}
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
@@ -368,9 +378,6 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
-		if !vmkit.BackendCapabilities(opts.Backend).Snapshot {
-			return Result{}, fmt.Errorf("snapshot restore (--from-snapshot) is not supported on the %s backend", opts.Backend)
-		}
 		startReq.Tag = tag
 	}
 	resp, err := startDetached(opts, startReq)
@@ -578,17 +585,22 @@ func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
 // workspace image reference. A running workspace is briefly paused and resumed
 // around the capture; an already-paused workspace stays paused.
 func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
-	if err := normalizeLifecycleOptions(&opts, false); err != nil {
-		return vmkit.SnapshotManifest{}, err
-	}
 	if err := ValidateName(opts.Name); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
 	if strings.TrimSpace(tag) == "" {
 		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot tag is required")
 	}
-	if !vmkit.BackendCapabilities(opts.Backend).SnapshotCreate {
-		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot is not supported on the %s backend", opts.Backend)
+	backend := opts.Backend
+	if backend == "" {
+		backend = DefaultOptions().Backend
+	}
+	if !vmkit.BackendCapabilities(backend).SnapshotCreate {
+		feature, _ := vmkit.FeatureForCLICommand("snapshot")
+		return vmkit.SnapshotManifest{}, vmkit.NewUnsupportedFeatureError(backend, feature, "snapshot create")
+	}
+	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return vmkit.SnapshotManifest{}, err
 	}
 	req := vmkit.Request{
 		Command: "snapshot",
@@ -687,7 +699,8 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		forkBackend = HostBackend()
 	}
 	if !vmkit.BackendCapabilities(forkBackend).Snapshot {
-		return Result{}, fmt.Errorf("snapshot fork (--from-snapshot) is not supported on the %s backend", forkBackend)
+		feature, _ := vmkit.FeatureForCLICommand("create --from-snapshot")
+		return Result{}, vmkit.NewUnsupportedFeatureError(forkBackend, feature, "snapshot fork (--from-snapshot)")
 	}
 	srcDir := vmkit.SnapshotDir(opts.StateDir, sourceWorkspace, tag)
 	manifest, err := vmkit.ReadSnapshotManifest(srcDir)

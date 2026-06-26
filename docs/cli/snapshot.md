@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-25_
+_Last updated: 2026-06-26_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]   Checkpoint a running workspace
@@ -15,8 +15,12 @@ microagent snapshot delete <name> <tag> [--state-dir <dir>]               Remove
 A snapshot is a full checkpoint of a workspace: its guest memory and device
 state plus a coherent copy of its rootfs disk, taken together while the VM is
 paused. Snapshots are implemented only on the Firecracker backend. Apple VF
-does not yet support snapshot create, restore, or fork; the
-`gap.apple-vf.snapshot` backend gap remains open. **Windows Hyper-V does not
+does not yet support snapshot create, restore, or fork for the Homebrew/ad-hoc
+distribution path: `validateSaveRestoreSupport` passes, but
+`saveMachineStateTo` returns `VZErrorDomain Code=11` permission denied even in
+an unconfined ad-hoc supervisor probe after start, pause, destination setup, and
+a minimal no-network/no-vsock/no-serial config. The `gap.apple-vf.snapshot`
+backend gap remains open. **Windows Hyper-V does not
 support snapshots and is not planned to:** its HCS-direct
 (`LinuxKernelDirect`) compute systems have no guest-memory save-state — the
 HCS save call captures only device state, and the Hyper-V mechanisms that do

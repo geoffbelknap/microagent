@@ -4,7 +4,7 @@ description: Drive the macOS backend executable - one JSON request in, one respo
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-25_
+_Last updated: 2026-06-26_
 
 If you run microagent on macOS, or you want to drive Virtualization.framework
 from a language that isn't Swift, this page documents the executable that
@@ -58,7 +58,11 @@ Apple VF process boundary.
 Apple VF implements these supervisor commands: `host`, `check`, `prepare`,
 `run`, `start`, `console`, `inspect`, `halt`, `quarantine`, `pause`, `resume`,
 `stop`, `kill`, and `delete`. Apple VF does not yet implement `snapshot`
-create, restore, or fork; that capability remains gated by the
+create, restore, or fork for the Homebrew/ad-hoc distribution path:
+`validateSaveRestoreSupport` passes, but `saveMachineStateTo` returns
+`VZErrorDomain Code=11` permission denied even in an unconfined ad-hoc
+supervisor probe after start, pause, destination setup, and a minimal
+no-network/no-vsock/no-serial config. That capability remains gated by the
 backend-neutral runtime contract while `gap.apple-vf.snapshot` is open.
 
 `host` does not require `identity` or `config`. `inspect`, `halt`,

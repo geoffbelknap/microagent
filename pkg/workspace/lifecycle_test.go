@@ -57,6 +57,25 @@ func TestSnapshotRemoveRejectsMissingTag(t *testing.T) {
 	}
 }
 
+func TestSnapshotCreateAppleVFUsesExplicitBackendGap(t *testing.T) {
+	_, err := Snapshot(context.Background(), Options{Name: "agent-1", StateDir: t.TempDir(), Backend: vmkit.BackendAppleVF}, "base")
+	if err == nil {
+		t.Fatal("expected Apple VF snapshot create to be unsupported")
+	}
+	var unsupported vmkit.UnsupportedFeatureError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("err = %T %[1]v, want vmkit.UnsupportedFeatureError", err)
+	}
+	if unsupported.Backend != vmkit.BackendAppleVF || unsupported.FeatureID != "workspace.snapshot" || unsupported.GapID != "gap.apple-vf.snapshot" {
+		t.Fatalf("unsupported error = %#v, want Apple VF snapshot gap", unsupported)
+	}
+	for _, want := range []string{"Homebrew/ad-hoc", "saveMachineStateTo", "VZErrorDomain Code=11"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %q, want %q", err.Error(), want)
+		}
+	}
+}
+
 func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{
