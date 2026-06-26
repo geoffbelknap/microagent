@@ -259,6 +259,7 @@ struct SaveStateCheckStep: Codable {
     var ok: Bool
     var detail: String?
     var error: String?
+    var errorDetail: ErrorDiagnostic?
     var observedAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -266,7 +267,49 @@ struct SaveStateCheckStep: Codable {
         case ok
         case detail
         case error
+        case errorDetail = "error_detail"
         case observedAt = "observed_at"
+    }
+}
+
+struct ErrorUserInfoEntry: Codable {
+    var key: String
+    var value: String
+}
+
+final class ErrorDiagnostic: Codable {
+    var type: String
+    var description: String
+    var localizedDescription: String
+    var localizedFailureReason: String?
+    var localizedRecoverySuggestion: String?
+    var domain: String?
+    var code: Int?
+    var userInfo: [ErrorUserInfoEntry]?
+    var underlying: ErrorDiagnostic?
+
+    init(type: String, description: String, localizedDescription: String, localizedFailureReason: String?, localizedRecoverySuggestion: String?, domain: String?, code: Int?, userInfo: [ErrorUserInfoEntry]?, underlying: ErrorDiagnostic?) {
+        self.type = type
+        self.description = description
+        self.localizedDescription = localizedDescription
+        self.localizedFailureReason = localizedFailureReason
+        self.localizedRecoverySuggestion = localizedRecoverySuggestion
+        self.domain = domain
+        self.code = code
+        self.userInfo = userInfo
+        self.underlying = underlying
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case description
+        case localizedDescription = "localized_description"
+        case localizedFailureReason = "localized_failure_reason"
+        case localizedRecoverySuggestion = "localized_recovery_suggestion"
+        case domain
+        case code
+        case userInfo = "user_info"
+        case underlying
     }
 }
 
@@ -286,6 +329,7 @@ struct SaveStateCheckDiagnostics: Codable {
     var steps: [SaveStateCheckStep]
     var ok: Bool
     var error: String?
+    var errorDetail: ErrorDiagnostic?
     var startedAt: Date
     var completedAt: Date?
 
@@ -305,6 +349,7 @@ struct SaveStateCheckDiagnostics: Codable {
         case steps
         case ok
         case error
+        case errorDetail = "error_detail"
         case startedAt = "started_at"
         case completedAt = "completed_at"
     }
@@ -606,6 +651,7 @@ func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, sav
         diagnostics.ok = true
     } catch {
         diagnostics.error = String(describing: error)
+        diagnostics.errorDetail = errorDiagnostic(error)
     }
     diagnostics.destinationParentExistsAfter = FileManager.default.fileExists(atPath: URL(fileURLWithPath: path).deletingLastPathComponent().path)
     diagnostics.destinationExistsAfter = FileManager.default.fileExists(atPath: path)
@@ -673,11 +719,38 @@ func describeVMState(_ vm: VZVirtualMachine) -> String {
 func recordSaveStateStep(_ diagnostics: inout SaveStateCheckDiagnostics, name: String, operation: () throws -> Void) throws {
     do {
         try operation()
-        diagnostics.steps.append(SaveStateCheckStep(name: name, ok: true, detail: nil, error: nil, observedAt: Date()))
+        diagnostics.steps.append(SaveStateCheckStep(name: name, ok: true, detail: nil, error: nil, errorDetail: nil, observedAt: Date()))
     } catch {
-        diagnostics.steps.append(SaveStateCheckStep(name: name, ok: false, detail: nil, error: String(describing: error), observedAt: Date()))
+        diagnostics.steps.append(SaveStateCheckStep(name: name, ok: false, detail: nil, error: String(describing: error), errorDetail: errorDiagnostic(error), observedAt: Date()))
         throw error
     }
+}
+
+func errorDiagnostic(_ error: Error, seen: Set<ObjectIdentifier> = []) -> ErrorDiagnostic {
+    let nsError = error as NSError
+    let objectID = ObjectIdentifier(nsError)
+    let nextSeen = seen.union([objectID])
+    let entries = nsError.userInfo
+        .filter { key, _ in key != NSUnderlyingErrorKey }
+        .map { key, value in ErrorUserInfoEntry(key: key, value: String(describing: value)) }
+        .sorted { $0.key < $1.key }
+    let underlying: ErrorDiagnostic?
+    if let nested = nsError.userInfo[NSUnderlyingErrorKey] as? Error, !seen.contains(objectID) {
+        underlying = errorDiagnostic(nested, seen: nextSeen)
+    } else {
+        underlying = nil
+    }
+    return ErrorDiagnostic(
+        type: String(reflecting: Swift.type(of: error)),
+        description: String(describing: error),
+        localizedDescription: nsError.localizedDescription,
+        localizedFailureReason: nsError.localizedFailureReason,
+        localizedRecoverySuggestion: nsError.localizedRecoverySuggestion,
+        domain: nsError.domain,
+        code: nsError.code,
+        userInfo: entries.isEmpty ? nil : entries,
+        underlying: underlying
+    )
 }
 
 func waitForVZResult(timeout: TimeInterval, operation: (@escaping (Result<Void, Error>) -> Void) -> Void) throws {
