@@ -1615,6 +1615,58 @@ func TestPrepareSnapshotRestoreRollsBackRootfs(t *testing.T) {
 	}
 }
 
+func TestPrepareSnapshotRestoreRequiresSecretRehydrateConfig(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	kernel := filepath.Join(dir, "kernel")
+	if err := os.WriteFile(kernel, []byte("kernel-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rootfs := filepath.Join(dir, "rootfs.ext4")
+	if err := os.WriteFile(rootfs, []byte("LIVE-disk-with-marker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kernelSHA, err := fileSHA256(kernel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "base")
+	if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{
+		Tag:                 "base",
+		KernelSHA256:        kernelSHA,
+		SecretsMaterialized: true,
+		SecretsPurged:       true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapDir, vmkit.SnapshotRootfsName), []byte("SNAPSHOT-disk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "r", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		Config:   &vmkit.Config{KernelPath: kernel, RootfsPath: rootfs, StateDir: dir},
+		Tag:      "base",
+	}
+	err = prepareSnapshotRestore(opts, req)
+	if err == nil || !strings.Contains(err.Error(), "requires materialized secret references") {
+		t.Fatalf("err = %v, want missing secret refs rejection", err)
+	}
+	data, readErr := os.ReadFile(rootfs)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(data) != "LIVE-disk-with-marker" {
+		t.Fatalf("rootfs = %q, want live disk left untouched", data)
+	}
+
+	req.Config.Secrets = []vmkit.SecretRef{{Name: "API", Ref: "env:TOKEN"}}
+	req.Config.SecretsControlPort = 1028
+	if err := prepareSnapshotRestore(opts, req); err != nil {
+		t.Fatalf("prepareSnapshotRestore with rehydrate config: %v", err)
+	}
+}
+
 func TestPrepareSnapshotRestoreRejectsKernelSkew(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{Name: "agent-1", StateDir: dir}

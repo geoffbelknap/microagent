@@ -109,6 +109,27 @@ func ValidateSnapshotSecretCapture(config *Config, purged bool) error {
 	return nil
 }
 
+// ValidateSnapshotSecretRestore enforces the backend-neutral secret safety
+// invariant for snapshot restore/fork: a snapshot that captured a workspace with
+// materialized guest secrets must have been purged at capture time, and the
+// restore config must provide both the secret references and a guest control
+// channel so the backend can rehydrate before treating the workspace as ready.
+func ValidateSnapshotSecretRestore(manifest SnapshotManifest, config *Config) error {
+	if !manifest.SecretsMaterialized {
+		return nil
+	}
+	if !manifest.SecretsPurged {
+		return fmt.Errorf("snapshot %q has materialized secrets but does not record guest secret purge; refusing restore", manifest.Tag)
+	}
+	if !MaterializedSecretsDeclared(config) {
+		return fmt.Errorf("snapshot %q requires materialized secret references for restore rehydrate", manifest.Tag)
+	}
+	if config == nil || config.SecretsControlPort == 0 {
+		return fmt.Errorf("snapshot %q requires a guest secrets control port for restore rehydrate", manifest.Tag)
+	}
+	return nil
+}
+
 // SnapshotsDir is the directory holding all snapshots for a workspace.
 func SnapshotsDir(stateDir, name string) string {
 	return filepath.Join(stateDir, name, "snapshots")

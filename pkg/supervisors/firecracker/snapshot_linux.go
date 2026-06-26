@@ -452,6 +452,9 @@ func prepareSnapshotRestore(opts Options, req vmkit.Request) error {
 			return fmt.Errorf("snapshot %q was taken against kernel sha256 %s but the workspace kernel is %s; refusing to load", req.Tag, manifest.KernelSHA256, sha)
 		}
 	}
+	if err := vmkit.ValidateSnapshotSecretRestore(manifest, req.Config); err != nil {
+		return err
+	}
 	if err := copyFile(filepath.Join(dir, vmkit.SnapshotRootfsName), req.Config.RootfsPath); err != nil {
 		return fmt.Errorf("restore snapshot rootfs: %w", err)
 	}
