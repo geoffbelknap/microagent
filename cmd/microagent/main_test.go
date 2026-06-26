@@ -6592,6 +6592,9 @@ func TestRunListListsWorkspaces(t *testing.T) {
 func TestRunListCanPrintHumanOutput(t *testing.T) {
 	t.Setenv("MICROAGENT_OUTPUT", "text")
 	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", RestartPolicy: "on-failure", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
 	eventDir := filepath.Join(dir, "research")
 	if err := os.MkdirAll(eventDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -6629,9 +6632,52 @@ func TestRunListCanPrintHumanOutput(t *testing.T) {
 	}
 }
 
+func TestRunListHidesTerminalRuntimeOnlyRecords(t *testing.T) {
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "research")
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	event := vmkit.Event{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		State:      vmkit.StateStopped,
+		ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "list.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runList(context.Background(), []string{"--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "research") || !strings.Contains(string(got), "No workspaces.") {
+		t.Fatalf("list human output = %s", got)
+	}
+}
+
 func TestRunDispatchesLSAlias(t *testing.T) {
 	t.Setenv("MICROAGENT_OUTPUT", "text")
 	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
 	eventDir := filepath.Join(dir, "research")
 	if err := os.MkdirAll(eventDir, 0o755); err != nil {
 		t.Fatal(err)
