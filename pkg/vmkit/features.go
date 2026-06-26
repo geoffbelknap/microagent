@@ -135,7 +135,7 @@ func FeatureContracts() []FeatureContract {
 					Backend:    BackendAppleVF,
 					Status:     "open",
 					Capability: FeatureCapabilitySnapshot,
-					Reason:     "Apple VF pause/resume runtime control exists, and VZ validateSaveRestoreSupport passes, but snapshot create is blocked for the Homebrew/ad-hoc distribution path because VZ saveMachineStateTo returns VZErrorDomain Code=11 permission denied even in an unconfined ad-hoc-signed supervisor probe after start, pause, destination setup, and a minimal no-network/no-vsock/no-serial config; restore/fork, materialized-secret purge/rehydrate, and mediated-egress restore/fork parity remain open.",
+					Reason:     "Apple VF pause/resume runtime control exists, and VZ validateSaveRestoreSupport passes, but snapshot create is blocked in the current remote/background test session: VZ saveMachineStateTo returns VZErrorDomain Code=11 permission denied even after start, pause, destination setup, and a minimal no-network/no-vsock/no-serial config. Unified logs and a direct Security probe show matching Secure Enclave key generation denial (NSOSStatusErrorDomain Code=-25308 errSecInteractionNotAllowed, AKSError=-536870174) while another user owns the active GUI console; retest from an active GUI session is required before declaring product support blocked. Restore/fork, materialized-secret purge/rehydrate, and mediated-egress restore/fork parity remain open.",
 				},
 			},
 		},

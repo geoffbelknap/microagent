@@ -58,12 +58,16 @@ Apple VF process boundary.
 Apple VF implements these supervisor commands: `host`, `check`, `prepare`,
 `run`, `start`, `console`, `inspect`, `halt`, `quarantine`, `pause`, `resume`,
 `stop`, `kill`, and `delete`. Apple VF does not yet implement `snapshot`
-create, restore, or fork for the Homebrew/ad-hoc distribution path:
-`validateSaveRestoreSupport` passes, but `saveMachineStateTo` returns
-`VZErrorDomain Code=11` permission denied even in an unconfined ad-hoc
-supervisor probe after start, pause, destination setup, and a minimal
-no-network/no-vsock/no-serial config. That capability remains gated by the
-backend-neutral runtime contract while `gap.apple-vf.snapshot` is open.
+create, restore, or fork: `validateSaveRestoreSupport` passes, but
+`saveMachineStateTo` returns `VZErrorDomain Code=11` permission denied even
+after start, pause, destination setup, and a minimal no-network/no-vsock/no-serial
+config. Current local evidence points at the test session rather than VM config:
+unified logs and a direct Security probe show matching Secure Enclave key
+generation denial (`NSOSStatusErrorDomain Code=-25308`,
+`errSecInteractionNotAllowed`, `AKSError=-536870174`) while another user owns
+the active GUI console. That capability remains gated by the backend-neutral
+runtime contract while `gap.apple-vf.snapshot` is open and pending an active GUI
+session retest.
 
 `host` does not require `identity` or `config`. `inspect`, `halt`,
 `quarantine`, `stop`, `kill`, and `delete` require `identity` and

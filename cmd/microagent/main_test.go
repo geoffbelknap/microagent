@@ -283,7 +283,7 @@ func TestRunSnapshotCreateAppleVFUsesExplicitBackendGap(t *testing.T) {
 	if rerr == nil {
 		t.Fatal("expected Apple VF snapshot create to be unsupported")
 	}
-	for _, want := range []string{"snapshot create is not supported on the apple-vf backend", "Homebrew/ad-hoc", "saveMachineStateTo", "VZErrorDomain Code=11"} {
+	for _, want := range []string{"snapshot create is not supported on the apple-vf backend", "Secure Enclave", "saveMachineStateTo", "VZErrorDomain Code=11"} {
 		if !strings.Contains(rerr.Error(), want) {
 			t.Fatalf("snapshot create error = %q, want %q", rerr.Error(), want)
 		}
