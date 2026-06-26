@@ -19,10 +19,11 @@ const (
 // SnapshotManifest records the metadata needed to restore or fork a workspace
 // snapshot: the image and network identity it was taken from, the guest IP to
 // re-establish on load, the kernel hash that guards against skew, the VM
-// sizing, and when it was created. It is written alongside the backend vmstate,
-// memory file, and rootfs copy under the snapshot directory. The type is
-// backend-neutral so the host-side CLI can list and remove snapshots without a
-// running VM, while only snapshot create needs the backend supervisor.
+// sizing, and when it was created. It is written alongside a coherent rootfs
+// copy and backend-defined machine-state artifacts under the snapshot
+// directory. The type is backend-neutral so the host-side CLI can list and
+// remove snapshots without a running VM, while only snapshot create needs the
+// backend supervisor.
 type SnapshotManifest struct {
 	Tag          string `json:"tag"`
 	ImageRef     string `json:"imageRef,omitempty"`
@@ -44,6 +45,14 @@ type SnapshotManifest struct {
 	NetworkIP      string `json:"networkIP,omitempty"`
 	NetworkGateway string `json:"networkGateway,omitempty"`
 	NetworkSubnet  string `json:"networkSubnet,omitempty"`
+	// RootfsArtifact names the coherent rootfs copy inside the snapshot
+	// directory. Empty means the legacy/default SnapshotRootfsName.
+	RootfsArtifact string `json:"rootfsArtifact,omitempty"`
+	// MachineStateArtifacts names backend-defined machine-state artifacts inside
+	// the snapshot directory. Firecracker uses separate vmstate and memory files;
+	// other backends may use a different shape, such as a single saved-state
+	// file. Empty means the legacy Firecracker vmstate+memory pair.
+	MachineStateArtifacts []SnapshotArtifact `json:"machineStateArtifacts,omitempty"`
 	// VsockUDSPath is the absolute host path the snapshot's vsock device is
 	// bound to (the source workspace's vsock socket). It is baked into the
 	// Firecracker snapshot and cannot be remapped on load, so a fork into a
@@ -81,11 +90,48 @@ type SnapshotManifest struct {
 	EgressAuditMaxBackups    int   `json:"egressAuditMaxBackups,omitempty"`
 }
 
+// SnapshotArtifact describes one backend artifact stored under a snapshot
+// directory. Path is relative to the snapshot directory; Kind is a stable
+// backend-defined role such as "firecracker-vmstate" or
+// "firecracker-memory".
+type SnapshotArtifact struct {
+	Kind string `json:"kind"`
+	Path string `json:"path"`
+}
+
 // SnapshotInfo is a manifest plus the on-disk size of its snapshot directory,
 // reported by snapshot list so operators can see what each tag costs.
 type SnapshotInfo struct {
 	SnapshotManifest
 	SizeBytes int64 `json:"sizeBytes"`
+}
+
+// SnapshotRootfsArtifact returns the rootfs artifact path for this manifest,
+// preserving compatibility with manifests written before RootfsArtifact existed.
+func SnapshotRootfsArtifact(manifest SnapshotManifest) string {
+	if manifest.RootfsArtifact != "" {
+		return manifest.RootfsArtifact
+	}
+	return SnapshotRootfsName
+}
+
+// SnapshotMachineStateArtifacts returns backend machine-state artifact paths
+// for this manifest, preserving compatibility with legacy Firecracker
+// vmstate+memory snapshots.
+func SnapshotMachineStateArtifacts(manifest SnapshotManifest) []SnapshotArtifact {
+	if len(manifest.MachineStateArtifacts) > 0 {
+		return append([]SnapshotArtifact(nil), manifest.MachineStateArtifacts...)
+	}
+	return FirecrackerSnapshotArtifacts()
+}
+
+// FirecrackerSnapshotArtifacts returns the default Firecracker machine-state
+// artifacts: vmstate metadata plus the guest memory file.
+func FirecrackerSnapshotArtifacts() []SnapshotArtifact {
+	return []SnapshotArtifact{
+		{Kind: "firecracker-vmstate", Path: SnapshotVMStateName},
+		{Kind: "firecracker-memory", Path: SnapshotMemoryName},
+	}
 }
 
 // MaterializedSecretsDeclared reports whether the config declares secrets that

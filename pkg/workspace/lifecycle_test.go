@@ -107,6 +107,47 @@ func TestApplyForkSecretManifestFailsWithoutMaterializedRefs(t *testing.T) {
 	}
 }
 
+func TestCopySnapshotIntoUsesManifestArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src")
+	dst := filepath.Join(dir, "dst")
+	manifest := vmkit.SnapshotManifest{
+		Tag:            "base",
+		RootfsArtifact: "rootfs-copy.ext4",
+		MachineStateArtifacts: []vmkit.SnapshotArtifact{
+			{Kind: "apple-vf-machine-state", Path: "machine-state.vz"},
+		},
+	}
+	if err := os.MkdirAll(src, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string]string{
+		vmkit.SnapshotManifestName: "manifest",
+		"rootfs-copy.ext4":         "rootfs",
+		"machine-state.vz":         "state",
+	} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := copySnapshotInto(src, dst, manifest); err != nil {
+		t.Fatalf("copySnapshotInto: %v", err)
+	}
+	for name, want := range map[string]string{
+		vmkit.SnapshotManifestName: "manifest",
+		"rootfs-copy.ext4":         "rootfs",
+		"machine-state.vz":         "state",
+	} {
+		got, err := os.ReadFile(filepath.Join(dst, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != want {
+			t.Fatalf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestPauseAndResumeDispatchControlCommands(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
@@ -1773,6 +1774,12 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	}
 	if manifest.CreatedAt == "" {
 		t.Fatal("manifest createdAt is empty")
+	}
+	if manifest.RootfsArtifact != vmkit.SnapshotRootfsName {
+		t.Fatalf("RootfsArtifact = %q, want %q", manifest.RootfsArtifact, vmkit.SnapshotRootfsName)
+	}
+	if got, want := manifest.MachineStateArtifacts, vmkit.FirecrackerSnapshotArtifacts(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("MachineStateArtifacts = %#v, want %#v", got, want)
 	}
 	if manifest.SecretsMaterialized || manifest.SecretsPurged {
 		t.Fatalf("manifest secret fields = materialized:%t purged:%t, want both false", manifest.SecretsMaterialized, manifest.SecretsPurged)
