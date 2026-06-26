@@ -100,30 +100,40 @@ PY
 
 run_check() {
   mode="$1"
+  shape="${2:-full}"
   mode_dir="$STATE_DIR/$mode"
-  save_state_path="$mode_dir/$WORKSPACE/save-state-check.vmstate"
+  save_state_path="$mode_dir/$WORKSPACE/save-state-check-$shape.vmstate"
   MICROAGENT_EGRESS_DATAPATH_BIN="$CLI" \
     "$SUPERVISOR" --save-state-check \
       --request "$mode_dir/request.json" \
       --mode "$mode" \
-      --save-state-path "$save_state_path" >"$mode_dir/save-state-check.json"
+      --config-shape "$shape" \
+      --save-state-path "$save_state_path" >"$mode_dir/save-state-check-$shape.json"
 }
 
 summarize_result() {
   mode="$1"
-  result="$STATE_DIR/$mode/save-state-check.json"
-  python3 - "$mode" "$result" <<'PY'
+  shape="${2:-full}"
+  result="$STATE_DIR/$mode/save-state-check-$shape.json"
+  python3 - "$mode" "$shape" "$result" <<'PY'
 import json
 import sys
 
 mode = sys.argv[1]
-with open(sys.argv[2], "r", encoding="utf-8") as f:
+shape = sys.argv[2]
+with open(sys.argv[3], "r", encoding="utf-8") as f:
     result = json.load(f)
 if result.get("ok"):
     event = result.get("event") or {}
-    print(f"{mode}: ok ({event.get('detail', 'saved')})")
+    print(f"{mode}/{shape}: ok ({event.get('detail', 'saved')})")
 else:
-    print(f"{mode}: failed: {result.get('error')}")
+    check = result.get("save_state_check") or {}
+    failing_steps = [step for step in check.get("steps", []) if not step.get("ok")]
+    suffix = ""
+    if failing_steps:
+        step = failing_steps[-1]
+        suffix = f" (step={step.get('name')}: {step.get('error')})"
+    print(f"{mode}/{shape}: failed: {result.get('error')}{suffix}")
     raise SystemExit(1)
 PY
 }
@@ -132,14 +142,25 @@ prepare_workspace unconfined
 prepare_workspace confined
 
 set +e
-run_check unconfined
+run_check unconfined full
 unconfined_status="$?"
-summarize_result unconfined
+summarize_result unconfined full
 unconfined_summary_status="$?"
 set -e
 
 if [ "$unconfined_status" -ne 0 ] || [ "$unconfined_summary_status" -ne 0 ]; then
-  echo "unconfined saveMachineStateTo failed; this is not only a Seatbelt profile denial"
+  echo "unconfined full-config saveMachineStateTo failed; running minimal-config probe to isolate attachment/config prerequisites"
+  set +e
+  run_check unconfined minimal
+  minimal_status="$?"
+  summarize_result unconfined minimal
+  minimal_summary_status="$?"
+  set -e
+  if [ "$minimal_status" -eq 0 ] && [ "$minimal_summary_status" -eq 0 ]; then
+    echo "unconfined minimal-config saveMachineStateTo succeeded; full-config failure is attachment/config-specific"
+  else
+    echo "unconfined minimal-config saveMachineStateTo failed; this is not only a Seatbelt profile denial"
+  fi
   exit 1
 fi
 
@@ -152,13 +173,13 @@ else
 fi
 
 set +e
-run_check confined
+run_check confined full
 confined_status="$?"
 if [ -n "${log_pid:-}" ]; then
   kill "$log_pid" >/dev/null 2>&1 || true
   wait "$log_pid" >/dev/null 2>&1 || true
 fi
-summarize_result confined
+summarize_result confined full
 confined_summary_status="$?"
 set -e
 
