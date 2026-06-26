@@ -16,15 +16,16 @@ A snapshot is a full checkpoint of a workspace: its guest memory and device
 state plus a coherent copy of its rootfs disk, taken together while the VM is
 paused. Snapshots are implemented only on the Firecracker backend. Apple VF
 does not yet support snapshot create, restore, or fork:
-`validateSaveRestoreSupport` passes, but `saveMachineStateTo` returns
-`VZErrorDomain Code=11` permission denied even after start, pause, destination
-setup, and a minimal no-network/no-vsock/no-serial config. Current local
-evidence points at the test session rather than VM config: unified logs and a
-direct Security probe show matching Secure Enclave key generation denial
-(`NSOSStatusErrorDomain Code=-25308`, `errSecInteractionNotAllowed`,
-`AKSError=-536870174`) while another user owns the active GUI console. The
-`gap.apple-vf.snapshot` backend gap remains open until a retest from an active
-GUI session proves the save-state path. **Windows Hyper-V does not
+`validateSaveRestoreSupport` passes, and active-GUI validation proves
+`saveMachineStateTo` can succeed in both unconfined and Seatbelt-confined
+modes. The `gap.apple-vf.snapshot` backend gap remains open because product
+snapshot create, restore, and fork still need Apple VF manifest/artifact
+capture wired to VZ save-state output, plus live restore/fork validation for
+materialized-secret purge/rehydrate and mediated-egress parity. Earlier
+`VZErrorDomain Code=11`, `NSOSStatusErrorDomain Code=-25308`,
+`errSecInteractionNotAllowed`, and `AKSError=-536870174` results remain useful
+as diagnostics for the session prerequisite: run save-state validation from an
+active GUI session owned by the console user. **Windows Hyper-V does not
 support snapshots and is not planned to:** its HCS-direct
 (`LinuxKernelDirect`) compute systems have no guest-memory save-state — the
 HCS save call captures only device state, and the Hyper-V mechanisms that do

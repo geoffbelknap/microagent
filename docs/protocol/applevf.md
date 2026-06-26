@@ -58,16 +58,17 @@ Apple VF process boundary.
 Apple VF implements these supervisor commands: `host`, `check`, `prepare`,
 `run`, `start`, `console`, `inspect`, `halt`, `quarantine`, `pause`, `resume`,
 `stop`, `kill`, and `delete`. Apple VF does not yet implement `snapshot`
-create, restore, or fork: `validateSaveRestoreSupport` passes, but
-`saveMachineStateTo` returns `VZErrorDomain Code=11` permission denied even
-after start, pause, destination setup, and a minimal no-network/no-vsock/no-serial
-config. Current local evidence points at the test session rather than VM config:
-unified logs and a direct Security probe show matching Secure Enclave key
-generation denial (`NSOSStatusErrorDomain Code=-25308`,
-`errSecInteractionNotAllowed`, `AKSError=-536870174`) while another user owns
-the active GUI console. That capability remains gated by the backend-neutral
-runtime contract while `gap.apple-vf.snapshot` is open and pending an active GUI
-session retest.
+create, restore, or fork: `validateSaveRestoreSupport` passes, and active-GUI
+validation proves `saveMachineStateTo` can succeed in both unconfined and
+Seatbelt-confined modes. That capability remains gated by the backend-neutral
+runtime contract while `gap.apple-vf.snapshot` is open because product snapshot
+create, restore, and fork still need Apple VF manifest/artifact capture wired to
+VZ save-state output, plus live restore/fork validation for materialized-secret
+purge/rehydrate and mediated-egress parity. Earlier `VZErrorDomain Code=11`,
+`NSOSStatusErrorDomain Code=-25308`, `errSecInteractionNotAllowed`, and
+`AKSError=-536870174` results remain useful as diagnostics for the session
+prerequisite: run save-state validation from an active GUI session owned by the
+console user.
 
 `host` does not require `identity` or `config`. `inspect`, `halt`,
 `quarantine`, `stop`, `kill`, and `delete` require `identity` and

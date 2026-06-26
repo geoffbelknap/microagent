@@ -69,7 +69,7 @@ func TestSnapshotCreateAppleVFUsesExplicitBackendGap(t *testing.T) {
 	if unsupported.Backend != vmkit.BackendAppleVF || unsupported.FeatureID != "workspace.snapshot" || unsupported.GapID != "gap.apple-vf.snapshot" {
 		t.Fatalf("unsupported error = %#v, want Apple VF snapshot gap", unsupported)
 	}
-	for _, want := range []string{"saveMachineStateTo", "VZErrorDomain Code=11", "Secure Enclave", "active GUI session"} {
+	for _, want := range []string{"saveMachineStateTo", "active-GUI retesting", "restore/fork", "materialized-secret", "mediated-egress"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("err = %q, want %q", err.Error(), want)
 		}
