@@ -3284,6 +3284,9 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 	if req.Identity == nil || req.Config == nil {
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
+	if shouldPreserveQuarantine(opts, req, state) {
+		return nil
+	}
 	debugSupLog(opts, fmt.Sprintf("WRITE state=%s pid=%d err=%q (resets Stopping)", state, pid, errorText))
 	dir := filepath.Join(opts.StateDir, opts.Name)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -3328,6 +3331,18 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 	}
 	runtime.Readiness = readinessFromRuntimeState(runtime)
 	return writeJSONFile(filepath.Join(dir, "runtime.json"), runtime)
+}
+
+func shouldPreserveQuarantine(opts Options, req vmkit.Request, next vmkit.VMState) bool {
+	if next != vmkit.StateStopped && next != vmkit.StateFailed {
+		return false
+	}
+	switch req.Command {
+	case "halt", "stop", "kill", "delete":
+		return false
+	}
+	prev, err := readRuntimeState(opts)
+	return err == nil && prev.Event.State == vmkit.StateQuarantined
 }
 
 func readinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
