@@ -1,6 +1,9 @@
 package vmkit
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFeatureContractsDeclareBackendSupport(t *testing.T) {
 	features := FeatureContracts()
@@ -59,6 +62,18 @@ func TestSnapshotFeatureIsBackendNeutralWithExplicitAppleVFGap(t *testing.T) {
 	}
 	if !appleVF.Required || appleVF.Ready || appleVF.Status != "open" || appleVF.GapID != "gap.apple-vf.snapshot" {
 		t.Fatalf("apple-vf snapshot support = %#v, want required open gap", appleVF)
+	}
+	for _, want := range []string{"Homebrew/ad-hoc", "saveMachineStateTo", "VZErrorDomain Code=11", "minimal no-network/no-vsock/no-serial"} {
+		if !strings.Contains(appleVF.Reason, want) {
+			t.Fatalf("apple-vf snapshot gap reason = %q, want %q", appleVF.Reason, want)
+		}
+	}
+	err := NewUnsupportedFeatureError(BackendAppleVF, feature, "snapshot create")
+	if err.GapID != "gap.apple-vf.snapshot" || err.Capability != FeatureCapabilitySnapshot {
+		t.Fatalf("unsupported feature error = %#v, want snapshot gap metadata", err)
+	}
+	if !strings.Contains(err.Error(), "snapshot create is not supported on the apple-vf backend:") || !strings.Contains(err.Error(), "Homebrew/ad-hoc") {
+		t.Fatalf("unsupported feature error string = %q", err.Error())
 	}
 }
 

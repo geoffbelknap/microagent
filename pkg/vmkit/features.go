@@ -1,5 +1,7 @@
 package vmkit
 
+import "fmt"
+
 type FeatureScope string
 
 const (
@@ -43,6 +45,28 @@ type FeatureGap struct {
 	Status     string            `json:"status"`
 	Capability FeatureCapability `json:"capability,omitempty"`
 	Reason     string            `json:"reason"`
+}
+
+// UnsupportedFeatureError is the shared structured reason a backend-neutral
+// feature returns when a backend has an explicit capability gap.
+type UnsupportedFeatureError struct {
+	Backend    string            `json:"backend"`
+	FeatureID  string            `json:"feature_id"`
+	Operation  string            `json:"operation,omitempty"`
+	Capability FeatureCapability `json:"capability,omitempty"`
+	GapID      string            `json:"gap_id,omitempty"`
+	Reason     string            `json:"reason"`
+}
+
+func (e UnsupportedFeatureError) Error() string {
+	op := e.Operation
+	if op == "" {
+		op = e.FeatureID
+	}
+	if e.Reason == "" {
+		return fmt.Sprintf("%s is not supported on the %s backend", op, e.Backend)
+	}
+	return fmt.Sprintf("%s is not supported on the %s backend: %s", op, e.Backend, e.Reason)
 }
 
 func FeatureContracts() []FeatureContract {
@@ -111,7 +135,7 @@ func FeatureContracts() []FeatureContract {
 					Backend:    BackendAppleVF,
 					Status:     "open",
 					Capability: FeatureCapabilitySnapshot,
-					Reason:     "Apple VF pause/resume runtime control exists, and VZ save/restore config support validates, but live snapshot create is blocked because VZ saveMachineStateTo returns permission denied even in an unconfined ad-hoc-signed supervisor probe; restore/fork, materialized-secret purge/rehydrate, and mediated-egress restore/fork parity remain open.",
+					Reason:     "Apple VF pause/resume runtime control exists, and VZ validateSaveRestoreSupport passes, but snapshot create is blocked for the Homebrew/ad-hoc distribution path because VZ saveMachineStateTo returns VZErrorDomain Code=11 permission denied even in an unconfined ad-hoc-signed supervisor probe after start, pause, destination setup, and a minimal no-network/no-vsock/no-serial config; restore/fork, materialized-secret purge/rehydrate, and mediated-egress restore/fork parity remain open.",
 				},
 			},
 		},
@@ -234,6 +258,27 @@ func FeatureForCLICommand(command string) (FeatureContract, bool) {
 		}
 	}
 	return FeatureContract{}, false
+}
+
+// NewUnsupportedFeatureError returns the backend gap for a feature as an error
+// that can be shared by library, CLI, and MCP adapters.
+func NewUnsupportedFeatureError(backend string, feature FeatureContract, operation string) UnsupportedFeatureError {
+	reason := ""
+	gapID := ""
+	if gap, ok := featureGapForBackend(feature, backend); ok {
+		reason = gap.Reason
+		gapID = gap.ID
+	} else if _, unsupportedReason := BackendSupportsFeature(backend, feature); unsupportedReason != "" {
+		reason = unsupportedReason
+	}
+	return UnsupportedFeatureError{
+		Backend:    backend,
+		FeatureID:  feature.ID,
+		Operation:  operation,
+		Capability: feature.Capability,
+		GapID:      gapID,
+		Reason:     reason,
+	}
 }
 
 func backendSupportsCapability(backend string, capability FeatureCapability) (bool, string) {

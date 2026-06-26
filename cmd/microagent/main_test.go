@@ -272,6 +272,24 @@ func TestRunSnapshotCreateParsesTagAndName(t *testing.T) {
 	}
 }
 
+func TestRunSnapshotCreateAppleVFUsesExplicitBackendGap(t *testing.T) {
+	dir := t.TempDir()
+	out, err := os.Create(filepath.Join(dir, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rerr := run(t.Context(), []string{"snapshot", "create", "agent-1", "--tag", "base", "--state-dir", dir, "--backend", "apple-vf"}, out)
+	_ = out.Close()
+	if rerr == nil {
+		t.Fatal("expected Apple VF snapshot create to be unsupported")
+	}
+	for _, want := range []string{"snapshot create is not supported on the apple-vf backend", "Homebrew/ad-hoc", "saveMachineStateTo", "VZErrorDomain Code=11"} {
+		if !strings.Contains(rerr.Error(), want) {
+			t.Fatalf("snapshot create error = %q, want %q", rerr.Error(), want)
+		}
+	}
+}
+
 func TestRunSnapshotListAndRemove(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent-1"
