@@ -63,7 +63,7 @@ func TestSnapshotFeatureIsBackendNeutralWithExplicitAppleVFGap(t *testing.T) {
 	if !appleVF.Required || appleVF.Ready || appleVF.Status != "open" || appleVF.GapID != "gap.apple-vf.snapshot" {
 		t.Fatalf("apple-vf snapshot support = %#v, want required open gap", appleVF)
 	}
-	for _, want := range []string{"saveMachineStateTo", "VZErrorDomain Code=11", "Secure Enclave", "errSecInteractionNotAllowed", "active GUI session"} {
+	for _, want := range []string{"saveMachineStateTo", "active-GUI retesting", "restore/fork", "materialized-secret", "mediated-egress", "VZErrorDomain Code=11", "session-precondition diagnostic"} {
 		if !strings.Contains(appleVF.Reason, want) {
 			t.Fatalf("apple-vf snapshot gap reason = %q, want %q", appleVF.Reason, want)
 		}
@@ -72,7 +72,7 @@ func TestSnapshotFeatureIsBackendNeutralWithExplicitAppleVFGap(t *testing.T) {
 	if err.GapID != "gap.apple-vf.snapshot" || err.Capability != FeatureCapabilitySnapshot {
 		t.Fatalf("unsupported feature error = %#v, want snapshot gap metadata", err)
 	}
-	if !strings.Contains(err.Error(), "snapshot create is not supported on the apple-vf backend:") || !strings.Contains(err.Error(), "Secure Enclave") {
+	if !strings.Contains(err.Error(), "snapshot create is not supported on the apple-vf backend:") || !strings.Contains(err.Error(), "restore/fork") {
 		t.Fatalf("unsupported feature error string = %q", err.Error())
 	}
 }
