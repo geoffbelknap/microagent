@@ -1722,6 +1722,9 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	if manifest.CreatedAt == "" {
 		t.Fatal("manifest createdAt is empty")
 	}
+	if manifest.SecretsMaterialized || manifest.SecretsPurged {
+		t.Fatalf("manifest secret fields = materialized:%t purged:%t, want both false", manifest.SecretsMaterialized, manifest.SecretsPurged)
+	}
 	// Workspace returns to running, aux processes preserved.
 	state, err := readRuntimeState(opts)
 	if err != nil {
@@ -1729,6 +1732,44 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	}
 	if state.Event.State != vmkit.StateRunning || state.PID != vmProcess.Process.Pid || state.PortForwardPID != forwarder.Process.Pid {
 		t.Fatalf("post-snapshot state = %#v", state)
+	}
+}
+
+func TestSnapshotCreateRejectsMaterializedSecretsWithoutControlPort(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := snapshotSourceRequest(t, dir)
+	req.Config.Secrets = []vmkit.SecretRef{{Name: "API", Ref: "env:TOKEN"}}
+	req.Config.SecretsControlPort = 0
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "snapshot",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+		Tag:      "snap-1",
+	})
+	if err == nil {
+		t.Fatal("expected snapshot to fail closed without a secrets control port")
+	}
+	if resp.OK {
+		t.Fatalf("response OK = true, want false")
+	}
+	for _, want := range []string{"cannot purge secrets for snapshot", "materialized secrets", "no secrets control port"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err = %q, want %q", err.Error(), want)
+		}
+	}
+	if len(fake.snapshots) != 0 {
+		t.Fatalf("createSnapshot calls = %d, want 0", len(fake.snapshots))
+	}
+	if _, statErr := os.Stat(vmkit.SnapshotDir(dir, "agent-1", "snap-1")); !os.IsNotExist(statErr) {
+		t.Fatalf("snapshot dir stat err = %v, want not exist", statErr)
 	}
 }
 

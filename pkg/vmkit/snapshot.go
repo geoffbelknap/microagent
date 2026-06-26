@@ -50,6 +50,11 @@ type SnapshotManifest struct {
 	// different workspace bind-mounts its own directory over the source's to
 	// make this path resolve to the fork's socket.
 	VsockUDSPath string `json:"vsockUDSPath,omitempty"`
+	// SecretsMaterialized records that this snapshot source had secrets written
+	// into guest memory. When true, SecretsPurged must also be true: a backend
+	// must fail closed rather than capture a memory image that may contain guest
+	// secret material.
+	SecretsMaterialized bool `json:"secretsMaterialized,omitempty"`
 	// SecretsPurged records that the guest tmpfs secrets were scrubbed before
 	// the memory image was captured.
 	SecretsPurged bool `json:"secretsPurged,omitempty"`
@@ -81,6 +86,27 @@ type SnapshotManifest struct {
 type SnapshotInfo struct {
 	SnapshotManifest
 	SizeBytes int64 `json:"sizeBytes"`
+}
+
+// MaterializedSecretsDeclared reports whether the config declares secrets that
+// are written into the guest tmpfs and therefore must be purged before memory
+// snapshot capture. On-demand-only secrets are fetched per request and are not
+// materialized into the snapshot source by default.
+func MaterializedSecretsDeclared(config *Config) bool {
+	if config == nil {
+		return false
+	}
+	return len(config.Secrets) > 0 || len(config.SecretEnvFiles) > 0
+}
+
+// ValidateSnapshotSecretCapture enforces the backend-neutral secret safety
+// invariant for memory snapshots: if the source had materialized guest secrets,
+// the backend must prove it purged them before writing the memory image.
+func ValidateSnapshotSecretCapture(config *Config, purged bool) error {
+	if MaterializedSecretsDeclared(config) && !purged {
+		return fmt.Errorf("snapshot of secret-bearing workspace requires guest secret purge before memory capture")
+	}
+	return nil
 }
 
 // SnapshotsDir is the directory holding all snapshots for a workspace.

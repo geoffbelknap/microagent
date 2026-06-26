@@ -58,7 +58,12 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	// Fail closed: a snapshot of a secrets-bearing workspace is never created
 	// with un-purged plaintext.
 	purged := false
-	if materializedSecretsDeclared(&state.Config) && state.Config.SecretsControlPort != 0 {
+	if vmkit.MaterializedSecretsDeclared(&state.Config) {
+		if state.Config.SecretsControlPort == 0 {
+			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s has materialized secrets but no secrets control port", opts.Name)
+			_ = os.RemoveAll(dir)
+			return failedResponse(req, err.Error()), err
+		}
 		if current != vmkit.StateRunning {
 			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s is %s, must be running", opts.Name, current)
 			_ = os.RemoveAll(dir)
@@ -139,6 +144,9 @@ func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, o
 }
 
 func snapshotManifestFromState(tag string, state runtimeState, opts Options, purged bool) (vmkit.SnapshotManifest, error) {
+	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
 	kernelSHA := ""
 	if path := strings.TrimSpace(state.Config.KernelPath); path != "" {
 		sha, err := fileSHA256(path)
@@ -189,6 +197,7 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 		NetworkIP:            netIP,
 		NetworkGateway:       netGateway,
 		NetworkSubnet:        netSubnet,
+		SecretsMaterialized:  vmkit.MaterializedSecretsDeclared(&state.Config),
 		SecretsPurged:        purged,
 		EgressMode:           state.Config.EgressMode,
 		EgressAllow:          state.Config.EgressAllow,
