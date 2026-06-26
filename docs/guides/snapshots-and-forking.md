@@ -4,7 +4,7 @@ description: Checkpoint a running workspace, restore it in place, or fork copies
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-26_
 
 A snapshot freezes a workspace - guest memory, device state, and disk - at
 one moment. This guide takes one, rolls back to it, and forks independent
@@ -42,8 +42,9 @@ TAG                      SIZE         CREATED               IMAGE
 baseline                 1.5GiB       2026-06-11T08:52:44Z  docker.io/library/alpine:3.20
 ```
 
-Each snapshot stores the memory file plus a full rootfs copy, so size is
-roughly touched RAM plus the disk. `snapshot delete` reclaims it.
+Each snapshot stores backend machine state plus a full rootfs copy, so size is
+roughly saved guest state plus the disk. The manifest lists the exact backend
+machine-state artifacts. `snapshot delete` reclaims the space.
 
 ## 3. Restore in place
 

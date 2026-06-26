@@ -33,10 +33,11 @@ deliberately does not use. On Windows Hyper-V use [`commit`](/cli/commit/) for a
 distributable image or [`clone`](/cli/clone/) for a disk copy instead. Snapshot
 commands fail closed with a clear message on backends that do not support them.
 
-Snapshots are stored under
-`<state-dir>/<name>/snapshots/<tag>/` as `vmstate`, `memory`, `rootfs.ext4`,
-and `manifest.json`. A workspace may hold multiple named snapshots; `--tag`
-defaults to a timestamp.
+Snapshots are stored under `<state-dir>/<name>/snapshots/<tag>/`. Every
+snapshot has `manifest.json` plus a coherent rootfs copy; backend machine-state
+artifacts are backend-defined and listed in the manifest. Firecracker snapshots
+currently use `vmstate`, `memory`, and `rootfs.ext4`. A workspace may hold
+multiple named snapshots; `--tag` defaults to a timestamp.
 
 Three commands copy a workspace; pick by what you need to keep. `snapshot`
 captures a live moment - memory included - so you can restore or fork
@@ -72,11 +73,13 @@ snapshotted in place and left paused.
 
 The manifest records the image reference, network mode, the guest IP to
 re-establish on restore, the kernel sha256 (used to reject loading against a
-different kernel), the vCPU/memory sizing, and the creation time.
+different kernel), the vCPU/memory sizing, the creation time, the rootfs
+artifact path, and the backend machine-state artifact paths.
 
-Because each snapshot stores both a memory file and a full rootfs copy, total
-size is roughly the touched guest RAM plus the rootfs size. `snapshot list`
-reports each tag's size; `snapshot delete` and `delete <name>` reclaim the space.
+Because each snapshot stores backend machine state plus a full rootfs copy,
+total size is roughly the backend saved state plus the rootfs size. `snapshot
+list` reports each tag's size; `snapshot delete` and `delete <name>` reclaim
+the space.
 
 ## `list`
 

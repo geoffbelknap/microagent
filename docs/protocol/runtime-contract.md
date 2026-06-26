@@ -4,7 +4,7 @@ description: Depend on one set of runtime semantics across backend implementatio
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-25_
+_Last updated: 2026-06-26_
 
 If you are building an agent runtime on top of microagent, this page defines
 the semantics you can rely on across backend implementations where they expose
@@ -67,6 +67,10 @@ the disk-state `halt`/`start`:
 - `snapshot` captures a memory-plus-disk checkpoint. `start --from-snapshot`
   restores it in place (rollback); `create --from-snapshot` forks a new
   workspace from it.
+- Snapshot directories always include `manifest.json` and a coherent rootfs
+  copy. Backend machine-state artifacts are backend-defined and listed in the
+  manifest, so clients must not assume Firecracker's `vmstate` + `memory`
+  layout for every backend.
 
 These are capability-gated, not universal. A backend advertises support through
 `microagent --json host`: `pauseResumeAvailable` covers pause/resume,

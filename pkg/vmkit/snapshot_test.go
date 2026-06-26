@@ -27,20 +27,25 @@ func writeFakeSnapshot(t *testing.T, stateDir, name, tag string, manifest Snapsh
 func TestSnapshotManifestRoundTrip(t *testing.T) {
 	dir := SnapshotDir(t.TempDir(), "agent-1", "snap-1")
 	manifest := SnapshotManifest{
-		Tag:                 "snap-1",
-		ImageRef:            "docker.io/library/nats:latest",
-		NetworkMode:         "nat",
-		GuestIP:             "169.254.0.2",
-		KernelSHA256:        "abc123",
-		VCPUCount:           2,
-		MemoryMiB:           512,
-		CreatedAt:           "2026-06-01T00:00:00Z",
-		VsockUDSPath:        "/state/agent-1/vsock.sock",
-		ShellPort:           28365,
-		ExecPort:            48365,
-		NetworkIP:           "10.43.220.2/29",
-		NetworkGateway:      "10.43.220.1",
-		NetworkSubnet:       "10.43.220.0/29",
+		Tag:            "snap-1",
+		ImageRef:       "docker.io/library/nats:latest",
+		NetworkMode:    "nat",
+		GuestIP:        "169.254.0.2",
+		KernelSHA256:   "abc123",
+		VCPUCount:      2,
+		MemoryMiB:      512,
+		CreatedAt:      "2026-06-01T00:00:00Z",
+		VsockUDSPath:   "/state/agent-1/vsock.sock",
+		ShellPort:      28365,
+		ExecPort:       48365,
+		NetworkIP:      "10.43.220.2/29",
+		NetworkGateway: "10.43.220.1",
+		NetworkSubnet:  "10.43.220.0/29",
+		RootfsArtifact: SnapshotRootfsName,
+		MachineStateArtifacts: []SnapshotArtifact{
+			{Kind: "firecracker-vmstate", Path: SnapshotVMStateName},
+			{Kind: "firecracker-memory", Path: SnapshotMemoryName},
+		},
 		SecretsMaterialized: true,
 		SecretsPurged:       true,
 	}
@@ -83,6 +88,38 @@ func TestSnapshotManifestRoundTripsEgress(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, manifest) {
 		t.Fatalf("round-trip = %#v, want %#v", got, manifest)
+	}
+}
+
+func TestSnapshotArtifactDefaultsPreserveLegacyFirecrackerManifests(t *testing.T) {
+	manifest := SnapshotManifest{Tag: "legacy"}
+	if got := SnapshotRootfsArtifact(manifest); got != SnapshotRootfsName {
+		t.Fatalf("SnapshotRootfsArtifact = %q, want %q", got, SnapshotRootfsName)
+	}
+	got := SnapshotMachineStateArtifacts(manifest)
+	want := FirecrackerSnapshotArtifacts()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SnapshotMachineStateArtifacts = %#v, want %#v", got, want)
+	}
+}
+
+func TestSnapshotArtifactHelpersUseManifestShape(t *testing.T) {
+	manifest := SnapshotManifest{
+		RootfsArtifact: "disks/rootfs.ext4",
+		MachineStateArtifacts: []SnapshotArtifact{
+			{Kind: "apple-vf-machine-state", Path: "machine-state.vz"},
+		},
+	}
+	if got := SnapshotRootfsArtifact(manifest); got != "disks/rootfs.ext4" {
+		t.Fatalf("SnapshotRootfsArtifact = %q", got)
+	}
+	got := SnapshotMachineStateArtifacts(manifest)
+	if len(got) != 1 || got[0].Kind != "apple-vf-machine-state" || got[0].Path != "machine-state.vz" {
+		t.Fatalf("SnapshotMachineStateArtifacts = %#v", got)
+	}
+	got[0].Path = "mutated"
+	if manifest.MachineStateArtifacts[0].Path != "machine-state.vz" {
+		t.Fatal("SnapshotMachineStateArtifacts returned alias of manifest slice")
 	}
 }
 

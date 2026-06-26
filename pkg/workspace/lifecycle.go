@@ -756,13 +756,13 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err
 	}
-	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsName), rootfsPath, 0o600); err != nil {
+	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsArtifact(manifest)), rootfsPath, 0o600); err != nil {
 		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
 	}
 	if err := WriteManifest(opts); err != nil {
 		return Result{}, err
 	}
-	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err != nil {
+	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag), manifest); err != nil {
 		return Result{}, err
 	}
 	// A mediated source baked its per-workspace egress CA into the guest's trust
@@ -829,11 +829,17 @@ func copyForkEgressCA(stateDir, sourceWorkspace, forkName string) error {
 	return nil
 }
 
-func copySnapshotInto(srcDir, dstDir string) error {
+func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) error {
 	if err := os.MkdirAll(dstDir, 0o700); err != nil {
 		return err
 	}
-	for _, name := range []string{vmkit.SnapshotVMStateName, vmkit.SnapshotMemoryName, vmkit.SnapshotRootfsName, vmkit.SnapshotManifestName} {
+	names := []string{vmkit.SnapshotRootfsArtifact(manifest), vmkit.SnapshotManifestName}
+	for _, artifact := range vmkit.SnapshotMachineStateArtifacts(manifest) {
+		if artifact.Path != "" {
+			names = append(names, artifact.Path)
+		}
+	}
+	for _, name := range names {
 		if err := CopyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name), 0o644); err != nil {
 			return fmt.Errorf("copy snapshot %s into fork: %w", name, err)
 		}

@@ -4,7 +4,7 @@ description: Run the Linux backend - process model, state files, networking, sna
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-26_
 
 Read this page when you need to know what the Firecracker supervisor - the
 Linux backend - does on the host: which files it writes, how each network mode
@@ -55,7 +55,7 @@ Important files include:
 | `firecracker-api.sock` | Firecracker API socket for pause/resume/snapshot control |
 | `serial.log` | guest serial output |
 | `serial.in` | console input FIFO for running workspaces |
-| `snapshots/<tag>/` | snapshot artifacts: `vmstate`, `memory`, `rootfs.ext4`, `manifest.json` |
+| `snapshots/<tag>/` | Firecracker snapshot artifacts: `vmstate`, `memory`, `rootfs.ext4`, `manifest.json` |
 | transient `magtap*` device | namespace-local TAP created for `user` mode and removed on quarantine/stop/kill/delete |
 
 Persistent workspace disks live under:
@@ -104,8 +104,9 @@ Firecracker host reports):
   `running`, keeping the VM process and host-side aux processes alive.
 - `snapshot` auto-pauses a running VM (recorded in the event history), issues
   `PUT /snapshot/create`, copies the workspace `rootfs.ext4` while paused so
-  memory and disk are coherent, writes `manifest.json`, and resumes. An
-  already-paused workspace is snapshotted in place.
+  memory and disk are coherent, writes `manifest.json`, and resumes. The
+  manifest records Firecracker's `vmstate` and `memory` files as backend
+  machine-state artifacts. An already-paused workspace is snapshotted in place.
 - `start --from-snapshot <tag>` restores in place: it rolls the rootfs back to
   the snapshot's copy, launches `firecracker --api-sock`, and `PUT
   /snapshot/load` with `resume_vm`. The snapshot's baked kernel hash must match.

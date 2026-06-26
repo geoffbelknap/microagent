@@ -184,26 +184,28 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 		caSHA = sha
 	}
 	return vmkit.SnapshotManifest{
-		Tag:                  tag,
-		NetworkMode:          mode,
-		GuestIP:              guestIP,
-		KernelSHA256:         kernelSHA,
-		VCPUCount:            state.Config.CPUCount,
-		MemoryMiB:            state.Config.MemoryMiB,
-		CreatedAt:            time.Now().UTC().Format(time.RFC3339),
-		VsockUDSPath:         vsockPath,
-		ShellPort:            state.Config.ShellPort,
-		ExecPort:             state.Config.ExecPort,
-		NetworkIP:            netIP,
-		NetworkGateway:       netGateway,
-		NetworkSubnet:        netSubnet,
-		SecretsMaterialized:  vmkit.MaterializedSecretsDeclared(&state.Config),
-		SecretsPurged:        purged,
-		EgressMode:           state.Config.EgressMode,
-		EgressAllow:          state.Config.EgressAllow,
-		EgressPassthrough:    state.Config.EgressPassthrough,
-		EgressSwapConfigPath: state.Config.EgressSwapConfigPath,
-		EgressCASHA256:       caSHA,
+		Tag:                   tag,
+		NetworkMode:           mode,
+		GuestIP:               guestIP,
+		KernelSHA256:          kernelSHA,
+		VCPUCount:             state.Config.CPUCount,
+		MemoryMiB:             state.Config.MemoryMiB,
+		CreatedAt:             time.Now().UTC().Format(time.RFC3339),
+		VsockUDSPath:          vsockPath,
+		ShellPort:             state.Config.ShellPort,
+		ExecPort:              state.Config.ExecPort,
+		NetworkIP:             netIP,
+		NetworkGateway:        netGateway,
+		NetworkSubnet:         netSubnet,
+		RootfsArtifact:        vmkit.SnapshotRootfsName,
+		MachineStateArtifacts: vmkit.FirecrackerSnapshotArtifacts(),
+		SecretsMaterialized:   vmkit.MaterializedSecretsDeclared(&state.Config),
+		SecretsPurged:         purged,
+		EgressMode:            state.Config.EgressMode,
+		EgressAllow:           state.Config.EgressAllow,
+		EgressPassthrough:     state.Config.EgressPassthrough,
+		EgressSwapConfigPath:  state.Config.EgressSwapConfigPath,
+		EgressCASHA256:        caSHA,
 		// Bounded-operations caps (ASK tenet 8): persist so a restore re-applies the
 		// SAME bounds the workspace ran under.
 		EgressMaxBytesPerSec:     state.Config.EgressMaxBytesPerSec,
@@ -390,10 +392,33 @@ func restoreFromSnapshot(ctx context.Context, opts Options, tag string, networkO
 		return err
 	}
 	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+	manifest, err := vmkit.ReadSnapshotManifest(dir)
+	if err != nil {
+		return err
+	}
+	vmstate, memory := firecrackerSnapshotArtifactPaths(manifest)
 	return newVMStateController(sock).loadSnapshot(ctx,
-		filepath.Join(dir, vmkit.SnapshotVMStateName),
-		filepath.Join(dir, vmkit.SnapshotMemoryName),
+		filepath.Join(dir, vmstate),
+		filepath.Join(dir, memory),
 		true, networkOverrides)
+}
+
+func firecrackerSnapshotArtifactPaths(manifest vmkit.SnapshotManifest) (vmstate, memory string) {
+	vmstate = vmkit.SnapshotVMStateName
+	memory = vmkit.SnapshotMemoryName
+	for _, artifact := range vmkit.SnapshotMachineStateArtifacts(manifest) {
+		switch artifact.Kind {
+		case "firecracker-vmstate":
+			if artifact.Path != "" {
+				vmstate = artifact.Path
+			}
+		case "firecracker-memory":
+			if artifact.Path != "" {
+				memory = artifact.Path
+			}
+		}
+	}
+	return vmstate, memory
 }
 
 // snapshotNetworkOverrides remaps the restored guest network interface to this
@@ -455,7 +480,7 @@ func prepareSnapshotRestore(opts Options, req vmkit.Request) error {
 	if err := vmkit.ValidateSnapshotSecretRestore(manifest, req.Config); err != nil {
 		return err
 	}
-	if err := copyFile(filepath.Join(dir, vmkit.SnapshotRootfsName), req.Config.RootfsPath); err != nil {
+	if err := copyFile(filepath.Join(dir, vmkit.SnapshotRootfsArtifact(manifest)), req.Config.RootfsPath); err != nil {
 		return fmt.Errorf("restore snapshot rootfs: %w", err)
 	}
 	return nil
