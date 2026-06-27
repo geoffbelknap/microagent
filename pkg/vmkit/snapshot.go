@@ -10,10 +10,12 @@ import (
 
 // Snapshot file names within a snapshot directory.
 const (
-	SnapshotManifestName = "manifest.json"
-	SnapshotVMStateName  = "vmstate"
-	SnapshotMemoryName   = "memory"
-	SnapshotRootfsName   = "rootfs.ext4"
+	SnapshotManifestName        = "manifest.json"
+	SnapshotVMStateName         = "vmstate"
+	SnapshotMemoryName          = "memory"
+	SnapshotRootfsName          = "rootfs.ext4"
+	SnapshotAppleVFMachineState = "machine-state.vz"
+	SnapshotAppleVFConfig       = "apple-vf-config.json"
 )
 
 // SnapshotManifest records the metadata needed to restore or fork a workspace
@@ -131,6 +133,15 @@ func FirecrackerSnapshotArtifacts() []SnapshotArtifact {
 	return []SnapshotArtifact{
 		{Kind: "firecracker-vmstate", Path: SnapshotVMStateName},
 		{Kind: "firecracker-memory", Path: SnapshotMemoryName},
+	}
+}
+
+// AppleVFSnapshotArtifacts returns the saved Virtualization.framework machine
+// state artifact written by saveMachineStateTo.
+func AppleVFSnapshotArtifacts() []SnapshotArtifact {
+	return []SnapshotArtifact{
+		{Kind: "apple-vf-machine-state", Path: SnapshotAppleVFMachineState},
+		{Kind: "apple-vf-restore-config", Path: SnapshotAppleVFConfig},
 	}
 }
 

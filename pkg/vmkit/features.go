@@ -129,15 +129,6 @@ func FeatureContracts() []FeatureContract {
 			Capability:   FeatureCapabilitySnapshot,
 			CLICommands:  []string{"pause", "resume", "snapshot", "start --from-snapshot", "create --from-snapshot"},
 			MCPTools:     []string{"workspace.pause", "workspace.resume", "snapshot.create", "snapshot.list", "snapshot.delete"},
-			Gaps: []FeatureGap{
-				{
-					ID:         "gap.apple-vf.snapshot",
-					Backend:    BackendAppleVF,
-					Status:     "open",
-					Capability: FeatureCapabilitySnapshot,
-					Reason:     "Apple VF pause/resume runtime control exists, VZ validateSaveRestoreSupport passes, and active-GUI retesting proves saveMachineStateTo can succeed in both unconfined and Seatbelt-confined modes. Snapshot create remains unsupported until the Go library wires Apple VF snapshot manifests/artifact capture to VZ save-state output and live restore/fork validation covers materialized-secret purge/rehydrate plus mediated-egress restore/fork parity. The earlier VZErrorDomain Code=11 Secure Enclave errSecInteractionNotAllowed failure is preserved as a session-precondition diagnostic, not the current blocker.",
-				},
-			},
 		},
 		{
 			ID:           "workspace.model",

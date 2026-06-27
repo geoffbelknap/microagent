@@ -1,9 +1,6 @@
 package vmkit
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestFeatureContractsDeclareBackendSupport(t *testing.T) {
 	features := FeatureContracts()
@@ -39,7 +36,7 @@ func TestFeatureContractsDeclareBackendSupport(t *testing.T) {
 	}
 }
 
-func TestSnapshotFeatureIsBackendNeutralWithExplicitAppleVFGap(t *testing.T) {
+func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	feature, ok := FeatureForCLICommand("snapshot")
 	if !ok {
 		t.Fatal("snapshot CLI command is not mapped to a feature contract")
@@ -51,7 +48,7 @@ func TestSnapshotFeatureIsBackendNeutralWithExplicitAppleVFGap(t *testing.T) {
 		t.Fatalf("snapshot scope/capability = %s/%s, want backend-neutral/Snapshot", feature.Scope, feature.Capability)
 	}
 	assertFeatureSupport(t, feature, BackendLinuxKVM, true)
-	assertFeatureSupport(t, feature, BackendAppleVF, false)
+	assertFeatureSupport(t, feature, BackendAppleVF, true)
 	assertFeatureSupport(t, feature, BackendWindowsHyperV, false)
 	var appleVF FeatureBackend
 	for _, backend := range feature.Backends {
@@ -60,20 +57,8 @@ func TestSnapshotFeatureIsBackendNeutralWithExplicitAppleVFGap(t *testing.T) {
 			break
 		}
 	}
-	if !appleVF.Required || appleVF.Ready || appleVF.Status != "open" || appleVF.GapID != "gap.apple-vf.snapshot" {
-		t.Fatalf("apple-vf snapshot support = %#v, want required open gap", appleVF)
-	}
-	for _, want := range []string{"saveMachineStateTo", "active-GUI retesting", "restore/fork", "materialized-secret", "mediated-egress", "VZErrorDomain Code=11", "session-precondition diagnostic"} {
-		if !strings.Contains(appleVF.Reason, want) {
-			t.Fatalf("apple-vf snapshot gap reason = %q, want %q", appleVF.Reason, want)
-		}
-	}
-	err := NewUnsupportedFeatureError(BackendAppleVF, feature, "snapshot create")
-	if err.GapID != "gap.apple-vf.snapshot" || err.Capability != FeatureCapabilitySnapshot {
-		t.Fatalf("unsupported feature error = %#v, want snapshot gap metadata", err)
-	}
-	if !strings.Contains(err.Error(), "snapshot create is not supported on the apple-vf backend:") || !strings.Contains(err.Error(), "restore/fork") {
-		t.Fatalf("unsupported feature error string = %q", err.Error())
+	if !appleVF.Required || !appleVF.Ready || appleVF.Status != "ready" || appleVF.GapID != "" || appleVF.Reason != "" {
+		t.Fatalf("apple-vf snapshot support = %#v, want required ready support", appleVF)
 	}
 }
 

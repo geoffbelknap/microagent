@@ -331,6 +331,30 @@ func TestNewRepositoryAllowsAnonymousPullWithoutCredentialConfig(t *testing.T) {
 	}
 }
 
+func TestNewRepositoryAllowsAnonymousPullWithMissingCredentialHelper(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DOCKER_CONFIG", dir)
+	configJSON := `{"credHelpers":{"example.com":"microagent-missing-helper"}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(configJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := newRepository("example.com/acme/image")
+	if err != nil {
+		t.Fatalf("newRepository: %v", err)
+	}
+	client, ok := repo.Client.(*auth.Client)
+	if !ok {
+		t.Fatalf("repo.Client = %T, want *auth.Client", repo.Client)
+	}
+	cred, err := client.Credential(context.Background(), "example.com")
+	if err != nil {
+		t.Fatalf("Credential: %v", err)
+	}
+	if cred != (auth.Credential{}) {
+		t.Fatalf("credential = %#v, want empty", cred)
+	}
+}
+
 func TestNewRepositoryUsesPlainHTTPOnlyForLoopbackRegistries(t *testing.T) {
 	tests := []struct {
 		repoRef string

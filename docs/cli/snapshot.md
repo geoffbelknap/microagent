@@ -4,7 +4,7 @@ description: Create, list, and remove memory-plus-disk workspace snapshots.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-26_
+_Last updated: 2026-06-27_
 
 ```text
 microagent snapshot create <name> [--tag <tag>] [--state-dir <dir>]   Checkpoint a running workspace
@@ -14,14 +14,9 @@ microagent snapshot delete <name> <tag> [--state-dir <dir>]               Remove
 
 A snapshot is a full checkpoint of a workspace: its guest memory and device
 state plus a coherent copy of its rootfs disk, taken together while the VM is
-paused. Snapshots are implemented only on the Firecracker backend. Apple VF
-does not yet support snapshot create, restore, or fork:
-`validateSaveRestoreSupport` passes, and active-GUI validation proves
-`saveMachineStateTo` can succeed in both unconfined and Seatbelt-confined
-modes. The `gap.apple-vf.snapshot` backend gap remains open because product
-snapshot create, restore, and fork still need Apple VF manifest/artifact
-capture wired to VZ save-state output, plus live restore/fork validation for
-materialized-secret purge/rehydrate and mediated-egress parity. Earlier
+paused. Firecracker snapshots use Firecracker's vmstate and memory artifacts.
+Apple VF snapshots use Virtualization.framework saved machine state on macOS
+14+ hosts where save/restore support validates. Earlier Apple VF
 `VZErrorDomain Code=11`, `NSOSStatusErrorDomain Code=-25308`,
 `errSecInteractionNotAllowed`, and `AKSError=-536870174` results remain useful
 as diagnostics for the session prerequisite: run save-state validation from an
@@ -37,8 +32,9 @@ commands fail closed with a clear message on backends that do not support them.
 Snapshots are stored under `<state-dir>/<name>/snapshots/<tag>/`. Every
 snapshot has `manifest.json` plus a coherent rootfs copy; backend machine-state
 artifacts are backend-defined and listed in the manifest. Firecracker snapshots
-currently use `vmstate`, `memory`, and `rootfs.ext4`. A workspace may hold
-multiple named snapshots; `--tag` defaults to a timestamp.
+use `vmstate`, `memory`, and `rootfs.ext4`; Apple VF snapshots use
+`machine-state.vz`, `apple-vf-config.json`, and `rootfs.ext4`. A workspace may
+hold multiple named snapshots; `--tag` defaults to a timestamp.
 
 Three commands copy a workspace; pick by what you need to keep. `snapshot`
 captures a live moment - memory included - so you can restore or fork
@@ -67,10 +63,10 @@ microagent snapshot delete research pre-upgrade
 
 ## `create`
 
-`snapshot create` checkpoints a running or paused workspace. Firecracker
-requires the VM be paused before a snapshot is written, so a running workspace
-is briefly auto-paused, snapshotted, and resumed. An already-paused workspace is
-snapshotted in place and left paused.
+`snapshot create` checkpoints a running or paused workspace. Firecracker and
+Apple VF require the VM be paused before a snapshot is written, so a running
+workspace is briefly auto-paused, snapshotted, and resumed. An already-paused
+workspace is snapshotted in place and left paused.
 
 The manifest records the image reference, network mode, the guest IP to
 re-establish on restore, the kernel sha256 (used to reject loading against a

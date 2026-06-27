@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -57,22 +58,23 @@ func TestSnapshotRemoveRejectsMissingTag(t *testing.T) {
 	}
 }
 
-func TestSnapshotCreateAppleVFUsesExplicitBackendGap(t *testing.T) {
+func TestSnapshotCreateAppleVFRequiresRuntimeState(t *testing.T) {
 	_, err := Snapshot(context.Background(), Options{Name: "agent-1", StateDir: t.TempDir(), Backend: vmkit.BackendAppleVF}, "base")
 	if err == nil {
-		t.Fatal("expected Apple VF snapshot create to be unsupported")
+		t.Fatal("expected Apple VF snapshot create to require a live runtime state")
 	}
 	var unsupported vmkit.UnsupportedFeatureError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("err = %T %[1]v, want vmkit.UnsupportedFeatureError", err)
+	if errors.As(err, &unsupported) {
+		t.Fatalf("err = %#v, did not expect unsupported feature gap", unsupported)
 	}
-	if unsupported.Backend != vmkit.BackendAppleVF || unsupported.FeatureID != "workspace.snapshot" || unsupported.GapID != "gap.apple-vf.snapshot" {
-		t.Fatalf("unsupported error = %#v, want Apple VF snapshot gap", unsupported)
-	}
-	for _, want := range []string{"saveMachineStateTo", "active-GUI retesting", "restore/fork", "materialized-secret", "mediated-egress"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("err = %q, want %q", err.Error(), want)
+	if runtime.GOOS != "darwin" {
+		if !strings.Contains(err.Error(), "is not available in this") {
+			t.Fatalf("err = %q, want host backend rejection on %s", err.Error(), runtime.GOOS)
 		}
+		return
+	}
+	if !strings.Contains(err.Error(), "runtime.json") {
+		t.Fatalf("err = %q, want missing runtime state", err.Error())
 	}
 }
 
@@ -145,6 +147,185 @@ func TestCopySnapshotIntoUsesManifestArtifacts(t *testing.T) {
 		if string(got) != want {
 			t.Fatalf("%s = %q, want %q", name, got, want)
 		}
+	}
+}
+
+func TestAppleVFSnapshotManifestFromStateRecordsRestoreContract(t *testing.T) {
+	dir := t.TempDir()
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := RuntimeState{
+		Event: EventFile{
+			Identity:   vmkit.Identity{RuntimeID: "agent-1", Backend: vmkit.BackendAppleVF},
+			State:      vmkit.StateRunning,
+			ObservedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		Config: vmkit.Config{
+			StateDir:   dir,
+			KernelPath: kernelPath,
+			CPUCount:   4,
+			MemoryMiB:  1024,
+			ShellPort:  31001,
+			ExecPort:   31002,
+			Network: &vmkit.NetworkConfig{
+				Mode:    "user",
+				IP:      "10.0.2.15/24",
+				Gateway: "10.0.2.2",
+				Subnet:  "10.0.2.0/24",
+			},
+		},
+	}
+	manifest, err := appleVFSnapshotManifestFromState("base", state, Options{StateDir: dir, Name: "agent-1"})
+	if err != nil {
+		t.Fatalf("appleVFSnapshotManifestFromState: %v", err)
+	}
+	kernelSHA, err := fileSHA256(kernelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Tag != "base" || manifest.KernelSHA256 != kernelSHA || manifest.MemoryMiB != 1024 || manifest.VCPUCount != 4 {
+		t.Fatalf("manifest core fields = %#v", manifest)
+	}
+	if manifest.RootfsArtifact != vmkit.SnapshotRootfsName {
+		t.Fatalf("RootfsArtifact = %q", manifest.RootfsArtifact)
+	}
+	artifacts := vmkit.SnapshotMachineStateArtifacts(manifest)
+	if len(artifacts) != 2 ||
+		artifacts[0].Kind != "apple-vf-machine-state" ||
+		artifacts[0].Path != vmkit.SnapshotAppleVFMachineState ||
+		artifacts[1].Kind != "apple-vf-restore-config" ||
+		artifacts[1].Path != vmkit.SnapshotAppleVFConfig {
+		t.Fatalf("MachineStateArtifacts = %#v", artifacts)
+	}
+	if manifest.NetworkMode != "user" || manifest.GuestIP != "10.0.2.15" || manifest.NetworkGateway != "10.0.2.2" {
+		t.Fatalf("network fields = %#v", manifest)
+	}
+}
+
+func TestPrepareAppleVFSnapshotRestoreCopiesRootfsAndCaps(t *testing.T) {
+	dir := t.TempDir()
+	name := "agent-1"
+	snapshotDir := vmkit.SnapshotDir(dir, name, "base")
+	if err := os.MkdirAll(snapshotDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kernelSHA, err := fileSHA256(kernelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshotDir, vmkit.SnapshotRootfsName), []byte("snapshot-rootfs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := vmkit.SnapshotManifest{
+		Tag:                      "base",
+		KernelSHA256:             kernelSHA,
+		RootfsArtifact:           vmkit.SnapshotRootfsName,
+		MachineStateArtifacts:    vmkit.AppleVFSnapshotArtifacts(),
+		EgressMaxBytesPerSec:     1024,
+		EgressMaxTotalBytes:      2048,
+		EgressMaxConcurrentConns: 3,
+		EgressAuditMaxBytes:      4096,
+		EgressAuditMaxBackups:    5,
+	}
+	if err := vmkit.WriteSnapshotManifest(snapshotDir, manifest); err != nil {
+		t.Fatal(err)
+	}
+	rootfsPath := filepath.Join(dir, name, "rootfs.ext4")
+	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rootfsPath, []byte("old-rootfs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := &vmkit.Config{KernelPath: kernelPath, RootfsPath: rootfsPath}
+	req := vmkit.Request{Tag: "base", Config: config}
+	if err := prepareAppleVFSnapshotRestore(Options{StateDir: dir, Name: name}, req); err != nil {
+		t.Fatalf("prepareAppleVFSnapshotRestore: %v", err)
+	}
+	data, err := os.ReadFile(rootfsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "snapshot-rootfs" {
+		t.Fatalf("restored rootfs = %q", data)
+	}
+	if config.EgressMaxBytesPerSec != 1024 || config.EgressMaxTotalBytes != 2048 || config.EgressMaxConcurrentConns != 3 || config.EgressAuditMaxBytes != 4096 || config.EgressAuditMaxBackups != 5 {
+		t.Fatalf("egress caps = %#v", config)
+	}
+}
+
+func TestPrepareAppleVFSnapshotRestoreAppliesSavedVZConfig(t *testing.T) {
+	dir := t.TempDir()
+	name := "fork"
+	snapshotDir := vmkit.SnapshotDir(dir, name, "base")
+	if err := os.MkdirAll(snapshotDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	kernelPath := filepath.Join(dir, "Image")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	kernelSHA, err := fileSHA256(kernelPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshotDir, vmkit.SnapshotRootfsName), []byte("snapshot-rootfs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := vmkit.WriteSnapshotManifest(snapshotDir, vmkit.SnapshotManifest{Tag: "base", KernelSHA256: kernelSHA, RootfsArtifact: vmkit.SnapshotRootfsName}); err != nil {
+		t.Fatal(err)
+	}
+	saved := vmkit.Config{
+		KernelPath:               "/source/Image",
+		RootfsPath:               "/source/rootfs.ext4",
+		StateDir:                 "/source/state",
+		AppleVFMachineIdentifier: "saved-machine-id",
+		MemoryMiB:                512,
+		CPUCount:                 2,
+		ShellPort:                31001,
+		ExecPort:                 51001,
+		CACertPort:               1027,
+		SecretsControlPort:       1028,
+		VsockListeners:           []vmkit.VsockListener{{Port: 1024, Target: "/source/result.json"}},
+		EgressMaxBytesPerSec:     12,
+	}
+	if err := writeJSONFile(filepath.Join(snapshotDir, vmkit.SnapshotAppleVFConfig), saved); err != nil {
+		t.Fatal(err)
+	}
+	rootfsPath := filepath.Join(dir, name, "rootfs.ext4")
+	config := &vmkit.Config{
+		KernelPath:     kernelPath,
+		RootfsPath:     rootfsPath,
+		StateDir:       dir,
+		ShellPort:      32001,
+		ExecPort:       52001,
+		GuestShellPort: 31001,
+		GuestExecPort:  51001,
+		VsockListeners: []vmkit.VsockListener{{Port: 1024, Target: filepath.Join(dir, name, "result.json")}},
+	}
+	if err := prepareAppleVFSnapshotRestore(Options{StateDir: dir, Name: name}, vmkit.Request{Tag: "base", Config: config}); err != nil {
+		t.Fatalf("prepareAppleVFSnapshotRestore: %v", err)
+	}
+	if config.KernelPath != kernelPath || config.RootfsPath != rootfsPath || config.StateDir != dir {
+		t.Fatalf("identity paths not preserved: %#v", config)
+	}
+	if config.AppleVFMachineIdentifier != "saved-machine-id" {
+		t.Fatalf("AppleVFMachineIdentifier = %q", config.AppleVFMachineIdentifier)
+	}
+	if config.ShellPort != 32001 || config.ExecPort != 52001 || config.GuestShellPort != 31001 || config.GuestExecPort != 51001 {
+		t.Fatalf("port mapping = %#v", config)
+	}
+	if len(config.VsockListeners) != 1 || config.VsockListeners[0].Target != filepath.Join(dir, name, "result.json") {
+		t.Fatalf("vsock listeners = %#v", config.VsockListeners)
+	}
+	if config.CACertPort != 1027 || config.SecretsControlPort != 1028 {
+		t.Fatalf("saved VZ-sensitive ports not applied: %#v", config)
 	}
 }
 

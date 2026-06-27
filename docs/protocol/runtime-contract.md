@@ -4,7 +4,7 @@ description: Depend on one set of runtime semantics across backend implementatio
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-26_
+_Last updated: 2026-06-27_
 
 If you are building an agent runtime on top of microagent, this page defines
 the semantics you can rely on across backend implementations where they expose
@@ -77,8 +77,9 @@ These are capability-gated, not universal. A backend advertises support through
 `snapshotCreateAvailable` covers snapshot artifact creation, and
 `snapshotAvailable` covers the full create/restore/fork snapshot feature set.
 Firecracker reports all three. Apple VF reports pause/resume availability on
-supported macOS hosts, while snapshot fields remain false until live confined
-snapshot validation passes. Windows Hyper-V reports these as absent/false.
+supported macOS hosts and reports snapshot availability on macOS 14+ hosts
+where Virtualization.framework save/restore support validates. Windows Hyper-V
+reports these as absent/false.
 Unsupported commands return a structured unsupported error (the same pattern as
 console input). The `paused` state and the commands stay in the backend-neutral
 contract so clients share one vocabulary; availability is per host.

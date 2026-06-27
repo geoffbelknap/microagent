@@ -103,6 +103,17 @@ func TestSnapshotArtifactDefaultsPreserveLegacyFirecrackerManifests(t *testing.T
 	}
 }
 
+func TestAppleVFSnapshotArtifacts(t *testing.T) {
+	got := AppleVFSnapshotArtifacts()
+	want := []SnapshotArtifact{
+		{Kind: "apple-vf-machine-state", Path: SnapshotAppleVFMachineState},
+		{Kind: "apple-vf-restore-config", Path: SnapshotAppleVFConfig},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AppleVFSnapshotArtifacts = %#v, want %#v", got, want)
+	}
+}
+
 func TestSnapshotArtifactHelpersUseManifestShape(t *testing.T) {
 	manifest := SnapshotManifest{
 		RootfsArtifact: "disks/rootfs.ext4",

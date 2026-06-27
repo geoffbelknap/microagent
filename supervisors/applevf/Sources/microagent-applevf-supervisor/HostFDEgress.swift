@@ -159,7 +159,7 @@ func closeHostFDEgress() {
 // makeHostFDNetworkDevice attaches the framework end of the prepared socket as
 // the guest NIC. prepareHostFDEgressBeforeConfinement must have run first.
 @available(macOS 13.0, *)
-func makeHostFDNetworkDevice() throws -> VZVirtioNetworkDeviceConfiguration {
+func makeHostFDNetworkDevice(macAddress: VZMACAddress) throws -> VZVirtioNetworkDeviceConfiguration {
     guard hostFDFrameEnd >= 0 else {
         throw ProtocolError.invalid("apple-vf host-fd: egress datapath was not prepared before confinement")
     }
@@ -168,5 +168,6 @@ func makeHostFDNetworkDevice() throws -> VZVirtioNetworkDeviceConfiguration {
     attachment.maximumTransmissionUnit = 1500
     let device = VZVirtioNetworkDeviceConfiguration()
     device.attachment = attachment
+    device.macAddress = macAddress
     return device
 }

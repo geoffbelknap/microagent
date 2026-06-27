@@ -4,7 +4,7 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-27_
 
 ```text
 microagent start <name> [--state-dir <dir>]
@@ -62,7 +62,7 @@ The complete set:
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
-| `--from-snapshot <tag>` | Restore the workspace in place from this snapshot tag (Firecracker) |
+| `--from-snapshot <tag>` | Restore the workspace in place from this snapshot tag |
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
 | `--cpus <n>` | CPU count override for this start |
@@ -94,8 +94,8 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 [snapshot](/cli/snapshot/) instead of booting fresh: it rolls the workspace
 rootfs back to the snapshot's copy and loads the snapshot's memory and device
 state, so the guest resumes exactly where it was checkpointed. This is currently
-implemented only for the Firecracker backend and the snapshot's kernel must
-match the workspace kernel (the load is rejected on kernel skew).
+implemented for Firecracker and Apple VF; the snapshot's kernel must match the
+workspace kernel (the load is rejected on kernel skew).
 
 In-flight guest connections do not survive a restore - outbound TCP and live
 vsock sessions (exec/shell/mediation) are reset and the guest process must

@@ -4,7 +4,7 @@ description: Drive the macOS backend executable - one JSON request in, one respo
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-26_
+_Last updated: 2026-06-27_
 
 If you run microagent on macOS, or you want to drive Virtualization.framework
 from a language that isn't Swift, this page documents the executable that
@@ -57,14 +57,13 @@ Apple VF process boundary.
 
 Apple VF implements these supervisor commands: `host`, `check`, `prepare`,
 `run`, `start`, `console`, `inspect`, `halt`, `quarantine`, `pause`, `resume`,
-`stop`, `kill`, and `delete`. Apple VF does not yet implement `snapshot`
-create, restore, or fork: `validateSaveRestoreSupport` passes, and active-GUI
-validation proves `saveMachineStateTo` can succeed in both unconfined and
-Seatbelt-confined modes. That capability remains gated by the backend-neutral
-runtime contract while `gap.apple-vf.snapshot` is open because product snapshot
-create, restore, and fork still need Apple VF manifest/artifact capture wired to
-VZ save-state output, plus live restore/fork validation for materialized-secret
-purge/rehydrate and mediated-egress parity. Earlier `VZErrorDomain Code=11`,
+`snapshot`, `stop`, `kill`, and `delete`. Snapshot create/restore/fork uses
+Virtualization.framework saved machine state on macOS 14+ hosts where
+`validateSaveRestoreSupport` passes. The live supervisor briefly pauses a
+running VM, writes the saved machine-state artifact, copies the coherent rootfs,
+records the Apple VF restore config needed to reproduce the VZ configuration,
+and resumes the source. Restore uses `restoreMachineStateFrom` and then resumes
+the VM from the saved point. Earlier `VZErrorDomain Code=11`,
 `NSOSStatusErrorDomain Code=-25308`, `errSecInteractionNotAllowed`, and
 `AKSError=-536870174` results remain useful as diagnostics for the session
 prerequisite: run save-state validation from an active GUI session owned by the

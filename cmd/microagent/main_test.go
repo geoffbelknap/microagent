@@ -272,7 +272,7 @@ func TestRunSnapshotCreateParsesTagAndName(t *testing.T) {
 	}
 }
 
-func TestRunSnapshotCreateAppleVFUsesExplicitBackendGap(t *testing.T) {
+func TestRunSnapshotCreateAppleVFUsesBackendSnapshotPath(t *testing.T) {
 	dir := t.TempDir()
 	out, err := os.Create(filepath.Join(dir, "out.txt"))
 	if err != nil {
@@ -281,12 +281,19 @@ func TestRunSnapshotCreateAppleVFUsesExplicitBackendGap(t *testing.T) {
 	rerr := run(t.Context(), []string{"snapshot", "create", "agent-1", "--tag", "base", "--state-dir", dir, "--backend", "apple-vf"}, out)
 	_ = out.Close()
 	if rerr == nil {
-		t.Fatal("expected Apple VF snapshot create to be unsupported")
+		t.Fatal("expected Apple VF snapshot create to require runtime state")
 	}
-	for _, want := range []string{"snapshot create is not supported on the apple-vf backend", "saveMachineStateTo", "restore/fork", "materialized-secret", "VZErrorDomain Code=11"} {
-		if !strings.Contains(rerr.Error(), want) {
-			t.Fatalf("snapshot create error = %q, want %q", rerr.Error(), want)
+	if strings.Contains(rerr.Error(), "not supported on the apple-vf backend") {
+		t.Fatalf("snapshot create error = %q, did not expect unsupported feature gap", rerr.Error())
+	}
+	if runtime.GOOS != "darwin" {
+		if !strings.Contains(rerr.Error(), "is not available in this") {
+			t.Fatalf("snapshot create error = %q, want host backend rejection on %s", rerr.Error(), runtime.GOOS)
 		}
+		return
+	}
+	if !strings.Contains(rerr.Error(), "runtime.json") {
+		t.Fatalf("snapshot create error = %q, want missing runtime state", rerr.Error())
 	}
 }
 

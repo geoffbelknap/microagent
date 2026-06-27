@@ -52,17 +52,19 @@ type SecretRef struct {
 }
 
 type Config struct {
-	KernelPath     string           `json:"kernelPath"`
-	RootfsPath     string           `json:"rootfsPath"`
-	StateDir       string           `json:"stateDir"`
-	MemoryMiB      int              `json:"memoryMiB,omitempty"`
-	CPUCount       int              `json:"cpuCount,omitempty"`
-	Disks          []Disk           `json:"disks,omitempty"`
-	VsockListeners []VsockListener  `json:"vsockListeners,omitempty"`
-	Mediation      *MediationConfig `json:"mediation,omitempty"`
-	Network        *NetworkConfig   `json:"network,omitempty"`
-	ShellPort      uint16           `json:"shellPort,omitempty"`
-	ExecPort       uint16           `json:"execPort,omitempty"`
+	KernelPath               string           `json:"kernelPath"`
+	RootfsPath               string           `json:"rootfsPath"`
+	StateDir                 string           `json:"stateDir"`
+	AppleVFMachineIdentifier string           `json:"appleVFMachineIdentifier,omitempty"`
+	AppleVFNetworkMACAddress string           `json:"appleVFNetworkMACAddress,omitempty"`
+	MemoryMiB                int              `json:"memoryMiB,omitempty"`
+	CPUCount                 int              `json:"cpuCount,omitempty"`
+	Disks                    []Disk           `json:"disks,omitempty"`
+	VsockListeners           []VsockListener  `json:"vsockListeners,omitempty"`
+	Mediation                *MediationConfig `json:"mediation,omitempty"`
+	Network                  *NetworkConfig   `json:"network,omitempty"`
+	ShellPort                uint16           `json:"shellPort,omitempty"`
+	ExecPort                 uint16           `json:"execPort,omitempty"`
 	// SecretsPort is the host vsock port the guest connects to at boot to fetch
 	// resolved secrets. Zero means no secrets are delivered.
 	SecretsPort uint32 `json:"secretsPort,omitempty"`

@@ -40,6 +40,8 @@ struct Config: Codable {
     var kernelPath: String
     var rootfsPath: String
     var stateDir: String
+    var appleVFMachineIdentifier: String?
+    var appleVFNetworkMACAddress: String?
     var memoryMiB: Int?
     var cpuCount: Int?
     var disks: [Disk]?
@@ -49,6 +51,7 @@ struct Config: Codable {
     var shellPort: UInt16?
     var execPort: UInt16?
     var leaseSeconds: Int?
+    var guestShellPort: UInt16?
     var guestExecPort: UInt16?
     var secretsPort: UInt32?
     var secrets: [SecretRef]?
@@ -124,6 +127,7 @@ struct Request: Codable {
     var command: String
     var identity: Identity?
     var config: Config?
+    var tag: String?
 }
 
 struct Event: Codable {
@@ -326,6 +330,10 @@ struct SaveStateCheckDiagnostics: Codable {
     var stateAfterPause: String?
     var stateBeforeSave: String?
     var stateAfterSave: String?
+    var restoreCheck: Bool?
+    var restoreInitialVMState: String?
+    var stateAfterRestore: String?
+    var stateAfterRestoreResume: String?
     var steps: [SaveStateCheckStep]
     var ok: Bool
     var error: String?
@@ -346,6 +354,10 @@ struct SaveStateCheckDiagnostics: Codable {
         case stateAfterPause = "state_after_pause"
         case stateBeforeSave = "state_before_save"
         case stateAfterSave = "state_after_save"
+        case restoreCheck = "restore_check"
+        case restoreInitialVMState = "restore_initial_vm_state"
+        case stateAfterRestore = "state_after_restore"
+        case stateAfterRestoreResume = "state_after_restore_resume"
         case steps
         case ok
         case error
@@ -368,6 +380,8 @@ let applyRequestFileName = "apply.request.json"
 let applyAckFileName = "apply.ack.json"
 let runtimeControlRequestFileName = "runtime-control.request.json"
 let runtimeControlAckFileName = "runtime-control.ack.json"
+let snapshotRootfsFileName = "rootfs.ext4"
+let snapshotMachineStateFileName = "machine-state.vz"
 let quarantineControlSignal = SIGUSR1
 let applyControlSignal = SIGUSR2
 let runtimeControlSignal = SIGHUP
@@ -404,6 +418,8 @@ struct ApplyAck: Codable {
 
 struct RuntimeControlRequest: Codable {
     var action: String
+    var saveStatePath: String?
+    var rootfsSnapshotPath: String?
 }
 
 struct RuntimeControlAck: Codable {
@@ -411,6 +427,28 @@ struct RuntimeControlAck: Codable {
     var action: String
     var observedAt: String
     var error: String?
+}
+
+struct SecretControlRequest: Codable {
+    var protocolVersion: String
+    var op: String
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case op
+    }
+}
+
+struct SecretControlResponse: Codable {
+    var protocolVersion: String
+    var ok: Bool
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case ok
+        case error
+    }
 }
 
 func main() -> Int32 {
@@ -502,7 +540,7 @@ func runSaveStateCheck(args: [String]) -> Int32 {
         }
         if #available(macOS 14.0, *) {
             let mode = parsed.confined ? "confined" : "unconfined"
-            let diagnostics = runSaveStateCheckVM(identity: identity, config: runtimeConfig, confined: parsed.confined, saveStatePath: parsed.saveStatePath, configShape: parsed.configShape)
+            let diagnostics = runSaveStateCheckVM(identity: identity, config: runtimeConfig, confined: parsed.confined, saveStatePath: parsed.saveStatePath, configShape: parsed.configShape, restoreCheck: parsed.restoreCheck)
             if diagnostics.ok {
                 let event = Event(identity: identity, state: .paused, detail: "saveMachineStateTo succeeded (\(mode), \(parsed.configShape))", observedAt: Date())
                 var out = response(event: event, config: runtimeConfig, error: nil)
@@ -528,6 +566,7 @@ struct SaveStateCheckArgs {
     var confined: Bool
     var saveStatePath: String?
     var configShape: String
+    var restoreCheck: Bool
 }
 
 func parseSaveStateCheckArgs(_ args: [String]) throws -> SaveStateCheckArgs {
@@ -535,6 +574,7 @@ func parseSaveStateCheckArgs(_ args: [String]) throws -> SaveStateCheckArgs {
     var confined = true
     var saveStatePath: String?
     var configShape = "full"
+    var restoreCheck = false
     var i = 0
     while i < args.count {
         switch args[i] {
@@ -562,27 +602,30 @@ func parseSaveStateCheckArgs(_ args: [String]) throws -> SaveStateCheckArgs {
             saveStatePath = args[i + 1]
             i += 2
         case "--config-shape":
-            guard i + 1 < args.count else { throw ProtocolError.invalid("--config-shape requires full or minimal") }
+            guard i + 1 < args.count else { throw ProtocolError.invalid("--config-shape requires full, minimal, no-network, no-sockets, no-serial, nat-network, or full-same-vm") }
             switch args[i + 1] {
-            case "full", "minimal":
+            case "full", "minimal", "no-network", "no-sockets", "no-serial", "nat-network", "full-same-vm":
                 configShape = args[i + 1]
             default:
-                throw ProtocolError.invalid("--config-shape requires full or minimal")
+                throw ProtocolError.invalid("--config-shape requires full, minimal, no-network, no-sockets, no-serial, nat-network, or full-same-vm")
             }
             i += 2
+        case "--restore-check":
+            restoreCheck = true
+            i += 1
         default:
-            throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>] [--config-shape full|minimal]")
+            throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>] [--config-shape full|minimal|no-network|no-sockets|no-serial|nat-network|full-same-vm] [--restore-check]")
         }
     }
     guard let request else {
-        throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>] [--config-shape full|minimal]")
+        throw ProtocolError.invalid("usage: --save-state-check (--request <path>|--request-json <json>) [--mode confined|unconfined] [--save-state-path <path>] [--config-shape full|minimal|no-network|no-sockets|no-serial|nat-network|full-same-vm] [--restore-check]")
     }
-    return SaveStateCheckArgs(request: request, confined: confined, saveStatePath: saveStatePath, configShape: configShape)
+    return SaveStateCheckArgs(request: request, confined: confined, saveStatePath: saveStatePath, configShape: configShape, restoreCheck: restoreCheck)
 }
 
 #if canImport(Virtualization)
 @available(macOS 14.0, *)
-func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, saveStatePath: String?, configShape: String) -> SaveStateCheckDiagnostics {
+func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, saveStatePath: String?, configShape: String, restoreCheck: Bool) -> SaveStateCheckDiagnostics {
     let path = saveStatePath ?? runtimeDirectory(identity: identity, stateDir: config.stateDir).appendingPathComponent("save-state-check.vmstate").path
     let mode = confined ? "confined" : "unconfined"
     var diagnostics = SaveStateCheckDiagnostics(
@@ -598,6 +641,10 @@ func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, sav
         stateAfterPause: nil,
         stateBeforeSave: nil,
         stateAfterSave: nil,
+        restoreCheck: restoreCheck,
+        restoreInitialVMState: nil,
+        stateAfterRestore: nil,
+        stateAfterRestoreResume: nil,
         steps: [],
         ok: false,
         error: nil,
@@ -605,13 +652,13 @@ func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, sav
         completedAt: nil
     )
     do {
-        if configShape == "full" {
+        if saveStateCheckNeedsHostFDEgress(configShape) {
             try recordSaveStateStep(&diagnostics, name: "prepare-host-fd-egress") {
                 try prepareHostFDEgressBeforeConfinement(config: config, identity: identity)
             }
         }
         defer {
-            if configShape == "full" {
+            if saveStateCheckNeedsHostFDEgress(configShape) {
                 closeHostFDEgress()
             }
         }
@@ -620,12 +667,7 @@ func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, sav
                 try applyConfinement(identity: identity, config: config, qos: QOS_CLASS_UTILITY)
             }
         }
-        let vmConfig: VZVirtualMachineConfiguration
-        if configShape == "minimal" {
-            vmConfig = try minimalSaveStateConfiguration(config: config)
-        } else {
-            vmConfig = try virtualMachineConfiguration(identity: identity, config: config, serialMode: .detached)
-        }
+        let vmConfig = try saveStateCheckConfiguration(identity: identity, config: config, configShape: configShape)
         try recordSaveStateStep(&diagnostics, name: "validate") {
             try vmConfig.validate()
         }
@@ -638,15 +680,66 @@ func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, sav
         vm.delegate = delegate
         let socketListeners: [SocketListenerHandle]
         let publishForwarder: TCPPublishForwarder?
-        if configShape == "minimal" {
+        if !saveStateCheckUsesSocketDevices(configShape) {
             socketListeners = []
-            publishForwarder = nil
         } else {
             socketListeners = try installSocketListeners(vm: vm, identity: identity, config: config)
+        }
+        if !saveStateCheckUsesNetworkDevices(configShape) || !saveStateCheckUsesSocketDevices(configShape) {
+            publishForwarder = nil
+        } else {
             publishForwarder = try installTCPPublishForwarder(vm: vm, config: config)
         }
         try withExtendedLifetime((delegate, socketListeners, publishForwarder)) {
             try startPauseAndSave(vm: vm, saveStatePath: path, diagnostics: &diagnostics)
+        }
+        if restoreCheck {
+            try recordSaveStateStep(&diagnostics, name: "stop-source-vm") {
+                try waitForVZOptionalError(timeout: 10.0) { complete in
+                    vm.stop { complete($0) }
+                }
+            }
+            if saveStateCheckRestoreUsesSameVM(configShape) {
+                diagnostics.restoreInitialVMState = describeVMState(vm)
+                try recordSaveStateStep(&diagnostics, name: "restore-machine-state") {
+                    try waitForVZOptionalError(timeout: 60.0) { complete in
+                        vm.restoreMachineStateFrom(url: URL(fileURLWithPath: path)) { complete($0) }
+                    }
+                }
+                diagnostics.stateAfterRestore = describeVMState(vm)
+                try recordSaveStateStep(&diagnostics, name: "restore-resume") {
+                    try waitForVZResult(timeout: 10.0) { complete in
+                        vm.resume { complete($0) }
+                    }
+                }
+                diagnostics.stateAfterRestoreResume = describeVMState(vm)
+            } else {
+                let restoreConfig = try saveStateCheckConfiguration(identity: identity, config: config, configShape: configShape)
+                try recordSaveStateStep(&diagnostics, name: "restore-validate") {
+                    try restoreConfig.validate()
+                }
+                try recordSaveStateStep(&diagnostics, name: "restore-validate-save-restore-support") {
+                    try restoreConfig.validateSaveRestoreSupport()
+                }
+                let restoreVM = VZVirtualMachine(configuration: restoreConfig)
+                diagnostics.restoreInitialVMState = describeVMState(restoreVM)
+                let restoreDelegate = VMRunDelegate(identity: identity, config: config)
+                restoreVM.delegate = restoreDelegate
+                try withExtendedLifetime(restoreDelegate) {
+                    try recordSaveStateStep(&diagnostics, name: "restore-machine-state") {
+                        try waitForVZOptionalError(timeout: 60.0) { complete in
+                            restoreVM.restoreMachineStateFrom(url: URL(fileURLWithPath: path)) { complete($0) }
+                        }
+                    }
+                    diagnostics.stateAfterRestore = describeVMState(restoreVM)
+                    try recordSaveStateStep(&diagnostics, name: "restore-resume") {
+                        try waitForVZResult(timeout: 10.0) { complete in
+                            restoreVM.resume { complete($0) }
+                        }
+                    }
+                    diagnostics.stateAfterRestoreResume = describeVMState(restoreVM)
+                }
+            }
         }
         diagnostics.ok = true
     } catch {
@@ -662,7 +755,9 @@ func runSaveStateCheckVM(identity: Identity, config: Config, confined: Bool, sav
 @available(macOS 14.0, *)
 func minimalSaveStateConfiguration(config: Config) throws -> VZVirtualMachineConfiguration {
     let vmConfig = VZVirtualMachineConfiguration()
-    vmConfig.platform = VZGenericPlatformConfiguration()
+    let platform = VZGenericPlatformConfiguration()
+    platform.machineIdentifier = try genericMachineIdentifier(from: config)
+    vmConfig.platform = platform
     let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: config.kernelPath))
     bootLoader.commandLine = "console=hvc0 root=/dev/vda rw init=/sbin/microagent-init"
     vmConfig.bootLoader = bootLoader
@@ -678,6 +773,51 @@ func minimalSaveStateConfiguration(config: Config) throws -> VZVirtualMachineCon
 }
 
 @available(macOS 14.0, *)
+func saveStateCheckConfiguration(identity: Identity, config: Config, configShape: String) throws -> VZVirtualMachineConfiguration {
+    if configShape == "minimal" {
+        return try minimalSaveStateConfiguration(config: config)
+    }
+    var buildConfig = config
+    if configShape == "nat-network" {
+        buildConfig.egressMode = "off"
+    }
+    let vmConfig = try virtualMachineConfiguration(identity: identity, config: buildConfig, serialMode: .detached)
+    switch configShape {
+    case "full", "full-same-vm":
+        break
+    case "no-network":
+        vmConfig.networkDevices = []
+    case "nat-network":
+        let device = VZVirtioNetworkDeviceConfiguration()
+        device.attachment = VZNATNetworkDeviceAttachment()
+        vmConfig.networkDevices = [device]
+    case "no-sockets":
+        vmConfig.socketDevices = []
+    case "no-serial":
+        vmConfig.serialPorts = []
+    default:
+        throw ProtocolError.invalid("unsupported save-state config shape \(configShape)")
+    }
+    return vmConfig
+}
+
+func saveStateCheckNeedsHostFDEgress(_ configShape: String) -> Bool {
+    configShape == "full" || configShape == "full-same-vm" || configShape == "no-network" || configShape == "no-sockets" || configShape == "no-serial"
+}
+
+func saveStateCheckUsesNetworkDevices(_ configShape: String) -> Bool {
+    configShape != "minimal" && configShape != "no-network"
+}
+
+func saveStateCheckUsesSocketDevices(_ configShape: String) -> Bool {
+    configShape != "minimal" && configShape != "no-sockets"
+}
+
+func saveStateCheckRestoreUsesSameVM(_ configShape: String) -> Bool {
+    configShape == "full-same-vm"
+}
+
+@available(macOS 14.0, *)
 func startPauseAndSave(vm: VZVirtualMachine, saveStatePath: String, diagnostics: inout SaveStateCheckDiagnostics) throws {
     try recordSaveStateStep(&diagnostics, name: "start") {
         try waitForVZResult(timeout: 30.0) { complete in
@@ -688,9 +828,7 @@ func startPauseAndSave(vm: VZVirtualMachine, saveStatePath: String, diagnostics:
     Thread.sleep(forTimeInterval: 2.0)
     diagnostics.stateBeforePause = describeVMState(vm)
     try recordSaveStateStep(&diagnostics, name: "pause") {
-        try waitForVZResult(timeout: 10.0) { complete in
-            vm.pause { complete($0) }
-        }
+        try pauseVMForSave(vm: vm)
     }
     diagnostics.stateAfterPause = describeVMState(vm)
     let url = URL(fileURLWithPath: saveStatePath)
@@ -709,6 +847,24 @@ func startPauseAndSave(vm: VZVirtualMachine, saveStatePath: String, diagnostics:
         }
     }
     diagnostics.stateAfterSave = describeVMState(vm)
+}
+
+@available(macOS 14.0, *)
+func pauseVMForSave(vm: VZVirtualMachine) throws {
+    do {
+        try waitForVZResult(timeout: 10.0) { complete in
+            vm.pause { complete($0) }
+        }
+    } catch {
+        let deadline = Date().addingTimeInterval(3.0)
+        while Date() < deadline {
+            if vm.state == .paused {
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        throw error
+    }
 }
 
 @available(macOS 13.0, *)
@@ -875,6 +1031,8 @@ func handle(_ request: Request) throws -> Response {
         return try pauseLive(request)
     case "resume":
         return try resumeLive(request)
+    case "snapshot":
+        return try snapshotLive(request)
     case "apply":
         return try applyLive(request)
     case "kill":
@@ -899,6 +1057,59 @@ func pauseLive(_ request: Request) throws -> Response {
 
 func resumeLive(_ request: Request) throws -> Response {
     return try runtimeControl(request, action: "resume", requiredState: .paused, nextState: .running, detail: "apple-vf virtual machine resumed")
+}
+
+func snapshotLive(_ request: Request) throws -> Response {
+    let identity = try validatedIdentity(request.identity)
+    let config = try stateConfig(request.config)
+    let tag = try validatedSnapshotTag(request.tag)
+    guard let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir) else {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
+    }
+    guard runtime.event.state == .running || runtime.event.state == .paused else {
+        throw ProtocolError.invalid("snapshot requires state running or paused, got \(runtime.event.state.rawValue)")
+    }
+    guard processAlive(runtime.pid), let pid = runtime.pid else {
+        throw ProtocolError.invalid("workspace \(identity.runtimeID) is not running")
+    }
+    let dir = snapshotDirectory(identity: identity, stateDir: runtime.config.stateDir, tag: tag)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let saveStatePath = snapshotMachineStatePath(identity: identity, stateDir: runtime.config.stateDir, tag: tag)
+    let rootfsSnapshotPath = snapshotRootfsPath(identity: identity, stateDir: runtime.config.stateDir, tag: tag)
+    let requestPath = runtimeControlRequestPath(identity: identity, stateDir: runtime.config.stateDir)
+    let ackPath = runtimeControlAckPath(identity: identity, stateDir: runtime.config.stateDir)
+    try? FileManager.default.removeItem(at: ackPath)
+    try encoder.encode(RuntimeControlRequest(action: "snapshot", saveStatePath: saveStatePath.path, rootfsSnapshotPath: rootfsSnapshotPath.path)).write(to: requestPath, options: .atomic)
+    if kill(pid, runtimeControlSignal) != 0 && errno != ESRCH {
+        throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
+    }
+    let ack = try waitForRuntimeControlAck(path: ackPath, action: "snapshot", timeout: 60.0)
+    if let error = ack.error, !error.isEmpty {
+        throw ProtocolError.invalid(error)
+    }
+    let event = Event(identity: identity, state: runtime.event.state, detail: "snapshot \(tag) captured", observedAt: Date())
+    try writeState(event: event, config: runtime.config)
+    try writeRuntimeState(event: event, config: runtime.config, pid: pid, error: nil)
+    return response(event: event, config: runtime.config, error: nil)
+}
+
+func validatedSnapshotTag(_ tag: String?) throws -> String {
+    let value = (tag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if !isSafeIdentifier(value) {
+        throw ProtocolError.invalid("snapshot tag must be a safe basename")
+    }
+    return value
+}
+
+func validatedOptionalSnapshotTag(_ tag: String?) throws -> String? {
+    let value = (tag ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if value.isEmpty {
+        return nil
+    }
+    if !isSafeIdentifier(value) {
+        throw ProtocolError.invalid("snapshot tag must be a safe basename")
+    }
+    return value
 }
 
 func runtimeControl(_ request: Request, action: String, requiredState: VMState, nextState: VMState, detail: String) throws -> Response {
@@ -1314,14 +1525,21 @@ func hostSupport() -> HostSupport {
     #if canImport(Virtualization)
     let available = true
     let supported: Bool
+    let saveRestoreSupported: Bool
     if #available(macOS 13.0, *) {
         supported = VZVirtualMachine.isSupported
     } else {
         supported = false
     }
+    if #available(macOS 14.0, *) {
+        saveRestoreSupported = supported
+    } else {
+        saveRestoreSupported = false
+    }
     #else
     let available = false
     let supported = false
+    let saveRestoreSupported = false
     #endif
     return HostSupport(
         backend: backendName,
@@ -1331,8 +1549,8 @@ func hostSupport() -> HostSupport {
         supervisorPath: currentExecutablePath(),
         supervisorAvailable: true,
         pauseResumeAvailable: supported,
-        snapshotCreateAvailable: false,
-        snapshotAvailable: false,
+        snapshotCreateAvailable: saveRestoreSupported,
+        snapshotAvailable: saveRestoreSupported,
         consoleAvailable: true,
         consoleMode: "interactive",
         confinementMode: confinementMode,
@@ -1394,6 +1612,20 @@ func runtimeControlRequestPath(identity: Identity, stateDir: String) -> URL {
 
 func runtimeControlAckPath(identity: Identity, stateDir: String) -> URL {
     runtimeDirectory(identity: identity, stateDir: stateDir).appendingPathComponent(runtimeControlAckFileName)
+}
+
+func snapshotDirectory(identity: Identity, stateDir: String, tag: String) -> URL {
+    runtimeDirectory(identity: identity, stateDir: stateDir)
+        .appendingPathComponent("snapshots", isDirectory: true)
+        .appendingPathComponent(tag, isDirectory: true)
+}
+
+func snapshotRootfsPath(identity: Identity, stateDir: String, tag: String) -> URL {
+    snapshotDirectory(identity: identity, stateDir: stateDir, tag: tag).appendingPathComponent(snapshotRootfsFileName)
+}
+
+func snapshotMachineStatePath(identity: Identity, stateDir: String, tag: String) -> URL {
+    snapshotDirectory(identity: identity, stateDir: stateDir, tag: tag).appendingPathComponent(snapshotMachineStateFileName)
 }
 
 func resultPath(identity: Identity, stateDir: String) -> URL {
@@ -1755,7 +1987,7 @@ final class TCPPublishForwarder: @unchecked Sendable {
         for (idx, forward) in forwards.enumerated() {
             let fd = opened[idx]
             Thread.detachNewThread {
-                self.acceptLoop(listenerFD: fd, guestVsockPort: UInt32(forward.hostPort))
+                self.acceptLoop(listenerFD: fd, guestVsockPort: guestVsockPort(forward))
             }
         }
     }
@@ -1824,6 +2056,10 @@ final class TCPPublishForwarder: @unchecked Sendable {
         connections.removeAll { $0 === connection }
         lock.unlock()
     }
+}
+
+func guestVsockPort(_ forward: PortForward) -> UInt32 {
+    UInt32(forward.guestPort)
 }
 
 @available(macOS 13.0, *)
@@ -2335,6 +2571,12 @@ final class RuntimeControlController {
             performOnMainRunLoop { [weak self] in
                 self?.resumeVM(path: ackPath)
             }
+        case "snapshot":
+            let saveStatePath = request.saveStatePath
+            let rootfsSnapshotPath = request.rootfsSnapshotPath
+            performOnMainRunLoop { [weak self] in
+                self?.snapshotVM(path: ackPath, saveStatePath: saveStatePath, rootfsSnapshotPath: rootfsSnapshotPath)
+            }
         default:
             writeAck(path: ackPath, action: request.action, error: "unknown runtime control action \(request.action)")
         }
@@ -2360,10 +2602,109 @@ final class RuntimeControlController {
         vm.resume { [weak self] result in
             switch result {
             case .success:
-                self?.writeAck(path: path, action: "resume", error: nil)
+                do {
+                    try self?.rehydrateMaterializedSecretsIfNeeded()
+                    self?.writeAck(path: path, action: "resume", error: nil)
+                } catch {
+                    self?.writeAck(path: path, action: "resume", error: String(describing: error))
+                }
             case .failure(let error):
                 self?.writeAck(path: path, action: "resume", error: error.localizedDescription)
             }
+        }
+    }
+
+    private func snapshotVM(path: URL, saveStatePath: String?, rootfsSnapshotPath: String?) {
+        do {
+            guard let saveStatePath, !saveStatePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ProtocolError.invalid("snapshot control missing saveStatePath")
+            }
+            guard let rootfsSnapshotPath, !rootfsSnapshotPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ProtocolError.invalid("snapshot control missing rootfsSnapshotPath")
+            }
+            try snapshotVM(saveStatePath: URL(fileURLWithPath: saveStatePath), rootfsSnapshotPath: URL(fileURLWithPath: rootfsSnapshotPath))
+            writeAck(path: path, action: "snapshot", error: nil)
+        } catch {
+            writeAck(path: path, action: "snapshot", error: String(describing: error))
+        }
+    }
+
+    private func snapshotVM(saveStatePath: URL, rootfsSnapshotPath: URL) throws {
+        let wasRunning = vm.state == .running
+        if materializedSecretsDeclared(config) && !wasRunning {
+            throw ProtocolError.invalid("cannot purge secrets for snapshot: workspace \(identity.runtimeID) is \(String(describing: vm.state)), must be running")
+        }
+        var purged = false
+        var pausedForSnapshot = false
+        do {
+            if materializedSecretsDeclared(config) {
+                try sendGuestSecretControl(op: "purge")
+                purged = true
+            }
+            if wasRunning {
+                try waitForVZResult(timeout: 10.0) { complete in
+                    vm.pause { complete($0) }
+                }
+                pausedForSnapshot = true
+            } else if vm.state != .paused {
+                throw ProtocolError.invalid("snapshot requires VM state running or paused, got \(String(describing: vm.state))")
+            }
+            if FileManager.default.fileExists(atPath: saveStatePath.path) {
+                try FileManager.default.removeItem(at: saveStatePath)
+            }
+            if FileManager.default.fileExists(atPath: rootfsSnapshotPath.path) {
+                try FileManager.default.removeItem(at: rootfsSnapshotPath)
+            }
+            try FileManager.default.createDirectory(at: saveStatePath.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try waitForVZOptionalError(timeout: 30.0) { complete in
+                vm.saveMachineStateTo(url: saveStatePath) { complete($0) }
+            }
+            try FileManager.default.copyItem(at: URL(fileURLWithPath: config.rootfsPath), to: rootfsSnapshotPath)
+            if wasRunning {
+                try waitForVZResult(timeout: 10.0) { complete in
+                    vm.resume { complete($0) }
+                }
+                pausedForSnapshot = false
+                if purged {
+                    try sendGuestSecretControl(op: "rehydrate")
+                }
+            }
+        } catch {
+            if pausedForSnapshot {
+                try? waitForVZResult(timeout: 10.0) { complete in
+                    vm.resume { complete($0) }
+                }
+                if purged {
+                    try? sendGuestSecretControl(op: "rehydrate")
+                }
+            }
+            throw error
+        }
+    }
+
+    private func rehydrateMaterializedSecretsIfNeeded() throws {
+        if materializedSecretsDeclared(config) {
+            try sendGuestSecretControl(op: "rehydrate")
+        }
+    }
+
+    private func sendGuestSecretControl(op: String) throws {
+        guard let port = config.secretsControlPort, port > 0 else {
+            throw ProtocolError.invalid("materialized secrets require secretsControlPort")
+        }
+        guard let socket = vm.socketDevices.first as? VZVirtioSocketDevice else {
+            throw ProtocolError.invalid("materialized secrets require a virtio socket device")
+        }
+        let connection = try connectGuestSocket(socket: socket, port: port, timeout: 10.0)
+        defer { connection.close() }
+        let fd = connection.fileDescriptor
+        try writeFramedJSON(fd: fd, SecretControlRequest(protocolVersion: secretsProtocolVersion, op: op))
+        let response: SecretControlResponse = try readFramedJSON(fd: fd)
+        guard response.protocolVersion == secretsProtocolVersion else {
+            throw ProtocolError.invalid("unsupported secrets protocol \(response.protocolVersion)")
+        }
+        if !response.ok {
+            throw ProtocolError.invalid("secret control \(op) failed: \(response.error ?? "")")
         }
     }
 
@@ -2559,6 +2900,28 @@ func validSecretName(_ name: String) -> Bool {
     return true
 }
 
+func materializedSecretsDeclared(_ config: Config) -> Bool {
+    return !(config.secrets ?? []).isEmpty || !(config.secretEnvFiles ?? []).isEmpty
+}
+
+#if canImport(Virtualization)
+@available(macOS 13.0, *)
+func connectGuestSocket(socket: VZVirtioSocketDevice, port: UInt32, timeout: TimeInterval) throws -> VZVirtioSocketConnection {
+    var result: Result<VZVirtioSocketConnection, Error>?
+    socket.connect(toPort: port) { completed in
+        result = completed
+    }
+    let deadline = Date().addingTimeInterval(timeout)
+    while result == nil && Date() < deadline {
+        RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+    }
+    guard let result else {
+        throw ProtocolError.invalid("guest socket port \(port) did not connect before timeout")
+    }
+    return try result.get()
+}
+#endif
+
 func readFramedJSON<T: Decodable>(fd: Int32) throws -> T {
     let prefix = try readExact(fd: fd, count: 4)
     let length = prefix.withUnsafeBytes { raw -> UInt32 in
@@ -2654,10 +3017,35 @@ func runVM(_ request: Request) throws {
         try applyConfinement(identity: identity, config: runtimeConfig, qos: QOS_CLASS_UTILITY)
         let vmConfig = try virtualMachineConfiguration(identity: identity, config: runtimeConfig, serialMode: .detached)
         try vmConfig.validate()
+        let restoreTag = try validatedOptionalSnapshotTag(request.tag)
+        if restoreTag != nil {
+            if #available(macOS 14.0, *) {
+                try vmConfig.validateSaveRestoreSupport()
+            } else {
+                throw ProtocolError.invalid("Apple VF snapshot restore requires macOS 14 or newer")
+            }
+        }
 
         let vm = VZVirtualMachine(configuration: vmConfig)
         let delegate = VMRunDelegate(identity: identity, config: runtimeConfig)
         vm.delegate = delegate
+        if let restoreTag {
+            if #available(macOS 14.0, *) {
+                let saveState = snapshotMachineStatePath(identity: identity, stateDir: runtimeConfig.stateDir, tag: restoreTag)
+                do {
+                    try waitForVZOptionalError(timeout: 60.0) { complete in
+                        vm.restoreMachineStateFrom(url: saveState) { complete($0) }
+                    }
+                } catch {
+                    updateRuntime(identity: identity, config: runtimeConfig, state: .failed, error: error.localizedDescription)
+                    throw error
+                }
+            } else {
+                let error = ProtocolError.invalid("Apple VF snapshot restore requires macOS 14 or newer")
+                updateRuntime(identity: identity, config: runtimeConfig, state: .failed, error: String(describing: error))
+                throw error
+            }
+        }
         let socketListeners = try installSocketListeners(vm: vm, identity: identity, config: runtimeConfig)
         let publishForwarder = try installTCPPublishForwarder(vm: vm, config: runtimeConfig)
         let quarantineController = QuarantineController(identity: identity, config: runtimeConfig, vm: vm, socketListeners: socketListeners, publishForwarder: publishForwarder)
@@ -2668,19 +3056,37 @@ func runVM(_ request: Request) throws {
         runtimeControlController.start()
         let semaphore = DispatchSemaphore(value: 0)
         var startError: Error?
-        vm.start { result in
-            switch result {
-            case .success:
-                updateRuntime(identity: identity, config: runtimeConfig, state: .running, error: nil)
-                let storedConfig = (try? readRuntimeState(identity: identity, stateDir: runtimeConfig.stateDir))?.config ?? runtimeConfig
-                var deadmanRequest = request
-                deadmanRequest.config = storedConfig
-                startDeadmanProcessIfNeeded(request: deadmanRequest, identity: identity, config: storedConfig)
-            case .failure(let error):
-                startError = error
-                updateRuntime(identity: identity, config: runtimeConfig, state: .failed, error: error.localizedDescription)
+        if let restoreTag {
+            _ = restoreTag
+            vm.resume { result in
+                switch result {
+                case .success:
+                    updateRuntime(identity: identity, config: runtimeConfig, state: .running, error: nil)
+                    let storedConfig = (try? readRuntimeState(identity: identity, stateDir: runtimeConfig.stateDir))?.config ?? runtimeConfig
+                    var deadmanRequest = request
+                    deadmanRequest.config = storedConfig
+                    startDeadmanProcessIfNeeded(request: deadmanRequest, identity: identity, config: storedConfig)
+                case .failure(let error):
+                    startError = error
+                    updateRuntime(identity: identity, config: runtimeConfig, state: .failed, error: error.localizedDescription)
+                }
+                semaphore.signal()
             }
-            semaphore.signal()
+        } else {
+            vm.start { result in
+                switch result {
+                case .success:
+                    updateRuntime(identity: identity, config: runtimeConfig, state: .running, error: nil)
+                    let storedConfig = (try? readRuntimeState(identity: identity, stateDir: runtimeConfig.stateDir))?.config ?? runtimeConfig
+                    var deadmanRequest = request
+                    deadmanRequest.config = storedConfig
+                    startDeadmanProcessIfNeeded(request: deadmanRequest, identity: identity, config: storedConfig)
+                case .failure(let error):
+                    startError = error
+                    updateRuntime(identity: identity, config: runtimeConfig, state: .failed, error: error.localizedDescription)
+                }
+                semaphore.signal()
+            }
         }
         while semaphore.wait(timeout: .now()) == .timedOut {
             RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
@@ -2817,7 +3223,7 @@ func installTCPPublishForwarder(vm: VZVirtualMachine, config: Config) throws -> 
 func tcpPublishForwards(config: Config) -> [PortForward] {
     var forwards = config.network?.portForwards ?? []
     if let shellPort = config.shellPort, shellPort > 0 {
-        forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: shellPort, guestPort: shellPort))
+        forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: shellPort, guestPort: guestShellPort(config)))
     }
     if let execPort = config.execPort, execPort > 0 {
         forwards.append(PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: execPort, guestPort: guestExecPort(config)))
@@ -2827,6 +3233,9 @@ func tcpPublishForwards(config: Config) -> [PortForward] {
 
 func livePortForwardHostOnlyChange(oldConfig: Config, newConfig: Config) -> Bool {
     if oldConfig.shellPort != newConfig.shellPort {
+        return false
+    }
+    if oldConfig.guestShellPort != newConfig.guestShellPort {
         return false
     }
     if oldConfig.execPort != newConfig.execPort || oldConfig.guestExecPort != newConfig.guestExecPort {
@@ -2988,7 +3397,9 @@ func copyFD(from source: Int32, to destination: Int32) -> Int64 {
 @available(macOS 13.0, *)
 func virtualMachineConfiguration(identity: Identity, config: Config, serialMode: SerialAttachmentMode?) throws -> VZVirtualMachineConfiguration {
     let vmConfig = VZVirtualMachineConfiguration()
-    vmConfig.platform = VZGenericPlatformConfiguration()
+    let platform = VZGenericPlatformConfiguration()
+    platform.machineIdentifier = try genericMachineIdentifier(from: config)
+    vmConfig.platform = platform
     let bootLoader = VZLinuxBootLoader(kernelURL: URL(fileURLWithPath: config.kernelPath))
     bootLoader.commandLine = linuxKernelCommandLine(for: config)
     vmConfig.bootLoader = bootLoader
@@ -3041,7 +3452,7 @@ func virtualMachineConfiguration(identity: Identity, config: Config, serialMode:
 func linuxKernelCommandLine(for config: Config) -> String {
     var args = ["console=hvc0", "root=/dev/vda", "rw", "init=/sbin/microagent-init"]
     if let shellPort = config.shellPort, shellPort > 0 {
-        args.append("microagent_shell_port=\(shellPort)")
+        args.append("microagent_shell_port=\(guestShellPort(config))")
     }
     if let execPort = config.execPort, execPort > 0 {
         args.append("microagent_exec_port=\(guestExecPort(config))")
@@ -3199,8 +3610,36 @@ func guestExecPort(_ config: Config) -> UInt16 {
     return config.execPort ?? 0
 }
 
+func guestShellPort(_ config: Config) -> UInt16 {
+    if let guestShellPort = config.guestShellPort, guestShellPort > 0 {
+        return guestShellPort
+    }
+    return config.shellPort ?? 0
+}
+
 func runtimeConfigForStart(identity: Identity, config: Config) throws -> Config {
-    return config
+    var runtimeConfig = config
+    #if canImport(Virtualization)
+    if #available(macOS 13.0, *), (runtimeConfig.appleVFMachineIdentifier ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        runtimeConfig.appleVFMachineIdentifier = VZGenericMachineIdentifier().dataRepresentation.base64EncodedString()
+    }
+    if #available(macOS 13.0, *), (runtimeConfig.appleVFNetworkMACAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        runtimeConfig.appleVFNetworkMACAddress = VZMACAddress.randomLocallyAdministered().string
+    }
+    #endif
+    return runtimeConfig
+}
+
+@available(macOS 13.0, *)
+func genericMachineIdentifier(from config: Config) throws -> VZGenericMachineIdentifier {
+    let encoded = (config.appleVFMachineIdentifier ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if encoded.isEmpty {
+        return VZGenericMachineIdentifier()
+    }
+    guard let data = Data(base64Encoded: encoded), let identifier = VZGenericMachineIdentifier(dataRepresentation: data) else {
+        throw ProtocolError.invalid("appleVFMachineIdentifier is not a valid VZGenericMachineIdentifier data representation")
+    }
+    return identifier
 }
 
 @available(macOS 13.0, *)
@@ -3211,19 +3650,32 @@ func networkDevices(for config: Config, identity: Identity) throws -> [VZVirtioN
         // host-owned socket driven by the microagent userspace gateway, so all
         // egress is captured and (with mediation) cannot bypass the mediator.
         if hostFDEgressEnabled(config: config) {
-            return [try makeHostFDNetworkDevice()]
+            return [try makeHostFDNetworkDevice(macAddress: appleVFNetworkMACAddress(from: config))]
         }
         // Default: Apple Virtualization.framework's VZNATNetworkDeviceAttachment
         // runs in user space inside the framework, providing the unprivileged
         // outbound-only semantics that "user" mode promises on Linux via pasta.
         let device = VZVirtioNetworkDeviceConfiguration()
         device.attachment = VZNATNetworkDeviceAttachment()
+        device.macAddress = try appleVFNetworkMACAddress(from: config)
         return [device]
     case "isolated":
         return []
     default:
         throw ProtocolError.invalid("network.mode must be user or isolated")
     }
+}
+
+@available(macOS 13.0, *)
+func appleVFNetworkMACAddress(from config: Config) throws -> VZMACAddress {
+    let value = (config.appleVFNetworkMACAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if value.isEmpty {
+        return VZMACAddress.randomLocallyAdministered()
+    }
+    guard let address = VZMACAddress(string: value) else {
+        throw ProtocolError.invalid("appleVFNetworkMACAddress is not a valid MAC address")
+    }
+    return address
 }
 
 func configureRawTerminal(_ fileHandle: FileHandle) {
