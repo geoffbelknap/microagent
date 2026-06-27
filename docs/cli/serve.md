@@ -4,7 +4,7 @@ description: Serve machine-readable agent endpoints.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-27_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
@@ -196,8 +196,8 @@ the minimum shape is:
 |---|---|
 | `microagent.describe` | Return the machine-readable capability manifest |
 | `microagent.ping` | Validate the MCP transport |
-| `workspace.create` | Create or dry-run a workspace |
-| `workspace.start` | Start a prepared workspace |
+| `workspace.create` | Create or dry-run a workspace, including snapshot forks with `from_snapshot` |
+| `workspace.start` | Start a prepared workspace, including snapshot restore with `from_snapshot` |
 | `workspace.exec` | Run a structured command in a running workspace |
 | `workspace.halt` | Halt a workspace and preserve disk state |
 | `workspace.stop` | Stop a workspace runtime |
@@ -277,6 +277,12 @@ new events without a long-running `events --follow` call.
 actions that would be taken without changing host state. Mutating tools accept
 an optional `idempotency_key`; tools that are not inherently idempotent replay
 the first successful MCP envelope for a client-supplied key.
+
+Snapshot restore and fork use the same workspace tools as the CLI. Pass
+`from_snapshot: "<tag>"` to `workspace.start` to restore a workspace in place,
+or `from_snapshot: "<workspace>:<tag>"` to `workspace.create` to fork a new
+workspace from an existing snapshot. The dedicated `snapshot.*` tools create,
+list, and delete snapshot records.
 
 `kernel.install` and `rootfs.build` use a stricter
 preview-confirm contract. Call the tool with `preview: true` first, inspect the

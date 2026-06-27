@@ -69,14 +69,19 @@ if init.get("result", {}).get("serverInfo", {}).get("name") != "microagent":
 
 send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
 tools = recv()
-names = {tool.get("name") for tool in tools.get("result", {}).get("tools", [])}
+tool_by_name = {tool.get("name"): tool for tool in tools.get("result", {}).get("tools", [])}
+names = set(tool_by_name)
 required = {
     "microagent.ping",
     "microagent.describe",
     "workspace.create",
+    "workspace.start",
     "workspace.exec",
     "workspace.events",
     "workspace.stats",
+    "snapshot.create",
+    "snapshot.list",
+    "snapshot.delete",
     "models.pull",
     "models.serve",
     "kernel.install",
@@ -85,6 +90,10 @@ required = {
 missing = sorted(required - names)
 if missing:
     raise SystemExit(f"missing MCP tools: {missing}")
+for name in ("workspace.create", "workspace.start"):
+    properties = tool_by_name[name].get("inputSchema", {}).get("properties", {})
+    if "from_snapshot" not in properties:
+        raise SystemExit(f"{name} schema missing from_snapshot: {properties}")
 
 send({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "microagent.ping", "arguments": {}}})
 ping = recv()

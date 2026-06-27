@@ -370,10 +370,12 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent init` | `scaffold.Generate` |
 | `microagent create` | `workspace.Create` |
 | `microagent start` | `workspace.Start` |
-| `microagent status` / `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
+| `microagent create --from-snapshot` | `workspace.CreateFromSnapshot` |
+| `microagent start --from-snapshot` | `workspace.Start` with `Options.FromSnapshot` |
+| `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
 | `microagent result` | `workspace.ResultStatus` |
 | `microagent list` / `microagent ls` / `microagent ps` | `workspace.List` |
-| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` / `microagent delete` | `workspace.Control` (one function, action picked via options) |
+| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` | `workspace.Control` (one function, action picked via options) |
 | `microagent pause` / `microagent resume` | `workspace.Pause` / `workspace.Resume` |
 | `microagent snapshot` create / list / delete | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
 | `microagent apply` | `workspace.Apply` |
