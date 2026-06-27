@@ -1414,6 +1414,13 @@ func withFakeVMController(t *testing.T, fake *fakeVMController) {
 	t.Cleanup(func() { newVMStateController = previous })
 }
 
+func withFakeFirecrackerProcessConfined(t *testing.T, confined bool) {
+	t.Helper()
+	previous := firecrackerProcessConfinedToWorkspace
+	firecrackerProcessConfinedToWorkspace = func(int, Options) bool { return confined }
+	t.Cleanup(func() { firecrackerProcessConfinedToWorkspace = previous })
+}
+
 func startSleepProcess(t *testing.T) *exec.Cmd {
 	t.Helper()
 	cmd := exec.Command("sleep", "30")
@@ -1595,6 +1602,39 @@ func TestSnapshotForkBindSkipsWhenNoVsock(t *testing.T) {
 	opts := Options{Name: "fork1", StateDir: "/state"}
 	if _, _, need := snapshotForkBind(opts, vmkit.SnapshotManifest{}); need {
 		t.Fatal("a snapshot with no vsock path needs no bind")
+	}
+}
+
+func TestSnapshotForkBindSkipsJailRunVsock(t *testing.T) {
+	opts := Options{Name: "fork1", StateDir: "/state"}
+	if _, _, need := snapshotForkBind(opts, vmkit.SnapshotManifest{VsockUDSPath: "/run/vsock.sock"}); need {
+		t.Fatal("a confined snapshot with a /run vsock path must load through the confined /run bind, not fork-mount host paths")
+	}
+}
+
+func TestSnapshotAPIPathsTranslateOnlyWhenConfined(t *testing.T) {
+	opts := Options{Name: "agent-1", StateDir: "/state"}
+	vmstate := "/state/agent-1/snapshots/snap-1/vmstate"
+	memory := "/state/agent-1/snapshots/snap-1/memory"
+
+	gotVMState, gotMemory, err := snapshotAPIPaths(opts, false, vmstate, memory)
+	if err != nil {
+		t.Fatalf("snapshotAPIPaths unconfined: %v", err)
+	}
+	if gotVMState != vmstate || gotMemory != memory {
+		t.Fatalf("unconfined paths = %q %q, want host paths", gotVMState, gotMemory)
+	}
+
+	gotVMState, gotMemory, err = snapshotAPIPaths(opts, true, vmstate, memory)
+	if err != nil {
+		t.Fatalf("snapshotAPIPaths confined: %v", err)
+	}
+	if gotVMState != "/run/snapshots/snap-1/vmstate" || gotMemory != "/run/snapshots/snap-1/memory" {
+		t.Fatalf("confined paths = %q %q, want /run snapshot paths", gotVMState, gotMemory)
+	}
+
+	if _, err := snapshotAPIPath(opts, true, "/state/other/snapshots/snap-1/vmstate"); err == nil {
+		t.Fatal("confined snapshot path outside workspace should be rejected")
 	}
 }
 
@@ -1854,6 +1894,108 @@ func TestSnapshotCreateAutoPausesCreatesResumes(t *testing.T) {
 	}
 	if state.Event.State != vmkit.StateRunning || state.PID != vmProcess.Process.Pid || state.PortForwardPID != forwarder.Process.Pid {
 		t.Fatalf("post-snapshot state = %#v", state)
+	}
+}
+
+func TestSnapshotCreateUsesJailVisibleAPIPathsWhenConfined(t *testing.T) {
+	dir := t.TempDir()
+	opts := Options{Name: "agent-1", StateDir: dir}
+	req := snapshotSourceRequest(t, dir)
+	req.Config.ExecPort = 25279
+	vmProcess := startSleepProcess(t)
+	if err := writeProcessState(opts, req, vmkit.StateRunning, vmProcess.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeVMController{}
+	withFakeVMController(t, fake)
+	withFakeFirecrackerProcessConfined(t, true)
+
+	resp, err := Supervisor{}.Do(context.Background(), vmkit.Request{
+		Command:  "snapshot",
+		Identity: req.Identity,
+		Config:   &vmkit.Config{StateDir: dir},
+		Tag:      "snap-confined",
+	})
+	if err != nil {
+		t.Fatalf("snapshot: resp=%+v err=%v", resp, err)
+	}
+	if len(fake.snapshots) != 1 {
+		t.Fatalf("createSnapshot calls = %d, want 1", len(fake.snapshots))
+	}
+	if fake.snapshots[0][0] != "/run/snapshots/snap-confined/vmstate" {
+		t.Fatalf("snapshot API path = %q", fake.snapshots[0][0])
+	}
+	if fake.snapshots[0][1] != "/run/snapshots/snap-confined/memory" {
+		t.Fatalf("memory API path = %q", fake.snapshots[0][1])
+	}
+
+	snapDir := vmkit.SnapshotDir(dir, "agent-1", "snap-confined")
+	if _, err := os.Stat(filepath.Join(snapDir, vmkit.SnapshotRootfsName)); err != nil {
+		t.Fatalf("host rootfs snapshot missing: %v", err)
+	}
+	manifest, err := vmkit.ReadSnapshotManifest(snapDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.VsockUDSPath != "/run/vsock.sock" {
+		t.Fatalf("manifest vsock path = %q, want jail-visible /run/vsock.sock", manifest.VsockUDSPath)
+	}
+}
+
+func TestRestoreFromSnapshotTranslatesLoadPathsWhenConfined(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		confined bool
+		wantVM   string
+		wantMem  string
+	}{
+		{name: "unconfined", confined: false},
+		{name: "confined", confined: true, wantVM: "/run/snapshots/snap-1/vmstate", wantMem: "/run/snapshots/snap-1/memory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, err := os.MkdirTemp("", "ma-fc-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.RemoveAll(dir) })
+			opts := Options{Name: "agent-1", StateDir: dir}
+			snapDir := vmkit.SnapshotDir(dir, "agent-1", "snap-1")
+			if err := vmkit.WriteSnapshotManifest(snapDir, vmkit.SnapshotManifest{Tag: "snap-1"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(apiSocketPath(opts)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", apiSocketPath(opts))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+
+			fake := &fakeVMController{}
+			withFakeVMController(t, fake)
+			withFakeFirecrackerProcessConfined(t, tc.confined)
+			if err := restoreFromSnapshot(context.Background(), opts, "snap-1", 1234, nil); err != nil {
+				t.Fatalf("restoreFromSnapshot: %v", err)
+			}
+			if len(fake.loads) != 1 {
+				t.Fatalf("loadSnapshot calls = %d, want 1", len(fake.loads))
+			}
+			wantVM := tc.wantVM
+			if wantVM == "" {
+				wantVM = filepath.Join(snapDir, vmkit.SnapshotVMStateName)
+			}
+			wantMem := tc.wantMem
+			if wantMem == "" {
+				wantMem = filepath.Join(snapDir, vmkit.SnapshotMemoryName)
+			}
+			if fake.loads[0][0] != wantVM || fake.loads[0][1] != wantMem {
+				t.Fatalf("load paths = %q %q, want %q %q", fake.loads[0][0], fake.loads[0][1], wantVM, wantMem)
+			}
+			if !fake.loadResume {
+				t.Fatal("loadSnapshot resume = false, want true")
+			}
+		})
 	}
 }
 

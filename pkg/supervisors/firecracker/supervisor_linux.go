@@ -531,7 +531,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		return failedResponse(req, err.Error()), err
 	}
 	if loadMode {
-		if err := restoreFromSnapshot(ctx, opts, req.Tag, snapshotNetworkOverrides(opts, req.Config)); err != nil {
+		if err := restoreFromSnapshot(ctx, opts, req.Tag, cmd.Process.Pid, snapshotNetworkOverrides(opts, req.Config)); err != nil {
 			_ = cmd.Process.Kill()
 			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
@@ -3728,6 +3728,14 @@ func processReferencesWorkspace(pid int, opts Options) bool {
 	return processIdentityReferencesWorkspace(cmdline, mountinfo, filepath.Join(opts.StateDir, opts.Name))
 }
 
+var firecrackerProcessConfinedToWorkspace = func(pid int, opts Options) bool {
+	if pid <= 0 {
+		return false
+	}
+	mountinfo, _ := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid))
+	return processMountinfoReferencesWorkspaceJail(mountinfo, filepath.Join(opts.StateDir, opts.Name))
+}
+
 // processIdentityReferencesWorkspace is the pure matcher behind
 // processReferencesWorkspace: the workspace state path appears in an unconfined
 // process's argv (NUL-separated cmdline), or the per-workspace jail root
@@ -3740,6 +3748,13 @@ func processIdentityReferencesWorkspace(cmdline, mountinfo []byte, wsPath string
 	}
 	if strings.Contains(strings.ReplaceAll(string(cmdline), "\x00", " "), wsPath) {
 		return true
+	}
+	return processMountinfoReferencesWorkspaceJail(mountinfo, wsPath)
+}
+
+func processMountinfoReferencesWorkspaceJail(mountinfo []byte, wsPath string) bool {
+	if wsPath == "" {
+		return false
 	}
 	return strings.Contains(string(mountinfo), filepath.Join(wsPath, "jail"))
 }
