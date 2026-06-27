@@ -164,6 +164,37 @@ func TestMCPToolSchemasDoNotEmitNullRequired(t *testing.T) {
 	}
 }
 
+func TestMCPToolSchemasExposeSnapshotRestoreAndFork(t *testing.T) {
+	for _, toolName := range []string{"workspace.create", "workspace.start"} {
+		t.Run(toolName, func(t *testing.T) {
+			schema := mcpToolInputSchema(t, toolName)
+			properties, ok := schema["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s properties = %#v", toolName, schema["properties"])
+			}
+			if _, ok := properties["from_snapshot"]; !ok {
+				t.Fatalf("%s schema missing from_snapshot: %#v", toolName, properties)
+			}
+		})
+	}
+}
+
+func mcpToolInputSchema(t *testing.T, name string) map[string]any {
+	t.Helper()
+	for _, tool := range mcpTools() {
+		if tool["name"] != name {
+			continue
+		}
+		schema, ok := tool["inputSchema"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s inputSchema = %#v", name, tool["inputSchema"])
+		}
+		return schema
+	}
+	t.Fatalf("missing MCP tool %s", name)
+	return nil
+}
+
 func TestMCPToolsHaveLibraryFeatureContracts(t *testing.T) {
 	for _, tool := range mcpTools() {
 		name, ok := tool["name"].(string)
@@ -250,6 +281,11 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "create", "demo", "-image", "docker.io/library/python:3.13-slim", "-model", "unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf", "-model-token", "hf_test", "-dry-run"},
 		},
 		{
+			name: "workspace.create",
+			args: map[string]any{"name": "demo-fork", "from_snapshot": "demo:before-upgrade", "state_dir": "/tmp/state"},
+			want: []string{"--mode=ax", "create", "demo-fork", "-from-snapshot", "demo:before-upgrade", "-state-dir", "/tmp/state"},
+		},
+		{
 			// network mode maps through to create (t.Run disambiguates with #01)
 			name: "workspace.create",
 			args: map[string]any{"name": "demo", "image": "docker.io/library/busybox:1.36", "network": "isolated"},
@@ -295,11 +331,12 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			args: map[string]any{
 				"name":            "demo",
 				"state_dir":       "/tmp/state",
+				"from_snapshot":   "before-upgrade",
 				"model_runner":    "llamacpp",
 				"model_gpu":       "on",
 				"model_mediation": "local-allow",
 			},
-			want: []string{"--mode=ax", "start", "demo", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
+			want: []string{"--mode=ax", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
 		},
 		{
 			name: "workspace.logs",

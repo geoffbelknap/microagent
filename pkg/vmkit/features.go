@@ -76,7 +76,7 @@ func FeatureContracts() []FeatureContract {
 			Description:  "create, start, inspect, stop, halt, kill, quarantine, delete, list, and clone workspaces with structured state transitions",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			CLICommands:  []string{"create", "start", "status", "stop", "halt", "kill", "quarantine", "delete", "list", "ps", "clone"},
+			CLICommands:  []string{"create", "start", "status", "stop", "halt", "kill", "quarantine", "delete", "list", "ls", "ps", "clone"},
 			MCPTools:     []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.stop", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"},
 		},
 		{
@@ -101,7 +101,7 @@ func FeatureContracts() []FeatureContract {
 			Description:  "read workspace result, logs, events, stats, egress audit, and network metadata",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			CLICommands:  []string{"result", "logs", "events", "stats", "egress", "network status"},
+			CLICommands:  []string{"result", "logs", "events", "stats", "egress", "network", "network status"},
 			MCPTools:     []string{"workspace.result", "workspace.logs", "workspace.events", "workspace.stats", "workspace.egress", "network.inspect"},
 		},
 		{
@@ -146,6 +146,13 @@ func FeatureContracts() []FeatureContract {
 			MCPTools:     []string{"workspace.estimate_cost"},
 		},
 		{
+			ID:           "workspace.supervision",
+			Description:  "install, remove, and run host restart supervision for persistent workspaces",
+			OwnerPackage: "pkg/workspace",
+			Scope:        FeatureHostTooling,
+			CLICommands:  []string{"supervise"},
+		},
+		{
 			ID:           "volume.management",
 			Description:  "manage named microVM volumes",
 			OwnerPackage: "pkg/volume",
@@ -176,6 +183,27 @@ func FeatureContracts() []FeatureContract {
 			Scope:        FeatureHostTooling,
 			CLICommands:  []string{"rootfs build"},
 			MCPTools:     []string{"rootfs.build"},
+		},
+		{
+			ID:           "project.scaffold",
+			Description:  "scaffold starter agent projects that can run in a workspace",
+			OwnerPackage: "pkg/scaffold",
+			Scope:        FeatureHostTooling,
+			CLICommands:  []string{"init"},
+		},
+		{
+			ID:           "secret.management",
+			Description:  "validate secret references and read workspace secret-access audit records",
+			OwnerPackage: "pkg/secret",
+			Scope:        FeatureHostTooling,
+			CLICommands:  []string{"secret", "secret check", "secret audit"},
+		},
+		{
+			ID:           "performance.measurement",
+			Description:  "measure boot latency, workspace footprint, and steady-state resource usage",
+			OwnerPackage: "pkg/perf",
+			Scope:        FeatureHostTooling,
+			CLICommands:  []string{"perf"},
 		},
 		{
 			ID:           "host.diagnostics",
