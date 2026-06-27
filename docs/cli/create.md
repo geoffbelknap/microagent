@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-06-27_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -208,7 +208,7 @@ The complete set:
 | Flag | Description |
 |---|---|
 | `--image <ref>` | OCI image reference. When omitted on the image path, defaults to Python 3.13 slim (digest-pinned for `arm64`/`amd64`, the `python:3.13-slim` tag for other architectures); the `--rootfs` and `--from-snapshot` paths take no image |
-| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image (Firecracker) |
+| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image |
 | `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
 | `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
@@ -282,7 +282,7 @@ A Firecracker snapshot binds its vsock socket to the source workspace's path, so
 each fork runs Firecracker in a private mount namespace that maps the fork's own
 directory over the source's, and the fork takes its own host-side service ports
 while bridging them to the guest's snapshot ports. This is currently implemented
-only for the Firecracker backend; the snapshot kernel must match. In-flight guest
+for Firecracker and Apple VF; the snapshot kernel must match. In-flight guest
 connections do not survive the fork - the guest process must reconnect.
 
 Networked forks use `user` mode (pasta): every fork resumes with the

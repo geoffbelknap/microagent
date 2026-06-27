@@ -49,6 +49,22 @@ final class RuntimeControlTests: XCTestCase {
         }
     }
 
+    func testTCPPublishForwardUsesGuestPortForGuestConnection() {
+        let forward = PortForward(protocolName: "tcp", host: "127.0.0.1", hostPort: 41000, guestPort: 51000)
+
+        XCTAssertEqual(guestVsockPort(forward), 51000)
+    }
+
+    func testLivePortForwardChangeIncludesGuestShellPort() {
+        var oldConfig = Config(kernelPath: "/kernel", rootfsPath: "/rootfs", stateDir: "/state")
+        oldConfig.shellPort = 41000
+        oldConfig.guestShellPort = 51000
+        var newConfig = oldConfig
+        newConfig.guestShellPort = 51001
+
+        XCTAssertFalse(livePortForwardHostOnlyChange(oldConfig: oldConfig, newConfig: newConfig))
+    }
+
     private func fixture(execPort: UInt16? = nil) throws -> (Identity, Config) {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("microagent-applevf-runtime-control-\(UUID().uuidString)", isDirectory: true)

@@ -30,7 +30,9 @@ func TestBackendCapabilitiesMatrix(t *testing.T) {
 				DetachedHostSupervisor: true,
 				ShellNetwork:           "tcp",
 				ShellReadinessProbe:    true,
+				Snapshot:               true,
 				PauseResume:            true,
+				SnapshotCreate:         true,
 			},
 		},
 		{

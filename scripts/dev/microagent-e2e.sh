@@ -60,6 +60,7 @@ SCENARIOS=(
   "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin:vm:broad"
   "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin:vm:broad"
   "applevf-save-restore-config:scripts/dev/applevf-save-restore-config-check.sh:darwin:vm:broad"
+  "applevf-snapshot:scripts/dev/applevf-snapshot-smoke.sh:darwin:vm:broad"
 )
 
 # Each entry: scenario|coverage|backends|feature summary.
@@ -113,6 +114,7 @@ SCENARIO_COVERAGE=(
   "applevf-publish|backend-specific|apple-vf|Apple VF TCP publish forwarding"
   "applevf-vsock-diagnostic|backend-specific|apple-vf|Apple VF mediation and virtio-vsock diagnostics"
   "applevf-save-restore-config|backend-specific|apple-vf|Apple VF VZ save/restore configuration support probe"
+  "applevf-snapshot|backend-specific|apple-vf|Apple VF snapshot create/restore/fork smoke"
 )
 
 # Each entry: feature|classification|required backends|covering scenarios|notes.
@@ -142,7 +144,7 @@ E2E_MATRIX=(
   "secrets|backend-neutral|linux-kvm,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
   "health|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
   "supervise|backend-neutral|linux-kvm,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
-  "snapshot/pause/resume|backend-specific|linux-kvm,apple-vf,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker, Apple VF, and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); full memory snapshot create/restore/fork is still Firecracker-only"
+  "snapshot/pause/resume|backend-specific|linux-kvm,apple-vf,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep,applevf-snapshot|vCPU pause/resume is implemented on Firecracker, Apple VF, and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); full memory snapshot create/restore/fork is supported on Firecracker and Apple VF, while windows-hyperv remains unsupported"
   "model|backend-neutral|linux-kvm,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
   "perf|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
@@ -251,6 +253,7 @@ Scenarios:
                     Apple VF mediation and virtio-vsock diagnostic smoke
   applevf-save-restore-config
                     Apple VF VZ save/restore configuration support probe
+  applevf-snapshot  Apple VF snapshot create/restore/fork smoke
 
 Environment:
   --keep or MICROAGENT_E2E_KEEP=1 keeps failed and successful scenario state directories.
