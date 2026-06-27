@@ -62,6 +62,26 @@ func TestSnapshotFeatureIsBackendNeutralAcrossSupportedBackends(t *testing.T) {
 	}
 }
 
+func TestFeatureContractsRequireSupportedBackendsOnly(t *testing.T) {
+	for _, feature := range FeatureContracts() {
+		if feature.Scope != FeatureBackendNeutral && feature.Scope != FeatureHostTooling {
+			continue
+		}
+		required := map[string]bool{}
+		for _, backend := range feature.Backends {
+			if backend.Required {
+				required[backend.Backend] = true
+			}
+		}
+		if !required[BackendAppleVF] || !required[BackendLinuxKVM] {
+			t.Fatalf("%s required backends = %#v, want apple-vf and linux-kvm", feature.ID, required)
+		}
+		if required[BackendWindowsHyperV] {
+			t.Fatalf("%s marks experimental windows-hyperv as required: %#v", feature.ID, required)
+		}
+	}
+}
+
 func TestFeatureLookupCoversRepresentativeAdapters(t *testing.T) {
 	for _, command := range []string{
 		"create", "start", "status", "dispatch", "exec", "apply", "cp", "artifact", "commit", "pause", "resume", "snapshot", "model", "volume", "image", "kernel", "rootfs build", "host", "doctor", "contract",

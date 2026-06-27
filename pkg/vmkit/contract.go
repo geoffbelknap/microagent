@@ -98,7 +98,7 @@ func NewRuntimeContract() RuntimeContract {
 		},
 		Verification: ContractItem{Name: "verification", Description: "image digest, kernel hash, rootfs hash, init hash, and divergence entries"},
 		Parity: ContractParity{
-			Scope: "Firecracker, Apple VF, and Windows Hyper-V expose the same backend-neutral states, response fields, readiness signals, mediation shape, result channel, and artifact declarations.",
+			Scope: "Supported Firecracker and Apple VF backends expose the same backend-neutral states, response fields, readiness signals, mediation shape, result channel, and artifact declarations; experimental Windows Hyper-V follows these shapes where it implements a feature.",
 			Rules: []string{
 				"backend-specific mechanics stay behind the supervisor boundary",
 				"public output remains structured and machine-readable",

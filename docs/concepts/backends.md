@@ -4,7 +4,7 @@ description: See what each host OS supports before you pick where to run microag
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-25_
+_Last updated: 2026-06-27_
 
 microagent's supported host targets are Linux and macOS. Linux uses
 Firecracker, and macOS uses Apple Virtualization.framework. WSL is an intended
@@ -68,8 +68,8 @@ calls out a WSL-specific behavior.
 - Supports interactive `connect` and `connect --send`.
 - Supports `user`, `isolated`, and TCP `--publish` (`user` uses Apple's native
   NAT attachment).
-- Supports pause/resume. Snapshot create, restore, and fork remain open parity
-  gaps.
+- Supports pause/resume and snapshot create, restore, and fork on macOS hosts
+  where Virtualization.framework save/restore support validates.
 - The default arm64 kernel lives at
   `~/.microagent/kernels/apple-vf/arm64/Image`.
 
