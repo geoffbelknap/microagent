@@ -4,7 +4,7 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-27_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
@@ -258,7 +258,7 @@ tool/function names, request bytes, message count, and aggregate text bytes. It
 does not inspect prompt meaning, response content, semantic tool intent, quotas,
 trust scores, billing rules, or user/business authorization. Use the external
 policy URL path when those decisions need a policy service; microagent still
-owns the fail-closed substrate enforcement around that decision.
+owns the fail-closed host enforcement around that decision.
 
 Validate a generated file before using it:
 

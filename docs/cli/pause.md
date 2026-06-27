@@ -4,7 +4,7 @@ description: Freeze a running workspace in place, memory and all.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-25_
+_Last updated: 2026-06-27_
 
 ```text
 microagent pause <name> [--state-dir <dir>]
@@ -24,8 +24,7 @@ While a workspace is paused, [`exec`](/cli/exec/), [`connect`](/cli/connect/),
 and [`stats`](/cli/stats/) are rejected with a message directing you to resume
 it first.
 
-`pause` requires the workspace to be running. Pause/resume is implemented on
-Firecracker and Apple VF.
+`pause` requires the workspace to be running.
 
 ## Examples
 

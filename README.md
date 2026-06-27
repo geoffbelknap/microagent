@@ -4,11 +4,9 @@ Run AI agent workspaces in microVMs.
 
 Each agent gets its own Linux microVM with its own kernel, rootfs, state, and
 lifecycle. Boot from an OCI image and tear down, or keep the workspace around
-and halt/resume it later. Linux and macOS are the supported host targets:
-Linux uses Firecracker, and macOS uses Apple Virtualization.framework. WSL is
-an intended Linux compatibility lane when the required Linux host capabilities
-are available. Windows Hyper-V support is experimental. Identity, policy,
-credentials, and control-plane decisions live in your code.
+and halt/resume it later. Linux and macOS are supported host targets. On a new
+host, run `microagent doctor` before you create workspaces. Identity, policy,
+credentials, and control-plane decisions stay in your code.
 
 The project is a Go library first. The `microagent` CLI is a thin shell over
 the exported packages, so anything the CLI can do, your Go program can do
@@ -81,20 +79,20 @@ microagent delete research
 You can also keep the workspace in a spec file. See
 [`microagent.yaml`](docs/cli/spec.md) for the format.
 
-Other useful surfaces:
+Other useful commands:
 
 - `microagent status <name>` prints structured status.
 - `microagent exec <name> -- <argv...>` runs a structured command in a running workspace.
-- MCP clients launch `microagent serve mcp` as the machine-readable stdio endpoint.
+- MCP clients launch `microagent serve mcp` and drive workspaces through tools.
 - `microagent model pull/list/delete/prune/serve` downloads, manages, and serves local HuggingFace GGUF model files.
 - `microagent image pull/list/tag/delete/prune` manages reusable local rootfs baselines.
 - `microagent cp` and `microagent artifact get` move files without entering a running VM.
 - `microagent perf` measures boot and runtime footprint.
 
-For agent clients, AX mode and the MCP endpoint provide structured tool
-responses for lifecycle, status, exec, images, copy/artifacts, cost
-estimation, idempotency, and capability discovery. Coding tools should launch
-the local stdio server with `microagent serve mcp`; see
+For agent clients, AX mode and the MCP endpoint return structured responses
+for lifecycle, status, exec, images, copy/artifacts, cost estimation,
+idempotency, and capability discovery. Coding tools should launch the local
+stdio server with `microagent serve mcp`; see
 [`microagent serve`](docs/cli/serve.md) for Codex, Claude Code, VS Code, and
 GitHub Copilot CLI configuration snippets.
 
@@ -110,14 +108,14 @@ supervisors.
 ## What it doesn't own
 
 Planning loops, LLM calls, tool mediation, policy decisions, credential
-brokering, and audit interpretation. Other projects own those; `microagent` is
-the substrate they sit on.
+brokering, and audit interpretation. Other projects own those; `microagent`
+provides the VM layer underneath them.
 
 It also does not expose container-engine APIs, compose projects, pods,
 privileged mode, namespace/device controls, or host directory bind mounts.
-MicroAgent accepts only the subset that maps cleanly to a microVM boundary —
+MicroAgent accepts only the subset that maps cleanly to a microVM boundary,
 including [named volumes](docs/concepts/storage.md) (single-attach managed
-disks) and [user-mode networking](docs/concepts/networking.md) (unprivileged
+disks) and [user-mode networking](docs/guides/networking.md) (unprivileged
 outbound NAT with published ports), plus a fully `isolated` mode, but never the
 daemon-managed, concurrently-shared container models.
 
@@ -138,13 +136,14 @@ Pick the path that matches what you're doing:
 |---|---|
 | [Library overview](docs/library/index.md) | When to use the library, main packages, and integration path |
 | [First program](docs/getting-started/library/first-program.md) | A handful of lines that boots a VM, runs a command, tears down |
-| [Go library](docs/library/go.md) | Exported package surface and CLI ↔ library mapping |
-| [Supervisor protocol](docs/protocol/index.md) | JSON protocol if you're going below the library |
+| [Go library](docs/library/go.md) | Exported packages and CLI ↔ library mapping |
 
 | Reference and operations | |
 |---|---|
-| [Concepts](docs/concepts/architecture.md) | Architecture, [platform support](docs/concepts/platform-support.md), backends, networking, state, [glossary](docs/concepts/glossary.md) |
-| [Guides](docs/guides/index.md) | Task-shaped walkthroughs |
+| [Guides](docs/guides/index.md) | Step-by-step walkthroughs |
+| [Host requirements](docs/concepts/backends.md) | What Linux, macOS, WSL, and experimental Windows hosts need |
+| [Network modes](docs/concepts/networking.md) | `user`, `isolated`, published ports, and what status reports |
+| [Storage](docs/concepts/storage.md) | Rootfs disks, named volumes, tar bundles, and stopped-disk copy |
 | [Security](docs/security.md) | Trust boundary; see [`SECURITY.md`](SECURITY.md) for disclosure |
 | [Troubleshooting](docs/troubleshooting.md) | Common failure modes, indexed by symptom |
 

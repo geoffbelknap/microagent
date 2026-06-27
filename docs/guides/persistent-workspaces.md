@@ -4,13 +4,12 @@ description: Create a named workspace and walk its create, start, halt, connect,
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-27_
 
-By the end of this guide you have a named workspace whose disk and state
-survive between starts - the environment you set up today is still there
-tomorrow. A workspace is a named, persistent microVM record: unlike
-[`microagent run`](/guides/one-shot-runs/), nothing is thrown away until you
-say so.
+Use a persistent workspace when disk and state should survive between starts:
+the environment you set up today is still there tomorrow. A workspace is a
+named, persistent microVM record. Unlike [`microagent run`](/guides/one-shot-runs/),
+nothing is thrown away until you say so.
 
 ## 1. Create it
 
@@ -75,9 +74,8 @@ microagent connect research --send "uname -r"
 # 6.1.155
 ```
 
-`connect` is implemented by Apple VF, Firecracker, and the experimental
-Windows Hyper-V backend. Use [`logs`](/cli/logs/) to review captured serial
-output.
+Use [`logs`](/cli/logs/) when you want captured serial output instead of an
+interactive console.
 
 ## 3. Inspect it
 
@@ -116,10 +114,10 @@ Everything you wrote, installed, or configured is still there. This
 halt-and-resume loop is the core of the workspace model: pay for setup once,
 boot back into it in seconds.
 
-The other lifecycle words are not synonyms for halt. `stop` sends the guest a
-graceful shutdown signal (SIGTERM on Firecracker), waits five seconds, and
-marks the workspace failed if the guest doesn't exit - it does not fall back
-to `kill` on its own; run [`kill`](/cli/kill/) yourself when a guest is stuck.
+The other lifecycle words are not synonyms for halt. `stop` asks the guest to
+shut down cleanly, waits five seconds, and marks the workspace failed if the
+guest doesn't exit - it does not fall back to `kill` on its own; run
+[`kill`](/cli/kill/) yourself when a guest is stuck.
 See the [glossary](/concepts/glossary/) for the full halt / stop / kill /
 quarantine vocabulary.
 
@@ -149,7 +147,7 @@ microagent delete research --yes
 recorded VM process is still running - halt, stop, or kill first. Leave off
 `--yes` to get a confirmation prompt.
 
-## What's next
+## Related
 
 - **Run an actual agent in a persistent workspace** - [run your first agent](/getting-started/cli/first-agent/).
 - **Run a long-lived service in one** - [run a service](/guides/run-a-service/).

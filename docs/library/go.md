@@ -43,8 +43,8 @@ func main() {
 ```
 
 `DefaultOptions` picks the host backend, kernel, and state directory; you set
-only what your program cares about. The rest of this page covers the package
-surface behind this call and the lower-level APIs around it.
+only what your program cares about. The rest of this page covers the packages
+behind this call and the lower-level APIs around it.
 
 ## Use it as a generic microVM toolkit
 
@@ -64,7 +64,7 @@ supervisor request.
 | Package | Purpose |
 |---|---|
 | `pkg/vmkit` | supervisor request/response types, validation, and executable supervisor client |
-| `pkg/workspace` | workspace lifecycle API, options, defaults, request construction, backend supervisor selection, and backend-neutral helpers |
+| `pkg/workspace` | workspace lifecycle API, options, defaults, request construction, backend supervisor selection, and shared helpers |
 | `pkg/kernel` | kernel default manifest, install, verify, and support checks |
 | `pkg/imagecache` | reusable rootfs image cache indexing, pull, tag, remove, and prune |
 | `pkg/diagnostics` | backend host diagnostics and support summaries |
@@ -76,12 +76,12 @@ The CLI is an adapter over these packages. Go callers should use the library
 directly for workspace lifecycle operations instead of shelling out to
 `microagent`.
 
-## Public surface guard
+## Documented API
 
-The docs parity check treats these symbols as the public Go surface that should
-stay visible in docs. Helper functions and backend plumbing can remain exported
-for package boundaries without being promoted here, but new caller-facing
-symbols should be added to this page when they are introduced.
+These exported symbols are part of the documented Go API. Helper functions and
+backend plumbing can remain exported for package boundaries without being
+promoted here, but caller-facing symbols should be added to this page when they
+are introduced.
 
 | Package | Documented symbols |
 |---|---|
@@ -142,20 +142,13 @@ func inspect(ctx context.Context, supervisor vmkit.Supervisor, req vmkit.Request
 }
 ```
 
-`vmkit.NewRuntimeContract()` also exposes feature contracts through
-`RuntimeContract.Features`. These records describe the backend-neutral product
-features that CLI and MCP adapters expose, which package owns the library
-implementation, and the per-backend support state. Supported release backends
-(`linux-kvm` and `apple-vf`) are required by default; when a required backend is
-not ready, the feature contract carries an explicit `FeatureGap` with a status,
-reason, and optional capability blocker. Use `vmkit.FeatureContracts()` for the
-full table, `vmkit.BackendSupportsFeature()` for support checks, and
-`vmkit.FeatureForCLICommand()` / `vmkit.FeatureForMCPTool()` when validating
-adapter coverage. Use `vmkit.NewUnsupportedFeatureError()` when a library path
-rejects a backend-neutral feature because a backend has an explicit feature gap;
-the returned `vmkit.UnsupportedFeatureError` carries the backend, feature ID,
-capability, gap ID, and reason so CLI and MCP adapters surface the same
-unsupported behavior.
+`vmkit.NewRuntimeContract()` also exposes the runtime feature records used by
+the CLI and MCP adapters. Use `vmkit.FeatureContracts()` when your integration
+needs to map commands or MCP tools back to library-owned behavior, and use
+`vmkit.FeatureForCLICommand()` / `vmkit.FeatureForMCPTool()` when checking
+adapter coverage. If a library path rejects a feature, return
+`vmkit.NewUnsupportedFeatureError()` so CLI and MCP callers see the same
+structured error shape.
 
 ## Rootfs builder
 
@@ -210,8 +203,8 @@ captured from the guest. `Result.Response` carries the supervisor's structured
 response (state, identity, verification).
 
 Paired model workspaces set `Options.Model`, `Options.ModelRunner`, and
-`Options.ModelMediation`. `ModelRunnerSpec` stores the backend-neutral runner
-selection (`llamacpp`, `vllm`, or `custom`), GPU intent, backend model id,
+`Options.ModelMediation`. `ModelRunnerSpec` stores the runner selection
+(`llamacpp`, `vllm`, or `custom`), GPU intent, backend model id,
 custom command template, and repeatable runner args. `ModelMediationSpec` stores
 the mediation mode and policy source (`PolicyFile` or `PolicyURL`). Runner env is
 transient and is intentionally not persisted to workspace manifests.
@@ -239,9 +232,9 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
 | `workspace.Control` | Halt, quarantine, stop, kill, or delete a workspace |
-| `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place (Firecracker and Apple VF) |
-| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace (Firecracker and Apple VF) |
-| `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it (Firecracker and Apple VF) |
+| `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place |
+| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace |
+| `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it |
 | `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side) |
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
 | `workspace.ReadManifest` / `workspace.WriteManifest` | Manage workspace manifests directly |
@@ -407,6 +400,6 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |
 
 The library calls take options structs and return typed responses. For reusable
-runtime behavior, prefer the package API. The remaining CLI-only surfaces are
+runtime behavior, prefer the package API. The remaining CLI-only commands are
 presentation concerns such as `help`, `version`, and raw terminal mode around an
 already-open console connection.

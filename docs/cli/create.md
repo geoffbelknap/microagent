@@ -278,16 +278,11 @@ existing workspace's [snapshot](/cli/snapshot/) instead of building from an
 image. The fork gets a fresh identity and a private copy of the snapshot's
 rootfs, then resumes from the snapshot's memory and device state.
 
-A Firecracker snapshot binds its vsock socket to the source workspace's path, so
-each fork runs Firecracker in a private mount namespace that maps the fork's own
-directory over the source's, and the fork takes its own host-side service ports
-while bridging them to the guest's snapshot ports. This is currently implemented
-for Firecracker and Apple VF; the snapshot kernel must match. In-flight guest
-connections do not survive the fork - the guest process must reconnect.
+The snapshot kernel must match. In-flight guest connections do not survive the
+fork - the guest process must reconnect.
 
-Networked forks use `user` mode (pasta): every fork resumes with the
-snapshot's recorded guest IP, and user-mode gives each fork its own per-VM
-network namespace, so any number of forks run concurrently without colliding.
+Networked forks use `user` mode. Each fork gets its own runtime network path,
+so multiple forks can run concurrently without colliding.
 
 ## Image references
 
@@ -307,4 +302,4 @@ fails. In AX mode a failure is written as a structured error envelope.
 - [`stop`](/cli/stop/) - shut it down again
 - [`delete`](/cli/delete/) - remove it and its state
 - [State and identity](/concepts/state-and-identity/) - what the workspace record holds
-- [Supervisor protocol](/protocol/) - the request/response shapes underneath
+- [Network modes](/concepts/networking/) - `user`, `isolated`, and published ports

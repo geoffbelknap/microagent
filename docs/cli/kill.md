@@ -4,18 +4,17 @@ description: Force-terminate a workspace that won't stop.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
 ```text
 microagent kill <name> [--state-dir <dir>]
 ```
 
-`kill` is the hard variant of [`stop`](/cli/stop/). On Firecracker it sends
-SIGKILL to the recorded VM process; on Apple VF it asks the supervisor to
-terminate the VM immediately. Use it when `stop` doesn't return - `stop` never
-escalates on its own. For a clean shutdown of a healthy workspace you intend to
-start again, use [`halt`](/cli/halt/) instead; the disk state survives `kill`
-too, but nothing inside the guest gets a chance to flush or exit cleanly.
+`kill` is the hard variant of [`stop`](/cli/stop/). Use it when `stop` doesn't
+return; `stop` never escalates on its own. For a clean shutdown of a healthy
+workspace you intend to start again, use [`halt`](/cli/halt/) instead. The disk
+state survives `kill`, but nothing inside the guest gets a chance to flush or
+exit cleanly.
 
 ## Examples
 

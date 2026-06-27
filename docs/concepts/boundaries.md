@@ -4,15 +4,15 @@ description: Know what microagent owns and what your runtime must supply before 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-27_
 
 `microagent` runs Linux workspaces inside microVMs, and it stops at the VM
-boundary. Read this page before you design a runtime around it, so you know
-which problems are already solved and which ones your program must own.
+boundary. If you are building a runtime on top of it, this is the line to keep
+in mind.
 
-The split in one sentence: microagent supplies the substrate - kernel, rootfs
-conversion, VM lifecycle, state, and structured adapter surfaces - and your
-program supplies identity, policy, credentials, and intent.
+microagent supplies the VM layer: kernel, rootfs conversion, lifecycle, state,
+and structured CLI/MCP output. Your program supplies identity, policy,
+credentials, and intent.
 
 ## In this repo
 
@@ -22,11 +22,8 @@ program supplies identity, policy, credentials, and intent.
 - Identity in requests and state files
 - State changes as JSON
 - Readiness, structured exec, structured results, and declared artifacts
-- Backend supervisor boundary
-- MCP stdio adapter over the existing substrate APIs
-- Firecracker supervisor implementation (Go executable)
-- Apple Virtualization.framework supervisor implementation (Swift executable)
-- Experimental Windows Hyper-V supervisor implementation (Go)
+- Host supervisor boundary
+- MCP stdio adapter over the workspace APIs
 - State files and cleanup
 - Host/guest wiring such as vsock listeners
 
@@ -55,15 +52,14 @@ call may do. Secrets too: microagent [delivers them](/guides/secrets/)
 without persisting them, and your secret manager stays the source of truth.
 
 If a guide asks you to write a policy check, a host listener, or a credential
-fetch, that is the boundary working as designed - not a gap in the tool.
+fetch, that belongs outside microagent. It is not a missing feature.
 
 ## Design rules
 
 - Public output is structured and machine-readable.
 - [AX mode](/concepts/glossary/) and MCP responses are for clients, not log scraping.
-- The Apple VF supervisor stays usable from Go, Python, Rust, Node, and shell.
 - State changes are API output, not log strings.
 - Identity is preserved explicitly in requests, state files, and events.
-- Backend details stay behind supervisor boundaries.
+- Host details stay behind supervisor boundaries.
 - Invalid VM config fails closed.
 - Narrow protocols beat shell-string execution.

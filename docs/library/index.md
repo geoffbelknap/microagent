@@ -4,11 +4,11 @@ description: Embed microagent from Go instead of shelling out to the CLI.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
-`microagent` is a Go library with a CLI adapter. If you are building an
-agent runtime, scheduler, local developer tool, or backend service, use the Go
-packages directly instead of spawning `microagent`.
+`microagent` is a Go library with a CLI on top. If you are building an agent
+runtime, scheduler, local developer tool, or backend service, import the Go
+packages instead of spawning the CLI.
 
 ## Start here
 
@@ -16,32 +16,29 @@ packages directly instead of spawning `microagent`.
   boots a VM, runs a command, and tears it down from Go.
 - [Go library reference](/library/go/) lists the exported packages, public
   symbols, and CLI-to-library mapping.
-- [Architecture](/concepts/architecture/) explains how the library, CLI, and
-  backend supervisors fit together.
+- [How microagent fits](/concepts/architecture/) explains when to use the CLI,
+  MCP endpoint, or library.
 
 ## What the library owns
 
-Everything the CLI can do to a microVM, the packages do first: lifecycle,
-rootfs builds, kernel management, image records, diagnostics, and performance
-measurement all live in library code. The CLI is useful for humans and
-scripts, but it is not a separate product surface - it calls the same packages
-your Go program can import. The MCP endpoint follows the same rule: it adapts
-the existing package APIs for agent clients, and orchestration, policy,
-planning, and LLM behavior stay with the caller - see
-[Boundaries](/concepts/boundaries/) for where microagent's responsibilities
-end.
+The packages own lifecycle, rootfs builds, kernel management, image records,
+diagnostics, and performance measurement. The CLI is useful for humans and
+scripts, but it calls the same packages your Go program can import. The MCP
+endpoint follows the same rule: it adapts the package APIs for agent clients.
+Orchestration, policy, planning, and LLM behavior stay with the caller; see
+[Boundaries](/concepts/boundaries/) for the line microagent does not cross.
 
 ## Main packages
 
 | Package | Use it for |
 |---|---|
-| `pkg/workspace` | Creating, running, starting, inspecting, stopping, deleting, cloning, copying files, reading logs, collecting results, and supervising workspaces. |
+| `pkg/workspace` | Create, run, start, inspect, stop, delete, clone, copy files, read logs, collect results, and supervise workspaces. |
 | `pkg/rootfs` | Converting OCI images and tar bundles into ext4 rootfs disks. |
 | `pkg/kernel` | Installing and verifying default backend kernels. |
 | `pkg/imagecache` | Pulling, tagging, listing, removing, and pruning reusable local rootfs baselines. |
-| `pkg/diagnostics` | Checking host backend support before trying to boot a VM. |
+| `pkg/diagnostics` | Check whether the current host can boot a VM. |
 | `pkg/perf` | Measuring boot, footprint, and steady-state VM performance. |
-| `pkg/vmkit` | Backend-neutral supervisor request/response types and executable supervisor clients. |
+| `pkg/vmkit` | Shared request/response types and supervisor clients. |
 
 ## CLI or library?
 

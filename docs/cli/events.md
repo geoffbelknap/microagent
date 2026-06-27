@@ -4,7 +4,7 @@ description: Show or stream a workspace's event history.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-27_
 
 ```text
 microagent events <name> [--follow] [--state-dir <dir>]
@@ -13,8 +13,8 @@ microagent events <name> [--follow] [--state-dir <dir>]
 `events` prints the recorded events for a workspace, oldest first. Most events
 are state transitions (`prepared`, `starting`, `running`, `halted`, `stopped`,
 `quarantined`, `failed`) with their timestamp and a short detail. The history
-is the same `events.json` append log referenced by the
-[supervisor protocol](/protocol/). It is the history view:
+is the same `events.json` append log described in
+[State and identity](/concepts/state-and-identity/). It is the history view:
 [`status`](/cli/status/) answers what state the workspace is in now,
 [`result`](/cli/result/) returns the guest's completion payload, and `events`
 shows how the workspace got here.

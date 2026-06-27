@@ -40,9 +40,8 @@ Resume in place from a snapshot:
 microagent start research --from-snapshot pre-upgrade
 ```
 
-After it's running, open a console with [`connect`](/cli/connect/) on Apple
-VF, Firecracker, or the experimental Windows Hyper-V backend, or read serial
-output with [`logs`](/cli/logs/).
+After it's running, open a console with [`connect`](/cli/connect/) or read
+serial output with [`logs`](/cli/logs/).
 
 ## Flags
 
@@ -93,9 +92,8 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 `start <name> --from-snapshot <tag>` restores the workspace in place from a
 [snapshot](/cli/snapshot/) instead of booting fresh: it rolls the workspace
 rootfs back to the snapshot's copy and loads the snapshot's memory and device
-state, so the guest resumes exactly where it was checkpointed. This is currently
-implemented for Firecracker and Apple VF; the snapshot's kernel must match the
-workspace kernel (the load is rejected on kernel skew).
+state, so the guest resumes exactly where it was checkpointed. The snapshot's
+kernel must match the workspace kernel; the load is rejected on kernel skew.
 
 In-flight guest connections do not survive a restore - outbound TCP and live
 vsock sessions (exec/shell/mediation) are reset and the guest process must
@@ -124,8 +122,8 @@ actions are recorded in the workspace [`events`](/cli/events/) history as
 `start` exits `0` when the workspace boots; nonzero when it cannot be found,
 fails to boot, or is started from an invalid state - it rejects workspaces that
 are already `starting` or `running`, and refuses `quarantined` workspaces until
-they are halted, stopped, or killed first. In AX mode these surface as
-structured error envelopes (an invalid-state start maps to `conflict`).
+they are halted, stopped, or killed first. In AX mode these return structured
+error envelopes (an invalid-state start maps to `conflict`).
 
 ## Related
 

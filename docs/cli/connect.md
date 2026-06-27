@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-27_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -20,10 +20,8 @@ the workspace. Typing `exit` closes the current guest shell and returns from
 `connect`; the workspace stays running unless you run a shutdown command such as
 `poweroff`.
 
-`connect` is implemented by Apple VF, Firecracker, and the experimental
-Windows Hyper-V backend. Windows Hyper-V uses Hyper-V sockets rather than WSL
-or QEMU.
-[`logs`](/cli/logs/) remains available for captured serial output.
+Use [`logs`](/cli/logs/) when you want captured serial output instead of an
+interactive console.
 
 ## Examples
 
@@ -85,7 +83,7 @@ must report that the shell target is reachable.
 when the backend console endpoint or guest shell is not ready, or - with
 `--send` - when the command does not report completion before the deadline. On a
 `--send` timeout the error includes any partial output that was captured. In AX
-mode these surface as structured error envelopes (a console read timeout is
+mode these return structured error envelopes (a console read timeout is
 reported as a `transient` error with `partial_output`).
 
 ## Related

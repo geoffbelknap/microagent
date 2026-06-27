@@ -4,42 +4,34 @@ description: Boot real Linux microVMs from OCI images, from the CLI or from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-27_
 
-microagent boots real Linux microVMs from the OCI images you already use, and
-gives you a CLI and a Go API to run commands inside them, move files in and
-out, and manage their lifecycle. The kernel, disk, and network plumbing is
-handled for you.
+microagent boots real Linux microVMs from the OCI images you already use. Use
+the CLI or Go API to run commands inside them, move files in and out, and
+manage their lifecycle. microagent handles the kernel, disk, and network
+plumbing.
 
-Linux and macOS are the supported host targets: Firecracker on Linux and
-Apple Virtualization.framework on macOS. WSL is an intended Linux
-compatibility lane when the required Linux host capabilities are available,
-and Windows Hyper-V is experimental.
-For the full tiering model, see [Platform support](/concepts/platform-support/).
-For what microagent deliberately leaves to your control plane, see
-[Boundaries](/concepts/boundaries/).
+Linux and macOS are the supported host targets. On a new machine, start with
+[`microagent doctor`](/cli/doctor/) so the install can tell you exactly what
+the host is missing before you boot a workspace.
 
 ## Choose your path
 
-- **Trying it from the CLI?** The [quickstart](/getting-started/quickstart/)
-  boots a microVM and runs a command inside it in minutes. If you already
-  think in Docker commands,
-  [coming from Docker](/getting-started/coming-from-docker/) maps them to
-  their microagent equivalents.
-- **Embedding it from Go?** Start with the [library overview](/library/), then
+- **Try the CLI:** [Quickstart](/getting-started/quickstart/) boots a microVM
+  and runs a command inside it. If you already think in Docker commands,
+  [coming from Docker](/getting-started/coming-from-docker/) maps the common
+  verbs.
+- **Embed from Go:** Start with the [library overview](/library/), then
   [run microagent from a Go program](/getting-started/library/first-program/).
-- **Connecting an agent or MCP client?** Point it at the MCP stdio endpoint:
-  [`microagent serve`](/cli/serve/).
+- **Connect an agent or MCP client:** Launch the stdio endpoint with
+  [`microagent serve mcp`](/cli/serve/).
 
 ## Sections
 
 - [Getting started](/getting-started/quickstart/): install, quickstart, and the first-agent walkthrough.
-- [Library](/library/): Go package overview, reference, and CLI-to-library mapping.
-- [Concepts](/concepts/architecture/): architecture, platform support,
-  backends, boundaries, networking, storage, state and identity,
-  [glossary](/concepts/glossary/).
+- [Guides](/guides/): step-by-step walkthroughs, from one-shot runs to services and snapshots.
 - [CLI reference](/cli/): every subcommand.
-- [Protocol](/protocol/): shared supervisor protocol and backend notes.
-- [Guides](/guides/): task-shaped walkthroughs, from one-shot runs to services and snapshots.
+- [Library](/library/): Go package overview, reference, and CLI-to-library mapping.
+- [Operations reference](/concepts/backends/): host requirements, network modes, storage, state, security, and troubleshooting.
 - [Security](/security/): trust boundary and reporting.
 - [Troubleshooting](/troubleshooting/): common failure modes, indexed by symptom.

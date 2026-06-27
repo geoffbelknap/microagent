@@ -4,13 +4,12 @@ description: Declare the guest-to-host vsock contract, listen on the host, and l
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
-By the end of this guide your agent talks to your host control plane over
-the mediation channel while it runs. Requests stream in, results stream out,
-no restart between them. This page is the home for everything mediation: the
-declaration syntax, the host listener, the agent loop, and the failure
-semantics.
+Use mediation when an agent needs to keep running while your host control plane
+sends work and reads results. Requests stream in, results stream out, and the
+workspace does not restart between them. This page covers the declaration
+syntax, the host listener, the agent loop, and the failure semantics.
 
 The mediation channel is a guest-to-host vsock contract, separate from
 ordinary networking. The agent connects to a vsock port inside the guest, the
@@ -190,7 +189,7 @@ microagent halt agent
 microagent delete agent --yes
 ```
 
-## What's next
+## Related
 
 - **Egress for credentials** - mediation carries requests, not API keys. Route model calls through a host-side proxy that holds the key; see [agency](https://github.com/geoffbelknap/agency) for an implementation.
 - **The file-based flow this replaces** - [build a simple agent](/guides/simple-agent/).

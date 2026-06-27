@@ -4,7 +4,7 @@ description: Choose between the rootfs, attached disks, tar bundles, and named v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-27_
 
 A workspace sees block devices, never host directories. microagent does not
 expose host bind mounts - everything the guest reads or writes is an ext4
@@ -25,8 +25,8 @@ that image across stop/start, and are discarded by `delete` (and by `run --delet
 ## Attaching extra storage
 
 Beyond the rootfs, a workspace can attach additional disks at declared
-mountpoints. There are three sources, all surfaced through `-v`/`--volume` (and
-the spec's `disks`/`bundles`):
+mountpoints. There are three sources, all available through `-v`/`--volume`
+(and the spec's `disks`/`bundles`):
 
 | Source | Syntax | What it is | Lifecycle |
 |---|---|---|---|

@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -62,7 +62,7 @@ requires `on-failure` or `always`. Probe forms:
 - `httpGet` + `port` - a host-side GET against a published guest port; healthy
   on a non-error status.
 
-An unhealthy probe surfaces as a `failed` state in the supervise result, so the
+An unhealthy probe returns a `failed` state in the supervise result, so the
 restart accounting (and `--max-restarts`) applies the same as an exit failure.
 
 ## Survive host reboot

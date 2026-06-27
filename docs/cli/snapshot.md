@@ -12,29 +12,16 @@ microagent snapshot list <name> [--state-dir <dir>]                   List a wor
 microagent snapshot delete <name> <tag> [--state-dir <dir>]               Remove one snapshot
 ```
 
-A snapshot is a full checkpoint of a workspace: its guest memory and device
-state plus a coherent copy of its rootfs disk, taken together while the VM is
-paused. Firecracker snapshots use Firecracker's vmstate and memory artifacts.
-Apple VF snapshots use Virtualization.framework saved machine state on macOS
-14+ hosts where save/restore support validates. Earlier Apple VF
-`VZErrorDomain Code=11`, `NSOSStatusErrorDomain Code=-25308`,
-`errSecInteractionNotAllowed`, and `AKSError=-536870174` results remain useful
-as diagnostics for the session prerequisite: run save-state validation from an
-active GUI session owned by the console user. **Windows Hyper-V does not
-support snapshots and is not planned to:** its HCS-direct
-(`LinuxKernelDirect`) compute systems have no guest-memory save-state — the
-HCS save call captures only device state, and the Hyper-V mechanisms that do
-save memory (`Save-VM`, checkpoints) belong to VMMS, which this backend
-deliberately does not use. On Windows Hyper-V use [`commit`](/cli/commit/) for a
-distributable image or [`clone`](/cli/clone/) for a disk copy instead. Snapshot
-commands fail closed with a clear message on backends that do not support them.
+A snapshot is a full checkpoint of a workspace: guest memory, device state,
+and a coherent copy of the rootfs disk, taken together while the VM is paused.
+If the current host cannot save and restore VM memory, `snapshot create` fails
+with a structured error before it writes a partial checkpoint. On macOS, save
+and restore require a host session where Virtualization.framework permits
+machine-state capture.
 
 Snapshots are stored under `<state-dir>/<name>/snapshots/<tag>/`. Every
-snapshot has `manifest.json` plus a coherent rootfs copy; backend machine-state
-artifacts are backend-defined and listed in the manifest. Firecracker snapshots
-use `vmstate`, `memory`, and `rootfs.ext4`; Apple VF snapshots use
-`machine-state.vz`, `apple-vf-config.json`, and `rootfs.ext4`. A workspace may
-hold multiple named snapshots; `--tag` defaults to a timestamp.
+snapshot has `manifest.json`, saved VM state, and a coherent rootfs copy. A
+workspace may hold multiple named snapshots; `--tag` defaults to a timestamp.
 
 Three commands copy a workspace; pick by what you need to keep. `snapshot`
 captures a live moment - memory included - so you can restore or fork
@@ -63,20 +50,18 @@ microagent snapshot delete research pre-upgrade
 
 ## `create`
 
-`snapshot create` checkpoints a running or paused workspace. Firecracker and
-Apple VF require the VM be paused before a snapshot is written, so a running
+`snapshot create` checkpoints a running or paused workspace. A running
 workspace is briefly auto-paused, snapshotted, and resumed. An already-paused
 workspace is snapshotted in place and left paused.
 
-The manifest records the image reference, network mode, the guest IP to
-re-establish on restore, the kernel sha256 (used to reject loading against a
-different kernel), the vCPU/memory sizing, the creation time, the rootfs
-artifact path, and the backend machine-state artifact paths.
+The manifest records the image reference, network mode, guest address fields
+needed on restore, the kernel sha256 (used to reject loading against a
+different kernel), the vCPU/memory sizing, the creation time, and the snapshot
+artifact paths.
 
-Because each snapshot stores backend machine state plus a full rootfs copy,
-total size is roughly the backend saved state plus the rootfs size. `snapshot
-list` reports each tag's size; `snapshot delete` and `delete <name>` reclaim
-the space.
+Because each snapshot stores VM state plus a full rootfs copy, total size is
+roughly saved state plus the rootfs size. `snapshot list` reports each tag's
+size; `snapshot delete` and `delete <name>` reclaim the space.
 
 ## `list`
 
@@ -97,8 +82,7 @@ restore the host networking is re-established fresh, so in-flight guest
 connections - outbound TCP and live vsock sessions (exec/shell/mediation) - do
 not survive; the guest process is expected to reconnect. Halt the source before
 restoring, and treat the window between a running-state snapshot and the next
-restore as one where sessions need re-establishing. Bridged networking is not
-supported for snapshot or fork.
+restore as one where sessions need re-establishing.
 
 ## Flags
 

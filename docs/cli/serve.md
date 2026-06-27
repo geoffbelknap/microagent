@@ -1,6 +1,6 @@
 ---
 title: microagent serve
-description: Serve machine-readable agent endpoints.
+description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
@@ -10,11 +10,11 @@ _Last updated: 2026-06-27_
 microagent serve mcp                                                              Stdio MCP transport for agent clients
 ```
 
-`microagent serve mcp` exists as an MCP client integration entry point. It is a
-foreground stdio transport that a client launches as a subprocess; it is not a
-normal interactive CLI command and is intentionally not advertised in top-level
-help. When started directly from a terminal, the command exits with setup
-guidance instead of waiting for protocol frames on stdin.
+`microagent serve mcp` is the MCP client integration entry point. A client
+launches it as a foreground stdio subprocess; it is not a normal interactive
+CLI command and is not advertised in top-level help. When started directly from
+a terminal, the command exits with setup guidance instead of waiting for MCP
+frames on stdin.
 
 Serve local GGUF models with [`microagent model serve`](/cli/model/).
 
@@ -23,9 +23,8 @@ for workspace lifecycle, inspection, results, stats, logs, events, snapshots,
 images, networks, volumes, model store/serving, copy/artifact access, host
 diagnostics, capability discovery, and cost estimation.
 
-It is the full microagent MCP surface for the current release. It intentionally
-stops at substrate operations: it does not plan, call an LLM, interpret audit
-meaning, broker credentials, or make policy decisions.
+The MCP server stops at VM operations: it does not plan, call an LLM,
+interpret audit meaning, broker credentials, or make policy decisions.
 
 ## Examples
 
@@ -244,7 +243,7 @@ the minimum shape is:
 | `profiles.list` | List resource profiles |
 | `host.inspect` | Report host capabilities |
 | `doctor.check` | Run host diagnostics |
-| `contract.get` | Return the backend-neutral runtime contract |
+| `contract.get` | Return the runtime fields integrations rely on |
 | `kernel.verify` | Verify a kernel artifact |
 | `kernel.install` | Install a kernel artifact after preview confirmation |
 | `rootfs.build` | Build a rootfs after preview confirmation |
@@ -335,5 +334,5 @@ AX mode a failure is written as a structured error envelope.
 
 - [Use the MCP server](/guides/mcp-server/) - the client-setup walkthrough
 - [`model`](/cli/model/) - model store and runner management
-- [`contract`](/cli/contract/) - the backend-neutral runtime contract the MCP surface exposes
-- [Supervisor protocol](/protocol/) - the JSON shapes returned by the underlying commands
+- [`contract`](/cli/contract/) - the runtime fields integrations rely on
+- [State and identity](/concepts/state-and-identity/) - lifecycle states and readiness fields
