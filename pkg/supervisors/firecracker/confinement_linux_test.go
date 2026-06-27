@@ -3,6 +3,7 @@ package firecracker
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -94,6 +95,31 @@ func TestConfinedJailLayout(t *testing.T) {
 	wantDisk := jailArtifact{ID: "data", Source: "/vol/data.img", Host: "/state/ws1/jail/disks/data", Guest: "/disks/data"}
 	if l.Disks[0] != wantDisk {
 		t.Errorf("Disks[0] = %+v, want %+v", l.Disks[0], wantDisk)
+	}
+}
+
+func TestConfinedLaunchArgsTranslateWorkspacePaths(t *testing.T) {
+	opts := Options{Name: "ws1", StateDir: "/state"}
+
+	bootArgs, err := confinedLaunchArgs(opts, []string{
+		"--api-sock", "/state/ws1/firecracker-api.sock",
+		"--config-file", "/state/ws1/firecracker.json",
+	})
+	if err != nil {
+		t.Fatalf("confinedLaunchArgs boot: %v", err)
+	}
+	wantBoot := []string{"--api-sock", "/run/firecracker-api.sock", "--config-file", "/run/firecracker.json"}
+	if !reflect.DeepEqual(bootArgs, wantBoot) {
+		t.Fatalf("boot args = %#v, want %#v", bootArgs, wantBoot)
+	}
+
+	loadArgs, err := confinedLaunchArgs(opts, []string{"--api-sock", "/state/ws1/firecracker-api.sock"})
+	if err != nil {
+		t.Fatalf("confinedLaunchArgs load: %v", err)
+	}
+	wantLoad := []string{"--api-sock", "/run/firecracker-api.sock"}
+	if !reflect.DeepEqual(loadArgs, wantLoad) {
+		t.Fatalf("load args = %#v, want %#v", loadArgs, wantLoad)
 	}
 }
 
