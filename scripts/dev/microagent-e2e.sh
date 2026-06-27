@@ -65,7 +65,7 @@ SCENARIOS=(
 
 # Each entry: scenario|coverage|backends|feature summary.
 #   coverage = portable | backend-neutral | backend-specific | host-specific
-#   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf
+#   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf | windows-hyperv
 # This is a coverage inventory, not the release support policy. See
 # docs/concepts/platform-support.md for supported, compatibility, and
 # experimental host tiers.
@@ -117,7 +117,7 @@ SCENARIO_COVERAGE=(
   "applevf-snapshot|backend-specific|apple-vf|Apple VF snapshot create/restore/fork smoke"
 )
 
-# Each entry: feature|classification|required backends|covering scenarios|notes.
+# Each entry: feature|classification|covered backends|covering scenarios|notes.
 # The matrix is intentionally user-facing: it maps CLI/workspace surfaces to
 # practical E2E coverage and makes unsupported/backend-specific areas explicit.
 E2E_MATRIX=(
@@ -454,7 +454,7 @@ list_scenarios() {
 
 list_matrix() {
   if [ "${MICROAGENT_E2E_MATRIX_TSV:-0}" = "1" ]; then
-    printf 'FEATURE\tCLASS\tREQUIRED_BACKENDS\tSCENARIOS\tNOTES\n'
+    printf 'FEATURE\tCLASS\tBACKENDS\tSCENARIOS\tNOTES\n'
     for entry in "${E2E_MATRIX[@]}"; do
       feature="${entry%%|*}"
       rest="${entry#*|}"
@@ -468,7 +468,7 @@ list_matrix() {
     done
     return 0
   fi
-  printf '%-30s %-18s %-22s %-44s %s\n' "FEATURE" "CLASS" "REQUIRED_BACKENDS" "SCENARIOS" "NOTES"
+  printf '%-30s %-18s %-22s %-44s %s\n' "FEATURE" "CLASS" "BACKENDS" "SCENARIOS" "NOTES"
   for entry in "${E2E_MATRIX[@]}"; do
     feature="${entry%%|*}"
     rest="${entry#*|}"

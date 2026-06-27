@@ -48,7 +48,7 @@ for header in ("SCENARIO", "COVERAGE", "BACKENDS", "FEATURES"):
     if header not in list_text.splitlines()[0]:
         raise SystemExit(f"--list header missing {header}")
 
-for header in ("FEATURE", "CLASS", "REQUIRED_BACKENDS", "SCENARIOS", "NOTES"):
+for header in ("FEATURE", "CLASS", "BACKENDS", "SCENARIOS", "NOTES"):
     if header not in matrix_text.splitlines()[0]:
         raise SystemExit(f"--matrix header missing {header}")
 

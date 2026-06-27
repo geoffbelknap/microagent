@@ -1,6 +1,9 @@
 package vmkit
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRuntimeContractCoversBothBackends(t *testing.T) {
 	contract := NewRuntimeContract()
@@ -70,6 +73,15 @@ func TestRuntimeContractPausedSemantics(t *testing.T) {
 		}
 	}
 	t.Fatal("contract missing paused state")
+}
+
+func TestRuntimeContractParityScopeKeepsHyperVExperimental(t *testing.T) {
+	scope := NewRuntimeContract().Parity.Scope
+	for _, want := range []string{"Supported Firecracker and Apple VF", "experimental Windows Hyper-V"} {
+		if !strings.Contains(scope, want) {
+			t.Fatalf("parity scope = %q, want %q", scope, want)
+		}
+	}
 }
 
 func contractHasItem(items []ContractItem, name string) bool {
