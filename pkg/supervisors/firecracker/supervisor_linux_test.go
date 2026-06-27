@@ -2671,6 +2671,37 @@ func TestEnsureCanDeleteRejectsDeadVMWithLiveCompanions(t *testing.T) {
 	}
 }
 
+func TestProcessTreeMountinfoReferencesWorkspaceJailFindsConfinedDescendant(t *testing.T) {
+	const ws = "/state/feature-matrix"
+	children := map[int][]int{
+		100: {101, 102},
+		101: {103},
+		103: {101}, // cycle guard: a malformed/reparented view must not loop forever.
+	}
+	mountinfo := map[int][]byte{
+		100: []byte("100 1 8:1 / / rw - ext4 /dev/sda1 rw\n"),
+		103: []byte("277 268 253:1 /state/feature-matrix/jail / rw - ext4 /dev/vda1 rw\n"),
+	}
+	readMountinfo := func(pid int) []byte { return mountinfo[pid] }
+
+	if !processTreeMountinfoReferencesWorkspaceJail(100, ws, children, readMountinfo) {
+		t.Fatal("recorded parent PID should detect confined descendant jail mount")
+	}
+	if processTreeMountinfoReferencesWorkspaceJail(102, ws, children, readMountinfo) {
+		t.Fatal("sibling subtree without a jail mount should not be confined")
+	}
+}
+
+func TestLinuxProcessStatParentPIDParsesCommandWithSpaces(t *testing.T) {
+	got, err := linuxProcessStatParentPID([]byte("123 (cmd with spaces) S 42 1 2 3 4\n"))
+	if err != nil {
+		t.Fatalf("linuxProcessStatParentPID: %v", err)
+	}
+	if got != 42 {
+		t.Fatalf("parent pid = %d, want 42", got)
+	}
+}
+
 func TestProcessIdentityReferencesWorkspace(t *testing.T) {
 	const ws = "/state/feature-matrix"
 	cases := []struct {
