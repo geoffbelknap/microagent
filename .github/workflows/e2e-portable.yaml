@@ -1,0 +1,61 @@
+name: E2E portable
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-portable:
+    name: Generate portable scenario matrix
+    runs-on: ubuntu-latest
+    outputs:
+      scenarios: ${{ steps.gen.outputs.scenarios }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Generate scenario list
+        id: gen
+        run: |
+          echo "scenarios=$(scripts/dev/microagent-e2e.sh --list-tier portable | jq -R -s -c 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
+
+  portable:
+    name: portable / ${{ matrix.scenario }}
+    needs: matrix-portable
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: ${{ fromJSON(needs.matrix-portable.outputs.scenarios) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.4"
+          cache-dependency-path: go.mod
+
+      - name: Run ${{ matrix.scenario }}
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+        run: scripts/dev/microagent-e2e.sh "$SCENARIO"
+
+  e2e-portable:
+    name: Portable microagent E2E
+    needs: portable
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate
+        run: '[ "${{ needs.portable.result }}" = "success" ] || exit 1'
