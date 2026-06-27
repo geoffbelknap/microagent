@@ -3732,8 +3732,12 @@ var firecrackerProcessConfinedToWorkspace = func(pid int, opts Options) bool {
 	if pid <= 0 {
 		return false
 	}
-	mountinfo, _ := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid))
-	return processMountinfoReferencesWorkspaceJail(mountinfo, filepath.Join(opts.StateDir, opts.Name))
+	wsPath := filepath.Join(opts.StateDir, opts.Name)
+	children := linuxProcessChildrenByParent()
+	return processTreeMountinfoReferencesWorkspaceJail(pid, wsPath, children, func(pid int) []byte {
+		mountinfo, _ := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid))
+		return mountinfo
+	})
 }
 
 // processIdentityReferencesWorkspace is the pure matcher behind
@@ -3757,6 +3761,75 @@ func processMountinfoReferencesWorkspaceJail(mountinfo []byte, wsPath string) bo
 		return false
 	}
 	return strings.Contains(string(mountinfo), filepath.Join(wsPath, "jail"))
+}
+
+// processTreeMountinfoReferencesWorkspaceJail checks the recorded runtime PID
+// and its descendants for the workspace jail mount. In user-network mode the
+// recorded runtime PID is pasta, while the confined Firecracker process is a
+// descendant with the jail bind in its own mount namespace.
+func processTreeMountinfoReferencesWorkspaceJail(rootPID int, wsPath string, childrenByParent map[int][]int, mountinfo func(int) []byte) bool {
+	if rootPID <= 0 || wsPath == "" {
+		return false
+	}
+	queue := []int{rootPID}
+	seen := map[int]bool{}
+	for len(queue) != 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		if mountinfo != nil && processMountinfoReferencesWorkspaceJail(mountinfo(pid), wsPath) {
+			return true
+		}
+		for _, child := range childrenByParent[pid] {
+			if !seen[child] {
+				queue = append(queue, child)
+			}
+		}
+	}
+	return false
+}
+
+func linuxProcessChildrenByParent() map[int][]int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	children := map[int][]int{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
+		if err != nil {
+			continue
+		}
+		ppid, err := linuxProcessStatParentPID(data)
+		if err != nil {
+			continue
+		}
+		children[ppid] = append(children[ppid], pid)
+	}
+	return children
+}
+
+func linuxProcessStatParentPID(data []byte) (int, error) {
+	stat := string(data)
+	commEnd := strings.LastIndex(stat, ")")
+	if commEnd == -1 {
+		return 0, fmt.Errorf("invalid proc stat: missing command terminator")
+	}
+	fields := strings.Fields(stat[commEnd+1:])
+	if len(fields) < 2 {
+		return 0, fmt.Errorf("invalid proc stat: missing parent pid")
+	}
+	return strconv.Atoi(fields[1])
 }
 
 // leaseExpired reports whether a workspace declared a lifetime lease
