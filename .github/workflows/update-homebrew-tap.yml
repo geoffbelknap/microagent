@@ -66,6 +66,42 @@ jobs:
           with open(formula, "w") as fh:
               fh.write(text)
           PY
+          python3 - "$formula" <<'PY'
+          import re
+          import subprocess
+          import sys
+
+          formula = sys.argv[1]
+          with open(formula) as fh:
+              text = fh.read()
+          urls = [
+              url
+              for url in re.findall(r'url "([^"]+)"', text)
+              if url.startswith("https://") and not url.endswith(".git")
+          ]
+          if not urls:
+              raise SystemExit(f"no downloadable resource URLs found in {formula}")
+          for url in urls:
+              print(f"checking {url}")
+              subprocess.run(
+                  [
+                      "curl",
+                      "--fail",
+                      "--location",
+                      "--head",
+                      "--silent",
+                      "--show-error",
+                      "--output",
+                      "/dev/null",
+                      "--retry",
+                      "3",
+                      "--retry-delay",
+                      "2",
+                      url,
+                  ],
+                  check=True,
+              )
+          PY
           git add "$formula"
           if git diff --cached --quiet; then
             echo "formula already pins ${TAG}; nothing to push"
