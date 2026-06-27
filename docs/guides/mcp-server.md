@@ -4,7 +4,7 @@ description: Register microagent serve mcp in Claude Code or another MCP client 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-27_
 
 Give a coding agent microVM workspaces as tools. This guide registers
 `microagent serve mcp` in Claude Code (or any MCP client) so the agent
@@ -89,7 +89,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 ```
 
 ```text
-{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"microagent","version":"0.8.0"}}}
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"microagent","version":"0.8.3"}}}
 ```
 
 ## Clean up

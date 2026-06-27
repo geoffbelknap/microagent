@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # MCP-driven workspace lifecycle E2E: boots `serve mcp` from a dev build and
-# drives create/start/exec/halt/delete through JSON-RPC tool calls against a
+# drives create/start/exec/kill/delete through JSON-RPC tool calls against a
 # real microVM, then runs the identical lifecycle through the CLI and asserts
 # the two surfaces report the same states and exec results. Agents are a
 # first-class consumer of the MCP adapter; this scenario is what keeps new
@@ -44,12 +44,14 @@ case "$(uname -s):$(uname -m)" in
   Linux:x86_64|Linux:amd64)
     ARCH=amd64
     KERNEL_BACKEND=linux-kvm
+    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f}"
     MICROAGENT_FIRECRACKER="$(e2e_resolve_firecracker)"
     export MICROAGENT_FIRECRACKER
     ;;
   Darwin:arm64)
     ARCH=arm64
     KERNEL_BACKEND=apple-vf
+    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox@sha256:bd44eb136a95dcc8dc58995e43abc40a413f2e8e3d4a2aae6bccbe94686acb05}"
     SUPERVISOR="${MICROAGENT_APPLEVF_SUPERVISOR:-$ROOT/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
     if [ ! -x "$SUPERVISOR" ]; then
       e2e_skip "Apple VF supervisor is not executable at $SUPERVISOR; run scripts/dev/applevf-supervisor-build.sh"
@@ -60,6 +62,7 @@ case "$(uname -s):$(uname -m)" in
     e2e_have_hcs || e2e_skip "Hyper-V HCS services (vmms/vmcompute) are not running"
     ARCH=amd64
     KERNEL_BACKEND=windows-hyperv
+    IMAGE="${MICROAGENT_E2E_IMAGE:-docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f}"
     # The CLI must be the .exe so os.Executable-based helpers resolve; the
     # guest init built next to it ($STATE_DIR/microagent-guestinit-amd64) is
     # found by the default sibling resolution, so the MCP create needs no
@@ -97,7 +100,7 @@ e2e_step "drive workspace lifecycle over MCP stdio and assert CLI parity"
 # Host-native path forms: python spawns the CLI directly (no Git Bash arg
 # conversion), so on Windows the CLI and state paths must already be in
 # Windows form. e2e_host_path is the identity off Windows.
-python3 - "$(e2e_host_path "$CLI")" "$(e2e_host_path "$STATE_DIR")" "$NETWORK_MODE" <<'PY'
+python3 - "$(e2e_host_path "$CLI")" "$(e2e_host_path "$STATE_DIR")" "$NETWORK_MODE" "$IMAGE" <<'PY'
 import base64
 import json
 import subprocess
@@ -107,7 +110,7 @@ cli = sys.argv[1]
 state_root = sys.argv[2]
 network_mode = sys.argv[3] if len(sys.argv) > 3 else ""
 ws_state = state_root + "/ws"
-IMAGE = "docker.io/library/busybox@sha256:b7f3d86d6e84fc17718c48bcde1450807faa2d56704205c697b4bd5df7b9e29f"
+IMAGE = sys.argv[4]
 
 proc = subprocess.Popen(
     [cli, "serve", "mcp"],
@@ -241,8 +244,8 @@ mcp["inspect"] = find_state(inspect)
 exec_result = call("workspace.exec", {"name": "mcp-lc", "argv": ["echo", "lifecycle-parity"], "state_dir": ws_state})
 mcp["exec_code"], mcp["exec_stdout"] = exec_summary(exec_result)
 
-halt = call("workspace.halt", {"name": "mcp-lc", "state_dir": ws_state})
-mcp["halt"] = find_state(halt)
+kill = call("workspace.kill", {"name": "mcp-lc", "state_dir": ws_state})
+mcp["kill"] = find_state(kill)
 
 delete = call("workspace.delete", {"name": "mcp-lc", "state_dir": ws_state})
 mcp["delete"] = find_state(delete)
@@ -268,8 +271,8 @@ cli_states["inspect"] = find_state(status)
 exec_result = cli_call(["exec", "cli-lc", "--state-dir", ws_state, "--", "echo", "lifecycle-parity"])
 cli_states["exec_code"], cli_states["exec_stdout"] = exec_summary(exec_result)
 
-halt = cli_call(["halt", "cli-lc", "--state-dir", ws_state])
-cli_states["halt"] = find_state(halt)
+kill = cli_call(["kill", "cli-lc", "--state-dir", ws_state])
+cli_states["kill"] = find_state(kill)
 
 delete = cli_call(["delete", "cli-lc", "--yes", "--state-dir", ws_state])
 cli_states["delete"] = find_state(delete)
@@ -282,7 +285,7 @@ expected = {
     "create": ("prepared", "stopped"),
     "start": ("running",),
     "inspect": ("running",),
-    "halt": ("halted",),
+    "kill": ("stopped",),
     "delete": ("stopped",),
 }
 for step, allowed in expected.items():

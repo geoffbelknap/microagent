@@ -50,6 +50,7 @@ jobs:
   macos-supervisor:
     name: macOS supervisor checks
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -79,6 +80,12 @@ jobs:
 
       - name: Smoke CLI lifecycle
         run: scripts/dev/cli-lifecycle-smoke.sh
+
+      - name: Build signed Apple VF supervisor
+        run: scripts/dev/applevf-supervisor-build.sh
+
+      - name: Targeted Apple VF E2E
+        run: scripts/dev/microagent-e2e.sh mcp-lifecycle networking-deep public-surface applevf-direct-console applevf-snapshot
 
   docs-and-scripts:
     name: Docs and shell checks

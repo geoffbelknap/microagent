@@ -4,7 +4,7 @@ description: Install microagent with Homebrew or build it from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-27_
 
 Install the `microagent` CLI, then verify the host can boot microVMs with
 `microagent doctor`. Homebrew is the fast path on Linux and macOS; build from
@@ -120,8 +120,8 @@ dev-linked Host VMM when one is present. In CI or other non-interactive
 shells, it prints that command and exits with the doctor failure.
 
 The CLI reports a source version based on the current release line, such as
-`0.8.0-8780315` or `0.8.0-8780315-dirty`, so it is obvious you are not running
-the latest stable Homebrew build. The build derives the `0.8.0`
+`0.8.3-9c7ad3d` or `0.8.3-9c7ad3d-dirty`, so it is obvious you are not running
+the latest stable Homebrew build. The build derives the `0.8.3`
 prefix from the latest stable tag, ignoring release-candidate and other
 prerelease tags, then adds the short SHA. It also places the host supervisor
 and Linux guest-init companion next to the CLI so the resolver can find them.
