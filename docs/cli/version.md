@@ -4,7 +4,7 @@ description: Print the microagent version.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-27_
 
 ```text
 microagent version
@@ -22,7 +22,7 @@ version linker flags report `dev`.
 
 ```bash
 $ microagent version
-microagent 0.8.0-8780315
+microagent 0.8.3-9c7ad3d
 ```
 
 ## Flags

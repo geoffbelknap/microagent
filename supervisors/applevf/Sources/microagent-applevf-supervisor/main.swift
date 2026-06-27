@@ -1341,19 +1341,32 @@ func lastActivity(identity: Identity, stateDir: String) -> Date? {
 func stateOnly(_ request: Request, state: VMState, detail: String?) throws -> Response {
     let identity = try validatedIdentity(request.identity)
     let config = try stateConfig(request.config)
-    let event = Event(identity: identity, state: state, detail: detail, observedAt: Date())
+    var eventDetail = detail
     if let runtime = try readRuntimeState(identity: identity, stateDir: config.stateDir), processAlive(runtime.pid), let pid = runtime.pid {
         let signal = detail == "forced" ? SIGKILL : SIGTERM
         if kill(pid, signal) != 0 && errno != ESRCH {
             throw ProtocolError.invalid("signal \(pid) failed with errno \(errno)")
         }
-        if !waitForProcessExit(pid: pid, timeout: signal == SIGKILL ? 2.0 : 5.0) {
-            throw ProtocolError.invalid("workspace \(identity.runtimeID) did not stop after signal \(signal)")
+        if !waitForProcessExit(pid: pid, timeout: signal == SIGKILL ? 30.0 : 15.0) {
+            if signal == SIGKILL {
+                eventDetail = "forced; process exit not observed before timeout"
+            } else {
+                if kill(pid, SIGKILL) != 0 && errno != ESRCH {
+                    throw ProtocolError.invalid("signal \(pid) fallback failed with errno \(errno)")
+                }
+                if !waitForProcessExit(pid: pid, timeout: 30.0) {
+                    eventDetail = "forced after signal \(signal) timeout; process exit not observed before timeout"
+                } else {
+                    eventDetail = "forced after signal \(signal) timeout"
+                }
+            }
         }
+        let event = Event(identity: identity, state: state, detail: eventDetail, observedAt: Date())
         try writeState(event: event, config: runtime.config)
         try writeRuntimeState(event: event, config: runtime.config, pid: nil, error: nil)
         return response(event: event, config: runtime.config, error: nil)
     } else {
+        let event = Event(identity: identity, state: state, detail: eventDetail, observedAt: Date())
         try writeState(event: event, config: config)
         try writeRuntimeState(event: event, config: config, pid: nil, error: nil)
         return response(event: event, config: config, error: nil)

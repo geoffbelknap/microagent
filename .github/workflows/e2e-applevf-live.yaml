@@ -1,0 +1,39 @@
+name: Apple VF live E2E
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    name: Apple VF targeted live E2E
+    if: github.event_name != 'pull_request' || github.event.label.name == 'run-applevf-live'
+    runs-on: [self-hosted, macOS, ARM64, applevf]
+    timeout-minutes: 45
+    env:
+      MICROAGENT_E2E_BACKEND: applevf
+      MICROAGENT_E2E_WAIT_TIMEOUT: "180"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.4"
+          cache-dependency-path: go.mod
+
+      - name: Build signed Apple VF supervisor
+        run: scripts/dev/applevf-supervisor-build.sh
+
+      - name: Run targeted Apple VF E2E
+        run: scripts/dev/microagent-e2e.sh mcp-lifecycle networking-deep public-surface applevf-direct-console applevf-snapshot

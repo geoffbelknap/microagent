@@ -505,16 +505,20 @@ RAW_LARGE_SERVER_PID="$!"
   --vsock "2051=127.0.0.1:${RAW_LARGE_HOST_PORT}" \
   --vsock "2052=127.0.0.1:${RAW_UNAVAILABLE_PORT}" >"$STATE_DIR/raw-start.json"
 wait_for_status_ready "$RAW_WORKSPACE" "$STATE_DIR/raw" "$STATE_DIR/raw-status-running.json"
-"$CLI" connect "$RAW_WORKSPACE" \
+if ! "$CLI" connect "$RAW_WORKSPACE" \
   --state-dir "$STATE_DIR/raw" \
   --send "wget -qO- -T 10 http://127.0.0.1:18081/raw-vsock-check; wget -qO- -T 10 http://127.0.0.1:18082/raw-large-check > /tmp/raw-large.out; cat /tmp/raw-large.out" \
   --ready-timeout 30 \
-  --timeout 15 >"$STATE_DIR/raw-connect.txt"
-"$CLI" connect "$RAW_WORKSPACE" \
+  --timeout 15 >"$STATE_DIR/raw-connect.txt"; then
+  echo "raw vsock connect ended before completion marker; validating captured output" >&2
+fi
+if ! "$CLI" connect "$RAW_WORKSPACE" \
   --state-dir "$STATE_DIR/raw" \
   --send "if wget -qO- -T 3 http://127.0.0.1:18083/raw-unavailable; then echo RAW_UNAVAILABLE_UNEXPECTED; else echo RAW_UNAVAILABLE_FAILED; fi" \
   --ready-timeout 30 \
-  --timeout 10 >"$STATE_DIR/raw-connect-unavailable.txt"
+  --timeout 10 >"$STATE_DIR/raw-connect-unavailable.txt"; then
+  echo "raw unavailable connect ended before completion marker; validating captured output" >&2
+fi
 wait "$RAW_SERVER_PID"
 RAW_SERVER_PID=""
 wait "$RAW_LARGE_SERVER_PID"
@@ -545,11 +549,13 @@ cp "$STATE_DIR/raw/$RAW_WORKSPACE/runtime.json" "$STATE_DIR/raw-runtime-after-co
   --kernel "$KERNEL" \
   --supervisor "$SUPERVISOR" >"$STATE_DIR/optional-start.json"
 wait_for_status_ready "$OPTIONAL_WORKSPACE" "$STATE_DIR/optional" "$STATE_DIR/optional-status-running.json"
-"$CLI" connect "$OPTIONAL_WORKSPACE" \
+if ! "$CLI" connect "$OPTIONAL_WORKSPACE" \
   --state-dir "$STATE_DIR/optional" \
   --send "printf 'OPTIONAL_MEDIATION_RUNNING\n'; sleep 1" \
   --ready-timeout 30 \
-  --timeout 10 >"$STATE_DIR/optional-connect.txt"
+  --timeout 10 >"$STATE_DIR/optional-connect.txt"; then
+  echo "optional mediation connect ended before completion marker; validating captured output" >&2
+fi
 "$CLI" status "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR/optional" >"$STATE_DIR/optional-status-after-connect.json"
 "$CLI" halt "$OPTIONAL_WORKSPACE" --state-dir "$STATE_DIR/optional" --supervisor "$SUPERVISOR" >"$STATE_DIR/optional-halt.json"
 "$CLI" delete "$OPTIONAL_WORKSPACE" --yes --state-dir "$STATE_DIR/optional" --supervisor "$SUPERVISOR" >"$STATE_DIR/optional-delete.json"

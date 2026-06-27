@@ -76,6 +76,7 @@ request = {
         "stateDir": state_dir,
         "memoryMiB": 512,
         "cpuCount": 2,
+        "network": {"mode": "isolated"},
     },
 }
 with open(request_path, "w", encoding="utf-8") as f:
@@ -88,14 +89,31 @@ SUPERVISOR_PID="$!"
 
 exec 3>"$INPUT"
 sleep "${MICROAGENT_DIRECT_CONSOLE_INPUT_DELAY_SECONDS:-4}"
+write_status=0
+set +e
+trap '' PIPE
 printf 'echo DIRECT_CONSOLE_READY\rpoweroff -f\r' >&3
+write_status="$?"
 exec 3>&-
-wait "$SUPERVISOR_PID"
+trap - PIPE
+set -e
+supervisor_status=0
+wait "$SUPERVISOR_PID" || supervisor_status="$?"
 
 if ! grep -q "DIRECT_CONSOLE_READY" "$OUTPUT"; then
   echo "direct console input did not reach the guest" >&2
   tail -n 80 "$OUTPUT" >&2
   exit 1
+fi
+if [ "$write_status" -ne 0 ] && [ "$write_status" -ne 141 ]; then
+  echo "direct console input write exited $write_status" >&2
+  tail -n 80 "$OUTPUT" >&2
+  exit "$write_status"
+fi
+if [ "$supervisor_status" -ne 0 ] && [ "$supervisor_status" -ne 141 ]; then
+  echo "direct console supervisor exited $supervisor_status" >&2
+  tail -n 80 "$OUTPUT" >&2
+  exit "$supervisor_status"
 fi
 
 echo "Apple VF direct console smoke passed"

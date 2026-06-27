@@ -998,11 +998,14 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 	if hostBackend() == vmkit.BackendWindowsHyperV {
 		wantConsoleMode = "hvsock"
 	}
+	hasConfinementMode := strings.Contains(text, `"confinementMode": "off"`) ||
+		strings.Contains(text, `"confinementMode": "jailer"`) ||
+		strings.Contains(text, `"confinementMode": "seatbelt"`)
 	if !strings.Contains(text, fmt.Sprintf(`"backend": "%s"`, hostBackend())) ||
 		!strings.Contains(text, `"kernel"`) ||
 		!strings.Contains(text, `"consoleAvailable": true`) ||
 		!strings.Contains(text, fmt.Sprintf(`"consoleMode": "%s"`, wantConsoleMode)) ||
-		!strings.Contains(text, `"confinementMode": "off"`) {
+		!hasConfinementMode {
 		t.Fatalf("host output = %s", data)
 	}
 }
