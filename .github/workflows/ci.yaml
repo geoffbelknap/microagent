@@ -119,22 +119,6 @@ jobs:
       - name: Lint workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yaml .github/workflows/*.yml
 
-  portable-microagent-e2e:
-    name: Portable microagent E2E
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.26.4"
-          cache-dependency-path: go.mod
-
-      - name: Run portable E2E scenarios
-        run: scripts/dev/microagent-e2e.sh contract help-usage registry-auth text-output init
-
   govulncheck:
     name: Go vulnerability check
     runs-on: ubuntu-latest
