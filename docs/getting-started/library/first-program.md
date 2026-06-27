@@ -4,7 +4,7 @@ description: Boot a microVM, run a command, and tear it down - in a few lines of
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
 *If you'd rather drive microagent from the command line, see the [quickstart](/getting-started/quickstart/) instead.*
 
@@ -85,9 +85,8 @@ outer `workspace.Result` struct's `Result` field, not a typo.
 - Keep a workspace around between runs and inspect it as it lives - see the
   [`workspace.Create`, `Start`, `Inspect`, `Control`](/library/go/) functions.
 - Build a rootfs without booting anything - `pkg/rootfs`.
-- Talk to a supervisor directly without going through `pkg/workspace` - see
-  [`pkg/vmkit`](/library/go/#supervisor-types) and the
-  [supervisor protocol](/protocol/).
+- Talk to the lower-level supervisor interface without going through
+  `pkg/workspace` - see [`pkg/vmkit`](/library/go/#supervisor-types).
 - Already agent-flavored: the library treats every workspace as a
   `workload`-role identity by default. `opts.Name` becomes the `RuntimeID`
   carried in requests, state files, and events. For enforcement-role

@@ -4,19 +4,17 @@ description: Signal a workspace to shut down gracefully.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
 ```text
 microagent stop <name> [--state-dir <dir>]
 ```
 
-`stop` requests a graceful shutdown. On Firecracker this sends SIGTERM to the
-recorded VM process; on Apple VF it asks the supervisor to stop the VM. If the
-VM hasn't exited after five seconds, `stop` marks the workspace `failed` and
-returns an error - it never escalates on its own; follow up with
-[`kill`](/cli/kill/) yourself. When you're parking a healthy workspace to
-start again later, prefer [`halt`](/cli/halt/), which records the clean
-`halted` state.
+`stop` asks a workspace to shut down gracefully. If the VM hasn't exited after
+five seconds, `stop` marks the workspace `failed` and returns an error. It
+never escalates on its own; follow up with [`kill`](/cli/kill/) when you need a
+hard termination. When you're parking a healthy workspace to start again later,
+prefer [`halt`](/cli/halt/), which records the clean `halted` state.
 
 ## Examples
 

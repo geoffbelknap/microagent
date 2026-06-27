@@ -4,13 +4,13 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-06-27_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
 ```
 
-`egress` surfaces the egress mediator's audit log for a workspace, oldest first.
+`egress` shows the egress mediator's audit log for a workspace, oldest first.
 Egress mediation is **on by default** (mode `guarded`; the other modes are
 `strict` and `off`), so every workspace whose mediator has made a decision has
 this record. Each line is one decision the mediator made: `egress_allow` /

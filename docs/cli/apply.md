@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -17,7 +17,7 @@ Today it supports:
 
 - restart policy changes
 - network intent changes while the workspace is stopped
-- live Firecracker port-forward host bind changes when the workspace is running
+- live port-forward host bind changes when the workspace is running
 
 ## Examples
 
@@ -27,9 +27,9 @@ Apply an updated spec to its workspace:
 microagent apply --file ./homebridge.yaml
 ```
 
-If the workspace is running and only the Firecracker host bind changed,
-`apply` restarts the host-side port-forwarder and leaves the VM running. For a
-running Firecracker workspace, `apply` can live-reload this kind of change:
+If the workspace is running and only the host bind changed, `apply` restarts
+the host-side port forwarder and leaves the VM running. It can live-reload this
+kind of change:
 
 ```yaml
 network:
@@ -63,9 +63,9 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 ## Unsupported changes while running
 
 `apply` does not silently no-op an unsupported change. When the workspace is
-running and the spec asks for anything beyond a live Firecracker/Apple VF
-host-bind change - a different network mode, added or removed forwards, changed
-host or guest ports - `apply` errors and tells you to stop and start the
+running and the spec asks for anything beyond a live host-bind change - a
+different network mode, added or removed forwards, changed host or guest ports
+- `apply` errors and tells you to stop and start the
 workspace to apply it; nothing is written. When the spec matches the current
 manifest, `apply` reports the workspace state with no applied changes.
 

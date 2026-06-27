@@ -4,9 +4,9 @@ description: Confine a workspace to a known set of destinations with strict mode
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-06-27_
 
-This guide shows how to set a workspace's egress allowlist and passthrough set.
+Use egress allowlists when a workspace should reach only known destinations.
 For the ideas behind it - the three modes, the MITM trust model, UDP/DNS
 mediation - read [Egress mediation](/concepts/egress-mediation/) first.
 

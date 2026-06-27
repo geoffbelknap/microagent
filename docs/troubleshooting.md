@@ -4,9 +4,9 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-06-27_
 
-When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and the console surface, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
+When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
 Each symptom type has a tool that answers it fastest: host problems (missing KVM, binaries, permissions) are [`doctor`](/cli/doctor/)'s job; boot problems and anything the guest printed are in [`logs`](/cli/logs/). Questions about what state a workspace is in belong to [`status`](/cli/status/), and when you need the history of how it got there, read [`events`](/cli/events/).
 
@@ -103,15 +103,15 @@ attaching a network endpoint.
 
 ## Workspace lifecycle
 
-### `microagent delete` refuses while the VM is running (Firecracker)
+### `microagent delete` refuses while the VM is running
 
 The recorded VM process is still alive. By design, `delete` won't tear down a workspace whose VM hasn't been stopped - it'd orphan the process.
 
 ```bash
 microagent halt <name>     # clean disk-preserving stop
 # or
-microagent stop <name>     # graceful (SIGTERM)
-microagent kill <name>     # hard (SIGKILL) if stop doesn't return
+microagent stop <name>     # graceful shutdown request
+microagent kill <name>     # hard termination if stop doesn't return
 microagent delete <name>
 ```
 
@@ -289,5 +289,5 @@ error: image reference is mutable, pass --allow-mutable to override
 
 - Run `microagent --json doctor` for the full host capability report.
 - Run `microagent --json status <name>` for the workspace state plus verification details.
-- Check `microagent logs <name>` for serial output - most guest-side issues surface there.
+- Check `microagent logs <name>` for serial output - most guest-side issues appear there.
 - File an issue at [github.com/geoffbelknap/microagent/issues](https://github.com/geoffbelknap/microagent/issues) with the doctor output and the failing command.

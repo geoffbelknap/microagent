@@ -4,14 +4,14 @@ description: Get credentials into the guest without writing them to disk, plus o
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
-By the end of this guide your workload reads its credentials from
-`/run/secrets` - or fetches them on demand. Nothing secret ever touches
-the rootfs, the manifest, or a snapshot. microagent is a secret conduit, not a
-store: it passes operator-owned plaintext through (loudly warned) or resolves
-a reference from an external secret manager, holding the value only in host
-process memory.
+Use secrets when a workload needs credentials without writing them into the
+rootfs, the manifest, or a snapshot. The guest can read materialized secrets
+from `/run/secrets`, or fetch declared secrets on demand. microagent is a
+secret conduit, not a store: it passes operator-owned plaintext through
+(loudly warned) or resolves a reference from an external secret manager,
+holding the value only in host process memory.
 
 A secret is declared as `NAME=<scheme>:<ref>`. The reference names *where* the
 value lives, never the value itself, so it is safe on a command line. The
@@ -143,7 +143,7 @@ microagent halt vaulted && microagent delete vaulted --yes
 rm /tmp/app.env
 ```
 
-## What's next
+## Related
 
 - **Schemes, flags, and delivery semantics in full** - the [`secret`](/cli/secret/) reference.
 - **What the trust boundary covers** - [security](/security/).

@@ -4,10 +4,10 @@ description: Boot a Linux microVM from an OCI image and run a command inside it.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-27_
 
 Boot a Linux microVM from an OCI image, run one command inside it, and tear it
-down. Three commands, start to finish.
+down. You only need three commands.
 
 ## 1. Install
 
@@ -23,10 +23,9 @@ Building from source is covered in [Install](/getting-started/install/).
 microagent doctor
 ```
 
-`doctor` confirms the host has the right backend (Firecracker on Linux, Apple
-Virtualization.framework on macOS) and reports whether the default kernel is
-in place. If something is missing, it tells you how to fix it. Still stuck?
-See [Troubleshooting](/troubleshooting/).
+`doctor` checks whether this host can boot workspaces and whether the default
+kernel is in place. If something is missing, it tells you what to fix. Still
+stuck? See [Troubleshooting](/troubleshooting/).
 
 ## 3. Boot, run, tear down
 
@@ -34,9 +33,9 @@ See [Troubleshooting](/troubleshooting/).
 microagent run docker.io/library/ubuntu:24.04 uname -a
 ```
 
-The first argument is the OCI image; everything after it is the command to run
-inside the booted microVM. The first run also downloads the default kernel for
-the host backend; later runs reuse it.
+The first argument is the OCI image. Everything after it is the command to run
+inside the microVM. The first run also downloads the default kernel for this
+host; later runs reuse it.
 
 ```text
 Workspace: run-1781164526178302845
@@ -58,12 +57,12 @@ Entrypoint/Cmd.
 
 ## What just happened
 
-microagent pulled the Ubuntu image and converted it into an ext4 rootfs, then
-booted a real microVM with its own Linux kernel. The command ran inside the
-guest, and the exit code and output came back over vsock. Because this was a
-one-shot run, microagent removed the scratch state afterwards.
+microagent pulled the Ubuntu image, converted it into an ext4 rootfs, and
+booted a microVM with its own Linux kernel. The command ran inside the guest.
+The exit code and output came back to your terminal. Because this was a
+one-shot run, microagent removed the temporary workspace afterwards.
 
-## What's next
+## Related
 
 - **Run an actual agent inside a microVM** - [run your first agent](/getting-started/cli/first-agent/).
 - **Keep a workspace around between runs** - [persistent workspaces](/guides/persistent-workspaces/) covers `create`, `start`, `halt`, `connect`, `delete`.

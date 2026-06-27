@@ -4,7 +4,7 @@ description: Resolve and validate secret references without writing secrets to d
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-27_
 
 ```text
 microagent secret check NAME=<scheme>:<ref> [NAME=<scheme>:<ref> ...]   Validate secret references
@@ -73,7 +73,7 @@ microagent --json secret check DB=vault:secret/data/app#db_password
 The three plaintext schemes read the operator's own files on the host and emit a
 `not encrypted at rest, not for production` warning on every resolve. The
 `vault` scheme reads a KV v2 secret read-only using `VAULT_ADDR` and
-`VAULT_TOKEN`; auth, sealed, and not-found conditions surface as clear errors.
+`VAULT_TOKEN`; auth, sealed, and not-found conditions return clear errors.
 
 Unknown schemes, references missing a scheme, and values that resolve empty all
 **fail closed** with an error - never a silent empty secret.
@@ -124,8 +124,6 @@ microagent create --name app --secret API_KEY=env:CI_TOKEN --secrets-env-file /e
   guest aborts boot - a workload never runs without its declared secrets.
 - Backing credentials (`VAULT_TOKEN`, etc.) stay on the host; only resolved
   values cross vsock, which is a host-to-guest-only transport.
-
-`--secrets-stdin` is future work.
 
 ## On-demand secrets and the audited tier
 

@@ -158,14 +158,29 @@ This repository owns the VM pieces:
   `docs/` becomes part of the public docs site. Keep internal docs outside the
   public repository; use Notion for internal decisions, plans, and running
   notes. Keep `AGENTS.md` limited to repo working instructions.
+- Public docs are for people using microagent. Optimize them for installing,
+  running workspaces, embedding the Go library, operating the CLI/MCP surfaces,
+  and troubleshooting real failures. Do not publish implementation plans,
+  parity debt, backend support inventories, release-readiness matrices, or
+  developer notes in `docs/`.
+- Prefer runnable examples over abstract explanation. A good page starts with
+  what the user can do, then gives the few concepts needed to make the example
+  predictable.
+- Keep language concise and direct. Avoid textbook-style architecture tours,
+  stale capability tables, and backend caveats unless they change a user's
+  command, host prerequisite, or troubleshooting path.
+- Supported backends should read as supported. Do not ask users to compare
+  Linux/macOS parity tables in public docs; describe the current supported
+  behavior and use `doctor`, install docs, and troubleshooting pages for host
+  prerequisites and current failure modes.
 - When command output, flags, runtime semantics, or operator workflows change,
   update README/docs and run `python3 scripts/dev/markdown-link-check.py` and
   `python3 scripts/dev/docs-last-updated.py --check` and
   `python3 scripts/dev/docs-parity.py`.
 - When MCP tools, AX envelopes, readiness fields, or structured exec semantics
   change, update `docs/cli/serve.md`, `docs/cli/exec.md`,
-  `docs/concepts/state-and-identity.md`, `docs/protocol/runtime-contract.md`,
-  and `docs/library/go.md` as applicable.
+  `docs/concepts/state-and-identity.md`, and `docs/library/go.md` as
+  applicable.
 - Keep release/install docs aligned with the Homebrew tap: only stable
   releases ship to the tap (`microagent`). Release candidates are git tags
   validated by local builds and the tag-gated live CI suites; they are not
