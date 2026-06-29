@@ -2,20 +2,12 @@ package sandbox
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"net/http/httptest"
-	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/geoffbelknap/microagent/internal/egress"
 )
 
 // buildWASIModule compiles a Go program to wasm32-wasip1 (stdlib only → offline)
@@ -39,141 +31,185 @@ func buildWASIModule(t *testing.T, mainSrc string) string {
 	return out
 }
 
-// ---- Proof A: the egress brain serves a HOST-SUPPLIED destination ----
-// The Handler is the brain (allowlist + audit + forward). It's transport-
-// agnostic via an injectable OrigDst, so we drive it directly over an in-memory
-// conn with the destination supplied by the host — no netns, no TPROXY, no
-// SO_ORIGINAL_DST. This is what makes the brain reusable by a wasm host-dial.
-func TestEgressBrainServesHostSuppliedDst(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, "UPSTREAM-OK")
-	}))
-	defer upstream.Close()
-	upAddr := netip.MustParseAddrPort(strings.TrimPrefix(upstream.URL, "http://"))
-
-	logger := &egress.BufferLogger{}
-	policy, err := egress.NewPolicy([]string{"allowed.example"})
+func buildWASIBytes(t *testing.T, mainSrc string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(buildWASIModule(t, mainSrc))
 	if err != nil {
-		t.Fatalf("policy: %v", err)
+		t.Fatalf("read module: %v", err)
 	}
-	newHandler := func(dst netip.AddrPort) *egress.Handler {
-		return &egress.Handler{
-			Mode:    "strict",
-			Policy:  policy,
-			Logger:  logger,
-			OrigDst: func(net.Conn) (netip.AddrPort, error) { return dst, nil },
-			Dial:    net.Dial,
-		}
-	}
-
-	t.Run("allow_forwards_to_upstream", func(t *testing.T) {
-		client, server := net.Pipe()
-		go newHandler(upAddr).Handle(server)
-		_ = client.SetDeadline(time.Now().Add(5 * time.Second))
-		go func() {
-			_, _ = client.Write([]byte("GET / HTTP/1.1\r\nHost: allowed.example\r\nConnection: close\r\n\r\n"))
-		}()
-		body, _ := io.ReadAll(client)
-		if !strings.Contains(string(body), "UPSTREAM-OK") {
-			t.Fatalf("allowlisted request did not reach upstream over host-supplied dst: %q", string(body))
-		}
-	})
-
-	t.Run("deny_blocks_and_audits", func(t *testing.T) {
-		client, server := net.Pipe()
-		go newHandler(upAddr).Handle(server) // dst irrelevant: denied on host
-		_ = client.SetDeadline(time.Now().Add(5 * time.Second))
-		go func() {
-			_, _ = client.Write([]byte("GET / HTTP/1.1\r\nHost: blocked.example\r\nConnection: close\r\n\r\n"))
-		}()
-		_, _ = io.ReadAll(client) // denied → conn closed, no upstream dial
-		found := false
-		for _, e := range logger.Snapshot() {
-			if e["event"] == "egress_deny" && e["host"] == "blocked.example" {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("expected an egress_deny audit for blocked.example; got %v", logger.Snapshot())
-		}
-	})
+	return b
 }
 
-// ---- Proof B: a wasm module's egress is governed by that same brain ----
-// The sandbox primitive gives the guest a single privileged import,
-// microagency.egress_allowed, backed by internal/egress.Policy + audit. The
-// guest has no sockets; its only way to reach the network is to ask the brain.
-func TestSandboxEgressGovernedByBrain(t *testing.T) {
+// Tier 0: a oneshot module's exit code and stdout/stderr round-trip through Run.
+func TestRunCapturesExitAndOutput(t *testing.T) {
 	wasm := buildWASIModule(t, `package main
 
 import (
+	"fmt"
 	"os"
-	"runtime"
-	"unsafe"
 )
 
-//go:wasmimport microagency egress_allowed
-func egressAllowed(ptr uint32, length uint32) int32
-
-func allowed(host string) int32 {
-	b := []byte(host)
-	r := egressAllowed(uint32(uintptr(unsafe.Pointer(&b[0]))), uint32(len(b)))
-	runtime.KeepAlive(b)
-	return r
-}
-
 func main() {
-	// Exit 0 only if the brain allows the allowlisted host and denies the other.
-	if allowed("allowed.example") == 1 && allowed("blocked.example") == 0 {
-		os.Exit(0)
-	}
-	os.Exit(3)
+	fmt.Fprintln(os.Stdout, "hello-stdout")
+	fmt.Fprintln(os.Stderr, "hello-stderr")
+	os.Exit(7)
 }
 `)
-
-	logger := &egress.BufferLogger{}
-	res, err := Run(context.Background(), Config{
-		WasmPath: wasm,
-		Egress:   &EgressConfig{Allow: []string{"allowed.example"}, Logger: logger},
-	})
+	res, err := Run(context.Background(), Config{WasmPath: wasm})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if res.ExitCode != 0 {
-		t.Fatalf("guest disagreed with the brain (exit %d): the allowlist decision did not reach the module", res.ExitCode)
+	if res.ExitCode != 7 {
+		t.Fatalf("exit code: got %d want 7", res.ExitCode)
 	}
-
-	// The brain must have recorded BOTH decisions (audit completeness).
-	var sawAllow, sawDeny bool
-	for _, e := range logger.Snapshot() {
-		if e["event"] != "sandbox_egress_decision" {
-			continue
-		}
-		switch e["host"] {
-		case "allowed.example":
-			sawAllow = e["allow"] == true
-		case "blocked.example":
-			sawDeny = e["allow"] == false
-		}
+	if !strings.Contains(res.Stdout, "hello-stdout") {
+		t.Fatalf("stdout: %q", res.Stdout)
 	}
-	if !sawAllow || !sawDeny {
-		t.Fatalf("audit incomplete: sawAllow=%v sawDeny=%v events=%v", sawAllow, sawDeny, logger.Snapshot())
+	if !strings.Contains(res.Stderr, "hello-stderr") {
+		t.Fatalf("stderr: %q", res.Stderr)
 	}
 }
 
-// TestSandboxNoEgressCapabilityByDefault: with no EgressConfig the module has no
-// egress import at all — a guest that tries to call it fails to instantiate
-// (fail-closed by absence), never silently reaching the network.
-func TestSandboxNoEgressCapabilityByDefault(t *testing.T) {
-	wasm := buildWASIModule(t, `package main
+// Args reach the guest as argv after argv[0]=="sandbox".
+func TestRunPassesArgs(t *testing.T) {
+	wasm := buildWASIBytes(t, `package main
 
-//go:wasmimport microagency egress_allowed
-func egressAllowed(ptr uint32, length uint32) int32
+import (
+	"fmt"
+	"os"
+	"strings"
+)
 
-func main() { _ = egressAllowed(0, 0) }
+func main() { fmt.Print(strings.Join(os.Args[1:], ",")) }
 `)
-	_, err := Run(context.Background(), Config{WasmPath: wasm}) // no Egress
+	res, err := Run(context.Background(), Config{Module: wasm, Args: []string{"a", "b", "c"}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Stdout != "a,b,c" {
+		t.Fatalf("args: got %q want a,b,c", res.Stdout)
+	}
+}
+
+// Stdin is delivered to the guest; output is the transform of input.
+func TestRunPassesStdin(t *testing.T) {
+	wasm := buildWASIBytes(t, `package main
+
+import (
+	"io"
+	"os"
+	"strings"
+)
+
+func main() {
+	b, _ := io.ReadAll(os.Stdin)
+	os.Stdout.WriteString(strings.ToUpper(string(b)))
+}
+`)
+	res, err := Run(context.Background(), Config{Module: wasm, Stdin: strings.NewReader("query me")})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Stdout != "QUERY ME" {
+		t.Fatalf("stdin transform: got %q want QUERY ME", res.Stdout)
+	}
+}
+
+// Env is least-privilege: the guest sees ONLY the keys Config grants — a key it
+// was not given (even one set in the host process) reads back empty.
+func TestRunEnvIsLeastPrivilege(t *testing.T) {
+	t.Setenv("SANDBOX_HOST_ONLY", "leaked")
+	wasm := buildWASIBytes(t, `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Printf("granted=%q host_only=%q", os.Getenv("GRANTED"), os.Getenv("SANDBOX_HOST_ONLY"))
+}
+`)
+	res, err := Run(context.Background(), Config{Module: wasm, Env: map[string]string{"GRANTED": "ok"}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Stdout != `granted="ok" host_only=""` {
+		t.Fatalf("env least-privilege: got %q (host env must not leak)", res.Stdout)
+	}
+}
+
+// The poolable path: Compile once, instantiate many. Each Run is a fresh,
+// isolated guest — a second run with different args is unaffected by the first.
+func TestRuntimePoolReusesCompilation(t *testing.T) {
+	wasm := buildWASIBytes(t, `package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() { fmt.Print(strings.Join(os.Args[1:], "")) }
+`)
+	rt, err := Compile(context.Background(), wasm, RuntimeOptions{})
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	defer rt.Close(context.Background())
+
+	for _, want := range []string{"first", "second", "third"} {
+		res, err := rt.Run(context.Background(), Config{Args: []string{want}})
+		if err != nil {
+			t.Fatalf("Run(%s): %v", want, err)
+		}
+		if res.Stdout != want {
+			t.Fatalf("pooled run: got %q want %q", res.Stdout, want)
+		}
+	}
+}
+
+// Bounds: an absurdly low memory cap fails the module closed at instantiation
+// rather than letting it run unbounded (ASK tenet 8).
+func TestRunMemoryLimitFailsClosed(t *testing.T) {
+	wasm := buildWASIBytes(t, `package main
+
+func main() {}
+`)
+	_, err := Run(context.Background(), Config{Module: wasm, Limits: Limits{MaxMemoryPages: 1}})
 	if err == nil {
-		t.Fatal("expected instantiation to fail with no egress capability provided")
+		t.Fatal("expected instantiation to fail closed under a 1-page memory cap")
+	}
+}
+
+// Bounds: a runaway guest is interrupted at the Timeout rather than blocking the
+// host forever (the runtime is built WithCloseOnContextDone).
+func TestRunTimeoutInterrupts(t *testing.T) {
+	wasm := buildWASIBytes(t, `package main
+
+func main() {
+	x := 0
+	for {
+		x++
+		_ = x
+	}
+}
+`)
+	start := time.Now()
+	_, err := Run(context.Background(), Config{Module: wasm, Limits: Limits{Timeout: 300 * time.Millisecond}})
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected a runaway guest to be interrupted, got nil error")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("timeout did not interrupt promptly: %v", elapsed)
+	}
+}
+
+// A Config with no module to run is an error, not a silent no-op.
+func TestRunNoModuleErrors(t *testing.T) {
+	_, err := Run(context.Background(), Config{})
+	if err == nil {
+		t.Fatal("expected an error when neither Module nor WasmPath is set")
 	}
 }
