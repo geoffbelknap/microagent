@@ -13,80 +13,31 @@ import (
 	"github.com/geoffbelknap/microagent/internal/egress"
 )
 
-// queryGuest is the Tier-2 compose in one wasm-native module: it FETCHES a
-// dataset through the governed host-fetch capability (Tier 1), runs a
-// deterministic group-by aggregation over it IN the sandbox (Tier 0), and emits
-// only a compact SUMMARY — the raw dataset never leaves the sandbox
-// (pass-by-reference). This is the shape of the headline "cheap deterministic
-// data work an agent delegates off-context": the expensive/risky parts (network,
-// credentials) stay host-side and governed; the cheap deterministic compute runs
-// in the poolable wasm shape; only a small summary returns to the agent context.
-//
-// It is intentionally written against stdlib only (no engine dependency): the
-// substrate is engine-AGNOSTIC. A real consumer ships whatever query module it
-// likes — this proves microagent runs+governs it; it does not bundle an engine.
+// queryGuest is the Tier-2 compute half: a pure, deterministic wasm module that
+// reads a dataset from STDIN, runs a group-by aggregation, and emits only a
+// compact SUMMARY. It has no network and no credentials — it never makes a
+// request and never sees a key. It is stdlib-only on purpose: the substrate is
+// engine-AGNOSTIC (a real consumer ships whatever query module it likes).
 const queryGuest = `package main
 
 import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
-	"unsafe"
 )
 
-//go:wasmimport microagency fetch
-func hostFetch(reqPtr, reqLen uint32) uint64
-
-//go:wasmimport microagency read_response
-func hostReadResponse(handle, destPtr, destLen uint32) int32
-
-type resp struct {
-	Status int    ` + "`json:\"status\"`" + `
-	Body   []byte ` + "`json:\"body,omitempty\"`" + `
-	Denied bool   ` + "`json:\"denied,omitempty\"`" + `
-}
-
-func ptr(b []byte) uint32 {
-	if len(b) == 0 {
-		return 0
-	}
-	return uint32(uintptr(unsafe.Pointer(&b[0])))
-}
-
-func fetch(url string) (resp, bool) {
-	rb, _ := json.Marshal(map[string]string{"method": "GET", "url": url})
-	packed := hostFetch(ptr(rb), uint32(len(rb)))
-	runtime.KeepAlive(rb)
-	if packed == 0 {
-		return resp{}, false
-	}
-	handle := uint32(packed >> 32)
-	length := uint32(packed)
-	buf := make([]byte, length)
-	n := hostReadResponse(handle, ptr(buf), length)
-	runtime.KeepAlive(buf)
-	if n < 0 {
-		return resp{}, false
-	}
-	var out resp
-	if json.Unmarshal(buf[:n], &out) != nil {
-		return resp{}, false
-	}
-	return out, true
-}
-
 func main() {
-	r, ok := fetch(os.Getenv("QUERY_URL"))
-	if !ok || r.Denied || r.Status != 200 {
-		fmt.Print(` + "`" + `{"error":"fetch"}` + "`" + `)
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Print(` + "`" + `{"error":"read"}` + "`" + `)
 		os.Exit(2)
 	}
-	recs, err := csv.NewReader(strings.NewReader(string(r.Body))).ReadAll()
+	recs, err := csv.NewReader(strings.NewReader(string(data))).ReadAll()
 	if err != nil || len(recs) < 2 {
 		fmt.Print(` + "`" + `{"error":"parse"}` + "`" + `)
 		os.Exit(3)
@@ -123,10 +74,14 @@ func main() {
 }
 `
 
-// TestSandboxDataQueryCompose proves the Tier-2 headline end-to-end: a wasm
-// module fetches an access-controlled dataset (the credential is injected
-// host-side, cred-blind), aggregates it deterministically in the sandbox, and
-// returns ONLY a summary — the raw data never reaches the caller's context.
+// TestSandboxDataQueryCompose proves the Tier-2 headline with the work split the
+// way the shapes actually want it: the HOST/orchestrator does the governed,
+// cred-blind fetch through the brain (allowlist + swap + audit; the credential is
+// injected host-side and never leaves it), then pipes the bytes into a PURE
+// COMPUTE sandbox that aggregates them and returns only a summary. The sandbox
+// has no network and no credentials; the raw dataset never leaves it. The
+// governance guarantee is preserved — it is enforced host-side by the same brain
+// — without attaching network or secrets to the weaker software sandbox.
 func TestSandboxDataQueryCompose(t *testing.T) {
 	t.Setenv("K", "DATA_API_KEY")
 	const dataset = "region,sales\nwest,100\neast,50\nwest,200\neast,75\nnorth,25\n"
@@ -140,18 +95,33 @@ func TestSandboxDataQueryCompose(t *testing.T) {
 	pool := x509.NewCertPool()
 	pool.AddCert(srv.Certificate())
 
-	wasm := buildWASIBytes(t, queryGuest)
+	// HOST-SIDE: the orchestrator performs the governed, cred-blind fetch. The real
+	// credential is resolved from the host env and injected by the brain; it is in
+	// neither the request the orchestrator wrote nor the sandbox.
+	policy, err := egress.NewPolicy([]string{"127.0.0.1"})
+	if err != nil {
+		t.Fatalf("NewPolicy: %v", err)
+	}
 	log := &egress.BufferLogger{}
+	brain := egress.NewBrain("strict", policy, staticSwap(t, "127.0.0.1"), log, egress.Limits{})
+	brain.UpstreamRoots = pool
+	resp, err := brain.Fetch(context.Background(), egress.FetchRequest{Method: "GET", URL: srv.URL})
+	if err != nil {
+		t.Fatalf("Brain.Fetch: %v", err)
+	}
+	if resp.Status != 200 || resp.Denied {
+		t.Fatalf("governed fetch failed: status=%d denied=%v", resp.Status, resp.Denied)
+	}
+	if gotAuth != "Bearer DATA_API_KEY" {
+		t.Fatalf("credential was not injected host-side: %q", gotAuth)
+	}
+
+	// SANDBOX: pure compute over the fetched bytes — no network, no Egress field, no
+	// credential. Only a summary comes back.
+	wasm := buildWASIBytes(t, queryGuest)
 	res, err := Run(context.Background(), Config{
 		Module: wasm,
-		Env:    map[string]string{"QUERY_URL": srv.URL}, // dataset URL only; the API key (K) is NOT given to the guest
-		Egress: &EgressConfig{
-			Allow:         []string{"127.0.0.1"},
-			Mode:          "strict",
-			Swaps:         staticSwap(t, "127.0.0.1"),
-			Logger:        log,
-			UpstreamRoots: pool,
-		},
+		Stdin:  strings.NewReader(string(resp.Body)),
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -160,7 +130,6 @@ func TestSandboxDataQueryCompose(t *testing.T) {
 		t.Fatalf("guest exit %d stderr=%q stdout=%q", res.ExitCode, res.Stderr, res.Stdout)
 	}
 
-	// The deterministic query result: west=300, east=125, north=25.
 	var summary struct {
 		RowsIn int     `json:"rows_in"`
 		Groups int     `json:"groups"`
@@ -174,21 +143,16 @@ func TestSandboxDataQueryCompose(t *testing.T) {
 		t.Fatalf("wrong aggregation: %+v", summary)
 	}
 
-	// Cred-blind: the host injected the real key; the guest never saw it.
-	if gotAuth != "Bearer DATA_API_KEY" {
-		t.Fatalf("upstream did not receive the host-injected credential: %q", gotAuth)
-	}
+	// The credential never reached the sandbox output, and the raw dataset never
+	// leaves the sandbox — only the summary does (pass-by-reference).
 	if strings.Contains(res.Stdout, "DATA_API_KEY") {
 		t.Fatalf("credential leaked into guest output: %q", res.Stdout)
 	}
-
-	// Pass-by-reference: only the summary leaves the sandbox — the raw dataset rows
-	// never appear in what returns to the caller's context.
 	if strings.Contains(res.Stdout, "west,100") || strings.Contains(res.Stdout, "sales") {
 		t.Fatalf("raw dataset leaked into the returned summary: %q", res.Stdout)
 	}
 
-	// And the egress was audited (the agent's data access is observable).
+	// The host-side data access was governed and audited by the brain.
 	var sawSwap, sawAllow bool
 	for _, e := range log.Snapshot() {
 		switch e["event"] {
@@ -201,4 +165,14 @@ func TestSandboxDataQueryCompose(t *testing.T) {
 	if !sawSwap || !sawAllow {
 		t.Fatalf("data access not fully audited: swap=%v allow=%v", sawSwap, sawAllow)
 	}
+}
+
+func staticSwap(t *testing.T, host string) *egress.SwapTable {
+	t.Helper()
+	yaml := fmt.Sprintf("swaps:\n  k:\n    type: static\n    domains: [%s]\n    header: Authorization\n    format: 'Bearer {key}'\n    key_ref: env:K\n", host)
+	tbl, err := egress.LoadSwapTable([]byte(yaml))
+	if err != nil {
+		t.Fatalf("LoadSwapTable: %v", err)
+	}
+	return tbl
 }

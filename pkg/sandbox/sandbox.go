@@ -10,12 +10,24 @@
 // data transforms, parsing, validation, or a consumer-supplied query engine
 // over bytes the host hands in (the substrate is engine-agnostic — it runs
 // whatever wasm-native module the consumer provides; it does not bundle an
-// engine). Input arrives as args + stdin (and, with an EgressConfig, a
-// governed host-fetch capability — see Run); output leaves as stdout/stderr and
-// the exit code. The same egress brain that governs the microVM path
-// (internal/egress: default-deny allowlist + cred-blind credential swap + audit)
-// governs a sandbox module's network through a host function, so a consumer gets
-// the SAME guarantees regardless of shape.
+// engine). The shape is deliberately narrow: bytes in (args + stdin), a result
+// out (stdout/stderr + exit code). It does NO network and holds NO credentials.
+//
+// That is not a missing feature — it is the point. Credential-blindness exists to
+// keep a secret away from an UNTRUSTED principal (a brought agent in a microVM —
+// an LLM + third-party SDK reasoning over hostile input that a prompt injection
+// could turn into an exfiltrator). A wasm module is not that: it cannot fork/exec,
+// cannot host an agent, and runs trusted, consumer-authored, deterministic code.
+// There is no adversary inside to be blind to. So the governed, credentialed I/O
+// stays where it belongs — host-side, in the orchestrator, driven through the
+// shared egress brain (internal/egress: allowlist + cred-blind swap + audit). The
+// orchestrator fetches, and pipes the resulting bytes into a sandbox via Stdin;
+// the sandbox computes and returns a summary. The brain still governs every byte
+// that crosses the boundary — it is just called by the trusted host, not reached
+// from inside the software sandbox (which would only widen the weaker sandbox's
+// attack surface for no gain). Work that genuinely needs its OWN dynamic, reactive
+// network access is no longer "cheap deterministic oneshot" — it is drifting
+// agentic, and belongs in a microVM workspace.
 //
 // # The honest boundary (read this before routing risk here)
 //
@@ -26,12 +38,9 @@
 //   - WASI preview1 has NO fork/exec. A wasm module therefore CANNOT run Python
 //     or any external binary. This is structural, not a TODO. If your work needs
 //     a subprocess, it does not belong in this shape.
-//   - No host filesystem is exposed (no preopens) and no environment is inherited.
-//     A module sees only what Config grants it (Args, Stdin, Env) — least
-//     privilege by default (ASK tenet 7).
-//   - Without an EgressConfig a module has NO network capability at all
-//     (fail-closed by absence): a guest that tries to reach the network simply
-//     has no import to call.
+//   - No host filesystem is exposed (no preopens), no environment is inherited,
+//     and there is no network capability. A module sees only what Config grants it
+//     (Args, Stdin, Env) — least privilege by default (ASK tenet 7).
 package sandbox
 
 import (
@@ -79,14 +88,6 @@ type Config struct {
 	Env map[string]string
 	// Limits bounds this execution.
 	Limits Limits
-	// Egress, when set, installs the governed host-fetch capability: the guest's
-	// ONLY path to the network is the microagency.fetch host function, mediated by
-	// the shared egress brain (allowlist + guarded inside-deny + cred-blind
-	// credential swap + audit). When nil, the module has no network capability at
-	// all — fail-closed by absence (a guest that imports the capability fails to
-	// instantiate). For a pooled Runtime, the capability is installed at Compile
-	// (RuntimeOptions.Egress) and the per-run policy is supplied here.
-	Egress *EgressConfig
 }
 
 // Result is the outcome of one sandboxed execution.
@@ -105,10 +106,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	rt, err := Compile(ctx, module, RuntimeOptions{
-		MaxMemoryPages: cfg.Limits.MaxMemoryPages,
-		Egress:         cfg.Egress != nil,
-	})
+	rt, err := Compile(ctx, module, RuntimeOptions{MaxMemoryPages: cfg.Limits.MaxMemoryPages})
 	if err != nil {
 		return Result{}, err
 	}
@@ -121,12 +119,6 @@ type RuntimeOptions struct {
 	// MaxMemoryPages caps guest linear memory for every module this Runtime runs
 	// (see Limits.MaxMemoryPages). 0 leaves wazero's default ceiling.
 	MaxMemoryPages uint32
-	// Egress installs the microagency host-fetch capability on the runtime. The
-	// per-run policy (allowlist, swaps, audit sink) is supplied via Config.Egress
-	// at each Run; this only decides whether the capability EXISTS. A runtime built
-	// without it cannot perform governed egress — a guest that imports the
-	// capability fails to instantiate (fail-closed by absence).
-	Egress bool
 }
 
 // Runtime is a compiled module bound to a wazero runtime: Compile pays the
@@ -137,15 +129,12 @@ type RuntimeOptions struct {
 type Runtime struct {
 	rt       wazero.Runtime
 	compiled wazero.CompiledModule
-	// egress is the host-fetch capability's per-runtime state (the response stash),
-	// non-nil when the runtime was built WithEgress. The per-run brain is supplied
-	// via Config.Egress at Run time, not held here.
-	egress *egressState
 }
 
-// Compile builds a wazero runtime (with WASI preview1, plus the microagency
-// host-fetch capability when opts.Egress) and compiles module into it, returning
-// a reusable Runtime. The caller owns it and must Close it.
+// Compile builds a wazero runtime (with WASI preview1) and compiles module into
+// it, returning a reusable Runtime. The runtime exposes no host capabilities
+// beyond WASI — no network, no host filesystem — so a compiled module is a pure
+// compute unit. The caller owns the Runtime and must Close it.
 func Compile(ctx context.Context, module []byte, opts RuntimeOptions) (*Runtime, error) {
 	rc := wazero.NewRuntimeConfig().
 		// Let ctx cancellation / a Limits.Timeout interrupt a runaway guest rather
@@ -159,21 +148,12 @@ func Compile(ctx context.Context, module []byte, opts RuntimeOptions) (*Runtime,
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("sandbox: instantiate wasi: %w", err)
 	}
-	r := &Runtime{rt: rt}
-	if opts.Egress {
-		r.egress = newEgressState()
-		if err := r.egress.install(ctx, rt); err != nil {
-			_ = rt.Close(ctx)
-			return nil, fmt.Errorf("sandbox: install egress capability: %w", err)
-		}
-	}
 	compiled, err := rt.CompileModule(ctx, module)
 	if err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("sandbox: compile module: %w", err)
 	}
-	r.compiled = compiled
-	return r, nil
+	return &Runtime{rt: rt, compiled: compiled}, nil
 }
 
 // Close releases the runtime and every resource it holds.
@@ -188,21 +168,6 @@ func (r *Runtime) Run(ctx context.Context, cfg Config) (Result, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cfg.Limits.Timeout)
 		defer cancel()
-	}
-
-	// Bind this run's governance brain into the context the host-fetch functions
-	// read. A run that supplies an EgressConfig requires a runtime that installed
-	// the capability; otherwise the guest's import is unresolved and instantiation
-	// fails fail-closed.
-	if cfg.Egress != nil {
-		if r.egress == nil {
-			return Result{}, errors.New("sandbox: Config.Egress set but runtime was built without egress (RuntimeOptions.Egress)")
-		}
-		brain, err := cfg.Egress.brain()
-		if err != nil {
-			return Result{}, err
-		}
-		ctx = withBrain(ctx, brain)
 	}
 
 	var stdout, stderr bytes.Buffer
