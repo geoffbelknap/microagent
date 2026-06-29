@@ -7,8 +7,10 @@
 // # What it is for
 //
 // wasm-native deterministic units of work an agent delegates off-context:
-// data transforms, parsing, validation, a bundled query engine over bytes the
-// host hands in. Input arrives as args + stdin (and, with an EgressConfig, a
+// data transforms, parsing, validation, or a consumer-supplied query engine
+// over bytes the host hands in (the substrate is engine-agnostic — it runs
+// whatever wasm-native module the consumer provides; it does not bundle an
+// engine). Input arrives as args + stdin (and, with an EgressConfig, a
 // governed host-fetch capability — see Run); output leaves as stdout/stderr and
 // the exit code. The same egress brain that governs the microVM path
 // (internal/egress: default-deny allowlist + cred-blind credential swap + audit)
