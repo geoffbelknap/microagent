@@ -127,6 +127,23 @@ type Handler struct {
 	activeConns atomic.Int32
 }
 
+// brain returns a Brain view over the handler's policy fields — the one
+// allowlist+guarded+swap+audit decision core shared with the UDP datapath and
+// the wasm sandbox. It carries no per-connection state, so a fresh view per call
+// is correct and cheap; the Handler keeps the byte-stream transport machinery
+// (MITM, splice, byte/rate caps, peer/DNS reverse resolution) around it.
+func (h *Handler) brain() *Brain {
+	return &Brain{
+		Mode:     h.Mode,
+		Policy:   h.Policy,
+		Swaps:    h.Swaps,
+		Resolver: h.Resolver,
+		Cache:    h.tokenCache,
+		Logger:   h.Logger,
+		Limits:   h.Limits,
+	}
+}
+
 // EnableSwaps wires a loaded swap table onto the handler with the same
 // host-side resolver/cache setup used by Serve. It is for non-listener datapaths
 // that instantiate Handler directly while still reusing mediator policy logic.
@@ -405,58 +422,24 @@ func (h *Handler) Handle(conn net.Conn) {
 		}
 	}
 
-	d := h.Policy.AllowHost(host)
-	// Peer identity fallback: for a known east-west peer the authoritative identity
-	// is its workspace name from the roster, not a guest-supplied SNI/Host (an
-	// internal peer presents whatever internal cert/SNI it likes). When the
-	// host-based decision denied, re-evaluate against the peer name — so an operator
-	// who allowlisted the peer by name ("builder") permits the flow even when the
-	// guest's SNI differs. This is what makes a peer flow that LOOKS like TLS (SNI
-	// present) reach the L4-splice path instead of being denied on the SNI.
-	if !d.Allow && peer != "" && host != peer {
-		if nd := h.Policy.AllowHost(peer); nd.Allow {
-			d = nd
-		}
-	}
-	// Peer IP-literal fallback: a known peer that is still denied by name may be
-	// allowed if the operator allowlisted its IP literal. Default-deny stands —
-	// this only widens to an explicit IP entry, never beyond the allowlist. Tried
-	// only when the by-name decision denied.
-	if !d.Allow && peer != "" && peerIP != "" {
-		if ipd := h.Policy.AllowHost(peerIP); ipd.Allow {
-			d = ipd
-		}
-	}
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(host).Allow
-	// inside is true when guarded mode classifies the resolved destination IP
-	// as an inside/infrastructure address (link-local, RFC1918, CGNAT, loopback,
-	// etc.). An explicitly allowlisted host or a passthrough host overrides the
-	// inside-deny, so an operator who allowlists an internal IP/name keeps
-	// reaching it. The check runs on the raw destination IP, not the sniffed
-	// host, so SNI/Host spoofing cannot bypass it.
-	inside := h.Mode == egressModeGuarded && isInsideAddr(dst.Addr())
-	// strict (or empty) keeps the default-deny allowlist; guarded keeps the
-	// allowlist AND additionally denies non-allowlisted inside destinations
-	// fail-closed. allowed defaults to d.Allow when Mode is unset, so an
-	// unspecified mode is safe. The inside-deny is expressed as: guarded blocks
-	// the inside UNLESS explicitly allowlisted — i.e. the inside flag narrows
-	// guarded beyond the allowlist but the allowlist still wins.
-	allowed := d.Allow || (h.Mode == egressModeGuarded && !inside)
-	// unlisted marks a destination permitted only because of guarded mode (it
-	// is not on the allowlist) so the audit trail records the looser grant. A
-	// passthrough host is explicitly listed — and strict would allow it too — so
-	// it is never "unlisted".
-	unlisted := allowed && !d.Allow && !passthrough
+	// One decision sequence — shared with the UDP datapath and the wasm sandbox
+	// via Brain.Evaluate: the default-deny allowlist (against the sniffed host and
+	// any resolved east-west peer identity — its workspace name and IP literal, so
+	// an operator who allowlists a peer by name or IP permits the flow even when
+	// the guest's SNI differs), plus the guarded inside-deny on the resolved
+	// destination IP (which also defeats DNS rebinding, since the IP — not a
+	// guest-supplied name — is classified). passthrough is the byte-stream
+	// transport's own concern, applied here and excluded from the verdict's Allowed
+	// so the MITM/L4 branching below stays put.
+	b := h.brain()
+	v := b.Evaluate(host, []string{peer, peerIP}, dst.Addr(), passthrough)
+	allowed := v.Allowed
+	unlisted := v.Unlisted
 	if !allowed && !passthrough {
-		event := "egress_deny"
-		denyFields := map[string]any{"host": host, "dst": dst.String(), "reason": d.Reason}
+		denyFields := map[string]any{"host": host, "dst": dst.String()}
 		addPeerFields(denyFields, peer, peerIP)
-		if inside {
-			event = "egress_internal_deny"
-			denyFields["reason"] = "guarded: internal destination denied"
-			denyFields["internal"] = true
-		}
-		h.Logger.Log(event, denyFields)
+		b.AuditDeny(v, denyFields)
 		return // fail-closed: no upstream dial
 	}
 	// MITM applies only to external/public TLS. A named-network peer destination
