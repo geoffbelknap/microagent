@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -199,5 +200,63 @@ func TestFetchInvalidURLErrors(t *testing.T) {
 	_, err := Fetch(context.Background(), Spec{URL: "://nope", EgressAllow: []string{"x"}})
 	if err == nil {
 		t.Fatal("expected an error for an invalid URL")
+	}
+}
+
+// The Host/Dst/Reason accessors normalize the per-event key differences so a
+// consumer's {Event, Host, Dst, Reason} audit type maps directly.
+func TestAuditEventAccessors(t *testing.T) {
+	find := func(events []AuditEvent, name string) *AuditEvent {
+		for i := range events {
+			if events[i].Event == name {
+				return &events[i]
+			}
+		}
+		return nil
+	}
+
+	// Denial: Reason() reads the "reason" field.
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+	res, err := Fetch(context.Background(), Spec{URL: srv.URL, EgressAllow: []string{"allowed.example"}})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	deny := find(res.Audit, "egress_deny")
+	if deny == nil {
+		t.Fatalf("no egress_deny event: %+v", res.Audit)
+	}
+	if deny.Host() != "127.0.0.1" || !strings.HasPrefix(deny.Dst(), "127.0.0.1:") || deny.Reason() != "not allowlisted" {
+		t.Fatalf("deny accessors: host=%q dst=%q reason=%q", deny.Host(), deny.Dst(), deny.Reason())
+	}
+
+	// Failure: Reason() falls back to the "error" field. A closed loopback port
+	// gives a deterministic upstream (connection-refused) error with no DNS.
+	ln, lerr := net.Listen("tcp", "127.0.0.1:0")
+	if lerr != nil {
+		t.Fatalf("listen: %v", lerr)
+	}
+	closedAddr := ln.Addr().String()
+	_ = ln.Close()
+	res2, err := Fetch(context.Background(), Spec{URL: "https://" + closedAddr + "/", EgressAllow: []string{"127.0.0.1"}})
+	if err != nil {
+		t.Fatalf("Fetch (closed port): %v", err)
+	}
+	fe := find(res2.Audit, "egress_fetch_error")
+	if fe == nil {
+		t.Fatalf("no egress_fetch_error event: %+v", res2.Audit)
+	}
+	if fe.Host() != "127.0.0.1" || fe.Dst() != closedAddr || fe.Reason() == "" {
+		t.Fatalf("fetch_error accessors: host=%q dst=%q reason=%q", fe.Host(), fe.Dst(), fe.Reason())
+	}
+
+	// A clean allow has no reason.
+	res3, err := Fetch(context.Background(), Spec{URL: srv.URL, EgressAllow: []string{"127.0.0.1"}})
+	if err != nil {
+		t.Fatalf("Fetch (allow): %v", err)
+	}
+	allow := find(res3.Audit, "egress_allow")
+	if allow == nil || allow.Reason() != "" {
+		t.Fatalf("allow should have empty reason: %+v", allow)
 	}
 }

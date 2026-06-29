@@ -73,12 +73,44 @@ type Spec struct {
 	Timeout time.Duration
 }
 
-// AuditEvent is one egress decision (allow / deny / swap / close / cap) the brain
-// recorded during the fetch. Fields never contain secret material. It is
-// govfetch's public projection of the brain's internal audit records.
+// AuditEvent is one egress decision the brain recorded during the fetch (Event is
+// the kind: egress_allow, egress_deny, egress_internal_deny, egress_swap,
+// egress_swap_error, egress_fetch_error, egress_cap_exceeded, egress_close).
+// Fields never contain secret material.
+//
+// Prefer the Host/Dst/Reason accessors over indexing Fields directly — they are
+// the STABLE contract and normalize the per-event key differences (e.g. the
+// failure reason lives under "reason" for denials and "error" for fetch/swap
+// failures). Fields stays available for the extra context some events carry
+// (shape, swap, type, bytes, limit, stage, unlisted, internal).
 type AuditEvent struct {
 	Event  string
 	Fields map[string]any
+}
+
+// Host returns the destination hostname for the event. Present on every
+// fetch-path event; "" only if somehow absent.
+func (e AuditEvent) Host() string { return e.stringField("host") }
+
+// Dst returns the resolved destination as "ip:port", or "" when the event has no
+// destination yet (e.g. egress_swap, or an egress_fetch_error at the resolve
+// stage before any IP was chosen).
+func (e AuditEvent) Dst() string { return e.stringField("dst") }
+
+// Reason returns why a request was denied or failed, or "" for a clean
+// allow/close. It reads "reason" (policy denials and the volume cap) and falls
+// back to "error" (resolve / upstream / credential failures), so one accessor
+// covers every non-success outcome — what a denial classifier wants.
+func (e AuditEvent) Reason() string {
+	if r := e.stringField("reason"); r != "" {
+		return r
+	}
+	return e.stringField("error")
+}
+
+func (e AuditEvent) stringField(key string) string {
+	s, _ := e.Fields[key].(string)
+	return s
 }
 
 // Result is the outcome of a governed fetch. Status mirrors HTTP: 200 on success;
