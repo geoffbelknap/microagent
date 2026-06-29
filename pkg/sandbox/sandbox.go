@@ -77,6 +77,14 @@ type Config struct {
 	Env map[string]string
 	// Limits bounds this execution.
 	Limits Limits
+	// Egress, when set, installs the governed host-fetch capability: the guest's
+	// ONLY path to the network is the microagency.fetch host function, mediated by
+	// the shared egress brain (allowlist + guarded inside-deny + cred-blind
+	// credential swap + audit). When nil, the module has no network capability at
+	// all — fail-closed by absence (a guest that imports the capability fails to
+	// instantiate). For a pooled Runtime, the capability is installed at Compile
+	// (RuntimeOptions.Egress) and the per-run policy is supplied here.
+	Egress *EgressConfig
 }
 
 // Result is the outcome of one sandboxed execution.
@@ -95,7 +103,10 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	rt, err := Compile(ctx, module, RuntimeOptions{MaxMemoryPages: cfg.Limits.MaxMemoryPages})
+	rt, err := Compile(ctx, module, RuntimeOptions{
+		MaxMemoryPages: cfg.Limits.MaxMemoryPages,
+		Egress:         cfg.Egress != nil,
+	})
 	if err != nil {
 		return Result{}, err
 	}
@@ -108,6 +119,12 @@ type RuntimeOptions struct {
 	// MaxMemoryPages caps guest linear memory for every module this Runtime runs
 	// (see Limits.MaxMemoryPages). 0 leaves wazero's default ceiling.
 	MaxMemoryPages uint32
+	// Egress installs the microagency host-fetch capability on the runtime. The
+	// per-run policy (allowlist, swaps, audit sink) is supplied via Config.Egress
+	// at each Run; this only decides whether the capability EXISTS. A runtime built
+	// without it cannot perform governed egress — a guest that imports the
+	// capability fails to instantiate (fail-closed by absence).
+	Egress bool
 }
 
 // Runtime is a compiled module bound to a wazero runtime: Compile pays the
@@ -118,10 +135,15 @@ type RuntimeOptions struct {
 type Runtime struct {
 	rt       wazero.Runtime
 	compiled wazero.CompiledModule
+	// egress is the host-fetch capability's per-runtime state (the response stash),
+	// non-nil when the runtime was built WithEgress. The per-run brain is supplied
+	// via Config.Egress at Run time, not held here.
+	egress *egressState
 }
 
-// Compile builds a wazero runtime (with WASI preview1) and compiles module into
-// it, returning a reusable Runtime. The caller owns it and must Close it.
+// Compile builds a wazero runtime (with WASI preview1, plus the microagency
+// host-fetch capability when opts.Egress) and compiles module into it, returning
+// a reusable Runtime. The caller owns it and must Close it.
 func Compile(ctx context.Context, module []byte, opts RuntimeOptions) (*Runtime, error) {
 	rc := wazero.NewRuntimeConfig().
 		// Let ctx cancellation / a Limits.Timeout interrupt a runaway guest rather
@@ -135,12 +157,21 @@ func Compile(ctx context.Context, module []byte, opts RuntimeOptions) (*Runtime,
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("sandbox: instantiate wasi: %w", err)
 	}
+	r := &Runtime{rt: rt}
+	if opts.Egress {
+		r.egress = newEgressState()
+		if err := r.egress.install(ctx, rt); err != nil {
+			_ = rt.Close(ctx)
+			return nil, fmt.Errorf("sandbox: install egress capability: %w", err)
+		}
+	}
 	compiled, err := rt.CompileModule(ctx, module)
 	if err != nil {
 		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("sandbox: compile module: %w", err)
 	}
-	return &Runtime{rt: rt, compiled: compiled}, nil
+	r.compiled = compiled
+	return r, nil
 }
 
 // Close releases the runtime and every resource it holds.
@@ -155,6 +186,21 @@ func (r *Runtime) Run(ctx context.Context, cfg Config) (Result, error) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cfg.Limits.Timeout)
 		defer cancel()
+	}
+
+	// Bind this run's governance brain into the context the host-fetch functions
+	// read. A run that supplies an EgressConfig requires a runtime that installed
+	// the capability; otherwise the guest's import is unresolved and instantiation
+	// fails fail-closed.
+	if cfg.Egress != nil {
+		if r.egress == nil {
+			return Result{}, errors.New("sandbox: Config.Egress set but runtime was built without egress (RuntimeOptions.Egress)")
+		}
+		brain, err := cfg.Egress.brain()
+		if err != nil {
+			return Result{}, err
+		}
+		ctx = withBrain(ctx, brain)
 	}
 
 	var stdout, stderr bytes.Buffer

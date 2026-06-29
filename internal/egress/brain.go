@@ -2,6 +2,7 @@ package egress
 
 import (
 	"context"
+	"crypto/x509"
 	"net/netip"
 )
 
@@ -26,6 +27,10 @@ type Brain struct {
 	Cache    *tokenCache
 	Logger   Logger
 	Limits   Limits
+	// UpstreamRoots optionally overrides the system roots used to verify the real
+	// upstream certificate on the host-fetch path (Fetch). Nil uses the system
+	// pool. It is never used to disable verification.
+	UpstreamRoots *x509.CertPool
 }
 
 // NewBrain builds a stand-alone governance brain for a structured transport (the

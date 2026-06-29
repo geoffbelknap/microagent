@@ -134,13 +134,14 @@ type Handler struct {
 // (MITM, splice, byte/rate caps, peer/DNS reverse resolution) around it.
 func (h *Handler) brain() *Brain {
 	return &Brain{
-		Mode:     h.Mode,
-		Policy:   h.Policy,
-		Swaps:    h.Swaps,
-		Resolver: h.Resolver,
-		Cache:    h.tokenCache,
-		Logger:   h.Logger,
-		Limits:   h.Limits,
+		Mode:          h.Mode,
+		Policy:        h.Policy,
+		Swaps:         h.Swaps,
+		Resolver:      h.Resolver,
+		Cache:         h.tokenCache,
+		Logger:        h.Logger,
+		Limits:        h.Limits,
+		UpstreamRoots: h.UpstreamRoots,
 	}
 }
 
