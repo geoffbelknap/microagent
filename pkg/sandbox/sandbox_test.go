@@ -201,7 +201,12 @@ func main() {
 	if err == nil {
 		t.Fatal("expected a runaway guest to be interrupted, got nil error")
 	}
-	if elapsed > 5*time.Second {
+	// The signal is that Run RETURNS (the guest was torn down) rather than looping
+	// forever — not the exact latency. The ceiling is deliberately generous: the
+	// race detector inflates wazero's interruption checks several-fold (~7s seen in
+	// CI for a 300ms deadline), so a tight bound flakes there. A genuine "never
+	// interrupts" regression still trips this well before the test-binary timeout.
+	if elapsed > 60*time.Second {
 		t.Fatalf("timeout did not interrupt promptly: %v", elapsed)
 	}
 }
