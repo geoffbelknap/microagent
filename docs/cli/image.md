@@ -4,7 +4,7 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-25_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                    Pull and record an image
@@ -96,10 +96,12 @@ when the workspace has no setup commands, entrypoint, env overrides, or
 attached disks. Workspaces that need guest config are rebuilt from the source
 OCI image so their init config is baked into the rootfs.
 
-For private registries, image pulls read standard registry credential
-configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
-including configured credential helpers. Pulls use those credentials;
-microagent does not write registry login state.
+For private registries, image pulls resolve credentials without any Docker
+dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with
+Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
+[`microagent registry login`](/cli/registry/)). Credential helpers are never
+executed, and public images always pull anonymously. microagent does not write
+Docker's login state. See [registry](/cli/registry/) for details.
 
 ## Flags
 

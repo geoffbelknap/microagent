@@ -107,9 +107,11 @@ This repository owns the VM pieces:
 - Keep container-style aliases honest and narrow: `run IMAGE [COMMAND ARG...]`,
   `-e/--env`, `-p/--publish`, `-v/--volume` for tar/ext4 inputs, `--name`,
   and `--rm` are convenience forms, not a container runtime contract.
-- Keep private registry support limited to standard pull credentials read from
-  `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`; do not write login
-  state or broker credentials.
+- Keep private registry support Docker-free: read pull credentials only from
+  `$REGISTRY_AUTH_FILE` or microagent's own `~/.microagent/auth.json` (written
+  by `microagent registry login`). Never read `~/.docker/config.json` or invoke
+  docker credential helpers; public images always pull anonymously. Do not
+  broker credentials.
 
 ## Collaboration rules
 

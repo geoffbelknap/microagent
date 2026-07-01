@@ -12,7 +12,6 @@ package commit
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,6 +21,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/ociimage"
+	"github.com/geoffbelknap/microagent/pkg/registryauth"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	"oras.land/oras-go/v2"
@@ -29,7 +29,6 @@ import (
 	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 	"oras.land/oras-go/v2/registry/remote/retry"
 )
 
@@ -249,7 +248,7 @@ func newRepository(repoRef string) (*remote.Repository, error) {
 	repo.Client = &auth.Client{
 		Client:     retry.DefaultClient,
 		Cache:      auth.DefaultCache,
-		Credential: registryCredential(host),
+		Credential: registryauth.Credential(host),
 	}
 	return repo, nil
 }
@@ -265,32 +264,4 @@ func isLoopbackRegistry(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
-}
-
-func registryCredential(host string) auth.CredentialFunc {
-	store, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
-	if err == nil {
-		dockerCredential := credentials.Credential(store)
-		return func(ctx context.Context, hostport string) (auth.Credential, error) {
-			cred, err := dockerCredential(ctx, hostport)
-			if missingCredentialHelper(err) {
-				return auth.EmptyCredential, nil
-			}
-			return cred, err
-		}
-	}
-	return auth.StaticCredential(host, auth.Credential{})
-}
-
-func missingCredentialHelper(err error) bool {
-	if err == nil {
-		return false
-	}
-	var execErr *exec.Error
-	if errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "executable file not found") ||
-		strings.Contains(msg, "Docker Desktop seems not running")
 }

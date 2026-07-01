@@ -229,6 +229,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "secret" {
 		return runSecret(ctx, args[1:], stdout)
 	}
+	if args[0] == "registry" {
+		return runRegistry(args[1:], stdout)
+	}
 	if args[0] == "result" {
 		return runWorkspaceStateCommand(ctx, args[0], args[1:], stdout)
 	}
@@ -3593,6 +3596,8 @@ func reorderFlagArgs(args []string) []string {
 		"-expect":                    true,
 		"-secret":                    true,
 		"-secrets-env-file":          true,
+		"-username":                  true,
+		"-u":                         true,
 		"-secret-on-demand":          true,
 		"-egress":                    true,
 		"-egress-allow":              true,
@@ -3635,7 +3640,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push", "-password-stdin":
 		return true
 	default:
 		return false
@@ -4079,6 +4084,7 @@ Resources:
   model                Manage local GGUF models and runners
   artifact             List or retrieve declared workspace artifacts
   secret check         Validate secret references
+  registry             Store credentials for private OCI registries
 
 More:
   microagent <command> --help
@@ -4121,6 +4127,7 @@ Commands:
   stats                Show or stream workspace resource usage
   snapshot             Create, list, or remove workspace snapshots
   secret check         Resolve and validate secret references
+  registry             Store credentials for private OCI registries (login/logout/list)
   profiles             List resource profiles
   image                Manage local image records
   perf                 Measure workspace performance

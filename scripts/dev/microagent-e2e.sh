@@ -52,7 +52,7 @@ SCENARIOS=(
   "windows-hyperv-exec-host:scripts/dev/microagent-e2e-windows-hyperv-exec-host.sh:windows:vm:broad"
   "windows-hyperv-transport-host:scripts/dev/microagent-e2e-windows-hyperv-transport-host.sh:windows:vm:broad"
   "windows-hyperv-model-host:scripts/dev/microagent-e2e-windows-hyperv-model-host.sh:windows:vm:broad"
-  "applevf-boot:scripts/dev/applevf-boot-smoke.sh:darwin:vm:broad"
+  "applevf-boot:scripts/dev/applevf-live-boot-smoke.sh:darwin:vm:broad"
   "applevf-direct-console:scripts/dev/applevf-direct-console-smoke.sh:darwin:vm:broad"
   "applevf-substrate:scripts/dev/applevf-substrate-smoke.sh:darwin:vm:broad"
   "applevf-workspace-connect:scripts/dev/applevf-workspace-connect-smoke.sh:darwin:vm:broad"

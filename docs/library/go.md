@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-01_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -392,6 +392,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent kernel install` / `microagent kernel verify` | [`kernel.Install`](#kernel-api) / `kernel.Verify` |
 | `microagent rootfs build` | `rootfs.Builder.Build` |
 | `microagent image` | [`imagecache.Pull`](#image-cache-api) / `List` / `Tag` / `Remove` / `Prune` |
+| `microagent registry` login / logout / list | `registryauth.Login` / `registryauth.Logout` / `registryauth.List` |
 | `microagent perf` / `microagent perf boot` / `microagent perf footprint` / `microagent perf steady` | `perf.Boot` / `Footprint` / `Steady` |
 | `microagent profiles` | `workspace.ProfileNames` / `workspace.LookupProfile` |
 | `microagent serve mcp` | CLI-only MCP stdio transport over the existing package APIs |

@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-25_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -76,10 +76,13 @@ The complete set:
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.
 
-For private registries, microagent reads standard registry credential
-configuration from `$DOCKER_CONFIG/config.json` or `~/.docker/config.json`,
-including configured credential helpers. It does not store registry
-credentials.
+For private registries, microagent resolves credentials without any Docker
+dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with
+Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
+[`microagent registry login`](/cli/registry/)). Credential helpers are never
+executed, Docker's `~/.docker/config.json` is never read, and public images
+always pull anonymously. See [registry](/cli/registry/) for the resolution
+order.
 
 ## Exit status
 
