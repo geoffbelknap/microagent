@@ -4,7 +4,7 @@ description: Inspect a workspace's networking.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-27_
 
 ```text
 microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's network
@@ -14,7 +14,7 @@ microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's netwo
 routes, and IP information recorded for a workspace. The top-level `network`
 field comes from the persistent workspace manifest; when a workspace has a
 runtime state file, `runtime` shows the last network config recorded by the
-backend supervisor.
+host supervisor.
 
 ## Examples
 

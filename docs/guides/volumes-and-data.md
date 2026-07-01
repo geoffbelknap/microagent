@@ -4,13 +4,12 @@ description: Persist data in named volumes, attach disks and bundles, and copy f
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-27_
 
 microagent never exposes host directories to the guest - everything the guest
 reads or writes is a block device - so data moves through deliberate, declared
-paths. This guide walks all of them: named volumes that outlive any workspace,
-existing disks and tar bundles attached directly, and single files copied in
-and out with `cp`.
+paths. Use named volumes for data that outlives a workspace, attach existing
+disks and tar bundles directly, and copy single files in or out with `cp`.
 
 ## 1. Create a named volume
 
@@ -138,7 +137,7 @@ microagent volume delete data
 `--force` overrides. Deleting a workspace releases its volumes - the data
 stays for the next attach, until `volume delete` removes the backing disk.
 
-## What's next
+## Related
 
 - **The storage model behind all this** - [Storage](/concepts/storage/).
 - **Volume flags and semantics** - the [`volume`](/cli/volume/) reference.

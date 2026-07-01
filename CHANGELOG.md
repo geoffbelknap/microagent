@@ -5,6 +5,37 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.8.3 - 2026-06-27
+
+### Apple VF snapshots, restore, and fork are now on the shared contract path
+
+Apple Virtualization.framework now has the same product-level snapshot shape as
+Firecracker: pause/resume control, save-state configuration probes, supervisor
+runtime-control capability fixes, snapshot creation, restore, fork, and the
+library-owned backend capability contract. Snapshot artifacts are described in
+the backend-neutral contract, and secret restore/purge behavior is enforced
+through shared workspace semantics instead of adapter-only checks.
+
+### Backend-aware egress capture reporting
+
+The workspace layer now negotiates the egress capture provider by backend and
+fails closed when an invalid provider is requested. Workspace status and inspect
+output surface the active capture-provider report, and the Apple VF host-fd
+egress datapath is wired into the backend-neutral feature contract.
+
+### Contracts, docs, and E2E release coverage
+
+The CLI/MCP feature contracts, backend-neutral coverage policy, and Apple VF
+snapshot support docs were brought in line with the current behavior. Linux
+Firecracker E2E regressions were fixed, experimental Windows Hyper-V release-tag
+gating was removed, the E2E CI cutover is complete, and the E2E preflight now
+detects macOS hosts that cannot run Apple Virtualization.framework instead of
+misclassifying them as live VM-capable. A live Apple VF PR/tag workflow is ready
+for self-hosted macOS/ARM64 runners with Virtualization.framework access, and
+Apple VF force-stop control and live E2E assertions were hardened so stuck
+helpers and early console closure produce structured state instead of false
+release-lane failures.
+
 ## v0.8.2 - 2026-06-25
 
 ### VMM-process confinement is on by default (behavior change)

@@ -1,17 +1,17 @@
 ---
 title: Egress mediation
-description: How microagent captures, audits, and controls everything a workspace sends to the network - the four modes, the per-workspace MITM CA, UDP/DNS mediation, and allow vs passthrough.
+description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-06-27_
 
-Egress mediation is microagent's transparent control point for **everything a
-workspace sends to the network**. The host captures the guest's outbound
-traffic, decides what to do with each connection, records the decision, and
-forwards or denies it - the guest cannot reach the network except through this
-path. It is how microagent answers "what did this agent actually try to talk
-to?" and, when you want it, "what is it allowed to talk to?".
+Egress mediation is microagent's transparent control point for workspace
+network traffic. When mediation is active, the host captures the guest's
+outbound traffic, decides what to do with each connection, records the
+decision, and forwards or denies it. It is how microagent answers "what did
+this agent actually try to talk to?" and, when you want it, "what is it
+allowed to talk to?".
 
 > **Not the same thing as the mediation channel.** Egress mediation (this page)
 > governs the guest's *ordinary network egress* - the TCP, UDP, and DNS it sends
@@ -21,9 +21,10 @@ to?" and, when you want it, "what is it allowed to talk to?".
 > word "mediation". See [networking](/concepts/networking/#mediation-channel) for
 > the channel.
 
-Egress mediation is implemented by the Firecracker backend on Linux. It runs in
-the [`user` network mode](/concepts/networking/)'s per-VM user namespace, the
-only mode that carries network egress.
+Egress mediation only applies to [`user` network mode](/concepts/networking/),
+the mode that carries outbound network traffic. If the current host cannot
+provide mediation, microagent reports that as structured command output instead
+of asking you to infer it from logs.
 
 > **Migration note (behavior change):** the default egress mode is `guarded`.
 > Workspaces that omit `--egress` deny internal destinations

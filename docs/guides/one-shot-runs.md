@@ -4,12 +4,12 @@ description: Boot a microVM, run a command, and tear it down - with setup, env v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-27_
 
-By the end of this guide you can run any command in a disposable microVM:
-image plus command, setup steps before it, environment variables into it, and
-files back out of it. `microagent run` builds the rootfs, boots the microVM,
-runs the command, and removes the scratch state when it's done.
+Use `microagent run` for disposable work: image plus command, setup steps before
+it, environment variables into it, and files back out of it. microagent builds
+the rootfs, boots the microVM, runs the command, and removes the scratch state
+when it's done.
 
 ## 1. Run an image and a command
 
@@ -150,7 +150,7 @@ microagent list
 No workspaces.
 ```
 
-## What's next
+## Related
 
 - **Keep state between runs** - [persistent workspaces](/guides/persistent-workspaces/) cover the create, start, halt lifecycle.
 - **Mount data instead of baking it in** - [volumes and data](/guides/volumes-and-data/).

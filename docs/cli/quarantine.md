@@ -4,7 +4,7 @@ description: Sever host-side workspace effects while preserving forensic state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
 ```text
 microagent quarantine <name> [--state-dir <dir>]
@@ -19,16 +19,10 @@ process where it is and cuts its ability to affect anything outside the
 boundary. A quarantined workspace is a forensic state - you must halt, stop,
 or kill it before you can `start` it again.
 
-On Firecracker, quarantine does not signal the VM process. It terminates
-host-side port-forwarding, removes transient network devices, and unlinks the
-workspace vsock socket so mediation and other host-side vsock paths fail
-closed for new connections.
-
-On Apple VF, quarantine sends a control signal to the live supervisor process.
-The supervisor detaches Virtualization.framework network attachments, removes
-host-side vsock listeners including mediation, closes published TCP listeners,
-and removes the serial input FIFO. The VM process remains alive, and the
-recorded runtime PID is preserved in state.
+Quarantine removes host-side network paths, mediation listeners, published TCP
+listeners, and console input where they exist. New connections fail closed. The
+VM process may still be alive, and the recorded runtime PID is preserved in
+state so you can inspect what happened before taking it down.
 
 ## Examples
 

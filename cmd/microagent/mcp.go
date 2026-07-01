@@ -290,10 +290,11 @@ func mcpTools() []map[string]any {
 	return []map[string]any{
 		mcpTool("microagent.ping", "Test tool for validating the microagent MCP transport.", nil, nil),
 		mcpTool("microagent.describe", "Return the machine-readable microagent MCP capability manifest.", nil, nil),
-		mcpTool("workspace.create", "Create or dry-run a workspace.", []string{"name"}, map[string]any{
+		mcpTool("workspace.create", "Create or dry-run a workspace, including snapshot forks.", []string{"name"}, map[string]any{
 			"name": map[string]any{"type": "string"}, "image": map[string]any{"type": "string"}, "exec": map[string]any{"type": "string"},
 			"state_dir": map[string]any{"type": "string"}, "profile": map[string]any{"type": "string"}, "dry_run": map[string]any{"type": "boolean"},
-			"model": map[string]any{"type": "string"}, "model_token": map[string]any{"type": "string"},
+			"from_snapshot": map[string]any{"type": "string", "description": "Fork from <workspace>:<tag> instead of creating from an image"},
+			"model":         map[string]any{"type": "string"}, "model_token": map[string]any{"type": "string"},
 			"model_runner":              map[string]any{"type": "string", "enum": []string{"llamacpp", "vllm", "custom"}},
 			"model_gpu":                 map[string]any{"type": "string", "enum": []string{"off", "on", "auto"}},
 			"model_runner_model":        map[string]any{"type": "string"},
@@ -319,8 +320,9 @@ func mcpTools() []map[string]any {
 			"secrets_env_file":          map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
 			"secrets_audit":             map[string]any{"type": "boolean", "description": "Append every secret access to the workspace audit log"},
 		}),
-		mcpTool("workspace.start", "Start a prepared workspace.", []string{"name"}, map[string]any{
+		mcpTool("workspace.start", "Start a prepared workspace, optionally restoring from a snapshot.", []string{"name"}, map[string]any{
 			"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"},
+			"from_snapshot":             map[string]any{"type": "string", "description": "Restore the workspace in place from this snapshot tag"},
 			"model_runner":              map[string]any{"type": "string", "enum": []string{"llamacpp", "vllm", "custom"}},
 			"model_gpu":                 map[string]any{"type": "string", "enum": []string{"off", "on", "auto"}},
 			"model_runner_model":        map[string]any{"type": "string"},
@@ -1270,6 +1272,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		}
 		cli := []string{"--mode=ax", "create", stringArg(args, "name")}
 		cli = appendOptionalFlag(cli, "-image", stringArg(args, "image"))
+		cli = appendOptionalFlag(cli, "-from-snapshot", stringArg(args, "from_snapshot"))
 		cli = appendOptionalFlag(cli, "-exec", stringArg(args, "exec"))
 		cli = appendOptionalFlag(cli, "-profile", stringArg(args, "profile"))
 		cli = appendOptionalFlag(cli, "-network", stringArg(args, "network"))
@@ -1294,6 +1297,7 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 			return nil, err
 		}
 		cli := []string{"--mode=ax", "start", stringArg(args, "name")}
+		cli = appendOptionalFlag(cli, "-from-snapshot", stringArg(args, "from_snapshot"))
 		var err error
 		cli, err = appendMCPWorkspaceModelFlags(cli, args)
 		if err != nil {

@@ -3,6 +3,7 @@ package vmkit
 type RuntimeContract struct {
 	Version          string            `json:"version"`
 	Backends         []string          `json:"backends"`
+	Features         []FeatureContract `json:"features"`
 	Commands         []ContractItem    `json:"commands"`
 	States           []ContractState   `json:"states"`
 	ReadinessSignals []ContractItem    `json:"readinessSignals"`
@@ -42,6 +43,7 @@ func NewRuntimeContract() RuntimeContract {
 	return RuntimeContract{
 		Version:  "agent-runtime.v1",
 		Backends: []string{BackendAppleVF, BackendLinuxKVM, BackendWindowsHyperV},
+		Features: FeatureContracts(),
 		Commands: []ContractItem{
 			{Name: "prepare", Description: "write backend state/config without booting"},
 			{Name: "start", Description: "start a prepared, halted, stopped, or failed workspace with preserved disk state; quarantined workspaces must be halted, stopped, or killed first"},
@@ -49,9 +51,9 @@ func NewRuntimeContract() RuntimeContract {
 			{Name: "inspect", Description: "read latest structured state"},
 			{Name: "halt", Description: "clean disk-preserving shutdown; memory state is not preserved"},
 			{Name: "quarantine", Description: "sever host-side network, mediation, and side-effect paths while preserving disk and events"},
-			{Name: "pause", Description: "freeze a running workspace's vCPUs while preserving memory and disk; resumable in place (Firecracker)"},
-			{Name: "resume", Description: "thaw a paused workspace back to running (Firecracker)"},
-			{Name: "snapshot", Description: "capture a memory-plus-disk checkpoint of a running or paused workspace; restore with start --from-snapshot, fork with create --from-snapshot (Firecracker)"},
+			{Name: "pause", Description: "freeze a running workspace's vCPUs while preserving memory and disk; capability-gated by Snapshot"},
+			{Name: "resume", Description: "thaw a paused workspace back to running; capability-gated by Snapshot"},
+			{Name: "snapshot", Description: "capture a memory-plus-disk checkpoint of a running or paused workspace; restore with start --from-snapshot, fork with create --from-snapshot; capability-gated by Snapshot"},
 			{Name: "stop", Description: "graceful stop"},
 			{Name: "kill", Description: "hard stop"},
 			{Name: "delete", Description: "remove workspace runtime state and persisted disks"},
@@ -96,7 +98,7 @@ func NewRuntimeContract() RuntimeContract {
 		},
 		Verification: ContractItem{Name: "verification", Description: "image digest, kernel hash, rootfs hash, init hash, and divergence entries"},
 		Parity: ContractParity{
-			Scope: "Firecracker, Apple VF, and Windows Hyper-V expose the same backend-neutral states, response fields, readiness signals, mediation shape, result channel, and artifact declarations.",
+			Scope: "Supported Firecracker and Apple VF backends expose the same backend-neutral states, response fields, readiness signals, mediation shape, result channel, and artifact declarations; experimental Windows Hyper-V follows these shapes where it implements a feature.",
 			Rules: []string{
 				"backend-specific mechanics stay behind the supervisor boundary",
 				"public output remains structured and machine-readable",

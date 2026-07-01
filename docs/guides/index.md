@@ -1,15 +1,14 @@
 ---
 title: Guides
-description: Task-shaped walkthroughs - pick the thing you want to do and follow the steps.
+description: Pick the thing you want to do and follow the steps.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-27_
 
-Each guide takes one task from start to finish with runnable commands and real
-output. If you want flag-by-flag detail instead, see the [CLI
-reference](/cli/); for the ideas behind the commands, see
-[Concepts](/concepts/architecture/).
+These guides are for doing the work, not memorizing flags. Each one starts
+with a task, shows runnable commands, and points to the CLI reference when the
+details matter.
 
 ## Run things
 

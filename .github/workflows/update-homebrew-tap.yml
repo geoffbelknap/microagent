@@ -15,9 +15,10 @@ permissions:
 
 jobs:
   update-formula:
-    # Only stable releases ship to the tap; -rc tags are validated by local
-    # builds and the tag-gated live suites instead of a published formula.
-    if: ${{ !contains(inputs.tag || github.event.release.tag_name, '-rc') }}
+    # Only stable product releases ship to the tap. Kernel artifact releases and
+    # release candidates are validated by their own paths and must not rewrite
+    # the microagent formula.
+    if: ${{ startsWith(inputs.tag || github.event.release.tag_name, 'v') && !contains(inputs.tag || github.event.release.tag_name, '-rc') }}
     runs-on: ubuntu-latest
     steps:
       # Same Homebrew GitHub App as the agency repo. Fails loudly when the

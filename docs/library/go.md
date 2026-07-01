@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-06-27_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -43,8 +43,8 @@ func main() {
 ```
 
 `DefaultOptions` picks the host backend, kernel, and state directory; you set
-only what your program cares about. The rest of this page covers the package
-surface behind this call and the lower-level APIs around it.
+only what your program cares about. The rest of this page covers the packages
+behind this call and the lower-level APIs around it.
 
 ## Use it as a generic microVM toolkit
 
@@ -64,7 +64,7 @@ supervisor request.
 | Package | Purpose |
 |---|---|
 | `pkg/vmkit` | supervisor request/response types, validation, and executable supervisor client |
-| `pkg/workspace` | workspace lifecycle API, options, defaults, request construction, backend supervisor selection, and backend-neutral helpers |
+| `pkg/workspace` | workspace lifecycle API, options, defaults, request construction, backend supervisor selection, and shared helpers |
 | `pkg/kernel` | kernel default manifest, install, verify, and support checks |
 | `pkg/imagecache` | reusable rootfs image cache indexing, pull, tag, remove, and prune |
 | `pkg/diagnostics` | backend host diagnostics and support summaries |
@@ -76,16 +76,16 @@ The CLI is an adapter over these packages. Go callers should use the library
 directly for workspace lifecycle operations instead of shelling out to
 `microagent`.
 
-## Public surface guard
+## Documented API
 
-The docs parity check treats these symbols as the public Go surface that should
-stay visible in docs. Helper functions and backend plumbing can remain exported
-for package boundaries without being promoted here, but new caller-facing
-symbols should be added to this page when they are introduced.
+These exported symbols are part of the documented Go API. Helper functions and
+backend plumbing can remain exported for package boundaries without being
+promoted here, but caller-facing symbols should be added to this page when they
+are introduced.
 
 | Package | Documented symbols |
 |---|---|
-| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `Capabilities`, `BackendCapabilities`, `SnapshotManifest`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotsDir`, `SnapshotDir`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot`, `EgressModeGuarded`, `EgressMediationOn`, `NetworkModeMediates`, `NormalizeEgressMode`, `EgressPolicy`, `EgressCaps`, `NormalizeEgressPolicy` |
+| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `FeatureContract`, `FeatureScope`, `FeatureBackendNeutral`, `FeatureCapability`, `FeatureCapabilityStructuredExec`, `FeatureBackend`, `FeatureGap`, `UnsupportedFeatureError`, `FeatureContracts`, `FeatureBackendSupport`, `BackendSupportsFeature`, `FeatureForCLICommand`, `FeatureForMCPTool`, `NewUnsupportedFeatureError`, `IsKnownBackend`, `Capabilities`, `BackendCapabilities`, `SnapshotManifest`, `SnapshotArtifact`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotAppleVFMachineState`, `SnapshotAppleVFConfig`, `SnapshotsDir`, `SnapshotDir`, `SnapshotRootfsArtifact`, `SnapshotMachineStateArtifacts`, `FirecrackerSnapshotArtifacts`, `AppleVFSnapshotArtifacts`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot`, `MaterializedSecretsDeclared`, `ValidateSnapshotSecretCapture`, `ValidateSnapshotSecretRestore`, `EgressModeGuarded`, `EgressMediationOn`, `NetworkModeMediates`, `NormalizeEgressMode`, `EgressPolicy`, `EgressCaps`, `NormalizeEgressPolicy` |
 | `pkg/workspace` | `Options`, `OptionsFromRequest`, `EgressPolicyFromOptions`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `ModelRunnerSpec`, `ModelMediationSpec`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `DefaultModelGuestPort`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecMaxTransientRetries`, `ExecPort`, `ExecPortForName`, `ExecRetryExhaustedError`, `ExecRetryMetadata`, `ExecReadinessSignal`, `Create`, `CreateFromSnapshot`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `GuestRootfsLayerTar`, `Clone`, `ReadLogs`, `ReadEvents`, `EventsPath`, `ReadEgressAudit`, `EgressAuditPath`, `EgressEvent`, `EgressAuditSummary`, `SummarizeEgressAudit`, `RunDispatch`, `DispatchResult`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `Snapshot`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `ExecWithMetadata`, `ExecStream`, `MarkActivity`, `IsRetryableExecTransient`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
@@ -142,6 +142,14 @@ func inspect(ctx context.Context, supervisor vmkit.Supervisor, req vmkit.Request
 }
 ```
 
+`vmkit.NewRuntimeContract()` also exposes the runtime feature records used by
+the CLI and MCP adapters. Use `vmkit.FeatureContracts()` when your integration
+needs to map commands or MCP tools back to library-owned behavior, and use
+`vmkit.FeatureForCLICommand()` / `vmkit.FeatureForMCPTool()` when checking
+adapter coverage. If a library path rejects a feature, return
+`vmkit.NewUnsupportedFeatureError()` so CLI and MCP callers see the same
+structured error shape.
+
 ## Rootfs builder
 
 Use `pkg/rootfs` when your program needs to build a VM rootfs from an OCI image
@@ -195,8 +203,8 @@ captured from the guest. `Result.Response` carries the supervisor's structured
 response (state, identity, verification).
 
 Paired model workspaces set `Options.Model`, `Options.ModelRunner`, and
-`Options.ModelMediation`. `ModelRunnerSpec` stores the backend-neutral runner
-selection (`llamacpp`, `vllm`, or `custom`), GPU intent, backend model id,
+`Options.ModelMediation`. `ModelRunnerSpec` stores the runner selection
+(`llamacpp`, `vllm`, or `custom`), GPU intent, backend model id,
 custom command template, and repeatable runner args. `ModelMediationSpec` stores
 the mediation mode and policy source (`PolicyFile` or `PolicyURL`). Runner env is
 transient and is intentionally not persisted to workspace manifests.
@@ -224,9 +232,9 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
 | `workspace.Control` | Halt, quarantine, stop, kill, or delete a workspace |
-| `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place (Firecracker) |
-| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace (Firecracker) |
-| `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it (Firecracker) |
+| `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place |
+| `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace |
+| `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it |
 | `workspace.SnapshotList` / `workspace.SnapshotRemove` | List or delete a workspace's snapshots (host-side) |
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
 | `workspace.ReadManifest` / `workspace.WriteManifest` | Manage workspace manifests directly |
@@ -355,10 +363,12 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent init` | `scaffold.Generate` |
 | `microagent create` | `workspace.Create` |
 | `microagent start` | `workspace.Start` |
-| `microagent status` / `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
+| `microagent create --from-snapshot` | `workspace.CreateFromSnapshot` |
+| `microagent start --from-snapshot` | `workspace.Start` with `Options.FromSnapshot` |
+| `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
 | `microagent result` | `workspace.ResultStatus` |
 | `microagent list` / `microagent ls` / `microagent ps` | `workspace.List` |
-| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` / `microagent delete` | `workspace.Control` (one function, action picked via options) |
+| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` | `workspace.Control` (one function, action picked via options) |
 | `microagent pause` / `microagent resume` | `workspace.Pause` / `workspace.Resume` |
 | `microagent snapshot` create / list / delete | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
 | `microagent apply` | `workspace.Apply` |
@@ -390,6 +400,6 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |
 
 The library calls take options structs and return typed responses. For reusable
-runtime behavior, prefer the package API. The remaining CLI-only surfaces are
+runtime behavior, prefer the package API. The remaining CLI-only commands are
 presentation concerns such as `help`, `version`, and raw terminal mode around an
 already-open console connection.

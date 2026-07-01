@@ -4,7 +4,7 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-27_
 
 Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
@@ -89,7 +89,7 @@ microagent start minimal-agent
 The agent boots, calls the LLM with `bash` / `read_file` / `write_file`
 tools, runs the tool calls inside `/workspace`, and writes a `WorkResult` to
 `/workspace/result.json` (declared as the `result` output artifact in the
-spec; `microagent --json result` surfaces it inside its `result` envelope).
+spec; `microagent --json result` prints it inside its `result` envelope).
 `start` returns once the VM boots, not when the agent finishes - poll
 `microagent --json status minimal-agent` until it reports `"state": "stopped"`
 (half a minute or so), then read the result:
@@ -357,11 +357,10 @@ the hold, but an agent that exits on its own - like each run above - keeps it
 until the next lifecycle verb. `microagent model stop <ref>` reclaims a
 runner immediately.
 
-## What's next
+## Related
 
 - [Build a simple agent](/guides/simple-agent/) - the same flow with more
-  on the agent's structure, prompt caching, and the production-shape gaps
-  (mediation channel, host-side proxy for keys).
+  on the agent's structure, prompt caching, mediation channel, and host-side proxy for keys.
 - [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
 - [State and identity](/concepts/state-and-identity/) - what `microagent --json status` reports and how lifecycle events are emitted.
 - [Glossary](/concepts/glossary/) - workspace, mediation, halt vs stop vs kill vs quarantine.

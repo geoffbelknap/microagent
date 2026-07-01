@@ -3,6 +3,7 @@ package firecracker
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -97,6 +98,31 @@ func TestConfinedJailLayout(t *testing.T) {
 	}
 }
 
+func TestConfinedLaunchArgsTranslateWorkspacePaths(t *testing.T) {
+	opts := Options{Name: "ws1", StateDir: "/state"}
+
+	bootArgs, err := confinedLaunchArgs(opts, []string{
+		"--api-sock", "/state/ws1/firecracker-api.sock",
+		"--config-file", "/state/ws1/firecracker.json",
+	})
+	if err != nil {
+		t.Fatalf("confinedLaunchArgs boot: %v", err)
+	}
+	wantBoot := []string{"--api-sock", "/run/firecracker-api.sock", "--config-file", "/run/firecracker.json"}
+	if !reflect.DeepEqual(bootArgs, wantBoot) {
+		t.Fatalf("boot args = %#v, want %#v", bootArgs, wantBoot)
+	}
+
+	loadArgs, err := confinedLaunchArgs(opts, []string{"--api-sock", "/state/ws1/firecracker-api.sock"})
+	if err != nil {
+		t.Fatalf("confinedLaunchArgs load: %v", err)
+	}
+	wantLoad := []string{"--api-sock", "/run/firecracker-api.sock"}
+	if !reflect.DeepEqual(loadArgs, wantLoad) {
+		t.Fatalf("load args = %#v, want %#v", loadArgs, wantLoad)
+	}
+}
+
 func TestStageJailArtifactsHardlinks(t *testing.T) {
 	tmp := t.TempDir()
 	srcDir := filepath.Join(tmp, "src")
@@ -125,6 +151,48 @@ func TestStageJailArtifactsHardlinks(t *testing.T) {
 	assertSameFile(t, fcSrc, l.Firecracker.Host)
 	if fi, err := os.Stat(filepath.Dir(l.VsockUDS.Host)); err != nil || !fi.IsDir() {
 		t.Errorf("jail run dir not created: %v", err)
+	}
+}
+
+func TestStageJailArtifactsDereferencesFirecrackerSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src")
+	if err := os.MkdirAll(srcDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	kernelSrc := filepath.Join(srcDir, "vmlinux")
+	rootfsSrc := filepath.Join(srcDir, "rootfs.ext4")
+	fcReal := filepath.Join(srcDir, "firecracker-real")
+	fcLink := filepath.Join(srcDir, "firecracker")
+	for _, p := range []string{kernelSrc, rootfsSrc} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(fcReal, []byte("firecracker"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(fcReal, fcLink); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := Options{Name: "ws1", StateDir: filepath.Join(tmp, "state")}
+	cfg := &vmkit.Config{KernelPath: kernelSrc, RootfsPath: rootfsSrc}
+	l := confinedJailLayout(opts, cfg, fcLink)
+
+	if err := stageJailArtifacts(l); err != nil {
+		t.Fatalf("stageJailArtifacts: %v", err)
+	}
+	info, err := os.Lstat(l.Firecracker.Host)
+	if err != nil {
+		t.Fatalf("lstat staged firecracker: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("staged firecracker is a symlink; confined exec would resolve it outside the jail")
+	}
+	assertSameFile(t, fcReal, l.Firecracker.Host)
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("staged firecracker mode = %v, want executable", info.Mode().Perm())
 	}
 }
 

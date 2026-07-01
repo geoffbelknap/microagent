@@ -1,23 +1,20 @@
 ---
 title: microagent contract
-description: Print the backend-neutral agent runtime contract.
+description: Print the runtime fields integrations rely on.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-13_
+_Last updated: 2026-06-27_
 
 ```text
 microagent [--json] contract
 ```
 
-`contract` prints the backend-neutral runtime contract: lifecycle commands,
-states, readiness signals, result fields, artifact channels, mediation fields,
-and verification. Backends share the same response shapes; a backend may
-support a smaller command set for commands it does not yet implement while
-preserving those shapes for the commands it supports. Use it when you're
-building an agent
-runtime or host integration and need a machine-readable statement of what the
-substrate guarantees.
+`contract` prints the fields a host integration can rely on: lifecycle
+commands, states, readiness signals, result fields, artifact channels,
+mediation fields, and verification. Use it when you are building an agent
+runtime or host integration and need a JSON description of what microagent
+reports.
 
 ## Examples
 
@@ -38,6 +35,5 @@ structured error envelope.
 
 ## Related
 
-- [Runtime contract](/protocol/runtime-contract/) - the contract, explained
-- [Supervisor protocol](/protocol/) - the JSON shapes underneath
-- [Backends](/concepts/backends/) - which backends implement which surface
+- [State and identity](/concepts/state-and-identity/) - lifecycle states and readiness
+- [Host requirements](/concepts/backends/) - what the current host must provide

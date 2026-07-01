@@ -59,11 +59,13 @@ SCENARIOS=(
   "applevf-network-mode:scripts/dev/applevf-network-mode-smoke.sh:darwin:vm:broad"
   "applevf-publish:scripts/dev/applevf-publish-smoke.sh:darwin:vm:broad"
   "applevf-vsock-diagnostic:scripts/dev/applevf-vsock-diagnostic-smoke.sh:darwin:vm:broad"
+  "applevf-save-restore-config:scripts/dev/applevf-save-restore-config-check.sh:darwin:vm:broad"
+  "applevf-snapshot:scripts/dev/applevf-snapshot-smoke.sh:darwin:vm:broad"
 )
 
 # Each entry: scenario|coverage|backends|feature summary.
 #   coverage = portable | backend-neutral | backend-specific | host-specific
-#   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf
+#   backends = none | host-default | linux-kvm,apple-vf | linux-kvm | apple-vf | windows-hyperv
 # This is a coverage inventory, not the release support policy. See
 # docs/concepts/platform-support.md for supported, compatibility, and
 # experimental host tiers.
@@ -111,9 +113,11 @@ SCENARIO_COVERAGE=(
   "applevf-network-mode|backend-specific|apple-vf|Apple VF user/isolated network modes"
   "applevf-publish|backend-specific|apple-vf|Apple VF TCP publish forwarding"
   "applevf-vsock-diagnostic|backend-specific|apple-vf|Apple VF mediation and virtio-vsock diagnostics"
+  "applevf-save-restore-config|backend-specific|apple-vf|Apple VF VZ save/restore configuration support probe"
+  "applevf-snapshot|backend-specific|apple-vf|Apple VF snapshot create/restore/fork smoke"
 )
 
-# Each entry: feature|classification|required backends|covering scenarios|notes.
+# Each entry: feature|classification|covered backends|covering scenarios|notes.
 # The matrix is intentionally user-facing: it maps CLI/workspace surfaces to
 # practical E2E coverage and makes unsupported/backend-specific areas explicit.
 E2E_MATRIX=(
@@ -140,7 +144,7 @@ E2E_MATRIX=(
   "secrets|backend-neutral|linux-kvm,apple-vf,windows-hyperv|secrets|Secret reference validation, materialized/on-demand delivery, audit"
   "health|backend-neutral|linux-kvm,apple-vf,windows-hyperv|health|Exec probes and supervise restart"
   "supervise|backend-neutral|linux-kvm,apple-vf,windows-hyperv|supervision-deep,health,survive-reboot|Restart loop plus host boot-unit generation"
-  "snapshot/pause/resume|backend-specific|linux-kvm,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep|vCPU pause/resume is implemented on Firecracker and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); memory snapshot is still Firecracker-only, planned on apple-vf"
+  "snapshot/pause/resume|backend-specific|linux-kvm,apple-vf,windows-hyperv|firecracker-lifecycle-host,lifecycle-deep,applevf-snapshot|vCPU pause/resume is implemented on Firecracker, Apple VF, and windows-hyperv (HCS pause/resume, exercised by lifecycle-deep); full memory snapshot create/restore/fork is supported on Firecracker and Apple VF, while windows-hyperv remains unsupported"
   "model|backend-neutral|linux-kvm,apple-vf,windows-hyperv|model-serving,model-mediation,model-mediation-runner,model-mediation-runner-fake,model-mediation-pressure-ci,model-mediation-llamacpp,model-mediation-vllm|Model store and run --model vsock pairing; mediation has stub, fake custom runner, runner-neutral, CI-safe pressure, llama.cpp, and vLLM opt-in matrices"
   "perf|backend-neutral|linux-kvm,apple-vf,windows-hyperv|public-surface|Boot/steady/footprint surfaces where host supports sampling; windows-hyperv samples HCS statistics"
   "serve mcp|portable|none|mcp-stdio|MCP stdio transport and capability manifest"
@@ -247,6 +251,9 @@ Scenarios:
   applevf-publish    Apple VF TCP publish forwarding smoke
   applevf-vsock-diagnostic
                     Apple VF mediation and virtio-vsock diagnostic smoke
+  applevf-save-restore-config
+                    Apple VF VZ save/restore configuration support probe
+  applevf-snapshot  Apple VF snapshot create/restore/fork smoke
 
 Environment:
   --keep or MICROAGENT_E2E_KEEP=1 keeps failed and successful scenario state directories.
@@ -447,7 +454,7 @@ list_scenarios() {
 
 list_matrix() {
   if [ "${MICROAGENT_E2E_MATRIX_TSV:-0}" = "1" ]; then
-    printf 'FEATURE\tCLASS\tREQUIRED_BACKENDS\tSCENARIOS\tNOTES\n'
+    printf 'FEATURE\tCLASS\tBACKENDS\tSCENARIOS\tNOTES\n'
     for entry in "${E2E_MATRIX[@]}"; do
       feature="${entry%%|*}"
       rest="${entry#*|}"
@@ -461,7 +468,7 @@ list_matrix() {
     done
     return 0
   fi
-  printf '%-30s %-18s %-22s %-44s %s\n' "FEATURE" "CLASS" "REQUIRED_BACKENDS" "SCENARIOS" "NOTES"
+  printf '%-30s %-18s %-22s %-44s %s\n' "FEATURE" "CLASS" "BACKENDS" "SCENARIOS" "NOTES"
   for entry in "${E2E_MATRIX[@]}"; do
     feature="${entry%%|*}"
     rest="${entry#*|}"

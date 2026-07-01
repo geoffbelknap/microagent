@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -319,6 +320,16 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 	if err := ValidateName(opts.Name); err != nil {
 		return Result{}, err
 	}
+	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
+		backend := opts.Backend
+		if backend == "" {
+			backend = DefaultOptions().Backend
+		}
+		if !vmkit.BackendCapabilities(backend).Snapshot {
+			feature, _ := vmkit.FeatureForCLICommand("start --from-snapshot")
+			return Result{}, vmkit.NewUnsupportedFeatureError(backend, feature, "snapshot restore (--from-snapshot)")
+		}
+	}
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
@@ -368,10 +379,12 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
-		if !vmkit.BackendCapabilities(opts.Backend).Snapshot {
-			return Result{}, fmt.Errorf("snapshot restore (--from-snapshot) is not supported on the %s backend", opts.Backend)
-		}
 		startReq.Tag = tag
+		if opts.Backend == vmkit.BackendAppleVF {
+			if err := prepareAppleVFSnapshotRestore(opts, startReq); err != nil {
+				return Result{}, err
+			}
+		}
 	}
 	resp, err := startDetached(opts, startReq)
 	return Result{
@@ -401,7 +414,16 @@ func Inspect(ctx context.Context, opts Options) (vmkit.Response, error) {
 	if err != nil {
 		return vmkit.Response{}, err
 	}
-	return Dispatch(ctx, opts, req)
+	resp, err := Dispatch(ctx, opts, req)
+	if resp.EgressCapture == nil {
+		networkMode := opts.Network.Mode
+		if req.Config != nil && req.Config.Network != nil {
+			networkMode = req.Config.Network.Mode
+		}
+		report := vmkit.NegotiateEgressCapture(opts.Backend, networkMode, opts.EgressMode)
+		resp.EgressCapture = &report
+	}
+	return resp, err
 }
 
 func Status(opts Options) (vmkit.Response, error) {
@@ -472,8 +494,19 @@ func List(stateDir string) ([]ListEntry, error) {
 			if !entry.IsDir() || entry.Name() == "build" || entry.Name() == "workspaces" {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(stateDir, entry.Name(), "event.json")); err == nil {
-				names[entry.Name()] = true
+			name := entry.Name()
+			if _, err := os.Stat(filepath.Join(stateDir, name, "event.json")); err != nil {
+				continue
+			}
+			if names[name] {
+				continue
+			}
+			event, err := ReadEvent(Options{StateDir: stateDir, Name: name})
+			if err != nil {
+				continue
+			}
+			if isLiveState(event.State) {
+				names[name] = true
 			}
 		}
 	} else if !os.IsNotExist(err) {
@@ -512,6 +545,15 @@ func List(stateDir string) ([]ListEntry, error) {
 	return out, nil
 }
 
+func isLiveState(state vmkit.VMState) bool {
+	switch state {
+	case vmkit.StateStarting, vmkit.StateRunning, vmkit.StatePaused, vmkit.StateQuarantined, vmkit.StateStopping:
+		return true
+	default:
+		return false
+	}
+}
+
 func Control(ctx context.Context, opts Options, command string) (vmkit.Response, error) {
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return vmkit.Response{}, err
@@ -523,6 +565,9 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 	case "halt", "quarantine", "pause", "resume", "stop", "kill", "delete", "gc":
 	default:
 		return vmkit.Response{}, fmt.Errorf("unsupported workspace control command: %s", command)
+	}
+	if resp, err := unsupportedControlCapability(opts.Backend, command); err != nil {
+		return resp, err
 	}
 	req := vmkit.Request{
 		Command: command,
@@ -539,6 +584,14 @@ func Control(ctx context.Context, opts Options, command string) (vmkit.Response,
 		Cleanup(opts.StateDir, opts.Name)
 	}
 	return resp, err
+}
+
+func unsupportedControlCapability(backend, command string) (vmkit.Response, error) {
+	if (command == "pause" || command == "resume") && !vmkit.BackendCapabilities(backend).PauseResume {
+		err := fmt.Errorf("%s is not supported on the %s backend; requires PauseResume capability", command, backend)
+		return vmkit.Response{OK: false, Backend: backend, Error: err.Error()}, err
+	}
+	return vmkit.Response{}, nil
 }
 
 // Pause freezes a running workspace's vCPUs while preserving memory and disk
@@ -558,17 +611,25 @@ func Resume(ctx context.Context, opts Options) (vmkit.Response, error) {
 // workspace image reference. A running workspace is briefly paused and resumed
 // around the capture; an already-paused workspace stays paused.
 func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
-	if err := normalizeLifecycleOptions(&opts, false); err != nil {
-		return vmkit.SnapshotManifest{}, err
-	}
 	if err := ValidateName(opts.Name); err != nil {
 		return vmkit.SnapshotManifest{}, err
 	}
 	if strings.TrimSpace(tag) == "" {
 		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot tag is required")
 	}
-	if !vmkit.BackendCapabilities(opts.Backend).Snapshot {
-		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot is not supported on the %s backend", opts.Backend)
+	backend := opts.Backend
+	if backend == "" {
+		backend = DefaultOptions().Backend
+	}
+	if !vmkit.BackendCapabilities(backend).SnapshotCreate {
+		feature, _ := vmkit.FeatureForCLICommand("snapshot")
+		return vmkit.SnapshotManifest{}, vmkit.NewUnsupportedFeatureError(backend, feature, "snapshot create")
+	}
+	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	if opts.Backend == vmkit.BackendAppleVF {
+		return snapshotAppleVF(ctx, opts, tag)
 	}
 	req := vmkit.Request{
 		Command: "snapshot",
@@ -600,6 +661,121 @@ func Snapshot(ctx context.Context, opts Options, tag string) (vmkit.SnapshotMani
 		}
 	}
 	return manifest, nil
+}
+
+func snapshotAppleVF(ctx context.Context, opts Options, tag string) (vmkit.SnapshotManifest, error) {
+	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+	if _, err := os.Stat(dir); err == nil {
+		return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot %q already exists for workspace %s", tag, opts.Name)
+	} else if !os.IsNotExist(err) {
+		return vmkit.SnapshotManifest{}, err
+	}
+	state, err := ReadRuntimeState(opts)
+	if err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	previousState := state.Event.State
+	if previousState != vmkit.StateRunning && previousState != vmkit.StatePaused {
+		return vmkit.SnapshotManifest{}, fmt.Errorf("apple-vf workspace %s is %s; snapshot requires a running or paused workspace", opts.Name, previousState)
+	}
+	if vmkit.MaterializedSecretsDeclared(&state.Config) && state.Config.SecretsControlPort == 0 {
+		return vmkit.SnapshotManifest{}, fmt.Errorf("cannot purge secrets for snapshot: workspace %s has materialized secrets but no secrets control port", opts.Name)
+	}
+	req := vmkit.Request{
+		Command: "snapshot",
+		Identity: &vmkit.Identity{
+			RequestID: NewRequestID(),
+			RuntimeID: opts.Name,
+			Role:      vmkit.RoleWorkload,
+			Backend:   opts.Backend,
+		},
+		Config: &vmkit.Config{StateDir: opts.StateDir},
+		Tag:    tag,
+	}
+	if _, err := Dispatch(ctx, opts, req); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	if err := writeAppleVFSnapshotArtifacts(tag, state, opts); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	return vmkit.ReadSnapshotManifest(dir)
+}
+
+func writeAppleVFSnapshotArtifacts(tag string, state RuntimeState, opts Options) error {
+	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+	for _, artifact := range []string{vmkit.SnapshotRootfsName, vmkit.SnapshotAppleVFMachineState} {
+		if _, err := os.Stat(filepath.Join(dir, artifact)); err != nil {
+			return fmt.Errorf("snapshot artifact %s: %w", artifact, err)
+		}
+	}
+	if err := writeJSONFile(filepath.Join(dir, vmkit.SnapshotAppleVFConfig), state.Config); err != nil {
+		return fmt.Errorf("write Apple VF snapshot restore config: %w", err)
+	}
+	manifest, err := appleVFSnapshotManifestFromState(tag, state, opts)
+	if err != nil {
+		return err
+	}
+	return vmkit.WriteSnapshotManifest(dir, manifest)
+}
+
+func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Options) (vmkit.SnapshotManifest, error) {
+	purged := vmkit.MaterializedSecretsDeclared(&state.Config)
+	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
+	kernelSHA := ""
+	if path := strings.TrimSpace(state.Config.KernelPath); path != "" {
+		sha, err := fileSHA256(path)
+		if err != nil {
+			return vmkit.SnapshotManifest{}, fmt.Errorf("hash kernel for snapshot: %w", err)
+		}
+		kernelSHA = sha
+	}
+	mode, guestIP := "", ""
+	netIP, netGateway, netSubnet := "", "", ""
+	if state.Config.Network != nil {
+		mode = strings.TrimSpace(state.Config.Network.Mode)
+		guestIP = guestIPFromNetwork(*state.Config.Network)
+		netIP = strings.TrimSpace(state.Config.Network.IP)
+		netGateway = strings.TrimSpace(state.Config.Network.Gateway)
+		netSubnet = strings.TrimSpace(state.Config.Network.Subnet)
+	}
+	caSHA := ""
+	if vmkit.EgressMediationOn(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
+		sha, err := egressCACertSHA256(filepath.Join(opts.StateDir, opts.Name))
+		if err != nil {
+			return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot of mediated workspace %s requires its persisted egress CA: %w", opts.Name, err)
+		}
+		caSHA = sha
+	}
+	return vmkit.SnapshotManifest{
+		Tag:                      tag,
+		NetworkMode:              mode,
+		GuestIP:                  guestIP,
+		KernelSHA256:             kernelSHA,
+		VCPUCount:                state.Config.CPUCount,
+		MemoryMiB:                state.Config.MemoryMiB,
+		CreatedAt:                time.Now().UTC().Format(time.RFC3339),
+		ShellPort:                state.Config.ShellPort,
+		ExecPort:                 state.Config.ExecPort,
+		NetworkIP:                netIP,
+		NetworkGateway:           netGateway,
+		NetworkSubnet:            netSubnet,
+		RootfsArtifact:           vmkit.SnapshotRootfsName,
+		MachineStateArtifacts:    vmkit.AppleVFSnapshotArtifacts(),
+		SecretsMaterialized:      vmkit.MaterializedSecretsDeclared(&state.Config),
+		SecretsPurged:            purged,
+		EgressMode:               state.Config.EgressMode,
+		EgressAllow:              state.Config.EgressAllow,
+		EgressPassthrough:        state.Config.EgressPassthrough,
+		EgressSwapConfigPath:     state.Config.EgressSwapConfigPath,
+		EgressCASHA256:           caSHA,
+		EgressMaxBytesPerSec:     state.Config.EgressMaxBytesPerSec,
+		EgressMaxTotalBytes:      state.Config.EgressMaxTotalBytes,
+		EgressMaxConcurrentConns: state.Config.EgressMaxConcurrentConns,
+		EgressAuditMaxBytes:      state.Config.EgressAuditMaxBytes,
+		EgressAuditMaxBackups:    state.Config.EgressAuditMaxBackups,
+	}, nil
 }
 
 // SnapshotList returns the snapshots recorded for a workspace. It is a host-side
@@ -667,7 +843,8 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		forkBackend = HostBackend()
 	}
 	if !vmkit.BackendCapabilities(forkBackend).Snapshot {
-		return Result{}, fmt.Errorf("snapshot fork (--from-snapshot) is not supported on the %s backend", forkBackend)
+		feature, _ := vmkit.FeatureForCLICommand("create --from-snapshot")
+		return Result{}, vmkit.NewUnsupportedFeatureError(forkBackend, feature, "snapshot fork (--from-snapshot)")
 	}
 	srcDir := vmkit.SnapshotDir(opts.StateDir, sourceWorkspace, tag)
 	manifest, err := vmkit.ReadSnapshotManifest(srcDir)
@@ -676,6 +853,15 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 			return Result{}, fmt.Errorf("snapshot %q not found for workspace %s", tag, sourceWorkspace)
 		}
 		return Result{}, err
+	}
+	if manifest.SecretsMaterialized {
+		sourceManifest, err := ReadManifest(opts.StateDir, sourceWorkspace)
+		if err != nil {
+			return Result{}, fmt.Errorf("read source workspace manifest for secret-bearing snapshot: %w", err)
+		}
+		if err := applyForkSecretManifest(&opts, sourceManifest, manifest); err != nil {
+			return Result{}, err
+		}
 	}
 	if manifest.MemoryMiB > 0 {
 		opts.MemoryMiB = manifest.MemoryMiB
@@ -714,13 +900,13 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := os.MkdirAll(filepath.Dir(rootfsPath), 0o700); err != nil {
 		return Result{}, err
 	}
-	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsName), rootfsPath, 0o600); err != nil {
+	if err := CopyFile(filepath.Join(srcDir, vmkit.SnapshotRootfsArtifact(manifest)), rootfsPath, 0o600); err != nil {
 		return Result{}, fmt.Errorf("copy snapshot rootfs into fork: %w", err)
 	}
 	if err := WriteManifest(opts); err != nil {
 		return Result{}, err
 	}
-	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err != nil {
+	if err := copySnapshotInto(srcDir, vmkit.SnapshotDir(opts.StateDir, opts.Name, tag), manifest); err != nil {
 		return Result{}, err
 	}
 	// A mediated source baked its per-workspace egress CA into the guest's trust
@@ -737,6 +923,28 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	}
 	opts.FromSnapshot = tag
 	return Start(ctx, opts)
+}
+
+func applyForkSecretManifest(opts *Options, source Manifest, snapshot vmkit.SnapshotManifest) error {
+	if !snapshot.SecretsMaterialized {
+		return nil
+	}
+	if len(source.Secrets) == 0 && len(source.SecretEnvFiles) == 0 {
+		return fmt.Errorf("snapshot %q requires source materialized secret references for fork rehydrate", snapshot.Tag)
+	}
+	opts.Secrets = make(map[string]string, len(source.Secrets))
+	for _, ref := range source.Secrets {
+		opts.Secrets[ref.Name] = ref.Ref
+	}
+	opts.SecretEnvFiles = append([]string(nil), source.SecretEnvFiles...)
+	if len(source.OnDemandSecrets) > 0 {
+		opts.OnDemandSecrets = make(map[string]string, len(source.OnDemandSecrets))
+		for _, ref := range source.OnDemandSecrets {
+			opts.OnDemandSecrets[ref.Name] = ref.Ref
+		}
+	}
+	opts.SecretsAudit = source.SecretsAudit
+	return nil
 }
 
 // copyForkEgressCA copies the source workspace's persisted egress CA cert and key
@@ -765,11 +973,115 @@ func copyForkEgressCA(stateDir, sourceWorkspace, forkName string) error {
 	return nil
 }
 
-func copySnapshotInto(srcDir, dstDir string) error {
+func prepareAppleVFSnapshotRestore(opts Options, req vmkit.Request) error {
+	if req.Config == nil {
+		return fmt.Errorf("apple-vf snapshot restore requires a VM config")
+	}
+	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag)
+	manifest, err := vmkit.ReadSnapshotManifest(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("snapshot %q not found for workspace %s", req.Tag, opts.Name)
+		}
+		return err
+	}
+	if manifest.KernelSHA256 != "" {
+		sha, err := fileSHA256(req.Config.KernelPath)
+		if err != nil {
+			return fmt.Errorf("hash kernel for snapshot restore: %w", err)
+		}
+		if sha != manifest.KernelSHA256 {
+			return fmt.Errorf("snapshot %q was taken against kernel sha256 %s but the workspace kernel is %s; refusing to load", req.Tag, manifest.KernelSHA256, sha)
+		}
+	}
+	if err := vmkit.ValidateSnapshotSecretRestore(manifest, req.Config); err != nil {
+		return err
+	}
+	if err := verifySnapshotEgressCA(opts.StateDir, opts.Name, manifest); err != nil {
+		return err
+	}
+	if err := applyAppleVFRestoreConfig(dir, req.Config); err != nil {
+		return err
+	}
+	applySnapshotEgressCaps(req.Config, manifest)
+	if err := copyFileReplace(filepath.Join(dir, vmkit.SnapshotRootfsArtifact(manifest)), req.Config.RootfsPath, 0o600); err != nil {
+		return fmt.Errorf("restore snapshot rootfs: %w", err)
+	}
+	return nil
+}
+
+func applyAppleVFRestoreConfig(snapshotDir string, config *vmkit.Config) error {
+	data, err := os.ReadFile(filepath.Join(snapshotDir, vmkit.SnapshotAppleVFConfig))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read Apple VF snapshot restore config: %w", err)
+	}
+	var saved vmkit.Config
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return fmt.Errorf("decode Apple VF snapshot restore config: %w", err)
+	}
+	kernelPath := config.KernelPath
+	rootfsPath := config.RootfsPath
+	stateDir := config.StateDir
+	vsockListeners := config.VsockListeners
+	identityShellPort := config.ShellPort
+	identityExecPort := config.ExecPort
+	guestShellPort := config.GuestShellPort
+	guestExecPort := config.GuestExecPort
+	saved.KernelPath = kernelPath
+	saved.RootfsPath = rootfsPath
+	saved.StateDir = stateDir
+	saved.VsockListeners = vsockListeners
+	if guestShellPort != 0 {
+		saved.GuestShellPort = guestShellPort
+		saved.ShellPort = identityShellPort
+	}
+	if guestExecPort != 0 {
+		saved.GuestExecPort = guestExecPort
+		saved.ExecPort = identityExecPort
+	}
+	*config = saved
+	return nil
+}
+
+func applySnapshotEgressCaps(config *vmkit.Config, manifest vmkit.SnapshotManifest) {
+	if config == nil {
+		return
+	}
+	config.EgressMaxBytesPerSec = manifest.EgressMaxBytesPerSec
+	config.EgressMaxTotalBytes = manifest.EgressMaxTotalBytes
+	config.EgressMaxConcurrentConns = manifest.EgressMaxConcurrentConns
+	config.EgressAuditMaxBytes = manifest.EgressAuditMaxBytes
+	config.EgressAuditMaxBackups = manifest.EgressAuditMaxBackups
+}
+
+func verifySnapshotEgressCA(stateDir, workspace string, manifest vmkit.SnapshotManifest) error {
+	if manifest.EgressCASHA256 == "" {
+		return nil
+	}
+	got, err := egressCACertSHA256(filepath.Join(stateDir, workspace))
+	if err != nil {
+		return fmt.Errorf("snapshot restore of mediated workspace %s requires its persisted egress CA: %w", workspace, err)
+	}
+	if got != manifest.EgressCASHA256 {
+		return fmt.Errorf("egress CA fingerprint %s does not match snapshot fingerprint %s; refusing restore", got, manifest.EgressCASHA256)
+	}
+	return nil
+}
+
+func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) error {
 	if err := os.MkdirAll(dstDir, 0o700); err != nil {
 		return err
 	}
-	for _, name := range []string{vmkit.SnapshotVMStateName, vmkit.SnapshotMemoryName, vmkit.SnapshotRootfsName, vmkit.SnapshotManifestName} {
+	names := []string{vmkit.SnapshotRootfsArtifact(manifest), vmkit.SnapshotManifestName}
+	for _, artifact := range vmkit.SnapshotMachineStateArtifacts(manifest) {
+		if artifact.Path != "" {
+			names = append(names, artifact.Path)
+		}
+	}
+	for _, name := range names {
 		if err := CopyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name), 0o644); err != nil {
 			return fmt.Errorf("copy snapshot %s into fork: %w", name, err)
 		}
@@ -1523,6 +1835,7 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 	cmd.Stdin = strings.NewReader(string(body))
 	cmd.Stdout = supervisorLog
 	cmd.Stderr = supervisorLog
+	cmd.Env = supervisorEnvironment(opts)
 	cmd.SysProcAttr = detachedSysProcAttr()
 	if err := cmd.Start(); err != nil {
 		return vmkit.Response{}, err
@@ -1539,6 +1852,18 @@ func startDetached(opts Options, req vmkit.Request) (vmkit.Response, error) {
 		ObservedAt: time.Now().UTC(),
 	}
 	return vmkit.Response{OK: true, Backend: opts.Backend, Event: &event}, nil
+}
+
+func supervisorEnvironment(opts Options) []string {
+	env := os.Environ()
+	if opts.Backend != vmkit.BackendAppleVF {
+		return env
+	}
+	exe, err := os.Executable()
+	if err != nil || strings.TrimSpace(exe) == "" {
+		return env
+	}
+	return append(env, "MICROAGENT_EGRESS_DATAPATH_BIN="+exe)
 }
 
 func requireReadableFile(path, name string) error {
@@ -1631,6 +1956,8 @@ func responseFromEvent(opts Options, eventFile EventFile, errorText string) vmki
 		}
 		resp.Network = &network
 		resp.Mediation = manifest.Mediation
+		report := vmkit.NegotiateEgressCapture(backend, network.Mode, manifest.EgressMode)
+		resp.EgressCapture = &report
 		artifacts := RuntimeArtifacts(manifest.Artifacts)
 		resp.Artifacts = &artifacts
 		resp.Verification = VerificationForStatus(opts, eventFile.Identity.RuntimeID, manifest, eventFile.State)
@@ -2030,6 +2357,77 @@ func CopyFile(source, target string, mode os.FileMode) error {
 		return closeErr
 	}
 	return nil
+}
+
+func copyFileReplace(source, target string, mode os.FileMode) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	if copyErr != nil {
+		_ = out.Close()
+		return copyErr
+	}
+	if chmodErr := out.Chmod(mode); chmodErr != nil {
+		_ = out.Close()
+		return chmodErr
+	}
+	if closeErr := out.Close(); closeErr != nil {
+		return closeErr
+	}
+	return nil
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func egressCACertSHA256(wsDir string) (string, error) {
+	pemBytes, err := os.ReadFile(filepath.Join(wsDir, "egress-ca.pem"))
+	if err != nil {
+		return "", fmt.Errorf("read egress CA cert: %w", err)
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("egress CA cert at %s is not a valid CERTIFICATE PEM", wsDir)
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func guestIPFromNetwork(network vmkit.NetworkConfig) string {
+	ip := strings.TrimSpace(network.IP)
+	if ip == "" && network.Runtime != nil {
+		ip = strings.TrimSpace(network.Runtime.IP)
+	}
+	if ip == "" {
+		return ""
+	}
+	if host, _, err := net.ParseCIDR(ip); err == nil {
+		return host.String()
+	}
+	if strings.Contains(ip, "/") {
+		return strings.SplitN(ip, "/", 2)[0]
+	}
+	return ip
 }
 
 func parseOptionalTime(value string) *time.Time {

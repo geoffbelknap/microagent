@@ -4,13 +4,13 @@ description: Register microagent serve mcp in Claude Code or another MCP client 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-27_
 
-Give a coding agent microVM workspaces as tools. This guide registers
-`microagent serve mcp` in Claude Code (or any MCP client) so the agent
-creates, runs, and inspects workspaces without shelling out. The server is
+Give a coding agent microVM workspaces as tools. Register
+`microagent serve mcp` in Claude Code, Codex, or any MCP client, and the agent
+can create, run, and inspect workspaces without shelling out. The server uses
 stdio: the client launches it as a subprocess and speaks JSON-RPC over
-stdin/stdout - no daemon, no port.
+stdin/stdout. There is no daemon and no open port.
 
 ## 1. Check the host
 
@@ -58,13 +58,13 @@ just prints setup guidance and exits.
 
 ## 3. See what the agent gets
 
-The server exposes the full substrate surface - more than fifty structured
-tools covering workspace lifecycle (`workspace.create`, `workspace.exec`,
-`workspace.halt`, ...), inspection (`workspace.inspect`, `workspace.logs`,
-`workspace.events`), snapshots, images, networks, volumes, copy and artifacts,
-host diagnostics, and cost estimation. Nothing above the substrate is exposed;
-see [Boundaries](/concepts/boundaries/) for where microagent's
-responsibilities end.
+The server exposes more than fifty tools for workspace lifecycle
+(`workspace.create`, `workspace.exec`, `workspace.halt`, ...), inspection
+(`workspace.inspect`, `workspace.logs`, `workspace.events`), snapshots, images,
+networks, volumes, copy and artifacts, host diagnostics, and cost estimation.
+It stops at VM operations: it does not plan, call an LLM, decide policy, or
+interpret audit records. See [Boundaries](/concepts/boundaries/) for the line
+microagent does not cross.
 
 Destructive tools take `preview: true` to report what would happen without
 doing it, and the riskiest host mutations (`kernel.install`, `rootfs.build`,
@@ -79,8 +79,8 @@ In Claude Code, after registering:
 > Use the microagent MCP server to boot an alpine microVM and run `uname -a` in it.
 ```
 
-The agent calls `workspace.create`, `workspace.start`, and `workspace.exec`
-and reads back structured results - exit code, base64 stdout/stderr, timing.
+The agent calls `workspace.create`, `workspace.start`, and `workspace.exec`,
+then reads back the exit code, stdout/stderr, and timing.
 You can verify the transport by hand: pipe a single `initialize` request into
 the server and it answers on stdout, then exits when stdin closes:
 
@@ -89,7 +89,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 ```
 
 ```text
-{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"microagent","version":"0.8.0"}}}
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"microagent","version":"0.8.3"}}}
 ```
 
 ## Clean up
@@ -103,8 +103,8 @@ microagent list
 microagent delete <name> --yes
 ```
 
-## What's next
+## Related
 
-- **Every tool, envelope field, and preview contract** - the [`serve`](/cli/serve/) reference.
-- **The runtime contract the tools expose** - [`contract`](/cli/contract/).
-- **What an agent should build on top** - [build a simple agent](/guides/simple-agent/).
+- [`serve`](/cli/serve/) lists every MCP tool and preview-confirm flow.
+- [`contract`](/cli/contract/) prints the runtime fields tools rely on.
+- [Build a simple agent](/guides/simple-agent/) shows what to run inside a workspace.

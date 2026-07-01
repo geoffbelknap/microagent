@@ -4,14 +4,12 @@ description: Give a workspace outbound access and publish a guest port back to t
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-27_
 
 A workspace has one of two network modes: `user` (the default) gives the guest
 unprivileged outbound IPv4 plus any TCP ports you publish, and `isolated` gives
-it no network device at all. This guide covers the common `user`-mode tasks. For
-the mechanics under each backend, read [networking concepts](/concepts/networking/);
-for controlling and auditing what the guest may reach, read
-[egress mediation](/concepts/egress-mediation/).
+it no network device at all. For controlling and auditing what the guest may
+reach, read [egress mediation](/concepts/egress-mediation/).
 
 ## Outbound access (the default)
 
@@ -23,10 +21,9 @@ microagent start research
 microagent exec research -- curl -sS https://example.com >/dev/null && echo ok
 ```
 
-On Firecracker/Linux the workspace runs inside its own unprivileged user
-namespace, with `pasta` providing outbound NAT in user space - no host `setcap`,
-`ip_forward`, or bridge setup. On Apple VF/macOS it uses the native
-Virtualization.framework NAT attachment.
+You do not need to configure host routing, bridges, or packet forwarding for
+the default path. If outbound networking fails, run `microagent doctor` first;
+it checks the host prerequisites for the current platform.
 
 ## Publish a guest port to the host
 
@@ -55,9 +52,9 @@ microagent create offline --image docker.io/library/python:3.12 --network isolat
 Isolated workspaces reject `--publish` before the request leaves the CLI -
 there's no guest network for a forward to reach.
 
-## What's next
+## Related
 
-- **Both network modes and the backend matrix** - [Networking](/concepts/networking/).
-- **The `network` command surface** - the [`network`](/cli/network/) reference.
+- **Both network modes** - [Network modes](/concepts/networking/).
+- **The `network` command** - the [`network`](/cli/network/) reference.
 - **Publish a service's port to the host** - [run a service](/guides/run-a-service/).
 - **Control and audit what the guest reaches** - [egress mediation](/concepts/egress-mediation/).

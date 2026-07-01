@@ -41,6 +41,13 @@ func TestSnapshotManifestRoundTrip(t *testing.T) {
 		NetworkIP:      "10.43.220.2/29",
 		NetworkGateway: "10.43.220.1",
 		NetworkSubnet:  "10.43.220.0/29",
+		RootfsArtifact: SnapshotRootfsName,
+		MachineStateArtifacts: []SnapshotArtifact{
+			{Kind: "firecracker-vmstate", Path: SnapshotVMStateName},
+			{Kind: "firecracker-memory", Path: SnapshotMemoryName},
+		},
+		SecretsMaterialized: true,
+		SecretsPurged:       true,
 	}
 	if err := WriteSnapshotManifest(dir, manifest); err != nil {
 		t.Fatal(err)
@@ -81,6 +88,101 @@ func TestSnapshotManifestRoundTripsEgress(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, manifest) {
 		t.Fatalf("round-trip = %#v, want %#v", got, manifest)
+	}
+}
+
+func TestSnapshotArtifactDefaultsPreserveLegacyFirecrackerManifests(t *testing.T) {
+	manifest := SnapshotManifest{Tag: "legacy"}
+	if got := SnapshotRootfsArtifact(manifest); got != SnapshotRootfsName {
+		t.Fatalf("SnapshotRootfsArtifact = %q, want %q", got, SnapshotRootfsName)
+	}
+	got := SnapshotMachineStateArtifacts(manifest)
+	want := FirecrackerSnapshotArtifacts()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SnapshotMachineStateArtifacts = %#v, want %#v", got, want)
+	}
+}
+
+func TestAppleVFSnapshotArtifacts(t *testing.T) {
+	got := AppleVFSnapshotArtifacts()
+	want := []SnapshotArtifact{
+		{Kind: "apple-vf-machine-state", Path: SnapshotAppleVFMachineState},
+		{Kind: "apple-vf-restore-config", Path: SnapshotAppleVFConfig},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AppleVFSnapshotArtifacts = %#v, want %#v", got, want)
+	}
+}
+
+func TestSnapshotArtifactHelpersUseManifestShape(t *testing.T) {
+	manifest := SnapshotManifest{
+		RootfsArtifact: "disks/rootfs.ext4",
+		MachineStateArtifacts: []SnapshotArtifact{
+			{Kind: "apple-vf-machine-state", Path: "machine-state.vz"},
+		},
+	}
+	if got := SnapshotRootfsArtifact(manifest); got != "disks/rootfs.ext4" {
+		t.Fatalf("SnapshotRootfsArtifact = %q", got)
+	}
+	got := SnapshotMachineStateArtifacts(manifest)
+	if len(got) != 1 || got[0].Kind != "apple-vf-machine-state" || got[0].Path != "machine-state.vz" {
+		t.Fatalf("SnapshotMachineStateArtifacts = %#v", got)
+	}
+	got[0].Path = "mutated"
+	if manifest.MachineStateArtifacts[0].Path != "machine-state.vz" {
+		t.Fatal("SnapshotMachineStateArtifacts returned alias of manifest slice")
+	}
+}
+
+func TestMaterializedSecretsDeclared(t *testing.T) {
+	if MaterializedSecretsDeclared(&Config{}) {
+		t.Fatal("empty config should not need snapshot purge")
+	}
+	if !MaterializedSecretsDeclared(&Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}) {
+		t.Fatal("materialized --secret should need snapshot purge")
+	}
+	if !MaterializedSecretsDeclared(&Config{SecretEnvFiles: []string{"/tmp/app.env"}}) {
+		t.Fatal("materialized secrets env file should need snapshot purge")
+	}
+	if MaterializedSecretsDeclared(&Config{OnDemandSecrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}) {
+		t.Fatal("on-demand-only secrets should not need snapshot purge")
+	}
+}
+
+func TestValidateSnapshotSecretCaptureFailsClosed(t *testing.T) {
+	cfg := &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}
+	if err := ValidateSnapshotSecretCapture(cfg, false); err == nil {
+		t.Fatal("expected secret-bearing snapshot without purge to fail closed")
+	}
+	if err := ValidateSnapshotSecretCapture(cfg, true); err != nil {
+		t.Fatalf("purged secret-bearing snapshot should pass: %v", err)
+	}
+	if err := ValidateSnapshotSecretCapture(&Config{OnDemandSecrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}, false); err != nil {
+		t.Fatalf("on-demand-only snapshot should not require purge: %v", err)
+	}
+}
+
+func TestValidateSnapshotSecretRestoreFailsClosed(t *testing.T) {
+	manifest := SnapshotManifest{Tag: "base", SecretsMaterialized: true, SecretsPurged: true}
+	if err := ValidateSnapshotSecretRestore(manifest, nil); err == nil {
+		t.Fatal("expected missing restore config to fail closed")
+	}
+	if err := ValidateSnapshotSecretRestore(manifest, &Config{}); err == nil {
+		t.Fatal("expected missing materialized refs to fail closed")
+	}
+	if err := ValidateSnapshotSecretRestore(manifest, &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}}); err == nil {
+		t.Fatal("expected missing secrets control port to fail closed")
+	}
+	cfg := &Config{Secrets: []SecretRef{{Name: "API", Ref: "env:TOKEN"}}, SecretsControlPort: 1028}
+	if err := ValidateSnapshotSecretRestore(manifest, cfg); err != nil {
+		t.Fatalf("purged secret-bearing snapshot with rehydrate config should pass: %v", err)
+	}
+	manifest.SecretsPurged = false
+	if err := ValidateSnapshotSecretRestore(manifest, cfg); err == nil {
+		t.Fatal("expected unpurged secret-bearing snapshot to fail closed")
+	}
+	if err := ValidateSnapshotSecretRestore(SnapshotManifest{Tag: "old"}, &Config{}); err != nil {
+		t.Fatalf("snapshot without materialized secret marker should remain compatible: %v", err)
 	}
 }
 

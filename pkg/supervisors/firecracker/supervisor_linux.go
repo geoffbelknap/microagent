@@ -151,6 +151,9 @@ func hostResponse(opts Options) (vmkit.Response, error) {
 			VirtualizationSupported: fileExists("/dev/kvm"),
 			KVMAvailable:            fileExists("/dev/kvm"),
 			VsockAvailable:          fileExists("/dev/vhost-vsock"),
+			PauseResumeAvailable:    true,
+			SnapshotCreateAvailable: true,
+			SnapshotAvailable:       true,
 			ConsoleAvailable:        true,
 			ConsoleMode:             "interactive",
 		},
@@ -398,12 +401,14 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 	// unreadable during a restore.
 	restore := req.Tag != ""
 	expectedCASHA := ""
+	var restoreManifest *vmkit.SnapshotManifest
 	if restore {
 		manifest, merr := vmkit.ReadSnapshotManifest(vmkit.SnapshotDir(opts.StateDir, opts.Name, req.Tag))
 		if merr != nil {
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, merr.Error())
 			return failedResponse(req, merr.Error()), merr
 		}
+		restoreManifest = &manifest
 		expectedCASHA = manifest.EgressCASHA256
 		// Re-apply the persisted bounded-operations caps (ASK tenet 8) so a restored
 		// workspace keeps the SAME bounds it was snapshotted under, just as the CA is
@@ -526,7 +531,7 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 		return failedResponse(req, err.Error()), err
 	}
 	if loadMode {
-		if err := restoreFromSnapshot(ctx, opts, req.Tag, snapshotNetworkOverrides(opts, req.Config)); err != nil {
+		if err := restoreFromSnapshot(ctx, opts, req.Tag, cmd.Process.Pid, snapshotNetworkOverrides(opts, req.Config)); err != nil {
 			_ = cmd.Process.Kill()
 			cleanupTransientFirewallRules(firewallRules)
 			cleanupTransientNetworkDevices(networkDevices)
@@ -537,13 +542,23 @@ func startProcess(ctx context.Context, opts Options, req vmkit.Request, detached
 			_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 			return failedResponse(req, err.Error()), err
 		}
-		// The restored/forked guest resumes with a zeroed /run/secrets (purged
-		// before the source snapshot). Rehydrate it by re-fetching the bundle.
-		// Best-effort: the guest is already running, so a transient failure is
-		// retryable and should not kill a freshly restored VM.
-		if materializedSecretsDeclared(runtimeReq.Config) && runtimeReq.Config.SecretsControlPort != 0 {
+		// A snapshot that recorded materialized guest secrets resumes with
+		// zeroed /run/secrets (purged before memory capture). Rehydrate before
+		// the restored/forked workspace is considered running. Fail closed: do
+		// not leave a secret-bearing restore booted with silently missing
+		// materialized secrets.
+		if restoreManifest != nil && restoreManifest.SecretsMaterialized {
 			if err := rehydrateGuestSecrets(opts, runtimeReq.Config.SecretsControlPort); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: rehydrate secrets after restore failed: %v\n", err)
+				wrapped := fmt.Errorf("rehydrate secrets after snapshot restore: %w", err)
+				_ = cmd.Process.Kill()
+				cleanupTransientFirewallRules(firewallRules)
+				cleanupTransientNetworkDevices(networkDevices)
+				if serialInput != nil {
+					_ = serialInput.Close()
+				}
+				_ = serialLog.Close()
+				_ = writeProcessState(opts, req, vmkit.StateFailed, 0, wrapped.Error())
+				return failedResponse(req, wrapped.Error()), wrapped
 			}
 		}
 	}
@@ -3269,6 +3284,9 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 	if req.Identity == nil || req.Config == nil {
 		return fmt.Errorf("workspace request is missing identity or config")
 	}
+	if shouldPreserveQuarantine(opts, req, state) {
+		return nil
+	}
 	debugSupLog(opts, fmt.Sprintf("WRITE state=%s pid=%d err=%q (resets Stopping)", state, pid, errorText))
 	dir := filepath.Join(opts.StateDir, opts.Name)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -3313,6 +3331,18 @@ func writeProcessStateWithProcessesAndNetwork(opts Options, req vmkit.Request, s
 	}
 	runtime.Readiness = readinessFromRuntimeState(runtime)
 	return writeJSONFile(filepath.Join(dir, "runtime.json"), runtime)
+}
+
+func shouldPreserveQuarantine(opts Options, req vmkit.Request, next vmkit.VMState) bool {
+	if next != vmkit.StateStopped && next != vmkit.StateFailed {
+		return false
+	}
+	switch req.Command {
+	case "halt", "stop", "kill", "delete":
+		return false
+	}
+	prev, err := readRuntimeState(opts)
+	return err == nil && prev.Event.State == vmkit.StateQuarantined
 }
 
 func readinessFromRuntimeState(state runtimeState) vmkit.RuntimeReadiness {
@@ -3698,6 +3728,18 @@ func processReferencesWorkspace(pid int, opts Options) bool {
 	return processIdentityReferencesWorkspace(cmdline, mountinfo, filepath.Join(opts.StateDir, opts.Name))
 }
 
+var firecrackerProcessConfinedToWorkspace = func(pid int, opts Options) bool {
+	if pid <= 0 {
+		return false
+	}
+	wsPath := filepath.Join(opts.StateDir, opts.Name)
+	children := linuxProcessChildrenByParent()
+	return processTreeMountinfoReferencesWorkspaceJail(pid, wsPath, children, func(pid int) []byte {
+		mountinfo, _ := os.ReadFile(fmt.Sprintf("/proc/%d/mountinfo", pid))
+		return mountinfo
+	})
+}
+
 // processIdentityReferencesWorkspace is the pure matcher behind
 // processReferencesWorkspace: the workspace state path appears in an unconfined
 // process's argv (NUL-separated cmdline), or the per-workspace jail root
@@ -3711,7 +3753,83 @@ func processIdentityReferencesWorkspace(cmdline, mountinfo []byte, wsPath string
 	if strings.Contains(strings.ReplaceAll(string(cmdline), "\x00", " "), wsPath) {
 		return true
 	}
+	return processMountinfoReferencesWorkspaceJail(mountinfo, wsPath)
+}
+
+func processMountinfoReferencesWorkspaceJail(mountinfo []byte, wsPath string) bool {
+	if wsPath == "" {
+		return false
+	}
 	return strings.Contains(string(mountinfo), filepath.Join(wsPath, "jail"))
+}
+
+// processTreeMountinfoReferencesWorkspaceJail checks the recorded runtime PID
+// and its descendants for the workspace jail mount. In user-network mode the
+// recorded runtime PID is pasta, while the confined Firecracker process is a
+// descendant with the jail bind in its own mount namespace.
+func processTreeMountinfoReferencesWorkspaceJail(rootPID int, wsPath string, childrenByParent map[int][]int, mountinfo func(int) []byte) bool {
+	if rootPID <= 0 || wsPath == "" {
+		return false
+	}
+	queue := []int{rootPID}
+	seen := map[int]bool{}
+	for len(queue) != 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		if mountinfo != nil && processMountinfoReferencesWorkspaceJail(mountinfo(pid), wsPath) {
+			return true
+		}
+		for _, child := range childrenByParent[pid] {
+			if !seen[child] {
+				queue = append(queue, child)
+			}
+		}
+	}
+	return false
+}
+
+func linuxProcessChildrenByParent() map[int][]int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	children := map[int][]int{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "stat"))
+		if err != nil {
+			continue
+		}
+		ppid, err := linuxProcessStatParentPID(data)
+		if err != nil {
+			continue
+		}
+		children[ppid] = append(children[ppid], pid)
+	}
+	return children
+}
+
+func linuxProcessStatParentPID(data []byte) (int, error) {
+	stat := string(data)
+	commEnd := strings.LastIndex(stat, ")")
+	if commEnd == -1 {
+		return 0, fmt.Errorf("invalid proc stat: missing command terminator")
+	}
+	fields := strings.Fields(stat[commEnd+1:])
+	if len(fields) < 2 {
+		return 0, fmt.Errorf("invalid proc stat: missing parent pid")
+	}
+	return strconv.Atoi(fields[1])
 }
 
 // leaseExpired reports whether a workspace declared a lifetime lease

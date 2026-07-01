@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 )
 
 type Supervisor interface {
@@ -35,6 +37,7 @@ func (c ExecutableSupervisor) Do(ctx context.Context, req Request) (Response, er
 	}
 	cmd := exec.CommandContext(ctx, path)
 	cmd.Stdin = bytes.NewReader(body)
+	cmd.Env = executableSupervisorEnv(req)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -53,4 +56,16 @@ func (c ExecutableSupervisor) Do(ctx context.Context, req Request) (Response, er
 		return resp, runErr
 	}
 	return resp, nil
+}
+
+func executableSupervisorEnv(req Request) []string {
+	env := os.Environ()
+	if req.Identity == nil || req.Identity.Backend != BackendAppleVF {
+		return env
+	}
+	exe, err := os.Executable()
+	if err != nil || strings.TrimSpace(exe) == "" {
+		return env
+	}
+	return append(env, "MICROAGENT_EGRESS_DATAPATH_BIN="+exe)
 }

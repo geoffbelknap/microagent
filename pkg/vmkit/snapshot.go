@@ -10,19 +10,22 @@ import (
 
 // Snapshot file names within a snapshot directory.
 const (
-	SnapshotManifestName = "manifest.json"
-	SnapshotVMStateName  = "vmstate"
-	SnapshotMemoryName   = "memory"
-	SnapshotRootfsName   = "rootfs.ext4"
+	SnapshotManifestName        = "manifest.json"
+	SnapshotVMStateName         = "vmstate"
+	SnapshotMemoryName          = "memory"
+	SnapshotRootfsName          = "rootfs.ext4"
+	SnapshotAppleVFMachineState = "machine-state.vz"
+	SnapshotAppleVFConfig       = "apple-vf-config.json"
 )
 
 // SnapshotManifest records the metadata needed to restore or fork a workspace
 // snapshot: the image and network identity it was taken from, the guest IP to
 // re-establish on load, the kernel hash that guards against skew, the VM
-// sizing, and when it was created. It is written alongside the backend vmstate,
-// memory file, and rootfs copy under the snapshot directory. The type is
-// backend-neutral so the host-side CLI can list and remove snapshots without a
-// running VM, while only snapshot create needs the backend supervisor.
+// sizing, and when it was created. It is written alongside a coherent rootfs
+// copy and backend-defined machine-state artifacts under the snapshot
+// directory. The type is backend-neutral so the host-side CLI can list and
+// remove snapshots without a running VM, while only snapshot create needs the
+// backend supervisor.
 type SnapshotManifest struct {
 	Tag          string `json:"tag"`
 	ImageRef     string `json:"imageRef,omitempty"`
@@ -44,12 +47,25 @@ type SnapshotManifest struct {
 	NetworkIP      string `json:"networkIP,omitempty"`
 	NetworkGateway string `json:"networkGateway,omitempty"`
 	NetworkSubnet  string `json:"networkSubnet,omitempty"`
+	// RootfsArtifact names the coherent rootfs copy inside the snapshot
+	// directory. Empty means the legacy/default SnapshotRootfsName.
+	RootfsArtifact string `json:"rootfsArtifact,omitempty"`
+	// MachineStateArtifacts names backend-defined machine-state artifacts inside
+	// the snapshot directory. Firecracker uses separate vmstate and memory files;
+	// other backends may use a different shape, such as a single saved-state
+	// file. Empty means the legacy Firecracker vmstate+memory pair.
+	MachineStateArtifacts []SnapshotArtifact `json:"machineStateArtifacts,omitempty"`
 	// VsockUDSPath is the absolute host path the snapshot's vsock device is
 	// bound to (the source workspace's vsock socket). It is baked into the
 	// Firecracker snapshot and cannot be remapped on load, so a fork into a
 	// different workspace bind-mounts its own directory over the source's to
 	// make this path resolve to the fork's socket.
 	VsockUDSPath string `json:"vsockUDSPath,omitempty"`
+	// SecretsMaterialized records that this snapshot source had secrets written
+	// into guest memory. When true, SecretsPurged must also be true: a backend
+	// must fail closed rather than capture a memory image that may contain guest
+	// secret material.
+	SecretsMaterialized bool `json:"secretsMaterialized,omitempty"`
 	// SecretsPurged records that the guest tmpfs secrets were scrubbed before
 	// the memory image was captured.
 	SecretsPurged bool `json:"secretsPurged,omitempty"`
@@ -76,11 +92,99 @@ type SnapshotManifest struct {
 	EgressAuditMaxBackups    int   `json:"egressAuditMaxBackups,omitempty"`
 }
 
+// SnapshotArtifact describes one backend artifact stored under a snapshot
+// directory. Path is relative to the snapshot directory; Kind is a stable
+// backend-defined role such as "firecracker-vmstate" or
+// "firecracker-memory".
+type SnapshotArtifact struct {
+	Kind string `json:"kind"`
+	Path string `json:"path"`
+}
+
 // SnapshotInfo is a manifest plus the on-disk size of its snapshot directory,
 // reported by snapshot list so operators can see what each tag costs.
 type SnapshotInfo struct {
 	SnapshotManifest
 	SizeBytes int64 `json:"sizeBytes"`
+}
+
+// SnapshotRootfsArtifact returns the rootfs artifact path for this manifest,
+// preserving compatibility with manifests written before RootfsArtifact existed.
+func SnapshotRootfsArtifact(manifest SnapshotManifest) string {
+	if manifest.RootfsArtifact != "" {
+		return manifest.RootfsArtifact
+	}
+	return SnapshotRootfsName
+}
+
+// SnapshotMachineStateArtifacts returns backend machine-state artifact paths
+// for this manifest, preserving compatibility with legacy Firecracker
+// vmstate+memory snapshots.
+func SnapshotMachineStateArtifacts(manifest SnapshotManifest) []SnapshotArtifact {
+	if len(manifest.MachineStateArtifacts) > 0 {
+		return append([]SnapshotArtifact(nil), manifest.MachineStateArtifacts...)
+	}
+	return FirecrackerSnapshotArtifacts()
+}
+
+// FirecrackerSnapshotArtifacts returns the default Firecracker machine-state
+// artifacts: vmstate metadata plus the guest memory file.
+func FirecrackerSnapshotArtifacts() []SnapshotArtifact {
+	return []SnapshotArtifact{
+		{Kind: "firecracker-vmstate", Path: SnapshotVMStateName},
+		{Kind: "firecracker-memory", Path: SnapshotMemoryName},
+	}
+}
+
+// AppleVFSnapshotArtifacts returns the saved Virtualization.framework machine
+// state artifact written by saveMachineStateTo.
+func AppleVFSnapshotArtifacts() []SnapshotArtifact {
+	return []SnapshotArtifact{
+		{Kind: "apple-vf-machine-state", Path: SnapshotAppleVFMachineState},
+		{Kind: "apple-vf-restore-config", Path: SnapshotAppleVFConfig},
+	}
+}
+
+// MaterializedSecretsDeclared reports whether the config declares secrets that
+// are written into the guest tmpfs and therefore must be purged before memory
+// snapshot capture. On-demand-only secrets are fetched per request and are not
+// materialized into the snapshot source by default.
+func MaterializedSecretsDeclared(config *Config) bool {
+	if config == nil {
+		return false
+	}
+	return len(config.Secrets) > 0 || len(config.SecretEnvFiles) > 0
+}
+
+// ValidateSnapshotSecretCapture enforces the backend-neutral secret safety
+// invariant for memory snapshots: if the source had materialized guest secrets,
+// the backend must prove it purged them before writing the memory image.
+func ValidateSnapshotSecretCapture(config *Config, purged bool) error {
+	if MaterializedSecretsDeclared(config) && !purged {
+		return fmt.Errorf("snapshot of secret-bearing workspace requires guest secret purge before memory capture")
+	}
+	return nil
+}
+
+// ValidateSnapshotSecretRestore enforces the backend-neutral secret safety
+// invariant for snapshot restore/fork: a snapshot that captured a workspace with
+// materialized guest secrets must have been purged at capture time, and the
+// restore config must provide both the secret references and a guest control
+// channel so the backend can rehydrate before treating the workspace as ready.
+func ValidateSnapshotSecretRestore(manifest SnapshotManifest, config *Config) error {
+	if !manifest.SecretsMaterialized {
+		return nil
+	}
+	if !manifest.SecretsPurged {
+		return fmt.Errorf("snapshot %q has materialized secrets but does not record guest secret purge; refusing restore", manifest.Tag)
+	}
+	if !MaterializedSecretsDeclared(config) {
+		return fmt.Errorf("snapshot %q requires materialized secret references for restore rehydrate", manifest.Tag)
+	}
+	if config == nil || config.SecretsControlPort == 0 {
+		return fmt.Errorf("snapshot %q requires a guest secrets control port for restore rehydrate", manifest.Tag)
+	}
+	return nil
 }
 
 // SnapshotsDir is the directory holding all snapshots for a workspace.

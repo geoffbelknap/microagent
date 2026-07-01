@@ -64,16 +64,16 @@ func TestPurgeGuestSecretsRoundTrip(t *testing.T) {
 }
 
 func TestMaterializedSecretsDeclared(t *testing.T) {
-	if materializedSecretsDeclared(&vmkit.Config{}) {
+	if vmkit.MaterializedSecretsDeclared(&vmkit.Config{}) {
 		t.Fatal("empty config should not need purge")
 	}
-	if !materializedSecretsDeclared(&vmkit.Config{Secrets: []vmkit.SecretRef{{Name: "A", Ref: "env:X"}}}) {
+	if !vmkit.MaterializedSecretsDeclared(&vmkit.Config{Secrets: []vmkit.SecretRef{{Name: "A", Ref: "env:X"}}}) {
 		t.Fatal("declared --secret should need purge")
 	}
-	if !materializedSecretsDeclared(&vmkit.Config{SecretEnvFiles: []string{"/x"}}) {
+	if !vmkit.MaterializedSecretsDeclared(&vmkit.Config{SecretEnvFiles: []string{"/x"}}) {
 		t.Fatal("declared env-file should need purge")
 	}
-	if materializedSecretsDeclared(&vmkit.Config{OnDemandSecrets: []vmkit.SecretRef{{Name: "A", Ref: "env:X"}}}) {
+	if vmkit.MaterializedSecretsDeclared(&vmkit.Config{OnDemandSecrets: []vmkit.SecretRef{{Name: "A", Ref: "env:X"}}}) {
 		t.Fatal("on-demand-only should NOT need purge (nothing materialized)")
 	}
 }

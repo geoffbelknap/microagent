@@ -272,6 +272,31 @@ func TestRunSnapshotCreateParsesTagAndName(t *testing.T) {
 	}
 }
 
+func TestRunSnapshotCreateAppleVFUsesBackendSnapshotPath(t *testing.T) {
+	dir := t.TempDir()
+	out, err := os.Create(filepath.Join(dir, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rerr := run(t.Context(), []string{"snapshot", "create", "agent-1", "--tag", "base", "--state-dir", dir, "--backend", "apple-vf"}, out)
+	_ = out.Close()
+	if rerr == nil {
+		t.Fatal("expected Apple VF snapshot create to require runtime state")
+	}
+	if strings.Contains(rerr.Error(), "not supported on the apple-vf backend") {
+		t.Fatalf("snapshot create error = %q, did not expect unsupported feature gap", rerr.Error())
+	}
+	if runtime.GOOS != "darwin" {
+		if !strings.Contains(rerr.Error(), "is not available in this") {
+			t.Fatalf("snapshot create error = %q, want host backend rejection on %s", rerr.Error(), runtime.GOOS)
+		}
+		return
+	}
+	if !strings.Contains(rerr.Error(), "runtime.json") {
+		t.Fatalf("snapshot create error = %q, want missing runtime state", rerr.Error())
+	}
+}
+
 func TestRunSnapshotListAndRemove(t *testing.T) {
 	dir := t.TempDir()
 	name := "agent-1"
@@ -973,11 +998,14 @@ func TestHostCommandReportsHostBackendDiagnosticsWithoutFailing(t *testing.T) {
 	if hostBackend() == vmkit.BackendWindowsHyperV {
 		wantConsoleMode = "hvsock"
 	}
+	hasConfinementMode := strings.Contains(text, `"confinementMode": "off"`) ||
+		strings.Contains(text, `"confinementMode": "jailer"`) ||
+		strings.Contains(text, `"confinementMode": "seatbelt"`)
 	if !strings.Contains(text, fmt.Sprintf(`"backend": "%s"`, hostBackend())) ||
 		!strings.Contains(text, `"kernel"`) ||
 		!strings.Contains(text, `"consoleAvailable": true`) ||
 		!strings.Contains(text, fmt.Sprintf(`"consoleMode": "%s"`, wantConsoleMode)) ||
-		!strings.Contains(text, `"confinementMode": "off"`) {
+		!hasConfinementMode {
 		t.Fatalf("host output = %s", data)
 	}
 }
@@ -1587,8 +1615,10 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		FailClosed: true,
 	}
 	req, err := workspaceRequest(workspaceOptions{
-		Name:           "agent-1",
-		Backend:        "apple-vf",
+		Name:    "agent-1",
+		Backend: vmkit.BackendLinuxKVM,
+		// linux-kvm has a host-datapath capture provider, so the secure-default
+		// (unspecified -> guarded) egress mode allocates the CA-cert listener.
 		KernelPath:     "/tmp/kernel",
 		MemoryMiB:      512,
 		CPUCount:       2,
@@ -1600,7 +1630,8 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		t.Fatalf("workspaceRequest: %v", err)
 	}
 	// result + enforcer + mediation listeners, plus the CA-cert listener that
-	// egress mediation (the secure default for an unspecified mode) allocates.
+	// egress mediation (the secure default for an unspecified mode) allocates
+	// on a backend with a capture provider.
 	if len(req.Config.VsockListeners) != 4 {
 		t.Fatalf("VsockListeners len = %d, want 4: %#v", len(req.Config.VsockListeners), req.Config.VsockListeners)
 	}
@@ -6571,6 +6602,9 @@ func TestRunListListsWorkspaces(t *testing.T) {
 func TestRunListCanPrintHumanOutput(t *testing.T) {
 	t.Setenv("MICROAGENT_OUTPUT", "text")
 	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", RestartPolicy: "on-failure", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
 	eventDir := filepath.Join(dir, "research")
 	if err := os.MkdirAll(eventDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -6608,9 +6642,52 @@ func TestRunListCanPrintHumanOutput(t *testing.T) {
 	}
 }
 
+func TestRunListHidesTerminalRuntimeOnlyRecords(t *testing.T) {
+	t.Setenv("MICROAGENT_OUTPUT", "text")
+	dir := t.TempDir()
+	eventDir := filepath.Join(dir, "research")
+	if err := os.MkdirAll(eventDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	event := vmkit.Event{
+		Identity:   vmkit.Identity{RequestID: "req-1", RuntimeID: "research", Role: vmkit.RoleWorkload, Backend: vmkit.BackendLinuxKVM},
+		State:      vmkit.StateStopped,
+		ObservedAt: time.Date(2026, 5, 2, 7, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(eventDir, "event.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdoutPath := filepath.Join(dir, "list.txt")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runList(context.Background(), []string{"--state-dir", dir}, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if err != nil {
+		t.Fatalf("runList: %v", err)
+	}
+	got, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "research") || !strings.Contains(string(got), "No workspaces.") {
+		t.Fatalf("list human output = %s", got)
+	}
+}
+
 func TestRunDispatchesLSAlias(t *testing.T) {
 	t.Setenv("MICROAGENT_OUTPUT", "text")
 	dir := t.TempDir()
+	if err := writeWorkspaceManifest(workspaceOptions{StateDir: dir, Name: "research", Profile: "small", MemoryMiB: 512, CPUCount: 2, SizeMiB: 1024}); err != nil {
+		t.Fatal(err)
+	}
 	eventDir := filepath.Join(dir, "research")
 	if err := os.MkdirAll(eventDir, 0o755); err != nil {
 		t.Fatal(err)

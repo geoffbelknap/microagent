@@ -4,12 +4,13 @@ description: Checkpoint a running workspace, restore it in place, or fork copies
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-27_
 
 A snapshot freezes a workspace - guest memory, device state, and disk - at
-one moment. This guide takes one, rolls back to it, and forks independent
-copies that resume from it. Snapshots are currently implemented only for the
-Firecracker backend.
+one moment. Use it to roll back a workspace in place, or fork independent
+copies that resume from the same checkpoint. If the host cannot save and restore VM memory,
+`snapshot create` fails with a structured error before writing a partial
+checkpoint.
 
 ## 1. Get a workspace into a state worth keeping
 
@@ -42,8 +43,8 @@ TAG                      SIZE         CREATED               IMAGE
 baseline                 1.5GiB       2026-06-11T08:52:44Z  docker.io/library/alpine:3.20
 ```
 
-Each snapshot stores the memory file plus a full rootfs copy, so size is
-roughly touched RAM plus the disk. `snapshot delete` reclaims it.
+Each snapshot stores the VM state plus a full rootfs copy, so size is roughly
+saved guest state plus the disk. `snapshot delete` reclaims the space.
 
 ## 3. Restore in place
 
@@ -93,8 +94,7 @@ so any number run concurrently.
 - **Connections reset.** Host networking is re-established fresh on restore
   and fork, so in-flight TCP and vsock sessions (exec, shell,
   [mediation](/guides/agents-and-mediation/)) do not survive - the guest
-  process is expected to reconnect. Bridged networking is unsupported for snapshot and
-  fork.
+  process is expected to reconnect.
 - **Secrets are scrubbed.** Workspaces with delivered secrets get `/run/secrets`
   purged before the memory file is written and rehydrated on resume, restore,
   and fork - see [deliver secrets](/guides/secrets/).
@@ -111,10 +111,10 @@ microagent delete builder --yes
 Deleting a workspace also removes its snapshots; `snapshot delete` removes a
 single tag.
 
-## What's next
+## Related
 
 - **The lifecycle of the workspaces you're snapshotting** - [keep a persistent workspace](/guides/persistent-workspaces/).
 - **Why mediation sessions reset on restore and fork** - [build agents on the mediation channel](/guides/agents-and-mediation/).
-- **Snapshot internals and flags** - the [`snapshot`](/cli/snapshot/) reference.
-- **Fork flags and the vsock mount-namespace detail** - the [`create`](/cli/create/) reference.
+- **Snapshot flags** - the [`snapshot`](/cli/snapshot/) reference.
+- **Fork flags** - the [`create`](/cli/create/) reference.
 - **Pause without a disk artifact** - [`pause`](/cli/pause/) / [`resume`](/cli/resume/).

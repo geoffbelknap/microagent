@@ -1,20 +1,20 @@
 ---
 title: microagent serve
-description: Serve machine-readable agent endpoints.
+description: Run the MCP stdio server for agent clients.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-27_
 
 ```text
 microagent serve mcp                                                              Stdio MCP transport for agent clients
 ```
 
-`microagent serve mcp` exists as an MCP client integration entry point. It is a
-foreground stdio transport that a client launches as a subprocess; it is not a
-normal interactive CLI command and is intentionally not advertised in top-level
-help. When started directly from a terminal, the command exits with setup
-guidance instead of waiting for protocol frames on stdin.
+`microagent serve mcp` is the MCP client integration entry point. A client
+launches it as a foreground stdio subprocess; it is not a normal interactive
+CLI command and is not advertised in top-level help. When started directly from
+a terminal, the command exits with setup guidance instead of waiting for MCP
+frames on stdin.
 
 Serve local GGUF models with [`microagent model serve`](/cli/model/).
 
@@ -23,9 +23,8 @@ for workspace lifecycle, inspection, results, stats, logs, events, snapshots,
 images, networks, volumes, model store/serving, copy/artifact access, host
 diagnostics, capability discovery, and cost estimation.
 
-It is the full microagent MCP surface for the current release. It intentionally
-stops at substrate operations: it does not plan, call an LLM, interpret audit
-meaning, broker credentials, or make policy decisions.
+The MCP server stops at VM operations: it does not plan, call an LLM,
+interpret audit meaning, broker credentials, or make policy decisions.
 
 ## Examples
 
@@ -42,7 +41,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 ```
 
 ```text
-{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"microagent","version":"0.8.0"}}}
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}},"protocolVersion":"2025-06-18","serverInfo":{"name":"microagent","version":"0.8.3"}}}
 ```
 
 In normal use you never run `serve mcp` yourself - your MCP client launches it.
@@ -196,8 +195,8 @@ the minimum shape is:
 |---|---|
 | `microagent.describe` | Return the machine-readable capability manifest |
 | `microagent.ping` | Validate the MCP transport |
-| `workspace.create` | Create or dry-run a workspace |
-| `workspace.start` | Start a prepared workspace |
+| `workspace.create` | Create or dry-run a workspace, including snapshot forks with `from_snapshot` |
+| `workspace.start` | Start a prepared workspace, including snapshot restore with `from_snapshot` |
 | `workspace.exec` | Run a structured command in a running workspace |
 | `workspace.halt` | Halt a workspace and preserve disk state |
 | `workspace.stop` | Stop a workspace runtime |
@@ -244,7 +243,7 @@ the minimum shape is:
 | `profiles.list` | List resource profiles |
 | `host.inspect` | Report host capabilities |
 | `doctor.check` | Run host diagnostics |
-| `contract.get` | Return the backend-neutral runtime contract |
+| `contract.get` | Return the runtime fields integrations rely on |
 | `kernel.verify` | Verify a kernel artifact |
 | `kernel.install` | Install a kernel artifact after preview confirmation |
 | `rootfs.build` | Build a rootfs after preview confirmation |
@@ -277,6 +276,12 @@ new events without a long-running `events --follow` call.
 actions that would be taken without changing host state. Mutating tools accept
 an optional `idempotency_key`; tools that are not inherently idempotent replay
 the first successful MCP envelope for a client-supplied key.
+
+Snapshot restore and fork use the same workspace tools as the CLI. Pass
+`from_snapshot: "<tag>"` to `workspace.start` to restore a workspace in place,
+or `from_snapshot: "<workspace>:<tag>"` to `workspace.create` to fork a new
+workspace from an existing snapshot. The dedicated `snapshot.*` tools create,
+list, and delete snapshot records.
 
 `kernel.install` and `rootfs.build` use a stricter
 preview-confirm contract. Call the tool with `preview: true` first, inspect the
@@ -329,5 +334,5 @@ AX mode a failure is written as a structured error envelope.
 
 - [Use the MCP server](/guides/mcp-server/) - the client-setup walkthrough
 - [`model`](/cli/model/) - model store and runner management
-- [`contract`](/cli/contract/) - the backend-neutral runtime contract the MCP surface exposes
-- [Supervisor protocol](/protocol/) - the JSON shapes returned by the underlying commands
+- [`contract`](/cli/contract/) - the runtime fields integrations rely on
+- [State and identity](/concepts/state-and-identity/) - lifecycle states and readiness fields

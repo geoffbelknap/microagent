@@ -4,7 +4,7 @@ description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-19_
+_Last updated: 2026-06-27_
 
 ```text
 microagent kernel list    [--all] [--backend <name>] [--arch <arch>]                                       List available kernels
@@ -15,8 +15,8 @@ microagent kernel verify  --path <path> --sha256 <sum>                          
 
 `kernel` manages the guest kernel the microVMs boot. Most users can stick with
 `microagent run IMAGE [COMMAND ARG...]` and let `microagent` install the latest
-signed kernel automatically - `kernel` is the manual surface for listing,
-checking, and installing specific kernels.
+signed kernel automatically. Use `kernel` when you need to list, check, or
+install a specific kernel.
 
 Available kernels come from a cryptographically signed manifest on
 `kernels.microagent.sh`. `list`, `check`, and `install` fetch that manifest and

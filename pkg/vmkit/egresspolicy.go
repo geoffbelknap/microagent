@@ -71,6 +71,30 @@ func (p EgressPolicy) ValidateForNetworkMode(networkMode string) error {
 	return nil
 }
 
+// ValidateForCaptureProvider fails closed when a mediated egress policy
+// (guarded/strict) has no capture provider that can cover it on the given
+// backend and network mode. It is the backend-aware successor to the
+// NetworkModeMediates heuristic: a provider that leaves any protocol class
+// uncovered — e.g. Apple VF's native NAT, which exposes no microagent-owned
+// capture point and leaves the guest a direct uplink — cannot honor mediated
+// egress, so the workspace must not start under a false "guarded"/"strict"
+// claim (ASK Tenet 4: enforcement failure defaults to denial). egress=off and
+// isolated/no-egress modes pass.
+func (p EgressPolicy) ValidateForCaptureProvider(backend, networkMode string) error {
+	if !EgressMediationOn(p.Mode) {
+		return nil
+	}
+	report := NegotiateEgressCapture(backend, networkMode, p.Mode)
+	if report.HasUncoveredClass() {
+		reason := strings.Join(report.Limitations, "; ")
+		if reason == "" {
+			reason = "no egress capture provider is available"
+		}
+		return fmt.Errorf("vmkit: egress mode %q is not available on backend %q: %s; re-run with --egress off for explicit unmediated networking", p.Mode, backend, reason)
+	}
+	return nil
+}
+
 // Validate reports a policy that cannot be enforced. It returns an error when:
 //   - Mode is not one of guarded/strict/off (call NormalizeEgressPolicy first)
 //   - any Caps field is negative

@@ -58,7 +58,12 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 	// Fail closed: a snapshot of a secrets-bearing workspace is never created
 	// with un-purged plaintext.
 	purged := false
-	if materializedSecretsDeclared(&state.Config) && state.Config.SecretsControlPort != 0 {
+	if vmkit.MaterializedSecretsDeclared(&state.Config) {
+		if state.Config.SecretsControlPort == 0 {
+			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s has materialized secrets but no secrets control port", opts.Name)
+			_ = os.RemoveAll(dir)
+			return failedResponse(req, err.Error()), err
+		}
 		if current != vmkit.StateRunning {
 			err := fmt.Errorf("cannot purge secrets for snapshot: workspace %s is %s, must be running", opts.Name, current)
 			_ = os.RemoveAll(dir)
@@ -86,7 +91,8 @@ func snapshotWorkspace(ctx context.Context, opts Options, req vmkit.Request) (vm
 		}
 	}
 
-	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag, purged); err != nil {
+	confined := firecrackerProcessConfinedToWorkspace(state.PID, opts)
+	if err := writeSnapshotArtifacts(ctx, controller, opts, state, dir, req.Tag, purged, confined); err != nil {
 		if autoPaused {
 			_ = controller.patchVMState(ctx, "Resumed")
 			_ = writeSnapshotState(opts, req, state, vmkit.StateRunning)
@@ -124,8 +130,14 @@ func writeSnapshotState(opts Options, req vmkit.Request, state runtimeState, tar
 	return writeProcessStateWithProcessesAndNetwork(opts, runtimeStateRequest(req, state), target, state.PID, state.PortForwardPID, state.VsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, "")
 }
 
-func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string, purged bool) error {
-	if err := controller.createSnapshot(ctx, filepath.Join(dir, vmkit.SnapshotVMStateName), filepath.Join(dir, vmkit.SnapshotMemoryName)); err != nil {
+func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, opts Options, state runtimeState, dir, tag string, purged, confined bool) error {
+	vmstatePath := filepath.Join(dir, vmkit.SnapshotVMStateName)
+	memoryPath := filepath.Join(dir, vmkit.SnapshotMemoryName)
+	vmstateAPIPath, memoryAPIPath, err := snapshotAPIPaths(opts, confined, vmstatePath, memoryPath)
+	if err != nil {
+		return err
+	}
+	if err := controller.createSnapshot(ctx, vmstateAPIPath, memoryAPIPath); err != nil {
 		return err
 	}
 	if err := copyFile(state.Config.RootfsPath, filepath.Join(dir, vmkit.SnapshotRootfsName)); err != nil {
@@ -139,6 +151,9 @@ func writeSnapshotArtifacts(ctx context.Context, controller vmStateController, o
 }
 
 func snapshotManifestFromState(tag string, state runtimeState, opts Options, purged bool) (vmkit.SnapshotManifest, error) {
+	if err := vmkit.ValidateSnapshotSecretCapture(&state.Config, purged); err != nil {
+		return vmkit.SnapshotManifest{}, err
+	}
 	kernelSHA := ""
 	if path := strings.TrimSpace(state.Config.KernelPath); path != "" {
 		sha, err := fileSHA256(path)
@@ -159,6 +174,13 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 	vsockPath := ""
 	if needsVsock(&state.Config) {
 		vsockPath = vsockSocketPath(opts)
+		if firecrackerProcessConfinedToWorkspace(state.PID, opts) {
+			var err error
+			vsockPath, err = confinedWorkspacePath(opts, vsockPath)
+			if err != nil {
+				return vmkit.SnapshotManifest{}, err
+			}
+		}
 	}
 	// Capture the egress posture so a restore/fork re-arms the mediator with the
 	// recorded policy AND reuses the SAME per-workspace CA the guest's baked trust
@@ -176,25 +198,28 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 		caSHA = sha
 	}
 	return vmkit.SnapshotManifest{
-		Tag:                  tag,
-		NetworkMode:          mode,
-		GuestIP:              guestIP,
-		KernelSHA256:         kernelSHA,
-		VCPUCount:            state.Config.CPUCount,
-		MemoryMiB:            state.Config.MemoryMiB,
-		CreatedAt:            time.Now().UTC().Format(time.RFC3339),
-		VsockUDSPath:         vsockPath,
-		ShellPort:            state.Config.ShellPort,
-		ExecPort:             state.Config.ExecPort,
-		NetworkIP:            netIP,
-		NetworkGateway:       netGateway,
-		NetworkSubnet:        netSubnet,
-		SecretsPurged:        purged,
-		EgressMode:           state.Config.EgressMode,
-		EgressAllow:          state.Config.EgressAllow,
-		EgressPassthrough:    state.Config.EgressPassthrough,
-		EgressSwapConfigPath: state.Config.EgressSwapConfigPath,
-		EgressCASHA256:       caSHA,
+		Tag:                   tag,
+		NetworkMode:           mode,
+		GuestIP:               guestIP,
+		KernelSHA256:          kernelSHA,
+		VCPUCount:             state.Config.CPUCount,
+		MemoryMiB:             state.Config.MemoryMiB,
+		CreatedAt:             time.Now().UTC().Format(time.RFC3339),
+		VsockUDSPath:          vsockPath,
+		ShellPort:             state.Config.ShellPort,
+		ExecPort:              state.Config.ExecPort,
+		NetworkIP:             netIP,
+		NetworkGateway:        netGateway,
+		NetworkSubnet:         netSubnet,
+		RootfsArtifact:        vmkit.SnapshotRootfsName,
+		MachineStateArtifacts: vmkit.FirecrackerSnapshotArtifacts(),
+		SecretsMaterialized:   vmkit.MaterializedSecretsDeclared(&state.Config),
+		SecretsPurged:         purged,
+		EgressMode:            state.Config.EgressMode,
+		EgressAllow:           state.Config.EgressAllow,
+		EgressPassthrough:     state.Config.EgressPassthrough,
+		EgressSwapConfigPath:  state.Config.EgressSwapConfigPath,
+		EgressCASHA256:        caSHA,
 		// Bounded-operations caps (ASK tenet 8): persist so a restore re-applies the
 		// SAME bounds the workspace ran under.
 		EgressMaxBytesPerSec:     state.Config.EgressMaxBytesPerSec,
@@ -255,17 +280,17 @@ func firecrackerLaunchCommand(ctx context.Context, opts Options, req vmkit.Reque
 	if mode, err := resolveConfinementMode(opts); err != nil {
 		return nil, fmt.Errorf("resolve confinement: %w", err)
 	} else if mode != confinementOff {
-		return confinedLaunchCommand(ctx, opts, req, firecracker)
+		return confinedLaunchCommand(ctx, opts, req, firecracker, launchArgs)
 	}
 	return exec.CommandContext(ctx, firecracker, launchArgs...), nil
 }
 
-// confinedLaunchCommand builds the launch for a confined (rootless) workspace:
-// it stages the static artifacts into the jail and returns an unshare command
-// that runs the supervisor's --confined-exec handler, which jails and execs
-// Firecracker. Firecracker reads its config and sockets via the workspace dir
-// bound into the jail at /run, so the host-side path helpers are unchanged.
-func confinedLaunchCommand(ctx context.Context, opts Options, req vmkit.Request, firecracker string) (*exec.Cmd, error) {
+// confinedLaunchCommand builds the launch for a confined workspace: it stages
+// the static artifacts into the jail and returns an unshare command that runs
+// the supervisor's --confined-exec handler, which jails and execs Firecracker.
+// Firecracker sees workspace files through the workspace dir bound at /run, so
+// caller-provided launch paths are translated from host workspace paths to /run.
+func confinedLaunchCommand(ctx context.Context, opts Options, req vmkit.Request, firecracker string, launchArgs []string) (*exec.Cmd, error) {
 	layout := confinedJailLayout(opts, req.Config, firecracker)
 	if err := stageJailArtifacts(layout); err != nil {
 		return nil, fmt.Errorf("stage confined jail: %w", err)
@@ -282,12 +307,29 @@ func confinedLaunchCommand(ctx context.Context, opts Options, req vmkit.Request,
 	// shadow pasta's network setup) — only add the nested mount namespace.
 	mapRoot := !insideUserNetworkNamespace()
 	workDir := filepath.Join(opts.StateDir, opts.Name)
-	confinedArgs := []string{
-		"--api-sock", "/run/" + filepath.Base(apiSocketPath(opts)),
-		"--config-file", "/run/" + filepath.Base(configPath(opts)),
+	confinedArgs, err := confinedLaunchArgs(opts, launchArgs)
+	if err != nil {
+		return nil, err
 	}
 	args := confinedExecArgs(mapRoot, supervisor, layout.Root, workDir, layout.Firecracker.Guest, confinedArgs)
 	return exec.CommandContext(ctx, unsharePath, args...), nil
+}
+
+func confinedLaunchArgs(opts Options, launchArgs []string) ([]string, error) {
+	args := make([]string, 0, len(launchArgs))
+	for i := 0; i < len(launchArgs); i++ {
+		arg := launchArgs[i]
+		args = append(args, arg)
+		if (arg == "--api-sock" || arg == "--config-file") && i+1 < len(launchArgs) {
+			i++
+			path, err := confinedWorkspacePath(opts, launchArgs[i])
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, path)
+		}
+	}
+	return args, nil
 }
 
 // snapshotForkBind reports whether loading this snapshot into the given
@@ -299,6 +341,9 @@ func confinedLaunchCommand(ctx context.Context, opts Options, req vmkit.Request,
 func snapshotForkBind(opts Options, manifest vmkit.SnapshotManifest) (src, dst string, needed bool) {
 	baked := strings.TrimSpace(manifest.VsockUDSPath)
 	if baked == "" {
+		return "", "", false
+	}
+	if clean := filepath.Clean(baked); clean == "/run" || strings.HasPrefix(clean, "/run/") {
 		return "", "", false
 	}
 	src = filepath.Dir(baked)
@@ -375,16 +420,79 @@ exec:
 // restoreFromSnapshot waits for the freshly launched Firecracker API socket and
 // loads the snapshot's vmstate and memory into it, resuming the guest. The
 // rootfs has already been put in place by prepareSnapshotRestore.
-func restoreFromSnapshot(ctx context.Context, opts Options, tag string, networkOverrides []networkOverride) error {
+func restoreFromSnapshot(ctx context.Context, opts Options, tag string, firecrackerPID int, networkOverrides []networkOverride) error {
 	sock := apiSocketPath(opts)
 	if err := waitForAPISocket(ctx, sock, 10*time.Second); err != nil {
 		return err
 	}
 	dir := vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)
+	manifest, err := vmkit.ReadSnapshotManifest(dir)
+	if err != nil {
+		return err
+	}
+	vmstate, memory := firecrackerSnapshotArtifactPaths(manifest)
+	vmstatePath := filepath.Join(dir, vmstate)
+	memoryPath := filepath.Join(dir, memory)
+	vmstateAPIPath, memoryAPIPath, err := snapshotAPIPaths(opts, firecrackerProcessConfinedToWorkspace(firecrackerPID, opts), vmstatePath, memoryPath)
+	if err != nil {
+		return err
+	}
 	return newVMStateController(sock).loadSnapshot(ctx,
-		filepath.Join(dir, vmkit.SnapshotVMStateName),
-		filepath.Join(dir, vmkit.SnapshotMemoryName),
+		vmstateAPIPath,
+		memoryAPIPath,
 		true, networkOverrides)
+}
+
+func snapshotAPIPaths(opts Options, confined bool, vmstatePath, memoryPath string) (string, string, error) {
+	vmstateAPIPath, err := snapshotAPIPath(opts, confined, vmstatePath)
+	if err != nil {
+		return "", "", err
+	}
+	memoryAPIPath, err := snapshotAPIPath(opts, confined, memoryPath)
+	if err != nil {
+		return "", "", err
+	}
+	return vmstateAPIPath, memoryAPIPath, nil
+}
+
+func snapshotAPIPath(opts Options, confined bool, hostPath string) (string, error) {
+	if !confined {
+		return hostPath, nil
+	}
+	return confinedWorkspacePath(opts, hostPath)
+}
+
+func confinedWorkspacePath(opts Options, hostPath string) (string, error) {
+	workspaceDir := filepath.Clean(filepath.Join(opts.StateDir, opts.Name))
+	rel, err := filepath.Rel(workspaceDir, filepath.Clean(hostPath))
+	if err != nil {
+		return "", fmt.Errorf("translate confined firecracker path %s: %w", hostPath, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("confined firecracker path %s is outside workspace dir %s", hostPath, workspaceDir)
+	}
+	if rel == "." {
+		return "/run", nil
+	}
+	return filepath.Join("/run", rel), nil
+}
+
+func firecrackerSnapshotArtifactPaths(manifest vmkit.SnapshotManifest) (vmstate, memory string) {
+	vmstate = vmkit.SnapshotVMStateName
+	memory = vmkit.SnapshotMemoryName
+	for _, artifact := range vmkit.SnapshotMachineStateArtifacts(manifest) {
+		switch artifact.Kind {
+		case "firecracker-vmstate":
+			if artifact.Path != "" {
+				vmstate = artifact.Path
+			}
+		case "firecracker-memory":
+			if artifact.Path != "" {
+				memory = artifact.Path
+			}
+		}
+	}
+	return vmstate, memory
 }
 
 // snapshotNetworkOverrides remaps the restored guest network interface to this
@@ -443,7 +551,10 @@ func prepareSnapshotRestore(opts Options, req vmkit.Request) error {
 			return fmt.Errorf("snapshot %q was taken against kernel sha256 %s but the workspace kernel is %s; refusing to load", req.Tag, manifest.KernelSHA256, sha)
 		}
 	}
-	if err := copyFile(filepath.Join(dir, vmkit.SnapshotRootfsName), req.Config.RootfsPath); err != nil {
+	if err := vmkit.ValidateSnapshotSecretRestore(manifest, req.Config); err != nil {
+		return err
+	}
+	if err := copyFile(filepath.Join(dir, vmkit.SnapshotRootfsArtifact(manifest)), req.Config.RootfsPath); err != nil {
 		return fmt.Errorf("restore snapshot rootfs: %w", err)
 	}
 	return nil

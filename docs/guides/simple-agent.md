@@ -4,17 +4,17 @@ description: Boot a microVM, point it at Claude, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-27_
 
-This guide builds a small agent in a Linux microVM. The agent calls Claude with
+This example builds a small agent in a Linux microVM. The agent calls Claude with
 `bash`, `read_file`, and `write_file` tools, so Claude can edit code, run
 commands, and inspect files inside `/workspace`. Halt the workspace, swap in a
 new prompt, start it back up, and Claude can read whatever it wrote on the
 previous run.
 
 New here? Start with [run your first agent](/getting-started/cli/first-agent/)
-for the quickstart version. This guide spends more time on the agent itself,
-prompt caching, and the gaps between this demo and a production setup.
+for the quickstart version. This page spends more time on the agent itself,
+prompt caching, and the choices you would change for a production setup.
 
 [`examples/minimal-agent/microagent.yaml`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent/microagent.yaml)
 describes the workspace. One spec file, one `microagent create` call, no
@@ -142,7 +142,8 @@ microagent halt minimal-agent
 microagent delete minimal-agent
 ```
 
-`delete` removes the workspace record and disk. (For Firecracker, `delete` refuses while the VM is still running; halt or stop first.)
+`delete` removes the workspace record and disk. If the VM is still running,
+halt or stop it first.
 
 ## Try it with another provider
 
@@ -155,14 +156,15 @@ workspace, and walkthrough. Each variant has its own `microagent.yaml` and READM
 
 Swap the spec path and the API-key env var; everything else stays the same.
 
-## What this isn't yet
+## Demo limits
 
-This guide runs the agent against one request per restart and uses an env-var API key. Two production-shape gaps:
+This example runs one request per restart and uses an env-var API key. For a
+production setup, change two things:
 
 - **One request per restart.** A real deployment streams `WorkRequest`/`WorkResult` over the mediation channel instead of `microagent cp` - see [build agents on the mediation channel](/guides/agents-and-mediation/).
 - **The agent holds the key.** Passing `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`, `GEMINI_API_KEY`) as an env var means the agent reaches the model directly. The production shape routes the call through a host-side proxy that holds the key, audits requests, and forwards them. See [agency](https://github.com/geoffbelknap/agency) for an implementation.
 
-## What to read next
+## Related
 
 - [`microagent.yaml`](/cli/spec/) - the full workspace spec reference.
 - [Glossary](/concepts/glossary/) - workspace, mediation, halt vs quarantine, etc.

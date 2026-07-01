@@ -151,6 +151,30 @@ e2e_have_hcs() {
   sc query vmms 2>/dev/null | grep -q 'RUNNING'
 }
 
+e2e_have_applevf() {
+  [ "$(uname -s)" = "Darwin" ] || return 1
+  [ "$(uname -m)" = "arm64" ] || return 1
+
+  supervisor="${MICROAGENT_APPLEVF_SUPERVISOR:-${ROOT:-$(pwd)}/supervisors/applevf/.build/release/microagent-applevf-supervisor}"
+  [ -x "$supervisor" ] || return 1
+
+  response="$("$supervisor" <<< '{"command":"host"}' 2>/dev/null)" || return 1
+  python3 - "$response" <<'PY'
+import json
+import sys
+
+try:
+    body = json.loads(sys.argv[1])
+except Exception:
+    raise SystemExit(1)
+host = body.get("host") or {}
+if body.get("ok") is not True or host.get("backend") != "apple-vf":
+    raise SystemExit(1)
+if host.get("virtualizationSupported") is not True:
+    raise SystemExit(1)
+PY
+}
+
 # e2e_is_windows_elevated: the shell runs elevated (admin). HNS NAT network
 # creation (user/nat modes) needs elevation; Hyper-V Administrators alone is
 # enough for isolated boots but not for HNS.
@@ -172,7 +196,7 @@ e2e_have_vm() {
       return 0
       ;;
     Darwin)
-      [ "$(uname -m)" = "arm64" ]
+      e2e_have_applevf
       ;;
     MINGW*|MSYS*|CYGWIN*)
       case "$(uname -m)" in

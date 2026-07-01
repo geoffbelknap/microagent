@@ -492,12 +492,52 @@ func LegacyKernelPath(backend string) string {
 	return filepath.Join(home, ".microagent", "kernels", backend, "Image")
 }
 
-func PackagedKernelPath(backend, arch string) string {
-	executable, err := os.Executable()
-	if err != nil {
-		return ""
+// fileExists reports whether path is an existing regular file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// installBases lists the executables to resolve install-relative runtime paths
+// against: the running binary first (correct when microagent's own CLI/supervisor
+// is running), then the installed `microagent` on PATH. The second base is what
+// makes resolution correct for LIBRARY CONSUMERS — a process embedding microagent
+// (e.g. microagency) has its own os.Executable(), not microagent's install prefix,
+// so without this the guest-init/kernel/supervisor are looked for in the wrong dir.
+func installBases() []string {
+	var bases []string
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		bases = append(bases, exe)
 	}
-	return PackagedKernelPathFromExecutable(executable, backend, arch)
+	if p, err := exec.LookPath("microagent"); err == nil && p != "" {
+		if len(bases) == 0 || p != bases[0] {
+			bases = append(bases, p)
+		}
+	}
+	return bases
+}
+
+// resolveInstallPath returns the first install base whose resolved path exists,
+// falling back to the first base's resolution (preserving prior behavior when
+// nothing is found).
+func resolveInstallPath(fromExecutable func(string) string) string {
+	var fallback string
+	for i, base := range installBases() {
+		cand := fromExecutable(base)
+		if fileExists(cand) {
+			return cand
+		}
+		if i == 0 {
+			fallback = cand
+		}
+	}
+	return fallback
+}
+
+func PackagedKernelPath(backend, arch string) string {
+	return resolveInstallPath(func(exe string) string {
+		return PackagedKernelPathFromExecutable(exe, backend, arch)
+	})
 }
 
 func PackagedKernelPathFromExecutable(executable, backend, arch string) string {
@@ -531,11 +571,10 @@ func AppleVFSupervisorPath() string {
 	if path := strings.TrimSpace(os.Getenv("MICROAGENT_APPLEVF_SUPERVISOR")); path != "" {
 		return path
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		return "microagent-applevf-supervisor"
+	if p := resolveInstallPath(AppleVFSupervisorPathFromExecutable); p != "" {
+		return p
 	}
-	return AppleVFSupervisorPathFromExecutable(executable)
+	return "microagent-applevf-supervisor"
 }
 
 func AppleVFSupervisorPathFromExecutable(executable string) string {
@@ -556,11 +595,12 @@ func AppleVFSupervisorPathFromExecutable(executable string) string {
 }
 
 func GuestInitPath(arch string) string {
-	executable, err := os.Executable()
-	if err != nil {
-		return "microagent-guestinit"
+	if p := resolveInstallPath(func(exe string) string {
+		return GuestInitPathFromExecutable(exe, arch)
+	}); p != "" {
+		return p
 	}
-	return GuestInitPathFromExecutable(executable, arch)
+	return "microagent-guestinit"
 }
 
 func GuestInitPathFromExecutable(executable, arch string) string {
@@ -961,16 +1001,16 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if secretsPort != 0 {
 		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
 	}
-	// CACertPort is allocated whenever egress mediation is on ("guarded" or
-	// "strict"; empty already normalized to "guarded" above) AND the network
-	// mode actually runs the mediator. The vsock listener serves the
-	// per-workspace CA public cert to the guest at boot so guestinit can install
-	// it into the trust store before any HTTPS traffic. "isolated" (no egress)
-	// never starts a mediator — even with EgressMode=mediated/strict — so
-	// allocating the CA listener there would tell the guest to trust a CA for a
-	// mediator that will never exist (dead state).
+	// CACertPort is allocated only when the negotiated capture provider actually
+	// mediates a protocol class — i.e. a real mediator will exist to serve the
+	// per-workspace CA the guest installs at boot. Gating on the provider (not on
+	// EgressMediationOn + NetworkModeMediates) means backends with no capture
+	// provider (apple-vf native NAT today) never get a CA-cert listener their
+	// supervisor can't serve — which is what broke the default apple-vf boot.
+	// "off" and isolated provide no mediator, so no CA listener either.
+	captureReport := vmkit.NegotiateEgressCapture(opts.Backend, opts.Network.Mode, opts.EgressMode)
 	var caCertPort uint32
-	if vmkit.EgressMediationOn(opts.EgressMode) && vmkit.NetworkModeMediates(opts.Network.Mode) {
+	if captureReport.MediatesAnyClass() {
 		caCertPort = DefaultCACertPort
 		listeners = append(listeners, vmkit.VsockListener{Port: caCertPort, Target: secretxfer.CACertTarget})
 	}
@@ -1101,11 +1141,8 @@ func FirecrackerSupervisorPath(opts Options) string {
 	if path := strings.TrimSpace(os.Getenv("MICROAGENT_FIRECRACKER_SUPERVISOR")); path != "" {
 		return path
 	}
-	if executable, err := os.Executable(); err == nil {
-		path := FirecrackerSupervisorPathFromExecutable(executable)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			return path
-		}
+	if p := resolveInstallPath(FirecrackerSupervisorPathFromExecutable); fileExists(p) {
+		return p
 	}
 	return "microagent-firecracker-supervisor"
 }
@@ -1127,7 +1164,36 @@ func FirecrackerSupervisorPathFromExecutable(executable string) string {
 	return candidates[0]
 }
 
+// launchCommands are the supervisor commands that actually boot a guest, as
+// opposed to inspect/snapshot/control commands that operate on an existing or
+// recorded workspace. Egress capture-provider fail-closed validation applies
+// only to a launch: a stopped guarded workspace can still be inspected, but it
+// cannot boot mediated on a backend with no capture provider.
+func isLaunchCommand(command string) bool {
+	switch strings.TrimSpace(command) {
+	case "run", "prepare", "start":
+		return true
+	default:
+		return false
+	}
+}
+
 func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
+	// Fail closed before booting when mediated egress (guarded/strict) is
+	// requested but this backend has no capture provider that can cover it
+	// (e.g. apple-vf native NAT today). Only launches are gated — inspect,
+	// snapshot, and control commands on an existing workspace are not.
+	if isLaunchCommand(req.Command) && req.Config != nil {
+		networkMode := ""
+		if req.Config.Network != nil {
+			networkMode = req.Config.Network.Mode
+		}
+		pol := vmkit.EgressPolicy{Mode: req.Config.EgressMode}
+		if err := pol.ValidateForCaptureProvider(opts.Backend, networkMode); err != nil {
+			err = contextualDispatchError(opts, req, err)
+			return vmkit.Response{Backend: opts.Backend, Error: err.Error()}, err
+		}
+	}
 	supervisor, err := Supervisor(opts)
 	if err != nil {
 		err = contextualDispatchError(opts, req, err)

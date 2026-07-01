@@ -40,13 +40,19 @@ type Capabilities struct {
 	// workspaces.
 	GuestMediatedCopy bool
 	// Snapshot reports whether the backend can checkpoint a workspace's guest
-	// memory + device state to disk (snapshot create/restore/fork). Apple VF
-	// support is planned (VZ saveMachineStateTo, macOS 14+). windows-hyperv
+	// memory + device state to disk (snapshot create/restore/fork). windows-hyperv
 	// cannot: its HCS-direct (LinuxKernelDirect) compute systems have no
-	// guest-memory save-state — HcsSaveComputeSystem captures only device
+	// guest-memory save-state; HcsSaveComputeSystem captures only device
 	// state, and the working Hyper-V mechanisms (Save-VM/checkpoints) belong
 	// to VMMS, which the HCS-direct backend deliberately does not use.
 	Snapshot bool
+	// PauseResume reports whether the backend can freeze and thaw a running
+	// workspace in place. Snapshot remains the aggregate full-feature capability.
+	PauseResume bool
+	// SnapshotCreate reports whether the backend can create a snapshot artifact.
+	// Restore/fork support is still represented by Snapshot until split out and
+	// validated end-to-end.
+	SnapshotCreate bool
 }
 
 // BackendCapabilities returns the capability table entry for a backend.
@@ -62,6 +68,8 @@ func BackendCapabilities(backend string) Capabilities {
 			ShellNetwork:         "tcp",
 			ShellReadinessProbe:  true,
 			Snapshot:             true,
+			PauseResume:          true,
+			SnapshotCreate:       true,
 		}
 	case BackendAppleVF:
 		return Capabilities{
@@ -71,6 +79,9 @@ func BackendCapabilities(backend string) Capabilities {
 			DetachedHostSupervisor: true,
 			ShellNetwork:           "tcp",
 			ShellReadinessProbe:    true,
+			Snapshot:               true,
+			PauseResume:            true,
+			SnapshotCreate:         true,
 		}
 	case BackendWindowsHyperV:
 		return Capabilities{

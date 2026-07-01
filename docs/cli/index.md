@@ -4,7 +4,7 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-17_
+_Last updated: 2026-06-27_
 
 ## Which command do I want?
 
@@ -65,8 +65,8 @@ _Last updated: 2026-06-17_
 | [`profiles`](/cli/profiles/) | List exact named resource profiles |
 | [`image`](/cli/image/) | Manage local image records |
 | [`perf`](/cli/perf/) | Measure workspace boot performance |
-| [`serve`](/cli/serve/) | Serve machine-readable agent endpoints |
-| [`contract`](/cli/contract/) | Print the backend-neutral runtime contract |
+| [`serve`](/cli/serve/) | Run the MCP stdio server for agent clients |
+| [`contract`](/cli/contract/) | Print the runtime fields integrations rely on |
 | [`host`](/cli/host/) | Report host backend capabilities |
 | [`doctor`](/cli/doctor/) | Check the host for backend support |
 | [`rootfs`](/cli/rootfs/) | Build a rootfs from an OCI image |
@@ -111,6 +111,6 @@ produce output. Subcommand pages link back here rather than repeat them.
 ## Output
 
 All commands can print JSON output. With `--json` before the subcommand (or
-`MICROAGENT_OUTPUT=json`), the response matches the shape documented in the
-[supervisor protocol](/protocol/). Scripts should consume JSON; humans get the
-text format by default.
+`MICROAGENT_OUTPUT=json`), the response uses the same structured result shape
+the Go library and MCP adapter use. Scripts should consume JSON; humans get
+the text format by default.

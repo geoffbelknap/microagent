@@ -114,6 +114,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if len(args) > 0 && args[0] == "--host-worker-mediator" {
 		return runHostWorkerMediator(ctx, args[1:], stdout)
 	}
+	if len(args) > 0 && args[0] == "--egress-datapath" {
+		return runEgressDatapath(ctx, args[1:])
+	}
 	if len(args) > 0 && args[0] == "help" {
 		if len(args) > 1 && args[1] == "all" {
 			printFullHelp(stdout)

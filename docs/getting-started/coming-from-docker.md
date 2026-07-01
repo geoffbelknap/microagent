@@ -4,7 +4,7 @@ description: Map the Docker commands you already know to their microagent equiva
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-06-27_
 
 If you think in Docker commands, most of your muscle memory carries over. The
 big difference: each "container" is a real microVM with its own kernel, and
@@ -67,9 +67,8 @@ distinction matters for what you can do next:
 
 - **halt** - clean disk-preserving shutdown. The VM exits, the disk stays,
   and `start` boots the same disk back up.
-- **stop** - graceful shutdown signal (SIGTERM on Firecracker, the equivalent
-  on Apple VF). If the VM doesn't shut down cleanly, follow up with
-  `microagent kill`.
+- **stop** - graceful shutdown request. If the VM doesn't shut down cleanly,
+  follow up with `microagent kill`.
 - **kill** - hard terminate, for when `stop` doesn't return.
 
 All three leave the disk in place. `halt` is the deliberate "park it and
@@ -80,7 +79,7 @@ stop it first. `--force` kills and deletes. The
 [glossary](/concepts/glossary/#lifecycle-vocabulary) has the full lifecycle
 vocabulary, including `quarantine`.
 
-## What's next
+## Related
 
 - [Quickstart](/getting-started/quickstart/) - boot your first microVM.
 - [Persistent workspaces](/guides/persistent-workspaces/) - the create, start, halt, delete loop in practice.

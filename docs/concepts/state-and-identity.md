@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-16_
+_Last updated: 2026-06-27_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -41,7 +41,7 @@ The CLI builds the identity automatically on the high-level `run` and
 `create` paths - workspaces default to `role: workload` and the runtime ID
 comes from `--name` / `--id`. The lower-level `create --rootfs` path and
 `--json` requests let callers set `role` explicitly; see
-[`microagent create`](/cli/create/) for the flag surface.
+[`microagent create`](/cli/create/) for the flags.
 
 ## State directory
 
@@ -51,8 +51,7 @@ gets its own subdirectory containing:
 - the rootfs disk and any built bundles
 - a JSON state file with the latest event
 - a durable JSON event timeline
-- backend-specific scratch (PID files for Firecracker, console sockets for
-  Apple VF, HCS runtime IDs for Windows Hyper-V)
+- host runtime scratch used to track the live VM process
 
 `microagent list` reads this directory. `microagent delete` removes a
 workspace's subdirectory.
@@ -125,9 +124,9 @@ killed before it can be started again.
 
 `paused` is memory state, not disk state: `pause` freezes a running
 workspace's vCPUs while preserving memory and disk, and `resume` thaws it back
-to `running` exactly where it left off (Firecracker; `exec`, `connect`, and
-`stats` are rejected while paused). This is distinct from `halt`, which
-discards memory and reboots from disk on the next `start`.
+to `running` exactly where it left off. `exec`, `connect`, and `stats` are
+rejected while paused. This is distinct from `halt`, which discards memory and
+reboots from disk on the next `start`.
 Commands such as `kill` and `delete` still return lifecycle events, usually
 with state `stopped` and a `detail` field. Callers should treat these strings as
 the authoritative source of truth, not log scraping.
@@ -163,18 +162,16 @@ stateDiagram-v2
 Two non-obvious things to read from that diagram:
 
 - **Nothing goes directly from `quarantined` back to `start`.** Quarantine is a forensic state - you have to halt, stop, or kill it first, then start from the resulting clean state.
-- **`running` has no direct path to `delete`.** `delete` refuses while a VM process is alive (Firecracker), so you have to take the workspace through halt, stop, or kill first.
+- **`running` has no direct path to `delete`.** Take the workspace through
+  halt, stop, or kill first.
 
 `unknown` and `stopping` are real states the API can report - `unknown` for unrecognized state files, `stopping` as the transient between `running` and a terminal state - but neither sits between user-driven transitions, so they're omitted above.
 
 Each state write updates `<state-dir>/<runtimeID>/event.json` with the latest
 event and appends the same record to `<state-dir>/<runtimeID>/events.json`.
-Substrate events that do not change workspace state can also append to
+Lifecycle events that do not change workspace state can also append to
 `events.json` without replacing `event.json`; for example, model-paired
 workspaces record `model_worker=attached` and `model_worker=released` markers
 when a host model runner is attached or released. The timeline survives VM
 runtime exit and is intentionally small: it is a forensic lifecycle and
-substrate record, not a log stream.
-
-See the [supervisor protocol](/protocol/) for the shared request and response
-schema.
+host-side event record, not a log stream.

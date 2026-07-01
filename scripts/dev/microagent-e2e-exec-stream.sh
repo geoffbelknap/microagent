@@ -54,7 +54,11 @@ cleanup() {
   fi
   chmod -R u+w "$STATE_DIR" 2>/dev/null || true
   if [ "$status" -eq 0 ] && [ "${MICROAGENT_KEEP_MICROAGENT_E2E_EXEC_STREAM:-0}" != "1" ]; then
-    rm -rf "$STATE_DIR"
+    if ! rm -rf "$STATE_DIR"; then
+      sleep 1
+      chmod -R u+w "$STATE_DIR" 2>/dev/null || true
+      rm -rf "$STATE_DIR" 2>/dev/null || echo "warning: could not fully remove exec-stream state at $STATE_DIR" >&2
+    fi
   else
     echo "kept microagent E2E exec-stream state at $STATE_DIR" >&2
   fi

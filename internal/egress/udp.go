@@ -1,6 +1,8 @@
 package egress
 
 import (
+	"context"
+	"io"
 	"net"
 	"net/netip"
 	"sync"
@@ -32,6 +34,47 @@ const (
 type udpFlowKey struct {
 	src     netip.AddrPort
 	origDst netip.AddrPort
+}
+
+// HandleUDPConn mediates a single already-accepted UDP guest flow whose
+// original destination is known by the caller. It is used by host-owned
+// datapaths such as Apple VF host-fd where there is no Linux TPROXY socket, but
+// the datapath still has the guest source and original destination from its
+// userspace network stack.
+func (h *Handler) HandleUDPConn(ctx context.Context, guest net.Conn, src, origDst netip.AddrPort) {
+	defer func() { _ = guest.Close() }()
+	p := newUDPProxy(h)
+	defer p.closeAll()
+	p.replyTo = func(replyOrigDst, replyGuestSrc netip.AddrPort, payload []byte) error {
+		if replyOrigDst != origDst || replyGuestSrc != src {
+			return nil
+		}
+		_, err := guest.Write(payload)
+		return err
+	}
+	buf := make([]byte, maxUDPDatagram)
+	for {
+		_ = guest.SetReadDeadline(time.Now().Add(udpFlowIdle))
+		n, err := guest.Read(buf)
+		if n > 0 {
+			payload := make([]byte, n)
+			copy(payload, buf[:n])
+			p.handleUDPDatagram(src, origDst, payload)
+		}
+		if err != nil {
+			if ctx.Err() != nil || err == io.EOF || neTimeout(err) {
+				return
+			}
+			return
+		}
+	}
+}
+
+func neTimeout(err error) bool {
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return true
+	}
+	return false
 }
 
 // udpFlow is one live guest<->upstream UDP association. The upstream conn
@@ -237,24 +280,21 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		}
 	}
 
-	d := p.h.Policy.AllowHost(host)
-	// inside is true when guarded mode classifies the resolved destination IP as
-	// an inside/infrastructure address. An explicitly allowlisted host overrides
-	// the inside-deny (d.Allow wins), mirroring the TCP path in Handle. The check
-	// runs on the raw destination IP so SNI/hostname spoofing cannot bypass it.
-	inside := p.h.Mode == egressModeGuarded && isInsideAddr(origDst.Addr())
-	// strict (or empty) keeps the default-deny allowlist; guarded keeps the
-	// allowlist AND additionally denies non-allowlisted inside destinations
-	// fail-closed.
-	allowed := d.Allow || (p.h.Mode == egressModeGuarded && !inside)
-	unlisted := allowed && !d.Allow // not explicitly on the allowlist (guarded-public grant)
+	// Same decision sequence as the TCP path and the wasm sandbox, via the shared
+	// Brain.Evaluate: the default-deny allowlist plus the guarded inside-deny on
+	// the resolved destination IP (so SNI/hostname spoofing cannot bypass it).
+	// UDP has no passthrough/peer concept, so candidates is nil and passthrough is
+	// false; the deny audit keeps the UDP-specific event names.
+	v := p.h.brain().Evaluate(host, nil, origDst.Addr(), false)
+	allowed := v.Allowed
+	unlisted := v.Unlisted // not explicitly on the allowlist (guarded-public grant)
 
 	dst := origDst.String()
 	if !allowed {
 		// fail-closed: no upstream socket, drop the datagram.
 		event := "egress_udp_deny"
-		reason := d.Reason
-		if inside {
+		reason := v.Reason
+		if v.Inside {
 			event = "egress_udp_internal_deny"
 			reason = "guarded: internal destination denied"
 		}
@@ -262,7 +302,7 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 			"host":     host,
 			"dst":      dst,
 			"reason":   reason,
-			"internal": inside,
+			"internal": v.Inside,
 		})
 		return
 	}
