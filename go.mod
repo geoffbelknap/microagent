@@ -8,6 +8,7 @@ require (
 	github.com/google/nftables v0.3.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
+	github.com/tetratelabs/wazero v1.12.0
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
 	github.com/vishvananda/netlink v1.3.1
 	golang.org/x/net v0.56.0
