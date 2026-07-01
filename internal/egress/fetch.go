@@ -76,6 +76,20 @@ func (b *Brain) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, err
 		}
 	}
 
+	// Gate on the destination NAME before resolving it. In any mode but guarded, an
+	// unlisted host is a dispositive deny (allowed == d.Allow; see Evaluate), so
+	// there is no reason to resolve it — and resolving a forbidden host would itself
+	// be unmediated DNS egress to a destination the policy rejects, besides making
+	// the denial depend on DNS reachability (offline, a resolve failure returns 502,
+	// masking the real 403). Guarded mode can still permit an unlisted-but-public
+	// host, so it falls through to the post-resolve IP evaluation below.
+	if b.Mode != egressModeGuarded {
+		if d := b.Policy.AllowHost(host); !d.Allow {
+			b.AuditDeny(Verdict{Reason: d.Reason}, map[string]any{"host": host, "shape": "fetch"})
+			return FetchResponse{Status: 403, Denied: true, Reason: d.Reason}, nil
+		}
+	}
+
 	// Resolve to a concrete connect IP. The IP — not the guest-supplied name — is
 	// what guarded classifies and what the dial is pinned to, which is what defeats
 	// rebinding. A resolution failure is fail-closed.

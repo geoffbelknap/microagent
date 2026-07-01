@@ -117,6 +117,41 @@ func TestFetchDeniedNoUpstreamDial(t *testing.T) {
 	}
 }
 
+// A strict-mode unlisted host is denied on the NAME, before any DNS resolution:
+// the denial must not depend on the destination being reachable. Regression for a
+// resolve-first ordering bug where an unlisted host was resolved before the policy
+// check, so offline the resolve failure surfaced a 502 that masked the real 403
+// (and resolving a forbidden host is itself unmediated DNS egress).
+func TestFetchStrictDeniesUnlistedBeforeResolve(t *testing.T) {
+	log := &BufferLogger{}
+	// A hostname (not an IP literal) that is NOT on the allowlist. If the code
+	// resolved before deciding, this would produce an egress_fetch_error/502.
+	b := &Brain{Mode: "strict", Policy: brainPolicy(t, "allowed.example"), Logger: log}
+
+	resp, err := b.Fetch(context.Background(), FetchRequest{URL: "https://blocked.example.com/data"})
+	if err != nil {
+		t.Fatalf("a policy denial must not be a Go error: %v", err)
+	}
+	if !resp.Denied || resp.Status != 403 {
+		t.Fatalf("want fail-closed 403, got status=%d denied=%v", resp.Status, resp.Denied)
+	}
+	var sawDeny bool
+	for _, e := range log.Snapshot() {
+		if e["event"] == "egress_fetch_error" {
+			t.Fatalf("unlisted host was resolved before the policy check: %v", e)
+		}
+		if e["event"] == "egress_deny" {
+			sawDeny = true
+			if r, _ := e["reason"].(string); r == "" {
+				t.Error("egress_deny carries no reason")
+			}
+		}
+	}
+	if !sawDeny {
+		t.Fatalf("expected egress_deny; got %v", log.Snapshot())
+	}
+}
+
 // Guarded mode denies an inside/infra destination (loopback) on the resolved IP,
 // auditing egress_internal_deny — the same guarded contract as the microVM path.
 func TestFetchGuardedDeniesInside(t *testing.T) {
