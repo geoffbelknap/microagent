@@ -226,7 +226,10 @@ func TestAuditEventAccessors(t *testing.T) {
 	if deny == nil {
 		t.Fatalf("no egress_deny event: %+v", res.Audit)
 	}
-	if deny.Host() != "127.0.0.1" || !strings.HasPrefix(deny.Dst(), "127.0.0.1:") || deny.Reason() != "not allowlisted" {
+	// A NAME-level policy deny fires BEFORE resolution — no destination was ever
+	// chosen — so Dst() is empty here. (Dst() is exercised with a real value by the
+	// fetch_error case below.)
+	if deny.Host() != "127.0.0.1" || deny.Dst() != "" || deny.Reason() != "not allowlisted" {
 		t.Fatalf("deny accessors: host=%q dst=%q reason=%q", deny.Host(), deny.Dst(), deny.Reason())
 	}
 
