@@ -4,7 +4,7 @@ description: Store credentials for private OCI registries without any Docker dep
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-06-25_
 
 ```text
 microagent registry login <registry> -u <user> [--password-stdin]   Store registry credentials

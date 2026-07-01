@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-06-25_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
