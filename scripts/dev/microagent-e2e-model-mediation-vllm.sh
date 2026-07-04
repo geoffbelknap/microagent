@@ -38,6 +38,13 @@
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE    0/1 (default: 0)
 #   MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PRESSURE_PRESET
 #                                                    default, baseline, ci, or hardware
+#
+# The vLLM fixture does not need to be a source checkout. Any directory whose
+# .venv has the vllm package installed works, e.g.:
+#   uv venv .venv && uv pip install --python .venv/bin/python vllm
+# MICROAGENT_E2E_MODEL_MEDIATION_VLLM_REPO is only used as the runner's
+# working directory and to derive the default .venv/bin/python path; set
+# MICROAGENT_E2E_MODEL_MEDIATION_VLLM_PYTHON to use an interpreter elsewhere.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
