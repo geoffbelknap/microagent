@@ -3596,8 +3596,6 @@ func reorderFlagArgs(args []string) []string {
 		"-expect":                    true,
 		"-secret":                    true,
 		"-secrets-env-file":          true,
-		"-username":                  true,
-		"-u":                         true,
 		"-secret-on-demand":          true,
 		"-egress":                    true,
 		"-egress-allow":              true,
@@ -3606,6 +3604,15 @@ func reorderFlagArgs(args []string) []string {
 		"-egress-swap-config":        true,
 		"-cred-swap":                 true,
 	}
+	return reorderArgs(args, func(name string) bool { return valueFlags[name] }, isBoolReorderFlag)
+}
+
+// reorderArgs hoists recognized flags ahead of positionals so a FlagSet stops at the
+// first positional rather than at an interleaved flag. isValueFlag/isBoolFlag report
+// which flag names the CALLER's FlagSet knows — a command must pass only its OWN
+// flags, never a global set, or it will lift a guest/positional command's flags (e.g.
+// `run <image> id -u`) out of the tail and misparse them.
+func reorderArgs(args []string, isValueFlag, isBoolFlag func(string) bool) []string {
 	var flags []string
 	var positional []string
 	for i := 0; i < len(args); i++ {
@@ -3625,12 +3632,12 @@ func reorderFlagArgs(args []string) []string {
 			positional = append(positional, args[i])
 			continue
 		}
-		if !valueFlags[flagName] && !isBoolReorderFlag(flagName) {
+		if !isValueFlag(flagName) && !isBoolFlag(flagName) {
 			positional = append(positional, args[i])
 			continue
 		}
 		flags = append(flags, arg)
-		if valueFlags[flagName] && i+1 < len(args) {
+		if isValueFlag(flagName) && i+1 < len(args) {
 			i++
 			flags = append(flags, args[i])
 		}
@@ -3640,7 +3647,7 @@ func reorderFlagArgs(args []string) []string {
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push", "-password-stdin":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
 		return true
 	default:
 		return false

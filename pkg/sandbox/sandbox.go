@@ -71,6 +71,71 @@ type Limits struct {
 	// by Compile via RuntimeOptions; it is a property of the runtime, so a pooled
 	// Runtime fixes it at construction.
 	MaxMemoryPages uint32
+
+	// MaxOutputBytes caps the guest's combined stdout+stderr, in bytes. Guest output
+	// is buffered host-side (OUTSIDE the guest's linear memory, so MaxMemoryPages does
+	// not bound it): a module that loops on fd_write could otherwise grow the host
+	// buffer until the process runs out of memory. Once the cap is reached the run
+	// fails CLOSED — further output is dropped and Run returns an error rather than a
+	// truncated "success". 0 applies DefaultMaxOutputBytes; a negative value disables
+	// the cap (unbounded — only for a fully trusted module).
+	MaxOutputBytes int64
+}
+
+// DefaultMaxOutputBytes bounds guest stdout+stderr when Limits.MaxOutputBytes is 0.
+// The shape's contract is "bytes in, a summary out", so a generous ceiling still
+// catches a runaway fd_write loop long before it can exhaust host memory.
+const DefaultMaxOutputBytes int64 = 64 << 20 // 64 MiB
+
+// errOutputLimit is returned to the guest from a capped writer once the output
+// budget is spent; the run also fails closed via the overflow flag.
+var errOutputLimit = errors.New("sandbox: output limit exceeded")
+
+// outputBudget is a byte budget shared between a guest's stdout and stderr writers,
+// so the BOUND is on their combined size. overflow latches once the budget is spent.
+type outputBudget struct {
+	remaining int64 // <0 means unbounded
+	overflow  bool
+}
+
+// capWriter buffers guest output while drawing down a shared outputBudget. Beyond the
+// budget it stores nothing and reports an error, so the host buffer can't grow without
+// bound no matter how much the guest writes.
+type capWriter struct {
+	buf    bytes.Buffer
+	budget *outputBudget
+}
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	if w.budget.remaining < 0 { // unbounded
+		return w.buf.Write(p)
+	}
+	if w.budget.remaining == 0 {
+		w.budget.overflow = true
+		return 0, errOutputLimit
+	}
+	if int64(len(p)) > w.budget.remaining {
+		n, _ := w.buf.Write(p[:w.budget.remaining])
+		w.budget.remaining = 0
+		w.budget.overflow = true
+		return n, errOutputLimit
+	}
+	n, err := w.buf.Write(p)
+	w.budget.remaining -= int64(n)
+	return n, err
+}
+
+// newOutputBudget resolves the effective cap from a Limits.MaxOutputBytes value: 0 →
+// the default ceiling, <0 → unbounded, >0 → that many bytes.
+func newOutputBudget(max int64) *outputBudget {
+	switch {
+	case max == 0:
+		return &outputBudget{remaining: DefaultMaxOutputBytes}
+	case max < 0:
+		return &outputBudget{remaining: -1}
+	default:
+		return &outputBudget{remaining: max}
+	}
 }
 
 // Config configures one execution of a WASI module.
@@ -170,10 +235,15 @@ func (r *Runtime) Run(ctx context.Context, cfg Config) (Result, error) {
 		defer cancel()
 	}
 
-	var stdout, stderr bytes.Buffer
+	// Bound guest stdout+stderr to a shared byte budget so a runaway fd_write loop
+	// can't grow the host buffers until the process OOMs (this memory lives outside
+	// the guest's linear memory, so MaxMemoryPages does not constrain it).
+	budget := newOutputBudget(cfg.Limits.MaxOutputBytes)
+	stdout := &capWriter{budget: budget}
+	stderr := &capWriter{budget: budget}
 	modCfg := wazero.NewModuleConfig().
-		WithStdout(&stdout).
-		WithStderr(&stderr).
+		WithStdout(stdout).
+		WithStderr(stderr).
 		// Anonymous instance: no name registration, so concurrent Run calls on one
 		// Runtime do not collide on the module name.
 		WithName("").
@@ -199,19 +269,35 @@ func (r *Runtime) Run(ctx context.Context, cfg Config) (Result, error) {
 		if errors.As(instErr, &exitErr) {
 			switch exitErr.ExitCode() {
 			case sys.ExitCodeDeadlineExceeded:
-				return Result{Stdout: stdout.String(), Stderr: stderr.String()},
+				return Result{Stdout: stdout.buf.String(), Stderr: stderr.buf.String()},
 					fmt.Errorf("sandbox: execution deadline exceeded: %w", instErr)
 			case sys.ExitCodeContextCanceled:
-				return Result{Stdout: stdout.String(), Stderr: stderr.String()},
+				return Result{Stdout: stdout.buf.String(), Stderr: stderr.buf.String()},
 					fmt.Errorf("sandbox: execution canceled: %w", instErr)
 			default:
 				exitCode = int(exitErr.ExitCode())
 			}
 		} else {
-			return Result{Stdout: stdout.String(), Stderr: stderr.String()}, instErr
+			return Result{Stdout: stdout.buf.String(), Stderr: stderr.buf.String()}, instErr
 		}
 	}
-	return Result{ExitCode: exitCode, Stdout: stdout.String(), Stderr: stderr.String()}, nil
+	res := Result{ExitCode: exitCode, Stdout: stdout.buf.String(), Stderr: stderr.buf.String()}
+	// Fail closed if the guest exceeded its output budget: the captured output is
+	// truncated, so returning it as a clean result would be a silent, misleading
+	// success. The caller must treat this as a failed run.
+	if budget.overflow {
+		return res, fmt.Errorf("sandbox: guest output exceeded the %d-byte limit; failing closed", newOutputBudgetCap(cfg.Limits.MaxOutputBytes))
+	}
+	return res, nil
+}
+
+// newOutputBudgetCap reports the effective byte ceiling for an error message (the
+// resolved default when the caller passed 0).
+func newOutputBudgetCap(max int64) int64 {
+	if max == 0 {
+		return DefaultMaxOutputBytes
+	}
+	return max
 }
 
 // loadModule resolves the module binary from Config: Module wins, else WasmPath

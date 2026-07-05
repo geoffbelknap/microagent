@@ -211,6 +211,50 @@ func main() {
 	}
 }
 
+// Bounds: a guest that writes more than its output budget fails CLOSED — Run returns
+// an error and the buffered output is capped, so a runaway fd_write loop can't grow
+// the host buffer until the process runs out of memory (this memory is outside the
+// guest's linear memory, so MaxMemoryPages does not constrain it).
+func TestRunOutputLimitFailsClosed(t *testing.T) {
+	wasm := buildWASIBytes(t, `package main
+
+import "os"
+
+func main() {
+	// Write well past the tiny budget the test sets.
+	chunk := make([]byte, 1024)
+	for i := 0; i < 1000; i++ {
+		os.Stdout.Write(chunk)
+	}
+}
+`)
+	res, err := Run(context.Background(), Config{Module: wasm, Limits: Limits{MaxOutputBytes: 4096}})
+	if err == nil {
+		t.Fatal("expected a run that overflows the output budget to fail closed")
+	}
+	if int64(len(res.Stdout)) > 4096 {
+		t.Fatalf("captured output must be bounded by the cap, got %d bytes", len(res.Stdout))
+	}
+}
+
+// A guest whose output stays within the budget runs normally — the cap only trips on
+// overflow.
+func TestRunOutputWithinLimitSucceeds(t *testing.T) {
+	wasm := buildWASIBytes(t, `package main
+
+import "os"
+
+func main() { os.Stdout.WriteString("small output") }
+`)
+	res, err := Run(context.Background(), Config{Module: wasm, Limits: Limits{MaxOutputBytes: 4096}})
+	if err != nil {
+		t.Fatalf("a run within the output budget should succeed: %v", err)
+	}
+	if res.Stdout != "small output" {
+		t.Fatalf("stdout: got %q", res.Stdout)
+	}
+}
+
 // A Config with no module to run is an error, not a silent no-op.
 func TestRunNoModuleErrors(t *testing.T) {
 	_, err := Run(context.Background(), Config{})

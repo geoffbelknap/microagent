@@ -3051,6 +3051,72 @@ func TestParseWorkspaceOptionsRunAcceptsContainerFlagsAfterImage(t *testing.T) {
 	}
 }
 
+// A guest command's own flags must reach the guest, not be lifted out by
+// reorderFlagArgs as if they were microagent's flags. Regression guard for the
+// registry-login flag reordering report: `run <image> <cmd> <guest-flags>` keeps the
+// guest flags in the command tail.
+func TestParseWorkspaceOptionsRunKeepsGuestCommandFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "id -u",
+			args: []string{"docker.io/library/alpine:3.20", "id", "-u"},
+			want: "exec 'id' '-u'",
+		},
+		{
+			name: "docker login --password-stdin",
+			args: []string{"docker.io/library/alpine:3.20", "docker", "login", "--password-stdin"},
+			want: "exec 'docker' 'login' '--password-stdin'",
+		},
+		{
+			name: "short and long unknown flags",
+			args: []string{"docker.io/library/alpine:3.20", "mytool", "-u", "--username", "bob"},
+			want: "exec 'mytool' '-u' '--username' 'bob'",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts, err := parseWorkspaceOptions("run", tc.args)
+			if err != nil {
+				t.Fatalf("parseWorkspaceOptions: %v", err)
+			}
+			if opts.ExecCommand != tc.want {
+				t.Fatalf("ExecCommand = %q, want %q", opts.ExecCommand, tc.want)
+			}
+		})
+	}
+}
+
+// The registry-login reorderer hoists its OWN flags ahead of the <registry>
+// positional (so a flag may come after it) but leaves any other token — including a
+// flag it doesn't own — in place, so it can't disturb another command's arguments.
+func TestReorderRegistryLoginArgs(t *testing.T) {
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+	if got := reorderRegistryLoginArgs([]string{"ghcr.io", "--username", "bob", "--password-stdin"}); !eq(got, []string{"-username", "bob", "-password-stdin", "ghcr.io"}) {
+		t.Fatalf("login flags after the positional should hoist: %#v", got)
+	}
+	if got := reorderRegistryLoginArgs([]string{"--username", "bob", "ghcr.io"}); !eq(got, []string{"-username", "bob", "ghcr.io"}) {
+		t.Fatalf("login flags before the positional should be preserved: %#v", got)
+	}
+	// A flag the registry command doesn't own is left untouched (not lifted).
+	if got := reorderRegistryLoginArgs([]string{"ghcr.io", "-v", "x"}); !eq(got, []string{"ghcr.io", "-v", "x"}) {
+		t.Fatalf("unowned flags must be left in place: %#v", got)
+	}
+}
+
 func TestParseWorkspaceOptionsFindsDefaultSpecFile(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
