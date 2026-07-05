@@ -28,6 +28,18 @@ func runRegistry(args []string, stdout *os.File) error {
 	}
 }
 
+// reorderRegistryLoginArgs hoists ONLY the registry-login flags ahead of the
+// <registry> positional, so `registry login --username u ghcr.io` and
+// `registry login ghcr.io --username u` both parse. It deliberately knows nothing of
+// microagent's other flags, so it can't disturb any other command's arguments.
+func reorderRegistryLoginArgs(args []string) []string {
+	valueFlags := map[string]bool{"-u": true, "-username": true}
+	boolFlags := map[string]bool{"-password-stdin": true}
+	return reorderArgs(args,
+		func(name string) bool { return valueFlags[name] },
+		func(name string) bool { return boolFlags[name] })
+}
+
 func runRegistryLogin(args []string, stdout *os.File) error {
 	var username string
 	var passwordStdin bool
@@ -36,7 +48,9 @@ func runRegistryLogin(args []string, stdout *os.File) error {
 	fs.StringVar(&username, "username", "", "Registry username")
 	fs.StringVar(&username, "u", "", "Registry username (shorthand)")
 	fs.BoolVar(&passwordStdin, "password-stdin", false, "Read the password from stdin instead of prompting")
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	// Reorder ONLY this command's own flags — using the global reorderer would lift
+	// flags like `-u` out of an unrelated `run <image> <cmd> -u` guest command tail.
+	if err := fs.Parse(reorderRegistryLoginArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
