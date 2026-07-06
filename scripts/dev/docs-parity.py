@@ -114,8 +114,10 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "ValidateRequest",
     },
     "firecracker": {
+        "ErrUserNSProbeUnavailable",
         "GuestHalted",
         "Options",
+        "ProbeSelfMapUserNamespace",
         "ResolveBinary",
         "RunConfinedExec",
         "RunDeadman",

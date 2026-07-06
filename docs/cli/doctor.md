@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-07-06_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -50,9 +50,11 @@ and `kernel` populated. `ok` is `false` when any required check fails.
 - **Firecracker (Linux):** `firecracker` binary on PATH (or
   `MICROAGENT_FIRECRACKER`), `/dev/kvm` present, `/dev/vhost-vsock` present,
   `/dev/net/tun` present, `pasta` available for user-mode networking,
-  unprivileged user namespace creation actually works (a live `CLONE_NEWUSER`
-  probe, so policy layers like AppArmor's
-  `kernel.apparmor_restrict_unprivileged_userns` are caught, not just the
+  unprivileged user namespaces actually work the way boots use them (a live
+  probe runs the same `unshare --map-root-user` setup as the supervisor jail
+  and `pasta`, where the confined process writes its own uid map - so policy
+  layers like AppArmor's `kernel.apparmor_restrict_unprivileged_userns`, which
+  allow namespace creation but deny that self-write, are caught, not just the
   classic userns sysctls), default kernel installed, interactive console
   available.
 - **Windows Hyper-V (experimental):** Windows Host Compute Service available,

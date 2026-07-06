@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-06_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -162,12 +162,59 @@ For repeatable deployments, prefer digest-pinned image refs such as
 `user` mode needs three things:
 
 - `pasta` on `PATH` (from the `passt` package - `apt install passt` on Debian/Ubuntu, `dnf install passt` on Fedora; Homebrew installs it as a microagent dependency).
-- Unprivileged user namespaces enabled. Check `sysctl user.max_user_namespaces` (returns a non-zero count when enabled). Some distros also gate this via `kernel.unprivileged_userns_clone` - set both to `1` if either is `0`. On Ubuntu 23.10+ (including stock Ubuntu 24.04 and GitHub-hosted runners), AppArmor additionally blocks unprivileged user namespace creation even when those sysctls look permissive - `pasta` fails with `Couldn't write to /proc/self/uid_map: Operation not permitted`. Set `sysctl kernel.apparmor_restrict_unprivileged_userns=0` or install an AppArmor profile that grants the microagent binaries userns creation.
+- Unprivileged user namespaces enabled. Check `sysctl user.max_user_namespaces` (returns a non-zero count when enabled). Some distros also gate this via `kernel.unprivileged_userns_clone` - set both to `1` if either is `0`. On Ubuntu 23.10+ this is additionally restricted by AppArmor - see below.
 - `/dev/net/tun` readable by the calling user.
 
 `microagent doctor` reports each of these - start there to find the missing piece.
 
 If your host doesn't allow unprivileged user namespaces and you can't change that policy, use `--network isolated` when the guest does not need network access.
+
+### Ubuntu 24.04: `write failed /proc/self/uid_map: Operation not permitted`
+
+Ubuntu 23.10+ (including stock Ubuntu 24.04 cloud images and GitHub-hosted
+runners) ships `kernel.apparmor_restrict_unprivileged_userns=1`. Under this
+restriction, creating a user namespace still *succeeds*, but AppArmor confines
+the process that created it so its own uid-map write is denied. The classic
+sysctls look permissive, yet every rootless workspace boot fails. Symptoms:
+
+- The workspace serial log shows the supervisor's user-namespace jail dying
+  with `unshare: write failed /proc/self/uid_map: Operation not permitted`.
+- `pasta` (user-mode networking) fails with
+  `Couldn't write to /proc/self/uid_map: Operation not permitted`.
+
+`microagent doctor` detects this: its user-namespace probe performs the same
+self-written uid-map setup the supervisor jail and `pasta` use, so a host under
+this restriction reports `userNamespacesAvailable: false` with the AppArmor
+remediation instead of a false `ok`.
+
+Fixes (either one):
+
+- **Turn off the restriction** (simplest; this is a policy knob, not a kernel
+  rebuild):
+
+  ```bash
+  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+  # persist across reboots:
+  printf 'kernel.apparmor_restrict_unprivileged_userns = 0\n' | sudo tee /etc/sysctl.d/99-microagent-userns.conf
+  ```
+
+- **Keep the restriction, grant a targeted exception.** The jail enters its
+  namespace through `unshare(1)` and user networking through `pasta`, so those
+  binaries need an AppArmor profile with the `userns` permission. For example,
+  for `unshare`:
+
+  ```text
+  # /etc/apparmor.d/microagent-unshare
+  abi <abi/4.0>,
+  include <tunables/global>
+  profile microagent-unshare /usr/bin/unshare flags=(unconfined) {
+    userns,
+  }
+  ```
+
+  Load it with `sudo apparmor_parser -r /etc/apparmor.d/microagent-unshare`
+  (and mirror it for `/usr/bin/pasta` if you use `--network user`). Re-run
+  `microagent doctor` to confirm the probe passes.
 
 Use `microagent --json network <name>` to inspect the runtime IP, subnet,
 gateway, DNS, and route that were assigned to the guest.

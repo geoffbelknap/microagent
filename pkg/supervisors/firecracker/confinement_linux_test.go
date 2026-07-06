@@ -1,7 +1,9 @@
 package firecracker
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -208,6 +210,44 @@ func assertSameFile(t *testing.T, a, b string) {
 	}
 	if !os.SameFile(fa, fb) {
 		t.Errorf("%s and %s are not the same file (hard link expected)", a, b)
+	}
+}
+
+func TestJailAndProbeShareUnshareNamespaceFlags(t *testing.T) {
+	// The self-map probe is only honest if it exercises the exact unshare
+	// namespace flags the jail (and snapshot fork) launches use — a drift here
+	// re-opens the doctor-green-but-boot-fails gap on hosts where namespace
+	// creation is allowed but the uid_map self-write is denied.
+	wantMapped := []string{"--map-root-user", "--mount"}
+	if got := unshareJailNamespaceFlags(true); !reflect.DeepEqual(got, wantMapped) {
+		t.Fatalf("unshareJailNamespaceFlags(true) = %#v, want %#v", got, wantMapped)
+	}
+	if got := unshareJailNamespaceFlags(false); !reflect.DeepEqual(got, []string{"--mount"}) {
+		t.Fatalf("unshareJailNamespaceFlags(false) = %#v, want [--mount]", got)
+	}
+	jail := confinedExecArgs(true, "sup", "/jail", "/work", "/fc", nil)
+	fork := forkMountExecArgs(true, "sup", "/src", "/dst", "/fc", nil)
+	for name, args := range map[string][]string{"confined exec": jail, "fork mount exec": fork} {
+		if len(args) < len(wantMapped) || !reflect.DeepEqual(args[:len(wantMapped)], wantMapped) {
+			t.Errorf("%s args %#v do not start with the shared namespace flags %#v", name, args, wantMapped)
+		}
+	}
+}
+
+func TestProbeSelfMapUserNamespaceMatchesLiveUnshare(t *testing.T) {
+	// End-to-end: the probe's verdict must match a direct run of the jail's
+	// unshare invocation on this host, whatever this host's policy is.
+	unsharePath, err := exec.LookPath("unshare")
+	if err != nil {
+		t.Skip("unshare not available on this host")
+	}
+	probeErr := ProbeSelfMapUserNamespace()
+	if errors.Is(probeErr, ErrUserNSProbeUnavailable) {
+		t.Skipf("probe unavailable: %v", probeErr)
+	}
+	direct := exec.Command(unsharePath, "--map-root-user", "--mount", "true").Run()
+	if (probeErr == nil) != (direct == nil) {
+		t.Fatalf("probe error = %v, direct unshare error = %v; verdicts must agree", probeErr, direct)
 	}
 }
 

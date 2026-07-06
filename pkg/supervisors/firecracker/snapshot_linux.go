@@ -361,12 +361,8 @@ func snapshotForkBind(opts Options, manifest vmkit.SnapshotManifest) (src, dst s
 // already root inside pasta's namespace and only needs the mount namespace. The
 // supervisor's --fork-mount-exec handler performs the bind and execs Firecracker.
 func forkMountExecArgs(mapRoot bool, supervisor, src, dst, firecracker string, launchArgs []string) []string {
-	args := []string{}
-	if mapRoot {
-		args = append(args, "--map-root-user")
-	}
+	args := unshareJailNamespaceFlags(mapRoot)
 	args = append(args,
-		"--mount",
 		supervisor, "--fork-mount-exec",
 		"--bind-src", src,
 		"--bind-dst", dst,
