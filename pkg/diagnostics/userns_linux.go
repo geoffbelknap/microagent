@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"syscall"
 	"time"
+
+	firecracker "github.com/geoffbelknap/microagent/pkg/supervisors/firecracker"
 )
 
 // defaultUserNamespaceProbe is the live probe CheckFirecracker uses when the
@@ -14,12 +16,32 @@ import (
 var defaultUserNamespaceProbe = ProbeUnprivilegedUserNamespace
 
 // ProbeUnprivilegedUserNamespace verifies that the current user can actually
-// create a user namespace by cloning a child with CLONE_NEWUSER and mapping
-// the current uid/gid to root inside it — the same setup pasta performs for
-// Firecracker user-mode networking. Reading sysctls is not enough: policy
-// layers such as AppArmor (kernel.apparmor_restrict_unprivileged_userns) deny
-// the clone at runtime while the classic userns sysctls report it enabled.
+// use an unprivileged user namespace the way the Firecracker supervisor does:
+// the authoritative check is the supervisor's own self-map probe, which runs
+// the exact unshare invocation the rootless jail uses (and pasta mirrors),
+// where the confined child writes its own /proc/self/uid_map. That is the
+// write Ubuntu 24.04's kernel.apparmor_restrict_unprivileged_userns=1 default
+// denies even though plain namespace creation succeeds — so a
+// namespace-creation-only probe reports a green host that cannot boot
+// workspaces. Only when the self-map probe cannot run at all (no unshare
+// binary) does this fall back to a Go-native CLONE_NEWUSER probe with
+// parent-written uid maps, which still catches hosts where user namespaces
+// are disabled outright.
 func ProbeUnprivilegedUserNamespace() error {
+	err := firecracker.ProbeSelfMapUserNamespace()
+	if errors.Is(err, firecracker.ErrUserNSProbeUnavailable) {
+		return probeParentMappedUserNamespace()
+	}
+	return err
+}
+
+// probeParentMappedUserNamespace is the weaker fallback probe: it clones a
+// child with CLONE_NEWUSER and maps the current uid/gid to root inside it via
+// parent-written uid/gid maps. It detects hosts where user namespace creation
+// is denied outright, but NOT policy layers that only deny the confined
+// child's own uid_map write (the AppArmor restriction), because the parent
+// performing the write here is not confined.
+func probeParentMappedUserNamespace() error {
 	helper, err := lookupNoopHelper()
 	if err != nil {
 		// Without a helper binary the probe cannot run; leave the verdict to

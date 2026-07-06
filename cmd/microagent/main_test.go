@@ -4721,6 +4721,13 @@ func TestCreateDispatchKeepsLowLevelSupervisorCreate(t *testing.T) {
 }
 
 func TestWorkspaceSupervisorSelectsHostBackendOnly(t *testing.T) {
+	// The linux-kvm default resolves an installed supervisor next to the
+	// `microagent` binary on PATH (and honors MICROAGENT_FIRECRACKER_SUPERVISOR),
+	// so a host with microagent installed would leak an absolute path into the
+	// bare-name assertion below. Point both at hermetic values.
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("MICROAGENT_FIRECRACKER_SUPERVISOR", "")
+
 	opts := workspaceOptions{Backend: hostBackend()}
 	if hostBackend() == vmkit.BackendAppleVF {
 		opts.SupervisorPath = "/tmp/applevf"

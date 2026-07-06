@@ -26,13 +26,15 @@ func writeProcFile(t *testing.T, root, rel, contents string) {
 
 func TestUnprivilegedUserNSEnabled(t *testing.T) {
 	const (
-		cloneRel = "kernel/unprivileged_userns_clone"
-		maxRel   = "user/max_user_namespaces"
+		cloneRel    = "kernel/unprivileged_userns_clone"
+		maxRel      = "user/max_user_namespaces"
+		apparmorRel = "kernel/apparmor_restrict_unprivileged_userns"
 	)
 	for _, tc := range []struct {
 		name        string
 		clone       *string
 		max         *string
+		apparmor    *string
 		wantEnabled bool
 		reasonHas   string
 	}{
@@ -49,6 +51,22 @@ func TestUnprivilegedUserNSEnabled(t *testing.T) {
 			max:         strptr("0\n"),
 			wantEnabled: false,
 			reasonHas:   "user.max_user_namespaces=0",
+		},
+		{
+			// Stock Ubuntu 24.04: the classic gates look permissive but the
+			// AppArmor restriction denies the uid_map self-write.
+			name:        "disabled via apparmor restriction",
+			max:         strptr("32768\n"),
+			apparmor:    strptr("1\n"),
+			wantEnabled: false,
+			reasonHas:   "kernel.apparmor_restrict_unprivileged_userns=1",
+		},
+		{
+			name:        "enabled with apparmor restriction off",
+			clone:       strptr("1\n"),
+			max:         strptr("32768\n"),
+			apparmor:    strptr("0\n"),
+			wantEnabled: true,
 		},
 		{
 			name:        "enabled",
@@ -70,6 +88,9 @@ func TestUnprivilegedUserNSEnabled(t *testing.T) {
 			}
 			if tc.max != nil {
 				writeProcFile(t, root, maxRel, *tc.max)
+			}
+			if tc.apparmor != nil {
+				writeProcFile(t, root, apparmorRel, *tc.apparmor)
 			}
 			restore := procRoot
 			procRoot = root
@@ -100,12 +121,12 @@ func TestUserNetworkStartErrorWithHint(t *testing.T) {
 	procRoot = root
 	defer func() { procRoot = restore }()
 
-	t.Run("namespace signature adds nat pointer and preserves stderr", func(t *testing.T) {
+	t.Run("namespace signature adds isolated pointer and preserves stderr", func(t *testing.T) {
 		stderr := "Failed to clone() in setup_userns(): Operation not permitted"
 		err := userNetworkStartErrorWithHint(stderr)
 		msg := err.Error()
-		if !strings.Contains(msg, "--network nat") {
-			t.Fatalf("guiding error missing --network nat pointer: %q", msg)
+		if !strings.Contains(msg, "--network isolated") {
+			t.Fatalf("guiding error missing --network isolated pointer: %q", msg)
 		}
 		if !strings.Contains(msg, "unprivileged user namespaces") {
 			t.Fatalf("guiding error missing userns explanation: %q", msg)
@@ -118,8 +139,8 @@ func TestUserNetworkStartErrorWithHint(t *testing.T) {
 	t.Run("unshare signature triggers hint", func(t *testing.T) {
 		stderr := "unshare(CLONE_NEWUSER): operation not permitted"
 		err := userNetworkStartErrorWithHint(stderr)
-		if !strings.Contains(err.Error(), "--network nat") {
-			t.Fatalf("expected nat pointer for unshare signature: %q", err.Error())
+		if !strings.Contains(err.Error(), "--network isolated") {
+			t.Fatalf("expected isolated pointer for unshare signature: %q", err.Error())
 		}
 		if !strings.Contains(err.Error(), stderr) {
 			t.Fatalf("expected stderr preserved: %q", err.Error())
@@ -130,8 +151,8 @@ func TestUserNetworkStartErrorWithHint(t *testing.T) {
 		stderr := "pasta: Couldn't open /dev/net/tun: No such file or directory"
 		err := userNetworkStartErrorWithHint(stderr)
 		msg := err.Error()
-		if strings.Contains(msg, "--network nat") {
-			t.Fatalf("plain failure should not advertise nat pointer: %q", msg)
+		if strings.Contains(msg, "--network isolated") {
+			t.Fatalf("plain failure should not advertise isolated pointer: %q", msg)
 		}
 		if !strings.Contains(msg, "start firecracker user networking with pasta") {
 			t.Fatalf("plain failure lost the standard prefix: %q", msg)
@@ -140,6 +161,35 @@ func TestUserNetworkStartErrorWithHint(t *testing.T) {
 			t.Fatalf("plain failure dropped stderr: %q", msg)
 		}
 	})
+}
+
+func TestUserNetworkStartErrorWithHintAppArmorRestriction(t *testing.T) {
+	// Stock Ubuntu 24.04: classic gates permissive, AppArmor restriction on. The
+	// serial-log symptom is the confined child's own uid_map write being denied;
+	// the hint must name the AppArmor gate with its matching fix, not the
+	// classic sysctls.
+	root := t.TempDir()
+	writeProcFile(t, root, "user/max_user_namespaces", "32768\n")
+	writeProcFile(t, root, "kernel/apparmor_restrict_unprivileged_userns", "1\n")
+	restore := procRoot
+	procRoot = root
+	defer func() { procRoot = restore }()
+
+	stderr := "unshare: write failed /proc/self/uid_map: Operation not permitted"
+	err := userNetworkStartErrorWithHint(stderr)
+	msg := err.Error()
+	if !strings.Contains(msg, "kernel.apparmor_restrict_unprivileged_userns=1") {
+		t.Fatalf("hint does not name the AppArmor gate: %q", msg)
+	}
+	if !strings.Contains(msg, "sysctl -w kernel.apparmor_restrict_unprivileged_userns=0") {
+		t.Fatalf("hint missing the AppArmor sysctl fix: %q", msg)
+	}
+	if strings.Contains(msg, "kernel.unprivileged_userns_clone=1") {
+		t.Fatalf("hint offers the wrong (classic sysctl) fix: %q", msg)
+	}
+	if !strings.Contains(msg, stderr) {
+		t.Fatalf("hint dropped original stderr: %q", msg)
+	}
 }
 
 func TestUserNetworkStartErrorWithHintProbeDisabled(t *testing.T) {
@@ -154,8 +204,8 @@ func TestUserNetworkStartErrorWithHintProbeDisabled(t *testing.T) {
 	stderr := "pasta: some opaque failure"
 	err := userNetworkStartErrorWithHint(stderr)
 	msg := err.Error()
-	if !strings.Contains(msg, "--network nat") {
-		t.Fatalf("probe-disabled host should get nat pointer: %q", msg)
+	if !strings.Contains(msg, "--network isolated") {
+		t.Fatalf("probe-disabled host should get isolated pointer: %q", msg)
 	}
 	if !strings.Contains(msg, stderr) {
 		t.Fatalf("probe-disabled hint dropped stderr: %q", msg)

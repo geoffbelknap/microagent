@@ -292,13 +292,14 @@ func CheckFirecracker(opts Options, probe FirecrackerProbe) (vmkit.Response, err
 	return resp, nil
 }
 
-// checkUserNamespaces reports whether the current user can create unprivileged
-// user namespaces (which pasta needs for Firecracker user-mode networking).
-// The live clone probe is authoritative when available; the sysctl reads exist
-// to turn a probe failure into the most specific remediation. Sysctls alone
-// are not trusted for a positive verdict because policy layers such as
-// AppArmor's kernel.apparmor_restrict_unprivileged_userns deny the clone at
-// runtime while the classic userns sysctls still look permissive.
+// checkUserNamespaces reports whether the current user can use unprivileged
+// user namespaces the way the supervisor jail and pasta do (create one AND
+// self-write its uid map). The live probe is authoritative when available; the
+// sysctl reads exist to turn a probe failure into the most specific
+// remediation. Sysctls alone are not trusted for a positive verdict because
+// policy layers such as AppArmor's kernel.apparmor_restrict_unprivileged_userns
+// deny the confined child's uid_map self-write at runtime while the classic
+// userns sysctls still look permissive.
 func checkUserNamespaces(readFile func(string) ([]byte, error), probeUserns func() error) (bool, string) {
 	var probeErr error
 	if probeUserns != nil {
@@ -318,9 +319,10 @@ func checkUserNamespaces(readFile func(string) ([]byte, error), probeUserns func
 		}
 	}
 	if data, err := readFile("/proc/sys/kernel/apparmor_restrict_unprivileged_userns"); err == nil && strings.TrimSpace(string(data)) == "1" {
-		message := "unprivileged user namespaces are restricted by AppArmor; set kernel.apparmor_restrict_unprivileged_userns=0 or grant the microagent binaries an AppArmor profile that allows userns creation"
+		const remedy = "namespace creation succeeds but the uid_map self-write the supervisor jail and pasta perform is denied, so workspaces cannot boot; run sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 (persist it under /etc/sysctl.d) or install an AppArmor profile that grants userns to unshare and pasta"
+		message := "unprivileged user namespaces are restricted by AppArmor (kernel.apparmor_restrict_unprivileged_userns=1): " + remedy
 		if probeErr != nil {
-			message = fmt.Sprintf("unprivileged user namespaces are restricted by AppArmor (%v); set kernel.apparmor_restrict_unprivileged_userns=0 or grant the microagent binaries an AppArmor profile that allows userns creation", probeErr)
+			message = fmt.Sprintf("unprivileged user namespaces are restricted by AppArmor (kernel.apparmor_restrict_unprivileged_userns=1; probe: %v): %s", probeErr, remedy)
 		}
 		return false, message
 	}

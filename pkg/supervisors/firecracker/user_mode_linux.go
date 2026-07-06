@@ -336,17 +336,30 @@ func userNetworkStartError(message string) error {
 
 // userNetworkStartErrorWithHint wraps a pasta start failure. When the host's
 // unprivileged-user-namespace gates are disabled (or pasta's stderr carries a
-// namespace-creation failure signature), it returns a guiding error that points
-// the operator at the privileged NAT alternative (--network nat) while
-// preserving the original pasta stderr. Otherwise it falls back to the plain
-// wrap so unrelated failures are not misattributed to userns.
+// namespace-setup failure signature), it returns a guiding error naming the
+// tripped gate with its matching fix, plus the no-network fallback (--network
+// isolated), while preserving the original pasta stderr. Otherwise it falls
+// back to the plain wrap so unrelated failures are not misattributed to
+// userns.
 func userNetworkStartErrorWithHint(message string) error {
 	trimmed := strings.TrimSpace(message)
-	enabled, _ := unprivilegedUserNSEnabled()
-	if !enabled || pastaStderrIndicatesUserNSFailure(trimmed) {
-		return fmt.Errorf("firecracker user (rootless) networking needs unprivileged user namespaces, which appear to be disabled on this host (kernel.unprivileged_userns_clone=0 or user.max_user_namespaces=0). Enable them (sudo sysctl -w kernel.unprivileged_userns_clone=1), or run privileged NAT networking instead: --network nat (requires CAP_NET_ADMIN; run as root). Original error: %s", trimmed)
+	enabled, reason := unprivilegedUserNSEnabled()
+	if enabled && !pastaStderrIndicatesUserNSFailure(trimmed) {
+		return userNetworkStartError(trimmed)
 	}
-	return userNetworkStartError(trimmed)
+	cause := reason
+	fix := "enable unprivileged user namespaces (check kernel.unprivileged_userns_clone, user.max_user_namespaces, and kernel.apparmor_restrict_unprivileged_userns)"
+	switch reason {
+	case userNSReasonCloneDisabled:
+		fix = "enable them: sudo sysctl -w kernel.unprivileged_userns_clone=1"
+	case userNSReasonMaxDisabled:
+		fix = "raise the limit: sudo sysctl -w user.max_user_namespaces=32768"
+	case userNSReasonAppArmor:
+		fix = "allow the uid_map self-write: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0, or install an AppArmor profile that grants userns to pasta and unshare"
+	default:
+		cause = "a kernel security policy denied user namespace setup"
+	}
+	return fmt.Errorf("firecracker user (rootless) networking needs unprivileged user namespaces with a self-written uid map, which this host blocks (%s). Fix: %s. Or use --network isolated when the guest does not need network access. Original error: %s", cause, fix, trimmed)
 }
 
 // procRoot is concatenated in front of the absolute "/proc/sys/..." gate paths
@@ -358,17 +371,31 @@ var procRoot = ""
 const (
 	procUnprivilegedUserNSClone = "/proc/sys/kernel/unprivileged_userns_clone"
 	procMaxUserNamespaces       = "/proc/sys/user/max_user_namespaces"
+	procAppArmorRestrictUserNS  = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+)
+
+// Reasons userNSDecision returns for a disabled gate, matched by callers that
+// tailor remediation to the specific gate.
+const (
+	userNSReasonCloneDisabled = "kernel.unprivileged_userns_clone=0"
+	userNSReasonMaxDisabled   = "user.max_user_namespaces=0"
+	userNSReasonAppArmor      = "kernel.apparmor_restrict_unprivileged_userns=1"
 )
 
 // unprivilegedUserNSEnabled probes the known kernel gates that govern whether
-// an unprivileged process may create a new user namespace. It returns whether
-// the gates allow it and, when disabled, a human-readable reason naming the
-// gate that was tripped. Hardened hosts disable these with
-// kernel.unprivileged_userns_clone=0 or user.max_user_namespaces=0.
+// an unprivileged process can use a new user namespace the way microagent
+// needs to (create it and self-write its uid map, as pasta and the rootless
+// jail do). It returns whether the gates allow it and, when disabled, a
+// human-readable reason naming the gate that was tripped. Hardened hosts
+// disable these with kernel.unprivileged_userns_clone=0 or
+// user.max_user_namespaces=0; stock Ubuntu 24.04 restricts them with
+// kernel.apparmor_restrict_unprivileged_userns=1, which lets the namespace be
+// created but denies the confined child's own uid_map write.
 func unprivilegedUserNSEnabled() (bool, string) {
 	clone, clonePresent := readSysctlGate(procRoot + procUnprivilegedUserNSClone)
 	maxNS, maxNSPresent := readSysctlGate(procRoot + procMaxUserNamespaces)
-	return userNSDecision(clone, clonePresent, maxNS, maxNSPresent)
+	apparmor, apparmorPresent := readSysctlGate(procRoot + procAppArmorRestrictUserNS)
+	return userNSDecision(clone, clonePresent, maxNS, maxNSPresent, apparmor, apparmorPresent)
 }
 
 // readSysctlGate reads a single-value sysctl-style proc file, returning its
@@ -382,17 +409,20 @@ func readSysctlGate(path string) (string, bool) {
 	return strings.TrimSpace(string(data)), true
 }
 
-// userNSDecision is the pure decision over the two known gates, split out so it
+// userNSDecision is the pure decision over the known gates, split out so it
 // can be table-tested against synthetic proc contents. A gate that is present
-// and reads "0" (or empty, which the kernel never writes but which signals a
-// disabled/unreadable value) is treated as disabled; an absent gate does not
-// apply.
-func userNSDecision(clone string, clonePresent bool, maxNS string, maxNSPresent bool) (bool, string) {
+// and reads its disabling value ("0" for the classic gates, "1" for the
+// AppArmor restriction; empty, which the kernel never writes, signals a
+// disabled/unreadable value) trips; an absent gate does not apply.
+func userNSDecision(clone string, clonePresent bool, maxNS string, maxNSPresent bool, apparmor string, apparmorPresent bool) (bool, string) {
 	if clonePresent && (clone == "0" || clone == "") {
-		return false, "kernel.unprivileged_userns_clone=0"
+		return false, userNSReasonCloneDisabled
 	}
 	if maxNSPresent && (maxNS == "0" || maxNS == "") {
-		return false, "user.max_user_namespaces=0"
+		return false, userNSReasonMaxDisabled
+	}
+	if apparmorPresent && apparmor == "1" {
+		return false, userNSReasonAppArmor
 	}
 	return true, ""
 }
@@ -431,7 +461,7 @@ func resolveUserNetworkBinary() (string, error) {
 	if path, err := exec.LookPath("slirp4netns"); err == nil {
 		return "", fmt.Errorf("firecracker user networking requires pasta; slirp4netns was found at %s but is not supported for Firecracker TAP mode yet; install passt (for example, apt install passt)", path)
 	}
-	return "", fmt.Errorf("firecracker user networking requires pasta on PATH; install passt (for example, apt install passt) or use --network nat with supervisor capabilities")
+	return "", fmt.Errorf("firecracker user networking requires pasta on PATH; install passt (for example, apt install passt) or use --network isolated when the guest does not need network access")
 }
 
 func userNetworkPastaPID() int {

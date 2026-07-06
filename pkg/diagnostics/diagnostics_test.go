@@ -131,7 +131,8 @@ func TestCheckFirecrackerReportsAppArmorRestrictedUserNamespaces(t *testing.T) {
 				return "", os.ErrNotExist
 			},
 			// Stock Ubuntu 24.04: the classic userns sysctls look permissive,
-			// but AppArmor denies the clone at runtime.
+			// and namespace creation even succeeds — but AppArmor denies the
+			// confined child's own uid_map write, so the self-map probe fails.
 			ReadFile: func(path string) ([]byte, error) {
 				switch path {
 				case "/proc/sys/user/max_user_namespaces":
@@ -141,7 +142,9 @@ func TestCheckFirecrackerReportsAppArmorRestrictedUserNamespaces(t *testing.T) {
 				}
 				return nil, os.ErrNotExist
 			},
-			ProbeUserNamespaces: func() error { return fmt.Errorf("fork/exec /usr/bin/true: operation not permitted") },
+			ProbeUserNamespaces: func() error {
+				return fmt.Errorf("unshare --map-root-user --mount failed: unshare: write failed /proc/self/uid_map: Operation not permitted")
+			},
 		},
 	)
 	if err == nil {

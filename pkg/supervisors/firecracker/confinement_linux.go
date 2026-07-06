@@ -1,11 +1,15 @@
 package firecracker
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"golang.org/x/sys/unix"
@@ -205,12 +209,103 @@ func stageFile(src, dst string) error {
 }
 
 // resolveConfinementMode resolves the effective confinement mode for this host
-// from the (normalized) knob, the effective uid, and whether unprivileged user
-// namespaces are available. It fails closed for an explicitly requested mode
-// the host cannot satisfy.
+// from the (normalized) knob, the effective uid, and whether the rootless user
+// namespace jail actually works here. It fails closed for an explicitly
+// requested mode the host cannot satisfy. The jail probe only runs when the
+// decision depends on it, so a root (jailer) or opted-out launch pays nothing.
 func resolveConfinementMode(opts Options) (confinementMode, error) {
-	userNSOK, _ := unprivilegedUserNSEnabled()
-	return selectConfinementMode(normalizeConfinementKnob(opts.Confinement), os.Geteuid(), userNSOK)
+	knob := normalizeConfinementKnob(opts.Confinement)
+	euid := os.Geteuid()
+	userNSOK := false
+	if knob == confinementRootlessKnob || (knob == confinementAuto && euid != 0) {
+		userNSOK = userNamespaceJailUsable()
+	}
+	return selectConfinementMode(knob, euid, userNSOK)
+}
+
+// userNamespaceJailUsable reports whether the rootless jail can actually be
+// built on this host. The live self-map probe is authoritative when it can
+// run: it exercises the exact unshare invocation the jail uses, so policy
+// layers that allow namespace creation but deny the uid_map self-write (Ubuntu
+// 24.04's kernel.apparmor_restrict_unprivileged_userns=1 default) are caught,
+// and a targeted AppArmor profile that re-enables the jail is honored. Only
+// when the probe cannot run at all does the sysctl gate decide, preserving the
+// prior behavior on hosts without the probe's helper binaries.
+func userNamespaceJailUsable() bool {
+	err := ProbeSelfMapUserNamespace()
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, ErrUserNSProbeUnavailable) {
+		enabled, _ := unprivilegedUserNSEnabled()
+		return enabled
+	}
+	return false
+}
+
+// unshareJailNamespaceFlags returns the namespace flags passed to the unshare
+// binary for the rootless jail: a new mount namespace, plus --map-root-user (a
+// new user namespace whose root map unshare writes to its own
+// /proc/self/uid_map) unless the process is already root inside pasta's user
+// namespace. ProbeSelfMapUserNamespace must use exactly these flags so it
+// exercises the same kernel and LSM path the launch does.
+func unshareJailNamespaceFlags(mapRoot bool) []string {
+	flags := []string{}
+	if mapRoot {
+		flags = append(flags, "--map-root-user")
+	}
+	return append(flags, "--mount")
+}
+
+// ErrUserNSProbeUnavailable reports that the self-map probe could not run at
+// all (no unshare or no-op helper binary on this host), as opposed to running
+// and being denied. Callers fall back to the sysctl gates in that case.
+var ErrUserNSProbeUnavailable = errors.New("user namespace self-map probe unavailable")
+
+// ProbeSelfMapUserNamespace verifies that this user can enter a new user +
+// mount namespace and self-map root exactly the way the rootless jail (and
+// pasta) do: it runs the unshare binary with the jail's namespace flags and a
+// no-op payload, so unshare itself — already confined by any LSM transition the
+// namespace creation triggered — performs the /proc/self/uid_map write. A
+// Go-native CLONE_NEWUSER probe with parent-written uid maps is not
+// equivalent: Ubuntu 24.04's kernel.apparmor_restrict_unprivileged_userns=1
+// default allows namespace creation and the unconfined parent's map write,
+// while the confined child's own write fails with "unshare: write failed
+// /proc/self/uid_map: Operation not permitted" — exactly how the jail dies.
+func ProbeSelfMapUserNamespace() error {
+	unsharePath, err := exec.LookPath("unshare")
+	if err != nil {
+		return fmt.Errorf("%w: unshare binary not found (util-linux)", ErrUserNSProbeUnavailable)
+	}
+	helper, err := lookupNoopHelper()
+	if err != nil {
+		return fmt.Errorf("%w: no no-op helper binary (true) found", ErrUserNSProbeUnavailable)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, unsharePath, append(unshareJailNamespaceFlags(true), helper)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return fmt.Errorf("unshare --map-root-user --mount failed: %s", message)
+	}
+	return nil
+}
+
+func lookupNoopHelper() (string, error) {
+	if path, err := exec.LookPath("true"); err == nil {
+		return path, nil
+	}
+	for _, path := range []string{"/usr/bin/true", "/bin/true"} {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, nil
+		}
+	}
+	return "", os.ErrNotExist
 }
 
 // confinedExecArgs builds the argv passed to the unshare binary that launches
@@ -219,12 +314,8 @@ func resolveConfinementMode(opts Options) (confinementMode, error) {
 // adds --map-root-user (skipped when already inside pasta's user namespace, so
 // we don't shadow its network setup). Mirrors forkMountExecArgs.
 func confinedExecArgs(mapRoot bool, supervisor, jailRoot, workDir, firecracker string, launchArgs []string) []string {
-	args := []string{}
-	if mapRoot {
-		args = append(args, "--map-root-user")
-	}
+	args := unshareJailNamespaceFlags(mapRoot)
 	args = append(args,
-		"--mount",
 		supervisor, "--confined-exec",
 		"--jail-root", jailRoot,
 		"--work-dir", workDir,

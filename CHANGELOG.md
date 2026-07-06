@@ -5,6 +5,28 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Honest user-namespace detection on Ubuntu 24.04 (AppArmor userns restriction)
+
+On hosts with `kernel.apparmor_restrict_unprivileged_userns=1` (the stock
+Ubuntu 23.10+/24.04 default), user namespace *creation* succeeds but AppArmor
+denies the confined process's own uid-map write — so `microagent doctor`
+reported the host green while every rootless workspace boot died in the
+supervisor jail with `unshare: write failed /proc/self/uid_map: Operation not
+permitted`. Doctor's user-namespace probe now performs the same
+`unshare --map-root-user` self-map setup the jail and `pasta` use, so these
+hosts are reported as `userNamespacesAvailable: false` with the concrete
+AppArmor remediation (the sysctl, or a targeted AppArmor profile — see the
+troubleshooting guide).
+
+Confinement `auto` now resolves against the same live self-map probe: a host
+that blocks the rootless jail falls back to unconfined launches (per `auto`'s
+documented semantics) instead of failing every boot, while a targeted AppArmor
+profile that re-enables the jail is honored. Explicit
+`MICROAGENT_CONFINEMENT=rootless` still fails closed. The pasta start-failure
+hint now names the actual tripped gate (including the AppArmor restriction)
+with its matching fix, and no longer points at the removed `--network nat`
+mode.
+
 ## v0.8.3 - 2026-06-27
 
 ### Apple VF snapshots, restore, and fork are now on the shared contract path
