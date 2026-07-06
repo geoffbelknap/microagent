@@ -1,6 +1,6 @@
 .build/
 .cache/
-diagnostics/
+/diagnostics/
 .swiftpm/
 DerivedData/
 *.xcodeproj
