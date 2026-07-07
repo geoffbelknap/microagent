@@ -5,6 +5,15 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Snapshot forks no longer drop the caller's port forwards
+
+`CreateFromSnapshot` adopted the snapshot's baked network addressing by
+replacing the whole network config, silently discarding port forwards the
+caller requested for the fork. Forwards are realized host-side by the fork's
+own pasta/forwarder and are invisible to the resumed guest, so adopting the
+source's addressing now preserves them — a hibernate/wake cycle keeps the
+workload's exposed services reachable.
+
 ### Snapshot of a restored workspace no longer loses its baked identity
 
 Snapshotting a workspace that was itself started from a snapshot (a chain of
