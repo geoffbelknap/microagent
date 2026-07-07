@@ -352,6 +352,16 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		// caller supplies the complete minimal options.
 		applyManifest(&opts, manifest)
 	}
+	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
+		// Resume-in-place of a workspace that was itself a fork: the loaded
+		// VM keeps its baked identity (ancestor vsock path, guest service
+		// ports), exactly as CreateFromSnapshot adopts it for a new fork.
+		// Without this, stop + start --from-snapshot of a fork bridges to
+		// guest ports nobody listens on and its shell/exec are dead.
+		if snapManifest, err := vmkit.ReadSnapshotManifest(vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err == nil {
+			adoptSnapshotIdentity(&opts, snapManifest)
+		}
+	}
 	if opts.ProfileExplicit {
 		opts.Profile = requestedProfile
 		if err := ApplyProfile(&opts, opts.SpecMemory, opts.SpecCPU, true); err != nil {
@@ -929,6 +939,24 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	}
 	opts.FromSnapshot = tag
 	return Start(ctx, opts)
+}
+
+// adoptSnapshotIdentity defaults the baked identity fields from a snapshot
+// manifest onto opts: the guest service ports the resumed guest listens on
+// and the vsock UDS path its VM state references. For an original (non-fork)
+// workspace these equal the workspace's own values, so adoption is a no-op
+// in behavior; for a fork they differ and are load-bearing. Explicit caller
+// values win.
+func adoptSnapshotIdentity(opts *Options, manifest vmkit.SnapshotManifest) {
+	if opts.GuestShellPort == 0 {
+		opts.GuestShellPort = manifest.ShellPort
+	}
+	if opts.GuestExecPort == 0 {
+		opts.GuestExecPort = manifest.ExecPort
+	}
+	if strings.TrimSpace(opts.BakedVsockUDSPath) == "" {
+		opts.BakedVsockUDSPath = manifest.VsockUDSPath
+	}
 }
 
 // adoptSnapshotNetwork builds the fork's network config: addressing comes
