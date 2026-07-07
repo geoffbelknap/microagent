@@ -5,6 +5,8 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.8.5 - 2026-07-07
+
 ### Guarded-egress DNS no longer breaks on hosts with a local UDP :53 service
 
 On hosts where a service holds a UDP port-53 socket in the init netns (e.g.
