@@ -5,6 +5,12 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.8.6 - 2026-07-07
+
+Snapshot-chain correctness release: three related fixes for workspaces that
+are snapshotted and restored repeatedly (the pattern behind microplane's
+hibernate/wake), all found and field-validated by real hibernation cycles.
+
 ### Resuming a fork in place no longer loses its baked identity
 
 `start --from-snapshot` on a workspace that was itself created from a
