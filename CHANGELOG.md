@@ -5,6 +5,26 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Guarded-egress DNS no longer breaks on hosts with a local UDP :53 service
+
+On hosts where a service holds a UDP port-53 socket in the init netns (e.g.
+systemd-resolved on GCE Ubuntu 24.04), every guest DNS query under guarded or
+strict egress timed out (`EAI_AGAIN`) even though the audit logged
+`egress_dns_allow`. pasta mirrors host-bound UDP ports into the workspace
+netns as wildcard `SO_REUSEADDR` listeners, and the mediator's spoofed-source
+reply socket — which must bind the resolver's address on that same port 53 —
+lacked `SO_REUSEADDR`, so its bind failed `EADDRINUSE` and the answer was
+dropped before it reached the guest. The reply socket now sets `SO_REUSEADDR`
+(the canonical transparent-proxy reply-socket setup), which also removes the
+bind race between a guest's parallel A/AAAA answers toward the same resolver.
+The same fix covers non-DNS UDP flows whose destination port collides with a
+pasta-mirrored host port (e.g. NTP :123/:323).
+
+A reply-delivery failure is also no longer silent: the DNS path now audits
+`egress_dns_reply_error` (mirroring `egress_udp_reply_error`) instead of
+discarding the error — the gap that made this failure look like a healthy
+mediator with a dead guest resolver.
+
 ### Honest user-namespace detection on Ubuntu 24.04 (AppArmor userns restriction)
 
 On hosts with `kernel.apparmor_restrict_unprivileged_userns=1` (the stock

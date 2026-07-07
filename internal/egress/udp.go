@@ -374,8 +374,20 @@ func (p *udpProxy) serveDNS(src, origDst netip.AddrPort, query []byte) {
 	if err != nil {
 		return // handleDNS already audited egress_dns_error; drop fail-closed
 	}
-	if resp != nil {
-		_ = p.replyTo(origDst, src, resp)
+	if resp == nil {
+		return
+	}
+	// A reply failure means the guest never sees an answer the audit trail says
+	// was allowed and forwarded — it must leave its own trace (this exact gap
+	// hid the EADDRINUSE reply-bind collision on hosts where pasta mirrors a
+	// host UDP :53 listener into the netns). Mirrors readUpstream's
+	// egress_udp_reply_error.
+	if rerr := p.replyTo(origDst, src, resp); rerr != nil {
+		p.h.Logger.Log("egress_dns_reply_error", map[string]any{
+			"resolver": origDst.String(),
+			"src":      src.String(),
+			"error":    rerr.Error(),
+		})
 	}
 }
 

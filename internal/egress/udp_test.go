@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"errors"
 	"net"
 	"net/netip"
 	"sync"
@@ -491,6 +492,45 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 		}
 		assertEvent(t, log, "egress_dns_deny")
 	})
+}
+
+// TestServeDNSAuditsReplyFailure proves a DNS answer that cannot be delivered to
+// the guest leaves a trace: when replyTo fails (in production, the transparent
+// reply socket's bind colliding with a pasta-mirrored wildcard :53 socket in the
+// workspace netns), serveDNS must audit egress_dns_reply_error. Before this
+// event existed the audit showed egress_dns_allow while the guest timed out
+// EAI_AGAIN — an allowed-and-forwarded answer vanishing without a trace.
+func TestServeDNSAuditsReplyFailure(t *testing.T) {
+	resolver := netip.MustParseAddrPort("203.0.113.53:53")
+	guestSrc := netip.MustParseAddrPort("10.0.0.5:52000")
+	pol, _ := NewPolicy([]string{"allowed.example.com"})
+	log := &BufferLogger{}
+	h := &Handler{
+		Mode:      "strict",
+		Policy:    pol,
+		Logger:    log,
+		NameCache: NewNameCache(),
+		ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+		DialUDP:   func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS"); return nil, nil },
+	}
+	p := newUDPProxy(h)
+	defer p.closeAll()
+
+	resp := buildResponseWithA(t, 0x0103, "allowed.example.com.", "allowed.example.com.",
+		[4]byte{203, 0, 113, 7}, 300)
+	p.dnsForward = func(netip.AddrPort, []byte) ([]byte, error) { return resp, nil }
+	p.replyTo = func(netip.AddrPort, netip.AddrPort, []byte) error {
+		return errors.New("bind transparent reply socket to 203.0.113.53:53: address already in use")
+	}
+
+	query := buildQuery(t, 0x0103, "allowed.example.com.", dnsmessage.TypeA)
+	p.handleUDPDatagram(guestSrc, resolver, query)
+	// DNS handling is async (its own goroutine); dnsWG.Wait ensures the audit
+	// write happens-before the assertion.
+	p.dnsWG.Wait()
+
+	assertEvent(t, log, "egress_dns_allow")
+	assertEvent(t, log, "egress_dns_reply_error")
 }
 
 // TestDNSForwardDoesNotStallOtherDatagrams is the regression guard for the Phase 4
