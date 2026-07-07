@@ -12,6 +12,35 @@ permissions:
   contents: read
 
 jobs:
+  # No applevf self-hosted runner is attached today, so the targeted job would
+  # sit queued for GitHub's 24h ceiling on every v* tag (timeout-minutes only
+  # starts counting once a runner picks the job up — it never bounds queue
+  # time). This watchdog cancels the run when the mac job is still queued
+  # after a short grace period. When a runner is attached some day, extend or
+  # drop the grace period so a merely-busy runner is not mistaken for an
+  # absent one.
+  queue-watchdog:
+    name: Cancel when no applevf runner is online
+    if: github.event_name != 'pull_request' || github.event.label.name == 'run-applevf-live'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+    steps:
+      - name: Cancel the run if the targeted job is still queued after 5 minutes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 300
+          status=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '.jobs[] | select(.name | startswith("Apple VF targeted")) | .status')
+          if [ "$status" = "queued" ]; then
+            echo "No applevf self-hosted runner picked the job up within the grace period; cancelling the run."
+            gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}"
+          else
+            echo "Targeted job status: ${status:-not found}; leaving the run alone."
+          fi
+
   targeted:
     name: Apple VF targeted live E2E
     if: github.event_name != 'pull_request' || github.event.label.name == 'run-applevf-live'
