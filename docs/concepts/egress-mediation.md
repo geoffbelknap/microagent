@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-07_
 
 Egress mediation is microagent's transparent control point for workspace
 network traffic. When mediation is active, the host captures the guest's
@@ -138,7 +138,9 @@ so:
 - [`microagent doctor`](/cli/doctor/) reports whether the TPROXY modules are
   loaded or built in.
 - Load the modules once, as root, with
-  `sudo modprobe nft_tproxy nf_tproxy_ipv4 xt_socket nf_socket_ipv4`. With the
+  `sudo modprobe -a nft_tproxy nf_tproxy_ipv4 xt_socket nf_socket_ipv4` (`-a`
+  is required — without it modprobe treats the extra names as parameters for
+  the first module and loads only `nft_tproxy`). With the
   modules present, the workspace's netns installs its own TPROXY rules.
 
 If a `guarded` or `strict` workspace lands on a host where TPROXY
@@ -263,6 +265,7 @@ are:
 | `egress_internal_deny` | A TCP connection denied because the resolved destination IP is an inside address (`guarded` mode); includes `internal: true` and `dst` fields |
 | `egress_mitm_handshake_error` / `egress_mitm_upstream_error` | A TLS interception problem (see [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails)) |
 | `egress_dns_allow` / `egress_dns_deny` | A name resolved / REFUSED |
+| `egress_dns_reply_error` | A resolved answer could not be delivered back to the guest (the guest sees a timeout even though the name was allowed and resolved) |
 | `egress_udp_allow` / `egress_udp_deny` / `egress_udp_close` | A UDP flow permitted / denied / closed |
 | `egress_udp_internal_deny` | A UDP datagram denied because the destination IP is an inside address (`guarded` mode); includes `internal: true` and `dst` fields |
 | `egress_cap_exceeded` | A bounded-operations cap tripped |
