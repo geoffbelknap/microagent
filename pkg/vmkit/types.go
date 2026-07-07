@@ -119,8 +119,16 @@ type Config struct {
 	// equals the host port (the normal case).
 	GuestShellPort uint16 `json:"guestShellPort,omitempty"`
 	GuestExecPort  uint16 `json:"guestExecPort,omitempty"`
-	SerialInput    bool   `json:"serialInput,omitempty"`
-	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	// BakedVsockUDSPath is the vsock UDS path recorded in the snapshot this
+	// workspace was started from. Firecracker cannot remap the path on load,
+	// so a fork's running VM still references its ancestor's path (resolved
+	// through the fork's bind mount). Snapshot capture must carry this exact
+	// path forward — recording the fork's own path would point the NEXT
+	// fork's bind mount at the wrong directory. Empty means the workspace
+	// booted fresh and its vsock path is its own.
+	BakedVsockUDSPath string `json:"bakedVsockUDSPath,omitempty"`
+	SerialInput       bool   `json:"serialInput,omitempty"`
+	TimeoutSeconds    int    `json:"timeoutSeconds,omitempty"`
 	// LeaseSeconds bounds the VM's lifetime when set (>0): the gc sweep reaps a
 	// workspace still recorded running past StartedAt+LeaseSeconds. Zero means no
 	// bound — the VM is permanent and is never reaped for age.

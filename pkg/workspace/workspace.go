@@ -102,6 +102,9 @@ type Options struct {
 	ExecPort          uint16
 	GuestShellPort    uint16
 	GuestExecPort     uint16
+	// BakedVsockUDSPath carries the source snapshot's baked vsock path when
+	// starting from a snapshot; see vmkit.Config.BakedVsockUDSPath.
+	BakedVsockUDSPath string
 	Disks             []Disk
 	Outputs           []Output
 	VsockListeners    []vmkit.VsockListener
@@ -1061,6 +1064,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			SecretsControlPort:       SecretsControlPort(opts),
 			GuestShellPort:           opts.GuestShellPort,
 			GuestExecPort:            opts.GuestExecPort,
+			BakedVsockUDSPath:        opts.BakedVsockUDSPath,
 			SerialInput:              opts.SerialInput,
 			MaintenanceBoot:          opts.MaintenanceBoot,
 			TimeoutSeconds:           int(opts.Timeout.Seconds()),

@@ -748,6 +748,17 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		}
 		caSHA = sha
 	}
+	// A fork's guest listens on the baked (ancestor-derived) service ports in
+	// GuestShellPort/GuestExecPort; ShellPort/ExecPort are this workspace's
+	// host-side bridge ports. The manifest records what the GUEST listens on.
+	shellPort := state.Config.ShellPort
+	if state.Config.GuestShellPort != 0 {
+		shellPort = state.Config.GuestShellPort
+	}
+	execPort := state.Config.ExecPort
+	if state.Config.GuestExecPort != 0 {
+		execPort = state.Config.GuestExecPort
+	}
 	return vmkit.SnapshotManifest{
 		Tag:                      tag,
 		NetworkMode:              mode,
@@ -756,8 +767,8 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		VCPUCount:                state.Config.CPUCount,
 		MemoryMiB:                state.Config.MemoryMiB,
 		CreatedAt:                time.Now().UTC().Format(time.RFC3339),
-		ShellPort:                state.Config.ShellPort,
-		ExecPort:                 state.Config.ExecPort,
+		ShellPort:                shellPort,
+		ExecPort:                 execPort,
 		NetworkIP:                netIP,
 		NetworkGateway:           netGateway,
 		NetworkSubnet:            netSubnet,
@@ -890,6 +901,9 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	// the source's guest ports, so concurrent forks don't collide on the host.
 	opts.GuestShellPort = manifest.ShellPort
 	opts.GuestExecPort = manifest.ExecPort
+	// Likewise the loaded VM state references the manifest's vsock path, not
+	// the fork's own; carry it so a snapshot OF this fork records the truth.
+	opts.BakedVsockUDSPath = manifest.VsockUDSPath
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
