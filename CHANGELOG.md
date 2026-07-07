@@ -5,6 +5,18 @@ been cut into a release yet.
 
 ## Unreleased
 
+### New `helper:` secret scheme — credential-helper binaries
+
+Secret references gain a `helper:` scheme that resolves by executing an
+operator-owned binary (named by `MICROAGENT_SECRET_HELPER` in the resolving
+process's environment) with the reference remainder as its argument; the
+secret is the helper's stdout. This is the git/docker credential-helper
+pattern applied to the conduit: embedding platforms plug in their cloud's
+secret manager — resolved via instance identity, no tokens at rest — without
+cloud SDKs entering microagent. Fail-closed throughout: unconfigured host,
+nonzero exit, or empty output all fail the resolve, and stderr (never the
+secret) is surfaced in the error.
+
 ## v0.8.6 - 2026-07-07
 
 Snapshot-chain correctness release: three related fixes for workspaces that
