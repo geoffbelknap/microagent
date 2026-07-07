@@ -5,6 +5,23 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Snapshot of a restored workspace no longer loses its baked identity
+
+Snapshotting a workspace that was itself started from a snapshot (a chain of
+forks — e.g. repeated hibernate/resume cycles) recorded the wrong restore
+identity in the manifest: the fork's own vsock UDS path instead of the
+ancestor path baked into the loaded VM state, and the fork's host-side bridge
+ports instead of the guest service ports the resumed guest actually listens
+on. The NEXT restore in the chain then bind-mounted over the wrong directory
+and bridged to ports nobody listened on, leaving shell/exec dead (connection
+reset) while the workspace looked running. Capture now carries the baked
+identity forward: `CreateFromSnapshot` threads the source manifest's vsock
+path through the runtime config (new `bakedVsockUDSPath`), and both the
+Firecracker and Apple VF capture paths prefer the baked guest ports. The fork
+mount-exec path also creates the bind mountpoint when the ancestor's
+directory does not exist on this host, so chained restores work on a fresh
+node (bundle-restore scenarios), not just where the ancestor once ran.
+
 ## v0.8.5 - 2026-07-07
 
 ### Guarded-egress DNS no longer breaks on hosts with a local UDP :53 service
