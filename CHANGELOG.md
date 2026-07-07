@@ -5,6 +5,18 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Resuming a fork in place no longer loses its baked identity
+
+`start --from-snapshot` on a workspace that was itself created from a
+snapshot (a fork) launched the VM without the baked identity adoption that
+`create --from-snapshot` performs: the loaded guest listens on its ancestor's
+service ports and references the ancestor's vsock path, but the host bridged
+name-derived ports and recorded the fork's own path — shell/exec came up dead
+(connection reset) while the workspace looked running. Start now adopts the
+baked guest ports and vsock path from the snapshot manifest (explicit caller
+values still win); for an original workspace the adopted values equal its own,
+so behavior there is unchanged.
+
 ### Snapshot forks no longer drop the caller's port forwards
 
 `CreateFromSnapshot` adopted the snapshot's baked network addressing by
