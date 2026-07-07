@@ -883,15 +883,7 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		opts.SpecCPU = true
 	}
 	if strings.TrimSpace(manifest.NetworkMode) != "" {
-		// The resumed guest keeps the source's baked IP, so the fork configures
-		// its own tap/pasta (in its own namespace) with the source's addressing
-		// rather than deriving a fresh subnet from the fork's name.
-		opts.Network = vmkit.NetworkConfig{
-			Mode:    manifest.NetworkMode,
-			IP:      manifest.NetworkIP,
-			Gateway: manifest.NetworkGateway,
-			Subnet:  manifest.NetworkSubnet,
-		}
+		opts.Network = adoptSnapshotNetwork(opts.Network, manifest)
 	}
 	if opts.ImageRef == "" {
 		opts.ImageRef = manifest.ImageRef
@@ -937,6 +929,23 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	}
 	opts.FromSnapshot = tag
 	return Start(ctx, opts)
+}
+
+// adoptSnapshotNetwork builds the fork's network config: addressing comes
+// from the snapshot — the resumed guest keeps the source's baked IP, so the
+// fork configures its own tap/pasta (in its own namespace) with the source's
+// addressing rather than deriving a fresh subnet from the fork's name. The
+// caller's port forwards are preserved: they are realized host-side by this
+// fork's own pasta/forwarder and are invisible to the resumed guest, so
+// adopting the source's addressing must not silently drop them.
+func adoptSnapshotNetwork(requested vmkit.NetworkConfig, manifest vmkit.SnapshotManifest) vmkit.NetworkConfig {
+	return vmkit.NetworkConfig{
+		Mode:         manifest.NetworkMode,
+		IP:           manifest.NetworkIP,
+		Gateway:      manifest.NetworkGateway,
+		Subnet:       manifest.NetworkSubnet,
+		PortForwards: requested.PortForwards,
+	}
 }
 
 func applyForkSecretManifest(opts *Options, source Manifest, snapshot vmkit.SnapshotManifest) error {
