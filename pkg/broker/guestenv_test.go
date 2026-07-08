@@ -91,9 +91,11 @@ func TestMergeGuestEnvOverridesOwnedKeys(t *testing.T) {
 		t.Error("unrelated env not preserved")
 	}
 	for k, want := range map[string]string{
-		"HTTPS_PROXY":                    "http://127.0.0.1:8888",
-		"ANTHROPIC_BASE_URL":             "http://127.0.0.1:8888",
-		"MICROAGENT_VSOCK_TCP_LISTENERS": "127.0.0.1:8888=9000",
+		"HTTPS_PROXY":        "http://127.0.0.1:8888",
+		"ANTHROPIC_BASE_URL": "http://127.0.0.1:8888",
+		// Existing bridge entries are preserved (they only work if the host
+		// serves that vsock port anyway); the broker's entry is appended.
+		"MICROAGENT_VSOCK_TCP_LISTENERS": "127.0.0.1:1=1,127.0.0.1:8888=9000",
 	} {
 		if got[k] != want {
 			t.Errorf("broker-owned %q = %q, want %q (workload override not stripped)", k, got[k], want)
@@ -101,5 +103,49 @@ func TestMergeGuestEnvOverridesOwnedKeys(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(merged) {
 		t.Error("merged env not sorted")
+	}
+}
+
+func TestMergeGuestEnvMap(t *testing.T) {
+	cfg := GuestConfig{GuestListen: "127.0.0.1:8888", VsockPort: 9000, Proxy: true, BaseURL: map[string]string{"ANTHROPIC_BASE_URL": ""}}
+	existing := map[string]string{
+		"PATH":                           "/usr/bin",
+		"HTTPS_PROXY":                    "http://evil:1",
+		"MICROAGENT_VSOCK_TCP_LISTENERS": "127.0.0.1:1=1,127.0.0.1:8888=9000",
+	}
+	merged, err := cfg.MergeGuestEnvMap(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"PATH":               "/usr/bin",
+		"HTTPS_PROXY":        "http://127.0.0.1:8888",
+		"HTTP_PROXY":         "http://127.0.0.1:8888",
+		"ANTHROPIC_BASE_URL": "http://127.0.0.1:8888",
+		// The broker's own entry was already present: merged, not duplicated.
+		"MICROAGENT_VSOCK_TCP_LISTENERS": "127.0.0.1:1=1,127.0.0.1:8888=9000",
+	}
+	for k, v := range want {
+		if merged[k] != v {
+			t.Errorf("merged[%q] = %q, want %q", k, merged[k], v)
+		}
+	}
+	if len(merged) != len(want) {
+		t.Errorf("merged has %d keys, want %d: %v", len(merged), len(want), merged)
+	}
+	if existing["HTTPS_PROXY"] != "http://evil:1" {
+		t.Error("input map mutated")
+	}
+	// Nil input works and yields exactly the broker env.
+	solo, err := cfg.MergeGuestEnvMap(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if solo["MICROAGENT_VSOCK_TCP_LISTENERS"] != "127.0.0.1:8888=9000" {
+		t.Errorf("nil-merge listeners = %q", solo["MICROAGENT_VSOCK_TCP_LISTENERS"])
+	}
+	// Invalid config fails closed.
+	if _, err := (GuestConfig{}).MergeGuestEnvMap(nil); err == nil {
+		t.Error("invalid GuestConfig must error")
 	}
 }

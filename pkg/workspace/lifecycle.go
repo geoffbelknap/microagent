@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
@@ -1142,7 +1143,10 @@ func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) er
 
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
-	req := buildRootfsRequest(opts, rootfsPath)
+	req, err := rootfsRequest(opts, rootfsPath)
+	if err != nil {
+		return Result{}, err
+	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := Result{
 		Workspace:    opts.Name,
@@ -1160,6 +1164,32 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		Image:        provenance,
 	}
 	return result, err
+}
+
+// rootfsRequest composes the rootfs build request, baking the broker guest
+// env (vsock bridge, proxy, base URLs) into the image env when a broker is
+// configured. Fail-closed: an invalid broker config fails the build rather
+// than producing a workspace whose egress silently bypasses the broker.
+func rootfsRequest(opts Options, rootfsPath string) (rootfs.BuildRequest, error) {
+	req := buildRootfsRequest(opts, rootfsPath)
+	brokerCfg, err := normalizeBrokerConfig(opts.Broker)
+	if err != nil {
+		return rootfs.BuildRequest{}, err
+	}
+	if brokerCfg != nil {
+		guest := broker.GuestConfig{
+			GuestListen: brokerCfg.GuestListen,
+			VsockPort:   brokerCfg.VsockPort,
+			Proxy:       brokerCfg.Proxy,
+			BaseURL:     brokerCfg.BaseURLEnv,
+		}
+		env, err := guest.MergeGuestEnvMap(req.Env)
+		if err != nil {
+			return rootfs.BuildRequest{}, fmt.Errorf("broker guest env: %w", err)
+		}
+		req.Env = env
+	}
+	return req, nil
 }
 
 func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
@@ -1419,6 +1449,7 @@ func WriteManifest(opts Options) error {
 		EgressAllow:          opts.EgressAllow,
 		EgressPassthrough:    opts.EgressPassthrough,
 		EgressSwapConfigPath: opts.EgressSwapConfigPath,
+		Broker:               opts.Broker,
 	})
 }
 
@@ -1822,6 +1853,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.EgressAllow = manifest.EgressAllow
 	opts.EgressPassthrough = manifest.EgressPassthrough
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
+	opts.Broker = manifest.Broker
 }
 
 func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {

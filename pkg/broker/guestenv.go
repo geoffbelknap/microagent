@@ -30,6 +30,10 @@ type GuestConfig struct {
 	BaseURL map[string]string
 }
 
+// ListenerTarget marks a vsock listener the supervisor serves the egress
+// broker on, rather than forwarding to a TCP target or writing a result file.
+const ListenerTarget = "broker://serve"
+
 // vsockListenersEnv is the guest env var the guestinit bridge reads; it must
 // match cmd/microagent-guestinit (MICROAGENT_VSOCK_TCP_LISTENERS), format
 // "listen=vsockPort[,listen=vsockPort...]".
@@ -67,8 +71,10 @@ func (c GuestConfig) GuestEnv() (map[string]string, error) {
 }
 
 // MergeGuestEnv applies GuestEnv onto an existing env slice ("K=V" entries),
-// overriding any key the broker owns so the workload cannot pre-set a bridge
-// or base URL to escape mediation. Returned sorted for determinism.
+// overriding any key the broker owns so the workload cannot pre-set a proxy
+// or base URL to escape mediation. Existing vsock bridge entries are merged,
+// not replaced: they only function if the host serves that vsock port, so
+// preserving them cannot widen access. Returned sorted for determinism.
 func (c GuestConfig) MergeGuestEnv(existing []string) ([]string, error) {
 	add, err := c.GuestEnv()
 	if err != nil {
@@ -76,8 +82,12 @@ func (c GuestConfig) MergeGuestEnv(existing []string) ([]string, error) {
 	}
 	out := make([]string, 0, len(existing)+len(add))
 	for _, kv := range existing {
-		k, _, ok := strings.Cut(kv, "=")
+		k, v, ok := strings.Cut(kv, "=")
 		if ok {
+			if k == vsockListenersEnv {
+				add[k] = mergeVsockListenerSpecs(v, add[k])
+				continue
+			}
 			if _, owned := add[k]; owned {
 				continue // broker-owned key: replace, never inherit
 			}
@@ -89,4 +99,41 @@ func (c GuestConfig) MergeGuestEnv(existing []string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// MergeGuestEnvMap is MergeGuestEnv for a key→value env map (the shape rootfs
+// build requests use). It returns a new map; the input is not mutated.
+func (c GuestConfig) MergeGuestEnvMap(existing map[string]string) (map[string]string, error) {
+	add, err := c.GuestEnv()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(existing)+len(add))
+	for k, v := range existing {
+		out[k] = v
+	}
+	for k, v := range add {
+		if k == vsockListenersEnv {
+			out[k] = mergeVsockListenerSpecs(existing[k], v)
+			continue
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+// mergeVsockListenerSpecs joins two comma-separated bridge spec lists,
+// preserving order and dropping duplicate entries.
+func mergeVsockListenerSpecs(existing, added string) string {
+	seen := map[string]bool{}
+	var entries []string
+	for _, e := range strings.Split(existing+","+added, ",") {
+		e = strings.TrimSpace(e)
+		if e == "" || seen[e] {
+			continue
+		}
+		seen[e] = true
+		entries = append(entries, e)
+	}
+	return strings.Join(entries, ",")
 }

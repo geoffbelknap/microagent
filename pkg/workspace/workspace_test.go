@@ -929,3 +929,129 @@ func TestRequestFlatFieldsEqualNormalizedPolicy(t *testing.T) {
 		t.Fatalf("Config.EgressAllow = %v, want [api.example.com] (trimmed and deduped)", req.Config.EgressAllow)
 	}
 }
+
+func TestRequestWiresBroker(t *testing.T) {
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = t.TempDir()
+	opts.Backend = vmkit.BackendLinuxKVM
+	opts.Broker = &vmkit.BrokerConfig{
+		Upstream:   "https://api.example.com",
+		Secret:     vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
+		BaseURLEnv: map[string]string{"EXAMPLE_BASE_URL": ""},
+	}
+	req, err := Request(opts, "", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if req.Config.Broker == nil {
+		t.Fatalf("Config.Broker not threaded")
+	}
+	if req.Config.Broker.VsockPort != DefaultBrokerPort {
+		t.Fatalf("Broker.VsockPort = %d, want default %d", req.Config.Broker.VsockPort, DefaultBrokerPort)
+	}
+	if req.Config.Broker.GuestListen != DefaultBrokerGuestListen {
+		t.Fatalf("Broker.GuestListen = %q, want default %q", req.Config.Broker.GuestListen, DefaultBrokerGuestListen)
+	}
+	found := false
+	for _, l := range req.Config.VsockListeners {
+		if l.Port == DefaultBrokerPort && l.Target == "broker://serve" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("broker vsock listener missing: %+v", req.Config.VsockListeners)
+	}
+	// The broker credential is host-side only: it must never join the
+	// guest-delivered secret bundle or allocate the guest secrets listener.
+	for _, ref := range req.Config.Secrets {
+		if ref.Name == "api" {
+			t.Fatalf("broker secret leaked into guest-delivered Config.Secrets: %+v", req.Config.Secrets)
+		}
+	}
+	if req.Config.SecretsPort != 0 {
+		t.Fatalf("SecretsPort = %d, want 0 (broker-only workspace delivers no guest secrets)", req.Config.SecretsPort)
+	}
+}
+
+func TestRequestBrokerValidation(t *testing.T) {
+	base := func() Options {
+		opts := DefaultOptions()
+		opts.Name = "ws"
+		opts.StateDir = t.TempDir()
+		opts.Backend = vmkit.BackendLinuxKVM
+		return opts
+	}
+	missingUpstream := base()
+	missingUpstream.Broker = &vmkit.BrokerConfig{Secret: vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"}}
+	if _, err := Request(missingUpstream, "", "/tmp/rootfs.ext4", "req-1"); err == nil {
+		t.Fatalf("Request accepted broker config with no upstream")
+	}
+	missingSecret := base()
+	missingSecret.Broker = &vmkit.BrokerConfig{Upstream: "https://api.example.com"}
+	if _, err := Request(missingSecret, "", "/tmp/rootfs.ext4", "req-1"); err == nil {
+		t.Fatalf("Request accepted broker config with no secret ref")
+	}
+	literalSecret := base()
+	literalSecret.Broker = &vmkit.BrokerConfig{Upstream: "https://api.example.com", Secret: vmkit.SecretRef{Name: "api", Ref: "sk-pasted-literal"}}
+	if _, err := Request(literalSecret, "", "/tmp/rootfs.ext4", "req-1"); err == nil {
+		t.Fatalf("Request accepted a literal (non-reference) broker secret")
+	}
+}
+
+func TestManifestPersistsBroker(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.Broker = &vmkit.BrokerConfig{
+		Upstream:   "https://api.example.com",
+		Secret:     vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
+		Proxy:      true,
+		BaseURLEnv: map[string]string{"EXAMPLE_BASE_URL": ""},
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	manifest, err := ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	restored := DefaultOptions()
+	restored.Name = "ws"
+	restored.StateDir = dir
+	applyManifest(&restored, manifest)
+	if !reflect.DeepEqual(restored.Broker, opts.Broker) {
+		t.Fatalf("broker config did not round-trip: %+v != %+v", restored.Broker, opts.Broker)
+	}
+
+	// And a broker-less manifest restores to nil (no stale carry-over).
+	opts.Broker = nil
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	manifest, err = ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	applyManifest(&restored, manifest)
+	if restored.Broker != nil {
+		t.Fatalf("broker config should restore to nil: %+v", restored.Broker)
+	}
+}
+
+func TestRequestNoBroker(t *testing.T) {
+	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm"}
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if req.Config.Broker != nil {
+		t.Fatalf("Config.Broker should be nil when unconfigured")
+	}
+	for _, l := range req.Config.VsockListeners {
+		if l.Target == "broker://serve" {
+			t.Fatalf("broker vsock listener present without broker config: %+v", req.Config.VsockListeners)
+		}
+	}
+}

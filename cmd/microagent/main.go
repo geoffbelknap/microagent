@@ -28,6 +28,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/superviseunit"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
@@ -2079,6 +2080,13 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress guarded or strict)")
 	var credSwap multiFlag
 	fs.Var(&credSwap, "cred-swap", "Inject a provider API key host-side for a built-in provider: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). The guest never holds the key; reference only, never a literal. Repeatable; requires --egress guarded or strict")
+	var brokerUpstream, brokerSecret string
+	fs.StringVar(&brokerUpstream, "broker-upstream", "", "Egress broker upstream base URL; requests reach it through the broker with the credential injected host-side")
+	fs.StringVar(&brokerSecret, "broker-secret", "", "Egress broker credential NAME=<scheme>:<ref>; held host-side only, the guest sends @secret:NAME references (never the value)")
+	var brokerEnv multiFlag
+	fs.Var(&brokerEnv, "broker-env", "Guest env var pointed at the broker, KEY[=VALUE] (empty VALUE = broker URL; repeatable)")
+	var brokerProxy bool
+	fs.BoolVar(&brokerProxy, "broker-proxy", false, "Also set HTTPS_PROXY/HTTP_PROXY in the guest to the broker (CONNECT tunneling)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2165,6 +2173,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap); err != nil {
 		return workspaceOptions{}, err
 	}
+	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy); err != nil {
+		return workspaceOptions{}, err
+	}
 	if err := applyStorageOptionFlags(&opts, volumeFlags, diskFlags, bundleFlags, outputFlags); err != nil {
 		return workspaceOptions{}, err
 	}
@@ -2233,6 +2244,57 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 	}
 	opts.OnDemandSecrets = onDemand
 	opts.SecretsAudit = secretsAudit
+	return nil
+}
+
+// applyBrokerOptionFlags parses the --broker-* flags into Options.Broker. A
+// partial declaration fails loudly (a broker with no credential, or broker
+// env with no broker, would otherwise silently produce an unbrokered
+// workspace). A literal secret is rejected at parse time, before any state is
+// written, matching --cred-swap; deeper validation and default-filling happen
+// in the workspace layer.
+func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy bool) error {
+	upstream := strings.TrimSpace(brokerUpstream)
+	secretSpec := strings.TrimSpace(brokerSecret)
+	if upstream == "" && secretSpec == "" {
+		if len(brokerEnv) != 0 || brokerProxy {
+			return fmt.Errorf("--broker-env/--broker-proxy require --broker-upstream and --broker-secret")
+		}
+		return nil
+	}
+	if upstream == "" || secretSpec == "" {
+		return fmt.Errorf("--broker-upstream and --broker-secret are required together")
+	}
+	name, ref, ok := strings.Cut(secretSpec, "=")
+	name = strings.TrimSpace(name)
+	ref = strings.TrimSpace(ref)
+	if !ok || name == "" || ref == "" {
+		return fmt.Errorf("broker secret must be NAME=<scheme>:<ref>: %s", secretSpec)
+	}
+	if !secretxfer.ValidName(name) {
+		return fmt.Errorf("broker secret name is invalid: %s", name)
+	}
+	if !secret.DefaultRegistry(nil, nil).ValidRef(ref) {
+		return fmt.Errorf("broker secret reference %q must be <scheme>:<ref> (env:/file:/dotenv:/vault:/helper:), never a literal secret", ref)
+	}
+	var baseURLEnv map[string]string
+	for _, raw := range brokerEnv {
+		key, value, _ := strings.Cut(raw, "=")
+		key = strings.TrimSpace(key)
+		if !validEnvName(key) {
+			return fmt.Errorf("broker env key is invalid: %s", raw)
+		}
+		if baseURLEnv == nil {
+			baseURLEnv = map[string]string{}
+		}
+		baseURLEnv[key] = value
+	}
+	opts.Broker = &vmkit.BrokerConfig{
+		Upstream:   upstream,
+		Secret:     vmkit.SecretRef{Name: name, Ref: ref},
+		Proxy:      brokerProxy,
+		BaseURLEnv: baseURLEnv,
+	}
 	return nil
 }
 
@@ -4241,6 +4303,13 @@ Options:
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
   -cred-swap PROVIDER[=ref]
                          Inject a built-in provider API key host-side (e.g. anthropic, openai); reference only, never a literal (repeatable)
+  -broker-upstream <url>
+                         Egress broker upstream; the broker injects the credential host-side and originates its own TLS (guest never holds the key)
+  -broker-secret NAME=<scheme>:<ref>
+                         Broker credential reference; the guest sends @secret:NAME
+  -broker-env KEY[=VALUE]
+                         Guest env var pointed at the broker (repeatable)
+  -broker-proxy         Set HTTPS_PROXY/HTTP_PROXY in the guest to the broker
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable)
   -secret-on-demand NAME=<scheme>:<ref>
@@ -4327,6 +4396,13 @@ Options:
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
   -cred-swap PROVIDER[=ref]
                          Inject a built-in provider API key host-side (e.g. anthropic, openai); reference only, never a literal (repeatable)
+  -broker-upstream <url>
+                         Egress broker upstream; the broker injects the credential host-side and originates its own TLS (guest never holds the key)
+  -broker-secret NAME=<scheme>:<ref>
+                         Broker credential reference; the guest sends @secret:NAME
+  -broker-env KEY[=VALUE]
+                         Guest env var pointed at the broker (repeatable)
+  -broker-proxy         Set HTTPS_PROXY/HTTP_PROXY in the guest to the broker
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable)
   -secret-on-demand NAME=<scheme>:<ref>

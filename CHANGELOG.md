@@ -5,6 +5,29 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Egress broker — credential isolation without MITM
+
+Workspaces can now route egress through a per-workspace broker: a cooperative
+forward proxy served on a host vsock listener that swaps credential
+references (`@secret:<name>`) for the live secret just before originating its
+own upstream TLS — no forged certificates, no CA injected into the guest. The
+guest never holds the credential: not in its environment, its filesystem, or
+anything it can read; the live value exists only in host process memory.
+Because the channel is vsock, it works even for `--network isolated` guests,
+composing containment with credential isolation.
+
+`microagent create/run --broker-upstream <url> --broker-secret NAME=<ref>`
+(plus optional `--broker-env KEY[=VALUE]` and `--broker-proxy`) wire
+everything with zero manual steps: the guest env (bridge listener, base URLs,
+proxy vars) is baked at create, the broker config persists in the workspace
+manifest — reference only, never a value — and the supervisor serves the
+broker at every start, resolving the secret fresh (fail-closed: an
+unresolvable reference or a pasted literal aborts instead of booting an
+unbrokered workspace). Every brokered request is recorded pre-swap in the
+per-workspace `broker-access.jsonl`, so the trail carries the workload's own
+reference and can never contain the live secret — absent by construction,
+not redaction.
+
 ### New `helper:` secret scheme — credential-helper binaries
 
 Secret references gain a `helper:` scheme that resolves by executing an

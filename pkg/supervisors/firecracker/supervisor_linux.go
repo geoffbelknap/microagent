@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -2776,6 +2777,15 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 			srv := newSecretsServer(opts.Name, opts.StateDir, bundle, onDemand, config.SecretsAudit)
 			set.listeners = append(set.listeners, unixListener)
 			go serveSecretsListener(unixListener, srv)
+			continue
+		}
+		if listener.Target == broker.ListenerTarget {
+			brokerListener, err := startBrokerListener(opts, config, listener.Port)
+			if err != nil {
+				set.Close()
+				return nil, err
+			}
+			set.listeners = append(set.listeners, brokerListener)
 			continue
 		}
 		if listener.Target == secretxfer.CACertTarget {
