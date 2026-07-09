@@ -5,6 +5,31 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Broker decision stream + governed request capture
+
+The egress broker's per-workspace trail (`broker-access.jsonl`) is now a
+**decision stream**: one minimized record per brokered request — verdict,
+rule, method, host, upstream status, byte counts both ways, timing, and the
+*names* of the credential references swapped, never values. By schema the
+record carries no path, headers, or bodies, and everything the broker records
+is captured **before** the reference-for-secret swap, so the injected
+credential cannot appear in any trail by construction. `microagent egress`
+merges the mediator's connection-level log and the broker's request-level
+records into one time-ordered view (snapshot and `--follow`), and the per-host
+allow/deny rollups fold broker verdicts in.
+
+A new `--broker-capture` flag (Agentfile: `agent.broker.capture`, MCP:
+`broker_capture`) opts in to raw capture of pre-swap requests — path, headers
+with references verbatim, and a bounded body prefix (1 MiB, truncation
+flagged) — to a separate owner-only `broker-capture.jsonl`. Capture is
+request-only (responses have no swap point and are never captured), off by
+default, and declared in the workspace manifest.
+
+The broker also gained an in-process policy seam: a hook that judges each
+pre-swap request before any bytes go upstream and returns only a verdict
+(allow/deny, rule, classification labels). It is fail-closed — a policy error
+or panic denies — and unconfigured by default.
+
 ### `broker` egress mode — mediation without a CA in the guest
 
 A new `--egress broker` mode terminates guest egress at a transparent forward
