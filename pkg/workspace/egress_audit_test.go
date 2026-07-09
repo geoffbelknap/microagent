@@ -107,3 +107,90 @@ func TestReadEgressAuditRejectsInvalidName(t *testing.T) {
 		t.Fatal("expected validation error for invalid workspace name")
 	}
 }
+
+// TestReadBrokerAccessParsesDecisionRecords: broker decision records share the
+// mediator's event-record shape, so the same tolerant generic reader serves
+// broker-access.jsonl — event/ts/host promoted, verdict/rule/bytes in Raw.
+func TestReadBrokerAccessParsesDecisionRecords(t *testing.T) {
+	stateDir := t.TempDir()
+	name := "research"
+	dir := filepath.Join(stateDir, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"event":"broker_request_allow","ts":"2026-06-16T00:00:01Z","mode":"terminate","host":"api.anthropic.com","method":"POST","verdict":"allow","status":200,"bytes_out":42,"bytes_in":512,"duration_ms":180,"secret_refs":["api"]}` + "\n" +
+		`{"event":"broker_request_deny","ts":"2026-06-16T00:00:02Z","mode":"connect","host":"203.0.113.7:443","method":"CONNECT","verdict":"deny","rule":"no-tunnels"}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "broker-access.jsonl"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := ReadBrokerAccess(stateDir, name)
+	if err != nil {
+		t.Fatalf("ReadBrokerAccess: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("event count = %d, want 2", len(events))
+	}
+	if events[0].Event != "broker_request_allow" || events[0].Host != "api.anthropic.com" {
+		t.Fatalf("allow row = %+v", events[0])
+	}
+	if events[0].Raw["verdict"] != "allow" || events[0].Raw["status"] != float64(200) {
+		t.Fatalf("Raw lost decision fields: %+v", events[0].Raw)
+	}
+	if events[1].Event != "broker_request_deny" || events[1].Raw["rule"] != "no-tunnels" {
+		t.Fatalf("deny row = %+v", events[1])
+	}
+}
+
+func TestReadBrokerAccessAbsentFileReturnsEmpty(t *testing.T) {
+	events, err := ReadBrokerAccess(t.TempDir(), "never-brokered")
+	if err != nil {
+		t.Fatalf("ReadBrokerAccess: %v", err)
+	}
+	if events == nil || len(events) != 0 {
+		t.Fatalf("want non-nil empty slice, got %#v", events)
+	}
+}
+
+// TestMergeEgressEvents: the mediator and broker streams merge into one
+// time-ordered view; ties keep the first slice's records first (stable).
+func TestMergeEgressEvents(t *testing.T) {
+	mediator := []EgressEvent{
+		{Event: "egress_allow", TS: "2026-06-16T00:00:01Z"},
+		{Event: "egress_deny", TS: "2026-06-16T00:00:04Z"},
+	}
+	broker := []EgressEvent{
+		{Event: "broker_request_allow", TS: "2026-06-16T00:00:02Z"},
+		{Event: "broker_request_deny", TS: "2026-06-16T00:00:04Z"},
+	}
+	merged := MergeEgressEvents(mediator, broker)
+	got := make([]string, len(merged))
+	for i, e := range merged {
+		got[i] = e.Event
+	}
+	want := []string{"egress_allow", "broker_request_allow", "egress_deny", "broker_request_deny"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("merged order = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestSummarizeFoldsBrokerVerdicts: the existing per-host rollup folds broker
+// records in via the shared _allow/_deny event-name suffixes — the vocabulary
+// was chosen so this needs no special case.
+func TestSummarizeFoldsBrokerVerdicts(t *testing.T) {
+	events := []EgressEvent{
+		{Event: "egress_allow", Host: "api.github.com"},
+		{Event: "broker_request_allow", Host: "api.anthropic.com"},
+		{Event: "broker_request_allow", Host: "api.anthropic.com"},
+		{Event: "broker_request_deny", Host: "203.0.113.7:443"},
+	}
+	s := SummarizeEgressAudit(events)
+	if s.AllowByHost["api.anthropic.com"] != 2 {
+		t.Fatalf("AllowByHost = %+v", s.AllowByHost)
+	}
+	if s.DenyByHost["203.0.113.7:443"] != 1 {
+		t.Fatalf("DenyByHost = %+v", s.DenyByHost)
+	}
+}

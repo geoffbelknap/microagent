@@ -170,10 +170,11 @@ func eventFollowComplete(events []workspace.EventFile) bool {
 	}
 }
 
-// runEgress surfaces the egress mediator's audit log for a workspace — the
-// per-decision allow/deny/MITM/DNS/UDP record written to egress-access.jsonl. It
-// mirrors runEvents: a one-shot snapshot by default, or a live tail with
-// --follow. An absent audit file is not an error (mediation may be off, or no
+// runEgress surfaces a workspace's egress decisions — the mediator's
+// connection-level records (egress-access.jsonl) and the broker's per-request
+// decision records (broker-access.jsonl), merged time-ordered into one view.
+// It mirrors runEvents: a one-shot snapshot by default, or a live tail with
+// --follow. An absent file is not an error (mediation/broker may be off, or no
 // decision has been recorded yet) — it reports as an empty list.
 func runEgress(ctx context.Context, args []string, stdout *os.File) error {
 	opts := stateCommandOptions{StateDir: defaultStateDir()}
@@ -193,7 +194,11 @@ func runEgress(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(name); err != nil {
 		return err
 	}
-	events, err := workspace.ReadEgressAudit(opts.StateDir, name)
+	mediator, err := workspace.ReadEgressAudit(opts.StateDir, name)
+	if err != nil {
+		return err
+	}
+	brokered, err := workspace.ReadBrokerAccess(opts.StateDir, name)
 	if err != nil {
 		return err
 	}
@@ -201,12 +206,13 @@ func runEgress(ctx context.Context, args []string, stdout *os.File) error {
 		if outputStructured() {
 			return fmt.Errorf("egress --follow is not supported with --json/--output json; omit --follow for a one-shot snapshot")
 		}
-		return followEgress(ctx, opts.StateDir, name, events, stdout)
+		return followEgress(ctx, opts.StateDir, name, mediator, brokered, stdout)
 	}
+	merged := workspace.MergeEgressEvents(mediator, brokered)
 	if outputStructured() {
-		return writeJSON(stdout, map[string]any{"workspace": name, "egress": events})
+		return writeJSON(stdout, map[string]any{"workspace": name, "egress": merged})
 	}
-	for _, event := range events {
+	for _, event := range merged {
 		writeEgressLine(stdout, event)
 	}
 	return nil
@@ -232,34 +238,46 @@ func writeEgressLine(stdout *os.File, event workspace.EgressEvent) {
 	fmt.Fprintln(stdout, line)
 }
 
-// followEgress prints the recorded egress decisions, then streams newly
-// appended decisions, returning when the workspace reaches a terminal lifecycle
-// state or the caller interrupts. Unlike events.json (rewritten wholesale),
-// egress-access.jsonl is append-only, so new records are detected by a growing
-// record count. The terminal-state check reads the lifecycle event history,
-// since the audit log itself carries no lifecycle signal.
-func followEgress(ctx context.Context, stateDir, name string, seen []workspace.EgressEvent, stdout *os.File) error {
+// followEgress prints the recorded egress decisions (mediator + broker,
+// merged), then streams newly appended decisions from both files, returning
+// when the workspace reaches a terminal lifecycle state or the caller
+// interrupts. Both logs are append-only, so new records are detected by a
+// growing per-file record count; each poll's new records are merged before
+// printing so the interleaved view stays time-ordered. The terminal-state
+// check reads the lifecycle event history, since the audit logs themselves
+// carry no lifecycle signal.
+func followEgress(ctx context.Context, stateDir, name string, seenMediator, seenBroker []workspace.EgressEvent, stdout *os.File) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	for _, event := range seen {
+	for _, event := range workspace.MergeEgressEvents(seenMediator, seenBroker) {
 		writeEgressLine(stdout, event)
 	}
-	count := len(seen)
+	mediatorCount, brokerCount := len(seenMediator), len(seenBroker)
 	if lifecycle, err := workspace.ReadEvents(stateDir, name); err == nil && eventFollowComplete(lifecycle) {
 		return nil
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		events, err := workspace.ReadEgressAudit(stateDir, name)
+		mediator, err := workspace.ReadEgressAudit(stateDir, name)
 		if err != nil {
 			return err
 		}
-		if len(events) > count {
-			for _, event := range events[count:] {
-				writeEgressLine(stdout, event)
-			}
-			count = len(events)
+		brokered, err := workspace.ReadBrokerAccess(stateDir, name)
+		if err != nil {
+			return err
+		}
+		var freshMediator, freshBroker []workspace.EgressEvent
+		if len(mediator) > mediatorCount {
+			freshMediator = mediator[mediatorCount:]
+			mediatorCount = len(mediator)
+		}
+		if len(brokered) > brokerCount {
+			freshBroker = brokered[brokerCount:]
+			brokerCount = len(brokered)
+		}
+		for _, event := range workspace.MergeEgressEvents(freshMediator, freshBroker) {
+			writeEgressLine(stdout, event)
 		}
 		if lifecycle, err := workspace.ReadEvents(stateDir, name); err == nil && eventFollowComplete(lifecycle) {
 			return nil
