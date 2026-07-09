@@ -336,6 +336,15 @@ func allowsBroad(mode string) bool {
 	return mode == egressModeGuarded || mode == egressModeBroker
 }
 
+// shouldMITM reports whether an allowed flow is terminated by forging a per-SNI
+// leaf (serveMITM) rather than opaquely spliced. It requires TLS, a loaded CA,
+// an allowed non-passthrough non-peer destination — and NEVER holds in broker
+// mode. The broker guard is a hard security invariant, independent of whether a
+// CA happens to be loaded: broker mode splices, it does not forge certificates.
+func (h *Handler) shouldMITM(isTLS, allowed, passthrough, isPeer bool) bool {
+	return isTLS && h.CA != nil && allowed && !passthrough && !isPeer && h.Mode != egressModeBroker
+}
+
 var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
 // isInsideAddr reports whether a is "the inside" — infrastructure the guest
@@ -459,7 +468,7 @@ func (h *Handler) Handle(conn net.Conn) {
 	// (isPeer) is excluded: east-west TLS is L4-spliced below (splice + audit +
 	// allowlist + fail-closed) so a peer's self-signed/internal cert is not broken
 	// by interception, and upstream verification is never silently disabled.
-	if isTLS && h.CA != nil && allowed && !passthrough && !isPeer {
+	if h.shouldMITM(isTLS, allowed, passthrough, isPeer) {
 		h.serveMITM(conn, br, host, dst, unlisted)
 		return
 	}
