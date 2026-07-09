@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"bytes"
 	"net/netip"
 	"testing"
 
@@ -66,6 +67,89 @@ func buildResponseWithA(t *testing.T, id uint16, qname, aname string, ip [4]byte
 		t.Fatalf("Finish: %v", err)
 	}
 	return msg
+}
+
+// buildResponseWithAAndHTTPS builds a response carrying one A record and one
+// HTTPS (type 65) record whose RDATA includes an ech SvcParam (key 5). The
+// dnsmessage package has no native HTTPS type, so the record is an
+// UnknownResource with hand-built SVCB RDATA. echMarker is embedded in the ech
+// value so a test can assert the ECH config is gone after stripping.
+func buildResponseWithAAndHTTPS(t *testing.T, id uint16, qname string, ip [4]byte, echMarker []byte) []byte {
+	t.Helper()
+	// SVCB/HTTPS RDATA (RFC 9460): SvcPriority(2)=1, TargetName=root (0x00),
+	// then SvcParam key=5 (ech), 2-byte length, value=echMarker.
+	rdata := []byte{0x00, 0x01, 0x00, 0x00, 0x05, byte(len(echMarker) >> 8), byte(len(echMarker))}
+	rdata = append(rdata, echMarker...)
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, Response: true, RecursionAvailable: true})
+	if err := b.StartQuestions(); err != nil {
+		t.Fatalf("StartQuestions: %v", err)
+	}
+	if err := b.Question(dnsmessage.Question{Name: dnsmessage.MustNewName(qname), Type: 65, Class: dnsmessage.ClassINET}); err != nil {
+		t.Fatalf("Question: %v", err)
+	}
+	if err := b.StartAnswers(); err != nil {
+		t.Fatalf("StartAnswers: %v", err)
+	}
+	if err := b.AResource(dnsmessage.ResourceHeader{Name: dnsmessage.MustNewName(qname), Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.AResource{A: ip}); err != nil {
+		t.Fatalf("AResource: %v", err)
+	}
+	if err := b.UnknownResource(dnsmessage.ResourceHeader{Name: dnsmessage.MustNewName(qname), Type: 65, Class: dnsmessage.ClassINET, TTL: 60}, dnsmessage.UnknownResource{Type: 65, Data: rdata}); err != nil {
+		t.Fatalf("UnknownResource(HTTPS): %v", err)
+	}
+	msg, err := b.Finish()
+	if err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	return msg
+}
+
+func TestStripECHRecords(t *testing.T) {
+	echMarker := []byte{0xDE, 0xAD, 0xBE, 0xEF}
+	resp := buildResponseWithAAndHTTPS(t, 0x1234, "api.example.com.", [4]byte{1, 2, 3, 4}, echMarker)
+	if !bytes.Contains(resp, echMarker) {
+		t.Fatal("test fixture missing the ech marker before stripping")
+	}
+	stripped := stripECHRecords(resp)
+	if bytes.Contains(stripped, echMarker) {
+		t.Fatalf("ech config survived stripping: %x", stripped)
+	}
+	// The A record survives: parse and confirm the address is still answered.
+	var p dnsmessage.Parser
+	if _, err := p.Start(stripped); err != nil {
+		t.Fatalf("stripped response does not parse: %v", err)
+	}
+	if err := p.SkipAllQuestions(); err != nil {
+		t.Fatalf("SkipAllQuestions: %v", err)
+	}
+	var sawA, sawHTTPS bool
+	for {
+		h, err := p.AnswerHeader()
+		if err != nil {
+			break
+		}
+		switch h.Type {
+		case dnsmessage.TypeA:
+			sawA = true
+			_, _ = p.AResource()
+		case 65:
+			sawHTTPS = true
+			_, _ = p.UnknownResource()
+		default:
+			_ = p.SkipAnswer()
+		}
+	}
+	if !sawA {
+		t.Error("A record was dropped; only HTTPS/SVCB should be removed")
+	}
+	if sawHTTPS {
+		t.Error("HTTPS record survived stripping")
+	}
+
+	// A response with no HTTPS/SVCB records is returned byte-identical.
+	plain := buildResponseWithA(t, 0x5678, "api.example.com.", "api.example.com.", [4]byte{5, 6, 7, 8}, 30)
+	if got := stripECHRecords(plain); !bytes.Equal(got, plain) {
+		t.Errorf("plain A response was rewritten; want byte-identical")
+	}
 }
 
 func TestParseDNSQuestion(t *testing.T) {

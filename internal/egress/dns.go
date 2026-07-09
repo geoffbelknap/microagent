@@ -19,8 +19,9 @@ import (
 // parsing (name compression pointers in particular are bug-prone).
 //
 // handleDNS takes an injected forward func so the filtering core is unit-testable
-// without a real resolver or socket; the production UDP round-trip is wired in a
-// later task (4.3), which also calls handleDNS from the serveUDP receive loop.
+// without a real resolver or socket; the production UDP round-trip
+// (defaultDNSForward) is wired through serveUDP -> serveDNS, which drives this
+// same core.
 
 // parseDNSQuestion parses the header and the FIRST question of a DNS message and
 // returns the query id, the normalized QNAME (lowercased, trailing-dot stripped,
@@ -90,6 +91,122 @@ func synthesizeRefused(query []byte) ([]byte, error) {
 // Parse failures and unexpected record types are ignored: a malformed or
 // surprising answer simply yields no cache entries (the forwarded bytes are
 // still relayed to the guest verbatim by the caller); caching is best-effort.
+// DNS resource record types for the service-binding records that carry ECH
+// configs (SvcParamKey 5). dnsmessage has no native type for these, so they
+// parse as UnknownResource; we match on the numeric type.
+const (
+	dnsTypeSVCB  dnsmessage.Type = 64
+	dnsTypeHTTPS dnsmessage.Type = 65
+)
+
+// stripECHRecords rewrites a DNS response to drop every HTTPS (type 65) and SVCB
+// (type 64) resource record from all sections. Those records carry the ECH
+// config (SvcParamKey 5) and the HTTP/3 advertisement; removing them keeps the
+// guest's TLS SNI visible to the mediator (enforcement stays ECH-durable) and,
+// since broker mode denies QUIC anyway, costs nothing — cooperative clients fall
+// back to A/AAAA and standard TLS-over-TCP.
+//
+// Best-effort by design: the strip is hardening, not the enforcement boundary
+// (deny-by-path and the IP allowlist do not depend on it). A response that does
+// not parse, or that contains a resource type this rebuild does not handle, is
+// returned UNCHANGED rather than corrupted. A response with no SVCB/HTTPS
+// records is returned byte-identical (fast path, no rebuild).
+func stripECHRecords(response []byte) []byte {
+	var p dnsmessage.Parser
+	hdr, err := p.Start(response)
+	if err != nil {
+		return response
+	}
+	questions, err := p.AllQuestions()
+	if err != nil {
+		return response
+	}
+	answers, err := p.AllAnswers()
+	if err != nil {
+		return response
+	}
+	authorities, err := p.AllAuthorities()
+	if err != nil {
+		return response
+	}
+	additionals, err := p.AllAdditionals()
+	if err != nil {
+		return response
+	}
+	if !containsServiceBinding(answers) && !containsServiceBinding(authorities) && !containsServiceBinding(additionals) {
+		return response // nothing to strip; leave the wire bytes untouched
+	}
+
+	b := dnsmessage.NewBuilder(nil, hdr)
+	b.EnableCompression()
+	if b.StartQuestions() != nil {
+		return response
+	}
+	for _, q := range questions {
+		if b.Question(q) != nil {
+			return response
+		}
+	}
+	if !rebuildSection(&b, (*dnsmessage.Builder).StartAnswers, answers) ||
+		!rebuildSection(&b, (*dnsmessage.Builder).StartAuthorities, authorities) ||
+		!rebuildSection(&b, (*dnsmessage.Builder).StartAdditionals, additionals) {
+		return response
+	}
+	out, err := b.Finish()
+	if err != nil {
+		return response
+	}
+	return out
+}
+
+func containsServiceBinding(rs []dnsmessage.Resource) bool {
+	for _, r := range rs {
+		if r.Header.Type == dnsTypeHTTPS || r.Header.Type == dnsTypeSVCB {
+			return true
+		}
+	}
+	return false
+}
+
+// rebuildSection starts a section and re-adds every resource except HTTPS/SVCB.
+// It returns false on any unhandled resource type or builder error, so the
+// caller falls back to the original response rather than emitting a partial one.
+func rebuildSection(b *dnsmessage.Builder, start func(*dnsmessage.Builder) error, rs []dnsmessage.Resource) bool {
+	if start(b) != nil {
+		return false
+	}
+	for _, r := range rs {
+		if r.Header.Type == dnsTypeHTTPS || r.Header.Type == dnsTypeSVCB {
+			continue // drop the service-binding record entirely
+		}
+		if !readdResource(b, r) {
+			return false
+		}
+	}
+	return true
+}
+
+// readdResource re-emits one parsed resource into the builder. It handles the
+// record types that realistically appear in the responses clients receive for
+// A/AAAA/HTTPS queries; anything else returns false so the strip is abandoned
+// (original response returned) rather than silently dropping data.
+func readdResource(b *dnsmessage.Builder, r dnsmessage.Resource) bool {
+	switch body := r.Body.(type) {
+	case *dnsmessage.AResource:
+		return b.AResource(r.Header, *body) == nil
+	case *dnsmessage.AAAAResource:
+		return b.AAAAResource(r.Header, *body) == nil
+	case *dnsmessage.CNAMEResource:
+		return b.CNAMEResource(r.Header, *body) == nil
+	case *dnsmessage.OPTResource:
+		return b.OPTResource(r.Header, *body) == nil
+	case *dnsmessage.UnknownResource:
+		return b.UnknownResource(r.Header, *body) == nil
+	default:
+		return false
+	}
+}
+
 func cacheDNSAnswers(cache *NameCache, qname string, response []byte) {
 	if cache == nil {
 		return
@@ -135,6 +252,9 @@ func cacheDNSAnswers(cache *NameCache, qname string, response []byte) {
 // forwarded). forward is injected (a UDP round-trip to resolver in production,
 // wired in task 4.3) so this core is unit-testable without a real resolver.
 //
+// forward is injected (a UDP round-trip to resolver in production via
+// defaultDNSForward) so this core is unit-testable without a real resolver.
+//
 // Returns the bytes the caller relays to the guest. On query parse failure or
 // forward failure it returns an error; the caller drops the datagram (and the
 // audit already records why).
@@ -179,6 +299,11 @@ func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(
 		h.Logger.Log("egress_dns_error", fields)
 		return nil, ferr
 	}
+
+	// Strip HTTPS/SVCB records (and thus any ECH config) before the answer
+	// reaches the guest, so cooperative clients keep their TLS SNI visible to the
+	// mediator. This is the mediator acting as the sole ECH-stripping resolver.
+	resp = stripECHRecords(resp)
 
 	// Record name->IP mappings so later flows to those IPs can be policed by
 	// hostname. Best-effort: a malformed answer simply caches nothing.
