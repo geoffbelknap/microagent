@@ -1,12 +1,16 @@
 package broker
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestTerminateEmitsAllowDecision: a successful terminate request emits one
@@ -99,6 +103,109 @@ func TestDecisionRecordIsMinimized(t *testing.T) {
 		if strings.Contains(s, banned) {
 			t.Fatalf("decision record carries %q — must be metadata only: %s", banned, s)
 		}
+	}
+}
+
+// TestConnectEmitsDecisionAtTunnelClose: a CONNECT tunnel emits exactly one
+// record when it closes, with byte counts for both directions — metadata about
+// an opaque stream, never its contents.
+func TestConnectEmitsDecisionAtTunnelClose(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() { _, _ = io.Copy(c, c); c.Close() }()
+		}
+	}()
+
+	got := make(chan DecisionRecord, 1)
+	broker := httptest.NewServer(Handler(nil, &Connect{OnDecision: func(r DecisionRecord) { got <- r }}))
+	defer broker.Close()
+
+	conn, err := net.DialTimeout("tcp", strings.TrimPrefix(broker.URL, "http://"), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, "CONNECT "+ln.Addr().String()+" HTTP/1.1\r\nHost: "+ln.Addr().String()+"\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(conn)
+	if status, err := br.ReadString('\n'); err != nil || !strings.Contains(status, "200") {
+		t.Fatalf("CONNECT status = %q, %v", status, err)
+	}
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	if _, err := io.WriteString(conn, "ping"); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 4)
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := io.ReadFull(br, buf); err != nil {
+		t.Fatalf("tunnel echo: %v", err)
+	}
+	conn.Close()
+
+	var rec DecisionRecord
+	select {
+	case rec = <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no decision record emitted at tunnel close")
+	}
+	if rec.Event != "broker_request_allow" || rec.Verdict != "allow" {
+		t.Fatalf("event/verdict = %q/%q", rec.Event, rec.Verdict)
+	}
+	if rec.Mode != "connect" || rec.Method != "CONNECT" || rec.Host != ln.Addr().String() {
+		t.Fatalf("mode/method/host = %q/%q/%q", rec.Mode, rec.Method, rec.Host)
+	}
+	if rec.BytesOut != 4 || rec.BytesIn != 4 {
+		t.Fatalf("bytes out/in = %d/%d, want 4/4", rec.BytesOut, rec.BytesIn)
+	}
+	if rec.Status != 0 || len(rec.SecretRefs) != 0 {
+		t.Fatalf("tunnel record carries terminate-only fields: %+v", rec)
+	}
+}
+
+// TestConnectEmitsDenyOnDialFailure: a refused upstream dial is a recorded
+// deny, same rule vocabulary as terminate.
+func TestConnectEmitsDenyOnDialFailure(t *testing.T) {
+	var recs []DecisionRecord
+	conn := &Connect{
+		OnDecision: func(r DecisionRecord) { recs = append(recs, r) },
+		Dial:       func(network, addr string) (net.Conn, error) { return nil, errors.New("refused") },
+	}
+	broker := httptest.NewServer(Handler(nil, conn))
+	defer broker.Close()
+
+	req, _ := http.NewRequest(http.MethodConnect, broker.URL, nil)
+	req.Host = "203.0.113.7:443"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
+	}
+	if len(recs) != 1 || recs[0].Verdict != "deny" || recs[0].Rule != "upstream-error" {
+		t.Fatalf("records = %+v, want one deny with rule upstream-error", recs)
+	}
+	if recs[0].Mode != "connect" || recs[0].Host != "203.0.113.7:443" {
+		t.Fatalf("mode/host = %q/%q", recs[0].Mode, recs[0].Host)
 	}
 }
 

@@ -240,6 +240,9 @@ func singleJoiningSlash(a, b string) string {
 // its plaintext, and gets no credential injection.
 type Connect struct {
 	OnTap Tap
+	// OnDecision receives one record per tunnel, at tunnel close — byte
+	// counts and timing for an opaque stream, never its contents.
+	OnDecision OnDecision
 	// Dial opens the upstream connection; an enforcement-aware dialer
 	// (deny-by-default, allowlist) can be injected here. Defaults to a plain
 	// TCP dialer.
@@ -254,12 +257,25 @@ func (c *Connect) dial(network, addr string) (net.Conn, error) {
 }
 
 func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	if c.OnTap != nil {
 		c.OnTap(TapRecord{Mode: "connect", Method: r.Method, Host: r.Host, At: time.Now()})
+	}
+	emit := func(rec DecisionRecord) {
+		if c.OnDecision == nil {
+			return
+		}
+		rec.TS = time.Now()
+		rec.Mode = "connect"
+		rec.Host = r.Host
+		rec.Method = r.Method
+		rec.DurationMs = time.Since(start).Milliseconds()
+		c.OnDecision(rec)
 	}
 	upstream, err := c.dial("tcp", r.Host)
 	if err != nil {
 		http.Error(w, "broker: connect upstream", http.StatusBadGateway)
+		emit(DecisionRecord{Event: EventRequestDeny, Verdict: "deny", Rule: "upstream-error"})
 		return
 	}
 	defer func() { _ = upstream.Close() }()
@@ -278,10 +294,21 @@ func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Splice with counted copies; when one direction ends, close both sides,
+	// wait for the other to drain, then emit the tunnel's decision record with
+	// final byte totals.
+	var toUpstream, toClient int64
 	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(upstream, client); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(client, upstream); done <- struct{}{} }()
+	go func() { toUpstream, _ = io.Copy(upstream, client); done <- struct{}{} }()
+	go func() { toClient, _ = io.Copy(client, upstream); done <- struct{}{} }()
 	<-done
+	_ = upstream.Close()
+	_ = client.Close()
+	<-done
+	emit(DecisionRecord{
+		Event: EventRequestAllow, Verdict: "allow",
+		BytesOut: toUpstream, BytesIn: toClient,
+	})
 }
 
 // Handler routes CONNECT tunnels to conn and everything else to term, so one
