@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -77,17 +78,96 @@ func TestStartVsockListenersServesBroker(t *testing.T) {
 		t.Fatalf("status %d body %q — upstream did not see the live credential", resp.StatusCode, body)
 	}
 
-	// The pre-swap tap trail exists, records the reference, and never the live
-	// secret (absent by construction, not by redaction).
+	// The default trail is the minimized decision stream: verdict + metadata,
+	// the NAMES of the references used — no headers, no path, and never the
+	// live secret (absent by construction, not by redaction).
 	trail, err := os.ReadFile(brokerAccessLogPath(dir, "ws"))
 	if err != nil {
 		t.Fatalf("broker access log: %v", err)
 	}
-	if !strings.Contains(string(trail), "@secret:api") {
-		t.Fatalf("access log missing the pre-swap reference: %s", trail)
+	if !strings.Contains(string(trail), "broker_request_allow") {
+		t.Fatalf("access log missing the decision record: %s", trail)
 	}
-	if strings.Contains(string(trail), live) {
-		t.Fatalf("INVARIANT VIOLATION: live secret present in access log: %s", trail)
+	if !strings.Contains(string(trail), `"secret_refs":["api"]`) {
+		t.Fatalf("access log missing the credential-use metadata: %s", trail)
+	}
+	for _, banned := range []string{"@secret:api", "/v1/ping", `"headers"`, live} {
+		if strings.Contains(string(trail), banned) {
+			t.Fatalf("default trail must be minimized metadata, found %q: %s", banned, trail)
+		}
+	}
+	// Capture was not opted in: no capture file may exist.
+	if _, err := os.Stat(brokerCaptureLogPath(dir, "ws")); !os.IsNotExist(err) {
+		t.Fatalf("capture file exists without opt-in: %v", err)
+	}
+}
+
+func TestStartVsockListenersBrokerCaptureOptIn(t *testing.T) {
+	const live = "live-broker-secret-capture-4e2b"
+	t.Setenv("MA_BROKER_TOK", live)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	opts := Options{Name: "ws", StateDir: dir}
+	cfg := &vmkit.Config{
+		Broker: &vmkit.BrokerConfig{
+			Upstream: upstream.URL,
+			Secret:   vmkit.SecretRef{Name: "api", Ref: "env:MA_BROKER_TOK"},
+			Capture:  true,
+		},
+		VsockListeners: []vmkit.VsockListener{{Port: 1032, Target: broker.ListenerTarget}},
+	}
+	set, err := startVsockListeners(opts, cfg)
+	if err != nil {
+		t.Fatalf("start listeners: %v", err)
+	}
+	defer set.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, "http://broker/v1/messages", strings.NewReader("capture me"))
+	req.Header.Set("Authorization", "Bearer @secret:api")
+	resp, err := brokerTestClient(opts, 1032).Do(req)
+	if err != nil {
+		t.Fatalf("broker request: %v", err)
+	}
+	resp.Body.Close()
+
+	// The capture file exists, is owner-only, and holds the pre-swap request:
+	// reference verbatim, path, body — never the live secret.
+	capPath := brokerCaptureLogPath(dir, "ws")
+	info, err := os.Stat(capPath)
+	if err != nil {
+		t.Fatalf("capture file: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("capture file mode = %v, want 0600", info.Mode().Perm())
+	}
+	captured, _ := os.ReadFile(capPath)
+	for _, want := range []string{"@secret:api", "/v1/messages"} {
+		if !strings.Contains(string(captured), want) {
+			t.Fatalf("capture missing %q: %s", want, captured)
+		}
+	}
+
+	// Companion-level invariant: the live secret is absent from EVERY file in
+	// the workspace state dir.
+	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return nil // sockets etc.
+		}
+		if strings.Contains(string(b), live) {
+			t.Fatalf("INVARIANT VIOLATION: live secret present in %s", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

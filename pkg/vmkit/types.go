@@ -178,6 +178,12 @@ type BrokerConfig struct {
 	// terminate-mode credential injection; an empty value is filled with the
 	// guest listen URL.
 	BaseURLEnv map[string]string `json:"baseURLEnv,omitempty"`
+	// Capture opts in to governed raw capture of pre-swap requests (path,
+	// headers with references verbatim, bounded body) to a separate
+	// owner-only file. Off by default; the default emission is the minimized
+	// decision stream. Persisted in the manifest so the opt-in is declared,
+	// not silent.
+	Capture bool `json:"capture,omitempty"`
 }
 
 type Disk struct {
