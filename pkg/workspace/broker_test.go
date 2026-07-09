@@ -1,8 +1,11 @@
 package workspace
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // TestParseBrokerConfig is the shared parser both the CLI flags and the
@@ -10,7 +13,7 @@ import (
 // build a broker config identically.
 func TestParseBrokerConfig(t *testing.T) {
 	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN",
-		[]string{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"}, true)
+		[]string{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"}, true, false)
 	if err != nil {
 		t.Fatalf("ParseBrokerConfig: %v", err)
 	}
@@ -35,12 +38,41 @@ func TestParseBrokerConfig(t *testing.T) {
 }
 
 func TestParseBrokerConfigNilWhenEmpty(t *testing.T) {
-	cfg, err := ParseBrokerConfig("", "", nil, false)
+	cfg, err := ParseBrokerConfig("", "", nil, false, false)
 	if err != nil {
 		t.Fatalf("ParseBrokerConfig: %v", err)
 	}
 	if cfg != nil {
 		t.Fatalf("expected nil config for an empty declaration, got %+v", cfg)
+	}
+}
+
+// TestParseBrokerConfigCapture: the governed raw-capture opt-in threads
+// through the shared parser, requires a broker to attach to, and survives the
+// manifest round-trip (the opt-in is declared, not silent).
+func TestParseBrokerConfigCapture(t *testing.T) {
+	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN", nil, false, true)
+	if err != nil {
+		t.Fatalf("ParseBrokerConfig: %v", err)
+	}
+	if !cfg.Capture {
+		t.Fatal("Capture not set")
+	}
+
+	if _, err := ParseBrokerConfig("", "", nil, false, true); err == nil {
+		t.Fatal("capture without a broker must fail")
+	}
+
+	blob, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rt vmkit.BrokerConfig
+	if err := json.Unmarshal(blob, &rt); err != nil {
+		t.Fatal(err)
+	}
+	if !rt.Capture {
+		t.Fatal("Capture lost in the manifest round-trip")
 	}
 }
 
@@ -64,7 +96,7 @@ func TestParseBrokerConfigValidation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := ParseBrokerConfig(c.upstream, c.secret, c.env, c.proxy)
+			_, err := ParseBrokerConfig(c.upstream, c.secret, c.env, c.proxy, false)
 			if err == nil {
 				t.Fatalf("expected error, got nil")
 			}

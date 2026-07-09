@@ -335,8 +335,9 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"broker_secret":   "api=env:MY_TOKEN",
 				"broker_env":      []any{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
 				"broker_proxy":    true,
+				"broker_capture":  true,
 			},
-			want: []string{"--mode=ax", "create", "demo", "-broker-upstream", "https://api.example.com", "-broker-secret", "api=env:MY_TOKEN", "-broker-proxy", "-broker-env", "EXAMPLE_BASE_URL", "-broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
+			want: []string{"--mode=ax", "create", "demo", "-broker-upstream", "https://api.example.com", "-broker-secret", "api=env:MY_TOKEN", "-broker-proxy", "-broker-capture", "-broker-env", "EXAMPLE_BASE_URL", "-broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
 		},
 		{
 			name: "workspace.start",

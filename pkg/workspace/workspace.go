@@ -245,6 +245,9 @@ type AgentBrokerSpec struct {
 	Env []string `yaml:"env"`
 	// Proxy sets HTTPS_PROXY/HTTP_PROXY in the guest to the broker.
 	Proxy bool `yaml:"proxy"`
+	// Capture opts in to governed raw capture of pre-swap requests. Off by
+	// default; the default emission is the minimized decision stream.
+	Capture bool `yaml:"capture"`
 }
 
 // Declared reports whether the agent block carries any field, so an empty block

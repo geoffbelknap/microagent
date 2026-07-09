@@ -2088,6 +2088,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&brokerEnv, "broker-env", "Guest env var pointed at the broker, KEY[=VALUE] (empty VALUE = broker URL; repeatable)")
 	var brokerProxy bool
 	fs.BoolVar(&brokerProxy, "broker-proxy", false, "Also set HTTPS_PROXY/HTTP_PROXY in the guest to the broker (CONNECT tunneling)")
+	var brokerCapture bool
+	fs.BoolVar(&brokerCapture, "broker-capture", false, "Opt in to raw capture of pre-swap broker requests (path, headers with references, bounded body) to an owner-only file; default is the minimized decision stream")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2175,7 +2177,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap); err != nil {
 		return workspaceOptions{}, err
 	}
-	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy); err != nil {
+	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy, brokerCapture); err != nil {
 		return workspaceOptions{}, err
 	}
 	if err := applyStorageOptionFlags(&opts, volumeFlags, diskFlags, bundleFlags, outputFlags); err != nil {
@@ -2254,8 +2256,8 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 // block validate and build a broker identically. A partial declaration fails
 // loudly and a literal secret is rejected at parse time, before any state is
 // written (matching --cred-swap).
-func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy bool) error {
-	broker, err := workspace.ParseBrokerConfig(brokerUpstream, brokerSecret, []string(brokerEnv), brokerProxy)
+func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy, brokerCapture bool) error {
+	broker, err := workspace.ParseBrokerConfig(brokerUpstream, brokerSecret, []string(brokerEnv), brokerProxy, brokerCapture)
 	if err != nil {
 		return err
 	}

@@ -17,6 +17,7 @@ func TestParseWorkspaceOptionsBroker(t *testing.T) {
 		"--broker-env", "EXAMPLE_BASE_URL",
 		"--broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1",
 		"--broker-proxy",
+		"--broker-capture",
 	})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
@@ -32,6 +33,9 @@ func TestParseWorkspaceOptionsBroker(t *testing.T) {
 	}
 	if !opts.Broker.Proxy {
 		t.Fatal("Proxy not set")
+	}
+	if !opts.Broker.Capture {
+		t.Fatal("Capture not set")
 	}
 	if opts.Broker.BaseURLEnv["EXAMPLE_BASE_URL"] != "" {
 		t.Fatalf("BaseURLEnv[EXAMPLE_BASE_URL] = %q, want empty (filled with broker URL)", opts.Broker.BaseURLEnv["EXAMPLE_BASE_URL"])
@@ -87,5 +91,12 @@ func TestParseWorkspaceOptionsBrokerFlagsRequireEachOther(t *testing.T) {
 		"--broker-proxy",
 	}); err == nil {
 		t.Fatal("--broker-proxy without a broker must fail")
+	}
+	if _, err := parseWorkspaceOptions("create", []string{
+		"--name", "ws",
+		"--image", "docker.io/library/alpine:3.20",
+		"--broker-capture",
+	}); err == nil {
+		t.Fatal("--broker-capture without a broker must fail")
 	}
 }

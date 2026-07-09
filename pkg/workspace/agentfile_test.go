@@ -127,6 +127,7 @@ func TestApplySpecAgentBrokerPopulatesOptions(t *testing.T) {
 				Secret:   "api=env:MY_TOKEN",
 				Env:      []string{"EXAMPLE_BASE_URL"},
 				Proxy:    true,
+				Capture:  true,
 			},
 		},
 	}
@@ -145,6 +146,9 @@ func TestApplySpecAgentBrokerPopulatesOptions(t *testing.T) {
 	}
 	if !opts.Broker.Proxy {
 		t.Fatal("Proxy not set")
+	}
+	if !opts.Broker.Capture {
+		t.Fatal("Capture not set from agent.broker block")
 	}
 	if _, ok := opts.Broker.BaseURLEnv["EXAMPLE_BASE_URL"]; !ok {
 		t.Fatalf("BaseURLEnv missing EXAMPLE_BASE_URL: %+v", opts.Broker.BaseURLEnv)
