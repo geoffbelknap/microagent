@@ -10,6 +10,32 @@ import (
 	"time"
 )
 
+// shouldMITM is the termination-choice predicate. The security invariant under
+// test: broker mode NEVER forges certificates, even if a CA is somehow present —
+// it splices opaquely. guarded keeps forging per-SNI leaves for allowed TLS.
+func TestHandlerShouldMITM(t *testing.T) {
+	ca := &CA{} // non-nil sentinel; the predicate checks presence, not validity
+	cases := []struct {
+		name                                string
+		h                                   *Handler
+		isTLS, allowed, passthrough, isPeer bool
+		want                                bool
+	}{
+		{"guarded_tls_allowed_mitms", &Handler{Mode: "guarded", CA: ca}, true, true, false, false, true},
+		{"broker_never_mitms_even_with_ca", &Handler{Mode: "broker", CA: ca}, true, true, false, false, false},
+		{"no_ca", &Handler{Mode: "guarded"}, true, true, false, false, false},
+		{"not_tls", &Handler{Mode: "guarded", CA: ca}, false, true, false, false, false},
+		{"passthrough", &Handler{Mode: "guarded", CA: ca}, true, true, true, false, false},
+		{"peer", &Handler{Mode: "guarded", CA: ca}, true, true, false, true, false},
+		{"denied", &Handler{Mode: "guarded", CA: ca}, true, false, false, false, false},
+	}
+	for _, c := range cases {
+		if got := c.h.shouldMITM(c.isTLS, c.allowed, c.passthrough, c.isPeer); got != c.want {
+			t.Errorf("%s: shouldMITM = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestHandlerAllowForwards(t *testing.T) {
 	up, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer up.Close()

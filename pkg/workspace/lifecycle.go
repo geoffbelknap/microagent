@@ -790,6 +790,7 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		EgressMode:               state.Config.EgressMode,
 		EgressAllow:              state.Config.EgressAllow,
 		EgressPassthrough:        state.Config.EgressPassthrough,
+		EgressAllowlistLocked:    state.Config.EgressAllowlistLocked,
 		EgressSwapConfigPath:     state.Config.EgressSwapConfigPath,
 		EgressCASHA256:           caSHA,
 		EgressMaxBytesPerSec:     state.Config.EgressMaxBytesPerSec,
@@ -1425,31 +1426,32 @@ func WriteManifest(opts Options) error {
 		return err
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), Manifest{
-		Name:                 opts.Name,
-		Profile:              opts.Profile,
-		Restart:              NormalizeRestartPolicy(opts.RestartPolicy),
-		Resources:            ResourcesFromOptions(opts),
-		Network:              NetworkSpecFromConfig(opts.Network),
-		Service:              strings.TrimSpace(opts.ServiceCommand),
-		ConsoleShell:         strings.TrimSpace(opts.ConsoleShell),
-		Hostname:             strings.TrimSpace(opts.Hostname),
-		Model:                strings.TrimSpace(opts.Model),
-		ModelRunner:          modelRunnerManifest(opts.ModelRunner),
-		ModelMediation:       modelMediationManifest(opts.ModelMediation),
-		Mediation:            opts.Mediation,
-		Health:               healthManifest(opts.Health),
-		Disks:                opts.Disks,
-		Artifacts:            ArtifactsFromOptions(opts),
-		Verification:         opts.Verification,
-		Secrets:              secretRefsFromOptions(opts),
-		SecretEnvFiles:       opts.SecretEnvFiles,
-		OnDemandSecrets:      onDemandRefsFromOptions(opts),
-		SecretsAudit:         opts.SecretsAudit,
-		EgressMode:           opts.EgressMode,
-		EgressAllow:          opts.EgressAllow,
-		EgressPassthrough:    opts.EgressPassthrough,
-		EgressSwapConfigPath: opts.EgressSwapConfigPath,
-		Broker:               opts.Broker,
+		Name:                  opts.Name,
+		Profile:               opts.Profile,
+		Restart:               NormalizeRestartPolicy(opts.RestartPolicy),
+		Resources:             ResourcesFromOptions(opts),
+		Network:               NetworkSpecFromConfig(opts.Network),
+		Service:               strings.TrimSpace(opts.ServiceCommand),
+		ConsoleShell:          strings.TrimSpace(opts.ConsoleShell),
+		Hostname:              strings.TrimSpace(opts.Hostname),
+		Model:                 strings.TrimSpace(opts.Model),
+		ModelRunner:           modelRunnerManifest(opts.ModelRunner),
+		ModelMediation:        modelMediationManifest(opts.ModelMediation),
+		Mediation:             opts.Mediation,
+		Health:                healthManifest(opts.Health),
+		Disks:                 opts.Disks,
+		Artifacts:             ArtifactsFromOptions(opts),
+		Verification:          opts.Verification,
+		Secrets:               secretRefsFromOptions(opts),
+		SecretEnvFiles:        opts.SecretEnvFiles,
+		OnDemandSecrets:       onDemandRefsFromOptions(opts),
+		SecretsAudit:          opts.SecretsAudit,
+		EgressMode:            opts.EgressMode,
+		EgressAllow:           opts.EgressAllow,
+		EgressPassthrough:     opts.EgressPassthrough,
+		EgressAllowlistLocked: opts.EgressAllowlistLocked,
+		EgressSwapConfigPath:  opts.EgressSwapConfigPath,
+		Broker:                opts.Broker,
 	})
 }
 
@@ -1852,6 +1854,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.EgressMode = vmkit.NormalizeEgressMode(manifest.EgressMode)
 	opts.EgressAllow = manifest.EgressAllow
 	opts.EgressPassthrough = manifest.EgressPassthrough
+	opts.EgressAllowlistLocked = manifest.EgressAllowlistLocked
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
 	opts.Broker = manifest.Broker
 }

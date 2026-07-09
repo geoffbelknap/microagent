@@ -48,11 +48,14 @@ type Handler struct {
 	// Mode selects enforcement: "guarded" (default) denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west on
 	// resolved IP while allowing public internet; "strict" denies non-allowlisted destinations fail-closed; empty
 	// normalizes to "guarded".
-	Mode          string
-	Policy        *Policy
-	Passthrough   *Policy
-	CA            *CA
-	UpstreamRoots *x509.CertPool
+	Mode string
+	// AllowlistLocked, in broker mode, restricts egress to allowlisted
+	// destinations only (drops the allow-broad grant). No effect otherwise.
+	AllowlistLocked bool
+	Policy          *Policy
+	Passthrough     *Policy
+	CA              *CA
+	UpstreamRoots   *x509.CertPool
 
 	// Swaps is the host-indexed credential-swap table loaded from
 	// Options.SwapConfigPath. When non-nil, serveMITM HTTP-parses any
@@ -134,14 +137,15 @@ type Handler struct {
 // (MITM, splice, byte/rate caps, peer/DNS reverse resolution) around it.
 func (h *Handler) brain() *Brain {
 	return &Brain{
-		Mode:          h.Mode,
-		Policy:        h.Policy,
-		Swaps:         h.Swaps,
-		Resolver:      h.Resolver,
-		Cache:         h.tokenCache,
-		Logger:        h.Logger,
-		Limits:        h.Limits,
-		UpstreamRoots: h.UpstreamRoots,
+		Mode:            h.Mode,
+		AllowlistLocked: h.AllowlistLocked,
+		Policy:          h.Policy,
+		Swaps:           h.Swaps,
+		Resolver:        h.Resolver,
+		Cache:           h.tokenCache,
+		Logger:          h.Logger,
+		Limits:          h.Limits,
+		UpstreamRoots:   h.UpstreamRoots,
 	}
 }
 
@@ -320,9 +324,30 @@ func isEastWestAddr(a netip.Addr) bool {
 	return a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLoopback()
 }
 
-// Egress mode constant for the Handler.Mode field. Mirrors the vmkit constant
+// Egress mode constants for the Handler.Mode field. Mirror the vmkit constants
 // without introducing a package dependency; they must stay in sync.
-const egressModeGuarded = "guarded"
+const (
+	egressModeGuarded = "guarded"
+	egressModeBroker  = "broker"
+)
+
+// allowsBroad reports whether the mode grants public destinations by default,
+// denying only the inside/infrastructure: guarded and broker. strict resolves
+// and permits only allowlisted names; off runs no mediator. guarded and broker
+// share this allow-broad decision — they differ only in termination (broker
+// splices opaquely instead of forging per-SNI certificates).
+func allowsBroad(mode string) bool {
+	return mode == egressModeGuarded || mode == egressModeBroker
+}
+
+// shouldMITM reports whether an allowed flow is terminated by forging a per-SNI
+// leaf (serveMITM) rather than opaquely spliced. It requires TLS, a loaded CA,
+// an allowed non-passthrough non-peer destination — and NEVER holds in broker
+// mode. The broker guard is a hard security invariant, independent of whether a
+// CA happens to be loaded: broker mode splices, it does not forge certificates.
+func (h *Handler) shouldMITM(isTLS, allowed, passthrough, isPeer bool) bool {
+	return isTLS && h.CA != nil && allowed && !passthrough && !isPeer && h.Mode != egressModeBroker
+}
 
 var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
@@ -447,7 +472,7 @@ func (h *Handler) Handle(conn net.Conn) {
 	// (isPeer) is excluded: east-west TLS is L4-spliced below (splice + audit +
 	// allowlist + fail-closed) so a peer's self-signed/internal cert is not broken
 	// by interception, and upstream verification is never silently disabled.
-	if isTLS && h.CA != nil && allowed && !passthrough && !isPeer {
+	if h.shouldMITM(isTLS, allowed, passthrough, isPeer) {
 		h.serveMITM(conn, br, host, dst, unlisted)
 		return
 	}

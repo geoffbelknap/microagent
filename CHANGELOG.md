@@ -5,6 +5,23 @@ been cut into a release yet.
 
 ## Unreleased
 
+### `broker` egress mode — mediation without a CA in the guest
+
+A new `--egress broker` mode terminates guest egress at a transparent forward
+proxy instead of forging per-SNI certificates. Allowed TLS flows are spliced
+opaquely — the guest sees the real upstream certificate — so **no
+per-workspace CA is minted or delivered to the guest**. Like `guarded`, broker
+mode is allow-broad: it permits public destinations and denies only the
+inside/infrastructure (RFC1918, link-local, loopback, CGNAT, cloud metadata),
+classified on the resolved IP. As the guest's sole resolver, the mediator also
+strips HTTPS/SVCB records (and thus any ECH config) from DNS answers, keeping
+the TLS SNI visible so enforcement is not defeated by Encrypted Client Hello.
+
+`--egress-lock-allowlist` tightens broker mode to allowlisted destinations only
+(dropping the allow-broad default) while keeping the opaque-splice, no-CA
+behavior — the destination-restriction posture without TLS interception. The
+mode and toggle persist with the workspace and across snapshot restore.
+
 ### Egress broker — credential isolation without MITM
 
 Workspaces can now route egress through a per-workspace broker: a cooperative

@@ -64,23 +64,24 @@ const (
 const secretsListenerTarget = "secrets://serve"
 
 type Options struct {
-	Name                 string
-	ImageRef             string
-	ExecCommand          string
-	ServiceCommand       string
-	Entrypoint           string
-	ConsoleShell         string
-	Hostname             string
-	SetupCommands        []string
-	Env                  map[string]string
-	Secrets              map[string]string // name -> scheme-prefixed reference
-	SecretEnvFiles       []string          // dotenv file paths (plaintext, re-read each start)
-	OnDemandSecrets      map[string]string // name -> reference (lazy, never materialized)
-	SecretsAudit         bool              // append every access to the audit log
-	EgressMode           string            // "guarded" (default; deny-the-inside), "strict", or "off" (empty = guarded)
-	EgressAllow          []string          // allowlisted egress destination hosts
-	EgressPassthrough    []string          // allowed hosts that are NOT TLS-intercepted
-	EgressSwapConfigPath string            // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
+	Name                  string
+	ImageRef              string
+	ExecCommand           string
+	ServiceCommand        string
+	Entrypoint            string
+	ConsoleShell          string
+	Hostname              string
+	SetupCommands         []string
+	Env                   map[string]string
+	Secrets               map[string]string // name -> scheme-prefixed reference
+	SecretEnvFiles        []string          // dotenv file paths (plaintext, re-read each start)
+	OnDemandSecrets       map[string]string // name -> reference (lazy, never materialized)
+	SecretsAudit          bool              // append every access to the audit log
+	EgressMode            string            // "guarded" (default; deny-the-inside), "broker", "strict", or "off" (empty = guarded)
+	EgressAllow           []string          // allowlisted egress destination hosts
+	EgressPassthrough     []string          // allowed hosts that are NOT TLS-intercepted
+	EgressAllowlistLocked bool              // broker mode: restrict egress to allowlisted destinations only
+	EgressSwapConfigPath  string            // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
 	// CredSwapProviders are parsed `--cred-swap PROVIDER[=ref]` specs. They are a
 	// convenience surface over EgressSwapConfigPath: at workspace prep they are
 	// resolved against the built-in provider registry, their hosts are unioned
@@ -349,31 +350,32 @@ type Artifacts struct {
 }
 
 type Manifest struct {
-	Name                 string                     `json:"name"`
-	Profile              string                     `json:"profile,omitempty"`
-	Restart              string                     `json:"restart"`
-	Resources            Resources                  `json:"resources"`
-	Network              NetworkSpec                `json:"network,omitempty"`
-	Service              string                     `json:"service_command,omitempty"`
-	ConsoleShell         string                     `json:"shell,omitempty"`
-	Hostname             string                     `json:"hostname,omitempty"`
-	Model                string                     `json:"model,omitempty"`
-	ModelRunner          *ModelRunnerSpec           `json:"model_runner,omitempty"`
-	ModelMediation       *ModelMediationSpec        `json:"model_mediation,omitempty"`
-	Mediation            *vmkit.MediationConfig     `json:"mediation,omitempty"`
-	Health               *Health                    `json:"health,omitempty"`
-	Disks                []Disk                     `json:"disks,omitempty"`
-	Artifacts            Artifacts                  `json:"artifacts,omitempty"`
-	Verification         *vmkit.RuntimeVerification `json:"verification,omitempty"`
-	Secrets              []vmkit.SecretRef          `json:"secrets,omitempty"`
-	SecretEnvFiles       []string                   `json:"secret_env_files,omitempty"`
-	OnDemandSecrets      []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
-	SecretsAudit         bool                       `json:"secrets_audit,omitempty"`
-	EgressMode           string                     `json:"egress_mode,omitempty"`
-	EgressAllow          []string                   `json:"egress_allow,omitempty"`
-	EgressPassthrough    []string                   `json:"egress_passthrough,omitempty"`
-	EgressSwapConfigPath string                     `json:"egress_swap_config_path,omitempty"`
-	Broker               *vmkit.BrokerConfig        `json:"broker,omitempty"`
+	Name                  string                     `json:"name"`
+	Profile               string                     `json:"profile,omitempty"`
+	Restart               string                     `json:"restart"`
+	Resources             Resources                  `json:"resources"`
+	Network               NetworkSpec                `json:"network,omitempty"`
+	Service               string                     `json:"service_command,omitempty"`
+	ConsoleShell          string                     `json:"shell,omitempty"`
+	Hostname              string                     `json:"hostname,omitempty"`
+	Model                 string                     `json:"model,omitempty"`
+	ModelRunner           *ModelRunnerSpec           `json:"model_runner,omitempty"`
+	ModelMediation        *ModelMediationSpec        `json:"model_mediation,omitempty"`
+	Mediation             *vmkit.MediationConfig     `json:"mediation,omitempty"`
+	Health                *Health                    `json:"health,omitempty"`
+	Disks                 []Disk                     `json:"disks,omitempty"`
+	Artifacts             Artifacts                  `json:"artifacts,omitempty"`
+	Verification          *vmkit.RuntimeVerification `json:"verification,omitempty"`
+	Secrets               []vmkit.SecretRef          `json:"secrets,omitempty"`
+	SecretEnvFiles        []string                   `json:"secret_env_files,omitempty"`
+	OnDemandSecrets       []vmkit.SecretRef          `json:"on_demand_secrets,omitempty"`
+	SecretsAudit          bool                       `json:"secrets_audit,omitempty"`
+	EgressMode            string                     `json:"egress_mode,omitempty"`
+	EgressAllow           []string                   `json:"egress_allow,omitempty"`
+	EgressPassthrough     []string                   `json:"egress_passthrough,omitempty"`
+	EgressAllowlistLocked bool                       `json:"egress_allowlist_locked,omitempty"`
+	EgressSwapConfigPath  string                     `json:"egress_swap_config_path,omitempty"`
+	Broker                *vmkit.BrokerConfig        `json:"broker,omitempty"`
 }
 
 type ModelRunnerSpec struct {
@@ -998,10 +1000,11 @@ func secretRefsFromOptions(opts Options) []vmkit.SecretRef {
 // Caps, DNS) are left at their zero values.
 func EgressPolicyFromOptions(opts Options) vmkit.EgressPolicy {
 	return vmkit.EgressPolicy{
-		Mode:           opts.EgressMode,
-		Allow:          opts.EgressAllow,
-		Passthrough:    opts.EgressPassthrough,
-		SwapConfigPath: opts.EgressSwapConfigPath,
+		Mode:            opts.EgressMode,
+		Allow:           opts.EgressAllow,
+		Passthrough:     opts.EgressPassthrough,
+		AllowlistLocked: opts.EgressAllowlistLocked,
+		SwapConfigPath:  opts.EgressSwapConfigPath,
 		// Caps and DNS have no source on Options; callers that need them must
 		// build the EgressPolicy directly.
 	}
@@ -1047,15 +1050,17 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 		listeners = append(listeners, vmkit.VsockListener{Port: brokerCfg.VsockPort, Target: broker.ListenerTarget})
 	}
 	// CACertPort is allocated only when the negotiated capture provider actually
-	// mediates a protocol class — i.e. a real mediator will exist to serve the
-	// per-workspace CA the guest installs at boot. Gating on the provider (not on
+	// mediates a protocol class AND the mode forges certificates (guarded/strict)
+	// — i.e. a real mediator will exist AND it needs the guest to trust the
+	// per-workspace CA it forges leaves from. Gating on the provider (not on
 	// EgressMediationOn + NetworkModeMediates) means backends with no capture
 	// provider (apple-vf native NAT today) never get a CA-cert listener their
 	// supervisor can't serve — which is what broke the default apple-vf boot.
-	// "off" and isolated provide no mediator, so no CA listener either.
+	// "off" and isolated provide no mediator; broker mediates but splices
+	// opaquely and forges nothing, so none of them deliver a CA.
 	captureReport := vmkit.NegotiateEgressCapture(opts.Backend, opts.Network.Mode, opts.EgressMode)
 	var caCertPort uint32
-	if captureReport.MediatesAnyClass() {
+	if captureReport.MediatesAnyClass() && vmkit.EgressModeForgesCerts(opts.EgressMode) {
 		caCertPort = DefaultCACertPort
 		listeners = append(listeners, vmkit.VsockListener{Port: caCertPort, Target: secretxfer.CACertTarget})
 	}
@@ -1097,6 +1102,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			EgressMode:               pol.Mode,
 			EgressAllow:              pol.Allow,
 			EgressPassthrough:        pol.Passthrough,
+			EgressAllowlistLocked:    pol.AllowlistLocked,
 			EgressSwapConfigPath:     pol.SwapConfigPath,
 			EgressMaxBytesPerSec:     pol.Caps.MaxBytesPerSec,
 			EgressMaxTotalBytes:      pol.Caps.MaxTotalBytes,

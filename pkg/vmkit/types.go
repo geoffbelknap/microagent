@@ -88,6 +88,9 @@ type Config struct {
 	EgressMode        string   `json:"egressMode,omitempty"`
 	EgressAllow       []string `json:"egressAllow,omitempty"`
 	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
+	// EgressAllowlistLocked, in broker mode, restricts egress to allowlisted
+	// destinations only (drops the allow-broad grant). No effect otherwise.
+	EgressAllowlistLocked bool `json:"egressAllowlistLocked,omitempty"`
 	// EgressSwapConfigPath points at the operator credential-swap config the
 	// mediator loads (--swap-config). The real secret is injected host-side and
 	// never enters the guest; empty disables swap.
@@ -527,6 +530,12 @@ const (
 	EgressModeGuarded = "guarded"
 	EgressModeStrict  = "strict"
 	EgressModeOff     = "off"
+	// EgressModeBroker terminates guest egress at a forward proxy instead of
+	// forging per-SNI certificates: the mediator splices allowed flows opaquely
+	// and delivers no CA to the guest. Credential injection happens on the
+	// cooperative base-URL vsock channel, not this transparent path. See the
+	// P3.5 S2 design.
+	EgressModeBroker = "broker"
 )
 
 // NormalizeEgressMode collapses an egress mode string to one of the canonical
@@ -538,6 +547,8 @@ func NormalizeEgressMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case EgressModeStrict:
 		return EgressModeStrict
+	case EgressModeBroker:
+		return EgressModeBroker
 	case EgressModeOff:
 		return EgressModeOff
 	default: // empty, "guarded", or unrecognized -> safe default
@@ -555,6 +566,16 @@ func NormalizeEgressMode(mode string) string {
 // (it allocates no CA-cert listener, so mediating it would MITM the guest's TLS
 // with a CA the guest never receives).
 func EgressMediationOn(mode string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	return m == EgressModeGuarded || m == EgressModeStrict || m == EgressModeBroker
+}
+
+// EgressModeForgesCerts reports whether the mode terminates guest TLS by forging
+// per-SNI certificates from the per-workspace CA (guarded, strict) — which
+// requires delivering that CA to the guest so it trusts the forged leaves.
+// broker splices allowed flows opaquely and off runs no mediator, so neither
+// delivers a CA. Callers gate CA minting + the CA-cert vsock listener on this.
+func EgressModeForgesCerts(mode string) bool {
 	m := strings.ToLower(strings.TrimSpace(mode))
 	return m == EgressModeGuarded || m == EgressModeStrict
 }

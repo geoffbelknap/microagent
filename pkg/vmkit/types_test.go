@@ -316,6 +316,42 @@ func TestEgressMediationOn(t *testing.T) {
 	}
 }
 
+func TestEgressModeBroker(t *testing.T) {
+	// broker is a first-class canonical mode: normalized to itself, provisions
+	// the mediator. It replaces cert-forging termination with forward-proxy
+	// termination (no CA in the guest) — see the S2 design.
+	for _, in := range []string{"broker", "BROKER", " broker "} {
+		if got := NormalizeEgressMode(in); got != EgressModeBroker {
+			t.Errorf("NormalizeEgressMode(%q) = %q, want %q", in, got, EgressModeBroker)
+		}
+	}
+	if !EgressMediationOn(EgressModeBroker) {
+		t.Fatalf("EgressMediationOn(%q) = false, want true (broker must provision the mediator)", EgressModeBroker)
+	}
+	// An unrecognized value still resolves to the secure default, not broker.
+	if got := NormalizeEgressMode("brokerish"); got != EgressModeGuarded {
+		t.Errorf("NormalizeEgressMode(%q) = %q, want guarded", "brokerish", got)
+	}
+}
+
+func TestEgressModeForgesCerts(t *testing.T) {
+	// Only guarded and strict terminate TLS by forging per-SNI certificates from
+	// the per-workspace CA, so only they require delivering that CA to the guest.
+	// broker splices opaquely and off runs no mediator — neither delivers a CA.
+	forges := []string{"guarded", "GUARDED", " strict ", "strict"}
+	for _, m := range forges {
+		if !EgressModeForgesCerts(m) {
+			t.Errorf("EgressModeForgesCerts(%q) = false, want true", m)
+		}
+	}
+	noCA := []string{"broker", " broker ", "off", "", "  "}
+	for _, m := range noCA {
+		if EgressModeForgesCerts(m) {
+			t.Errorf("EgressModeForgesCerts(%q) = true, want false", m)
+		}
+	}
+}
+
 func TestNormalizeEgressModeGuardedDefault(t *testing.T) {
 	cases := map[string]string{
 		"":        EgressModeGuarded, // default flipped to guarded

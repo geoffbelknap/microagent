@@ -27,6 +27,9 @@ type EgressPolicy struct {
 	SwapConfigPath string   // path to the operator credential-swap config; may be empty
 	Caps           EgressCaps
 	DNS            []string // guest resolvers; may be empty (caller supplies a default)
+	// AllowlistLocked, in broker mode, restricts egress to allowlisted
+	// destinations only (drops the allow-broad grant). No effect otherwise.
+	AllowlistLocked bool
 }
 
 // NormalizeEgressPolicy returns a copy with Mode resolved via NormalizeEgressMode
@@ -102,10 +105,10 @@ func (p EgressPolicy) ValidateForCaptureProvider(backend, networkMode string) er
 // Allow/Passthrough/DNS are assumed already cleaned by NormalizeEgressPolicy.
 func (p EgressPolicy) Validate() error {
 	switch p.Mode {
-	case EgressModeGuarded, EgressModeStrict, EgressModeOff:
+	case EgressModeGuarded, EgressModeStrict, EgressModeBroker, EgressModeOff:
 		// valid
 	default:
-		return fmt.Errorf("vmkit: invalid egress mode %q: must be one of guarded, strict, off", p.Mode)
+		return fmt.Errorf("vmkit: invalid egress mode %q: must be one of guarded, strict, broker, off", p.Mode)
 	}
 	if p.Caps.MaxBytesPerSec < 0 {
 		return fmt.Errorf("vmkit: Caps.MaxBytesPerSec must be non-negative, got %d", p.Caps.MaxBytesPerSec)

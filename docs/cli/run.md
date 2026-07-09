@@ -167,7 +167,8 @@ The complete set:
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
-| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `guarded` (default; deny the inside, allow public), `strict` (deny non-allowlisted), or `off` |
+| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `guarded` (default; deny the inside, allow public), `broker` (allow-broad, opaque forward-proxy — no certificate forged, no CA in the guest), `strict` (deny non-allowlisted), or `off` |
+| `--egress-lock-allowlist` | In `--egress broker`, restrict egress to allowlisted destinations only (drop the allow-broad default), keeping the opaque-splice, no-CA behavior |
 | `--egress-allow <host>` | Allowlisted egress destination (TLS-intercepted). Repeatable; an exact host or a `.suffix` matching the apex and subdomains. See the [allowlist how-to](/guides/egress-allowlist/) |
 | `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted (forwarded opaquely). Repeatable. For cert-pinned / mTLS endpoints |
 | `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress guarded` or `strict` |
