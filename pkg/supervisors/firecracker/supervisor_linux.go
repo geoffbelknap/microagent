@@ -1373,7 +1373,7 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, 
 			return 0, nil, caErr
 		}
 	}
-	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, egressCapsFromConfig(config))
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllowlistLocked, config.EgressAllow, config.EgressPassthrough, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, egressCapsFromConfig(config))
 	if eerr != nil {
 		cleanupCA()
 		return 0, nil, eerr
@@ -2295,8 +2295,11 @@ func egressCapsFromConfig(config *vmkit.Config) egressCaps {
 	}
 }
 
-func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
+func egressMediatorArgs(bindHost string, port int, auditPath, mode string, lockAllowlist bool, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
 	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.NormalizeEgressMode(mode)}
+	if lockAllowlist {
+		args = append(args, "--lock-allowlist")
+	}
 	for _, h := range allow {
 		args = append(args, "--allow", h)
 	}
@@ -2335,7 +2338,7 @@ func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow
 	return args
 }
 
-func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
+func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
 		return 0, 0, err
@@ -2347,7 +2350,7 @@ func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough
 		return 0, 0, err
 	}
 	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
-	args := egressMediatorArgs(bindHost, port, auditPath, mode, allow, passthrough, swapConfigPath, peers, caCertPath, caKeyPath, caps)
+	args := egressMediatorArgs(bindHost, port, auditPath, mode, lockAllowlist, allow, passthrough, swapConfigPath, peers, caCertPath, caKeyPath, caps)
 	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, 0, err

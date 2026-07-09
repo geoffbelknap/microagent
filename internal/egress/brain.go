@@ -20,13 +20,17 @@ import (
 // caps, peer/DNS reverse resolution, the host-fetch round-trip — lives around the
 // brain, not inside it.
 type Brain struct {
-	Mode     string // "guarded" (deny inside/infra) | "strict" (deny non-allowlisted) | "" (=> guarded)
-	Policy   *Policy
-	Swaps    *SwapTable
-	Resolver resolver
-	Cache    *tokenCache
-	Logger   Logger
-	Limits   Limits
+	Mode string // "guarded" (deny inside/infra) | "broker" (allow-broad, opaque splice) | "strict" (deny non-allowlisted) | "" (=> guarded)
+	// AllowlistLocked, in broker mode, drops the allow-broad grant so only
+	// allowlisted destinations are permitted (the folded-in strict behavior).
+	// It has no effect in guarded/strict/off.
+	AllowlistLocked bool
+	Policy          *Policy
+	Swaps           *SwapTable
+	Resolver        resolver
+	Cache           *tokenCache
+	Logger          Logger
+	Limits          Limits
 	// UpstreamRoots optionally overrides the system roots used to verify the real
 	// upstream certificate on the host-fetch path (Fetch). Nil uses the system
 	// pool. It is never used to disable verification.
@@ -84,7 +88,11 @@ func (b *Brain) Evaluate(host string, candidates []string, dstIP netip.Addr, pas
 		}
 	}
 	inside := allowsBroad(b.Mode) && isInsideAddr(dstIP)
-	allowed := d.Allow || (allowsBroad(b.Mode) && !inside)
+	// A locked allowlist removes the allow-broad grant: broker then permits only
+	// allowlisted destinations. Inside classification is unchanged (it still
+	// labels the deny), so a locked broker matches strict's allowlist-only gate.
+	broad := allowsBroad(b.Mode) && !b.AllowlistLocked
+	allowed := d.Allow || (broad && !inside)
 	unlisted := allowed && !d.Allow && !passthrough
 	return Verdict{Allowed: allowed, Unlisted: unlisted, Inside: inside, Reason: d.Reason}
 }

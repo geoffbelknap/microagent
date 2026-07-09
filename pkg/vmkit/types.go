@@ -88,6 +88,9 @@ type Config struct {
 	EgressMode        string   `json:"egressMode,omitempty"`
 	EgressAllow       []string `json:"egressAllow,omitempty"`
 	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
+	// EgressAllowlistLocked, in broker mode, restricts egress to allowlisted
+	// destinations only (drops the allow-broad grant). No effect otherwise.
+	EgressAllowlistLocked bool `json:"egressAllowlistLocked,omitempty"`
 	// EgressSwapConfigPath points at the operator credential-swap config the
 	// mediator loads (--swap-config). The real secret is injected host-side and
 	// never enters the guest; empty disables swap.

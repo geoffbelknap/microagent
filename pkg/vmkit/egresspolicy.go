@@ -27,6 +27,9 @@ type EgressPolicy struct {
 	SwapConfigPath string   // path to the operator credential-swap config; may be empty
 	Caps           EgressCaps
 	DNS            []string // guest resolvers; may be empty (caller supplies a default)
+	// AllowlistLocked, in broker mode, restricts egress to allowlisted
+	// destinations only (drops the allow-broad grant). No effect otherwise.
+	AllowlistLocked bool
 }
 
 // NormalizeEgressPolicy returns a copy with Mode resolved via NormalizeEgressMode

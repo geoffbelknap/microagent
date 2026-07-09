@@ -2073,6 +2073,8 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&egressAllow, "egress-allow", "Allowlisted egress destination host (repeatable)")
 	var egressPassthrough multiFlag
 	fs.Var(&egressPassthrough, "egress-passthrough", "Allowed egress host that is not TLS-intercepted (repeatable)")
+	var egressLockAllowlist bool
+	fs.BoolVar(&egressLockAllowlist, "egress-lock-allowlist", false, "In --egress broker, restrict egress to allowlisted destinations only (drop the allow-broad default)")
 	var egressPolicy string
 	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress guarded or strict)")
 	var egressSwapConfig string
@@ -2169,6 +2171,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := applySetupEnvSecretOptionFlags(&opts, setupCommands, setupFiles, envVars, secretFlags, secretsEnvFile, secretOnDemandFlags, secretsAudit); err != nil {
 		return workspaceOptions{}, err
 	}
+	opts.EgressAllowlistLocked = egressLockAllowlist
 	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap); err != nil {
 		return workspaceOptions{}, err
 	}

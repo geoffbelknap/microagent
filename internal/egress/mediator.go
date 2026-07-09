@@ -48,11 +48,14 @@ type Handler struct {
 	// Mode selects enforcement: "guarded" (default) denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west on
 	// resolved IP while allowing public internet; "strict" denies non-allowlisted destinations fail-closed; empty
 	// normalizes to "guarded".
-	Mode          string
-	Policy        *Policy
-	Passthrough   *Policy
-	CA            *CA
-	UpstreamRoots *x509.CertPool
+	Mode string
+	// AllowlistLocked, in broker mode, restricts egress to allowlisted
+	// destinations only (drops the allow-broad grant). No effect otherwise.
+	AllowlistLocked bool
+	Policy          *Policy
+	Passthrough     *Policy
+	CA              *CA
+	UpstreamRoots   *x509.CertPool
 
 	// Swaps is the host-indexed credential-swap table loaded from
 	// Options.SwapConfigPath. When non-nil, serveMITM HTTP-parses any
@@ -134,14 +137,15 @@ type Handler struct {
 // (MITM, splice, byte/rate caps, peer/DNS reverse resolution) around it.
 func (h *Handler) brain() *Brain {
 	return &Brain{
-		Mode:          h.Mode,
-		Policy:        h.Policy,
-		Swaps:         h.Swaps,
-		Resolver:      h.Resolver,
-		Cache:         h.tokenCache,
-		Logger:        h.Logger,
-		Limits:        h.Limits,
-		UpstreamRoots: h.UpstreamRoots,
+		Mode:            h.Mode,
+		AllowlistLocked: h.AllowlistLocked,
+		Policy:          h.Policy,
+		Swaps:           h.Swaps,
+		Resolver:        h.Resolver,
+		Cache:           h.tokenCache,
+		Logger:          h.Logger,
+		Limits:          h.Limits,
+		UpstreamRoots:   h.UpstreamRoots,
 	}
 }
 

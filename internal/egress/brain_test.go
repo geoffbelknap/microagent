@@ -109,6 +109,25 @@ func TestBrainEvaluate(t *testing.T) {
 			t.Fatalf("broker allowlisted inside: got %+v, want Allowed && !Unlisted", v)
 		}
 	})
+
+	// broker with a locked allowlist drops the allow-broad grant: it becomes
+	// allowlist-only (the folded-in strict behavior), denying non-allowlisted
+	// public destinations while still permitting allowlisted ones.
+	t.Run("broker_locked_denies_non_allowlisted_public", func(t *testing.T) {
+		b := &Brain{Mode: "broker", AllowlistLocked: true, Policy: brainPolicy(t, "allowed.example")}
+		v := b.Evaluate("blocked.example", nil, public, false)
+		if v.Allowed {
+			t.Fatalf("broker locked non-allowlisted: got Allowed, want denied (%+v)", v)
+		}
+	})
+
+	t.Run("broker_locked_allows_allowlisted", func(t *testing.T) {
+		b := &Brain{Mode: "broker", AllowlistLocked: true, Policy: brainPolicy(t, "allowed.example")}
+		v := b.Evaluate("allowed.example", nil, public, false)
+		if !v.Allowed || v.Unlisted {
+			t.Fatalf("broker locked allowlisted: got %+v, want Allowed && !Unlisted", v)
+		}
+	})
 }
 
 func TestBrainAuditDeny(t *testing.T) {
