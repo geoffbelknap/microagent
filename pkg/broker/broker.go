@@ -72,6 +72,12 @@ type Terminate struct {
 	// Policy, when set, judges each pre-swap request before any bytes go
 	// upstream. Fail-closed: an error or panic denies.
 	Policy Policy
+	// OnCapture, when set, receives the governed raw capture of each request
+	// (pre-swap; request-only). Nil means capture is off — the default.
+	OnCapture OnCapture
+	// CaptureBodyLimit bounds the captured body prefix; 0 means
+	// DefaultCaptureBodyLimit.
+	CaptureBodyLimit int64
 	// Client originates the upstream request. Defaults to http.DefaultClient
 	// (its own TLS). Injected in tests to point at a mock upstream.
 	Client *http.Client
@@ -131,7 +137,24 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	out.Path = singleJoiningSlash(t.Upstream.Path, r.URL.Path)
 	out.RawQuery = r.URL.RawQuery
 	body := &countingReader{r: r.Body}
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, out.String(), body)
+	var upstreamBody io.Reader = body
+	if t.OnCapture != nil {
+		limit := t.CaptureBodyLimit
+		if limit <= 0 {
+			limit = DefaultCaptureBodyLimit
+		}
+		capBuf := &captureBuffer{limit: limit}
+		upstreamBody = io.TeeReader(body, capBuf)
+		// Emit on every exit path, with however much body was read by then.
+		defer func() {
+			t.OnCapture(CaptureRecord{
+				TS: time.Now(), Mode: "terminate", Host: t.Upstream.Host,
+				Method: r.Method, Path: r.URL.Path, Headers: tap.Headers,
+				Body: capBuf.buf.Bytes(), Truncated: capBuf.truncated,
+			})
+		}()
+	}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, out.String(), upstreamBody)
 	if err != nil {
 		http.Error(w, "broker: build upstream request", http.StatusBadGateway)
 		deny("bad-request")
