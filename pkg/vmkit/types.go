@@ -567,6 +567,16 @@ func EgressMediationOn(mode string) bool {
 	return m == EgressModeGuarded || m == EgressModeStrict || m == EgressModeBroker
 }
 
+// EgressModeForgesCerts reports whether the mode terminates guest TLS by forging
+// per-SNI certificates from the per-workspace CA (guarded, strict) — which
+// requires delivering that CA to the guest so it trusts the forged leaves.
+// broker splices allowed flows opaquely and off runs no mediator, so neither
+// delivers a CA. Callers gate CA minting + the CA-cert vsock listener on this.
+func EgressModeForgesCerts(mode string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	return m == EgressModeGuarded || m == EgressModeStrict
+}
+
 // NetworkModeMediates reports whether the given network mode actually runs the
 // egress mediator. Only "user" routes guest egress through the mediator
 // (provisionEgressMediation runs for it). "isolated" (no egress at all) never

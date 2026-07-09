@@ -1047,15 +1047,17 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 		listeners = append(listeners, vmkit.VsockListener{Port: brokerCfg.VsockPort, Target: broker.ListenerTarget})
 	}
 	// CACertPort is allocated only when the negotiated capture provider actually
-	// mediates a protocol class — i.e. a real mediator will exist to serve the
-	// per-workspace CA the guest installs at boot. Gating on the provider (not on
+	// mediates a protocol class AND the mode forges certificates (guarded/strict)
+	// — i.e. a real mediator will exist AND it needs the guest to trust the
+	// per-workspace CA it forges leaves from. Gating on the provider (not on
 	// EgressMediationOn + NetworkModeMediates) means backends with no capture
 	// provider (apple-vf native NAT today) never get a CA-cert listener their
 	// supervisor can't serve — which is what broke the default apple-vf boot.
-	// "off" and isolated provide no mediator, so no CA listener either.
+	// "off" and isolated provide no mediator; broker mediates but splices
+	// opaquely and forges nothing, so none of them deliver a CA.
 	captureReport := vmkit.NegotiateEgressCapture(opts.Backend, opts.Network.Mode, opts.EgressMode)
 	var caCertPort uint32
-	if captureReport.MediatesAnyClass() {
+	if captureReport.MediatesAnyClass() && vmkit.EgressModeForgesCerts(opts.EgressMode) {
 		caCertPort = DefaultCACertPort
 		listeners = append(listeners, vmkit.VsockListener{Port: caCertPort, Target: secretxfer.CACertTarget})
 	}

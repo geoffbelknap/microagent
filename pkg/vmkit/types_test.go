@@ -334,6 +334,24 @@ func TestEgressModeBroker(t *testing.T) {
 	}
 }
 
+func TestEgressModeForgesCerts(t *testing.T) {
+	// Only guarded and strict terminate TLS by forging per-SNI certificates from
+	// the per-workspace CA, so only they require delivering that CA to the guest.
+	// broker splices opaquely and off runs no mediator — neither delivers a CA.
+	forges := []string{"guarded", "GUARDED", " strict ", "strict"}
+	for _, m := range forges {
+		if !EgressModeForgesCerts(m) {
+			t.Errorf("EgressModeForgesCerts(%q) = false, want true", m)
+		}
+	}
+	noCA := []string{"broker", " broker ", "off", "", "  "}
+	for _, m := range noCA {
+		if EgressModeForgesCerts(m) {
+			t.Errorf("EgressModeForgesCerts(%q) = true, want false", m)
+		}
+	}
+}
+
 func TestNormalizeEgressModeGuardedDefault(t *testing.T) {
 	cases := map[string]string{
 		"":        EgressModeGuarded, // default flipped to guarded

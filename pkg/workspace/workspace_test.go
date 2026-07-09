@@ -721,6 +721,28 @@ func TestRequestAllocatesCACertForGuarded(t *testing.T) {
 	}
 }
 
+// TestRequestNoCACertForBroker confirms a broker-mode workspace mediates but
+// delivers NO CA to the guest — the broker splices opaquely and forges no
+// certificates, so a CA-cert listener would tell the guest to trust a CA that
+// is never used.
+func TestRequestNoCACertForBroker(t *testing.T) {
+	opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: vmkit.EgressModeBroker}
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if req.Config.EgressMode != vmkit.EgressModeBroker {
+		t.Fatalf("EgressMode should stay %q, got %q", vmkit.EgressModeBroker, req.Config.EgressMode)
+	}
+	if req.Config.CACertPort != 0 {
+		t.Fatalf("broker workspace must not allocate CACertPort, got %d", req.Config.CACertPort)
+	}
+	if hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("broker workspace must not allocate a CACertTarget vsock listener: %+v", req.Config.VsockListeners)
+	}
+}
+
 // TestRequestNoCACertForOff confirms an explicit "off" workspace gets no CA-cert
 // listener or port — mediation is disabled.
 func TestRequestNoCACertForOff(t *testing.T) {
