@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-07-09_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
