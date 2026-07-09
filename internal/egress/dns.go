@@ -148,7 +148,7 @@ func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(
 
 	listed := h.Policy != nil && h.Policy.AllowHost(qname).Allow
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(qname).Allow
-	permissive := h.Mode == egressModeGuarded
+	permissive := allowsBroad(h.Mode)
 	allowed := permissive || listed || passthrough
 	// unlisted marks a name permitted only because guarded mode resolves names
 	// freely (it is on no allowlist), so the audit trail records the looser grant

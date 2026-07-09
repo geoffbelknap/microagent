@@ -83,7 +83,7 @@ func (b *Brain) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, err
 	// the denial depend on DNS reachability (offline, a resolve failure returns 502,
 	// masking the real 403). Guarded mode can still permit an unlisted-but-public
 	// host, so it falls through to the post-resolve IP evaluation below.
-	if b.Mode != egressModeGuarded {
+	if !allowsBroad(b.Mode) {
 		if d := b.Policy.AllowHost(host); !d.Allow {
 			b.AuditDeny(Verdict{Reason: d.Reason}, map[string]any{"host": host, "shape": "fetch"})
 			return FetchResponse{Status: 403, Denied: true, Reason: d.Reason}, nil

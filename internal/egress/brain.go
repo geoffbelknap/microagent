@@ -83,8 +83,8 @@ func (b *Brain) Evaluate(host string, candidates []string, dstIP netip.Addr, pas
 			}
 		}
 	}
-	inside := b.Mode == egressModeGuarded && isInsideAddr(dstIP)
-	allowed := d.Allow || (b.Mode == egressModeGuarded && !inside)
+	inside := allowsBroad(b.Mode) && isInsideAddr(dstIP)
+	allowed := d.Allow || (allowsBroad(b.Mode) && !inside)
 	unlisted := allowed && !d.Allow && !passthrough
 	return Verdict{Allowed: allowed, Unlisted: unlisted, Inside: inside, Reason: d.Reason}
 }

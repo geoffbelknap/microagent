@@ -320,9 +320,21 @@ func isEastWestAddr(a netip.Addr) bool {
 	return a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLoopback()
 }
 
-// Egress mode constant for the Handler.Mode field. Mirrors the vmkit constant
+// Egress mode constants for the Handler.Mode field. Mirror the vmkit constants
 // without introducing a package dependency; they must stay in sync.
-const egressModeGuarded = "guarded"
+const (
+	egressModeGuarded = "guarded"
+	egressModeBroker  = "broker"
+)
+
+// allowsBroad reports whether the mode grants public destinations by default,
+// denying only the inside/infrastructure: guarded and broker. strict resolves
+// and permits only allowlisted names; off runs no mediator. guarded and broker
+// share this allow-broad decision — they differ only in termination (broker
+// splices opaquely instead of forging per-SNI certificates).
+func allowsBroad(mode string) bool {
+	return mode == egressModeGuarded || mode == egressModeBroker
+}
 
 var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
