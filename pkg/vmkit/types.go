@@ -144,6 +144,37 @@ type Config struct {
 	// guest-mediated file operations against an otherwise-stopped
 	// workspace and halt it again.
 	MaintenanceBoot bool `json:"maintenanceBoot,omitempty"`
+	// Broker configures the egress broker served on a host vsock listener; nil
+	// means no broker. See BrokerConfig.
+	Broker *BrokerConfig `json:"broker,omitempty"`
+}
+
+// BrokerConfig configures the egress broker: a host-side forward proxy served
+// on a per-workspace vsock listener that swaps credential references
+// (@secret:<name>) for the live secret just before originating its own
+// upstream TLS. The guest holds only the reference; the live credential exists
+// only in broker process memory and is absent from guest state by
+// construction.
+type BrokerConfig struct {
+	// Upstream is the terminate-mode upstream base URL requests are forwarded
+	// to with the credential injected.
+	Upstream string `json:"upstream"`
+	// Secret is the credential the broker resolves at listener start and holds
+	// host-side only. It is deliberately separate from Config.Secrets: broker
+	// secrets are never delivered into the guest.
+	Secret SecretRef `json:"secret"`
+	// GuestListen is the in-guest TCP address the vsock bridge listens on and
+	// workloads are pointed at (e.g. "127.0.0.1:18888").
+	GuestListen string `json:"guestListen,omitempty"`
+	// VsockPort is the host vsock port the broker listener is served on.
+	VsockPort uint32 `json:"vsockPort,omitempty"`
+	// Proxy sets HTTPS_PROXY/HTTP_PROXY in the guest to the broker so
+	// proxy-honoring clients tunnel their egress through it (CONNECT).
+	Proxy bool `json:"proxy,omitempty"`
+	// BaseURLEnv points per-SDK base-URL env vars at the broker for
+	// terminate-mode credential injection; an empty value is filled with the
+	// guest listen URL.
+	BaseURLEnv map[string]string `json:"baseURLEnv,omitempty"`
 }
 
 type Disk struct {

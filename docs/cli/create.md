@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-09_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -247,6 +247,10 @@ The complete set:
 | `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress guarded` or `strict` |
 | `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress guarded` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
 | `--cred-swap PROVIDER[=ref]` | Shorthand for a credential swap against a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`): allowlists the provider host and injects its API key host-side so the guest never holds it. The optional `=ref` is a reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret; omitted, it defaults to the provider's conventional env var. Repeatable; requires `--egress guarded` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `--broker-upstream <url>` | Route egress through the [egress broker](/concepts/egress-mediation/): a host-side proxy that injects the credential and originates its own upstream TLS, so the guest never holds the key. Persisted with the workspace |
+| `--broker-secret NAME=<scheme>:<ref>` | Broker credential; the guest sends `@secret:NAME` references and the broker swaps in the live value host-side. A reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret. Required with `--broker-upstream` |
+| `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; an empty `VALUE` is filled with the broker URL (e.g. `--broker-env ANTHROPIC_BASE_URL`). Repeatable |
+| `--broker-proxy` | Also set `HTTPS_PROXY` / `HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
 | `--model <ref>` | Pair the workspace with a locally served HuggingFace GGUF model; the ref is persisted so every `start` re-pairs, and `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are injected into the guest. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
 | `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom`; persisted with the workspace |

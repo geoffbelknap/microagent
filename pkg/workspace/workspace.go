@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
+	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -47,6 +49,14 @@ const (
 const (
 	DefaultModelGuestPort uint16 = 11434
 	DefaultModelVsockPort uint32 = 62100
+)
+
+// Egress broker transport defaults: the broker is served on host vsock port
+// DefaultBrokerPort and reached in-guest via a bridge on
+// DefaultBrokerGuestListen.
+const (
+	DefaultBrokerPort        uint32 = 1032
+	DefaultBrokerGuestListen        = "127.0.0.1:18888"
 )
 
 // secretsListenerTarget marks the vsock listener that serves resolved secrets.
@@ -94,14 +104,19 @@ type Options struct {
 	SizeMiB           int64
 	Network           vmkit.NetworkConfig
 	Mediation         *vmkit.MediationConfig
-	Health            Health
-	Timeout           time.Duration
-	LeaseSeconds      int
-	ResultPort        uint32
-	ShellPort         uint16
-	ExecPort          uint16
-	GuestShellPort    uint16
-	GuestExecPort     uint16
+	// Broker configures the egress broker: a host-side forward proxy on a vsock
+	// listener that injects the workspace credential upstream so the guest only
+	// ever holds a reference. Defaults (vsock port, guest listen address) are
+	// filled by Request; see vmkit.BrokerConfig.
+	Broker         *vmkit.BrokerConfig
+	Health         Health
+	Timeout        time.Duration
+	LeaseSeconds   int
+	ResultPort     uint32
+	ShellPort      uint16
+	ExecPort       uint16
+	GuestShellPort uint16
+	GuestExecPort  uint16
 	// BakedVsockUDSPath carries the source snapshot's baked vsock path when
 	// starting from a snapshot; see vmkit.Config.BakedVsockUDSPath.
 	BakedVsockUDSPath string
@@ -211,6 +226,24 @@ type AgentSpec struct {
 	// CredSwap lists built-in providers to inject host-side, each PROVIDER[=ref]
 	// (reference only, never a literal secret). See Options.CredSwapProviders.
 	CredSwap []string `yaml:"cred-swap"`
+	// Broker configures the egress broker: the guest reaches the upstream
+	// through a host-side proxy that injects the credential, so the guest only
+	// ever holds a reference. See Options.Broker and AgentBrokerSpec.
+	Broker *AgentBrokerSpec `yaml:"broker"`
+}
+
+// AgentBrokerSpec is the Agentfile `agent.broker` block. Its fields mirror the
+// --broker-* CLI flags and route through the same ParseBrokerConfig, so the two
+// surfaces build an identical broker.
+type AgentBrokerSpec struct {
+	// Upstream is the terminate-mode upstream base URL.
+	Upstream string `yaml:"upstream"`
+	// Secret is the host-side-only credential reference NAME=<scheme>:<ref>.
+	Secret string `yaml:"secret"`
+	// Env lists base-URL env keys pointed at the broker, each KEY[=VALUE].
+	Env []string `yaml:"env"`
+	// Proxy sets HTTPS_PROXY/HTTP_PROXY in the guest to the broker.
+	Proxy bool `yaml:"proxy"`
 }
 
 // Declared reports whether the agent block carries any field, so an empty block
@@ -219,7 +252,8 @@ func (a AgentSpec) Declared() bool {
 	return strings.TrimSpace(a.Entry) != "" ||
 		strings.TrimSpace(a.Egress) != "" ||
 		len(a.Allow) != 0 ||
-		len(a.CredSwap) != 0
+		len(a.CredSwap) != 0 ||
+		a.Broker != nil
 }
 
 type NetworkSpec struct {
@@ -339,6 +373,7 @@ type Manifest struct {
 	EgressAllow          []string                   `json:"egress_allow,omitempty"`
 	EgressPassthrough    []string                   `json:"egress_passthrough,omitempty"`
 	EgressSwapConfigPath string                     `json:"egress_swap_config_path,omitempty"`
+	Broker               *vmkit.BrokerConfig        `json:"broker,omitempty"`
 }
 
 type ModelRunnerSpec struct {
@@ -1004,6 +1039,13 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if secretsPort != 0 {
 		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
 	}
+	brokerCfg, err := normalizeBrokerConfig(opts.Broker)
+	if err != nil {
+		return vmkit.Request{}, err
+	}
+	if brokerCfg != nil {
+		listeners = append(listeners, vmkit.VsockListener{Port: brokerCfg.VsockPort, Target: broker.ListenerTarget})
+	}
 	// CACertPort is allocated only when the negotiated capture provider actually
 	// mediates a protocol class — i.e. a real mediator will exist to serve the
 	// per-workspace CA the guest installs at boot. Gating on the provider (not on
@@ -1071,8 +1113,38 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			LeaseSeconds:             opts.LeaseSeconds,
 			ModelGuestPort:           modelGuestPort,
 			ModelVsockPort:           modelVsockPort,
+			Broker:                   brokerCfg,
 		},
 	}, nil
+}
+
+// normalizeBrokerConfig validates the operator's broker config and fills
+// transport defaults, returning a copy so the caller's Options are not
+// mutated. The secret must be a scheme-prefixed reference — a pasted literal
+// is rejected before it is ever processed (same posture as --cred-swap) — and
+// its name must satisfy the shared secret-name rules so the guest's
+// @secret:<name> reference always parses.
+func normalizeBrokerConfig(cfg *vmkit.BrokerConfig) (*vmkit.BrokerConfig, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	out := *cfg
+	if strings.TrimSpace(out.Upstream) == "" {
+		return nil, fmt.Errorf("broker: upstream URL is required")
+	}
+	if !secretxfer.ValidName(out.Secret.Name) {
+		return nil, fmt.Errorf("broker: secret name %q must be a valid secret name (letters, digits, underscore; not starting with a digit)", out.Secret.Name)
+	}
+	if !secret.DefaultRegistry(nil, nil).ValidRef(out.Secret.Ref) {
+		return nil, fmt.Errorf("broker: secret reference %q must be <scheme>:<ref> (env:/file:/dotenv:/vault:/helper:), never a literal secret", out.Secret.Ref)
+	}
+	if strings.TrimSpace(out.GuestListen) == "" {
+		out.GuestListen = DefaultBrokerGuestListen
+	}
+	if out.VsockPort == 0 {
+		out.VsockPort = DefaultBrokerPort
+	}
+	return &out, nil
 }
 
 func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, error) {

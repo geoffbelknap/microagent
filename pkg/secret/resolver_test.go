@@ -69,6 +69,28 @@ func TestRegistryProviderErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestRegistryValidRef(t *testing.T) {
+	r := NewRegistry(nil)
+	r.Register("stub", &stubProvider{})
+	cases := []struct {
+		ref  string
+		want bool
+	}{
+		{"stub:some/ref#field", true},
+		{" stub:padded ", true},
+		{"nope:x", false},            // unregistered scheme
+		{"sk-pasted-literal", false}, // no scheme at all
+		{"stub:", false},             // empty remainder
+		{":rest", false},             // empty scheme
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := r.ValidRef(c.ref); got != c.want {
+			t.Fatalf("ValidRef(%q) = %v, want %v", c.ref, got, c.want)
+		}
+	}
+}
+
 func TestRegistryPlaintextEmitsWarning(t *testing.T) {
 	var warned string
 	r := NewRegistry(func(msg string) { warned = msg })

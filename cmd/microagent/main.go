@@ -2079,6 +2079,13 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress guarded or strict)")
 	var credSwap multiFlag
 	fs.Var(&credSwap, "cred-swap", "Inject a provider API key host-side for a built-in provider: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). The guest never holds the key; reference only, never a literal. Repeatable; requires --egress guarded or strict")
+	var brokerUpstream, brokerSecret string
+	fs.StringVar(&brokerUpstream, "broker-upstream", "", "Egress broker upstream base URL; requests reach it through the broker with the credential injected host-side")
+	fs.StringVar(&brokerSecret, "broker-secret", "", "Egress broker credential NAME=<scheme>:<ref>; held host-side only, the guest sends @secret:NAME references (never the value)")
+	var brokerEnv multiFlag
+	fs.Var(&brokerEnv, "broker-env", "Guest env var pointed at the broker, KEY[=VALUE] (empty VALUE = broker URL; repeatable)")
+	var brokerProxy bool
+	fs.BoolVar(&brokerProxy, "broker-proxy", false, "Also set HTTPS_PROXY/HTTP_PROXY in the guest to the broker (CONNECT tunneling)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2165,6 +2172,9 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap); err != nil {
 		return workspaceOptions{}, err
 	}
+	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy); err != nil {
+		return workspaceOptions{}, err
+	}
 	if err := applyStorageOptionFlags(&opts, volumeFlags, diskFlags, bundleFlags, outputFlags); err != nil {
 		return workspaceOptions{}, err
 	}
@@ -2233,6 +2243,22 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 	}
 	opts.OnDemandSecrets = onDemand
 	opts.SecretsAudit = secretsAudit
+	return nil
+}
+
+// applyBrokerOptionFlags parses the --broker-* flags into Options.Broker via the
+// shared workspace.ParseBrokerConfig, so the CLI and the Agentfile agent.broker
+// block validate and build a broker identically. A partial declaration fails
+// loudly and a literal secret is rejected at parse time, before any state is
+// written (matching --cred-swap).
+func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy bool) error {
+	broker, err := workspace.ParseBrokerConfig(brokerUpstream, brokerSecret, []string(brokerEnv), brokerProxy)
+	if err != nil {
+		return err
+	}
+	if broker != nil {
+		opts.Broker = broker
+	}
 	return nil
 }
 
@@ -4241,6 +4267,13 @@ Options:
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
   -cred-swap PROVIDER[=ref]
                          Inject a built-in provider API key host-side (e.g. anthropic, openai); reference only, never a literal (repeatable)
+  -broker-upstream <url>
+                         Egress broker upstream; the broker injects the credential host-side and originates its own TLS (guest never holds the key)
+  -broker-secret NAME=<scheme>:<ref>
+                         Broker credential reference; the guest sends @secret:NAME
+  -broker-env KEY[=VALUE]
+                         Guest env var pointed at the broker (repeatable)
+  -broker-proxy         Set HTTPS_PROXY/HTTP_PROXY in the guest to the broker
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable)
   -secret-on-demand NAME=<scheme>:<ref>
@@ -4327,6 +4360,13 @@ Options:
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
   -cred-swap PROVIDER[=ref]
                          Inject a built-in provider API key host-side (e.g. anthropic, openai); reference only, never a literal (repeatable)
+  -broker-upstream <url>
+                         Egress broker upstream; the broker injects the credential host-side and originates its own TLS (guest never holds the key)
+  -broker-secret NAME=<scheme>:<ref>
+                         Broker credential reference; the guest sends @secret:NAME
+  -broker-env KEY[=VALUE]
+                         Guest env var pointed at the broker (repeatable)
+  -broker-proxy         Set HTTPS_PROXY/HTTP_PROXY in the guest to the broker
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable)
   -secret-on-demand NAME=<scheme>:<ref>

@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-24_
+_Last updated: 2026-07-09_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -78,6 +78,10 @@ agent:
   egress: strict
   allow: [api.anthropic.com]
   cred-swap: [anthropic]
+  broker:
+    upstream: https://api.anthropic.com
+    secret: anthropic=env:ANTHROPIC_API_KEY
+    env: [ANTHROPIC_BASE_URL]
 ```
 
 ## Agentfile: the `agent:` block
@@ -96,7 +100,8 @@ microagent dispatch --file agent.yaml
 
 CLI flags override the block (e.g. `--egress strict` beats `agent.egress`,
 `--exec` beats `agent.entry`); `agent.allow` and `agent.cred-swap` union with the
-corresponding flags.
+corresponding flags. A `--broker-*` broker supplied on the command line wins
+outright — `agent.broker` only fills an otherwise-unset broker.
 
 ## Usage
 
@@ -167,6 +172,10 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `agent.egress` | Egress mode: `guarded`, `strict`, or `off`; a CLI `--egress` overrides it |
 | `agent.allow` | Extra egress hosts to allowlist; unioned with `--egress-allow` |
 | `agent.cred-swap` | Built-in providers to inject host-side, each `PROVIDER[=env:NAME\|file:PATH\|vault:PATH]` (reference only, never a literal); unioned with `--cred-swap`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `agent.broker.upstream` | Egress broker upstream base URL; the broker injects the credential host-side and originates its own TLS, so the guest never holds the key. A CLI `--broker-upstream` overrides the block |
+| `agent.broker.secret` | Broker credential `NAME=<scheme>:<ref>` (reference only, never a literal); held host-side only, the guest sends `@secret:NAME` references |
+| `agent.broker.env` | Guest env vars pointed at the broker, each `KEY[=VALUE]` (empty value = the broker URL) |
+| `agent.broker.proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
 
 ## Related
 
