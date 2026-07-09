@@ -123,6 +123,11 @@ UPSTREAM_PORT="$(cat "$STATE_DIR/upstream.port")"
 # brokered vsock channel the create flags wired up. The workload sends the
 # credential REFERENCE; it also dumps its environment so the host can assert
 # the live secret never entered the guest.
+#
+# This command runs in the GUEST shell: the $(wget ...) substitution and $resp
+# must expand there, not on this host, so the single quotes are deliberate.
+# shellcheck disable=SC2016
+GUEST_EXEC='resp="$(wget -qO- --header "Authorization: Bearer @secret:api" http://127.0.0.1:18888/check)" && echo "RESP:$resp"; echo GUEST-ENV-BEGIN; env; echo GUEST-ENV-END'
 MA_E2E_BROKER_TOKEN="$LIVE_SECRET" "$CLI" --mode=ax run \
   --name "$WORKSPACE" \
   --image "$IMAGE" \
@@ -130,7 +135,7 @@ MA_E2E_BROKER_TOKEN="$LIVE_SECRET" "$CLI" --mode=ax run \
   --broker-upstream "http://127.0.0.1:$UPSTREAM_PORT" \
   --broker-secret "api=env:MA_E2E_BROKER_TOKEN" \
   --keep \
-  --exec 'resp="$(wget -qO- --header "Authorization: Bearer @secret:api" http://127.0.0.1:18888/check)" && echo "RESP:$resp"; echo GUEST-ENV-BEGIN; env; echo GUEST-ENV-END' \
+  --exec "$GUEST_EXEC" \
   --state-dir "$STATE_DIR" >"$STATE_DIR/run.json"
 
 BROKER_TRAIL="$STATE_DIR/$WORKSPACE/broker-access.jsonl"
