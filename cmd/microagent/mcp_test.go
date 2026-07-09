@@ -327,6 +327,18 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			want: []string{"--mode=ax", "create", "demo", "-egress", "strict", "-egress-policy", "/tmp/egress.yaml", "-egress-swap-config", "/tmp/swaps.yaml", "-secrets-env-file", "/tmp/app.env", "-secrets-audit", "-egress-allow", "api.anthropic.com", "-egress-allow", ".pypi.org", "-egress-passthrough", "pinned.example.com", "-cred-swap", "anthropic", "-cred-swap", "openai=env:MY_OPENAI", "-secret", "ANTHROPIC_API_KEY=env:KEY", "-secret-on-demand", "DB=dotenv:/tmp/app.env#DB"},
 		},
 		{
+			// broker config maps through to create
+			name: "workspace.create",
+			args: map[string]any{
+				"name":            "demo",
+				"broker_upstream": "https://api.example.com",
+				"broker_secret":   "api=env:MY_TOKEN",
+				"broker_env":      []any{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
+				"broker_proxy":    true,
+			},
+			want: []string{"--mode=ax", "create", "demo", "-broker-upstream", "https://api.example.com", "-broker-secret", "api=env:MY_TOKEN", "-broker-proxy", "-broker-env", "EXAMPLE_BASE_URL", "-broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
+		},
+		{
 			name: "workspace.start",
 			args: map[string]any{
 				"name":            "demo",

@@ -226,6 +226,24 @@ type AgentSpec struct {
 	// CredSwap lists built-in providers to inject host-side, each PROVIDER[=ref]
 	// (reference only, never a literal secret). See Options.CredSwapProviders.
 	CredSwap []string `yaml:"cred-swap"`
+	// Broker configures the egress broker: the guest reaches the upstream
+	// through a host-side proxy that injects the credential, so the guest only
+	// ever holds a reference. See Options.Broker and AgentBrokerSpec.
+	Broker *AgentBrokerSpec `yaml:"broker"`
+}
+
+// AgentBrokerSpec is the Agentfile `agent.broker` block. Its fields mirror the
+// --broker-* CLI flags and route through the same ParseBrokerConfig, so the two
+// surfaces build an identical broker.
+type AgentBrokerSpec struct {
+	// Upstream is the terminate-mode upstream base URL.
+	Upstream string `yaml:"upstream"`
+	// Secret is the host-side-only credential reference NAME=<scheme>:<ref>.
+	Secret string `yaml:"secret"`
+	// Env lists base-URL env keys pointed at the broker, each KEY[=VALUE].
+	Env []string `yaml:"env"`
+	// Proxy sets HTTPS_PROXY/HTTP_PROXY in the guest to the broker.
+	Proxy bool `yaml:"proxy"`
 }
 
 // Declared reports whether the agent block carries any field, so an empty block
@@ -234,7 +252,8 @@ func (a AgentSpec) Declared() bool {
 	return strings.TrimSpace(a.Entry) != "" ||
 		strings.TrimSpace(a.Egress) != "" ||
 		len(a.Allow) != 0 ||
-		len(a.CredSwap) != 0
+		len(a.CredSwap) != 0 ||
+		a.Broker != nil
 }
 
 type NetworkSpec struct {

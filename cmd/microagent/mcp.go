@@ -315,6 +315,10 @@ func mcpTools() []map[string]any {
 			"egress_policy":             map[string]any{"type": "string", "description": "Path to an egress policy file (.yaml/.yml/.json)"},
 			"egress_swap_config":        map[string]any{"type": "string", "description": "Credential-swap config path; mediator injects the real secret host-side so the guest never holds it"},
 			"cred_swap":                 map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Inject a built-in provider's API key host-side: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). Guest never holds the key; reference only, never a literal"},
+			"broker_upstream":           map[string]any{"type": "string", "description": "Egress broker upstream base URL; the broker injects the credential host-side and originates its own TLS, so the guest never holds the key"},
+			"broker_secret":             map[string]any{"type": "string", "description": "Broker credential NAME=scheme:ref; held host-side only, the guest sends @secret:NAME references. Requires broker_upstream"},
+			"broker_env":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Guest env vars pointed at the broker, each KEY[=VALUE] (empty VALUE = broker URL)"},
+			"broker_proxy":              map[string]any{"type": "boolean", "description": "Also set HTTPS_PROXY/HTTP_PROXY in the guest to the broker (CONNECT tunneling)"},
 			"secret":                    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Secrets delivered to tmpfs /run/secrets, each NAME=scheme:ref"},
 			"secret_on_demand":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; fetched at runtime, never written to tmpfs"},
 			"secrets_env_file":          map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
@@ -350,6 +354,10 @@ func mcpTools() []map[string]any {
 			"egress_policy":      map[string]any{"type": "string", "description": "Path to an egress policy file (.yaml/.yml/.json)"},
 			"egress_swap_config": map[string]any{"type": "string", "description": "Credential-swap config path; mediator injects the real secret host-side so the guest never holds it"},
 			"cred_swap":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Inject a built-in provider's API key host-side: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). Guest never holds the key; reference only, never a literal"},
+			"broker_upstream":    map[string]any{"type": "string", "description": "Egress broker upstream base URL; the broker injects the credential host-side and originates its own TLS, so the guest never holds the key"},
+			"broker_secret":      map[string]any{"type": "string", "description": "Broker credential NAME=scheme:ref; held host-side only, the guest sends @secret:NAME references. Requires broker_upstream"},
+			"broker_env":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Guest env vars pointed at the broker, each KEY[=VALUE] (empty VALUE = broker URL)"},
+			"broker_proxy":       map[string]any{"type": "boolean", "description": "Also set HTTPS_PROXY/HTTP_PROXY in the guest to the broker (CONNECT tunneling)"},
 			"secret":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Secrets delivered to tmpfs /run/secrets, each NAME=scheme:ref"},
 			"secret_on_demand":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; never written to tmpfs"},
 			"secrets_env_file":   map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
@@ -1868,7 +1876,12 @@ func appendMCPWorkspaceEgressSecretFlags(cli []string, args map[string]any) ([]s
 	cli = appendOptionalFlag(cli, "-egress", stringArg(args, "egress"))
 	cli = appendOptionalFlag(cli, "-egress-policy", stringArg(args, "egress_policy"))
 	cli = appendOptionalFlag(cli, "-egress-swap-config", stringArg(args, "egress_swap_config"))
+	cli = appendOptionalFlag(cli, "-broker-upstream", stringArg(args, "broker_upstream"))
+	cli = appendOptionalFlag(cli, "-broker-secret", stringArg(args, "broker_secret"))
 	cli = appendOptionalFlag(cli, "-secrets-env-file", stringArg(args, "secrets_env_file"))
+	if boolArg(args, "broker_proxy") {
+		cli = append(cli, "-broker-proxy")
+	}
 	if boolArg(args, "secrets_audit") {
 		cli = append(cli, "-secrets-audit")
 	}
@@ -1879,6 +1892,7 @@ func appendMCPWorkspaceEgressSecretFlags(cli []string, args map[string]any) ([]s
 		{"egress_allow", "-egress-allow"},
 		{"egress_passthrough", "-egress-passthrough"},
 		{"cred_swap", "-cred-swap"},
+		{"broker_env", "-broker-env"},
 		{"secret", "-secret"},
 		{"secret_on_demand", "-secret-on-demand"},
 	} {

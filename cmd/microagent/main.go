@@ -28,7 +28,6 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
-	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/superviseunit"
 	windowshyperv "github.com/geoffbelknap/microagent/pkg/supervisors/windows_hyperv"
@@ -2247,53 +2246,18 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 	return nil
 }
 
-// applyBrokerOptionFlags parses the --broker-* flags into Options.Broker. A
-// partial declaration fails loudly (a broker with no credential, or broker
-// env with no broker, would otherwise silently produce an unbrokered
-// workspace). A literal secret is rejected at parse time, before any state is
-// written, matching --cred-swap; deeper validation and default-filling happen
-// in the workspace layer.
+// applyBrokerOptionFlags parses the --broker-* flags into Options.Broker via the
+// shared workspace.ParseBrokerConfig, so the CLI and the Agentfile agent.broker
+// block validate and build a broker identically. A partial declaration fails
+// loudly and a literal secret is rejected at parse time, before any state is
+// written (matching --cred-swap).
 func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy bool) error {
-	upstream := strings.TrimSpace(brokerUpstream)
-	secretSpec := strings.TrimSpace(brokerSecret)
-	if upstream == "" && secretSpec == "" {
-		if len(brokerEnv) != 0 || brokerProxy {
-			return fmt.Errorf("--broker-env/--broker-proxy require --broker-upstream and --broker-secret")
-		}
-		return nil
+	broker, err := workspace.ParseBrokerConfig(brokerUpstream, brokerSecret, []string(brokerEnv), brokerProxy)
+	if err != nil {
+		return err
 	}
-	if upstream == "" || secretSpec == "" {
-		return fmt.Errorf("--broker-upstream and --broker-secret are required together")
-	}
-	name, ref, ok := strings.Cut(secretSpec, "=")
-	name = strings.TrimSpace(name)
-	ref = strings.TrimSpace(ref)
-	if !ok || name == "" || ref == "" {
-		return fmt.Errorf("broker secret must be NAME=<scheme>:<ref>: %s", secretSpec)
-	}
-	if !secretxfer.ValidName(name) {
-		return fmt.Errorf("broker secret name is invalid: %s", name)
-	}
-	if !secret.DefaultRegistry(nil, nil).ValidRef(ref) {
-		return fmt.Errorf("broker secret reference %q must be <scheme>:<ref> (env:/file:/dotenv:/vault:/helper:), never a literal secret", ref)
-	}
-	var baseURLEnv map[string]string
-	for _, raw := range brokerEnv {
-		key, value, _ := strings.Cut(raw, "=")
-		key = strings.TrimSpace(key)
-		if !validEnvName(key) {
-			return fmt.Errorf("broker env key is invalid: %s", raw)
-		}
-		if baseURLEnv == nil {
-			baseURLEnv = map[string]string{}
-		}
-		baseURLEnv[key] = value
-	}
-	opts.Broker = &vmkit.BrokerConfig{
-		Upstream:   upstream,
-		Secret:     vmkit.SecretRef{Name: name, Ref: ref},
-		Proxy:      brokerProxy,
-		BaseURLEnv: baseURLEnv,
+	if broker != nil {
+		opts.Broker = broker
 	}
 	return nil
 }
