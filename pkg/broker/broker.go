@@ -69,6 +69,9 @@ type Terminate struct {
 	// OnDecision receives the per-request decision record — the minimized
 	// default emission (verdict + metadata, no content).
 	OnDecision OnDecision
+	// Policy, when set, judges each pre-swap request before any bytes go
+	// upstream. Fail-closed: an error or panic denies.
+	Policy Policy
 	// Client originates the upstream request. Defaults to http.DefaultClient
 	// (its own TLS). Injected in tests to point at a mock upstream.
 	Client *http.Client
@@ -94,12 +97,14 @@ func (t *Terminate) client() *http.Client {
 func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	// Tap PRE-SWAP: r.Header still holds the workload's own values.
-	if t.OnTap != nil {
-		t.OnTap(TapRecord{
-			Mode: "terminate", Method: r.Method, Host: t.Upstream.Host,
-			Path: r.URL.Path, Headers: r.Header.Clone(), At: time.Now(),
-		})
+	tap := TapRecord{
+		Mode: "terminate", Method: r.Method, Host: t.Upstream.Host,
+		Path: r.URL.Path, Headers: r.Header.Clone(), At: time.Now(),
 	}
+	if t.OnTap != nil {
+		t.OnTap(tap)
+	}
+	var labels []string
 	deny := func(rule string, signals ...string) {
 		if t.OnDecision == nil {
 			return
@@ -107,9 +112,19 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.OnDecision(DecisionRecord{
 			Event: EventRequestDeny, TS: time.Now(), Mode: "terminate",
 			Host: t.Upstream.Host, Method: r.Method, Verdict: "deny",
-			Rule: rule, Signals: signals,
+			Rule: rule, Signals: signals, Labels: labels,
 			DurationMs: time.Since(start).Milliseconds(),
 		})
+	}
+
+	// The policy sees the pre-swap request inside the boundary; only its
+	// verdict has any effect outside.
+	verdict := evaluate(t.Policy, tap)
+	labels = verdict.Labels
+	if !verdict.Allow {
+		http.Error(w, "broker: denied by policy", http.StatusForbidden)
+		deny(verdict.Rule)
+		return
 	}
 
 	out := *t.Upstream
@@ -168,6 +183,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		t.OnDecision(DecisionRecord{
 			Event: EventRequestAllow, TS: time.Now(), Mode: "terminate",
 			Host: t.Upstream.Host, Method: r.Method, Verdict: "allow",
+			Rule: verdict.Rule, Labels: labels,
 			Status: resp.StatusCode, BytesOut: body.n, BytesIn: respBytes,
 			DurationMs: time.Since(start).Milliseconds(), SecretRefs: refs,
 		})
@@ -243,6 +259,8 @@ type Connect struct {
 	// OnDecision receives one record per tunnel, at tunnel close — byte
 	// counts and timing for an opaque stream, never its contents.
 	OnDecision OnDecision
+	// Policy, when set, judges each tunnel before it dials. Fail-closed.
+	Policy Policy
 	// Dial opens the upstream connection; an enforcement-aware dialer
 	// (deny-by-default, allowlist) can be injected here. Defaults to a plain
 	// TCP dialer.
@@ -258,8 +276,9 @@ func (c *Connect) dial(network, addr string) (net.Conn, error) {
 
 func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	tap := TapRecord{Mode: "connect", Method: r.Method, Host: r.Host, At: time.Now()}
 	if c.OnTap != nil {
-		c.OnTap(TapRecord{Mode: "connect", Method: r.Method, Host: r.Host, At: time.Now()})
+		c.OnTap(tap)
 	}
 	emit := func(rec DecisionRecord) {
 		if c.OnDecision == nil {
@@ -271,6 +290,12 @@ func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rec.Method = r.Method
 		rec.DurationMs = time.Since(start).Milliseconds()
 		c.OnDecision(rec)
+	}
+	verdict := evaluate(c.Policy, tap)
+	if !verdict.Allow {
+		http.Error(w, "broker: denied by policy", http.StatusForbidden)
+		emit(DecisionRecord{Event: EventRequestDeny, Verdict: "deny", Rule: verdict.Rule, Labels: verdict.Labels})
+		return
 	}
 	upstream, err := c.dial("tcp", r.Host)
 	if err != nil {
@@ -307,6 +332,7 @@ func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	<-done
 	emit(DecisionRecord{
 		Event: EventRequestAllow, Verdict: "allow",
+		Rule: verdict.Rule, Labels: verdict.Labels,
 		BytesOut: toUpstream, BytesIn: toClient,
 	})
 }
