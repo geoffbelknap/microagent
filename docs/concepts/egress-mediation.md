@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-07_
+_Last updated: 2026-07-09_
 
 Egress mediation is microagent's transparent control point for workspace
 network traffic. When mediation is active, the host captures the guest's
@@ -32,7 +32,7 @@ of asking you to infer it from logs.
 > loopback, and east-west peers) while still allowing the public internet
 > freely. To permit a specific internal host use `--egress-allow <host-or-ip>`.
 
-## The three modes
+## The egress modes
 
 A workspace's egress posture is set with `--egress` on
 [`create`](/cli/create/) or [`run`](/cli/run/):
@@ -40,6 +40,7 @@ A workspace's egress posture is set with `--egress` on
 | Mode | What happens | Default |
 |---|---|---|
 | `guarded` | Denies "the inside" (link-local/metadata 169.254/16, RFC1918, IPv6 ULA, CGNAT 100.64/10, loopback, east-west peers) on the **resolved destination IP**; allows the public internet with **no allowlist required**. DNS resolves freely — the inside protection is enforced at connect time, which also defeats DNS rebinding. | **Yes** |
+| `broker` | Same allow-broad / deny-the-inside decision as `guarded`, but allowed TLS is **spliced opaquely instead of intercepted**: the mediator forges no certificate and **delivers no CA to the guest**, which sees the real upstream certificate. Content stays opaque; the destination is still enforced and audited. | No |
 | `strict` | **Deny anything not on the allowlist**, and the mediator is the **only DNS resolver** — non-allowlisted names get REFUSED before any connection is attempted. | No |
 | `off` | No mediation. The guest's network device is wired straight to the chosen [network mode](/concepts/networking/). | No |
 
@@ -53,6 +54,18 @@ without any allowlist but need the host and internal infrastructure protected;
 to grant access to a specific internal host, add it with `--egress-allow`.
 Reach for `strict` when you want the agent confined to an explicit set of
 destinations.
+
+Reach for `broker` when you want the same protection as `guarded` **without**
+microagent reading the guest's TLS: it splices allowed connections opaquely and
+never installs a CA in the guest, so cert-pinning clients keep working and there
+is no interception trust to reason about. The trade-off is that the operator no
+longer sees request/response content for those flows (only the destination and
+the audit decision). Add `--egress-lock-allowlist` to restrict `broker` to
+allowlisted destinations only — the destination-restriction posture of `strict`,
+but still without TLS interception or a guest CA. As the guest's sole resolver,
+`broker` also strips HTTPS/SVCB records — and any Encrypted Client Hello (ECH)
+config — from DNS answers, so the TLS SNI stays visible and enforcement is not
+blinded by ECH.
 
 ### Allowlist exception under guarded
 

@@ -571,7 +571,7 @@ command, and returns its result AND a summary of what it reached on the network
 tears the workspace down. One-shot: nothing persists.
 
 Common flags (same as run):
-  --egress <mode>              guarded (default; deny-the-inside) | strict | off
+  --egress <mode>              guarded (default; deny-the-inside) | broker (allow-broad, no CA) | strict | off
   --egress-allow <host>        allowlisted destination (repeatable)
   --egress-swap-config <path>  inject a credential host-side; the guest never holds it
   --cred-swap PROVIDER[=ref]   inject a built-in provider API key host-side (e.g. anthropic); reference only
@@ -4261,10 +4261,12 @@ Options:
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
   -egress <mode>        Egress mediation: guarded (default, deny inside),
+                         broker (allow-broad, opaque splice, no CA in guest),
                          strict (deny non-allowlisted), or off
   -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
   -egress-passthrough <host>
                          Allowed egress host that is not TLS-intercepted (repeatable)
+  -egress-lock-allowlist In broker mode, restrict egress to allowlisted destinations only
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
@@ -4354,10 +4356,12 @@ Options:
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
   -egress <mode>        Egress mediation: guarded (default, deny inside),
+                         broker (allow-broad, opaque splice, no CA in guest),
                          strict (deny non-allowlisted), or off
   -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
   -egress-passthrough <host>
                          Allowed egress host that is not TLS-intercepted (repeatable)
+  -egress-lock-allowlist In broker mode, restrict egress to allowlisted destinations only
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
