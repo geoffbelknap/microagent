@@ -66,6 +66,9 @@ type Terminate struct {
 	Upstream *url.URL
 	Resolve  SecretResolver
 	OnTap    Tap
+	// OnDecision receives the per-request decision record — the minimized
+	// default emission (verdict + metadata, no content).
+	OnDecision OnDecision
 	// Client originates the upstream request. Defaults to http.DefaultClient
 	// (its own TLS). Injected in tests to point at a mock upstream.
 	Client *http.Client
@@ -89,6 +92,7 @@ func (t *Terminate) client() *http.Client {
 }
 
 func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	// Tap PRE-SWAP: r.Header still holds the workload's own values.
 	if t.OnTap != nil {
 		t.OnTap(TapRecord{
@@ -96,26 +100,48 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Path: r.URL.Path, Headers: r.Header.Clone(), At: time.Now(),
 		})
 	}
+	deny := func(rule string, signals ...string) {
+		if t.OnDecision == nil {
+			return
+		}
+		t.OnDecision(DecisionRecord{
+			Event: EventRequestDeny, TS: time.Now(), Mode: "terminate",
+			Host: t.Upstream.Host, Method: r.Method, Verdict: "deny",
+			Rule: rule, Signals: signals,
+			DurationMs: time.Since(start).Milliseconds(),
+		})
+	}
 
 	out := *t.Upstream
 	out.Path = singleJoiningSlash(t.Upstream.Path, r.URL.Path)
 	out.RawQuery = r.URL.RawQuery
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, out.String(), r.Body)
+	body := &countingReader{r: r.Body}
+	req, err := http.NewRequestWithContext(r.Context(), r.Method, out.String(), body)
 	if err != nil {
 		http.Error(w, "broker: build upstream request", http.StatusBadGateway)
+		deny("bad-request")
 		return
 	}
 
 	// Copy headers, swapping references. Fail closed before any bytes leave.
+	var refs []string
+	seenRef := map[string]bool{}
 	for k, vals := range r.Header {
 		if hopByHop[http.CanonicalHeaderKey(k)] {
 			continue
 		}
 		for _, v := range vals {
-			swapped, err := t.swap(v)
+			swapped, names, err := t.swap(v)
 			if err != nil {
 				http.Error(w, "broker: unresolved secret reference", http.StatusBadGateway)
+				deny("unresolved-secret-ref", "unresolved-secret-ref")
 				return
+			}
+			for _, n := range names {
+				if !seenRef[n] {
+					seenRef[n] = true
+					refs = append(refs, n)
+				}
 			}
 			req.Header.Add(k, swapped)
 		}
@@ -124,6 +150,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := t.client().Do(req)
 	if err != nil {
 		http.Error(w, "broker: upstream: "+err.Error(), http.StatusBadGateway)
+		deny("upstream-error")
 		return
 	}
 	defer resp.Body.Close()
@@ -136,23 +163,33 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	respBytes, _ := io.Copy(w, resp.Body)
+	if t.OnDecision != nil {
+		t.OnDecision(DecisionRecord{
+			Event: EventRequestAllow, TS: time.Now(), Mode: "terminate",
+			Host: t.Upstream.Host, Method: r.Method, Verdict: "allow",
+			Status: resp.StatusCode, BytesOut: body.n, BytesIn: respBytes,
+			DurationMs: time.Since(start).Milliseconds(), SecretRefs: refs,
+		})
+	}
 }
 
 // swap replaces every @secret:<name> token in a header value with the resolved
-// live secret. An unknown name fails closed (returns an error), so the broker
-// never forwards an unresolved or empty credential.
-func (t *Terminate) swap(value string) (string, error) {
+// live secret and returns the reference names it substituted (for the decision
+// record — names only, never values). An unknown name fails closed (returns an
+// error), so the broker never forwards an unresolved or empty credential.
+func (t *Terminate) swap(value string) (string, []string, error) {
 	if !strings.Contains(value, RefPrefix) {
-		return value, nil
+		return value, nil, nil
 	}
 	var b strings.Builder
+	var names []string
 	rest := value
 	for {
 		i := strings.Index(rest, RefPrefix)
 		if i < 0 {
 			b.WriteString(rest)
-			return b.String(), nil
+			return b.String(), names, nil
 		}
 		b.WriteString(rest[:i])
 		nameStart := i + len(RefPrefix)
@@ -162,13 +199,14 @@ func (t *Terminate) swap(value string) (string, error) {
 		}
 		name := rest[nameStart:j]
 		if name == "" {
-			return "", fmt.Errorf("empty secret reference")
+			return "", nil, fmt.Errorf("empty secret reference")
 		}
 		secret, ok := t.Resolve(name)
 		if !ok {
-			return "", fmt.Errorf("unknown secret reference %q", name)
+			return "", nil, fmt.Errorf("unknown secret reference %q", name)
 		}
 		b.WriteString(secret)
+		names = append(names, name)
 		rest = rest[j:]
 	}
 }

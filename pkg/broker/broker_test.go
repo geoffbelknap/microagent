@@ -131,13 +131,16 @@ func TestTerminateSwapMechanics(t *testing.T) {
 		{"a " + RefPrefix + "k b", "a S b"},
 	}
 	for _, c := range cases {
-		got, err := term.swap(c.in)
+		got, _, err := term.swap(c.in)
 		if err != nil || got != c.want {
 			t.Fatalf("swap(%q) = %q, %v; want %q", c.in, got, err, c.want)
 		}
 	}
-	if _, err := term.swap("Bearer " + RefPrefix + "missing"); err == nil {
+	if _, _, err := term.swap("Bearer " + RefPrefix + "missing"); err == nil {
 		t.Fatal("unknown reference must error")
+	}
+	if _, names, _ := term.swap("Bearer " + RefPrefix + "k"); len(names) != 1 || names[0] != "k" {
+		t.Fatalf("swap names = %v, want [k]", names)
 	}
 }
 
