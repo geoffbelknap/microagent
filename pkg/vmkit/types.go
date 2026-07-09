@@ -527,6 +527,12 @@ const (
 	EgressModeGuarded = "guarded"
 	EgressModeStrict  = "strict"
 	EgressModeOff     = "off"
+	// EgressModeBroker terminates guest egress at a forward proxy instead of
+	// forging per-SNI certificates: the mediator splices allowed flows opaquely
+	// and delivers no CA to the guest. Credential injection happens on the
+	// cooperative base-URL vsock channel, not this transparent path. See the
+	// P3.5 S2 design.
+	EgressModeBroker = "broker"
 )
 
 // NormalizeEgressMode collapses an egress mode string to one of the canonical
@@ -538,6 +544,8 @@ func NormalizeEgressMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case EgressModeStrict:
 		return EgressModeStrict
+	case EgressModeBroker:
+		return EgressModeBroker
 	case EgressModeOff:
 		return EgressModeOff
 	default: // empty, "guarded", or unrecognized -> safe default
@@ -556,7 +564,7 @@ func NormalizeEgressMode(mode string) string {
 // with a CA the guest never receives).
 func EgressMediationOn(mode string) bool {
 	m := strings.ToLower(strings.TrimSpace(mode))
-	return m == EgressModeGuarded || m == EgressModeStrict
+	return m == EgressModeGuarded || m == EgressModeStrict || m == EgressModeBroker
 }
 
 // NetworkModeMediates reports whether the given network mode actually runs the

@@ -102,10 +102,10 @@ func (p EgressPolicy) ValidateForCaptureProvider(backend, networkMode string) er
 // Allow/Passthrough/DNS are assumed already cleaned by NormalizeEgressPolicy.
 func (p EgressPolicy) Validate() error {
 	switch p.Mode {
-	case EgressModeGuarded, EgressModeStrict, EgressModeOff:
+	case EgressModeGuarded, EgressModeStrict, EgressModeBroker, EgressModeOff:
 		// valid
 	default:
-		return fmt.Errorf("vmkit: invalid egress mode %q: must be one of guarded, strict, off", p.Mode)
+		return fmt.Errorf("vmkit: invalid egress mode %q: must be one of guarded, strict, broker, off", p.Mode)
 	}
 	if p.Caps.MaxBytesPerSec < 0 {
 		return fmt.Errorf("vmkit: Caps.MaxBytesPerSec must be non-negative, got %d", p.Caps.MaxBytesPerSec)
