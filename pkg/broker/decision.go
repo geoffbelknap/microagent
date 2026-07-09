@@ -20,7 +20,7 @@ const (
 // cannot appear in it by construction (SecretRefs carries reference names,
 // never values).
 type DecisionRecord struct {
-	Event      string    `json:"event"`   // broker_request_allow | broker_request_deny
+	Event      string    `json:"event"` // broker_request_allow | broker_request_deny
 	TS         time.Time `json:"ts"`
 	Mode       string    `json:"mode"`    // terminate | connect
 	Host       string    `json:"host"`    // upstream host
