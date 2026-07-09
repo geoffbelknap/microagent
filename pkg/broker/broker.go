@@ -224,7 +224,7 @@ func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "broker: connect upstream", http.StatusBadGateway)
 		return
 	}
-	defer upstream.Close()
+	defer func() { _ = upstream.Close() }()
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
@@ -235,7 +235,7 @@ func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	if _, err := client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
 		return
 	}
