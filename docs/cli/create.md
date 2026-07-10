@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-09_
+_Last updated: 2026-07-10_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -241,13 +241,13 @@ The complete set:
 | `-p <mapping>` | Alias for `--publish` |
 | `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
 | `--mediation-optional` | Allow startup when mediation is unavailable |
-| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `guarded` (default; deny the inside, allow public), `broker` (allow-broad, opaque forward-proxy — no certificate forged, no CA in the guest), `strict` (deny non-allowlisted), or `off`. Persisted with the workspace |
-| `--egress-lock-allowlist` | In `--egress broker`, restrict egress to allowlisted destinations only (drop the allow-broad default), keeping the opaque-splice, no-CA behavior |
+| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `broker` (default; allow-broad, opaque forward-proxy — no certificate forged, no CA in the guest), `mitm` (allow-broad, forge per-SNI — sunsetting), or `off`. Persisted with the workspace |
+| `--egress-lock-allowlist` | Restrict egress to allowlisted destinations only (drop the allow-broad default) on `--egress broker` or `mitm` — the retired `strict` reach control |
 | `--egress-allow <host>` | Allowlisted egress destination (TLS-intercepted). Repeatable; an exact host or a `.suffix` matching the apex and subdomains. See the [allowlist how-to](/guides/egress-allowlist/) |
 | `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted (forwarded opaquely). Repeatable. For cert-pinned / mTLS endpoints |
-| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress guarded` or `strict` |
-| `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress guarded` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
-| `--cred-swap PROVIDER[=ref]` | Shorthand for a credential swap against a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`): allowlists the provider host and injects its API key host-side so the guest never holds it. The optional `=ref` is a reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret; omitted, it defaults to the provider's conventional env var. Repeatable; requires `--egress guarded` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
+| `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `--cred-swap PROVIDER[=ref]` | Shorthand for a credential swap against a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`): allowlists the provider host and injects its API key host-side so the guest never holds it. The optional `=ref` is a reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret; omitted, it defaults to the provider's conventional env var. Repeatable; requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
 | `--broker-upstream <url>` | Route egress through the [egress broker](/concepts/egress-mediation/): a host-side proxy that injects the credential and originates its own upstream TLS, so the guest never holds the key. Persisted with the workspace |
 | `--broker-secret NAME=<scheme>:<ref>` | Broker credential; the guest sends `@secret:NAME` references and the broker swaps in the live value host-side. A reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret. Required with `--broker-upstream` |
 | `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; an empty `VALUE` is filled with the broker URL (e.g. `--broker-env ANTHROPIC_BASE_URL`). Repeatable |

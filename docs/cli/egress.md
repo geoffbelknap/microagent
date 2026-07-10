@@ -4,7 +4,7 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-09_
+_Last updated: 2026-07-10_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
@@ -14,8 +14,8 @@ microagent egress <name> [--follow] [--state-dir <dir>]
 connection-level audit log and, when the workspace has an
 [egress broker](/concepts/egress-mediation/#the-broker-decision-stream)
 configured, the broker's per-request decision records, merged into one
-time-ordered view. Egress mediation is **on by default** (mode `guarded`; the
-other modes are `broker`, `strict`, and `off`), so every workspace whose
+time-ordered view. Egress mediation is **on by default** (mode `broker`; the
+other modes are `mitm` and `off`), so every workspace whose
 mediator has made a decision has this record. Each line is one decision:
 `egress_allow` / `egress_deny` for connections, the `egress_mitm_*` records
 for TLS interception, `egress_dns_allow` / `egress_dns_deny` for name
