@@ -175,7 +175,7 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 	// A broker supplied earlier (e.g. a --broker-* CLI flag) wins; the agent
 	// block only fills an unset one, consistent with the rest of ApplySpec.
 	if agent.Broker != nil && opts.Broker == nil {
-		broker, err := ParseBrokerConfig(agent.Broker.Upstream, agent.Broker.Secret, agent.Broker.Env, agent.Broker.Proxy)
+		broker, err := ParseBrokerConfig(agent.Broker.Upstream, agent.Broker.Secret, agent.Broker.Env, agent.Broker.Proxy, agent.Broker.Capture)
 		if err != nil {
 			return err
 		}

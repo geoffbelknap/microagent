@@ -290,6 +290,39 @@ the looser grant from an explicitly allowlisted one. This audit log is a separat
 from lifecycle [`events`](/cli/events/): `events` is how the workspace got to its
 state, `egress` is what it tried to reach and how the mediator ruled.
 
+## The broker decision stream
+
+A workspace with an [egress broker](/cli/create/) configured
+(`--broker-upstream` / `--broker-secret`) records a second, request-level
+stream alongside the mediator's connection-level log: one record per brokered
+request, written by the host companion, never by the guest.
+[`microagent egress`](/cli/egress/) merges both into one time-ordered view.
+
+| Record | Meaning |
+|---|---|
+| `broker_request_allow` | A brokered request completed; carries `mode` (`terminate` or `connect`), `method`, `host`, upstream `status` (terminate only), `bytes_out` / `bytes_in`, `duration_ms`, and `secret_refs` — the **names** of the credential references the broker swapped, never values |
+| `broker_request_deny` | A brokered request refused, with the `rule` that decided it (`unresolved-secret-ref`, `upstream-error`, or a policy rule) |
+
+The default record is deliberately **minimized metadata**: no request path, no
+headers, no bodies. It is safe to tail, persist, and export because content
+cannot appear in it by schema — and the live credential cannot appear in it by
+construction, because everything the broker records is captured **before** it
+swaps the reference for the live secret.
+
+### Governed raw capture
+
+`--broker-capture` (or `agent.broker.capture` in a spec) opts in to capturing
+the full pre-swap request — path, headers with the `@secret:` references
+verbatim, and a bounded body prefix — to a separate owner-only
+`broker-capture.jsonl` in the workspace state. Capture is **request-only**:
+requests are recorded pre-swap so the injected credential is absent by
+construction, while responses have no swap point (an upstream could echo the
+injected credential back), so they are never captured. What capture records is
+the workload's own request data — an operator observing their own workload —
+so it is a declared opt-in (persisted in the workspace manifest), never a
+silent default, and retention/access of the capture file is the operator's
+responsibility.
+
 ## See also
 
 - [Allowlist and passthrough how-to](/guides/egress-allowlist/) - the flags, the `.suffix` form, and the policy file

@@ -176,6 +176,7 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `agent.broker.secret` | Broker credential `NAME=<scheme>:<ref>` (reference only, never a literal); held host-side only, the guest sends `@secret:NAME` references |
 | `agent.broker.env` | Guest env vars pointed at the broker, each `KEY[=VALUE]` (empty value = the broker URL) |
 | `agent.broker.proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
+| `agent.broker.capture` | Opt in to raw capture of pre-swap broker requests to an owner-only file; off by default (the default record is the minimized decision stream) |
 
 ## Related
 

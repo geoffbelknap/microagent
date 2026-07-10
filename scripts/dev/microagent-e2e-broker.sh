@@ -12,8 +12,13 @@ set -euo pipefail
 #   - the workload sends a reference (`Authorization: Bearer @secret:api`);
 #     the mock upstream confirms it received the LIVE credential, which the
 #     guest never held (asserted against the guest's own environment);
-#   - the broker access trail records the pre-swap reference and provably
-#     never contains the live secret (absent by construction, not redaction).
+#   - the broker access trail is the minimized decision stream (verdict +
+#     metadata + reference NAMES — no path, headers, or bodies) and is live
+#     via `microagent egress`;
+#   - `--broker-capture` opts in to the governed raw capture: the pre-swap
+#     request (reference verbatim, path, body) lands in an owner-only file;
+#   - the live secret is provably absent from EVERY file in the workspace
+#     state (absent by construction, not redaction).
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=scripts/dev/e2e-lib.sh disable=SC1091
@@ -91,7 +96,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 expected = "Bearer " + os.environ["MA_E2E_BROKER_TOKEN"]
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    def _answer(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
         if self.headers.get("Authorization") == expected:
             body = b"UPSTREAM-SAW-LIVE-SECRET"
             self.send_response(200)
@@ -101,6 +109,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    do_GET = _answer
+    do_POST = _answer
 
     def log_message(self, *args):
         pass
@@ -127,25 +138,33 @@ UPSTREAM_PORT="$(cat "$STATE_DIR/upstream.port")"
 # This command runs in the GUEST shell: the $(wget ...) substitution and $resp
 # must expand there, not on this host, so the single quotes are deliberate.
 # shellcheck disable=SC2016
-GUEST_EXEC='resp="$(wget -qO- --header "Authorization: Bearer @secret:api" http://127.0.0.1:18888/check)" && echo "RESP:$resp"; echo GUEST-ENV-BEGIN; env; echo GUEST-ENV-END'
+GUEST_EXEC='resp="$(wget -qO- --post-data "guest-request-body" --header "Authorization: Bearer @secret:api" http://127.0.0.1:18888/check)" && echo "RESP:$resp"; echo GUEST-ENV-BEGIN; env; echo GUEST-ENV-END'
 MA_E2E_BROKER_TOKEN="$LIVE_SECRET" "$CLI" --mode=ax run \
   --name "$WORKSPACE" \
   --image "$IMAGE" \
   --network isolated \
   --broker-upstream "http://127.0.0.1:$UPSTREAM_PORT" \
   --broker-secret "api=env:MA_E2E_BROKER_TOKEN" \
+  --broker-capture \
   --keep \
   --exec "$GUEST_EXEC" \
   --state-dir "$STATE_DIR" >"$STATE_DIR/run.json"
 
+# The merged live view surfaces the broker's decision records.
+"$CLI" egress "$WORKSPACE" --state-dir "$STATE_DIR" >"$STATE_DIR/egress-view.txt"
+
 BROKER_TRAIL="$STATE_DIR/$WORKSPACE/broker-access.jsonl"
+BROKER_CAPTURE="$STATE_DIR/$WORKSPACE/broker-capture.jsonl"
 MA_E2E_BROKER_TOKEN="$LIVE_SECRET" python3 - \
   "$STATE_DIR/run.json" \
   "$BROKER_TRAIL" \
-  "$STATE_DIR/workspaces/$WORKSPACE/workspace.json" <<'PY'
-import json, os, sys
+  "$STATE_DIR/workspaces/$WORKSPACE/workspace.json" \
+  "$BROKER_CAPTURE" \
+  "$STATE_DIR/$WORKSPACE" \
+  "$STATE_DIR/egress-view.txt" <<'PY'
+import base64, json, os, sys
 
-run_path, trail_path, manifest_path = sys.argv[1:4]
+run_path, trail_path, manifest_path, capture_path, ws_state_dir, view_path = sys.argv[1:7]
 live = os.environ["MA_E2E_BROKER_TOKEN"]
 
 with open(run_path) as f:
@@ -167,23 +186,61 @@ assert live not in stdout, "INVARIANT VIOLATION: live secret visible inside the 
 # The guest env carries the broker wiring the create flags baked in.
 assert "MICROAGENT_VSOCK_TCP_LISTENERS=127.0.0.1:18888=1032" in env_dump, f"bridge env missing: {env_dump!r}"
 
-# The broker access trail records the pre-swap reference and provably never
-# the live secret (absent by construction, not redaction).
+# The broker access trail is the minimized decision stream: verdict, metadata,
+# and the NAMES of the references used — no path, no headers, no body, and
+# never the live secret (absent by construction, not redaction).
 with open(trail_path) as f:
     trail = f.read()
-assert "@secret:api" in trail, f"pre-swap reference missing from broker trail:\n{trail}"
-assert live not in trail, f"INVARIANT VIOLATION: live secret present in broker trail:\n{trail}"
+assert "broker_request_allow" in trail, f"decision record missing from broker trail:\n{trail}"
+assert '"secret_refs":["api"]' in trail, f"credential-use metadata missing:\n{trail}"
+for banned in ("@secret:api", "/check", '"headers"', "guest-request-body", live):
+    assert banned not in trail, f"default trail must be minimized metadata, found {banned!r}:\n{trail}"
 
-# The manifest persists the broker config — reference only — so every start
-# re-arms the broker identically.
+# The governed capture holds the pre-swap request: reference verbatim, path,
+# body — and still never the live secret.
+with open(capture_path) as f:
+    capture = f.read()
+assert "@secret:api" in capture, f"pre-swap reference missing from capture:\n{capture}"
+assert "/check" in capture, f"path missing from capture:\n{capture}"
+body_b64 = base64.b64encode(b"guest-request-body").decode()
+assert body_b64 in capture, f"request body missing from capture:\n{capture}"
+assert live not in capture, f"INVARIANT VIOLATION: live secret present in capture:\n{capture}"
+
+# The merged `microagent egress` view surfaces the broker's decisions live.
+with open(view_path) as f:
+    view = f.read()
+assert "broker_request_allow" in view, f"broker decisions missing from egress view:\n{view}"
+
+# The manifest persists the broker config — reference only, capture opt-in
+# declared — so every start re-arms the broker identically.
 with open(manifest_path) as f:
     manifest = json.load(f)
 broker = manifest.get("broker") or {}
 assert broker.get("upstream", "").startswith("http://127.0.0.1:"), f"manifest broker = {broker}"
 assert broker.get("secret", {}).get("ref") == "env:MA_E2E_BROKER_TOKEN", f"manifest broker secret = {broker.get('secret')}"
+assert broker.get("capture") is True, f"capture opt-in not declared in manifest: {broker}"
 assert live not in json.dumps(manifest), "INVARIANT VIOLATION: live secret persisted in the manifest"
 
-print("broker: guest with no network reached the upstream through the broker; credential injected host-side, never present in guest, trail, or manifest")
+# The hard invariant, companion-wide: the live secret is absent from EVERY
+# regular file under the workspace's state. Non-regular entries (the serial
+# FIFO, vsock/API sockets) are skipped by stat, not by open(2) — opening a
+# FIFO would block forever waiting for a writer.
+import stat
+for root, _, files in os.walk(ws_state_dir):
+    for fname in files:
+        path = os.path.join(root, fname)
+        try:
+            if not stat.S_ISREG(os.lstat(path).st_mode):
+                continue
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            continue
+        assert live.encode() not in data, f"INVARIANT VIOLATION: live secret present in {path}"
+
+print("broker: guest with no network reached the upstream through the broker; "
+      "decision stream minimized + live via egress view; capture held the pre-swap "
+      "request; live credential absent from every file in the workspace state")
 PY
 
 echo "microagent E2E broker passed"

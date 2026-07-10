@@ -21,12 +21,14 @@ import (
 //   - secretSpec: "NAME=<scheme>:<ref>"; the credential is held host-side only.
 //   - env:        base-URL env keys pointed at the broker, each "KEY[=VALUE]".
 //   - proxy:      set HTTPS_PROXY/HTTP_PROXY in the guest to the broker.
-func ParseBrokerConfig(upstream, secretSpec string, env []string, proxy bool) (*vmkit.BrokerConfig, error) {
+//   - capture:    governed raw-capture opt-in (pre-swap requests to a
+//     separate owner-only file); off by default.
+func ParseBrokerConfig(upstream, secretSpec string, env []string, proxy, capture bool) (*vmkit.BrokerConfig, error) {
 	upstream = strings.TrimSpace(upstream)
 	secretSpec = strings.TrimSpace(secretSpec)
 	if upstream == "" && secretSpec == "" {
-		if len(env) != 0 || proxy {
-			return nil, fmt.Errorf("broker env/proxy require a broker upstream and secret")
+		if len(env) != 0 || proxy || capture {
+			return nil, fmt.Errorf("broker env/proxy/capture require a broker upstream and secret")
 		}
 		return nil, nil
 	}
@@ -62,6 +64,7 @@ func ParseBrokerConfig(upstream, secretSpec string, env []string, proxy bool) (*
 		Secret:     vmkit.SecretRef{Name: name, Ref: ref},
 		Proxy:      proxy,
 		BaseURLEnv: baseURLEnv,
+		Capture:    capture,
 	}, nil
 }
 

@@ -178,6 +178,7 @@ The complete set:
 | `--broker-secret NAME=<scheme>:<ref>` | Broker credential; the guest sends `@secret:NAME` references and the broker swaps in the live value host-side. A reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret. Required with `--broker-upstream` |
 | `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; an empty `VALUE` is filled with the broker URL (e.g. `--broker-env ANTHROPIC_BASE_URL`). Repeatable |
 | `--broker-proxy` | Also set `HTTPS_PROXY` / `HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
+| `--broker-capture` | Opt in to raw capture of pre-swap broker requests (path, headers with references, bounded body) to an owner-only per-workspace file. Off by default — the default record is the minimized decision stream. See [broker observability](/concepts/egress-mediation/#the-broker-decision-stream) |
 | `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model and inject `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL`; with `--keep`, the ref persists and later `start`s re-pair. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
 | `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom` |

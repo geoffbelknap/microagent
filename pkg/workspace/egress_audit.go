@@ -31,6 +31,12 @@ func EgressAuditPath(stateDir, name string) string {
 	return filepath.Join(stateDir, name, "egress-access.jsonl")
 }
 
+// BrokerAccessPath is the per-workspace broker decision stream: one JSON
+// object per brokered request, appended by the broker's host companion.
+func BrokerAccessPath(stateDir, name string) string {
+	return filepath.Join(stateDir, name, "broker-access.jsonl")
+}
+
 // ReadEgressAudit returns the egress mediator's recorded decisions for a
 // workspace, oldest first. The audit log is line-delimited JSON, so it is read
 // line by line rather than as a single document.
@@ -45,7 +51,42 @@ func ReadEgressAudit(stateDir, name string) ([]EgressEvent, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(EgressAuditPath(stateDir, name))
+	return readEventRecords(EgressAuditPath(stateDir, name))
+}
+
+// ReadBrokerAccess returns the broker's per-request decision records for a
+// workspace, oldest first. Broker records share the mediator's event-record
+// shape (event/ts/host + record-specific keys kept in Raw), so the same
+// tolerant reader serves both streams; absent-file and truncated-line
+// semantics match ReadEgressAudit.
+func ReadBrokerAccess(stateDir, name string) ([]EgressEvent, error) {
+	if err := ValidateName(name); err != nil {
+		return nil, err
+	}
+	return readEventRecords(BrokerAccessPath(stateDir, name))
+}
+
+// MergeEgressEvents interleaves two already-ordered event streams into one
+// time-ordered view (RFC3339 timestamps compare lexicographically); on equal
+// timestamps, records from a keep their position before records from b.
+func MergeEgressEvents(a, b []EgressEvent) []EgressEvent {
+	merged := make([]EgressEvent, 0, len(a)+len(b))
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if b[j].TS < a[i].TS {
+			merged = append(merged, b[j])
+			j++
+		} else {
+			merged = append(merged, a[i])
+			i++
+		}
+	}
+	merged = append(merged, a[i:]...)
+	return append(merged, b[j:]...)
+}
+
+func readEventRecords(path string) ([]EgressEvent, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []EgressEvent{}, nil
