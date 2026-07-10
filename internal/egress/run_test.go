@@ -89,13 +89,14 @@ func TestServePoliciesPeerRoster(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Serve(ctx, ln, Options{
-			Mode:      "strict",
-			Allow:     []string{"builder"},
-			Peers:     []string{"builder=" + upAddr.Addr().String()},
-			Logger:    log,
-			OrigDst:   func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
-			Ready:     &strings.Builder{},
-			UDPListen: plainUDPListen(t),
+			Mode:          "mitm",
+			LockAllowlist: true,
+			Allow:         []string{"builder"},
+			Peers:         []string{"builder=" + upAddr.Addr().String()},
+			Logger:        log,
+			OrigDst:       func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+			Ready:         &strings.Builder{},
+			UDPListen:     plainUDPListen(t),
 		})
 	}()
 	conn, err := net.Dial("tcp", ln.Addr().String())
@@ -294,7 +295,7 @@ func TestServeServesUDP(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Serve(ctx, ln, Options{
-			Mode:    "guarded", // bare-IP host (not that we reach allow here)
+			Mode:    "mitm", // bare-IP host (not that we reach allow here)
 			Logger:  log,
 			OrigDst: func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("127.0.0.1:9"), nil },
 			UDPListen: func(_ netip.AddrPort) (*net.UDPConn, error) {
@@ -343,7 +344,7 @@ func TestServeFailsClosedOnUDPListenError(t *testing.T) {
 	wantErr := errors.New("no TPROXY capability")
 	log := &BufferLogger{}
 	err := Serve(context.Background(), ln, Options{
-		Mode:    "guarded",
+		Mode:    "mitm",
 		Logger:  log,
 		OrigDst: func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("127.0.0.1:9"), nil },
 		UDPListen: func(_ netip.AddrPort) (*net.UDPConn, error) {
@@ -396,13 +397,14 @@ func TestServeFailsClosedWhenCapsExhausted(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Serve(ctx, ln, Options{
-			Mode:      "strict",
-			Allow:     []string{upAddr.Addr().String()}, // allowlist the loopback upstream so the flow reaches the cap
-			Logger:    log,
-			OrigDst:   func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
-			Ready:     &strings.Builder{},
-			UDPListen: plainUDPListen(t),
-			Limits:    Limits{MaxTotalBytes: 1}, // any forwarded byte exceeds the cap
+			Mode:          "mitm",
+			LockAllowlist: true,
+			Allow:         []string{upAddr.Addr().String()}, // allowlist the loopback upstream so the flow reaches the cap
+			Logger:        log,
+			OrigDst:       func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+			Ready:         &strings.Builder{},
+			UDPListen:     plainUDPListen(t),
+			Limits:        Limits{MaxTotalBytes: 1}, // any forwarded byte exceeds the cap
 		})
 	}()
 

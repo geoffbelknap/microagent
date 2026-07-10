@@ -13,7 +13,7 @@ func TestEgressOffWarning(t *testing.T) {
 	if w := egressOffWarning("off"); w == "" || !strings.Contains(strings.ToLower(w), "egress") {
 		t.Fatalf("egressOffWarning(off) = %q, want a non-empty egress notice", w)
 	}
-	for _, mode := range []string{"guarded", "strict", ""} {
+	for _, mode := range []string{"broker", "mitm", ""} {
 		if w := egressOffWarning(mode); w != "" {
 			t.Fatalf("egressOffWarning(%q) = %q, want no warning", mode, w)
 		}
@@ -38,7 +38,7 @@ name: claude-agent
 image: docker.io/library/python:3.12-slim
 agent:
   entry: python /app/agent.py
-  egress: strict
+  egress: mitm
   allow: [api.anthropic.com]
   cred-swap: [anthropic]
 `)
@@ -49,8 +49,8 @@ agent:
 	if opts.ExecCommand != "python /app/agent.py" {
 		t.Fatalf("ExecCommand = %q, want the agent entry", opts.ExecCommand)
 	}
-	if opts.EgressMode != "strict" {
-		t.Fatalf("EgressMode = %q, want strict", opts.EgressMode)
+	if opts.EgressMode != "mitm" {
+		t.Fatalf("EgressMode = %q, want mitm", opts.EgressMode)
 	}
 	got := map[string]bool{}
 	for _, h := range opts.EgressAllow {
@@ -72,14 +72,14 @@ name: demo
 image: docker.io/library/python:3.12-slim
 agent:
   entry: python /app/agent.py
-  egress: guarded
+  egress: broker
 `)
-	opts, err := parseWorkspaceOptions("dispatch", []string{"--file", path, "--egress", "strict"})
+	opts, err := parseWorkspaceOptions("dispatch", []string{"--file", path, "--egress", "mitm"})
 	if err != nil {
 		t.Fatalf("parseWorkspaceOptions: %v", err)
 	}
-	if opts.EgressMode != "strict" {
-		t.Fatalf("EgressMode = %q, want the flag value strict to override the spec", opts.EgressMode)
+	if opts.EgressMode != "mitm" {
+		t.Fatalf("EgressMode = %q, want the flag value mitm to override the spec", opts.EgressMode)
 	}
 }
 
@@ -109,7 +109,7 @@ name: demo
 image: docker.io/library/python:3.12-slim
 agent:
   entry: python /app/agent.py
-  egress: strict
+  egress: mitm
   cred-swap: [anthropic]
 `)
 	opts, err := parseWorkspaceOptions("dispatch", []string{"--file", path, "--cred-swap", "openai"})
@@ -140,7 +140,7 @@ agent:
 	if err == nil {
 		t.Fatal("parseWorkspaceOptions accepted egress off + cred-swap from a spec; want rejection")
 	}
-	if !strings.Contains(err.Error(), "guarded or strict") {
-		t.Fatalf("error = %q, want it to require guarded or strict", err)
+	if !strings.Contains(err.Error(), "mitm") {
+		t.Fatalf("error = %q, want it to require mitm", err)
 	}
 }

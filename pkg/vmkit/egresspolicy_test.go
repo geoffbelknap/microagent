@@ -10,12 +10,10 @@ func TestNormalizeEgressPolicyModeDefaults(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"", "guarded"},
-		{"guarded", "guarded"},
-		{"  GUARDED ", "guarded"},
-		{"strict", "strict"},
+		{"", "broker"}, // default resolves to broker
+		{"broker", "broker"},
+		{"  MITM ", "mitm"}, // lowercased + trimmed, not validated here
 		{"off", "off"},
-		{"bogus", "guarded"},
 	}
 	for _, tc := range cases {
 		p := NormalizeEgressPolicy(EgressPolicy{Mode: tc.in})
@@ -55,7 +53,7 @@ func TestNormalizeEgressPolicyCleansLists(t *testing.T) {
 
 func TestEgressPolicyValidateOK(t *testing.T) {
 	p := NormalizeEgressPolicy(EgressPolicy{
-		Mode:  "guarded",
+		Mode:  "broker",
 		Allow: []string{"api.example.com"},
 		Caps: EgressCaps{
 			MaxBytesPerSec:     1024,
@@ -72,7 +70,7 @@ func TestEgressPolicyValidateOK(t *testing.T) {
 
 func TestEgressPolicyValidateRejectsNegativeCap(t *testing.T) {
 	p := NormalizeEgressPolicy(EgressPolicy{
-		Mode: "guarded",
+		Mode: "broker",
 		Caps: EgressCaps{
 			MaxTotalBytes: -1,
 		},
@@ -100,12 +98,12 @@ func TestEgressPolicyValidateForNetworkMode(t *testing.T) {
 		networkMode string
 		wantErr     bool
 	}{
-		{"guarded", "isolated", false},
-		{"guarded", "user", false},
-		{"guarded", "", false},
-		{"strict", "user", false},
+		{"broker", "isolated", false},
+		{"broker", "user", false},
+		{"broker", "", false},
+		{"mitm", "user", false},
 		{"off", "isolated", false},
-		{"guarded", "Isolated", false}, // case-insensitive isolated check (defense-in-depth)
+		{"broker", "Isolated", false}, // case-insensitive isolated check (defense-in-depth)
 	}
 	for _, tc := range cases {
 		p := EgressPolicy{Mode: tc.mode}

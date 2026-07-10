@@ -571,7 +571,7 @@ command, and returns its result AND a summary of what it reached on the network
 tears the workspace down. One-shot: nothing persists.
 
 Common flags (same as run):
-  --egress <mode>              guarded (default; deny-the-inside) | broker (allow-broad, no CA) | strict | off
+  --egress <mode>              broker (default; allow-broad, no CA) | mitm (forge per-SNI, sunsetting) | off
   --egress-allow <host>        allowlisted destination (repeatable)
   --egress-swap-config <path>  inject a credential host-side; the guest never holds it
   --cred-swap PROVIDER[=ref]   inject a built-in provider API key host-side (e.g. anthropic); reference only
@@ -2068,19 +2068,19 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	var secretsAudit bool
 	fs.BoolVar(&secretsAudit, "secrets-audit", false, "Append every secret access to the workspace audit log")
 	var egressMode string
-	fs.StringVar(&egressMode, "egress", "", "Egress mediation: guarded (default; deny the inside, allow public), strict (allowlist), off")
+	fs.StringVar(&egressMode, "egress", "", "Egress mediation: broker (default; allow-broad, no CA in the guest), mitm (allow-broad, forge per-SNI — sunsetting), off")
 	var egressAllow multiFlag
 	fs.Var(&egressAllow, "egress-allow", "Allowlisted egress destination host (repeatable)")
 	var egressPassthrough multiFlag
 	fs.Var(&egressPassthrough, "egress-passthrough", "Allowed egress host that is not TLS-intercepted (repeatable)")
 	var egressLockAllowlist bool
-	fs.BoolVar(&egressLockAllowlist, "egress-lock-allowlist", false, "In --egress broker, restrict egress to allowlisted destinations only (drop the allow-broad default)")
+	fs.BoolVar(&egressLockAllowlist, "egress-lock-allowlist", false, "Restrict egress to allowlisted destinations only (drop the allow-broad default) in --egress broker or mitm")
 	var egressPolicy string
-	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress guarded or strict)")
+	fs.StringVar(&egressPolicy, "egress-policy", "", "Path to an egress policy file (.yaml/.yml/.json) declaring allow[]/passthrough[]; unioned with --egress-allow/--egress-passthrough (requires --egress broker or mitm)")
 	var egressSwapConfig string
-	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress guarded or strict)")
+	fs.StringVar(&egressSwapConfig, "egress-swap-config", "", "Path to a credential-swap config (YAML); the mediator injects the real credential host-side so the guest never holds it (requires --egress mitm)")
 	var credSwap multiFlag
-	fs.Var(&credSwap, "cred-swap", "Inject a provider API key host-side for a built-in provider: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). The guest never holds the key; reference only, never a literal. Repeatable; requires --egress guarded or strict")
+	fs.Var(&credSwap, "cred-swap", "Inject a provider API key host-side for a built-in provider: PROVIDER[=env:NAME|file:PATH|vault:PATH] (e.g. anthropic, openai). The guest never holds the key; reference only, never a literal. Repeatable; requires --egress mitm")
 	var brokerUpstream, brokerSecret string
 	fs.StringVar(&brokerUpstream, "broker-upstream", "", "Egress broker upstream base URL; requests reach it through the broker with the credential injected host-side")
 	fs.StringVar(&brokerSecret, "broker-secret", "", "Egress broker credential NAME=<scheme>:<ref>; held host-side only, the guest sends @secret:NAME references (never the value)")
@@ -2270,7 +2270,7 @@ func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret
 func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAllow, egressPassthrough multiFlag, egressPolicy, egressSwapConfig string, credSwap multiFlag) error {
 	// Mode precedence: an explicit --egress flag wins; otherwise keep any value a
 	// workspace spec (Agentfile `agent.egress`) already applied; otherwise default
-	// to guarded (the secure default, matching parseEgressMode("")).
+	//
 	if strings.TrimSpace(egressMode) != "" {
 		mode, err := parseEgressMode(egressMode)
 		if err != nil {
@@ -2278,7 +2278,7 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		}
 		opts.EgressMode = mode
 	} else if strings.TrimSpace(opts.EgressMode) == "" {
-		opts.EgressMode = vmkit.EgressModeGuarded
+		opts.EgressMode = vmkit.EgressModeBroker
 	}
 	mode := opts.EgressMode
 	// Allow/passthrough are additive: default-deny means flags, a spec, a policy
@@ -2292,7 +2292,7 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		// off there is nothing to apply it to, so reject rather than silently
 		// ignore (which would mislead the operator into believing it took effect).
 		if mode == vmkit.EgressModeOff {
-			return fmt.Errorf("--egress-policy: an egress policy file requires --egress guarded or strict")
+			return fmt.Errorf("--egress-policy: an egress policy file requires --egress broker or mitm")
 		}
 		pf, err := egress.LoadPolicyFile(egressPolicy)
 		if err != nil {
@@ -2308,7 +2308,7 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 		// mediation off there is no mediator to inject it, so reject rather than
 		// silently ignore (mirroring --egress-policy).
 		if mode == vmkit.EgressModeOff {
-			return fmt.Errorf("--egress-swap-config: credential swap requires --egress guarded or strict")
+			return fmt.Errorf("--egress-swap-config: credential swap requires --egress mitm")
 		}
 		opts.EgressSwapConfigPath = trimmed
 	}
@@ -2320,10 +2320,10 @@ func applyEgressOptionFlags(opts *workspaceOptions, egressMode string, egressAll
 	opts.CredSwapProviders = append(opts.CredSwapProviders, providers...)
 	if len(opts.CredSwapProviders) > 0 && mode == vmkit.EgressModeOff {
 		// cred-swap is performed by the mediator (host-side MITM injection), which
-		// only runs in guarded/strict; with egress off there is no mediator to
+		// only runs in mitm; with egress off there is no mediator to
 		// inject the key, so the swap would silently do nothing. Fail loud. Checked
 		// against the merged set so a spec-sourced cred-swap is caught too.
-		return fmt.Errorf("--cred-swap: credential swap requires --egress guarded or strict")
+		return fmt.Errorf("--cred-swap: credential swap requires --egress mitm")
 	}
 	return nil
 }
@@ -2352,7 +2352,7 @@ func parseCredSwapFlags(credSwap multiFlag) ([]workspace.CredSwapProvider, error
 
 // egressOffWarning returns a one-line operator notice when egress mediation is
 // off — unrestricted network, no allowlist, no audit, no cred-swap. It is empty
-// for guarded/strict. Printed to stderr at launch so turning mediation off is
+// for broker/mitm. Printed to stderr at launch so turning mediation off is
 // never silent (it's effectively yolo mode).
 func egressOffWarning(mode string) string {
 	if mode != vmkit.EgressModeOff {
@@ -4040,16 +4040,7 @@ func parseEnvFlags(values []string) (map[string]string, error) {
 }
 
 func parseEgressMode(v string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "", "guarded":
-		return vmkit.EgressModeGuarded, nil
-	case "strict":
-		return vmkit.EgressModeStrict, nil
-	case "off", "open", "disabled":
-		return vmkit.EgressModeOff, nil
-	default:
-		return "", fmt.Errorf("--egress must be guarded, strict, or off: %q", v)
-	}
+	return vmkit.ValidateEgressMode(v)
 }
 
 func parseSecretFlags(values []string) (map[string]string, error) {
@@ -4262,13 +4253,13 @@ Options:
   -p host:guest[/tcp]   Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
-  -egress <mode>        Egress mediation: guarded (default, deny inside),
-                         broker (allow-broad, opaque splice, no CA in guest),
-                         strict (deny non-allowlisted), or off
+  -egress <mode>        Egress mediation: broker (default, allow-broad, opaque
+                         splice, no CA in guest), mitm (forge per-SNI, sunsetting),
+                         or off
   -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
   -egress-passthrough <host>
                          Allowed egress host that is not TLS-intercepted (repeatable)
-  -egress-lock-allowlist In broker mode, restrict egress to allowlisted destinations only
+  -egress-lock-allowlist In broker/mitm mode, restrict egress to allowlisted destinations only
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)
@@ -4357,13 +4348,13 @@ Options:
                          Publish a TCP port
   -mediation p=host:port Required mediation vsock mapping
   -mediation-optional Allow workspace to run if mediation is unavailable
-  -egress <mode>        Egress mediation: guarded (default, deny inside),
-                         broker (allow-broad, opaque splice, no CA in guest),
-                         strict (deny non-allowlisted), or off
+  -egress <mode>        Egress mediation: broker (default, allow-broad, opaque
+                         splice, no CA in guest), mitm (forge per-SNI, sunsetting),
+                         or off
   -egress-allow <host>  Allowlisted egress host (repeatable; .suffix matches subdomains)
   -egress-passthrough <host>
                          Allowed egress host that is not TLS-intercepted (repeatable)
-  -egress-lock-allowlist In broker mode, restrict egress to allowlisted destinations only
+  -egress-lock-allowlist In broker/mitm mode, restrict egress to allowlisted destinations only
   -egress-policy <path>  Egress allow/passthrough policy file (.yaml/.yml/.json)
   -egress-swap-config <path>
                          Credential-swap config; mediator injects the real secret host-side (guest never holds it)

@@ -52,19 +52,20 @@ func TestRequestBuildsBackendNeutralWorkspaceRequest(t *testing.T) {
 	if req.Config.RootfsPath != "/tmp/rootfs.ext4" || req.Config.KernelPath != "/kernels/Image" {
 		t.Fatalf("Config paths = %#v", req.Config)
 	}
-	// Result listener + the service vsock listener + the CA-cert listener that
-	// egress mediation (the secure default for an unspecified mode) allocates.
-	if len(req.Config.VsockListeners) != 3 {
+	// Result listener + the service vsock listener. The default mode is broker,
+	// which mediates but forges no certificates — so it allocates NO CA-cert
+	// listener (unlike the retired guarded default).
+	if len(req.Config.VsockListeners) != 2 {
 		t.Fatalf("VsockListeners = %#v", req.Config.VsockListeners)
 	}
 	if req.Config.VsockListeners[0].Target != filepath.Join(opts.StateDir, opts.Name, "result.json") {
 		t.Fatalf("result listener = %#v", req.Config.VsockListeners[0])
 	}
-	if !hasCACertListener(req.Config.VsockListeners) {
-		t.Fatalf("expected a %q listener (egress mediated by default); got %#v", secretxfer.CACertTarget, req.Config.VsockListeners)
+	if hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("broker default must not allocate a %q listener; got %#v", secretxfer.CACertTarget, req.Config.VsockListeners)
 	}
-	if req.Config.CACertPort == 0 {
-		t.Fatalf("CACertPort = 0, want non-zero for mediated default")
+	if req.Config.CACertPort != 0 {
+		t.Fatalf("CACertPort = %d, want 0 for the broker default (no forging)", req.Config.CACertPort)
 	}
 	if len(req.Config.Disks) != 1 || req.Config.Disks[0].Mountpoint != "/work" {
 		t.Fatalf("Disks = %#v", req.Config.Disks)
@@ -617,7 +618,7 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 	opts := DefaultOptions()
 	opts.Name = "ws"
 	opts.StateDir = dir
-	opts.EgressMode = "strict"
+	opts.EgressMode = "mitm"
 	opts.EgressAllow = []string{"api.github.com", ".example.com"}
 	opts.EgressPassthrough = []string{"raw.example.com"}
 
@@ -628,7 +629,7 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	if manifest.EgressMode != "strict" {
+	if manifest.EgressMode != "mitm" {
 		t.Fatalf("EgressMode not persisted in manifest: %q", manifest.EgressMode)
 	}
 	if len(manifest.EgressAllow) != 2 || manifest.EgressAllow[0] != "api.github.com" || manifest.EgressAllow[1] != ".example.com" {
@@ -639,7 +640,7 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 	}
 
 	restored := OptionsFromManifest(opts, manifest)
-	if restored.EgressMode != "strict" {
+	if restored.EgressMode != "mitm" {
 		t.Fatalf("OptionsFromManifest lost EgressMode: %q", restored.EgressMode)
 	}
 	if len(restored.EgressAllow) != 2 || restored.EgressAllow[0] != "api.github.com" || restored.EgressAllow[1] != ".example.com" {
@@ -666,13 +667,13 @@ func TestManifestRoundTripPreservesEgress(t *testing.T) {
 
 func TestRequestThreadsEgress(t *testing.T) {
 	opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
-		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "strict", EgressAllow: []string{"api.github.com"},
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: "mitm", EgressAllow: []string{"api.github.com"},
 		EgressPassthrough: []string{"raw.example.com"}}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if req.Config.EgressMode != "strict" || len(req.Config.EgressAllow) != 1 || req.Config.EgressAllow[0] != "api.github.com" {
+	if req.Config.EgressMode != "mitm" || len(req.Config.EgressAllow) != 1 || req.Config.EgressAllow[0] != "api.github.com" {
 		t.Fatalf("egress not threaded: %+v", req.Config)
 	}
 	if len(req.Config.EgressPassthrough) != 1 || req.Config.EgressPassthrough[0] != "raw.example.com" {
@@ -681,43 +682,45 @@ func TestRequestThreadsEgress(t *testing.T) {
 }
 
 // TestEgressDefaultsToGuarded asserts an empty EgressMode normalizes to
-// "guarded" at the Request chokepoint — the secure default. Both the config
+// "broker" at the Request chokepoint — the secure default. Both the config
 // passed to the supervisor and the CA-cert vsock listener must reflect it.
-func TestEgressDefaultsToGuarded(t *testing.T) {
+// TestEgressDefaultsToBroker: an empty egress mode resolves to the broker
+// default, which mediates but forges no certificates — so it allocates NO
+// CA-cert listener or port. This is the S4 default flip (previously empty
+// resolved to the cert-forging guarded default).
+func TestEgressDefaultsToBroker(t *testing.T) {
 	opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
 		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: ""}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if req.Config.EgressMode != vmkit.EgressModeGuarded {
-		t.Fatalf("empty EgressMode should normalize to %q, got %q", vmkit.EgressModeGuarded, req.Config.EgressMode)
+	if req.Config.EgressMode != vmkit.EgressModeBroker {
+		t.Fatalf("empty EgressMode should resolve to %q, got %q", vmkit.EgressModeBroker, req.Config.EgressMode)
 	}
-	if req.Config.CACertPort != DefaultCACertPort {
-		t.Fatalf("guarded workspace should allocate CACertPort %d, got %d", DefaultCACertPort, req.Config.CACertPort)
+	if req.Config.CACertPort != 0 {
+		t.Fatalf("broker default must not allocate CACertPort, got %d", req.Config.CACertPort)
 	}
-	if !hasCACertListener(req.Config.VsockListeners) {
-		t.Fatalf("guarded workspace should allocate a CACertTarget vsock listener: %+v", req.Config.VsockListeners)
+	if hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("broker default must not allocate a CACertTarget vsock listener: %+v", req.Config.VsockListeners)
 	}
 }
 
-// TestRequestAllocatesCACertForGuarded mirrors the strict path: a workspace in
-// "guarded" mode must allocate the CA-cert vsock listener and port (previously
-// only "strict" did).
-func TestRequestAllocatesCACertForGuarded(t *testing.T) {
-	for _, mode := range []string{vmkit.EgressModeGuarded, vmkit.EgressModeStrict} {
-		opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
-			Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: mode}
-		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
-		if err != nil {
-			t.Fatalf("mode %q: Request: %v", mode, err)
-		}
-		if req.Config.CACertPort != DefaultCACertPort {
-			t.Errorf("mode %q: CACertPort = %d, want %d", mode, req.Config.CACertPort, DefaultCACertPort)
-		}
-		if !hasCACertListener(req.Config.VsockListeners) {
-			t.Errorf("mode %q: missing CACertTarget vsock listener: %+v", mode, req.Config.VsockListeners)
-		}
+// TestRequestAllocatesCACertForMITM: only the cert-forging mitm mode allocates
+// the CA-cert vsock listener and port — the guest must trust the per-workspace
+// CA the mitm datapath forges leaves from.
+func TestRequestAllocatesCACertForMITM(t *testing.T) {
+	opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
+		Network: vmkit.NetworkConfig{Mode: "user"}, EgressMode: vmkit.EgressModeMITM}
+	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if req.Config.CACertPort != DefaultCACertPort {
+		t.Errorf("mitm: CACertPort = %d, want %d", req.Config.CACertPort, DefaultCACertPort)
+	}
+	if !hasCACertListener(req.Config.VsockListeners) {
+		t.Errorf("mitm: missing CACertTarget vsock listener: %+v", req.Config.VsockListeners)
 	}
 }
 
@@ -774,8 +777,8 @@ func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
 		network    vmkit.NetworkConfig
 		egressMode string
 	}{
-		{"isolated-guarded", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeGuarded},
-		{"isolated-strict", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeStrict},
+		{"isolated-broker", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeBroker},
+		{"isolated-mitm", vmkit.NetworkConfig{Mode: "isolated"}, vmkit.EgressModeMITM},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -803,7 +806,7 @@ func TestRequestNoCACertForNonMediatedNetworkMode(t *testing.T) {
 func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
 	for _, mode := range []string{"", "user"} {
 		opts := Options{Name: "a", Backend: vmkit.BackendLinuxKVM, KernelPath: "/k", StateDir: t.TempDir(),
-			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeGuarded}
+			Network: vmkit.NetworkConfig{Mode: mode}, EgressMode: vmkit.EgressModeMITM}
 		req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 		if err != nil {
 			t.Fatalf("network mode %q: Request: %v", mode, err)
@@ -821,7 +824,7 @@ func TestRequestAllocatesCACertForMediatedNetworkModes(t *testing.T) {
 // error when a removed network mode (e.g. bridged) is requested — the mode is no
 // longer supported, so the start fails closed instead of running unmediated.
 func TestRequestFailsClosedOnRemovedNetworkMode(t *testing.T) {
-	for _, egressMode := range []string{"", "guarded", "strict"} {
+	for _, egressMode := range []string{"", "broker", "mitm"} {
 		opts := Options{
 			Name:       "a",
 			Backend:    vmkit.BackendLinuxKVM,
@@ -849,7 +852,7 @@ func hasCACertListener(listeners []vmkit.VsockListener) bool {
 // TestEgressPolicyFromOptionsMapsFields verifies that EgressPolicyFromOptions
 // maps the three Options egress fields into an EgressPolicy, and that
 // NormalizeEgressPolicy trims/deduplicates Allow and resolves an empty Mode to
-// the secure default ("guarded").
+// the secure default ("broker").
 func TestEgressPolicyFromOptionsMapsFields(t *testing.T) {
 	opts := Options{
 		EgressMode:        "",
@@ -857,8 +860,8 @@ func TestEgressPolicyFromOptionsMapsFields(t *testing.T) {
 		EgressPassthrough: []string{"raw.example.com"},
 	}
 	pol := vmkit.NormalizeEgressPolicy(EgressPolicyFromOptions(opts))
-	if pol.Mode != vmkit.EgressModeGuarded {
-		t.Fatalf("Mode = %q, want %q", pol.Mode, vmkit.EgressModeGuarded)
+	if pol.Mode != vmkit.EgressModeBroker {
+		t.Fatalf("Mode = %q, want %q", pol.Mode, vmkit.EgressModeBroker)
 	}
 	if len(pol.Allow) != 1 || pol.Allow[0] != "api.example.com" {
 		t.Fatalf("Allow = %v, want [api.example.com] (trimmed and deduped)", pol.Allow)
@@ -877,7 +880,7 @@ func TestEgressPolicyFromOptionsMapsFields(t *testing.T) {
 // guest-controllable field into the policy derivation.
 func TestEgressPolicyIsHostSourcedNotAgentInfluenceable(t *testing.T) {
 	optsBase := Options{
-		EgressMode:        "strict",
+		EgressMode:        "mitm",
 		EgressAllow:       []string{"api.example.com"},
 		EgressPassthrough: []string{"passthrough.example.com"},
 		// benign non-egress fields
@@ -887,7 +890,7 @@ func TestEgressPolicyIsHostSourcedNotAgentInfluenceable(t *testing.T) {
 
 	optsAdversarial := Options{
 		// identical host egress fields
-		EgressMode:        "strict",
+		EgressMode:        "mitm",
 		EgressAllow:       []string{"api.example.com"},
 		EgressPassthrough: []string{"passthrough.example.com"},
 		// guest-controlled fields set to subversion attempts
@@ -917,8 +920,8 @@ func TestEgressPolicyIsHostSourcedNotAgentInfluenceable(t *testing.T) {
 
 	// also assert the policy reflects the host-set fields — the DeepEqual above
 	// must not be vacuously comparing two zero-value policies.
-	if polBase.Mode != "strict" {
-		t.Fatalf("Mode = %q, want %q (host field not reflected)", polBase.Mode, "strict")
+	if polBase.Mode != "mitm" {
+		t.Fatalf("Mode = %q, want %q (host field not reflected)", polBase.Mode, "mitm")
 	}
 	if len(polBase.Allow) != 1 || polBase.Allow[0] != "api.example.com" {
 		t.Fatalf("Allow = %v, want [api.example.com] (host field not reflected)", polBase.Allow)
@@ -944,8 +947,8 @@ func TestRequestFlatFieldsEqualNormalizedPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if req.Config.EgressMode != vmkit.EgressModeGuarded {
-		t.Fatalf("Config.EgressMode = %q, want %q", req.Config.EgressMode, vmkit.EgressModeGuarded)
+	if req.Config.EgressMode != vmkit.EgressModeBroker {
+		t.Fatalf("Config.EgressMode = %q, want %q", req.Config.EgressMode, vmkit.EgressModeBroker)
 	}
 	if len(req.Config.EgressAllow) != 1 || req.Config.EgressAllow[0] != "api.example.com" {
 		t.Fatalf("Config.EgressAllow = %v, want [api.example.com] (trimmed and deduped)", req.Config.EgressAllow)

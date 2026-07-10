@@ -74,7 +74,7 @@ func TestSnapshotManifestRoundTripsEgress(t *testing.T) {
 		VCPUCount:         2,
 		MemoryMiB:         512,
 		CreatedAt:         "2026-06-01T00:00:00Z",
-		EgressMode:        EgressModeStrict,
+		EgressMode:        EgressModeMITM,
 		EgressAllow:       []string{"api.github.com", ".example.com"},
 		EgressPassthrough: []string{"raw.example.com"},
 		EgressCASHA256:    "deadbeefcafebabe0011223344556677889900aabbccddeeff00112233445566",

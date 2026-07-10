@@ -18,7 +18,7 @@ func TestApplySpecAgentBlockPopulatesOptions(t *testing.T) {
 		ImageRef: "docker.io/library/python:3.12-slim",
 		Agent: AgentSpec{
 			Entry:    "python /app/agent.py",
-			Egress:   "strict",
+			Egress:   "mitm",
 			Allow:    []string{"api.anthropic.com"},
 			CredSwap: []string{"anthropic"},
 		},
@@ -30,8 +30,8 @@ func TestApplySpecAgentBlockPopulatesOptions(t *testing.T) {
 	if opts.ExecCommand != "python /app/agent.py" {
 		t.Fatalf("ExecCommand = %q, want the agent entry", opts.ExecCommand)
 	}
-	if opts.EgressMode != "strict" {
-		t.Fatalf("EgressMode = %q, want strict", opts.EgressMode)
+	if opts.EgressMode != "mitm" {
+		t.Fatalf("EgressMode = %q, want mitm", opts.EgressMode)
 	}
 	found := false
 	for _, h := range opts.EgressAllow {
@@ -71,7 +71,7 @@ func TestApplySpecAgentEgressInvalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("ApplySpec accepted an invalid agent egress mode; want rejection")
 	}
-	if !strings.Contains(err.Error(), "guarded") {
+	if !strings.Contains(err.Error(), "broker") {
 		t.Fatalf("error = %q, want it to list the valid modes", err)
 	}
 }

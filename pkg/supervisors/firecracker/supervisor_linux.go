@@ -2296,7 +2296,7 @@ func egressCapsFromConfig(config *vmkit.Config) egressCaps {
 }
 
 func egressMediatorArgs(bindHost string, port int, auditPath, mode string, lockAllowlist bool, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
-	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.NormalizeEgressMode(mode)}
+	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.ResolveEgressModeDefault(mode)}
 	if lockAllowlist {
 		args = append(args, "--lock-allowlist")
 	}

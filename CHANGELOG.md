@@ -5,6 +5,37 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Egress mode vocabulary — `broker` / `mitm` / `off` (breaking)
+
+The `guarded` and `strict` egress modes are **retired**. The vocabulary is now:
+
+- **`broker`** (default): allow-broad, opaque forward-proxy splice, no CA in the
+  guest — the same reach the old `guarded` default had, without TLS interception.
+- **`mitm`**: allow-broad, forge per-SNI certificates (the old `guarded`/`strict`
+  datapath). A sunsetting, warning-gated compatibility mode: enabling it prints a
+  load-time warning and logs an `egress_mitm_enabled` audit record.
+- **`off`**: unmediated.
+- **`--egress-lock-allowlist`**: an orthogonal parameter that makes either
+  mediating mode allowlist-only — the retired `strict` reach control.
+
+This is a hard breaking change with no aliases. `--egress guarded`, `--egress
+strict`, a manifest or snapshot naming either, and any unrecognized value are
+rejected with an error naming the successor — never silently reinterpreted. An
+unspecified mode resolves to `broker`, so the common case keeps working and gets
+the no-CA default; only callers who *typed* a retired name or restore an old
+manifest are affected. Credential swap and `--egress-policy`/`--egress-swap-config`
+now require `mitm` (swap needs the plaintext). `--egress open`/`disabled` are no
+longer accepted aliases for `off`.
+
+### Non-cooperation signals
+
+The egress mediator now tags the audit records it writes with a `signal` field
+from a closed vocabulary when it detects an attempt to route around it —
+`denied`, `direct-ip-no-sni`, `quic-udp443` (QUIC/UDP:443 is default-denied so
+clients fall back to TCP), `foreign-resolver`, and the broker's
+`unresolved-secret-ref`. The mediator only detects and emits; the response is a
+consumer's policy.
+
 ### Broker decision stream + governed request capture
 
 The egress broker's per-workspace trail (`broker-access.jsonl`) is now a

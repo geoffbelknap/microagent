@@ -103,7 +103,7 @@ func TestSandboxDataQueryCompose(t *testing.T) {
 		t.Fatalf("NewPolicy: %v", err)
 	}
 	log := &egress.BufferLogger{}
-	brain := egress.NewBrain("strict", policy, staticSwap(t, "127.0.0.1"), log, egress.Limits{})
+	brain := egress.NewBrain("mitm", policy, staticSwap(t, "127.0.0.1"), log, egress.Limits{})
 	brain.UpstreamRoots = pool
 	resp, err := brain.Fetch(context.Background(), egress.FetchRequest{Method: "GET", URL: srv.URL})
 	if err != nil {

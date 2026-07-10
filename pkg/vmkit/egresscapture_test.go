@@ -18,38 +18,38 @@ func TestNegotiateEgressCapture(t *testing.T) {
 		wantMediates  bool // at least one class is mediated (CA listener meaningful)
 	}{
 		{
-			name:    "linux-kvm guarded user is supported+complete",
-			backend: BackendLinuxKVM, networkMode: "user", egressMode: "guarded",
+			name:    "linux-kvm broker user is supported+complete",
+			backend: BackendLinuxKVM, networkMode: "user", egressMode: "broker",
 			wantProvider: EgressProviderLinuxNetfilter, wantStatus: EgressProviderSupported,
 			wantCoverage: EgressCoverageComplete, wantUncovered: false, wantMediates: true,
 		},
 		{
-			name:    "linux-kvm strict user is supported+complete",
-			backend: BackendLinuxKVM, networkMode: "user", egressMode: "strict",
+			name:    "linux-kvm mitm user is supported+complete",
+			backend: BackendLinuxKVM, networkMode: "user", egressMode: "mitm",
 			wantProvider: EgressProviderLinuxNetfilter, wantStatus: EgressProviderSupported,
 			wantCoverage: EgressCoverageComplete, wantUncovered: false, wantMediates: true,
 		},
 		{
-			name:    "linux-kvm empty mode defaults to guarded+mediates",
+			name:    "linux-kvm empty mode defaults to broker+mediates",
 			backend: BackendLinuxKVM, networkMode: "", egressMode: "",
 			wantProvider: EgressProviderLinuxNetfilter, wantStatus: EgressProviderSupported,
 			wantCoverage: EgressCoverageComplete, wantUncovered: false, wantMediates: true,
 		},
 		{
-			name:    "windows-hyperv guarded is experimental+constrained (udp dropped)",
-			backend: BackendWindowsHyperV, networkMode: "user", egressMode: "guarded",
+			name:    "windows-hyperv broker is experimental+constrained (udp dropped)",
+			backend: BackendWindowsHyperV, networkMode: "user", egressMode: "broker",
 			wantProvider: EgressProviderHyperVGuestShim, wantStatus: EgressProviderExperimental,
 			wantCoverage: EgressCoverageConstrained, wantUncovered: false, wantMediates: true,
 		},
 		{
-			name:    "apple-vf guarded user is supported+complete",
-			backend: BackendAppleVF, networkMode: "user", egressMode: "guarded",
+			name:    "apple-vf broker user is supported+complete",
+			backend: BackendAppleVF, networkMode: "user", egressMode: "broker",
 			wantProvider: EgressProviderAppleVFHostFD, wantStatus: EgressProviderSupported,
 			wantCoverage: EgressCoverageComplete, wantUncovered: false, wantMediates: true,
 		},
 		{
-			name:    "apple-vf strict user is supported+complete",
-			backend: BackendAppleVF, networkMode: "user", egressMode: "strict",
+			name:    "apple-vf mitm user is supported+complete",
+			backend: BackendAppleVF, networkMode: "user", egressMode: "mitm",
 			wantProvider: EgressProviderAppleVFHostFD, wantStatus: EgressProviderSupported,
 			wantCoverage: EgressCoverageComplete, wantUncovered: false, wantMediates: true,
 		},
@@ -61,19 +61,19 @@ func TestNegotiateEgressCapture(t *testing.T) {
 		},
 		{
 			name:    "isolated network: mediation is a no-op no-egress state, not uncovered",
-			backend: BackendLinuxKVM, networkMode: "isolated", egressMode: "guarded",
+			backend: BackendLinuxKVM, networkMode: "isolated", egressMode: "broker",
 			wantProvider: EgressProviderNone, wantStatus: EgressProviderSupported,
 			wantCoverage: EgressCoverageOff, wantUncovered: false, wantMediates: false,
 		},
 		{
 			name:    "isolated on apple-vf is also a clean no-op (not uncovered)",
-			backend: BackendAppleVF, networkMode: "isolated", egressMode: "guarded",
+			backend: BackendAppleVF, networkMode: "isolated", egressMode: "broker",
 			wantProvider: EgressProviderNone, wantStatus: EgressProviderSupported,
 			wantCoverage: EgressCoverageOff, wantUncovered: false, wantMediates: false,
 		},
 		{
 			name:    "unknown backend fails closed: unsupported+uncovered",
-			backend: "made-up", networkMode: "user", egressMode: "guarded",
+			backend: "made-up", networkMode: "user", egressMode: "broker",
 			wantProvider: EgressProviderNone, wantStatus: EgressProviderUnsupported,
 			wantCoverage: EgressCoverageUnsupported, wantUncovered: true, wantMediates: false,
 		},
@@ -98,7 +98,7 @@ func TestNegotiateEgressCapture(t *testing.T) {
 			}
 			// Mode is always normalized to a canonical value.
 			switch r.Mode {
-			case EgressModeGuarded, EgressModeStrict, EgressModeOff:
+			case EgressModeBroker, EgressModeMITM, EgressModeOff:
 			default:
 				t.Errorf("Mode = %q, want a canonical egress mode", r.Mode)
 			}
@@ -109,7 +109,7 @@ func TestNegotiateEgressCapture(t *testing.T) {
 // TestEgressCaptureReportJSONStable locks the wire field names that AX/MCP/state
 // consumers depend on.
 func TestEgressCaptureReportJSONStable(t *testing.T) {
-	r := NegotiateEgressCapture(BackendLinuxKVM, "user", "guarded")
+	r := NegotiateEgressCapture(BackendLinuxKVM, "user", "broker")
 	b, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)

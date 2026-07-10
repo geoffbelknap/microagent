@@ -530,60 +530,88 @@ func ValidateConfig(config *Config) error {
 	return nil
 }
 
-// Egress mode constants. An empty/unspecified mode is the secure default and
-// resolves to EgressModeGuarded.
+// Egress mode constants — the final vocabulary. An empty/unspecified mode is
+// the secure default and resolves to EgressModeBroker.
 const (
-	EgressModeGuarded = "guarded"
-	EgressModeStrict  = "strict"
-	EgressModeOff     = "off"
-	// EgressModeBroker terminates guest egress at a forward proxy instead of
-	// forging per-SNI certificates: the mediator splices allowed flows opaquely
-	// and delivers no CA to the guest. Credential injection happens on the
-	// cooperative base-URL vsock channel, not this transparent path. See the
-	// P3.5 S2 design.
+	// EgressModeBroker (default) terminates guest egress at a forward proxy
+	// instead of forging per-SNI certificates: the mediator splices allowed
+	// flows opaquely and delivers no CA to the guest. Credential injection
+	// happens on the cooperative base-URL vsock channel, not this transparent
+	// path. Allow-broad by default; allowlist-only under AllowlistLocked.
 	EgressModeBroker = "broker"
+	// EgressModeMITM is the opt-in, warning-gated compatibility mode: it
+	// forges per-SNI certificates from a per-workspace CA delivered to the
+	// guest, so it sees TLS plaintext. It enlarges the TLS attack surface,
+	// does not stop a real adversary (cert-pinners fail closed), and is on a
+	// one-way sunset. Formerly the "guarded"/"strict" datapath.
+	EgressModeMITM = "mitm"
+	EgressModeOff  = "off"
 )
 
-// NormalizeEgressMode collapses an egress mode string to one of the canonical
-// values: "guarded", "strict", or "off". Empty/whitespace (and any unrecognized
-// value) resolves to "guarded" — the secure default. This is the single
-// normalization chokepoint: once applied, downstream code only ever sees the
-// three canonical values.
-func NormalizeEgressMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case EgressModeStrict:
-		return EgressModeStrict
-	case EgressModeBroker:
-		return EgressModeBroker
-	case EgressModeOff:
-		return EgressModeOff
-	default: // empty, "guarded", or unrecognized -> safe default
-		return EgressModeGuarded
+// retiredEgressModes are the mode names removed in the S4 vocabulary rename.
+// They are rejected, never reinterpreted (tenet 9); each maps to the message
+// that tells an operator what to use instead.
+var retiredEgressModes = map[string]string{
+	"guarded": "the 'guarded' egress mode is retired; use 'broker' (same allow-broad reach, no CA in the guest) or 'mitm' (the old cert-forging interception, now explicit and warned)",
+	"strict":  "the 'strict' egress mode is retired; use 'broker' or 'mitm' with --egress-lock-allowlist (allowlist-only reach on either mode)",
+}
+
+// ValidateEgressMode resolves and validates an egress mode string against the
+// final vocabulary: "broker", "mitm", or "off". Empty/whitespace resolves to
+// the "broker" default. The retired names ("guarded", "strict") and any
+// unrecognized value are errors — no silent fallback survives, so a mistyped
+// or stale mode is flagged rather than quietly reinterpreted (tenet 9). This
+// replaces the former NormalizeEgressMode chokepoint.
+func ValidateEgressMode(mode string) (string, error) {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	switch m {
+	case "":
+		return EgressModeBroker, nil
+	case EgressModeBroker, EgressModeMITM, EgressModeOff:
+		return m, nil
 	}
+	if msg, ok := retiredEgressModes[m]; ok {
+		return "", fmt.Errorf("vmkit: %s", msg)
+	}
+	return "", fmt.Errorf("vmkit: unknown egress mode %q: must be broker, mitm, or off", mode)
+}
+
+// ResolveEgressModeDefault resolves empty/whitespace to the broker default and
+// otherwise lowercases/trims, WITHOUT validating. It is for pure reporters,
+// manifest-load paths, and idempotent internal steps that must carry a mode
+// forward for the real chokepoint (ValidateEgressMode, via EgressPolicy.Validate
+// at Request) to accept or reject — so an old manifest's retired mode survives
+// to be rejected on start rather than being silently normalized away. Prefer
+// ValidateEgressMode wherever an invalid mode should be surfaced immediately.
+func ResolveEgressModeDefault(mode string) string {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	if m == "" {
+		return EgressModeBroker
+	}
+	return m
 }
 
 // EgressMediationOn reports whether the given egress mode provisions the
-// mediator (mint CA, spawn mediator, install REDIRECT, allocate the CA-cert
-// vsock listener). "guarded" and "strict" are both ON. An
-// empty/unspecified mode is OFF here on purpose: "default" is set by
-// NormalizeEgressMode at the high-level workspace chokepoints, while
+// mediator (spawn mediator, install REDIRECT, and — for mitm — mint a CA and
+// allocate the CA-cert vsock listener). "broker" and "mitm" are both ON. An
+// empty/unspecified mode is OFF here on purpose: the default is resolved by
+// ValidateEgressMode at the high-level workspace chokepoints, while
 // EgressMediationOn decides whether to *provision*. The low-level raw
-// create/start primitive leaves EgressMode empty and must NOT be force-mediated
-// (it allocates no CA-cert listener, so mediating it would MITM the guest's TLS
-// with a CA the guest never receives).
+// create/start primitive leaves EgressMode empty and must NOT be
+// force-mediated. Retired/unknown values are OFF.
 func EgressMediationOn(mode string) bool {
 	m := strings.ToLower(strings.TrimSpace(mode))
-	return m == EgressModeGuarded || m == EgressModeStrict || m == EgressModeBroker
+	return m == EgressModeBroker || m == EgressModeMITM
 }
 
-// EgressModeForgesCerts reports whether the mode terminates guest TLS by forging
-// per-SNI certificates from the per-workspace CA (guarded, strict) — which
-// requires delivering that CA to the guest so it trusts the forged leaves.
-// broker splices allowed flows opaquely and off runs no mediator, so neither
-// delivers a CA. Callers gate CA minting + the CA-cert vsock listener on this.
+// EgressModeForgesCerts reports whether the mode terminates guest TLS by
+// forging per-SNI certificates from the per-workspace CA — which requires
+// delivering that CA to the guest so it trusts the forged leaves. Only "mitm"
+// does. "broker" splices allowed flows opaquely and "off" runs no mediator, so
+// neither delivers a CA. Callers gate CA minting + the CA-cert vsock listener
+// on this.
 func EgressModeForgesCerts(mode string) bool {
-	m := strings.ToLower(strings.TrimSpace(mode))
-	return m == EgressModeGuarded || m == EgressModeStrict
+	return strings.ToLower(strings.TrimSpace(mode)) == EgressModeMITM
 }
 
 // NetworkModeMediates reports whether the given network mode actually runs the

@@ -149,7 +149,7 @@ func (r EgressCaptureReport) MediatesAnyClass() bool {
 // supervisor/validation later. egressMode is normalized here, so callers may
 // pass the raw flag value.
 func NegotiateEgressCapture(backend, networkMode, egressMode string) EgressCaptureReport {
-	mode := NormalizeEgressMode(egressMode)
+	mode := ResolveEgressModeDefault(egressMode)
 
 	// Egress off: no capture provider, no CA, no mediator.
 	if mode == EgressModeOff {

@@ -11,7 +11,7 @@ import (
 func TestParseWorkspaceOptionsCredSwapStashesProviders(t *testing.T) {
 	opts, err := parseWorkspaceOptions("dispatch", []string{
 		"docker.io/library/alpine:3.20",
-		"--egress", "strict",
+		"--egress", "mitm",
 		"--cred-swap", "anthropic",
 		"--cred-swap", "openai=env:MY_OPENAI",
 	})
@@ -40,7 +40,7 @@ func TestParseWorkspaceOptionsCredSwapStashesProviders(t *testing.T) {
 func TestParseWorkspaceOptionsCredSwapRejectsLiteral(t *testing.T) {
 	_, err := parseWorkspaceOptions("dispatch", []string{
 		"docker.io/library/alpine:3.20",
-		"--egress", "strict",
+		"--egress", "mitm",
 		"--cred-swap", "anthropic=sk-ant-realsecret",
 	})
 	if err == nil {
@@ -56,7 +56,7 @@ func TestParseWorkspaceOptionsCredSwapRejectsLiteral(t *testing.T) {
 func TestParseWorkspaceOptionsCredSwapRejectsUnknownProvider(t *testing.T) {
 	_, err := parseWorkspaceOptions("dispatch", []string{
 		"docker.io/library/alpine:3.20",
-		"--egress", "strict",
+		"--egress", "mitm",
 		"--cred-swap", "not-a-provider",
 	})
 	if err == nil {
@@ -79,7 +79,7 @@ func TestParseWorkspaceOptionsCredSwapRequiresMediation(t *testing.T) {
 	if err == nil {
 		t.Fatal("parseWorkspaceOptions accepted --cred-swap with --egress off; want rejection")
 	}
-	if !strings.Contains(err.Error(), "guarded or strict") {
-		t.Fatalf("error = %q, want it to require guarded or strict", err)
+	if !strings.Contains(err.Error(), "mitm") {
+		t.Fatalf("error = %q, want it to require mitm", err)
 	}
 }

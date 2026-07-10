@@ -1,0 +1,114 @@
+package egress
+
+import (
+	"net"
+	"net/netip"
+	"testing"
+
+	"golang.org/x/net/dns/dnsmessage"
+)
+
+// TestAllSignalsExhaustiveAndUnique guards the closed vocabulary: every named
+// signal constant appears in AllSignals exactly once, so a consumer (planed
+// onSignal) can map them exhaustively.
+func TestAllSignalsExhaustiveAndUnique(t *testing.T) {
+	want := map[string]bool{
+		SignalDenied:              true,
+		SignalDirectIPNoSNI:       true,
+		SignalQUICUDP443:          true,
+		SignalForeignResolver:     true,
+		SignalUnresolvedSecretRef: true,
+	}
+	if len(AllSignals) != len(want) {
+		t.Fatalf("AllSignals has %d entries, want %d", len(AllSignals), len(want))
+	}
+	seen := map[string]bool{}
+	for _, s := range AllSignals {
+		if seen[s] {
+			t.Errorf("duplicate signal %q in AllSignals", s)
+		}
+		seen[s] = true
+		if !want[s] {
+			t.Errorf("unexpected signal %q in AllSignals", s)
+		}
+	}
+}
+
+// TestAuditDenyCarriesDeniedSignal: every fail-closed drop on the TCP/fetch path
+// carries the denied signal.
+func TestAuditDenyCarriesDeniedSignal(t *testing.T) {
+	log := &BufferLogger{}
+	b := &Brain{Mode: egressModeBroker, Logger: log}
+	b.AuditDeny(Verdict{Reason: "not allowlisted"}, map[string]any{"host": "blocked.example"})
+	events := log.Snapshot()
+	if len(events) != 1 || events[0]["signal"] != SignalDenied {
+		t.Fatalf("AuditDeny events = %v, want one carrying signal=denied", events)
+	}
+}
+
+// TestDNSForeignResolverSignal: a query aimed at a PUBLIC resolver is tagged
+// foreign-resolver; a query to the inside/gateway resolver is not.
+func TestDNSForeignResolverSignal(t *testing.T) {
+	forward := func(netip.AddrPort, []byte) ([]byte, error) {
+		// Return a minimal valid-enough response; the handler only relays it.
+		return buildQuery(t, 0x1234, "allowed.example.com.", dnsmessage.TypeA), nil
+	}
+	query := buildQuery(t, 0x1234, "allowed.example.com.", dnsmessage.TypeA)
+
+	// Public resolver (8.8.8.8): foreign-resolver.
+	log := &BufferLogger{}
+	h := &Handler{Mode: egressModeBroker, Logger: log, NameCache: NewNameCache()}
+	_, _ = h.handleDNS(query, netip.MustParseAddrPort("8.8.8.8:53"), forward)
+	if !hasEventWithSignal(log, "egress_dns_allow", SignalForeignResolver) {
+		t.Fatalf("public resolver query not tagged foreign-resolver: %v", log.Snapshot())
+	}
+
+	// Inside/gateway resolver (10.x): no foreign-resolver tag.
+	log2 := &BufferLogger{}
+	h2 := &Handler{Mode: egressModeBroker, Logger: log2, NameCache: NewNameCache()}
+	_, _ = h2.handleDNS(query, netip.MustParseAddrPort("10.43.7.1:53"), forward)
+	for _, e := range log2.Snapshot() {
+		if e["signal"] == SignalForeignResolver {
+			t.Fatalf("gateway resolver query wrongly tagged foreign-resolver: %v", e)
+		}
+	}
+}
+
+func hasEventWithSignal(log *BufferLogger, event, signal string) bool {
+	for _, e := range log.Snapshot() {
+		if e["event"] == event && e["signal"] == signal {
+			return true
+		}
+	}
+	return false
+}
+
+// TestQUICUDP443DroppedAndSignalled: a UDP:443 datagram is dropped (no upstream
+// dial, forcing TCP/TLS fallback where the broker governs it) and tagged with
+// the quic-udp443 non-cooperation signal.
+func TestQUICUDP443DroppedAndSignalled(t *testing.T) {
+	guestSrc := netip.MustParseAddrPort("10.0.0.5:52000")
+	quicDst := netip.MustParseAddrPort("203.0.113.9:443")
+	log := &BufferLogger{}
+	dialed := false
+	h := &Handler{
+		Mode:   egressModeBroker,
+		Policy: mustPolicy(t),
+		Logger: log,
+		DialUDP: func(netip.AddrPort) (net.Conn, error) {
+			dialed = true
+			return nil, nil
+		},
+	}
+	p := newUDPProxy(h)
+	defer p.closeAll()
+
+	p.handleUDPDatagram(guestSrc, quicDst, []byte("quic-initial"))
+
+	if dialed {
+		t.Fatal("UDP:443 must not be forwarded — QUIC is default-denied")
+	}
+	if !hasEventWithSignal(log, "egress_udp_deny", SignalQUICUDP443) {
+		t.Fatalf("UDP:443 drop not tagged quic-udp443: %v", log.Snapshot())
+	}
+}

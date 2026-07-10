@@ -37,13 +37,14 @@ func TestFetchInjectsCredentialHostSideCredBlind(t *testing.T) {
 
 	log := &BufferLogger{}
 	b := &Brain{
-		Mode:          "strict",
-		Policy:        brainPolicy(t, "127.0.0.1"),
-		Swaps:         staticSwapTable(t, "127.0.0.1"),
-		Resolver:      fakeResolver{"env:K": "REALSECRET"},
-		Cache:         newTokenCache(),
-		Logger:        log,
-		UpstreamRoots: pool,
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          brainPolicy(t, "127.0.0.1"),
+		Swaps:           staticSwapTable(t, "127.0.0.1"),
+		Resolver:        fakeResolver{"env:K": "REALSECRET"},
+		Cache:           newTokenCache(),
+		Logger:          log,
+		UpstreamRoots:   pool,
 	}
 
 	// The caller hands NO credential — only the destination.
@@ -161,7 +162,7 @@ func TestFetchGuardedDeniesInside(t *testing.T) {
 	pool.AddCert(srv.Certificate())
 
 	log := &BufferLogger{}
-	b := &Brain{Mode: "guarded", Policy: brainPolicy(t), Logger: log, UpstreamRoots: pool}
+	b := &Brain{Mode: "mitm", Policy: brainPolicy(t), Logger: log, UpstreamRoots: pool}
 
 	resp, err := b.Fetch(context.Background(), FetchRequest{URL: srv.URL}) // 127.0.0.1 → inside
 	if err != nil {
@@ -192,12 +193,13 @@ func TestFetchRefusesPlaintextCredential(t *testing.T) {
 
 	log := &BufferLogger{}
 	b := &Brain{
-		Mode:     "strict",
-		Policy:   brainPolicy(t, "127.0.0.1"),
-		Swaps:    staticSwapTable(t, "127.0.0.1"),
-		Resolver: fakeResolver{"env:K": "REALSECRET"},
-		Cache:    newTokenCache(),
-		Logger:   log,
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          brainPolicy(t, "127.0.0.1"),
+		Swaps:           staticSwapTable(t, "127.0.0.1"),
+		Resolver:        fakeResolver{"env:K": "REALSECRET"},
+		Cache:           newTokenCache(),
+		Logger:          log,
 	}
 
 	resp, err := b.Fetch(context.Background(), FetchRequest{URL: srv.URL}) // http, not https

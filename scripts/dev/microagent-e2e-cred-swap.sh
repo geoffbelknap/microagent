@@ -6,7 +6,7 @@ set -euo pipefail
 #   - `--cred-swap anthropic` resolves the built-in provider registry, GENERATES
 #     a per-workspace cred-swap.yaml, allowlists the provider host, and points the
 #     workspace's EgressSwapConfigPath at the generated file;
-#   - the workspace boots under strict egress, which means the mediator LOADED the
+#   - the workspace boots under mitm egress, which means the mediator LOADED the
 #     generated swap config (it fails closed on a missing/invalid one) — so a
 #     successful boot is itself proof the generated file is valid and wired in;
 #   - the generated file and the manifest persist the resolved entry + allowlist.
@@ -79,15 +79,15 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o "$GUEST_INIT" 
 
 "$CLI" kernel install --backend linux-kvm --arch amd64 >"$STATE_DIR/kernel-install.json"
 
-# Run under STRICT egress with --cred-swap. --keep retains the workspace so we can
+# Run under MITM egress with --cred-swap (credential swap requires TLS interception). --keep retains the workspace so we can
 # inspect the generated cred-swap.yaml and the persisted manifest. A successful
-# boot under strict egress proves the mediator loaded the generated swap config
+# boot under mitm egress proves the mediator loaded the generated swap config
 # (it fails closed on a missing/invalid one). The guest makes no outbound request
 # — this scenario is hermetic; injection itself is unit-tested in internal/egress.
 "$CLI" --mode=ax run \
   --name "$WORKSPACE" \
   --image "$IMAGE" \
-  --egress strict \
+  --egress mitm \
   --cred-swap anthropic \
   --keep \
   --exec "echo cred-swap-ok" \
@@ -125,7 +125,7 @@ assert swap_cfg.endswith("cred-swap.yaml"), f"manifest egress_swap_config_path =
 allow = manifest.get("egress_allow") or []
 assert "api.anthropic.com" in allow, f"manifest egress_allow = {allow}, want api.anthropic.com unioned in"
 
-print("cred-swap: --cred-swap generated a valid swap config, booted under strict, persisted entry + allowlist")
+print("cred-swap: --cred-swap generated a valid swap config, booted under mitm, persisted entry + allowlist")
 PY
 
 # --- Agentfile path: the agent: block on a workspace spec must produce the SAME
@@ -138,7 +138,7 @@ name: $AGENT_WS
 image: $IMAGE
 agent:
   entry: echo cred-swap-agentfile-ok
-  egress: strict
+  egress: mitm
   cred-swap: [anthropic]
 EOF
 
@@ -169,10 +169,10 @@ for needle in ("anthropic", "static", "x-api-key", "env:ANTHROPIC_API_KEY", "api
 with open(manifest_path) as f:
     manifest = json.load(f)
 assert (manifest.get("egress_swap_config_path") or "").endswith("cred-swap.yaml"), manifest.get("egress_swap_config_path")
-assert manifest.get("egress_mode") == "strict", f"egress_mode = {manifest.get('egress_mode')!r}, want strict (from agent.egress)"
+assert manifest.get("egress_mode") == "mitm", f"egress_mode = {manifest.get('egress_mode')!r}, want mitm (from agent.egress)"
 assert "api.anthropic.com" in (manifest.get("egress_allow") or []), manifest.get("egress_allow")
 
-print("cred-swap: Agentfile agent: block produced the same swap config + strict egress + allowlist as flags")
+print("cred-swap: Agentfile agent: block produced the same swap config + mitm egress + allowlist as flags")
 PY
 
 echo "microagent E2E cred-swap passed"

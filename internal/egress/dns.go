@@ -268,26 +268,44 @@ func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(
 
 	listed := h.Policy != nil && h.Policy.AllowHost(qname).Allow
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(qname).Allow
-	permissive := allowsBroad(h.Mode)
+	// A locked allowlist drops the allow-broad grant, so DNS resolves only
+	// allowlisted names — mirroring the Brain's TCP decision. Without this,
+	// broker/mitm + --egress-lock-allowlist would still resolve any name.
+	permissive := allowsBroad(h.Mode) && !h.AllowlistLocked
 	allowed := permissive || listed || passthrough
-	// unlisted marks a name permitted only because guarded mode resolves names
-	// freely (it is on no allowlist), so the audit trail records the looser grant
-	// — mirroring the TCP and UDP paths.
+	// unlisted marks a name permitted only because an allow-broad mode resolves
+	// names freely (it is on no allowlist), so the audit trail records the looser
+	// grant — mirroring the TCP and UDP paths.
 	unlisted := allowed && !listed && !passthrough
 
+	// A cooperative guest resolves through the mediator's own (inside/gateway)
+	// resolver; a query aimed at a PUBLIC resolver address is an attempt to use a
+	// foreign resolver — the guest cannot actually reach it (all DNS is TPROXY'd
+	// here), but the attempt is a non-cooperation tell that outranks the generic
+	// denied signal.
+	foreignResolver := resolver.Addr().IsValid() && !isInsideAddr(resolver.Addr())
 	dnsFields := func() map[string]any {
-		return map[string]any{"qname": qname, "qtype": qtype.String(), "id": id}
+		f := map[string]any{"qname": qname, "qtype": qtype.String(), "id": id}
+		if foreignResolver {
+			f["signal"] = SignalForeignResolver
+		}
+		return f
 	}
 
 	if !allowed {
-		// strict + non-allowlisted: refuse without forwarding. The guest learns no
-		// IP — this is what makes strict authoritative and kills DNS tunneling.
+		// allowlist-only + non-allowlisted: refuse without forwarding. The guest
+		// learns no IP — this is what makes a locked allowlist authoritative and
+		// kills DNS tunneling.
 		refused, rerr := synthesizeRefused(query)
 		if rerr != nil {
 			h.Logger.Log("egress_dns_error", map[string]any{"qname": qname, "error": rerr.Error()})
 			return nil, rerr
 		}
-		h.Logger.Log("egress_dns_deny", dnsFields())
+		denyFields := dnsFields()
+		if _, ok := denyFields["signal"]; !ok {
+			denyFields["signal"] = SignalDenied
+		}
+		h.Logger.Log("egress_dns_deny", denyFields)
 		return refused, nil
 	}
 

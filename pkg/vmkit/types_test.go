@@ -2,6 +2,7 @@ package vmkit
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -279,36 +280,66 @@ func TestValidateNetworkConfigRejectsDuplicateHostPorts(t *testing.T) {
 	}
 }
 
-func TestNormalizeEgressMode(t *testing.T) {
-	cases := map[string]string{
-		"":         "guarded",
-		"  ":       "guarded",
-		"guarded":  "guarded",
-		"GUARDED":  "guarded",
-		" strict ": "strict",
-		"strict":   "strict",
-		"off":      "off",
-		"OFF":      "off",
+func TestValidateEgressMode(t *testing.T) {
+	// The final vocabulary: broker (default) / mitm / off. Empty resolves to
+	// the broker default; the canonical modes pass through (case/space
+	// insensitive).
+	valid := map[string]string{
+		"":         EgressModeBroker,
+		"  ":       EgressModeBroker,
+		"broker":   EgressModeBroker,
+		"BROKER":   EgressModeBroker,
+		" broker ": EgressModeBroker,
+		"mitm":     EgressModeMITM,
+		"MITM":     EgressModeMITM,
+		"off":      EgressModeOff,
+		"OFF":      EgressModeOff,
 	}
-	for in, want := range cases {
-		if got := NormalizeEgressMode(in); got != want {
-			t.Errorf("NormalizeEgressMode(%q) = %q, want %q", in, got, want)
+	for in, want := range valid {
+		got, err := ValidateEgressMode(in)
+		if err != nil {
+			t.Errorf("ValidateEgressMode(%q) errored: %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("ValidateEgressMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestValidateEgressModeRetiredAndUnknown(t *testing.T) {
+	// The retired names and any junk are hard errors — NEVER silently
+	// reinterpreted (tenet 9). The retired-name errors must name a successor
+	// so an operator knows what to do.
+	for _, retired := range []string{"guarded", "GUARDED", " strict ", "strict"} {
+		_, err := ValidateEgressMode(retired)
+		if err == nil {
+			t.Errorf("ValidateEgressMode(%q) = nil error, want a retirement error", retired)
+			continue
+		}
+		if !strings.Contains(err.Error(), "broker") {
+			t.Errorf("ValidateEgressMode(%q) error %q must name the broker successor", retired, err)
+		}
+	}
+	for _, junk := range []string{"open", "disabled", "brokerish", "guardedx"} {
+		if _, err := ValidateEgressMode(junk); err == nil {
+			t.Errorf("ValidateEgressMode(%q) = nil error, want an unknown-mode error", junk)
 		}
 	}
 }
 
 func TestEgressMediationOn(t *testing.T) {
-	// "guarded" and "strict" both provision the mediator.
-	on := []string{"guarded", "GUARDED", " guarded ", "strict", " strict "}
+	// The mediating modes both provision the mediator.
+	on := []string{"broker", "BROKER", " broker ", "mitm", " mitm "}
 	for _, m := range on {
 		if !EgressMediationOn(m) {
 			t.Errorf("EgressMediationOn(%q) = false, want true", m)
 		}
 	}
-	// Empty/whitespace is OFF here (no provisioning) — it is the raw primitive's
-	// state; high-level callers normalize via NormalizeEgressMode first. "off"
-	// and any unrecognized value are also OFF.
-	off := []string{"", "  ", "off", "OFF", " off ", "open"}
+	// Empty/whitespace is OFF here (no provisioning) — it is the raw
+	// primitive's state; high-level callers resolve the default via
+	// ValidateEgressMode first. "off" and any retired/unknown value are OFF.
+	off := []string{"", "  ", "off", "OFF", " off ", "guarded", "strict"}
 	for _, m := range off {
 		if EgressMediationOn(m) {
 			t.Errorf("EgressMediationOn(%q) = true, want false", m)
@@ -316,57 +347,16 @@ func TestEgressMediationOn(t *testing.T) {
 	}
 }
 
-func TestEgressModeBroker(t *testing.T) {
-	// broker is a first-class canonical mode: normalized to itself, provisions
-	// the mediator. It replaces cert-forging termination with forward-proxy
-	// termination (no CA in the guest) — see the S2 design.
-	for _, in := range []string{"broker", "BROKER", " broker "} {
-		if got := NormalizeEgressMode(in); got != EgressModeBroker {
-			t.Errorf("NormalizeEgressMode(%q) = %q, want %q", in, got, EgressModeBroker)
-		}
+func TestEgressModeForgesCertsOnlyMITM(t *testing.T) {
+	// mitm inherits the cert-forging datapath; broker splices (no CA); off
+	// runs no mediator. The retired names forge nothing (they are errors now).
+	if !EgressModeForgesCerts(EgressModeMITM) {
+		t.Errorf("EgressModeForgesCerts(mitm) = false, want true")
 	}
-	if !EgressMediationOn(EgressModeBroker) {
-		t.Fatalf("EgressMediationOn(%q) = false, want true (broker must provision the mediator)", EgressModeBroker)
-	}
-	// An unrecognized value still resolves to the secure default, not broker.
-	if got := NormalizeEgressMode("brokerish"); got != EgressModeGuarded {
-		t.Errorf("NormalizeEgressMode(%q) = %q, want guarded", "brokerish", got)
-	}
-}
-
-func TestEgressModeForgesCerts(t *testing.T) {
-	// Only guarded and strict terminate TLS by forging per-SNI certificates from
-	// the per-workspace CA, so only they require delivering that CA to the guest.
-	// broker splices opaquely and off runs no mediator — neither delivers a CA.
-	forges := []string{"guarded", "GUARDED", " strict ", "strict"}
-	for _, m := range forges {
-		if !EgressModeForgesCerts(m) {
-			t.Errorf("EgressModeForgesCerts(%q) = false, want true", m)
-		}
-	}
-	noCA := []string{"broker", " broker ", "off", "", "  "}
-	for _, m := range noCA {
+	for _, m := range []string{EgressModeBroker, EgressModeOff, "guarded", "strict", ""} {
 		if EgressModeForgesCerts(m) {
 			t.Errorf("EgressModeForgesCerts(%q) = true, want false", m)
 		}
-	}
-}
-
-func TestNormalizeEgressModeGuardedDefault(t *testing.T) {
-	cases := map[string]string{
-		"":        EgressModeGuarded, // default flipped to guarded
-		"guarded": EgressModeGuarded,
-		"strict":  EgressModeStrict,
-		"off":     EgressModeOff,
-		"bogus":   EgressModeGuarded, // unknown -> safe default
-	}
-	for in, want := range cases {
-		if got := NormalizeEgressMode(in); got != want {
-			t.Errorf("NormalizeEgressMode(%q)=%q want %q", in, got, want)
-		}
-	}
-	if !EgressMediationOn(EgressModeGuarded) {
-		t.Fatal("EgressMediationOn(guarded) must be true or the mediator is skipped (fail-open)")
 	}
 }
 

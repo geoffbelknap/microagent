@@ -101,6 +101,7 @@ func startMediatorWithSwapConfig(t *testing.T, swapDomain, swapYAML, captureHead
 
 	log := &BufferLogger{}
 	h := &Handler{
+		Mode:          egressModeMITM, // credential swap requires TLS interception (forging)
 		Policy:        pol,
 		CA:            testCA,
 		UpstreamRoots: upstreamRoots,
