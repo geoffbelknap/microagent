@@ -278,19 +278,34 @@ func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(
 	// grant — mirroring the TCP and UDP paths.
 	unlisted := allowed && !listed && !passthrough
 
+	// A cooperative guest resolves through the mediator's own (inside/gateway)
+	// resolver; a query aimed at a PUBLIC resolver address is an attempt to use a
+	// foreign resolver — the guest cannot actually reach it (all DNS is TPROXY'd
+	// here), but the attempt is a non-cooperation tell that outranks the generic
+	// denied signal.
+	foreignResolver := resolver.Addr().IsValid() && !isInsideAddr(resolver.Addr())
 	dnsFields := func() map[string]any {
-		return map[string]any{"qname": qname, "qtype": qtype.String(), "id": id}
+		f := map[string]any{"qname": qname, "qtype": qtype.String(), "id": id}
+		if foreignResolver {
+			f["signal"] = SignalForeignResolver
+		}
+		return f
 	}
 
 	if !allowed {
-		// strict + non-allowlisted: refuse without forwarding. The guest learns no
-		// IP — this is what makes strict authoritative and kills DNS tunneling.
+		// allowlist-only + non-allowlisted: refuse without forwarding. The guest
+		// learns no IP — this is what makes a locked allowlist authoritative and
+		// kills DNS tunneling.
 		refused, rerr := synthesizeRefused(query)
 		if rerr != nil {
 			h.Logger.Log("egress_dns_error", map[string]any{"qname": qname, "error": rerr.Error()})
 			return nil, rerr
 		}
-		h.Logger.Log("egress_dns_deny", dnsFields())
+		denyFields := dnsFields()
+		if _, ok := denyFields["signal"]; !ok {
+			denyFields["signal"] = SignalDenied
+		}
+		h.Logger.Log("egress_dns_deny", denyFields)
 		return refused, nil
 	}
 

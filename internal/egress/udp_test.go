@@ -52,7 +52,7 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 	guestSrc := netip.MustParseAddrPort("10.0.0.5:51000")
 	// Non-DNS port: :53 routes to the DNS resolver-filter (one-shot, no flow),
 	// which is exercised separately; this test drives the generic flow path.
-	origDst := netip.MustParseAddrPort("203.0.113.9:443")
+	origDst := netip.MustParseAddrPort("203.0.113.9:4433")
 
 	replies := make(chan capturedReply, 4)
 	log := &BufferLogger{}
@@ -100,8 +100,8 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 func TestUDPStrictDeniesUnlisted(t *testing.T) {
 	// Non-DNS ports: :53 routes to the DNS resolver-filter (covered by
 	// TestUDPRoutesDNSToHandler); these drive the generic UDP flow policy path.
-	allowed := netip.MustParseAddrPort("203.0.113.9:443")
-	denied := netip.MustParseAddrPort("198.51.100.7:443")
+	allowed := netip.MustParseAddrPort("203.0.113.9:4433")
+	denied := netip.MustParseAddrPort("198.51.100.7:4433")
 	guestSrc := netip.MustParseAddrPort("10.0.0.5:51001")
 
 	t.Run("strict denies unlisted", func(t *testing.T) {
@@ -297,7 +297,7 @@ func TestUDPFlowIdleClose(t *testing.T) {
 	defer p.closeAll()
 
 	src := netip.MustParseAddrPort("10.0.0.5:51010")
-	od := netip.MustParseAddrPort("203.0.113.9:443") // non-DNS: drive the flow path, not the DNS one-shot
+	od := netip.MustParseAddrPort("203.0.113.9:4433") // non-DNS: drive the flow path, not the DNS one-shot
 	p.handleUDPDatagram(src, od, []byte("ping"))
 
 	select {
@@ -552,7 +552,7 @@ func TestDNSForwardDoesNotStallOtherDatagrams(t *testing.T) {
 	defer cleanup()
 
 	resolver := netip.MustParseAddrPort("203.0.113.53:53")
-	dataDst := netip.MustParseAddrPort("203.0.113.9:443") // non-DNS port -> generic flow
+	dataDst := netip.MustParseAddrPort("203.0.113.9:4433") // non-DNS port -> generic flow
 	guestSrc := netip.MustParseAddrPort("10.0.0.5:53000")
 
 	replies := make(chan capturedReply, 4)
@@ -662,7 +662,7 @@ func TestStrictUDPByName(t *testing.T) {
 		p := newUDPProxy(h)
 		defer p.closeAll()
 
-		dst := netip.AddrPortFrom(allowedIP, 443)
+		dst := netip.AddrPortFrom(allowedIP, 4433)
 		p.handleUDPDatagram(netip.MustParseAddrPort("10.0.0.5:52100"), dst, []byte("ping"))
 
 		assertEvent(t, log, "egress_udp_allow")
@@ -689,7 +689,7 @@ func TestStrictUDPByName(t *testing.T) {
 		p := newUDPProxy(h)
 		defer p.closeAll()
 
-		uncached := netip.MustParseAddrPort("198.51.100.9:443")
+		uncached := netip.MustParseAddrPort("198.51.100.9:4433")
 		p.handleUDPDatagram(netip.MustParseAddrPort("10.0.0.5:52101"), uncached, []byte("ping"))
 
 		if dialed {

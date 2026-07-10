@@ -280,16 +280,31 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		}
 	}
 
+	dst := origDst.String()
+
+	// QUIC / HTTP-3 (UDP:443) is default-denied so cooperative clients fall back
+	// to TCP/TLS where the broker governs them — the pragmatic answer every egress
+	// proxy uses; a QUIC-terminating broker is out of scope. The drop is now a
+	// tagged non-cooperation signal rather than a silent drop.
+	if origDst.Port() == 443 {
+		p.h.Logger.Log("egress_udp_deny", map[string]any{
+			"host":   host,
+			"dst":    dst,
+			"reason": "quic/udp:443 denied — falls back to TCP where the broker governs it",
+			"signal": SignalQUICUDP443,
+		})
+		return
+	}
+
 	// Same decision sequence as the TCP path and the wasm sandbox, via the shared
-	// Brain.Evaluate: the default-deny allowlist plus the guarded inside-deny on
-	// the resolved destination IP (so SNI/hostname spoofing cannot bypass it).
-	// UDP has no passthrough/peer concept, so candidates is nil and passthrough is
-	// false; the deny audit keeps the UDP-specific event names.
+	// Brain.Evaluate: the default-deny allowlist plus the inside-deny on the
+	// resolved destination IP (so SNI/hostname spoofing cannot bypass it). UDP has
+	// no passthrough/peer concept, so candidates is nil and passthrough is false;
+	// the deny audit keeps the UDP-specific event names.
 	v := p.h.brain().Evaluate(host, nil, origDst.Addr(), false)
 	allowed := v.Allowed
-	unlisted := v.Unlisted // not explicitly on the allowlist (guarded-public grant)
+	unlisted := v.Unlisted // not explicitly on the allowlist (allow-broad grant)
 
-	dst := origDst.String()
 	if !allowed {
 		// fail-closed: no upstream socket, drop the datagram.
 		event := "egress_udp_deny"
@@ -303,6 +318,7 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 			"dst":      dst,
 			"reason":   reason,
 			"internal": v.Inside,
+			"signal":   SignalDenied,
 		})
 		return
 	}

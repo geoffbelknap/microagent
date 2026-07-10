@@ -491,6 +491,14 @@ func (h *Handler) Handle(conn net.Conn) {
 		allowFields["unlisted"] = true
 		closeFields["unlisted"] = true
 	}
+	// A bare-IP destination with no SNI/Host sniffed, allowed under the
+	// allow-broad grant and not a known peer: permitted but conspicuous — a
+	// cooperative client resolves names first, so direct-to-IP is a
+	// non-cooperation signal.
+	if !isPeer && host == dst.Addr().String() {
+		allowFields["signal"] = SignalDirectIPNoSNI
+		closeFields["signal"] = SignalDirectIPNoSNI
+	}
 	// East-west legibility: a peer flow takes this L4-splice path (NO MITM), so
 	// stamp mitm:false to make the external-vs-peer split explicit in the audit —
 	// external MITM flows log mitm:true. Only on a peer flow; plain external

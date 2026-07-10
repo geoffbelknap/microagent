@@ -98,19 +98,21 @@ func (b *Brain) Evaluate(host string, candidates []string, dstIP netip.Addr, pas
 }
 
 // AuditDeny records a fail-closed denial for the TCP byte-stream and structured
-// (host-fetch) paths: egress_internal_deny when guarded classified the
-// destination as inside/infrastructure, otherwise egress_deny, stamping the
-// policy reason. fields carries the transport's identifying context (host, dst,
-// and any peer fields); AuditDeny adds reason (and internal, when inside). The
-// UDP path keeps its own egress_udp_* event names but shares Evaluate for the
-// decision, so the allow/deny math is single-sourced even where the audit event
-// names differ by transport.
+// (host-fetch) paths: egress_internal_deny when the destination is classified
+// inside/infrastructure, otherwise egress_deny, stamping the policy reason.
+// fields carries the transport's identifying context (host, dst, and any peer
+// fields); AuditDeny adds reason (and internal, when inside) plus the "denied"
+// non-cooperation signal so the record joins the signal taxonomy. The UDP path
+// keeps its own egress_udp_* event names but shares Evaluate for the decision,
+// so the allow/deny math is single-sourced even where the audit event names
+// differ by transport.
 func (b *Brain) AuditDeny(v Verdict, fields map[string]any) {
 	if fields == nil {
 		fields = map[string]any{}
 	}
 	event := "egress_deny"
 	fields["reason"] = v.Reason
+	fields["signal"] = SignalDenied
 	if v.Inside {
 		event = "egress_internal_deny"
 		fields["reason"] = "inside: internal destination denied"
