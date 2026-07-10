@@ -57,7 +57,7 @@ func TestUDPProxyForwardsAndReplies(t *testing.T) {
 	replies := make(chan capturedReply, 4)
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:   "guarded",
+		Mode:   "mitm",
 		Policy: mustPolicy(t),
 		Logger: log,
 		// DialUDP ignores origDst and dials the real echo server so we can
@@ -109,9 +109,10 @@ func TestUDPStrictDeniesUnlisted(t *testing.T) {
 		pol, _ := NewPolicy([]string{"203.0.113.9"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   "strict",
-			Policy: pol,
-			Logger: log,
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
 			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
 				dialed = true
 				return nil, nil
@@ -134,9 +135,10 @@ func TestUDPStrictDeniesUnlisted(t *testing.T) {
 		pol, _ := NewPolicy([]string{"203.0.113.9"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   "strict",
-			Policy: pol,
-			Logger: log,
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
 			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
 				return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
 			},
@@ -156,7 +158,7 @@ func TestUDPStrictDeniesUnlisted(t *testing.T) {
 		pol, _ := NewPolicy([]string{"203.0.113.9"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   "guarded",
+			Mode:   "mitm",
 			Policy: pol,
 			Logger: log,
 			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -183,7 +185,7 @@ func TestUDPFlowTableBounded(t *testing.T) {
 
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:   "guarded",
+		Mode:   "mitm",
 		Policy: mustPolicy(t),
 		Logger: log,
 		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -273,7 +275,7 @@ func TestUDPFlowIdleClose(t *testing.T) {
 	closed := make(chan struct{}, 1)
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:   "guarded",
+		Mode:   "mitm",
 		Policy: mustPolicy(t),
 		Logger: log,
 		DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -335,7 +337,7 @@ func TestUDPProxyLoopGuardDropsOwnBindAddr(t *testing.T) {
 	dialed := false
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:     "guarded",
+		Mode:     "mitm",
 		Policy:   mustPolicy(t),
 		Logger:   log,
 		BindAddr: bind,
@@ -371,11 +373,12 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 	t.Run("allowlisted name forwarded, cached, no flow", func(t *testing.T) {
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:      "strict",
-			Policy:    pol,
-			Logger:    log,
-			NameCache: NewNameCache(),
-			ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
+			NameCache:       NewNameCache(),
+			ReplyTo:         func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
 			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				t.Fatal("DialUDP called for DNS (must be one-shot, no flow)")
 				return nil, nil
@@ -441,12 +444,13 @@ func TestUDPRoutesDNSToHandler(t *testing.T) {
 	t.Run("non-allowlisted name refused without forwarding", func(t *testing.T) {
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:      "strict",
-			Policy:    pol,
-			Logger:    log,
-			NameCache: NewNameCache(),
-			ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
-			DialUDP:   func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS deny"); return nil, nil },
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
+			NameCache:       NewNameCache(),
+			ReplyTo:         func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+			DialUDP:         func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS deny"); return nil, nil },
 		}
 		p := newUDPProxy(h)
 		defer p.closeAll()
@@ -506,12 +510,13 @@ func TestServeDNSAuditsReplyFailure(t *testing.T) {
 	pol, _ := NewPolicy([]string{"allowed.example.com"})
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:      "strict",
-		Policy:    pol,
-		Logger:    log,
-		NameCache: NewNameCache(),
-		ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
-		DialUDP:   func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS"); return nil, nil },
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          pol,
+		Logger:          log,
+		NameCache:       NewNameCache(),
+		ReplyTo:         func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+		DialUDP:         func(netip.AddrPort) (net.Conn, error) { t.Fatal("DialUDP called for DNS"); return nil, nil },
 	}
 	p := newUDPProxy(h)
 	defer p.closeAll()
@@ -552,7 +557,7 @@ func TestDNSForwardDoesNotStallOtherDatagrams(t *testing.T) {
 
 	replies := make(chan capturedReply, 4)
 	h := &Handler{
-		Mode:      "guarded",
+		Mode:      "mitm",
 		Policy:    mustPolicy(t),
 		Logger:    &BufferLogger{},
 		NameCache: NewNameCache(),
@@ -643,10 +648,11 @@ func TestStrictUDPByName(t *testing.T) {
 		defer cleanup()
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:      "strict",
-			Policy:    pol,
-			Logger:    log,
-			NameCache: NewNameCache(),
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
+			NameCache:       NewNameCache(),
 			DialUDP: func(netip.AddrPort) (net.Conn, error) {
 				return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
 			},
@@ -671,12 +677,13 @@ func TestStrictUDPByName(t *testing.T) {
 		dialed := false
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:      "strict",
-			Policy:    pol,
-			Logger:    log,
-			NameCache: NewNameCache(),
-			DialUDP:   func(netip.AddrPort) (net.Conn, error) { dialed = true; return nil, nil },
-			ReplyTo:   func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
+			NameCache:       NewNameCache(),
+			DialUDP:         func(netip.AddrPort) (net.Conn, error) { dialed = true; return nil, nil },
+			ReplyTo:         func(netip.AddrPort, netip.AddrPort, []byte) error { return nil },
 		}
 		h.NameCache.Put("allowed.example.com", allowedIP, time.Minute)
 		p := newUDPProxy(h)
@@ -720,7 +727,7 @@ func TestGuardedUDP(t *testing.T) {
 		pol, _ := NewPolicy(nil)
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   egressModeGuarded,
+			Mode:   egressModeMITM,
 			Policy: pol,
 			Logger: log,
 			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -748,7 +755,7 @@ func TestGuardedUDP(t *testing.T) {
 		pol, _ := NewPolicy(nil)
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   egressModeGuarded,
+			Mode:   egressModeMITM,
 			Policy: pol,
 			Logger: log,
 			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -773,7 +780,7 @@ func TestGuardedUDP(t *testing.T) {
 		pol, _ := NewPolicy([]string{"169.254.169.254"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   egressModeGuarded,
+			Mode:   egressModeMITM,
 			Policy: pol,
 			Logger: log,
 			DialUDP: func(_ netip.AddrPort) (net.Conn, error) {
@@ -805,7 +812,7 @@ func TestGuardedUDP(t *testing.T) {
 		pol, _ := NewPolicy([]string{"example.com"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:      egressModeGuarded,
+			Mode:      egressModeMITM,
 			Policy:    pol,
 			Logger:    log,
 			NameCache: NewNameCache(),

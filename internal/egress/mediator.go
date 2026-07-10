@@ -45,12 +45,14 @@ const maxTLSRecord = 1<<14 + 5
 // destination, sniff the host, enforce the allowlist, and forward or deny
 // fail-closed. OrigDst and Dial are injectable for tests.
 type Handler struct {
-	// Mode selects enforcement: "guarded" (default) denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west on
-	// resolved IP while allowing public internet; "strict" denies non-allowlisted destinations fail-closed; empty
-	// normalizes to "guarded".
+	// Mode selects enforcement + termination: "broker" (default) allows public
+	// internet and denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west
+	// on the resolved IP, splicing allowed TLS opaquely; "mitm" makes the same
+	// allow-broad decision but forges per-SNI certificates; empty normalizes to
+	// "broker". AllowlistLocked turns either into allowlist-only.
 	Mode string
-	// AllowlistLocked, in broker mode, restricts egress to allowlisted
-	// destinations only (drops the allow-broad grant). No effect otherwise.
+	// AllowlistLocked restricts egress to allowlisted destinations only (drops
+	// the allow-broad grant), on either mediating mode. No effect with egress off.
 	AllowlistLocked bool
 	Policy          *Policy
 	Passthrough     *Policy
@@ -327,26 +329,26 @@ func isEastWestAddr(a netip.Addr) bool {
 // Egress mode constants for the Handler.Mode field. Mirror the vmkit constants
 // without introducing a package dependency; they must stay in sync.
 const (
-	egressModeGuarded = "guarded"
-	egressModeBroker  = "broker"
+	egressModeMITM   = "mitm"
+	egressModeBroker = "broker"
 )
 
 // allowsBroad reports whether the mode grants public destinations by default,
-// denying only the inside/infrastructure: guarded and broker. strict resolves
-// and permits only allowlisted names; off runs no mediator. guarded and broker
-// share this allow-broad decision — they differ only in termination (broker
-// splices opaquely instead of forging per-SNI certificates).
+// denying only the inside/infrastructure: broker and mitm. off runs no
+// mediator. broker and mitm share this allow-broad decision — they differ only
+// in termination (broker splices opaquely; mitm forges per-SNI certificates).
+// Allowlist-only reach is the AllowlistLocked variant, orthogonal to the mode.
 func allowsBroad(mode string) bool {
-	return mode == egressModeGuarded || mode == egressModeBroker
+	return mode == egressModeBroker || mode == egressModeMITM
 }
 
 // shouldMITM reports whether an allowed flow is terminated by forging a per-SNI
 // leaf (serveMITM) rather than opaquely spliced. It requires TLS, a loaded CA,
-// an allowed non-passthrough non-peer destination — and NEVER holds in broker
-// mode. The broker guard is a hard security invariant, independent of whether a
-// CA happens to be loaded: broker mode splices, it does not forge certificates.
+// an allowed non-passthrough non-peer destination — and holds ONLY in mitm
+// mode. broker mode splices, it does not forge certificates: a hard security
+// invariant, independent of whether a CA happens to be loaded.
 func (h *Handler) shouldMITM(isTLS, allowed, passthrough, isPeer bool) bool {
-	return isTLS && h.CA != nil && allowed && !passthrough && !isPeer && h.Mode != egressModeBroker
+	return isTLS && h.CA != nil && allowed && !passthrough && !isPeer && h.Mode == egressModeMITM
 }
 
 var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")

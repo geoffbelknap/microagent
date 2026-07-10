@@ -296,7 +296,7 @@ func (p *udpProxy) handleUDPDatagram(src, origDst netip.AddrPort, payload []byte
 		reason := v.Reason
 		if v.Inside {
 			event = "egress_udp_internal_deny"
-			reason = "guarded: internal destination denied"
+			reason = "inside: internal destination denied"
 		}
 		p.h.Logger.Log(event, map[string]any{
 			"host":     host,

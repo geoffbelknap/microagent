@@ -20,10 +20,10 @@ import (
 // caps, peer/DNS reverse resolution, the host-fetch round-trip — lives around the
 // brain, not inside it.
 type Brain struct {
-	Mode string // "guarded" (deny inside/infra) | "broker" (allow-broad, opaque splice) | "strict" (deny non-allowlisted) | "" (=> guarded)
-	// AllowlistLocked, in broker mode, drops the allow-broad grant so only
-	// allowlisted destinations are permitted (the folded-in strict behavior).
-	// It has no effect in guarded/strict/off.
+	Mode string // "broker" (allow-broad, opaque splice) | "mitm" (allow-broad, forge per-SNI) | "off" | "" (=> broker)
+	// AllowlistLocked drops the allow-broad grant so only allowlisted
+	// destinations are permitted (the folded-in strict behavior), on either
+	// mediating mode. It has no effect with egress off.
 	AllowlistLocked bool
 	Policy          *Policy
 	Swaps           *SwapTable
@@ -113,7 +113,7 @@ func (b *Brain) AuditDeny(v Verdict, fields map[string]any) {
 	fields["reason"] = v.Reason
 	if v.Inside {
 		event = "egress_internal_deny"
-		fields["reason"] = "guarded: internal destination denied"
+		fields["reason"] = "inside: internal destination denied"
 		fields["internal"] = true
 	}
 	b.Logger.Log(event, fields)

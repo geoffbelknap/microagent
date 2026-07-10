@@ -22,13 +22,13 @@ func TestOptionsFromManifestThreadsEgressToConfig(t *testing.T) {
 	}
 	manifest := Manifest{
 		Network:           NetworkSpec{Mode: "user"},
-		EgressMode:        vmkit.EgressModeStrict,
+		EgressMode:        vmkit.EgressModeMITM,
 		EgressAllow:       []string{"api.github.com", ".example.com"},
 		EgressPassthrough: []string{"raw.example.com"},
 	}
 
 	opts := OptionsFromManifest(base, manifest)
-	if opts.EgressMode != vmkit.EgressModeStrict {
+	if opts.EgressMode != vmkit.EgressModeMITM {
 		t.Fatalf("OptionsFromManifest dropped EgressMode: %q", opts.EgressMode)
 	}
 	if len(opts.EgressAllow) != 2 || opts.EgressAllow[0] != "api.github.com" || opts.EgressAllow[1] != ".example.com" {
@@ -42,7 +42,7 @@ func TestOptionsFromManifestThreadsEgressToConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if req.Config.EgressMode != vmkit.EgressModeStrict {
+	if req.Config.EgressMode != vmkit.EgressModeMITM {
 		t.Fatalf("Config dropped EgressMode: %q", req.Config.EgressMode)
 	}
 	if len(req.Config.EgressAllow) != 2 || req.Config.EgressAllow[0] != "api.github.com" || req.Config.EgressAllow[1] != ".example.com" {

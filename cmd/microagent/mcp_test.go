@@ -313,7 +313,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 			name: "workspace.create",
 			args: map[string]any{
 				"name":               "demo",
-				"egress":             "strict",
+				"egress":             "mitm",
 				"egress_allow":       []any{"api.anthropic.com", ".pypi.org"},
 				"egress_passthrough": []any{"pinned.example.com"},
 				"egress_policy":      "/tmp/egress.yaml",
@@ -324,7 +324,7 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"secrets_env_file":   "/tmp/app.env",
 				"secrets_audit":      true,
 			},
-			want: []string{"--mode=ax", "create", "demo", "-egress", "strict", "-egress-policy", "/tmp/egress.yaml", "-egress-swap-config", "/tmp/swaps.yaml", "-secrets-env-file", "/tmp/app.env", "-secrets-audit", "-egress-allow", "api.anthropic.com", "-egress-allow", ".pypi.org", "-egress-passthrough", "pinned.example.com", "-cred-swap", "anthropic", "-cred-swap", "openai=env:MY_OPENAI", "-secret", "ANTHROPIC_API_KEY=env:KEY", "-secret-on-demand", "DB=dotenv:/tmp/app.env#DB"},
+			want: []string{"--mode=ax", "create", "demo", "-egress", "mitm", "-egress-policy", "/tmp/egress.yaml", "-egress-swap-config", "/tmp/swaps.yaml", "-secrets-env-file", "/tmp/app.env", "-secrets-audit", "-egress-allow", "api.anthropic.com", "-egress-allow", ".pypi.org", "-egress-passthrough", "pinned.example.com", "-cred-swap", "anthropic", "-cred-swap", "openai=env:MY_OPENAI", "-secret", "ANTHROPIC_API_KEY=env:KEY", "-secret-on-demand", "DB=dotenv:/tmp/app.env#DB"},
 		},
 		{
 			// broker config maps through to create

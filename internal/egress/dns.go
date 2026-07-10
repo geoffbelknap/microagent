@@ -268,11 +268,14 @@ func (h *Handler) handleDNS(query []byte, resolver netip.AddrPort, forward func(
 
 	listed := h.Policy != nil && h.Policy.AllowHost(qname).Allow
 	passthrough := h.Passthrough != nil && h.Passthrough.AllowHost(qname).Allow
-	permissive := allowsBroad(h.Mode)
+	// A locked allowlist drops the allow-broad grant, so DNS resolves only
+	// allowlisted names — mirroring the Brain's TCP decision. Without this,
+	// broker/mitm + --egress-lock-allowlist would still resolve any name.
+	permissive := allowsBroad(h.Mode) && !h.AllowlistLocked
 	allowed := permissive || listed || passthrough
-	// unlisted marks a name permitted only because guarded mode resolves names
-	// freely (it is on no allowlist), so the audit trail records the looser grant
-	// — mirroring the TCP and UDP paths.
+	// unlisted marks a name permitted only because an allow-broad mode resolves
+	// names freely (it is on no allowlist), so the audit trail records the looser
+	// grant — mirroring the TCP and UDP paths.
 	unlisted := allowed && !listed && !passthrough
 
 	dnsFields := func() map[string]any {

@@ -320,7 +320,7 @@ func TestHandleDNSStrictAllowsAndCaches(t *testing.T) {
 func TestHandleDNSGuardedForwardsAndCachesUnlisted(t *testing.T) {
 	pol, _ := NewPolicy([]string{"unrelated.example.com"})
 	log := &BufferLogger{}
-	h := &Handler{Mode: "guarded", Policy: pol, Logger: log, NameCache: NewNameCache()}
+	h := &Handler{Mode: "mitm", Policy: pol, Logger: log, NameCache: NewNameCache()}
 
 	want := buildResponseWithA(t, 0x0003, "whatever.example.com.", "whatever.example.com.",
 		[4]byte{198, 51, 100, 4}, 120)
@@ -370,7 +370,7 @@ func TestHandleDNSForwardErrorAudited(t *testing.T) {
 
 func TestHandleDNSParseErrorReturnsError(t *testing.T) {
 	log := &BufferLogger{}
-	h := &Handler{Mode: "guarded", Logger: log, NameCache: NewNameCache()}
+	h := &Handler{Mode: "mitm", Logger: log, NameCache: NewNameCache()}
 	forward := func(netip.AddrPort, []byte) ([]byte, error) {
 		t.Fatal("forward must not be called on a parse error")
 		return nil, nil
@@ -388,7 +388,7 @@ func TestHandleDNSParseErrorReturnsError(t *testing.T) {
 // the DNS layer must not duplicate it.
 func TestGuardedDNSRebind(t *testing.T) {
 	log := &BufferLogger{}
-	h := &Handler{Mode: egressModeGuarded, Logger: log, NameCache: NewNameCache()}
+	h := &Handler{Mode: egressModeMITM, Logger: log, NameCache: NewNameCache()}
 
 	// Simulate a response where metadata.internal. resolves to 169.254.169.254.
 	internalIP := [4]byte{169, 254, 169, 254}
@@ -427,7 +427,7 @@ func TestGuardedDNSRebind(t *testing.T) {
 // names freely (non-allowlisted names are forwarded, not refused).
 func TestGuardedDNSPublicName(t *testing.T) {
 	log := &BufferLogger{}
-	h := &Handler{Mode: egressModeGuarded, Logger: log, NameCache: NewNameCache()}
+	h := &Handler{Mode: egressModeMITM, Logger: log, NameCache: NewNameCache()}
 
 	want := buildResponseWithA(t, 0x0011, "example.com.", "example.com.",
 		[4]byte{93, 184, 216, 34}, 300)

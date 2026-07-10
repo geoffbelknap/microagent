@@ -297,6 +297,7 @@ func BenchmarkMITMThroughput(b *testing.B) {
 	}
 	pol, _ := NewPolicy([]string{"example.com"})
 	h := &Handler{
+		Mode:          egressModeMITM, // this benchmark measures the cert-forging path
 		Policy:        pol,
 		CA:            ca,
 		UpstreamRoots: upRoots,
@@ -383,7 +384,7 @@ func BenchmarkMITMHandshakeLatency(b *testing.B) {
 	newHandler := func(ca *CA) *Handler {
 		// ".bench" suffix admits the cold-cache hN.bench SNIs; example.com is the warm one.
 		pol, _ := NewPolicy([]string{"example.com", ".bench"})
-		return &Handler{Policy: pol, CA: ca, UpstreamRoots: upRoots, Logger: discardLogger{}}
+		return &Handler{Mode: egressModeMITM, Policy: pol, CA: ca, UpstreamRoots: upRoots, Logger: discardLogger{}}
 	}
 
 	b.Run("cold-cache", func(b *testing.B) {
@@ -426,9 +427,10 @@ func BenchmarkUDPForwarding(b *testing.B) {
 	replied := make(chan struct{}, 1<<16)
 	pol, _ := NewPolicy([]string{"203.0.113.9"})
 	h := &Handler{
-		Mode:   "strict",
-		Policy: pol,
-		Logger: discardLogger{},
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          pol,
+		Logger:          discardLogger{},
 		DialUDP: func(netip.AddrPort) (net.Conn, error) {
 			return net.DialUDP("udp4", nil, net.UDPAddrFromAddrPort(echoAddr))
 		},
@@ -537,7 +539,7 @@ func TestEgressPerformanceThresholds(t *testing.T) {
 		defer stopUp()
 		ca, _ := NewCA("bench-ca", time.Hour)
 		pol, _ := NewPolicy([]string{"example.com", ".bench"})
-		h := &Handler{Policy: pol, CA: ca, UpstreamRoots: upRoots, Logger: discardLogger{}}
+		h := &Handler{Mode: egressModeMITM, Policy: pol, CA: ca, UpstreamRoots: upRoots, Logger: discardLogger{}}
 		medAddr, stopMed := benchMediator(b, h, upAddr)
 		defer stopMed()
 		caPool := x509.NewCertPool()
@@ -554,7 +556,7 @@ func TestEgressPerformanceThresholds(t *testing.T) {
 		ca, _ := NewCA("bench-ca", time.Hour)
 		warmCA = ca
 		pol, _ := NewPolicy([]string{"example.com"})
-		h := &Handler{Policy: pol, CA: ca, UpstreamRoots: upRoots, Logger: discardLogger{}}
+		h := &Handler{Mode: egressModeMITM, Policy: pol, CA: ca, UpstreamRoots: upRoots, Logger: discardLogger{}}
 		medAddr, stopMed := benchMediator(b, h, upAddr)
 		defer stopMed()
 		caPool := x509.NewCertPool()

@@ -48,6 +48,7 @@ func TestMITMInterceptsTLS(t *testing.T) {
 	}
 	log := &BufferLogger{}
 	h := &Handler{
+		Mode:          egressModeMITM,
 		Policy:        pol,
 		CA:            testCA,
 		UpstreamRoots: upstreamRoots,
@@ -208,6 +209,7 @@ func TestMITMSwapInjectsCredential(t *testing.T) {
 	}
 	log := &BufferLogger{}
 	h := &Handler{
+		Mode:          egressModeMITM,
 		Policy:        pol,
 		CA:            testCA,
 		UpstreamRoots: upstreamRoots,
@@ -332,15 +334,16 @@ func TestHandlerSplicesPeerTLSWithoutMITM(t *testing.T) {
 	}
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:          "strict",
-		Policy:        pol,
-		CA:            testCA,
-		UpstreamRoots: publicRoots, // does NOT trust the self-signed upstream
-		Peers:         peers,
-		Logger:        log,
-		OrigDst:       func(net.Conn) (netip.AddrPort, error) { return upstreamAddrPort, nil },
-		Dial:          net.Dial,
-		SniffTimeout:  2 * time.Second,
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          pol,
+		CA:              testCA,
+		UpstreamRoots:   publicRoots, // does NOT trust the self-signed upstream
+		Peers:           peers,
+		Logger:          log,
+		OrigDst:         func(net.Conn) (netip.AddrPort, error) { return upstreamAddrPort, nil },
+		Dial:            net.Dial,
+		SniffTimeout:    2 * time.Second,
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -444,15 +447,16 @@ func TestHandlerMITMsExternalTLS(t *testing.T) {
 	}
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:          "strict",
-		Policy:        pol,
-		CA:            testCA,
-		UpstreamRoots: upstreamRoots,
-		Peers:         peers,
-		Logger:        log,
-		OrigDst:       func(net.Conn) (netip.AddrPort, error) { return upstreamAddrPort, nil },
-		Dial:          net.Dial,
-		SniffTimeout:  2 * time.Second,
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          pol,
+		CA:              testCA,
+		UpstreamRoots:   upstreamRoots,
+		Peers:           peers,
+		Logger:          log,
+		OrigDst:         func(net.Conn) (netip.AddrPort, error) { return upstreamAddrPort, nil },
+		Dial:            net.Dial,
+		SniffTimeout:    2 * time.Second,
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -540,13 +544,14 @@ func TestPeerAuditFieldsPresent(t *testing.T) {
 		}
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:         "strict",
-			Policy:       pol,
-			Peers:        peers,
-			Logger:       log,
-			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
-			Dial:         net.Dial,
-			SniffTimeout: 300 * time.Millisecond,
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Peers:           peers,
+			Logger:          log,
+			OrigDst:         func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+			Dial:            net.Dial,
+			SniffTimeout:    300 * time.Millisecond,
 		}
 		client, server := net.Pipe()
 		done := make(chan struct{})
@@ -566,9 +571,10 @@ func TestPeerAuditFieldsPresent(t *testing.T) {
 	})
 
 	t.Run("denied IP-only peer carries peer_ip", func(t *testing.T) {
-		// An IP not in the PeerCache and not on the allowlist: name unknown, but the
-		// egress_deny must still carry peer_ip (the bare destination IP) for the
-		// east-west audit trail.
+		// An inside IP not in the PeerCache and not on the allowlist: name
+		// unknown, denied as internal (an allow-broad-family mode classifies the
+		// resolved RFC1918 IP as inside), and the deny must still carry peer_ip
+		// (the bare destination IP) for the east-west audit trail.
 		dst := netip.MustParseAddrPort("10.44.1.99:443")
 		pol, _ := NewPolicy([]string{"builder"})
 		peers, err := NewPeerCache([]string{"builder=10.44.1.3"})
@@ -577,13 +583,14 @@ func TestPeerAuditFieldsPresent(t *testing.T) {
 		}
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:         "strict",
-			Policy:       pol,
-			Peers:        peers,
-			Logger:       log,
-			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return dst, nil },
-			Dial:         func(string, string) (net.Conn, error) { t.Fatal("must not dial denied peer"); return nil, nil },
-			SniffTimeout: 300 * time.Millisecond,
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Peers:           peers,
+			Logger:          log,
+			OrigDst:         func(net.Conn) (netip.AddrPort, error) { return dst, nil },
+			Dial:            func(string, string) (net.Conn, error) { t.Fatal("must not dial denied peer"); return nil, nil },
+			SniffTimeout:    300 * time.Millisecond,
 		}
 		client, server := net.Pipe()
 		done := make(chan struct{})
@@ -591,7 +598,7 @@ func TestPeerAuditFieldsPresent(t *testing.T) {
 		go client.Write([]byte("RAWPING\n"))
 		<-done
 		client.Close()
-		assertEventWithField(t, log, "egress_deny", "peer_ip", dst.Addr().String())
+		assertEventWithField(t, log, "egress_internal_deny", "peer_ip", dst.Addr().String())
 	})
 }
 
@@ -632,6 +639,7 @@ func TestMITMPassthroughSkipsMITM(t *testing.T) {
 	passthrough, _ := NewPolicy([]string{"passthrough.example.com"})
 	log := &BufferLogger{}
 	h := &Handler{
+		Mode:         egressModeMITM,
 		Policy:       pol,
 		Passthrough:  passthrough,
 		CA:           testCA,

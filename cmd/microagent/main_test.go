@@ -186,8 +186,8 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"model-runner-command", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-command", "runner serve {model} --listen {addr}"}, "-model-runner-command", "runner serve {model} --listen {addr}"},
 		{"model-runner-arg", []string{"demo", "--model", "org/repo/m.gguf", "--model-runner-arg", "-ngl"}, "-model-runner-arg", "-ngl"},
 		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
-		{"egress-policy", []string{"demo", "--egress", "strict", "--egress-policy", "/tmp/egress.yaml"}, "-egress-policy", "/tmp/egress.yaml"},
-		{"egress-swap-config", []string{"demo", "--egress", "strict", "--egress-swap-config", "/tmp/swaps.yaml"}, "-egress-swap-config", "/tmp/swaps.yaml"},
+		{"egress-policy", []string{"demo", "--egress", "mitm", "--egress-policy", "/tmp/egress.yaml"}, "-egress-policy", "/tmp/egress.yaml"},
+		{"egress-swap-config", []string{"demo", "--egress", "mitm", "--egress-swap-config", "/tmp/swaps.yaml"}, "-egress-swap-config", "/tmp/swaps.yaml"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)
@@ -214,7 +214,7 @@ func TestParseWorkspaceOptionsPositionalNameWithSwapConfig(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"victim",
 		"--image", "docker.io/library/alpine:3.20",
-		"--egress", "strict",
+		"--egress", "mitm",
 		"--egress-allow", "registry.npmjs.org",
 		"--egress-swap-config", "swaps.yaml",
 	})
@@ -235,7 +235,7 @@ func TestParseWorkspaceOptionsEgressAllowCommaSplits(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"victim",
 		"--image", "docker.io/library/alpine:3.20",
-		"--egress", "strict",
+		"--egress", "mitm",
 		"--egress-allow", "registry.npmjs.org,postman-echo.com",
 	})
 	if err != nil {
@@ -1618,7 +1618,7 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 		Name:    "agent-1",
 		Backend: vmkit.BackendLinuxKVM,
 		// linux-kvm has a host-datapath capture provider, so the secure-default
-		// (unspecified -> guarded) egress mode allocates the CA-cert listener.
+		// (unspecified -> broker) egress mode; broker forges no certs, so no CA-cert listener.
 		KernelPath:     "/tmp/kernel",
 		MemoryMiB:      512,
 		CPUCount:       2,
@@ -1629,11 +1629,11 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workspaceRequest: %v", err)
 	}
-	// result + enforcer + mediation listeners, plus the CA-cert listener that
-	// egress mediation (the secure default for an unspecified mode) allocates
-	// on a backend with a capture provider.
-	if len(req.Config.VsockListeners) != 4 {
-		t.Fatalf("VsockListeners len = %d, want 4: %#v", len(req.Config.VsockListeners), req.Config.VsockListeners)
+	// result + enforcer + mediation listeners. The default mode is broker,
+	// which mediates but forges no certificates, so NO CA-cert listener is
+	// allocated (unlike the retired guarded default).
+	if len(req.Config.VsockListeners) != 3 {
+		t.Fatalf("VsockListeners len = %d, want 3: %#v", len(req.Config.VsockListeners), req.Config.VsockListeners)
 	}
 	if req.Config.VsockListeners[1].Port != 3128 || req.Config.VsockListeners[1].Target != "127.0.0.1:19000" {
 		t.Fatalf("enforcer listener = %#v", req.Config.VsockListeners[1])
@@ -1641,14 +1641,10 @@ func TestWorkspaceRequestIncludesVsockMappings(t *testing.T) {
 	if req.Config.VsockListeners[2].Port != 2048 || req.Config.VsockListeners[2].Target != "127.0.0.1:9900" {
 		t.Fatalf("mediation listener = %#v", req.Config.VsockListeners[2])
 	}
-	var sawCACert bool
 	for _, l := range req.Config.VsockListeners {
 		if l.Target == "cacert://serve" {
-			sawCACert = true
+			t.Fatalf("broker default must not allocate a cacert://serve listener: %#v", req.Config.VsockListeners)
 		}
-	}
-	if !sawCACert {
-		t.Fatalf("expected a cacert://serve listener (egress mediated by default): %#v", req.Config.VsockListeners)
 	}
 	if req.Config.Mediation == nil || !req.Config.Mediation.Required || !req.Config.Mediation.FailClosed {
 		t.Fatalf("mediation = %#v", req.Config.Mediation)
@@ -7815,9 +7811,9 @@ func TestWriteDoctorResponseTextAppleVFNetworkingDoesNotSuggestLinuxSetup(t *tes
 
 func TestParseEgressMode(t *testing.T) {
 	cases := map[string]string{
-		"": "guarded", "guarded": "guarded",
-		"strict": "strict", "STRICT": "strict",
-		"off": "off", "open": "off", "disabled": "off",
+		"": "broker", "broker": "broker", "BROKER": "broker",
+		"mitm": "mitm", "MITM": "mitm",
+		"off": "off", "OFF": "off",
 	}
 	for in, want := range cases {
 		got, err := parseEgressMode(in)
@@ -7825,8 +7821,8 @@ func TestParseEgressMode(t *testing.T) {
 			t.Fatalf("parseEgressMode(%q)=%q,%v want %q", in, got, err, want)
 		}
 	}
-	// "mediated" was removed: it is no longer a valid mode and must error.
-	for _, bad := range []string{"bogus", "mediated"} {
+	// The retired names and any junk must error — no silent fallback (tenet 9).
+	for _, bad := range []string{"guarded", "strict", "bogus", "mediated", "open", "disabled"} {
 		if _, err := parseEgressMode(bad); err == nil {
 			t.Fatalf("expected error for %q mode", bad)
 		}
@@ -7856,7 +7852,7 @@ passthrough:
 `)
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
-		"--egress", "strict",
+		"--egress", "mitm",
 		"--egress-allow", "API.GitHub.com", // dup of file entry, different case
 		"--egress-allow", "extra.com",
 		"--egress-passthrough", "raw.example.com", // dup of file entry
@@ -7891,7 +7887,7 @@ func TestEgressPolicyFileJSON(t *testing.T) {
 	policy := writeEgressPolicyFile(t, "policy.json", `{"allow":["api.github.com"],"passthrough":["raw.example.com"]}`)
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
-		"--egress", "guarded",
+		"--egress", "broker",
 		"--egress-policy", policy,
 	})
 	if err != nil {
@@ -7917,8 +7913,8 @@ func TestEgressPolicyFileRejectedWhenOff(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for --egress-policy with --egress off")
 	}
-	if !strings.Contains(err.Error(), "guarded") || !strings.Contains(err.Error(), "strict") {
-		t.Fatalf("error %q should explain guarded/strict requirement", err)
+	if !strings.Contains(err.Error(), "broker") || !strings.Contains(err.Error(), "mitm") {
+		t.Fatalf("error %q should explain broker/mitm requirement", err)
 	}
 }
 
@@ -7926,7 +7922,7 @@ func TestEgressPolicyFileLoadErrorPropagates(t *testing.T) {
 	policy := writeEgressPolicyFile(t, "policy.yaml", "allowed: [api.github.com]\n") // typo -> unknown key
 	_, err := parseWorkspaceOptions("create", []string{
 		"research",
-		"--egress", "strict",
+		"--egress", "mitm",
 		"--egress-policy", policy,
 	})
 	if err == nil {
@@ -7943,7 +7939,7 @@ func TestEgressPolicyFileUnionWithManifest(t *testing.T) {
 	policy := writeEgressPolicyFile(t, "policy.yaml", "allow: [file.example.com]\n")
 	opts, err := parseWorkspaceOptions("create", []string{
 		"research",
-		"--egress", "strict",
+		"--egress", "mitm",
 		"--egress-allow", "flag.example.com",
 		"--egress-policy", policy,
 	})
@@ -7961,7 +7957,7 @@ func TestEgressPolicyFileUnionWithManifest(t *testing.T) {
 }
 
 func TestParseEgressModeDefaults(t *testing.T) {
-	for in, want := range map[string]string{"": "guarded", "guarded": "guarded", "strict": "strict"} {
+	for in, want := range map[string]string{"": "broker", "broker": "broker", "mitm": "mitm"} {
 		got, err := parseEgressMode(in)
 		if err != nil || got != want {
 			t.Errorf("parseEgressMode(%q)=%q,%v want %q", in, got, err, want)

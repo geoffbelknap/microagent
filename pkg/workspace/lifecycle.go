@@ -1365,11 +1365,11 @@ func materializeCredSwapConfig(opts *Options) error {
 		return nil
 	}
 	// cred-swap is performed by the egress mediator (host-side MITM injection),
-	// which only runs in guarded/strict. With egress off there is no mediator to
+	// which only runs in mitm mode. With egress off there is no mediator to
 	// inject the key, so the swap would silently do nothing — fail loud. This is
 	// the library backstop for direct Go-API callers; the CLI catches it earlier.
-	if vmkit.NormalizeEgressMode(opts.EgressMode) == vmkit.EgressModeOff {
-		return fmt.Errorf("cred-swap: credential swap requires egress guarded or strict, not off")
+	if vmkit.ResolveEgressModeDefault(opts.EgressMode) == vmkit.EgressModeOff {
+		return fmt.Errorf("cred-swap: credential swap requires egress mitm, not off")
 	}
 	cfg := egress.SwapConfigFile{Swaps: map[string]egress.SwapEntry{}}
 	// Merge an operator-supplied swap config first so generated provider entries
@@ -1847,11 +1847,12 @@ func applyManifest(opts *Options, manifest Manifest) {
 		opts.OnDemandSecrets = nil
 	}
 	opts.SecretsAudit = manifest.SecretsAudit
-	// Normalize the egress mode loaded from the manifest so a workspace whose
-	// manifest carries an unspecified mode is started with the explicit secure
-	// default ("guarded"); Request() then re-allocates the CA-cert vsock
-	// listener on start, mirroring create.
-	opts.EgressMode = vmkit.NormalizeEgressMode(manifest.EgressMode)
+	// Resolve the manifest egress mode's default (empty -> broker) without
+	// validating, so a workspace whose manifest carries an unspecified mode
+	// starts under broker; a retired mode survives to be rejected at Request()'s
+	// policy chokepoint. Request() then re-allocates the CA-cert vsock listener
+	// (mitm only) on start, mirroring create.
+	opts.EgressMode = vmkit.ResolveEgressModeDefault(manifest.EgressMode)
 	opts.EgressAllow = manifest.EgressAllow
 	opts.EgressPassthrough = manifest.EgressPassthrough
 	opts.EgressAllowlistLocked = manifest.EgressAllowlistLocked

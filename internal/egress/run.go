@@ -21,7 +21,7 @@ const ReadyMarker = "egress_ready"
 
 // Options configures the mediator listener.
 type Options struct {
-	Mode string // "guarded" (default, deny private ranges) or "broker" (allow-broad, opaque splice) or "strict" (deny non-allowlisted) or "" (normalizes to guarded)
+	Mode string // "broker" (default, allow-broad, opaque splice) or "mitm" (allow-broad, forge per-SNI) or "off" or "" (normalizes to broker); LockAllowlist turns a mediating mode allowlist-only
 	// LockAllowlist, in broker mode, restricts egress to allowlisted destinations
 	// only (drops the allow-broad grant). Ignored in other modes.
 	LockAllowlist bool

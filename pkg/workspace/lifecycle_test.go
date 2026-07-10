@@ -1502,10 +1502,10 @@ func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
 		CPUCount:   2,
 		Network:    vmkit.NetworkConfig{Mode: "user"},
 	}
-	// Manifest with an unspecified egress mode (guarded is now the default).
+	// Manifest with an unspecified egress mode (broker is now the default).
 	applyManifest(&opts, Manifest{Network: NetworkSpec{Mode: "user"}})
-	if opts.EgressMode != vmkit.EgressModeGuarded {
-		t.Fatalf("applyManifest left EgressMode = %q, want %q", opts.EgressMode, vmkit.EgressModeGuarded)
+	if opts.EgressMode != vmkit.EgressModeBroker {
+		t.Fatalf("applyManifest left EgressMode = %q, want %q", opts.EgressMode, vmkit.EgressModeBroker)
 	}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
@@ -1514,11 +1514,13 @@ func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
 	if !vmkit.EgressMediationOn(req.Config.EgressMode) {
 		t.Fatalf("started workspace not mediated: EgressMode = %q", req.Config.EgressMode)
 	}
-	if req.Config.CACertPort != DefaultCACertPort {
-		t.Fatalf("started mediated workspace CACertPort = %d, want %d", req.Config.CACertPort, DefaultCACertPort)
+	// The broker default mediates but forges no certificates, so it allocates
+	// no CA-cert listener (unlike the retired guarded default).
+	if req.Config.CACertPort != 0 {
+		t.Fatalf("started broker-default workspace CACertPort = %d, want 0", req.Config.CACertPort)
 	}
-	if !hasCACertListener(req.Config.VsockListeners) {
-		t.Fatalf("started mediated workspace missing CA-cert listener: %#v", req.Config.VsockListeners)
+	if hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("started broker-default workspace must not allocate a CA-cert listener: %#v", req.Config.VsockListeners)
 	}
 }
 

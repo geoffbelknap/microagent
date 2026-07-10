@@ -35,7 +35,7 @@ const (
 	DefaultSecretsControlPort  = 1028
 	// DefaultCACertPort is the host vsock port the guest connects to at boot to
 	// fetch the per-workspace egress CA certificate. Allocated whenever egress
-	// mediation is on ("guarded" or "strict").
+	// mediation is on ("broker" or "mitm").
 	DefaultCACertPort    = 1030
 	DefaultShellPortBase = 22000
 	DefaultShellPortSpan = 20000
@@ -77,10 +77,10 @@ type Options struct {
 	SecretEnvFiles        []string          // dotenv file paths (plaintext, re-read each start)
 	OnDemandSecrets       map[string]string // name -> reference (lazy, never materialized)
 	SecretsAudit          bool              // append every access to the audit log
-	EgressMode            string            // "guarded" (default; deny-the-inside), "broker", "strict", or "off" (empty = guarded)
+	EgressMode            string            // "broker" (default; allow-broad, no CA), "mitm" (forge per-SNI), or "off" (empty = broker)
 	EgressAllow           []string          // allowlisted egress destination hosts
 	EgressPassthrough     []string          // allowed hosts that are NOT TLS-intercepted
-	EgressAllowlistLocked bool              // broker mode: restrict egress to allowlisted destinations only
+	EgressAllowlistLocked bool              // broker/mitm: restrict egress to allowlisted destinations only
 	EgressSwapConfigPath  string            // path to the operator credential-swap config (mediator injects host-side; secret never enters the guest)
 	// CredSwapProviders are parsed `--cred-swap PROVIDER[=ref]` specs. They are a
 	// convenience surface over EgressSwapConfigPath: at workspace prep they are
@@ -220,7 +220,7 @@ type Spec struct {
 type AgentSpec struct {
 	// Entry is the agent's one-shot run command (maps to Options.ExecCommand).
 	Entry string `yaml:"entry"`
-	// Egress is the egress mediation mode: guarded | strict | off.
+	// Egress is the egress mediation mode: broker | mitm | off.
 	Egress string `yaml:"egress"`
 	// Allow lists extra egress hosts to allowlist, unioned with any from flags.
 	Allow []string `yaml:"allow"`
@@ -1053,7 +1053,7 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 		listeners = append(listeners, vmkit.VsockListener{Port: brokerCfg.VsockPort, Target: broker.ListenerTarget})
 	}
 	// CACertPort is allocated only when the negotiated capture provider actually
-	// mediates a protocol class AND the mode forges certificates (guarded/strict)
+	// mediates a protocol class AND the mode forges certificates (mitm)
 	// — i.e. a real mediator will exist AND it needs the guest to trust the
 	// per-workspace CA it forges leaves from. Gating on the provider (not on
 	// EgressMediationOn + NetworkModeMediates) means backends with no capture
@@ -1252,7 +1252,7 @@ func FirecrackerSupervisorPathFromExecutable(executable string) string {
 // launchCommands are the supervisor commands that actually boot a guest, as
 // opposed to inspect/snapshot/control commands that operate on an existing or
 // recorded workspace. Egress capture-provider fail-closed validation applies
-// only to a launch: a stopped guarded workspace can still be inspected, but it
+// only to a launch: a stopped mediated workspace can still be inspected, but it
 // cannot boot mediated on a backend with no capture provider.
 func isLaunchCommand(command string) bool {
 	switch strings.TrimSpace(command) {
@@ -1264,7 +1264,7 @@ func isLaunchCommand(command string) bool {
 }
 
 func Dispatch(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
-	// Fail closed before booting when mediated egress (guarded/strict) is
+	// Fail closed before booting when mediated egress (broker/mitm) is
 	// requested but this backend has no capture provider that can cover it
 	// (e.g. apple-vf native NAT today). Only launches are gated — inspect,
 	// snapshot, and control commands on an existing workspace are not.

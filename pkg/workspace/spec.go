@@ -152,13 +152,12 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 	if entry := strings.TrimSpace(agent.Entry); entry != "" && strings.TrimSpace(opts.ExecCommand) == "" {
 		opts.ExecCommand = entry
 	}
-	if mode := strings.ToLower(strings.TrimSpace(agent.Egress)); mode != "" {
-		switch mode {
-		case vmkit.EgressModeGuarded, vmkit.EgressModeStrict, vmkit.EgressModeOff:
-			opts.EgressMode = mode
-		default:
-			return fmt.Errorf("agent egress %q must be guarded, strict, or off", agent.Egress)
+	if strings.TrimSpace(agent.Egress) != "" {
+		mode, err := vmkit.ValidateEgressMode(agent.Egress)
+		if err != nil {
+			return fmt.Errorf("agent egress: %w", err)
 		}
+		opts.EgressMode = mode
 	}
 	if len(agent.Allow) != 0 {
 		opts.EgressAllow = egress.DedupeHosts(append(append([]string(nil), opts.EgressAllow...), agent.Allow...))

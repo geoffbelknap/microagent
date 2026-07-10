@@ -81,9 +81,10 @@ func (b *Brain) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, err
 	// there is no reason to resolve it — and resolving a forbidden host would itself
 	// be unmediated DNS egress to a destination the policy rejects, besides making
 	// the denial depend on DNS reachability (offline, a resolve failure returns 502,
-	// masking the real 403). Guarded mode can still permit an unlisted-but-public
-	// host, so it falls through to the post-resolve IP evaluation below.
-	if !allowsBroad(b.Mode) {
+	// masking the real 403). An allow-broad mode can still permit an unlisted-but-
+	// public host, so it falls through to the post-resolve IP evaluation below; a
+	// locked allowlist drops that grant, so it takes the early deny too.
+	if !allowsBroad(b.Mode) || b.AllowlistLocked {
 		if d := b.Policy.AllowHost(host); !d.Allow {
 			b.AuditDeny(Verdict{Reason: d.Reason}, map[string]any{"host": host, "shape": "fetch"})
 			return FetchResponse{Status: 403, Denied: true, Reason: d.Reason}, nil
@@ -105,7 +106,7 @@ func (b *Brain) Fetch(ctx context.Context, req FetchRequest) (FetchResponse, err
 		b.AuditDeny(v, map[string]any{"host": host, "dst": dst.String(), "shape": "fetch"})
 		reason := v.Reason
 		if v.Inside {
-			reason = "guarded: internal destination denied"
+			reason = "inside: internal destination denied"
 		}
 		return FetchResponse{Status: 403, Denied: true, Reason: reason}, nil
 	}
