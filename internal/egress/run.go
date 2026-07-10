@@ -192,6 +192,9 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// missing resolver would fail closed in Swapper.acquire regardless.
 	h.EnableSwaps(swaps)
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
+	if opts.Mode == egressModeMITM {
+		warnMITMEnabled(logger)
+	}
 
 	// Mediation always includes UDP: open the transparent UDP socket on the same
 	// host:port as the TCP listener (different protocol). Deriving the bind from
@@ -245,4 +248,17 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 		}
 		go h.Handle(conn)
 	}
+}
+
+// mitmWarning is the load-time notice printed and audited when the sunsetting
+// mitm mode is enabled. It states plainly what the mode does and its risks so
+// no one turns on TLS interception without confronting exactly what it is.
+const mitmWarning = "egress mode 'mitm' enabled: injects a forge-anything CA into the guest, enlarges the TLS attack surface, does not stop a determined adversary (cert-pinners fail closed), and is on a one-way sunset — prefer 'broker'"
+
+// warnMITMEnabled emits the mitm load-time warning to stderr (operator-visible
+// at launch) and as an egress_mitm_enabled audit record (written by mediation,
+// tenet 2), so enabling TLS interception is never silent.
+func warnMITMEnabled(logger Logger) {
+	fmt.Fprintln(os.Stderr, "warning: "+mitmWarning)
+	logger.Log("egress_mitm_enabled", map[string]any{"warning": mitmWarning})
 }
