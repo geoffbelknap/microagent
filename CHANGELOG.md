@@ -5,6 +5,16 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Fixed: snapshot of a `broker`-mode workspace no longer demands an egress CA
+
+Snapshot manifest capture still required the persisted per-workspace egress CA
+for every mediated workspace, but `broker` mode (the default) deliberately
+mints no CA — so snapshotting any broker workspace failed with "requires its
+persisted egress CA". The requirement is now gated on certificate-forging
+modes only (`mitm`), matching the start/restore paths; a broker snapshot
+carries an empty CA fingerprint and the restore path already treats that as
+"no CA to reuse".
+
 ### Egress mode vocabulary — `broker` / `mitm` / `off` (breaking)
 
 The `guarded` and `strict` egress modes are **retired**. The vocabulary is now:

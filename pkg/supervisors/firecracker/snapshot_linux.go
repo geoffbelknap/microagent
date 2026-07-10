@@ -203,13 +203,14 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 	}
 	// Capture the egress posture so a restore/fork re-arms the mediator with the
 	// recorded policy AND reuses the SAME per-workspace CA the guest's baked trust
-	// store was built against. For a mediated workspace the persisted CA cert MUST
+	// store was built against. Only certificate-forging modes mint a CA — broker
+	// splices and delivers none — so only for those must the persisted CA cert
 	// exist; record its DER SHA-256 as the restore-time integrity check. Fail
-	// closed if the cert is gone — never snapshot a mediated workspace whose CA
+	// closed if the cert is gone — never snapshot a forging workspace whose CA
 	// cannot be reproduced, because restoring it would silently break every MITM
 	// handshake of the guest.
 	caSHA := ""
-	if vmkit.EgressMediationOn(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
+	if vmkit.EgressModeForgesCerts(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
 		sha, err := egressCACertSHA256(filepath.Join(opts.StateDir, opts.Name))
 		if err != nil {
 			return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot of mediated workspace %s requires its persisted egress CA: %w", opts.Name, err)
