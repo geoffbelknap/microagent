@@ -181,6 +181,34 @@ func TestSnapshotManifestFromStateFailsClosedOnMissingCA(t *testing.T) {
 	}
 }
 
+// TestSnapshotManifestFromStateBrokerNeedsNoCA: broker mode forges nothing
+// and mints no per-workspace CA, so snapshotting a broker workspace must
+// succeed without a persisted CA and record an empty fingerprint — the
+// restore path already treats an empty fingerprint as "no CA to reuse".
+// Only certificate-forging modes require the persisted CA at snapshot time.
+func TestSnapshotManifestFromStateBrokerNeedsNoCA(t *testing.T) {
+	stateDir := t.TempDir()
+	opts := Options{Name: "ws", StateDir: stateDir}
+	// No egress-ca.pem: broker workspaces never have one.
+	if err := os.MkdirAll(filepath.Join(stateDir, opts.Name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := mediatedRuntimeState(vmkit.EgressModeBroker, nil, []string{"raw.example.com"})
+	manifest, err := snapshotManifestFromState("snap-1", state, opts, false)
+	if err != nil {
+		t.Fatalf("snapshotManifestFromState for broker mode: %v", err)
+	}
+	if manifest.EgressCASHA256 != "" {
+		t.Fatalf("broker manifest must carry no CA fingerprint, got %q", manifest.EgressCASHA256)
+	}
+	if manifest.EgressMode != vmkit.EgressModeBroker {
+		t.Errorf("EgressMode = %q, want %q", manifest.EgressMode, vmkit.EgressModeBroker)
+	}
+	if len(manifest.EgressPassthrough) != 1 || manifest.EgressPassthrough[0] != "raw.example.com" {
+		t.Errorf("EgressPassthrough = %v, want [raw.example.com]", manifest.EgressPassthrough)
+	}
+}
+
 func TestSnapshotManifestFromStateRequiresSecretPurge(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: t.TempDir()}
 	state := mediatedRuntimeState(vmkit.EgressModeOff, nil, nil)

@@ -751,8 +751,10 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		netGateway = strings.TrimSpace(state.Config.Network.Gateway)
 		netSubnet = strings.TrimSpace(state.Config.Network.Subnet)
 	}
+	// Only certificate-forging modes mint a per-workspace CA (broker splices
+	// and delivers none), so only for those is the persisted CA required.
 	caSHA := ""
-	if vmkit.EgressMediationOn(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
+	if vmkit.EgressModeForgesCerts(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
 		sha, err := egressCACertSHA256(filepath.Join(opts.StateDir, opts.Name))
 		if err != nil {
 			return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot of mediated workspace %s requires its persisted egress CA: %w", opts.Name, err)
