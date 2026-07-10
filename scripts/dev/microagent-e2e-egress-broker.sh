@@ -9,7 +9,7 @@
 #     a direct-to-IP dial is still forced through the mediator and refused.
 #   - the mediator is torn down with the workspace (no orphan).
 #
-# The contrast with the egress-mitm E2E is the whole point: guarded/strict forge
+# The contrast with the egress-mitm E2E is the whole point: mitm forges
 # a per-SNI leaf (issuer = "microagent egress"); broker forges nothing.
 #
 # Runs in --network user (pasta): no host CAP_NET_ADMIN / root needed.
@@ -177,7 +177,7 @@ if not any(e.get("event") == "egress_allow" and e.get("host") == public and not 
     raise SystemExit(f"missing non-intercepted egress_allow for {public}: {events}")
 if any(e.get("event") == "egress_allow" and e.get("host") == public and e.get("mitm") for e in events):
     raise SystemExit(f"broker intercepted {public} (mitm=true) — must splice: {events}")
-# Inside IP denied on the resolved IP (guarded/broker inside classification).
+# Inside IP denied on the resolved IP (broker inside classification).
 if not any(e.get("event") == "egress_internal_deny" for e in events):
     raise SystemExit(f"missing egress_internal_deny for the inside IP: {events}")
 
