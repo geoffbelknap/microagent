@@ -336,8 +336,22 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"broker_env":      []any{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
 				"broker_proxy":    true,
 				"broker_capture":  true,
+				"broker_ca":       "/etc/ssl/broker-ca.pem",
 			},
-			want: []string{"--mode=ax", "create", "demo", "-broker-upstream", "https://api.example.com", "-broker-secret", "api=env:MY_TOKEN", "-broker-proxy", "-broker-capture", "-broker-env", "EXAMPLE_BASE_URL", "-broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
+			want: []string{"--mode=ax", "create", "demo", "-broker-upstream", "https://api.example.com", "-broker-secret", "api=env:MY_TOKEN", "-broker-ca", "/etc/ssl/broker-ca.pem", "-broker-proxy", "-broker-capture", "-broker-env", "EXAMPLE_BASE_URL", "-broker-env", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"},
+		},
+		{
+			// multi-endpoint brokers array maps through to create as repeated
+			// -broker-endpoint flags (same grammar the CLI --broker-endpoint takes).
+			name: "workspace.create",
+			args: map[string]any{
+				"name": "demo",
+				"brokers": []any{
+					"upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL",
+					"upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy",
+				},
+			},
+			want: []string{"--mode=ax", "create", "demo", "-broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL", "-broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;proxy"},
 		},
 		{
 			name: "workspace.start",

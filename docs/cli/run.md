@@ -179,6 +179,8 @@ The complete set:
 | `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; an empty `VALUE` is filled with the broker URL (e.g. `--broker-env ANTHROPIC_BASE_URL`). Repeatable |
 | `--broker-proxy` | Also set `HTTPS_PROXY` / `HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
 | `--broker-capture` | Opt in to raw capture of pre-swap broker requests (path, headers with references, bounded body) to an owner-only per-workspace file. Off by default — the default record is the minimized decision stream. See [broker observability](/concepts/egress-mediation/#the-broker-decision-stream) |
+| `--broker-ca <path>` | PEM bundle path the broker's upstream TLS client trusts, for an upstream with a private cert (e.g. an internal control plane). Empty (default) trusts system roots |
+| `--broker-endpoint <spec>` | Declare one egress broker endpoint as a `;`-separated list of `key=value` pairs: `upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture` (`base-url-env` repeatable within the spec). Repeatable to declare multiple endpoints. Cannot be combined with `--broker-upstream`/`--broker-secret`/`--broker-env`/`--broker-proxy`/`--broker-capture`/`--broker-ca` — declare each endpoint fully within its own `--broker-endpoint` |
 | `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model and inject `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL`; with `--keep`, the ref persists and later `start`s re-pair. See [`model`](/cli/model/) |
 | `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
 | `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom` |

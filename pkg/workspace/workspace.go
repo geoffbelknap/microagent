@@ -114,8 +114,8 @@ type Options struct {
 	Broker *vmkit.BrokerConfig
 	// Brokers configures multiple egress broker endpoints; see
 	// vmkit.Config.Brokers. Setting both Broker and Brokers is an operator
-	// error. Manifest persistence still carries only the single legacy
-	// Broker — that follows in a later change.
+	// error, rejected both at the declaring surface (CLI/Agentfile/MCP) and by
+	// normalizeEffectiveBrokers. Persisted in Manifest.Brokers.
 	Brokers        []*vmkit.BrokerConfig
 	Health         Health
 	Timeout        time.Duration
@@ -238,11 +238,15 @@ type AgentSpec struct {
 	// through a host-side proxy that injects the credential, so the guest only
 	// ever holds a reference. See Options.Broker and AgentBrokerSpec.
 	Broker *AgentBrokerSpec `yaml:"broker"`
+	// Brokers configures multiple egress broker endpoints; see Options.Brokers.
+	// Setting both Broker and Brokers is rejected at spec-apply time.
+	Brokers []AgentBrokerSpec `yaml:"brokers"`
 }
 
-// AgentBrokerSpec is the Agentfile `agent.broker` block. Its fields mirror the
-// --broker-* CLI flags and route through the same ParseBrokerConfig, so the two
-// surfaces build an identical broker.
+// AgentBrokerSpec is the Agentfile `agent.broker` block (and each element of
+// `agent.brokers`). Its fields mirror the --broker-* CLI flags and route
+// through the same ParseBrokerConfig, so every surface builds an identical
+// broker.
 type AgentBrokerSpec struct {
 	// Upstream is the terminate-mode upstream base URL.
 	Upstream string `yaml:"upstream"`
@@ -255,6 +259,10 @@ type AgentBrokerSpec struct {
 	// Capture opts in to governed raw capture of pre-swap requests. Off by
 	// default; the default emission is the minimized decision stream.
 	Capture bool `yaml:"capture"`
+	// CA is an optional PEM bundle path this endpoint's upstream TLS client
+	// trusts (maps to vmkit.BrokerConfig.UpstreamCAFile); empty means system
+	// roots.
+	CA string `yaml:"ca"`
 }
 
 // Declared reports whether the agent block carries any field, so an empty block
@@ -264,7 +272,8 @@ func (a AgentSpec) Declared() bool {
 		strings.TrimSpace(a.Egress) != "" ||
 		len(a.Allow) != 0 ||
 		len(a.CredSwap) != 0 ||
-		a.Broker != nil
+		a.Broker != nil ||
+		len(a.Brokers) != 0
 }
 
 type NetworkSpec struct {
@@ -386,6 +395,9 @@ type Manifest struct {
 	EgressAllowlistLocked bool                       `json:"egress_allowlist_locked,omitempty"`
 	EgressSwapConfigPath  string                     `json:"egress_swap_config_path,omitempty"`
 	Broker                *vmkit.BrokerConfig        `json:"broker,omitempty"`
+	// Brokers persists the multi-endpoint broker set (see Options.Brokers), so
+	// restart/wake preserves every endpoint, not just a single legacy Broker.
+	Brokers []*vmkit.BrokerConfig `json:"brokers,omitempty"`
 }
 
 type ModelRunnerSpec struct {

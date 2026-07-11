@@ -13,7 +13,7 @@ import (
 // build a broker config identically.
 func TestParseBrokerConfig(t *testing.T) {
 	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN",
-		[]string{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"}, true, false)
+		[]string{"EXAMPLE_BASE_URL", "OTHER_BASE_URL=http://127.0.0.1:18888/v1"}, true, false, "/etc/ssl/broker-ca.pem")
 	if err != nil {
 		t.Fatalf("ParseBrokerConfig: %v", err)
 	}
@@ -35,10 +35,13 @@ func TestParseBrokerConfig(t *testing.T) {
 	if cfg.BaseURLEnv["OTHER_BASE_URL"] != "http://127.0.0.1:18888/v1" {
 		t.Fatalf("OTHER_BASE_URL = %q", cfg.BaseURLEnv["OTHER_BASE_URL"])
 	}
+	if cfg.UpstreamCAFile != "/etc/ssl/broker-ca.pem" {
+		t.Fatalf("UpstreamCAFile = %q", cfg.UpstreamCAFile)
+	}
 }
 
 func TestParseBrokerConfigNilWhenEmpty(t *testing.T) {
-	cfg, err := ParseBrokerConfig("", "", nil, false, false)
+	cfg, err := ParseBrokerConfig("", "", nil, false, false, "")
 	if err != nil {
 		t.Fatalf("ParseBrokerConfig: %v", err)
 	}
@@ -47,11 +50,19 @@ func TestParseBrokerConfigNilWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestParseBrokerConfigCARequiresBroker verifies --broker-ca without a broker
+// declaration fails loudly, matching env/proxy/capture's posture.
+func TestParseBrokerConfigCARequiresBroker(t *testing.T) {
+	if _, err := ParseBrokerConfig("", "", nil, false, false, "/etc/ssl/broker-ca.pem"); err == nil {
+		t.Fatal("ca without a broker must fail")
+	}
+}
+
 // TestParseBrokerConfigCapture: the governed raw-capture opt-in threads
 // through the shared parser, requires a broker to attach to, and survives the
 // manifest round-trip (the opt-in is declared, not silent).
 func TestParseBrokerConfigCapture(t *testing.T) {
-	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN", nil, false, true)
+	cfg, err := ParseBrokerConfig("https://api.example.com", "api=env:MY_TOKEN", nil, false, true, "")
 	if err != nil {
 		t.Fatalf("ParseBrokerConfig: %v", err)
 	}
@@ -59,7 +70,7 @@ func TestParseBrokerConfigCapture(t *testing.T) {
 		t.Fatal("Capture not set")
 	}
 
-	if _, err := ParseBrokerConfig("", "", nil, false, true); err == nil {
+	if _, err := ParseBrokerConfig("", "", nil, false, true, ""); err == nil {
 		t.Fatal("capture without a broker must fail")
 	}
 
@@ -96,7 +107,7 @@ func TestParseBrokerConfigValidation(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := ParseBrokerConfig(c.upstream, c.secret, c.env, c.proxy, false)
+			_, err := ParseBrokerConfig(c.upstream, c.secret, c.env, c.proxy, false, "")
 			if err == nil {
 				t.Fatalf("expected error, got nil")
 			}

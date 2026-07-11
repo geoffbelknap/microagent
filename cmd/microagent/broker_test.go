@@ -67,6 +67,70 @@ func TestParseWorkspaceOptionsBrokerRejectsLiteral(t *testing.T) {
 	}
 }
 
+// TestParseWorkspaceOptionsBrokerCA verifies --broker-ca threads into
+// Options.Broker.UpstreamCAFile alongside the single --broker-upstream path.
+func TestParseWorkspaceOptionsBrokerCA(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"--name", "ws",
+		"--image", "docker.io/library/alpine:3.20",
+		"--broker-upstream", "https://api.example.com",
+		"--broker-secret", "api=env:MY_TOKEN",
+		"--broker-ca", "/etc/ssl/broker-ca.pem",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Broker == nil || opts.Broker.UpstreamCAFile != "/etc/ssl/broker-ca.pem" {
+		t.Fatalf("Options.Broker = %+v, want UpstreamCAFile set", opts.Broker)
+	}
+}
+
+// TestParseWorkspaceOptionsBrokerEndpoints verifies repeatable
+// --broker-endpoint specs parse into Options.Brokers via the shared
+// workspace.ParseBrokerEndpoints, exercising every grammar key.
+func TestParseWorkspaceOptionsBrokerEndpoints(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"--name", "ws",
+		"--image", "docker.io/library/alpine:3.20",
+		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;base-url-env=A_BASE_URL;ca=/etc/ssl/a.pem",
+		"--broker-endpoint", "upstream=https://b.example.com;secret=b=env:B_TOKEN;base-url-env=B_BASE_URL;proxy;capture",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if len(opts.Brokers) != 2 {
+		t.Fatalf("Options.Brokers = %+v, want 2 endpoints", opts.Brokers)
+	}
+	if opts.Brokers[0].Upstream != "https://a.example.com" || opts.Brokers[0].UpstreamCAFile != "/etc/ssl/a.pem" {
+		t.Fatalf("Brokers[0] = %+v", opts.Brokers[0])
+	}
+	if opts.Brokers[1].Upstream != "https://b.example.com" || !opts.Brokers[1].Proxy || !opts.Brokers[1].Capture {
+		t.Fatalf("Brokers[1] = %+v", opts.Brokers[1])
+	}
+	if opts.Broker != nil {
+		t.Fatalf("Options.Broker unexpectedly set: %+v", opts.Broker)
+	}
+}
+
+// TestParseWorkspaceOptionsBrokerEndpointConflictsWithSingleBroker verifies
+// combining --broker-endpoint with any single-broker flag is rejected at
+// parse time with a clear message, ahead of the downstream both-set guard.
+func TestParseWorkspaceOptionsBrokerEndpointConflictsWithSingleBroker(t *testing.T) {
+	_, err := parseWorkspaceOptions("create", []string{
+		"--name", "ws",
+		"--image", "docker.io/library/alpine:3.20",
+		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN",
+		"--broker-upstream", "https://cli.example.com",
+		"--broker-secret", "api=env:MY_TOKEN",
+	})
+	if err == nil {
+		t.Fatal("parseWorkspaceOptions accepted --broker-endpoint combined with --broker-upstream; want rejection")
+	}
+	if !strings.Contains(err.Error(), "broker-endpoint") {
+		t.Fatalf("error = %q, want it to mention -broker-endpoint", err)
+	}
+}
+
 // TestParseWorkspaceOptionsBrokerFlagsRequireEachOther verifies a partial
 // broker declaration fails loudly rather than silently producing a workspace
 // with no broker (or a broker with no credential).

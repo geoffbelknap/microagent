@@ -100,8 +100,9 @@ microagent dispatch --file agent.yaml
 
 CLI flags override the block (e.g. `--egress mitm` beats `agent.egress`,
 `--exec` beats `agent.entry`); `agent.allow` and `agent.cred-swap` union with the
-corresponding flags. A `--broker-*` broker supplied on the command line wins
-outright — `agent.broker` only fills an otherwise-unset broker.
+corresponding flags. A `--broker-*`/`--broker-endpoint` broker supplied on the
+command line wins outright — `agent.broker`/`agent.brokers` only fills an
+otherwise-unset broker.
 
 ## Usage
 
@@ -177,6 +178,8 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `agent.broker.env` | Guest env vars pointed at the broker, each `KEY[=VALUE]` (empty value = the broker URL) |
 | `agent.broker.proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
 | `agent.broker.capture` | Opt in to raw capture of pre-swap broker requests to an owner-only file; off by default (the default record is the minimized decision stream) |
+| `agent.broker.ca` | PEM bundle path this broker's upstream TLS client trusts; empty means system roots |
+| `agent.brokers` | Declare multiple broker endpoints instead of a single `agent.broker`; a list of blocks with the same `upstream`/`secret`/`env`/`proxy`/`capture`/`ca` fields, one per endpoint. Setting both `agent.broker` and `agent.brokers` is rejected |
 
 ## Related
 

@@ -2090,6 +2090,10 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.BoolVar(&brokerProxy, "broker-proxy", false, "Also set HTTPS_PROXY/HTTP_PROXY in the guest to the broker (CONNECT tunneling)")
 	var brokerCapture bool
 	fs.BoolVar(&brokerCapture, "broker-capture", false, "Opt in to raw capture of pre-swap broker requests (path, headers with references, bounded body) to an owner-only file; default is the minimized decision stream")
+	var brokerCA string
+	fs.StringVar(&brokerCA, "broker-ca", "", "PEM bundle path the broker upstream TLS client trusts; empty = system roots")
+	var brokerEndpoints multiFlag
+	fs.Var(&brokerEndpoints, "broker-endpoint", "Declare one broker endpoint as ;-separated key=value pairs: upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture (repeatable; cannot combine with --broker-upstream/-secret/-env/-proxy/-capture/-ca)")
 	var diskFlags multiFlag
 	fs.Var(&diskFlags, "disk", "Attach disk name=path:/mount:ro|rw")
 	var bundleFlags multiFlag
@@ -2177,7 +2181,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := applyEgressOptionFlags(&opts, egressMode, egressAllow, egressPassthrough, egressPolicy, egressSwapConfig, credSwap); err != nil {
 		return workspaceOptions{}, err
 	}
-	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy, brokerCapture); err != nil {
+	if err := applyBrokerOptionFlags(&opts, brokerUpstream, brokerSecret, brokerEnv, brokerProxy, brokerCapture, brokerCA, brokerEndpoints); err != nil {
 		return workspaceOptions{}, err
 	}
 	if err := applyStorageOptionFlags(&opts, volumeFlags, diskFlags, bundleFlags, outputFlags); err != nil {
@@ -2251,13 +2255,27 @@ func applySetupEnvSecretOptionFlags(opts *workspaceOptions, setupCommands, setup
 	return nil
 }
 
-// applyBrokerOptionFlags parses the --broker-* flags into Options.Broker via the
-// shared workspace.ParseBrokerConfig, so the CLI and the Agentfile agent.broker
-// block validate and build a broker identically. A partial declaration fails
-// loudly and a literal secret is rejected at parse time, before any state is
-// written (matching --cred-swap).
-func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy, brokerCapture bool) error {
-	broker, err := workspace.ParseBrokerConfig(brokerUpstream, brokerSecret, []string(brokerEnv), brokerProxy, brokerCapture)
+// applyBrokerOptionFlags parses the --broker-* flags into Options.Broker (or,
+// with --broker-endpoint, Options.Brokers) via the shared
+// workspace.ParseBrokerConfig / ParseBrokerEndpoints, so the CLI and the
+// Agentfile agent.broker(s) block validate and build a broker identically. A
+// partial declaration fails loudly and a literal secret is rejected at parse
+// time, before any state is written (matching --cred-swap). Combining
+// --broker-endpoint with any single-broker flag is rejected here for a clear
+// CLI message, ahead of the same both-set guard in normalizeEffectiveBrokers.
+func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret string, brokerEnv multiFlag, brokerProxy, brokerCapture bool, brokerCA string, brokerEndpoints multiFlag) error {
+	if len(brokerEndpoints) > 0 {
+		if strings.TrimSpace(brokerUpstream) != "" || strings.TrimSpace(brokerSecret) != "" || len(brokerEnv) != 0 || brokerProxy || brokerCapture || strings.TrimSpace(brokerCA) != "" {
+			return fmt.Errorf("--broker-endpoint cannot be combined with --broker-upstream/--broker-secret/--broker-env/--broker-proxy/--broker-capture/--broker-ca; declare each endpoint fully within its --broker-endpoint spec")
+		}
+		brokers, err := workspace.ParseBrokerEndpoints([]string(brokerEndpoints))
+		if err != nil {
+			return err
+		}
+		opts.Brokers = brokers
+		return nil
+	}
+	broker, err := workspace.ParseBrokerConfig(brokerUpstream, brokerSecret, []string(brokerEnv), brokerProxy, brokerCapture, brokerCA)
 	if err != nil {
 		return err
 	}
@@ -3634,6 +3652,11 @@ func reorderFlagArgs(args []string) []string {
 		"-egress-policy":             true,
 		"-egress-swap-config":        true,
 		"-cred-swap":                 true,
+		"-broker-upstream":           true,
+		"-broker-secret":             true,
+		"-broker-env":                true,
+		"-broker-ca":                 true,
+		"-broker-endpoint":           true,
 	}
 	return reorderArgs(args, func(name string) bool { return valueFlags[name] }, isBoolReorderFlag)
 }
@@ -3678,7 +3701,7 @@ func reorderArgs(args []string, isValueFlag, isBoolFlag func(string) bool) []str
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-broker-proxy", "-broker-capture", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
 		return true
 	default:
 		return false
@@ -4272,6 +4295,11 @@ Options:
   -broker-env KEY[=VALUE]
                          Guest env var pointed at the broker (repeatable)
   -broker-proxy         Set HTTPS_PROXY/HTTP_PROXY in the guest to the broker
+  -broker-ca <path>     PEM bundle the broker upstream TLS client trusts; empty = system roots
+  -broker-endpoint <spec>
+                         Declare one broker endpoint as ;-separated key=value pairs:
+                         upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture
+                         (repeatable; cannot combine with the other -broker-* flags)
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable)
   -secret-on-demand NAME=<scheme>:<ref>
@@ -4367,6 +4395,11 @@ Options:
   -broker-env KEY[=VALUE]
                          Guest env var pointed at the broker (repeatable)
   -broker-proxy         Set HTTPS_PROXY/HTTP_PROXY in the guest to the broker
+  -broker-ca <path>     PEM bundle the broker upstream TLS client trusts; empty = system roots
+  -broker-endpoint <spec>
+                         Declare one broker endpoint as ;-separated key=value pairs:
+                         upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture
+                         (repeatable; cannot combine with the other -broker-* flags)
   -secret NAME=<scheme>:<ref>
                          Deliver a secret to tmpfs /run/secrets (repeatable)
   -secret-on-demand NAME=<scheme>:<ref>

@@ -188,6 +188,11 @@ func TestReorderFlagArgsKeepsTagAndFromSnapshotValues(t *testing.T) {
 		{"model-policy-file", []string{"demo", "--model", "org/repo/m.gguf", "--model-policy-file", "/tmp/policy.json"}, "-model-policy-file", "/tmp/policy.json"},
 		{"egress-policy", []string{"demo", "--egress", "mitm", "--egress-policy", "/tmp/egress.yaml"}, "-egress-policy", "/tmp/egress.yaml"},
 		{"egress-swap-config", []string{"demo", "--egress", "mitm", "--egress-swap-config", "/tmp/swaps.yaml"}, "-egress-swap-config", "/tmp/swaps.yaml"},
+		{"broker-upstream", []string{"demo", "--broker-upstream", "https://api.example.com"}, "-broker-upstream", "https://api.example.com"},
+		{"broker-secret", []string{"demo", "--broker-secret", "api=env:MY_TOKEN"}, "-broker-secret", "api=env:MY_TOKEN"},
+		{"broker-env", []string{"demo", "--broker-env", "EXAMPLE_BASE_URL"}, "-broker-env", "EXAMPLE_BASE_URL"},
+		{"broker-ca", []string{"demo", "--broker-ca", "/etc/ssl/broker-ca.pem"}, "-broker-ca", "/etc/ssl/broker-ca.pem"},
+		{"broker-endpoint", []string{"demo", "--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN"}, "-broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reordered := reorderFlagArgs(tc.args)
@@ -226,6 +231,49 @@ func TestParseWorkspaceOptionsPositionalNameWithSwapConfig(t *testing.T) {
 	}
 	if opts.EgressSwapConfigPath != "swaps.yaml" {
 		t.Fatalf("EgressSwapConfigPath = %q, want swaps.yaml", opts.EgressSwapConfigPath)
+	}
+}
+
+// TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint is a regression
+// guard for the same class of bug TestParseWorkspaceOptionsPositionalNameWithSwapConfig
+// covers: the MCP surface builds its CLI args with the workspace name first
+// (positional), followed by flags (see mcpCLIArgs), so every broker-* flag —
+// including the new --broker-endpoint/--broker-ca and the bool
+// --broker-proxy/--broker-capture — must be recognized by reorderFlagArgs or
+// the name is rejected as an unexpected trailing argument.
+func TestParseWorkspaceOptionsPositionalNameWithBrokerEndpoint(t *testing.T) {
+	opts, err := parseWorkspaceOptions("create", []string{
+		"victim",
+		"--image", "docker.io/library/alpine:3.20",
+		"--broker-endpoint", "upstream=https://a.example.com;secret=a=env:A_TOKEN;proxy;capture",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "victim" {
+		t.Fatalf("Name = %q, want victim", opts.Name)
+	}
+	if len(opts.Brokers) != 1 || !opts.Brokers[0].Proxy || !opts.Brokers[0].Capture {
+		t.Fatalf("Brokers = %+v", opts.Brokers)
+	}
+
+	opts, err = parseWorkspaceOptions("create", []string{
+		"victim2",
+		"--image", "docker.io/library/alpine:3.20",
+		"--broker-upstream", "https://api.example.com",
+		"--broker-secret", "api=env:MY_TOKEN",
+		"--broker-ca", "/etc/ssl/broker-ca.pem",
+		"--broker-proxy",
+		"--broker-capture",
+	})
+	if err != nil {
+		t.Fatalf("parseWorkspaceOptions: %v", err)
+	}
+	if opts.Name != "victim2" {
+		t.Fatalf("Name = %q, want victim2", opts.Name)
+	}
+	if opts.Broker == nil || !opts.Broker.Proxy || !opts.Broker.Capture || opts.Broker.UpstreamCAFile != "/etc/ssl/broker-ca.pem" {
+		t.Fatalf("Broker = %+v", opts.Broker)
 	}
 }
 

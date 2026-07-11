@@ -164,6 +164,77 @@ func TestApplySpecAgentBrokerPopulatesOptions(t *testing.T) {
 	}
 }
 
+// TestApplySpecAgentBrokersPopulatesOptions verifies the agent.brokers block
+// (multi-endpoint) maps each entry onto Options.Brokers via ParseBrokerConfig,
+// exactly as the single agent.broker block does for one endpoint.
+func TestApplySpecAgentBrokersPopulatesOptions(t *testing.T) {
+	spec := Spec{
+		Name:     "claude-agent",
+		ImageRef: "docker.io/library/python:3.12-slim",
+		Agent: AgentSpec{
+			Brokers: []AgentBrokerSpec{
+				{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN", Env: []string{"A_BASE_URL"}, CA: "/etc/ssl/a.pem"},
+				{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN", Env: []string{"B_BASE_URL"}, Proxy: true, Capture: true},
+			},
+		},
+	}
+	opts := DefaultOptions()
+	if err := ApplySpec(&opts, spec, t.TempDir(), SpecApplyOptions{}); err != nil {
+		t.Fatalf("ApplySpec: %v", err)
+	}
+	if len(opts.Brokers) != 2 {
+		t.Fatalf("Options.Brokers = %+v, want 2 endpoints", opts.Brokers)
+	}
+	if opts.Brokers[0].Upstream != "https://a.example.com" || opts.Brokers[0].UpstreamCAFile != "/etc/ssl/a.pem" {
+		t.Fatalf("Brokers[0] = %+v", opts.Brokers[0])
+	}
+	if opts.Brokers[1].Upstream != "https://b.example.com" || !opts.Brokers[1].Proxy || !opts.Brokers[1].Capture {
+		t.Fatalf("Brokers[1] = %+v", opts.Brokers[1])
+	}
+	if opts.Broker != nil {
+		t.Fatalf("Options.Broker unexpectedly set: %+v", opts.Broker)
+	}
+}
+
+// TestApplySpecAgentBrokerAndBrokersConflict verifies declaring both the
+// single agent.broker block and the multi-endpoint agent.brokers block on the
+// same Agentfile is rejected with a clear message, before any state is
+// written.
+func TestApplySpecAgentBrokerAndBrokersConflict(t *testing.T) {
+	spec := Spec{Agent: AgentSpec{
+		Broker:  &AgentBrokerSpec{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN"},
+		Brokers: []AgentBrokerSpec{{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN"}},
+	}}
+	opts := DefaultOptions()
+	err := ApplySpec(&opts, spec, t.TempDir(), SpecApplyOptions{})
+	if err == nil {
+		t.Fatal("ApplySpec accepted both agent.broker and agent.brokers; want rejection")
+	}
+	if !strings.Contains(err.Error(), "broker") {
+		t.Fatalf("error = %q, want it to mention broker/brokers", err)
+	}
+}
+
+// TestApplySpecAgentBrokersRejectsSecondProxy verifies the agent.brokers block
+// enforces the same single-HTTPS_PROXY-slot rule ParseBrokerEndpoints does for
+// the CLI/MCP string form, so all three surfaces fail closed identically.
+func TestApplySpecAgentBrokersRejectsSecondProxy(t *testing.T) {
+	spec := Spec{Agent: AgentSpec{
+		Brokers: []AgentBrokerSpec{
+			{Upstream: "https://a.example.com", Secret: "a=env:A_TOKEN", Proxy: true},
+			{Upstream: "https://b.example.com", Secret: "b=env:B_TOKEN", Proxy: true},
+		},
+	}}
+	opts := DefaultOptions()
+	err := ApplySpec(&opts, spec, t.TempDir(), SpecApplyOptions{})
+	if err == nil {
+		t.Fatal("ApplySpec accepted two agent.brokers entries with proxy set")
+	}
+	if !strings.Contains(err.Error(), "proxy") {
+		t.Fatalf("error = %q, want it to mention proxy", err)
+	}
+}
+
 // TestApplySpecAgentBrokerLiteralRejected verifies a literal secret in the
 // agent.broker block is rejected at spec-apply time, before any state is written.
 func TestApplySpecAgentBrokerLiteralRejected(t *testing.T) {

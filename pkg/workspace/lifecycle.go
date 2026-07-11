@@ -1454,6 +1454,7 @@ func WriteManifest(opts Options) error {
 		EgressAllowlistLocked: opts.EgressAllowlistLocked,
 		EgressSwapConfigPath:  opts.EgressSwapConfigPath,
 		Broker:                opts.Broker,
+		Brokers:               opts.Brokers,
 	})
 }
 
@@ -1860,6 +1861,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.EgressAllowlistLocked = manifest.EgressAllowlistLocked
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
 	opts.Broker = manifest.Broker
+	opts.Brokers = manifest.Brokers
 }
 
 func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {

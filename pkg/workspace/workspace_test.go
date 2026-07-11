@@ -1065,6 +1065,59 @@ func TestManifestPersistsBroker(t *testing.T) {
 	}
 }
 
+// TestManifestPersistsBrokers verifies the multi-endpoint Brokers set (not
+// just the single legacy Broker) survives a manifest round-trip, so a
+// restart/wake after --broker-endpoint keeps every declared endpoint.
+func TestManifestPersistsBrokers(t *testing.T) {
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Name = "ws"
+	opts.StateDir = dir
+	opts.Brokers = []*vmkit.BrokerConfig{
+		{
+			Upstream:       "https://a.example.com",
+			Secret:         vmkit.SecretRef{Name: "a", Ref: "env:A_TOKEN"},
+			BaseURLEnv:     map[string]string{"A_BASE_URL": ""},
+			UpstreamCAFile: "/etc/ssl/a.pem",
+		},
+		{
+			Upstream:   "https://b.example.com",
+			Secret:     vmkit.SecretRef{Name: "b", Ref: "env:B_TOKEN"},
+			BaseURLEnv: map[string]string{"B_BASE_URL": ""},
+			Proxy:      true,
+			Capture:    true,
+		},
+	}
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	manifest, err := ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	restored := DefaultOptions()
+	restored.Name = "ws"
+	restored.StateDir = dir
+	applyManifest(&restored, manifest)
+	if !reflect.DeepEqual(restored.Brokers, opts.Brokers) {
+		t.Fatalf("broker set did not round-trip: %+v != %+v", restored.Brokers, opts.Brokers)
+	}
+
+	// And a Brokers-less manifest restores to nil (no stale carry-over).
+	opts.Brokers = nil
+	if err := WriteManifest(opts); err != nil {
+		t.Fatalf("WriteManifest: %v", err)
+	}
+	manifest, err = ReadManifest(dir, "ws")
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	applyManifest(&restored, manifest)
+	if restored.Brokers != nil {
+		t.Fatalf("Brokers should restore to nil: %+v", restored.Brokers)
+	}
+}
+
 func TestRequestNoBroker(t *testing.T) {
 	opts := Options{Name: "w", StateDir: t.TempDir(), Backend: "linux-kvm"}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
