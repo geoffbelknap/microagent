@@ -85,6 +85,34 @@ func TestCommitWritesLayout(t *testing.T) {
 	}
 }
 
+func TestCommitSameWorkspaceTwoTags(t *testing.T) {
+	// Committing the same rootfs to a second tag must succeed: the OCI layout is
+	// content-addressed, so the shared layer/config blobs already exist and are a
+	// hit, not an error. This is the multi-tag publish path (e.g. :sha + :latest).
+	dir, backend := stopWorkspaceFixture(t, vmkit.StateStopped)
+	fakeExtractor(t)
+
+	base := Options{StateDir: dir, Backend: backend, Workspace: "demo", Architecture: "amd64", CreatedAt: time.Unix(1000, 0)}
+	refs := []string{"localhost:5000/demo:sha", "localhost:5000/demo:latest"}
+	for _, ref := range refs {
+		opts := base
+		opts.Reference = ref
+		if _, err := Commit(context.Background(), opts); err != nil {
+			t.Fatalf("commit %s: %v", ref, err)
+		}
+	}
+
+	store, err := oci.New(LayoutPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range refs {
+		if _, err := store.Resolve(context.Background(), ref); err != nil {
+			t.Errorf("resolve %s: %v", ref, err)
+		}
+	}
+}
+
 func TestCommitRefusesRunningWorkspace(t *testing.T) {
 	dir, backend := stopWorkspaceFixture(t, vmkit.StateRunning)
 	fakeExtractor(t)
