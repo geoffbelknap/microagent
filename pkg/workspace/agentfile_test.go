@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
 
 // TestApplySpecAgentBlockPopulatesOptions verifies the agent: block maps to the
@@ -16,7 +18,7 @@ func TestApplySpecAgentBlockPopulatesOptions(t *testing.T) {
 		ImageRef: "docker.io/library/python:3.12-slim",
 		Agent: AgentSpec{
 			Entry:    "python /app/agent.py",
-			Egress:   "strict",
+			Egress:   "mitm",
 			Allow:    []string{"api.anthropic.com"},
 			CredSwap: []string{"anthropic"},
 		},
@@ -28,8 +30,8 @@ func TestApplySpecAgentBlockPopulatesOptions(t *testing.T) {
 	if opts.ExecCommand != "python /app/agent.py" {
 		t.Fatalf("ExecCommand = %q, want the agent entry", opts.ExecCommand)
 	}
-	if opts.EgressMode != "strict" {
-		t.Fatalf("EgressMode = %q, want strict", opts.EgressMode)
+	if opts.EgressMode != "mitm" {
+		t.Fatalf("EgressMode = %q, want mitm", opts.EgressMode)
 	}
 	found := false
 	for _, h := range opts.EgressAllow {
@@ -69,7 +71,7 @@ func TestApplySpecAgentEgressInvalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("ApplySpec accepted an invalid agent egress mode; want rejection")
 	}
-	if !strings.Contains(err.Error(), "guarded") {
+	if !strings.Contains(err.Error(), "broker") {
 		t.Fatalf("error = %q, want it to list the valid modes", err)
 	}
 }
@@ -108,6 +110,74 @@ agent:
 	}
 	if !strings.Contains(err.Error(), "egres") {
 		t.Fatalf("error = %q, want it to name the unknown field", err)
+	}
+}
+
+// TestApplySpecAgentBrokerPopulatesOptions verifies the agent.broker block maps
+// onto Options.Broker: upstream, host-side secret reference, base-URL env keys,
+// and the proxy toggle.
+func TestApplySpecAgentBrokerPopulatesOptions(t *testing.T) {
+	spec := Spec{
+		Name:     "claude-agent",
+		ImageRef: "docker.io/library/python:3.12-slim",
+		Agent: AgentSpec{
+			Entry: "python /app/agent.py",
+			Broker: &AgentBrokerSpec{
+				Upstream: "https://api.example.com",
+				Secret:   "api=env:MY_TOKEN",
+				Env:      []string{"EXAMPLE_BASE_URL"},
+				Proxy:    true,
+				Capture:  true,
+			},
+		},
+	}
+	opts := DefaultOptions()
+	if err := ApplySpec(&opts, spec, t.TempDir(), SpecApplyOptions{}); err != nil {
+		t.Fatalf("ApplySpec: %v", err)
+	}
+	if opts.Broker == nil {
+		t.Fatal("Options.Broker not set from agent.broker block")
+	}
+	if opts.Broker.Upstream != "https://api.example.com" {
+		t.Fatalf("Upstream = %q", opts.Broker.Upstream)
+	}
+	if opts.Broker.Secret.Name != "api" || opts.Broker.Secret.Ref != "env:MY_TOKEN" {
+		t.Fatalf("Secret = %+v", opts.Broker.Secret)
+	}
+	if !opts.Broker.Proxy {
+		t.Fatal("Proxy not set")
+	}
+	if !opts.Broker.Capture {
+		t.Fatal("Capture not set from agent.broker block")
+	}
+	if _, ok := opts.Broker.BaseURLEnv["EXAMPLE_BASE_URL"]; !ok {
+		t.Fatalf("BaseURLEnv missing EXAMPLE_BASE_URL: %+v", opts.Broker.BaseURLEnv)
+	}
+	// A CLI-supplied broker wins: the agent block must not clobber it.
+	pre := DefaultOptions()
+	pre.Broker = &vmkit.BrokerConfig{Upstream: "https://cli.example.com", Secret: vmkit.SecretRef{Name: "api", Ref: "env:CLI_TOKEN"}}
+	if err := ApplySpec(&pre, spec, t.TempDir(), SpecApplyOptions{}); err != nil {
+		t.Fatalf("ApplySpec: %v", err)
+	}
+	if pre.Broker.Upstream != "https://cli.example.com" {
+		t.Fatalf("agent.broker clobbered a CLI-supplied broker: %+v", pre.Broker)
+	}
+}
+
+// TestApplySpecAgentBrokerLiteralRejected verifies a literal secret in the
+// agent.broker block is rejected at spec-apply time, before any state is written.
+func TestApplySpecAgentBrokerLiteralRejected(t *testing.T) {
+	spec := Spec{Agent: AgentSpec{Broker: &AgentBrokerSpec{
+		Upstream: "https://api.example.com",
+		Secret:   "api=sk-real-secret",
+	}}}
+	opts := DefaultOptions()
+	err := ApplySpec(&opts, spec, t.TempDir(), SpecApplyOptions{})
+	if err == nil {
+		t.Fatal("ApplySpec accepted a literal broker secret; want rejection")
+	}
+	if !strings.Contains(err.Error(), "literal") {
+		t.Fatalf("error = %q, want it to explain a literal is rejected", err)
 	}
 }
 

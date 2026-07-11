@@ -21,18 +21,21 @@ const ReadyMarker = "egress_ready"
 
 // Options configures the mediator listener.
 type Options struct {
-	Mode         string // "guarded" (default, deny private ranges) or "strict" (deny non-allowlisted) or "" (normalizes to guarded)
-	BindHost     string
-	BindPort     int
-	Allow        []string
-	AuditLogPath string
-	Logger       Logger                                 // optional; if nil and AuditLogPath set, a FileLogger is opened
-	OrigDst      func(net.Conn) (netip.AddrPort, error) // optional; defaults to DefaultOrigDst
-	Ready        io.Writer                              // optional; bound address written here once listening
-	SniffTimeout time.Duration                          // optional; passed to Handler (Handler defaults to 2s when <=0)
-	CACertPath   string                                 // if set with CAKeyPath, enables TLS interception
-	CAKeyPath    string
-	Passthrough  []string // allowed hosts that are NOT intercepted (L4 splice + audit)
+	Mode string // "broker" (default, allow-broad, opaque splice) or "mitm" (allow-broad, forge per-SNI) or "off" or "" (normalizes to broker); LockAllowlist turns a mediating mode allowlist-only
+	// LockAllowlist, in broker mode, restricts egress to allowlisted destinations
+	// only (drops the allow-broad grant). Ignored in other modes.
+	LockAllowlist bool
+	BindHost      string
+	BindPort      int
+	Allow         []string
+	AuditLogPath  string
+	Logger        Logger                                 // optional; if nil and AuditLogPath set, a FileLogger is opened
+	OrigDst       func(net.Conn) (netip.AddrPort, error) // optional; defaults to DefaultOrigDst
+	Ready         io.Writer                              // optional; bound address written here once listening
+	SniffTimeout  time.Duration                          // optional; passed to Handler (Handler defaults to 2s when <=0)
+	CACertPath    string                                 // if set with CAKeyPath, enables TLS interception
+	CAKeyPath     string
+	Passthrough   []string // allowed hosts that are NOT intercepted (L4 splice + audit)
 
 	// Peers is the named-network member roster as "name=ip" pairs (this
 	// workspace's own entry excluded). When non-empty, Serve builds a PeerCache and
@@ -179,7 +182,7 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// merely disables the loop guard (the nft rules still prevent the loop), so it
 	// is not fatal here.
 	bindAP, _ := netip.ParseAddrPort(ln.Addr().String())
-	h := &Handler{Mode: opts.Mode, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
+	h := &Handler{Mode: opts.Mode, AllowlistLocked: opts.LockAllowlist, Policy: policy, Logger: logger, OrigDst: orig, Dial: net.Dial, CA: ca, Passthrough: passthrough, Peers: peers, SniffTimeout: opts.SniffTimeout, BindAddr: bindAP, Swaps: swaps, Limits: opts.Limits}
 	// Build the token cache and the real secret resolver only when a swap table
 	// is loaded. KeyResolver wraps microagent's standard secret registry (env /
 	// file / dotenv / vault) so a swap's key_ref resolves host-side identically
@@ -189,6 +192,9 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 	// missing resolver would fail closed in Swapper.acquire regardless.
 	h.EnableSwaps(swaps)
 	logger.Log("egress_listen", map[string]any{"addr": ln.Addr().String(), "allow": opts.Allow})
+	if opts.Mode == egressModeMITM {
+		warnMITMEnabled(logger)
+	}
 
 	// Mediation always includes UDP: open the transparent UDP socket on the same
 	// host:port as the TCP listener (different protocol). Deriving the bind from
@@ -242,4 +248,17 @@ func Serve(ctx context.Context, ln net.Listener, opts Options) error {
 		}
 		go h.Handle(conn)
 	}
+}
+
+// mitmWarning is the load-time notice printed and audited when the sunsetting
+// mitm mode is enabled. It states plainly what the mode does and its risks so
+// no one turns on TLS interception without confronting exactly what it is.
+const mitmWarning = "egress mode 'mitm' enabled: injects a forge-anything CA into the guest, enlarges the TLS attack surface, does not stop a determined adversary (cert-pinners fail closed), and is on a one-way sunset — prefer 'broker'"
+
+// warnMITMEnabled emits the mitm load-time warning to stderr (operator-visible
+// at launch) and as an egress_mitm_enabled audit record (written by mediation,
+// tenet 2), so enabling TLS interception is never silent.
+func warnMITMEnabled(logger Logger) {
+	fmt.Fprintln(os.Stderr, "warning: "+mitmWarning)
+	logger.Log("egress_mitm_enabled", map[string]any{"warning": mitmWarning})
 }

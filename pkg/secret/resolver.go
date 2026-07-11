@@ -88,6 +88,19 @@ func (r *Registry) resolve(ctx context.Context, ref string) (value []byte, schem
 	return value, scheme, warning, nil
 }
 
+// ValidRef reports whether ref has the shape of a resolvable reference —
+// "<scheme>:<rest>" with a registered scheme and a non-empty remainder —
+// without resolving it. Callers use it to reject a pasted literal secret
+// before it is ever processed as configuration.
+func (r *Registry) ValidRef(ref string) bool {
+	scheme, rest, ok := strings.Cut(strings.TrimSpace(ref), ":")
+	if !ok || scheme == "" || rest == "" {
+		return false
+	}
+	_, known := r.providers[scheme]
+	return known
+}
+
 // plaintextWarning is the message emitted whenever a plaintext scheme is used.
 func plaintextWarning(scheme string) string {
 	return fmt.Sprintf("secret scheme %q is plaintext: not encrypted at rest, not for production", scheme)

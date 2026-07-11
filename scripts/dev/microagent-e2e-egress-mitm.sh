@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# microagent E2E: strict egress with TLS interception (per-workspace CA) + passthrough.
+# microagent E2E: mitm egress with a locked allowlist + TLS interception (per-workspace CA) + passthrough.
 #
 # Proves the full Plan-3 pipeline in rootless user/pasta mode:
 #   - allowlisted HTTPS host  -> intercepted: the guest trusts the per-workspace CA
@@ -104,7 +104,7 @@ manifest = {
     "name": name, "profile": "small", "restart": "never",
     "resources": {"memory_mib": 512, "cpu_count": 2, "size_mib": 128},
     "network": {"mode": "user"},
-    "egress_mode": "strict", "egress_allow": [allow], "egress_passthrough": [passthrough],
+    "egress_mode": "mitm", "egress_allowlist_locked": True, "egress_allow": [allow], "egress_passthrough": [passthrough],
 }
 event = {
     "identity": {"requestID": name + "-prepared", "runtimeID": name, "role": "workload", "backend": "linux-kvm"},
@@ -189,9 +189,9 @@ if not any(e.get("event") == "egress_allow" and e.get("host") == passt and not e
 # Strict blocks the non-allowlisted host at the DNS layer (egress_dns_deny): the
 # guest never learns an IP, so no TCP is attempted and NO egress_deny is emitted.
 if not any(e.get("event") == "egress_dns_deny" and e.get("qname") == deny for e in events):
-    raise SystemExit(f"missing egress_dns_deny for {deny} (strict blocks at the DNS layer): {events}")
+    raise SystemExit(f"missing egress_dns_deny for {deny} (a locked allowlist blocks at the DNS layer): {events}")
 if any(e.get("event") == "egress_deny" and e.get("host") == deny for e in events):
-    raise SystemExit(f"unexpected egress_deny for {deny}: strict must block at the DNS layer, before any TCP: {events}")
+    raise SystemExit(f"unexpected egress_deny for {deny}: a locked allowlist must block at the DNS layer, before any TCP: {events}")
 
 if teardown != "clean":
     raise SystemExit("egress mediator was orphaned after halt")

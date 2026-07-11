@@ -173,24 +173,44 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 	}
 	vsockPath := ""
 	if needsVsock(&state.Config) {
-		vsockPath = vsockSocketPath(opts)
-		if firecrackerProcessConfinedToWorkspace(state.PID, opts) {
-			var err error
-			vsockPath, err = confinedWorkspacePath(opts, vsockPath)
-			if err != nil {
-				return vmkit.SnapshotManifest{}, err
+		// A workspace started from a snapshot runs a VM whose vsock device
+		// still references its ancestor's baked path (resolved through the
+		// fork's bind mount). The manifest must carry that baked path, not
+		// this workspace's own — the next fork's bind mount targets it.
+		if baked := strings.TrimSpace(state.Config.BakedVsockUDSPath); baked != "" {
+			vsockPath = baked
+		} else {
+			vsockPath = vsockSocketPath(opts)
+			if firecrackerProcessConfinedToWorkspace(state.PID, opts) {
+				var err error
+				vsockPath, err = confinedWorkspacePath(opts, vsockPath)
+				if err != nil {
+					return vmkit.SnapshotManifest{}, err
+				}
 			}
 		}
 	}
+	// Same for the guest service ports: a fork's guest listens on the baked
+	// (ancestor-derived) ports recorded in GuestShellPort/GuestExecPort, while
+	// Config.ShellPort/ExecPort are this workspace's host-side bridge ports.
+	shellPort := state.Config.ShellPort
+	if state.Config.GuestShellPort != 0 {
+		shellPort = state.Config.GuestShellPort
+	}
+	execPort := state.Config.ExecPort
+	if state.Config.GuestExecPort != 0 {
+		execPort = state.Config.GuestExecPort
+	}
 	// Capture the egress posture so a restore/fork re-arms the mediator with the
 	// recorded policy AND reuses the SAME per-workspace CA the guest's baked trust
-	// store was built against. For a mediated workspace the persisted CA cert MUST
+	// store was built against. Only certificate-forging modes mint a CA — broker
+	// splices and delivers none — so only for those must the persisted CA cert
 	// exist; record its DER SHA-256 as the restore-time integrity check. Fail
-	// closed if the cert is gone — never snapshot a mediated workspace whose CA
+	// closed if the cert is gone — never snapshot a forging workspace whose CA
 	// cannot be reproduced, because restoring it would silently break every MITM
 	// handshake of the guest.
 	caSHA := ""
-	if vmkit.EgressMediationOn(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
+	if vmkit.EgressModeForgesCerts(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
 		sha, err := egressCACertSHA256(filepath.Join(opts.StateDir, opts.Name))
 		if err != nil {
 			return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot of mediated workspace %s requires its persisted egress CA: %w", opts.Name, err)
@@ -206,8 +226,8 @@ func snapshotManifestFromState(tag string, state runtimeState, opts Options, pur
 		MemoryMiB:             state.Config.MemoryMiB,
 		CreatedAt:             time.Now().UTC().Format(time.RFC3339),
 		VsockUDSPath:          vsockPath,
-		ShellPort:             state.Config.ShellPort,
-		ExecPort:              state.Config.ExecPort,
+		ShellPort:             shellPort,
+		ExecPort:              execPort,
 		NetworkIP:             netIP,
 		NetworkGateway:        netGateway,
 		NetworkSubnet:         netSubnet,
@@ -403,6 +423,12 @@ exec:
 	rest := args[i:]
 	if bindSrc == "" || bindDst == "" || len(rest) == 0 {
 		return fmt.Errorf("usage: --fork-mount-exec --bind-src <dir> --bind-dst <dir> -- <firecracker> [args...]")
+	}
+	// The baked path's directory may not exist on this host: a chain fork's
+	// ancestor workspace, or a bundle restored onto a fresh node. It is only
+	// a mountpoint — create it before binding over it.
+	if err := os.MkdirAll(bindSrc, 0o700); err != nil {
+		return fmt.Errorf("create fork bind mountpoint %s: %w", bindSrc, err)
 	}
 	if err := unix.Mount(bindDst, bindSrc, "", unix.MS_BIND|unix.MS_REC, ""); err != nil {
 		return fmt.Errorf("bind-mount %s over %s for fork: %w", bindDst, bindSrc, err)

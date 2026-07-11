@@ -84,13 +84,13 @@ func TestSnapshotManifestFromStateRecordsEgressCA(t *testing.T) {
 	opts := Options{Name: "ws", StateDir: stateDir}
 	_, _, wantSHA := writePersistedCA(t, filepath.Join(stateDir, opts.Name))
 
-	state := mediatedRuntimeState(vmkit.EgressModeStrict, []string{"api.github.com", ".example.com"}, []string{"raw.example.com"})
+	state := mediatedRuntimeState(vmkit.EgressModeMITM, []string{"api.github.com", ".example.com"}, []string{"raw.example.com"})
 	manifest, err := snapshotManifestFromState("snap-1", state, opts, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState: %v", err)
 	}
-	if manifest.EgressMode != vmkit.EgressModeStrict {
-		t.Errorf("EgressMode = %q, want %q", manifest.EgressMode, vmkit.EgressModeStrict)
+	if manifest.EgressMode != vmkit.EgressModeMITM {
+		t.Errorf("EgressMode = %q, want %q", manifest.EgressMode, vmkit.EgressModeMITM)
 	}
 	if len(manifest.EgressAllow) != 2 || manifest.EgressAllow[0] != "api.github.com" || manifest.EgressAllow[1] != ".example.com" {
 		t.Errorf("EgressAllow = %v, want [api.github.com .example.com]", manifest.EgressAllow)
@@ -119,7 +119,7 @@ func TestSnapshotManifestRoundTripsEgressCaps(t *testing.T) {
 		EgressAuditMaxBytes:      5242880,
 		EgressAuditMaxBackups:    3,
 	}
-	state := mediatedRuntimeStateWithCaps(vmkit.EgressModeStrict, []string{"api.github.com"}, nil, caps)
+	state := mediatedRuntimeStateWithCaps(vmkit.EgressModeMITM, []string{"api.github.com"}, nil, caps)
 	manifest, err := snapshotManifestFromState("snap-caps", state, opts, false)
 	if err != nil {
 		t.Fatalf("snapshotManifestFromState: %v", err)
@@ -149,7 +149,7 @@ func TestSnapshotManifestRoundTripsEgressCaps(t *testing.T) {
 
 	// Re-apply onto a restore Config that carries NO caps: the manifest is
 	// authoritative and the restored posture inherits the snapshotted bounds.
-	restoreCfg := &vmkit.Config{EgressMode: vmkit.EgressModeStrict}
+	restoreCfg := &vmkit.Config{EgressMode: vmkit.EgressModeMITM}
 	applyManifestEgressCaps(restoreCfg, got)
 	if restoreCfg.EgressMaxBytesPerSec != 1048576 || restoreCfg.EgressMaxTotalBytes != 10485760 ||
 		restoreCfg.EgressMaxConcurrentConns != 8 || restoreCfg.EgressAuditMaxBytes != 5242880 ||
@@ -175,9 +175,37 @@ func TestSnapshotManifestFromStateFailsClosedOnMissingCA(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(stateDir, opts.Name), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	state := mediatedRuntimeState(vmkit.EgressModeGuarded, nil, nil)
+	state := mediatedRuntimeState(vmkit.EgressModeMITM, nil, nil)
 	if _, err := snapshotManifestFromState("snap-1", state, opts, false); err == nil {
 		t.Fatal("expected error snapshotting mediated workspace with missing CA, got nil")
+	}
+}
+
+// TestSnapshotManifestFromStateBrokerNeedsNoCA: broker mode forges nothing
+// and mints no per-workspace CA, so snapshotting a broker workspace must
+// succeed without a persisted CA and record an empty fingerprint — the
+// restore path already treats an empty fingerprint as "no CA to reuse".
+// Only certificate-forging modes require the persisted CA at snapshot time.
+func TestSnapshotManifestFromStateBrokerNeedsNoCA(t *testing.T) {
+	stateDir := t.TempDir()
+	opts := Options{Name: "ws", StateDir: stateDir}
+	// No egress-ca.pem: broker workspaces never have one.
+	if err := os.MkdirAll(filepath.Join(stateDir, opts.Name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := mediatedRuntimeState(vmkit.EgressModeBroker, nil, []string{"raw.example.com"})
+	manifest, err := snapshotManifestFromState("snap-1", state, opts, false)
+	if err != nil {
+		t.Fatalf("snapshotManifestFromState for broker mode: %v", err)
+	}
+	if manifest.EgressCASHA256 != "" {
+		t.Fatalf("broker manifest must carry no CA fingerprint, got %q", manifest.EgressCASHA256)
+	}
+	if manifest.EgressMode != vmkit.EgressModeBroker {
+		t.Errorf("EgressMode = %q, want %q", manifest.EgressMode, vmkit.EgressModeBroker)
+	}
+	if len(manifest.EgressPassthrough) != 1 || manifest.EgressPassthrough[0] != "raw.example.com" {
+		t.Errorf("EgressPassthrough = %v, want [raw.example.com]", manifest.EgressPassthrough)
 	}
 }
 
@@ -211,7 +239,7 @@ func TestSnapshotManifestFromStateSkipsCAForIsolatedNetwork(t *testing.T) {
 		Config: vmkit.Config{
 			CPUCount:   2,
 			MemoryMiB:  512,
-			EgressMode: vmkit.EgressModeGuarded,
+			EgressMode: vmkit.EgressModeMITM,
 			Network:    &vmkit.NetworkConfig{Mode: "isolated"},
 		},
 	}
@@ -390,7 +418,7 @@ func TestProvisionEgressFailsClosedOnCAFingerprintMismatch(t *testing.T) {
 	wsDir := filepath.Join(stateDir, opts.Name)
 	certPEMBefore, _, _ := writePersistedCA(t, wsDir)
 
-	cfg := &vmkit.Config{EgressMode: vmkit.EgressModeStrict, EgressAllow: []string{"api.github.com"}}
+	cfg := &vmkit.Config{EgressMode: vmkit.EgressModeMITM, EgressAllow: []string{"api.github.com"}}
 	pid, rules, err := provisionEgressMediation(opts, cfg, "microtap0", "10.44.1.1", "10.44.1.0/24", true, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 	if err == nil {
 		t.Fatal("expected fail-closed error on CA fingerprint mismatch, got nil")
@@ -493,7 +521,7 @@ func TestProvisionEgressReusesPersistedCAOnRestore(t *testing.T) {
 	// A loopback "gateway" the mediator can bind without a real tap.
 	gateway := "127.0.0.1"
 	subnet := "127.0.0.0/8"
-	cfg := &vmkit.Config{EgressMode: vmkit.EgressModeStrict, EgressAllow: []string{"api.github.com"}}
+	cfg := &vmkit.Config{EgressMode: vmkit.EgressModeMITM, EgressAllow: []string{"api.github.com"}}
 	pid, rules, err := provisionEgressMediation(opts, cfg, "lo", gateway, subnet, true, sha)
 	if err != nil {
 		t.Skipf("provision egress reuse e2e: host could not provision mediation (likely missing TPROXY prereqs): %v", err)

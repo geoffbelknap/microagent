@@ -138,12 +138,13 @@ func OptionsFromManifest(base Options, manifest Manifest) Options {
 		}
 	}
 	opts.SecretsAudit = manifest.SecretsAudit
-	// Normalize the egress mode loaded from the manifest so an unspecified mode
-	// carries the explicit secure default ("guarded") into Request(), which
-	// then provisions the mediator and the CA-cert vsock listener.
-	opts.EgressMode = vmkit.NormalizeEgressMode(manifest.EgressMode)
+	// Resolve the egress mode's default (empty -> broker) but do NOT validate
+	// here: a retired mode from an old manifest must survive to be rejected at
+	// Request()'s policy chokepoint on start/restore, not silently remapped.
+	opts.EgressMode = vmkit.ResolveEgressModeDefault(manifest.EgressMode)
 	opts.EgressAllow = manifest.EgressAllow
 	opts.EgressPassthrough = manifest.EgressPassthrough
+	opts.EgressAllowlistLocked = manifest.EgressAllowlistLocked
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
 	opts.Outputs = manifest.Artifacts.Egress
 	if opts.KernelPath == "" {

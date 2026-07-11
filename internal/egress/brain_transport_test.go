@@ -33,11 +33,12 @@ func TestBrainServesHostSuppliedDst(t *testing.T) {
 	}
 	newHandler := func(dst netip.AddrPort) *Handler {
 		return &Handler{
-			Mode:    "strict",
-			Policy:  policy,
-			Logger:  logger,
-			OrigDst: func(net.Conn) (netip.AddrPort, error) { return dst, nil },
-			Dial:    net.Dial,
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          policy,
+			Logger:          logger,
+			OrigDst:         func(net.Conn) (netip.AddrPort, error) { return dst, nil },
+			Dial:            net.Dial,
 		}
 	}
 
@@ -56,7 +57,7 @@ func TestBrainServesHostSuppliedDst(t *testing.T) {
 
 	t.Run("deny_blocks_and_audits", func(t *testing.T) {
 		client, server := net.Pipe()
-		go newHandler(upAddr).Handle(server) // dst irrelevant: denied on host
+		go newHandler(upAddr).Handle(server) // denied on host; dst resolves to loopback (inside)
 		_ = client.SetDeadline(time.Now().Add(5 * time.Second))
 		go func() {
 			_, _ = client.Write([]byte("GET / HTTP/1.1\r\nHost: blocked.example\r\nConnection: close\r\n\r\n"))
@@ -64,12 +65,14 @@ func TestBrainServesHostSuppliedDst(t *testing.T) {
 		_, _ = io.ReadAll(client) // denied → conn closed, no upstream dial
 		found := false
 		for _, e := range logger.Snapshot() {
-			if e["event"] == "egress_deny" && e["host"] == "blocked.example" {
+			// The non-allowlisted host resolves to loopback, so an allow-broad-family
+			// mode classifies it inside — denied as internal (the SSRF-shaped case).
+			if e["event"] == "egress_internal_deny" && e["host"] == "blocked.example" {
 				found = true
 			}
 		}
 		if !found {
-			t.Fatalf("expected an egress_deny audit for blocked.example; got %v", logger.Snapshot())
+			t.Fatalf("expected an egress_internal_deny audit for blocked.example; got %v", logger.Snapshot())
 		}
 	})
 }

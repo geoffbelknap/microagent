@@ -10,6 +10,32 @@ import (
 	"time"
 )
 
+// shouldMITM is the termination-choice predicate. The security invariant under
+// test: broker mode NEVER forges certificates, even if a CA is somehow present —
+// it splices opaquely. guarded keeps forging per-SNI leaves for allowed TLS.
+func TestHandlerShouldMITM(t *testing.T) {
+	ca := &CA{} // non-nil sentinel; the predicate checks presence, not validity
+	cases := []struct {
+		name                                string
+		h                                   *Handler
+		isTLS, allowed, passthrough, isPeer bool
+		want                                bool
+	}{
+		{"guarded_tls_allowed_mitms", &Handler{Mode: "mitm", CA: ca}, true, true, false, false, true},
+		{"broker_never_mitms_even_with_ca", &Handler{Mode: "broker", CA: ca}, true, true, false, false, false},
+		{"no_ca", &Handler{Mode: "mitm"}, true, true, false, false, false},
+		{"not_tls", &Handler{Mode: "mitm", CA: ca}, false, true, false, false, false},
+		{"passthrough", &Handler{Mode: "mitm", CA: ca}, true, true, true, false, false},
+		{"peer", &Handler{Mode: "mitm", CA: ca}, true, true, false, true, false},
+		{"denied", &Handler{Mode: "mitm", CA: ca}, true, false, false, false, false},
+	}
+	for _, c := range cases {
+		if got := c.h.shouldMITM(c.isTLS, c.allowed, c.passthrough, c.isPeer); got != c.want {
+			t.Errorf("%s: shouldMITM = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestHandlerAllowForwards(t *testing.T) {
 	up, _ := net.Listen("tcp", "127.0.0.1:0")
 	defer up.Close()
@@ -95,7 +121,7 @@ func TestGuardedAllowsUnlisted(t *testing.T) {
 		pol, _ := NewPolicy([]string{"allowed.example.com"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   "guarded",
+			Mode:   "mitm",
 			Policy: pol,
 			Logger: log,
 			// OrigDst returns a public address (not on the allowlist) but we Dial
@@ -122,15 +148,18 @@ func TestGuardedAllowsUnlisted(t *testing.T) {
 		assertEventWithField(t, log, "egress_allow", "unlisted", true)
 	})
 
-	t.Run("strict denies unlisted", func(t *testing.T) {
+	t.Run("locked allowlist denies unlisted", func(t *testing.T) {
 		dialed := false
 		pol, _ := NewPolicy([]string{"allowed.example.com"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:         "strict",
-			Policy:       pol,
-			Logger:       log,
-			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.0.0.9:443"), nil },
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
+			// A public, non-allowlisted destination: denied purely for the
+			// allowlist miss (egress_deny), not the inside classification.
+			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("203.0.113.9:443"), nil },
 			Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
 			SniffTimeout: 500 * time.Millisecond,
 		}
@@ -141,7 +170,7 @@ func TestGuardedAllowsUnlisted(t *testing.T) {
 		<-done
 		client.Close()
 		if dialed {
-			t.Fatal("upstream dialed despite strict deny (must fail closed)")
+			t.Fatal("upstream dialed despite locked-allowlist deny (must fail closed)")
 		}
 		assertEvent(t, log, "egress_deny")
 	})
@@ -171,7 +200,7 @@ func TestPassthroughNotUnlisted(t *testing.T) {
 	passthrough, _ := NewPolicy([]string{"raw.example.com"})
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:         "guarded",
+		Mode:         "mitm",
 		Policy:       pol,
 		Passthrough:  passthrough,
 		Logger:       log,
@@ -210,7 +239,7 @@ func TestHandlerLoopGuardDropsOwnBindAddr(t *testing.T) {
 	pol, _ := NewPolicy([]string{"10.43.7.1"}) // allowlist the bind IP so only the loop guard (not the inside-deny) can stop the self-loop
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:     "guarded", // the loop guard fires before the policy decision
+		Mode:     "mitm", // the loop guard fires before the policy decision
 		Policy:   pol,
 		Logger:   log,
 		BindAddr: bind,
@@ -284,13 +313,14 @@ func TestTCPRawIPByName(t *testing.T) {
 		nc := NewNameCache()
 		nc.Put("allowed.example.com", upAddr.Addr(), time.Minute)
 		h := &Handler{
-			Mode:         "strict",
-			Policy:       pol,
-			Logger:       log,
-			NameCache:    nc,
-			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
-			Dial:         net.Dial,
-			SniffTimeout: 300 * time.Millisecond,
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
+			NameCache:       nc,
+			OrigDst:         func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+			Dial:            net.Dial,
+			SniffTimeout:    300 * time.Millisecond,
 		}
 
 		client, server := net.Pipe()
@@ -319,13 +349,14 @@ func TestTCPRawIPByName(t *testing.T) {
 		nc := NewNameCache()
 		nc.Put("allowed.example.com", upAddr.Addr(), time.Minute)
 		h := &Handler{
-			Mode:         "strict",
-			Policy:       pol,
-			Logger:       log,
-			NameCache:    nc,
-			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return uncached, nil },
-			Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
-			SniffTimeout: 300 * time.Millisecond,
+			Mode:            "mitm",
+			AllowlistLocked: true,
+			Policy:          pol,
+			Logger:          log,
+			NameCache:       nc,
+			OrigDst:         func(net.Conn) (netip.AddrPort, error) { return uncached, nil },
+			Dial:            func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
+			SniffTimeout:    300 * time.Millisecond,
 		}
 		client, server := net.Pipe()
 		done := make(chan struct{})
@@ -367,13 +398,14 @@ func TestHandlerAllowsPeerByName(t *testing.T) {
 	}
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:         "strict",
-		Policy:       pol,
-		Peers:        peers,
-		Logger:       log,
-		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
-		Dial:         net.Dial,
-		SniffTimeout: 300 * time.Millisecond,
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          pol,
+		Peers:           peers,
+		Logger:          log,
+		OrigDst:         func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+		Dial:            net.Dial,
+		SniffTimeout:    300 * time.Millisecond,
 	}
 
 	client, server := net.Pipe()
@@ -406,10 +438,11 @@ func TestHandlerDeniesUnknownPeer(t *testing.T) {
 	}
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:   "strict",
-		Policy: pol,
-		Peers:  peers,
-		Logger: log,
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          pol,
+		Peers:           peers,
+		Logger:          log,
 		// Not a known peer (10.44.1.99 is not in the roster) and not allowlisted.
 		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.44.1.99:443"), nil },
 		Dial:         func(string, string) (net.Conn, error) { dialed = true; return nil, nil },
@@ -422,9 +455,11 @@ func TestHandlerDeniesUnknownPeer(t *testing.T) {
 	<-done
 	client.Close()
 	if dialed {
-		t.Fatal("upstream dialed for an unknown peer under strict (must fail closed)")
+		t.Fatal("upstream dialed for an unknown peer under a locked allowlist (must fail closed)")
 	}
-	assertEvent(t, log, "egress_deny")
+	// The peer IP is RFC1918 (east-west), so an allow-broad-family mode classifies
+	// it inside: denied as internal, the more informative east-west audit event.
+	assertEvent(t, log, "egress_internal_deny")
 }
 
 // TestHandlerAllowsPeerByIPLiteral proves an operator may allowlist a peer by its
@@ -453,13 +488,14 @@ func TestHandlerAllowsPeerByIPLiteral(t *testing.T) {
 	}
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:         "strict",
-		Policy:       pol,
-		Peers:        peers,
-		Logger:       log,
-		OrigDst:      func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
-		Dial:         net.Dial,
-		SniffTimeout: 300 * time.Millisecond,
+		Mode:            "mitm",
+		AllowlistLocked: true,
+		Policy:          pol,
+		Peers:           peers,
+		Logger:          log,
+		OrigDst:         func(net.Conn) (netip.AddrPort, error) { return upAddr, nil },
+		Dial:            net.Dial,
+		SniffTimeout:    300 * time.Millisecond,
 	}
 
 	client, server := net.Pipe()
@@ -500,7 +536,7 @@ func TestHandlerEnforcesByteCap(t *testing.T) {
 	pol, _ := NewPolicy([]string{"api.github.com"})
 	log := &BufferLogger{}
 	h := &Handler{
-		Mode:   "guarded",
+		Mode:   "mitm",
 		Policy: pol,
 		Logger: log,
 		// OrigDst returns a public address (guarded allows it) but we Dial the
@@ -557,7 +593,7 @@ func TestHandlerEnforcesConcurrencyCap(t *testing.T) {
 	log := &BufferLogger{}
 	var dials int32
 	h := &Handler{
-		Mode:   "guarded",
+		Mode:   "mitm",
 		Policy: pol,
 		Logger: log,
 		// OrigDst returns a public address (guarded allows it) but we Dial the
@@ -643,7 +679,7 @@ func TestGuardedTCP(t *testing.T) {
 		pol, _ := NewPolicy(nil)
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:         "guarded",
+			Mode:         "mitm",
 			Policy:       pol,
 			Logger:       log,
 			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("169.254.169.254:80"), nil },
@@ -667,7 +703,7 @@ func TestGuardedTCP(t *testing.T) {
 		pol, _ := NewPolicy(nil)
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:         "guarded",
+			Mode:         "mitm",
 			Policy:       pol,
 			Logger:       log,
 			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.0.0.5:443"), nil },
@@ -691,7 +727,7 @@ func TestGuardedTCP(t *testing.T) {
 		pol, _ := NewPolicy(nil)
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:         "guarded",
+			Mode:         "mitm",
 			Policy:       pol,
 			Logger:       log,
 			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("100.64.0.1:443"), nil },
@@ -726,7 +762,7 @@ func TestGuardedTCP(t *testing.T) {
 		pol, _ := NewPolicy([]string{"93.184.216.34"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:   "guarded",
+			Mode:   "mitm",
 			Policy: pol,
 			Logger: log,
 			// OrigDst returns a public address (93.184.216.34) but we Dial
@@ -776,7 +812,7 @@ func TestGuardedTCP(t *testing.T) {
 		pol, _ := NewPolicy([]string{"10.0.0.5"})
 		log := &BufferLogger{}
 		h := &Handler{
-			Mode:         "guarded",
+			Mode:         "mitm",
 			Policy:       pol,
 			Logger:       log,
 			OrigDst:      func(net.Conn) (netip.AddrPort, error) { return netip.MustParseAddrPort("10.0.0.5:80"), nil },

@@ -88,6 +88,9 @@ type Config struct {
 	EgressMode        string   `json:"egressMode,omitempty"`
 	EgressAllow       []string `json:"egressAllow,omitempty"`
 	EgressPassthrough []string `json:"egressPassthrough,omitempty"`
+	// EgressAllowlistLocked, in broker mode, restricts egress to allowlisted
+	// destinations only (drops the allow-broad grant). No effect otherwise.
+	EgressAllowlistLocked bool `json:"egressAllowlistLocked,omitempty"`
 	// EgressSwapConfigPath points at the operator credential-swap config the
 	// mediator loads (--swap-config). The real secret is injected host-side and
 	// never enters the guest; empty disables swap.
@@ -119,8 +122,16 @@ type Config struct {
 	// equals the host port (the normal case).
 	GuestShellPort uint16 `json:"guestShellPort,omitempty"`
 	GuestExecPort  uint16 `json:"guestExecPort,omitempty"`
-	SerialInput    bool   `json:"serialInput,omitempty"`
-	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	// BakedVsockUDSPath is the vsock UDS path recorded in the snapshot this
+	// workspace was started from. Firecracker cannot remap the path on load,
+	// so a fork's running VM still references its ancestor's path (resolved
+	// through the fork's bind mount). Snapshot capture must carry this exact
+	// path forward — recording the fork's own path would point the NEXT
+	// fork's bind mount at the wrong directory. Empty means the workspace
+	// booted fresh and its vsock path is its own.
+	BakedVsockUDSPath string `json:"bakedVsockUDSPath,omitempty"`
+	SerialInput       bool   `json:"serialInput,omitempty"`
+	TimeoutSeconds    int    `json:"timeoutSeconds,omitempty"`
 	// LeaseSeconds bounds the VM's lifetime when set (>0): the gc sweep reaps a
 	// workspace still recorded running past StartedAt+LeaseSeconds. Zero means no
 	// bound — the VM is permanent and is never reaped for age.
@@ -136,6 +147,43 @@ type Config struct {
 	// guest-mediated file operations against an otherwise-stopped
 	// workspace and halt it again.
 	MaintenanceBoot bool `json:"maintenanceBoot,omitempty"`
+	// Broker configures the egress broker served on a host vsock listener; nil
+	// means no broker. See BrokerConfig.
+	Broker *BrokerConfig `json:"broker,omitempty"`
+}
+
+// BrokerConfig configures the egress broker: a host-side forward proxy served
+// on a per-workspace vsock listener that swaps credential references
+// (@secret:<name>) for the live secret just before originating its own
+// upstream TLS. The guest holds only the reference; the live credential exists
+// only in broker process memory and is absent from guest state by
+// construction.
+type BrokerConfig struct {
+	// Upstream is the terminate-mode upstream base URL requests are forwarded
+	// to with the credential injected.
+	Upstream string `json:"upstream"`
+	// Secret is the credential the broker resolves at listener start and holds
+	// host-side only. It is deliberately separate from Config.Secrets: broker
+	// secrets are never delivered into the guest.
+	Secret SecretRef `json:"secret"`
+	// GuestListen is the in-guest TCP address the vsock bridge listens on and
+	// workloads are pointed at (e.g. "127.0.0.1:18888").
+	GuestListen string `json:"guestListen,omitempty"`
+	// VsockPort is the host vsock port the broker listener is served on.
+	VsockPort uint32 `json:"vsockPort,omitempty"`
+	// Proxy sets HTTPS_PROXY/HTTP_PROXY in the guest to the broker so
+	// proxy-honoring clients tunnel their egress through it (CONNECT).
+	Proxy bool `json:"proxy,omitempty"`
+	// BaseURLEnv points per-SDK base-URL env vars at the broker for
+	// terminate-mode credential injection; an empty value is filled with the
+	// guest listen URL.
+	BaseURLEnv map[string]string `json:"baseURLEnv,omitempty"`
+	// Capture opts in to governed raw capture of pre-swap requests (path,
+	// headers with references verbatim, bounded body) to a separate
+	// owner-only file. Off by default; the default emission is the minimized
+	// decision stream. Persisted in the manifest so the opt-in is declared,
+	// not silent.
+	Capture bool `json:"capture,omitempty"`
 }
 
 type Disk struct {
@@ -482,42 +530,88 @@ func ValidateConfig(config *Config) error {
 	return nil
 }
 
-// Egress mode constants. An empty/unspecified mode is the secure default and
-// resolves to EgressModeGuarded.
+// Egress mode constants — the final vocabulary. An empty/unspecified mode is
+// the secure default and resolves to EgressModeBroker.
 const (
-	EgressModeGuarded = "guarded"
-	EgressModeStrict  = "strict"
-	EgressModeOff     = "off"
+	// EgressModeBroker (default) terminates guest egress at a forward proxy
+	// instead of forging per-SNI certificates: the mediator splices allowed
+	// flows opaquely and delivers no CA to the guest. Credential injection
+	// happens on the cooperative base-URL vsock channel, not this transparent
+	// path. Allow-broad by default; allowlist-only under AllowlistLocked.
+	EgressModeBroker = "broker"
+	// EgressModeMITM is the opt-in, warning-gated compatibility mode: it
+	// forges per-SNI certificates from a per-workspace CA delivered to the
+	// guest, so it sees TLS plaintext. It enlarges the TLS attack surface,
+	// does not stop a real adversary (cert-pinners fail closed), and is on a
+	// one-way sunset. Formerly the "guarded"/"strict" datapath.
+	EgressModeMITM = "mitm"
+	EgressModeOff  = "off"
 )
 
-// NormalizeEgressMode collapses an egress mode string to one of the canonical
-// values: "guarded", "strict", or "off". Empty/whitespace (and any unrecognized
-// value) resolves to "guarded" — the secure default. This is the single
-// normalization chokepoint: once applied, downstream code only ever sees the
-// three canonical values.
-func NormalizeEgressMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case EgressModeStrict:
-		return EgressModeStrict
-	case EgressModeOff:
-		return EgressModeOff
-	default: // empty, "guarded", or unrecognized -> safe default
-		return EgressModeGuarded
+// retiredEgressModes are the mode names removed in the S4 vocabulary rename.
+// They are rejected, never reinterpreted (tenet 9); each maps to the message
+// that tells an operator what to use instead.
+var retiredEgressModes = map[string]string{
+	"guarded": "the 'guarded' egress mode is retired; use 'broker' (same allow-broad reach, no CA in the guest) or 'mitm' (the old cert-forging interception, now explicit and warned)",
+	"strict":  "the 'strict' egress mode is retired; use 'broker' or 'mitm' with --egress-lock-allowlist (allowlist-only reach on either mode)",
+}
+
+// ValidateEgressMode resolves and validates an egress mode string against the
+// final vocabulary: "broker", "mitm", or "off". Empty/whitespace resolves to
+// the "broker" default. The retired names ("guarded", "strict") and any
+// unrecognized value are errors — no silent fallback survives, so a mistyped
+// or stale mode is flagged rather than quietly reinterpreted (tenet 9). This
+// replaces the former NormalizeEgressMode chokepoint.
+func ValidateEgressMode(mode string) (string, error) {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	switch m {
+	case "":
+		return EgressModeBroker, nil
+	case EgressModeBroker, EgressModeMITM, EgressModeOff:
+		return m, nil
 	}
+	if msg, ok := retiredEgressModes[m]; ok {
+		return "", fmt.Errorf("vmkit: %s", msg)
+	}
+	return "", fmt.Errorf("vmkit: unknown egress mode %q: must be broker, mitm, or off", mode)
+}
+
+// ResolveEgressModeDefault resolves empty/whitespace to the broker default and
+// otherwise lowercases/trims, WITHOUT validating. It is for pure reporters,
+// manifest-load paths, and idempotent internal steps that must carry a mode
+// forward for the real chokepoint (ValidateEgressMode, via EgressPolicy.Validate
+// at Request) to accept or reject — so an old manifest's retired mode survives
+// to be rejected on start rather than being silently normalized away. Prefer
+// ValidateEgressMode wherever an invalid mode should be surfaced immediately.
+func ResolveEgressModeDefault(mode string) string {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	if m == "" {
+		return EgressModeBroker
+	}
+	return m
 }
 
 // EgressMediationOn reports whether the given egress mode provisions the
-// mediator (mint CA, spawn mediator, install REDIRECT, allocate the CA-cert
-// vsock listener). "guarded" and "strict" are both ON. An
-// empty/unspecified mode is OFF here on purpose: "default" is set by
-// NormalizeEgressMode at the high-level workspace chokepoints, while
+// mediator (spawn mediator, install REDIRECT, and — for mitm — mint a CA and
+// allocate the CA-cert vsock listener). "broker" and "mitm" are both ON. An
+// empty/unspecified mode is OFF here on purpose: the default is resolved by
+// ValidateEgressMode at the high-level workspace chokepoints, while
 // EgressMediationOn decides whether to *provision*. The low-level raw
-// create/start primitive leaves EgressMode empty and must NOT be force-mediated
-// (it allocates no CA-cert listener, so mediating it would MITM the guest's TLS
-// with a CA the guest never receives).
+// create/start primitive leaves EgressMode empty and must NOT be
+// force-mediated. Retired/unknown values are OFF.
 func EgressMediationOn(mode string) bool {
 	m := strings.ToLower(strings.TrimSpace(mode))
-	return m == EgressModeGuarded || m == EgressModeStrict
+	return m == EgressModeBroker || m == EgressModeMITM
+}
+
+// EgressModeForgesCerts reports whether the mode terminates guest TLS by
+// forging per-SNI certificates from the per-workspace CA — which requires
+// delivering that CA to the guest so it trusts the forged leaves. Only "mitm"
+// does. "broker" splices allowed flows opaquely and "off" runs no mediator, so
+// neither delivers a CA. Callers gate CA minting + the CA-cert vsock listener
+// on this.
+func EgressModeForgesCerts(mode string) bool {
+	return strings.ToLower(strings.TrimSpace(mode)) == EgressModeMITM
 }
 
 // NetworkModeMediates reports whether the given network mode actually runs the

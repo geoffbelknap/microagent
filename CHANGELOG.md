@@ -5,6 +5,168 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Fixed: snapshot of a `broker`-mode workspace no longer demands an egress CA
+
+Snapshot manifest capture still required the persisted per-workspace egress CA
+for every mediated workspace, but `broker` mode (the default) deliberately
+mints no CA — so snapshotting any broker workspace failed with "requires its
+persisted egress CA". The requirement is now gated on certificate-forging
+modes only (`mitm`), matching the start/restore paths; a broker snapshot
+carries an empty CA fingerprint and the restore path already treats that as
+"no CA to reuse".
+
+### Egress mode vocabulary — `broker` / `mitm` / `off` (breaking)
+
+The `guarded` and `strict` egress modes are **retired**. The vocabulary is now:
+
+- **`broker`** (default): allow-broad, opaque forward-proxy splice, no CA in the
+  guest — the same reach the old `guarded` default had, without TLS interception.
+- **`mitm`**: allow-broad, forge per-SNI certificates (the old `guarded`/`strict`
+  datapath). A sunsetting, warning-gated compatibility mode: enabling it prints a
+  load-time warning and logs an `egress_mitm_enabled` audit record.
+- **`off`**: unmediated.
+- **`--egress-lock-allowlist`**: an orthogonal parameter that makes either
+  mediating mode allowlist-only — the retired `strict` reach control.
+
+This is a hard breaking change with no aliases. `--egress guarded`, `--egress
+strict`, a manifest or snapshot naming either, and any unrecognized value are
+rejected with an error naming the successor — never silently reinterpreted. An
+unspecified mode resolves to `broker`, so the common case keeps working and gets
+the no-CA default; only callers who *typed* a retired name or restore an old
+manifest are affected. Credential swap and `--egress-policy`/`--egress-swap-config`
+now require `mitm` (swap needs the plaintext). `--egress open`/`disabled` are no
+longer accepted aliases for `off`.
+
+### Non-cooperation signals
+
+The egress mediator now tags the audit records it writes with a `signal` field
+from a closed vocabulary when it detects an attempt to route around it —
+`denied`, `direct-ip-no-sni`, `quic-udp443` (QUIC/UDP:443 is default-denied so
+clients fall back to TCP), `foreign-resolver`, and the broker's
+`unresolved-secret-ref`. The mediator only detects and emits; the response is a
+consumer's policy.
+
+### Broker decision stream + governed request capture
+
+The egress broker's per-workspace trail (`broker-access.jsonl`) is now a
+**decision stream**: one minimized record per brokered request — verdict,
+rule, method, host, upstream status, byte counts both ways, timing, and the
+*names* of the credential references swapped, never values. By schema the
+record carries no path, headers, or bodies, and everything the broker records
+is captured **before** the reference-for-secret swap, so the injected
+credential cannot appear in any trail by construction. `microagent egress`
+merges the mediator's connection-level log and the broker's request-level
+records into one time-ordered view (snapshot and `--follow`), and the per-host
+allow/deny rollups fold broker verdicts in.
+
+A new `--broker-capture` flag (Agentfile: `agent.broker.capture`, MCP:
+`broker_capture`) opts in to raw capture of pre-swap requests — path, headers
+with references verbatim, and a bounded body prefix (1 MiB, truncation
+flagged) — to a separate owner-only `broker-capture.jsonl`. Capture is
+request-only (responses have no swap point and are never captured), off by
+default, and declared in the workspace manifest.
+
+The broker also gained an in-process policy seam: a hook that judges each
+pre-swap request before any bytes go upstream and returns only a verdict
+(allow/deny, rule, classification labels). It is fail-closed — a policy error
+or panic denies — and unconfigured by default.
+
+### `broker` egress mode — mediation without a CA in the guest
+
+A new `--egress broker` mode terminates guest egress at a transparent forward
+proxy instead of forging per-SNI certificates. Allowed TLS flows are spliced
+opaquely — the guest sees the real upstream certificate — so **no
+per-workspace CA is minted or delivered to the guest**. Like `guarded`, broker
+mode is allow-broad: it permits public destinations and denies only the
+inside/infrastructure (RFC1918, link-local, loopback, CGNAT, cloud metadata),
+classified on the resolved IP. As the guest's sole resolver, the mediator also
+strips HTTPS/SVCB records (and thus any ECH config) from DNS answers, keeping
+the TLS SNI visible so enforcement is not defeated by Encrypted Client Hello.
+
+`--egress-lock-allowlist` tightens broker mode to allowlisted destinations only
+(dropping the allow-broad default) while keeping the opaque-splice, no-CA
+behavior — the destination-restriction posture without TLS interception. The
+mode and toggle persist with the workspace and across snapshot restore.
+
+### Egress broker — credential isolation without MITM
+
+Workspaces can now route egress through a per-workspace broker: a cooperative
+forward proxy served on a host vsock listener that swaps credential
+references (`@secret:<name>`) for the live secret just before originating its
+own upstream TLS — no forged certificates, no CA injected into the guest. The
+guest never holds the credential: not in its environment, its filesystem, or
+anything it can read; the live value exists only in host process memory.
+Because the channel is vsock, it works even for `--network isolated` guests,
+composing containment with credential isolation.
+
+`microagent create/run --broker-upstream <url> --broker-secret NAME=<ref>`
+(plus optional `--broker-env KEY[=VALUE]` and `--broker-proxy`) wire
+everything with zero manual steps: the guest env (bridge listener, base URLs,
+proxy vars) is baked at create, the broker config persists in the workspace
+manifest — reference only, never a value — and the supervisor serves the
+broker at every start, resolving the secret fresh (fail-closed: an
+unresolvable reference or a pasted literal aborts instead of booting an
+unbrokered workspace). Every brokered request is recorded pre-swap in the
+per-workspace `broker-access.jsonl`, so the trail carries the workload's own
+reference and can never contain the live secret — absent by construction,
+not redaction.
+
+### New `helper:` secret scheme — credential-helper binaries
+
+Secret references gain a `helper:` scheme that resolves by executing an
+operator-owned binary (named by `MICROAGENT_SECRET_HELPER` in the resolving
+process's environment) with the reference remainder as its argument; the
+secret is the helper's stdout. This is the git/docker credential-helper
+pattern applied to the conduit: embedding platforms plug in their cloud's
+secret manager — resolved via instance identity, no tokens at rest — without
+cloud SDKs entering microagent. Fail-closed throughout: unconfigured host,
+nonzero exit, or empty output all fail the resolve, and stderr (never the
+secret) is surfaced in the error.
+
+## v0.8.6 - 2026-07-07
+
+Snapshot-chain correctness release: three related fixes for workspaces that
+are snapshotted and restored repeatedly (the pattern behind microplane's
+hibernate/wake), all found and field-validated by real hibernation cycles.
+
+### Resuming a fork in place no longer loses its baked identity
+
+`start --from-snapshot` on a workspace that was itself created from a
+snapshot (a fork) launched the VM without the baked identity adoption that
+`create --from-snapshot` performs: the loaded guest listens on its ancestor's
+service ports and references the ancestor's vsock path, but the host bridged
+name-derived ports and recorded the fork's own path — shell/exec came up dead
+(connection reset) while the workspace looked running. Start now adopts the
+baked guest ports and vsock path from the snapshot manifest (explicit caller
+values still win); for an original workspace the adopted values equal its own,
+so behavior there is unchanged.
+
+### Snapshot forks no longer drop the caller's port forwards
+
+`CreateFromSnapshot` adopted the snapshot's baked network addressing by
+replacing the whole network config, silently discarding port forwards the
+caller requested for the fork. Forwards are realized host-side by the fork's
+own pasta/forwarder and are invisible to the resumed guest, so adopting the
+source's addressing now preserves them — a hibernate/wake cycle keeps the
+workload's exposed services reachable.
+
+### Snapshot of a restored workspace no longer loses its baked identity
+
+Snapshotting a workspace that was itself started from a snapshot (a chain of
+forks — e.g. repeated hibernate/resume cycles) recorded the wrong restore
+identity in the manifest: the fork's own vsock UDS path instead of the
+ancestor path baked into the loaded VM state, and the fork's host-side bridge
+ports instead of the guest service ports the resumed guest actually listens
+on. The NEXT restore in the chain then bind-mounted over the wrong directory
+and bridged to ports nobody listened on, leaving shell/exec dead (connection
+reset) while the workspace looked running. Capture now carries the baked
+identity forward: `CreateFromSnapshot` threads the source manifest's vsock
+path through the runtime config (new `bakedVsockUDSPath`), and both the
+Firecracker and Apple VF capture paths prefer the baked guest ports. The fork
+mount-exec path also creates the bind mountpoint when the ancestor's
+directory does not exist on this host, so chained restores work on a fresh
+node (bundle-restore scenarios), not just where the ancestor once ran.
+
 ## v0.8.5 - 2026-07-07
 
 ### Guarded-egress DNS no longer breaks on hosts with a local UDP :53 service

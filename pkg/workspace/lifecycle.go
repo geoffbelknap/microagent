@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/volume"
@@ -351,6 +352,16 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		// secrets, no model pairing, no forwards, isolated networking. The
 		// caller supplies the complete minimal options.
 		applyManifest(&opts, manifest)
+	}
+	if tag := strings.TrimSpace(opts.FromSnapshot); tag != "" {
+		// Resume-in-place of a workspace that was itself a fork: the loaded
+		// VM keeps its baked identity (ancestor vsock path, guest service
+		// ports), exactly as CreateFromSnapshot adopts it for a new fork.
+		// Without this, stop + start --from-snapshot of a fork bridges to
+		// guest ports nobody listens on and its shell/exec are dead.
+		if snapManifest, err := vmkit.ReadSnapshotManifest(vmkit.SnapshotDir(opts.StateDir, opts.Name, tag)); err == nil {
+			adoptSnapshotIdentity(&opts, snapManifest)
+		}
 	}
 	if opts.ProfileExplicit {
 		opts.Profile = requestedProfile
@@ -740,13 +751,26 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		netGateway = strings.TrimSpace(state.Config.Network.Gateway)
 		netSubnet = strings.TrimSpace(state.Config.Network.Subnet)
 	}
+	// Only certificate-forging modes mint a per-workspace CA (broker splices
+	// and delivers none), so only for those is the persisted CA required.
 	caSHA := ""
-	if vmkit.EgressMediationOn(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
+	if vmkit.EgressModeForgesCerts(state.Config.EgressMode) && vmkit.NetworkModeMediates(mode) {
 		sha, err := egressCACertSHA256(filepath.Join(opts.StateDir, opts.Name))
 		if err != nil {
 			return vmkit.SnapshotManifest{}, fmt.Errorf("snapshot of mediated workspace %s requires its persisted egress CA: %w", opts.Name, err)
 		}
 		caSHA = sha
+	}
+	// A fork's guest listens on the baked (ancestor-derived) service ports in
+	// GuestShellPort/GuestExecPort; ShellPort/ExecPort are this workspace's
+	// host-side bridge ports. The manifest records what the GUEST listens on.
+	shellPort := state.Config.ShellPort
+	if state.Config.GuestShellPort != 0 {
+		shellPort = state.Config.GuestShellPort
+	}
+	execPort := state.Config.ExecPort
+	if state.Config.GuestExecPort != 0 {
+		execPort = state.Config.GuestExecPort
 	}
 	return vmkit.SnapshotManifest{
 		Tag:                      tag,
@@ -756,8 +780,8 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		VCPUCount:                state.Config.CPUCount,
 		MemoryMiB:                state.Config.MemoryMiB,
 		CreatedAt:                time.Now().UTC().Format(time.RFC3339),
-		ShellPort:                state.Config.ShellPort,
-		ExecPort:                 state.Config.ExecPort,
+		ShellPort:                shellPort,
+		ExecPort:                 execPort,
 		NetworkIP:                netIP,
 		NetworkGateway:           netGateway,
 		NetworkSubnet:            netSubnet,
@@ -768,6 +792,7 @@ func appleVFSnapshotManifestFromState(tag string, state RuntimeState, opts Optio
 		EgressMode:               state.Config.EgressMode,
 		EgressAllow:              state.Config.EgressAllow,
 		EgressPassthrough:        state.Config.EgressPassthrough,
+		EgressAllowlistLocked:    state.Config.EgressAllowlistLocked,
 		EgressSwapConfigPath:     state.Config.EgressSwapConfigPath,
 		EgressCASHA256:           caSHA,
 		EgressMaxBytesPerSec:     state.Config.EgressMaxBytesPerSec,
@@ -872,15 +897,7 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 		opts.SpecCPU = true
 	}
 	if strings.TrimSpace(manifest.NetworkMode) != "" {
-		// The resumed guest keeps the source's baked IP, so the fork configures
-		// its own tap/pasta (in its own namespace) with the source's addressing
-		// rather than deriving a fresh subnet from the fork's name.
-		opts.Network = vmkit.NetworkConfig{
-			Mode:    manifest.NetworkMode,
-			IP:      manifest.NetworkIP,
-			Gateway: manifest.NetworkGateway,
-			Subnet:  manifest.NetworkSubnet,
-		}
+		opts.Network = adoptSnapshotNetwork(opts.Network, manifest)
 	}
 	if opts.ImageRef == "" {
 		opts.ImageRef = manifest.ImageRef
@@ -890,6 +907,9 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	// the source's guest ports, so concurrent forks don't collide on the host.
 	opts.GuestShellPort = manifest.ShellPort
 	opts.GuestExecPort = manifest.ExecPort
+	// Likewise the loaded VM state references the manifest's vsock path, not
+	// the fork's own; carry it so a snapshot OF this fork records the truth.
+	opts.BakedVsockUDSPath = manifest.VsockUDSPath
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
@@ -923,6 +943,41 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	}
 	opts.FromSnapshot = tag
 	return Start(ctx, opts)
+}
+
+// adoptSnapshotIdentity defaults the baked identity fields from a snapshot
+// manifest onto opts: the guest service ports the resumed guest listens on
+// and the vsock UDS path its VM state references. For an original (non-fork)
+// workspace these equal the workspace's own values, so adoption is a no-op
+// in behavior; for a fork they differ and are load-bearing. Explicit caller
+// values win.
+func adoptSnapshotIdentity(opts *Options, manifest vmkit.SnapshotManifest) {
+	if opts.GuestShellPort == 0 {
+		opts.GuestShellPort = manifest.ShellPort
+	}
+	if opts.GuestExecPort == 0 {
+		opts.GuestExecPort = manifest.ExecPort
+	}
+	if strings.TrimSpace(opts.BakedVsockUDSPath) == "" {
+		opts.BakedVsockUDSPath = manifest.VsockUDSPath
+	}
+}
+
+// adoptSnapshotNetwork builds the fork's network config: addressing comes
+// from the snapshot — the resumed guest keeps the source's baked IP, so the
+// fork configures its own tap/pasta (in its own namespace) with the source's
+// addressing rather than deriving a fresh subnet from the fork's name. The
+// caller's port forwards are preserved: they are realized host-side by this
+// fork's own pasta/forwarder and are invisible to the resumed guest, so
+// adopting the source's addressing must not silently drop them.
+func adoptSnapshotNetwork(requested vmkit.NetworkConfig, manifest vmkit.SnapshotManifest) vmkit.NetworkConfig {
+	return vmkit.NetworkConfig{
+		Mode:         manifest.NetworkMode,
+		IP:           manifest.NetworkIP,
+		Gateway:      manifest.NetworkGateway,
+		Subnet:       manifest.NetworkSubnet,
+		PortForwards: requested.PortForwards,
+	}
 }
 
 func applyForkSecretManifest(opts *Options, source Manifest, snapshot vmkit.SnapshotManifest) error {
@@ -1091,7 +1146,10 @@ func copySnapshotInto(srcDir, dstDir string, manifest vmkit.SnapshotManifest) er
 
 func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 	rootfsPath := WorkspaceRootfsPath(opts.StateDir, opts.Name, opts.Backend)
-	req := buildRootfsRequest(opts, rootfsPath)
+	req, err := rootfsRequest(opts, rootfsPath)
+	if err != nil {
+		return Result{}, err
+	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
 	result := Result{
 		Workspace:    opts.Name,
@@ -1109,6 +1167,32 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		Image:        provenance,
 	}
 	return result, err
+}
+
+// rootfsRequest composes the rootfs build request, baking the broker guest
+// env (vsock bridge, proxy, base URLs) into the image env when a broker is
+// configured. Fail-closed: an invalid broker config fails the build rather
+// than producing a workspace whose egress silently bypasses the broker.
+func rootfsRequest(opts Options, rootfsPath string) (rootfs.BuildRequest, error) {
+	req := buildRootfsRequest(opts, rootfsPath)
+	brokerCfg, err := normalizeBrokerConfig(opts.Broker)
+	if err != nil {
+		return rootfs.BuildRequest{}, err
+	}
+	if brokerCfg != nil {
+		guest := broker.GuestConfig{
+			GuestListen: brokerCfg.GuestListen,
+			VsockPort:   brokerCfg.VsockPort,
+			Proxy:       brokerCfg.Proxy,
+			BaseURL:     brokerCfg.BaseURLEnv,
+		}
+		env, err := guest.MergeGuestEnvMap(req.Env)
+		if err != nil {
+			return rootfs.BuildRequest{}, fmt.Errorf("broker guest env: %w", err)
+		}
+		req.Env = env
+	}
+	return req, nil
 }
 
 func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
@@ -1283,11 +1367,11 @@ func materializeCredSwapConfig(opts *Options) error {
 		return nil
 	}
 	// cred-swap is performed by the egress mediator (host-side MITM injection),
-	// which only runs in guarded/strict. With egress off there is no mediator to
+	// which only runs in mitm mode. With egress off there is no mediator to
 	// inject the key, so the swap would silently do nothing — fail loud. This is
 	// the library backstop for direct Go-API callers; the CLI catches it earlier.
-	if vmkit.NormalizeEgressMode(opts.EgressMode) == vmkit.EgressModeOff {
-		return fmt.Errorf("cred-swap: credential swap requires egress guarded or strict, not off")
+	if vmkit.ResolveEgressModeDefault(opts.EgressMode) == vmkit.EgressModeOff {
+		return fmt.Errorf("cred-swap: credential swap requires egress mitm, not off")
 	}
 	cfg := egress.SwapConfigFile{Swaps: map[string]egress.SwapEntry{}}
 	// Merge an operator-supplied swap config first so generated provider entries
@@ -1344,30 +1428,32 @@ func WriteManifest(opts Options) error {
 		return err
 	}
 	return writeJSONFile(filepath.Join(workspaceDir, "workspace.json"), Manifest{
-		Name:                 opts.Name,
-		Profile:              opts.Profile,
-		Restart:              NormalizeRestartPolicy(opts.RestartPolicy),
-		Resources:            ResourcesFromOptions(opts),
-		Network:              NetworkSpecFromConfig(opts.Network),
-		Service:              strings.TrimSpace(opts.ServiceCommand),
-		ConsoleShell:         strings.TrimSpace(opts.ConsoleShell),
-		Hostname:             strings.TrimSpace(opts.Hostname),
-		Model:                strings.TrimSpace(opts.Model),
-		ModelRunner:          modelRunnerManifest(opts.ModelRunner),
-		ModelMediation:       modelMediationManifest(opts.ModelMediation),
-		Mediation:            opts.Mediation,
-		Health:               healthManifest(opts.Health),
-		Disks:                opts.Disks,
-		Artifacts:            ArtifactsFromOptions(opts),
-		Verification:         opts.Verification,
-		Secrets:              secretRefsFromOptions(opts),
-		SecretEnvFiles:       opts.SecretEnvFiles,
-		OnDemandSecrets:      onDemandRefsFromOptions(opts),
-		SecretsAudit:         opts.SecretsAudit,
-		EgressMode:           opts.EgressMode,
-		EgressAllow:          opts.EgressAllow,
-		EgressPassthrough:    opts.EgressPassthrough,
-		EgressSwapConfigPath: opts.EgressSwapConfigPath,
+		Name:                  opts.Name,
+		Profile:               opts.Profile,
+		Restart:               NormalizeRestartPolicy(opts.RestartPolicy),
+		Resources:             ResourcesFromOptions(opts),
+		Network:               NetworkSpecFromConfig(opts.Network),
+		Service:               strings.TrimSpace(opts.ServiceCommand),
+		ConsoleShell:          strings.TrimSpace(opts.ConsoleShell),
+		Hostname:              strings.TrimSpace(opts.Hostname),
+		Model:                 strings.TrimSpace(opts.Model),
+		ModelRunner:           modelRunnerManifest(opts.ModelRunner),
+		ModelMediation:        modelMediationManifest(opts.ModelMediation),
+		Mediation:             opts.Mediation,
+		Health:                healthManifest(opts.Health),
+		Disks:                 opts.Disks,
+		Artifacts:             ArtifactsFromOptions(opts),
+		Verification:          opts.Verification,
+		Secrets:               secretRefsFromOptions(opts),
+		SecretEnvFiles:        opts.SecretEnvFiles,
+		OnDemandSecrets:       onDemandRefsFromOptions(opts),
+		SecretsAudit:          opts.SecretsAudit,
+		EgressMode:            opts.EgressMode,
+		EgressAllow:           opts.EgressAllow,
+		EgressPassthrough:     opts.EgressPassthrough,
+		EgressAllowlistLocked: opts.EgressAllowlistLocked,
+		EgressSwapConfigPath:  opts.EgressSwapConfigPath,
+		Broker:                opts.Broker,
 	})
 }
 
@@ -1763,14 +1849,17 @@ func applyManifest(opts *Options, manifest Manifest) {
 		opts.OnDemandSecrets = nil
 	}
 	opts.SecretsAudit = manifest.SecretsAudit
-	// Normalize the egress mode loaded from the manifest so a workspace whose
-	// manifest carries an unspecified mode is started with the explicit secure
-	// default ("guarded"); Request() then re-allocates the CA-cert vsock
-	// listener on start, mirroring create.
-	opts.EgressMode = vmkit.NormalizeEgressMode(manifest.EgressMode)
+	// Resolve the manifest egress mode's default (empty -> broker) without
+	// validating, so a workspace whose manifest carries an unspecified mode
+	// starts under broker; a retired mode survives to be rejected at Request()'s
+	// policy chokepoint. Request() then re-allocates the CA-cert vsock listener
+	// (mitm only) on start, mirroring create.
+	opts.EgressMode = vmkit.ResolveEgressModeDefault(manifest.EgressMode)
 	opts.EgressAllow = manifest.EgressAllow
 	opts.EgressPassthrough = manifest.EgressPassthrough
+	opts.EgressAllowlistLocked = manifest.EgressAllowlistLocked
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
+	opts.Broker = manifest.Broker
 }
 
 func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {

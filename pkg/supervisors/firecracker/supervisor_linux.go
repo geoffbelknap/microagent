@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/egress"
+	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/fsutil"
 	"github.com/geoffbelknap/microagent/pkg/secretxfer"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -1351,17 +1352,28 @@ func provisionEgressMediation(opts Options, config *vmkit.Config, tap, gateway, 
 		return 0, nil, nil
 	}
 	var rules []transientFirewallRule
-	// Acquire the per-workspace CA. On a fresh start we mint one and persist it;
-	// on a snapshot restore/fork we REUSE the persisted CA the guest's baked trust
-	// store was built against (re-minting would silently break every MITM
-	// handshake of the restored guest). cleanupCA removes the CA files only when
-	// we minted them this call — on reuse it is a no-op so a downstream failure
-	// never deletes the workspace's persistent CA.
-	caCertPath, caKeyPath, cleanupCA, caErr := acquireEgressCA(opts, restore, expectedCASHA)
-	if caErr != nil {
-		return 0, nil, caErr
+	// Acquire the per-workspace CA — but only for modes that forge certificates
+	// (mitm). broker mode splices allowed flows opaquely and forges
+	// nothing, so it mints no CA and delivers none to the guest (the workspace
+	// layer also allocates no CA-cert listener for it). An empty caCertPath makes
+	// startEgressMediator omit --ca-cert, so the mediator's shouldMITM stays off.
+	//
+	// On a fresh start we mint a CA and persist it; on a snapshot restore/fork we
+	// REUSE the persisted CA the guest's baked trust store was built against
+	// (re-minting would silently break every MITM handshake of the restored
+	// guest). cleanupCA removes the CA files only when we minted them this call —
+	// on reuse it is a no-op so a downstream failure never deletes the workspace's
+	// persistent CA.
+	caCertPath, caKeyPath := "", ""
+	cleanupCA := func() {}
+	if vmkit.EgressModeForgesCerts(config.EgressMode) {
+		var caErr error
+		caCertPath, caKeyPath, cleanupCA, caErr = acquireEgressCA(opts, restore, expectedCASHA)
+		if caErr != nil {
+			return 0, nil, caErr
+		}
 	}
-	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllow, config.EgressPassthrough, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, egressCapsFromConfig(config))
+	pid, port, eerr := startEgressMediator(opts, gateway, config.EgressMode, config.EgressAllowlistLocked, config.EgressAllow, config.EgressPassthrough, config.EgressSwapConfigPath, nil, caCertPath, caKeyPath, egressCapsFromConfig(config))
 	if eerr != nil {
 		cleanupCA()
 		return 0, nil, eerr
@@ -2283,8 +2295,11 @@ func egressCapsFromConfig(config *vmkit.Config) egressCaps {
 	}
 }
 
-func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
-	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.NormalizeEgressMode(mode)}
+func egressMediatorArgs(bindHost string, port int, auditPath, mode string, lockAllowlist bool, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) []string {
+	args := []string{"--egress-mediator", "--bind-host", bindHost, "--bind-port", strconv.Itoa(port), "--audit-log", auditPath, "--mode", vmkit.ResolveEgressModeDefault(mode)}
+	if lockAllowlist {
+		args = append(args, "--lock-allowlist")
+	}
 	for _, h := range allow {
 		args = append(args, "--allow", h)
 	}
@@ -2323,7 +2338,7 @@ func egressMediatorArgs(bindHost string, port int, auditPath, mode string, allow
 	return args
 }
 
-func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
+func startEgressMediator(opts Options, bindHost, mode string, lockAllowlist bool, allow, passthrough []string, swapConfigPath string, peers []string, caCertPath, caKeyPath string, caps egressCaps) (int, int, error) {
 	l, err := net.Listen("tcp", net.JoinHostPort(bindHost, "0"))
 	if err != nil {
 		return 0, 0, err
@@ -2335,7 +2350,7 @@ func startEgressMediator(opts Options, bindHost, mode string, allow, passthrough
 		return 0, 0, err
 	}
 	auditPath := filepath.Join(opts.StateDir, opts.Name, "egress-access.jsonl")
-	args := egressMediatorArgs(bindHost, port, auditPath, mode, allow, passthrough, swapConfigPath, peers, caCertPath, caKeyPath, caps)
+	args := egressMediatorArgs(bindHost, port, auditPath, mode, lockAllowlist, allow, passthrough, swapConfigPath, peers, caCertPath, caKeyPath, caps)
 	logPath := filepath.Join(opts.StateDir, opts.Name, "egress-mediator.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return 0, 0, err
@@ -2776,6 +2791,15 @@ func startVsockListeners(opts Options, config *vmkit.Config) (*vsockListenerSet,
 			srv := newSecretsServer(opts.Name, opts.StateDir, bundle, onDemand, config.SecretsAudit)
 			set.listeners = append(set.listeners, unixListener)
 			go serveSecretsListener(unixListener, srv)
+			continue
+		}
+		if listener.Target == broker.ListenerTarget {
+			brokerListener, err := startBrokerListener(opts, config, listener.Port)
+			if err != nil {
+				set.Close()
+				return nil, err
+			}
+			set.listeners = append(set.listeners, brokerListener)
 			continue
 		}
 		if listener.Target == secretxfer.CACertTarget {

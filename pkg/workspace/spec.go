@@ -152,13 +152,12 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 	if entry := strings.TrimSpace(agent.Entry); entry != "" && strings.TrimSpace(opts.ExecCommand) == "" {
 		opts.ExecCommand = entry
 	}
-	if mode := strings.ToLower(strings.TrimSpace(agent.Egress)); mode != "" {
-		switch mode {
-		case vmkit.EgressModeGuarded, vmkit.EgressModeStrict, vmkit.EgressModeOff:
-			opts.EgressMode = mode
-		default:
-			return fmt.Errorf("agent egress %q must be guarded, strict, or off", agent.Egress)
+	if strings.TrimSpace(agent.Egress) != "" {
+		mode, err := vmkit.ValidateEgressMode(agent.Egress)
+		if err != nil {
+			return fmt.Errorf("agent egress: %w", err)
 		}
+		opts.EgressMode = mode
 	}
 	if len(agent.Allow) != 0 {
 		opts.EgressAllow = egress.DedupeHosts(append(append([]string(nil), opts.EgressAllow...), agent.Allow...))
@@ -171,6 +170,15 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 		if ok {
 			opts.CredSwapProviders = append(opts.CredSwapProviders, provider)
 		}
+	}
+	// A broker supplied earlier (e.g. a --broker-* CLI flag) wins; the agent
+	// block only fills an unset one, consistent with the rest of ApplySpec.
+	if agent.Broker != nil && opts.Broker == nil {
+		broker, err := ParseBrokerConfig(agent.Broker.Upstream, agent.Broker.Secret, agent.Broker.Env, agent.Broker.Proxy, agent.Broker.Capture)
+		if err != nil {
+			return err
+		}
+		opts.Broker = broker
 	}
 	return nil
 }

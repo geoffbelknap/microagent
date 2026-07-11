@@ -1,0 +1,141 @@
+//go:build linux
+
+package firecracker
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/geoffbelknap/microagent/pkg/broker"
+	"github.com/geoffbelknap/microagent/pkg/secret"
+	"github.com/geoffbelknap/microagent/pkg/vmkit"
+)
+
+// brokerAccessLogPath is the per-workspace broker decision stream: one JSONL
+// record per brokered request — verdict plus minimized metadata, no content
+// (ASK tenet 2 — the trace is written by mediation, not the agent). The live
+// credential is absent by construction: records carry reference names, never
+// values.
+func brokerAccessLogPath(stateDir, name string) string {
+	return filepath.Join(stateDir, name, "broker-access.jsonl")
+}
+
+// brokerCaptureLogPath is the governed raw-capture file: pre-swap requests
+// (references verbatim, never live secrets), written only when the operator
+// opted in via BrokerConfig.Capture.
+func brokerCaptureLogPath(stateDir, name string) string {
+	return filepath.Join(stateDir, name, "broker-capture.jsonl")
+}
+
+// appendJSONL returns a mutex-serialized JSONL appender onto f.
+func appendJSONL[T any](f *os.File, what string) func(T) {
+	var mu sync.Mutex
+	return func(rec T) {
+		mu.Lock()
+		defer mu.Unlock()
+		if err := json.NewEncoder(f).Encode(rec); err != nil {
+			fmt.Fprintf(os.Stderr, "egress broker: append %s record: %v\n", what, err)
+		}
+	}
+}
+
+// startBrokerListener serves the egress broker on the workspace's broker
+// vsock UDS. The credential is resolved here, host-side, and lives only in
+// this process's memory: the guest holds a reference (@secret:<name>) that
+// the broker swaps just before originating its own upstream TLS.
+//
+// Fail-closed: an absent broker config, an unresolvable secret reference, or
+// an unopenable access log aborts the start — a workspace must not boot
+// half-brokered.
+func startBrokerListener(opts Options, config *vmkit.Config, port uint32) (net.Listener, error) {
+	if config == nil || config.Broker == nil {
+		return nil, fmt.Errorf("firecracker vsock listener %d targets the egress broker but the workspace has no broker config", port)
+	}
+	bc := config.Broker
+	registry := secret.DefaultRegistry(os.Getenv, func(msg string) {
+		fmt.Fprintln(os.Stderr, "warning: "+msg)
+	})
+	value, err := registry.Resolve(context.Background(), bc.Secret.Ref)
+	if err != nil {
+		return nil, fmt.Errorf("egress broker: resolve secret %q: %w", bc.Secret.Name, err)
+	}
+	live := string(value)
+	secretName := bc.Secret.Name
+	resolve := func(name string) (string, bool) {
+		if name == secretName {
+			return live, true
+		}
+		return "", false
+	}
+
+	logPath := brokerAccessLogPath(opts.StateDir, opts.Name)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return nil, err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("egress broker: open access log: %w", err)
+	}
+	onDecision := appendJSONL[broker.DecisionRecord](logFile, "decision")
+
+	term, err := broker.NewTerminate(bc.Upstream, resolve, nil)
+	if err != nil {
+		_ = logFile.Close()
+		return nil, err
+	}
+	term.OnDecision = onDecision
+	tunnel := &broker.Connect{OnDecision: onDecision}
+
+	// Raw capture is a governed opt-in: only when the manifest declares it
+	// does the capture file exist at all. Fail-closed like the access log — a
+	// workspace must not boot half-observed.
+	var captureFile *os.File
+	if bc.Capture {
+		capturePath := brokerCaptureLogPath(opts.StateDir, opts.Name)
+		captureFile, err = os.OpenFile(capturePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			_ = logFile.Close()
+			return nil, fmt.Errorf("egress broker: open capture log: %w", err)
+		}
+		term.OnCapture = appendJSONL[broker.CaptureRecord](captureFile, "capture")
+	}
+
+	closeLogs := func() {
+		_ = logFile.Close()
+		if captureFile != nil {
+			_ = captureFile.Close()
+		}
+	}
+	path := firecrackerGuestVsockPath(opts, port)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		closeLogs()
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		closeLogs()
+		return nil, err
+	}
+	unixListener, err := net.Listen("unix", path)
+	if err != nil {
+		closeLogs()
+		return nil, fmt.Errorf("listen broker vsock port %d: %w", port, err)
+	}
+	// Any local process reaching this socket can spend the workspace
+	// credential: restrict it to the owner, like the secrets socket.
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = unixListener.Close()
+		closeLogs()
+		return nil, fmt.Errorf("restrict broker vsock socket %d: %w", port, err)
+	}
+	go func() {
+		_ = http.Serve(unixListener, broker.Handler(term, tunnel))
+		closeLogs()
+	}()
+	return unixListener, nil
+}

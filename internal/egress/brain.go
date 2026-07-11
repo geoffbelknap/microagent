@@ -20,13 +20,17 @@ import (
 // caps, peer/DNS reverse resolution, the host-fetch round-trip — lives around the
 // brain, not inside it.
 type Brain struct {
-	Mode     string // "guarded" (deny inside/infra) | "strict" (deny non-allowlisted) | "" (=> guarded)
-	Policy   *Policy
-	Swaps    *SwapTable
-	Resolver resolver
-	Cache    *tokenCache
-	Logger   Logger
-	Limits   Limits
+	Mode string // "broker" (allow-broad, opaque splice) | "mitm" (allow-broad, forge per-SNI) | "off" | "" (=> broker)
+	// AllowlistLocked drops the allow-broad grant so only allowlisted
+	// destinations are permitted (the folded-in strict behavior), on either
+	// mediating mode. It has no effect with egress off.
+	AllowlistLocked bool
+	Policy          *Policy
+	Swaps           *SwapTable
+	Resolver        resolver
+	Cache           *tokenCache
+	Logger          Logger
+	Limits          Limits
 	// UpstreamRoots optionally overrides the system roots used to verify the real
 	// upstream certificate on the host-fetch path (Fetch). Nil uses the system
 	// pool. It is never used to disable verification.
@@ -83,29 +87,35 @@ func (b *Brain) Evaluate(host string, candidates []string, dstIP netip.Addr, pas
 			}
 		}
 	}
-	inside := b.Mode == egressModeGuarded && isInsideAddr(dstIP)
-	allowed := d.Allow || (b.Mode == egressModeGuarded && !inside)
+	inside := allowsBroad(b.Mode) && isInsideAddr(dstIP)
+	// A locked allowlist removes the allow-broad grant: broker then permits only
+	// allowlisted destinations. Inside classification is unchanged (it still
+	// labels the deny), so a locked broker matches strict's allowlist-only gate.
+	broad := allowsBroad(b.Mode) && !b.AllowlistLocked
+	allowed := d.Allow || (broad && !inside)
 	unlisted := allowed && !d.Allow && !passthrough
 	return Verdict{Allowed: allowed, Unlisted: unlisted, Inside: inside, Reason: d.Reason}
 }
 
 // AuditDeny records a fail-closed denial for the TCP byte-stream and structured
-// (host-fetch) paths: egress_internal_deny when guarded classified the
-// destination as inside/infrastructure, otherwise egress_deny, stamping the
-// policy reason. fields carries the transport's identifying context (host, dst,
-// and any peer fields); AuditDeny adds reason (and internal, when inside). The
-// UDP path keeps its own egress_udp_* event names but shares Evaluate for the
-// decision, so the allow/deny math is single-sourced even where the audit event
-// names differ by transport.
+// (host-fetch) paths: egress_internal_deny when the destination is classified
+// inside/infrastructure, otherwise egress_deny, stamping the policy reason.
+// fields carries the transport's identifying context (host, dst, and any peer
+// fields); AuditDeny adds reason (and internal, when inside) plus the "denied"
+// non-cooperation signal so the record joins the signal taxonomy. The UDP path
+// keeps its own egress_udp_* event names but shares Evaluate for the decision,
+// so the allow/deny math is single-sourced even where the audit event names
+// differ by transport.
 func (b *Brain) AuditDeny(v Verdict, fields map[string]any) {
 	if fields == nil {
 		fields = map[string]any{}
 	}
 	event := "egress_deny"
 	fields["reason"] = v.Reason
+	fields["signal"] = SignalDenied
 	if v.Inside {
 		event = "egress_internal_deny"
-		fields["reason"] = "guarded: internal destination denied"
+		fields["reason"] = "inside: internal destination denied"
 		fields["internal"] = true
 	}
 	b.Logger.Log(event, fields)

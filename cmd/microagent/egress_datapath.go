@@ -34,7 +34,7 @@ func runEgressDatapath(ctx context.Context, args []string) error {
 	fdNum := fs.Int("fd", -1, "inherited datagram socket fd carrying guest Ethernet frames")
 	gatewayIP := fs.String("gateway-ip", "", "IPv4 address the gateway owns and answers ARP for")
 	gatewayMAC := fs.String("gateway-mac", "", "gateway MAC address (optional)")
-	mode := fs.String("egress-mode", "", "egress mediation mode: guarded, strict, or off")
+	mode := fs.String("egress-mode", "", "egress mediation mode: broker, mitm, or off")
 	stateDir := fs.String("state-dir", "", "workspace state directory")
 	name := fs.String("name", "", "workspace name")
 	swapConfig := fs.String("swap-config", "", "credential swap config path")

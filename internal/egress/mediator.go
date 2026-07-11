@@ -45,14 +45,19 @@ const maxTLSRecord = 1<<14 + 5
 // destination, sniff the host, enforce the allowlist, and forward or deny
 // fail-closed. OrigDst and Dial are injectable for tests.
 type Handler struct {
-	// Mode selects enforcement: "guarded" (default) denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west on
-	// resolved IP while allowing public internet; "strict" denies non-allowlisted destinations fail-closed; empty
-	// normalizes to "guarded".
-	Mode          string
-	Policy        *Policy
-	Passthrough   *Policy
-	CA            *CA
-	UpstreamRoots *x509.CertPool
+	// Mode selects enforcement + termination: "broker" (default) allows public
+	// internet and denies link-local/metadata/RFC1918/ULA/loopback/CGNAT/east-west
+	// on the resolved IP, splicing allowed TLS opaquely; "mitm" makes the same
+	// allow-broad decision but forges per-SNI certificates; empty normalizes to
+	// "broker". AllowlistLocked turns either into allowlist-only.
+	Mode string
+	// AllowlistLocked restricts egress to allowlisted destinations only (drops
+	// the allow-broad grant), on either mediating mode. No effect with egress off.
+	AllowlistLocked bool
+	Policy          *Policy
+	Passthrough     *Policy
+	CA              *CA
+	UpstreamRoots   *x509.CertPool
 
 	// Swaps is the host-indexed credential-swap table loaded from
 	// Options.SwapConfigPath. When non-nil, serveMITM HTTP-parses any
@@ -134,14 +139,15 @@ type Handler struct {
 // (MITM, splice, byte/rate caps, peer/DNS reverse resolution) around it.
 func (h *Handler) brain() *Brain {
 	return &Brain{
-		Mode:          h.Mode,
-		Policy:        h.Policy,
-		Swaps:         h.Swaps,
-		Resolver:      h.Resolver,
-		Cache:         h.tokenCache,
-		Logger:        h.Logger,
-		Limits:        h.Limits,
-		UpstreamRoots: h.UpstreamRoots,
+		Mode:            h.Mode,
+		AllowlistLocked: h.AllowlistLocked,
+		Policy:          h.Policy,
+		Swaps:           h.Swaps,
+		Resolver:        h.Resolver,
+		Cache:           h.tokenCache,
+		Logger:          h.Logger,
+		Limits:          h.Limits,
+		UpstreamRoots:   h.UpstreamRoots,
 	}
 }
 
@@ -320,9 +326,30 @@ func isEastWestAddr(a netip.Addr) bool {
 	return a.IsPrivate() || a.IsLinkLocalUnicast() || a.IsLoopback()
 }
 
-// Egress mode constant for the Handler.Mode field. Mirrors the vmkit constant
+// Egress mode constants for the Handler.Mode field. Mirror the vmkit constants
 // without introducing a package dependency; they must stay in sync.
-const egressModeGuarded = "guarded"
+const (
+	egressModeMITM   = "mitm"
+	egressModeBroker = "broker"
+)
+
+// allowsBroad reports whether the mode grants public destinations by default,
+// denying only the inside/infrastructure: broker and mitm. off runs no
+// mediator. broker and mitm share this allow-broad decision — they differ only
+// in termination (broker splices opaquely; mitm forges per-SNI certificates).
+// Allowlist-only reach is the AllowlistLocked variant, orthogonal to the mode.
+func allowsBroad(mode string) bool {
+	return mode == egressModeBroker || mode == egressModeMITM
+}
+
+// shouldMITM reports whether an allowed flow is terminated by forging a per-SNI
+// leaf (serveMITM) rather than opaquely spliced. It requires TLS, a loaded CA,
+// an allowed non-passthrough non-peer destination — and holds ONLY in mitm
+// mode. broker mode splices, it does not forge certificates: a hard security
+// invariant, independent of whether a CA happens to be loaded.
+func (h *Handler) shouldMITM(isTLS, allowed, passthrough, isPeer bool) bool {
+	return isTLS && h.CA != nil && allowed && !passthrough && !isPeer && h.Mode == egressModeMITM
+}
 
 var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
@@ -447,7 +474,7 @@ func (h *Handler) Handle(conn net.Conn) {
 	// (isPeer) is excluded: east-west TLS is L4-spliced below (splice + audit +
 	// allowlist + fail-closed) so a peer's self-signed/internal cert is not broken
 	// by interception, and upstream verification is never silently disabled.
-	if isTLS && h.CA != nil && allowed && !passthrough && !isPeer {
+	if h.shouldMITM(isTLS, allowed, passthrough, isPeer) {
 		h.serveMITM(conn, br, host, dst, unlisted)
 		return
 	}
@@ -463,6 +490,14 @@ func (h *Handler) Handle(conn net.Conn) {
 	if unlisted {
 		allowFields["unlisted"] = true
 		closeFields["unlisted"] = true
+	}
+	// A bare-IP destination with no SNI/Host sniffed, allowed under the
+	// allow-broad grant and not a known peer: permitted but conspicuous — a
+	// cooperative client resolves names first, so direct-to-IP is a
+	// non-cooperation signal.
+	if !isPeer && host == dst.Addr().String() {
+		allowFields["signal"] = SignalDirectIPNoSNI
+		closeFields["signal"] = SignalDirectIPNoSNI
 	}
 	// East-west legibility: a peer flow takes this L4-splice path (NO MITM), so
 	// stamp mitm:false to make the external-vs-peer split explicit in the audit —

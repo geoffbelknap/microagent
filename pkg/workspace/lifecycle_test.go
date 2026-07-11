@@ -846,6 +846,56 @@ func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 	}
 }
 
+func TestBuildRootfsRequestBakesBrokerGuestEnv(t *testing.T) {
+	opts := Options{
+		Name:         "research",
+		StateDir:     "/tmp/microagent",
+		ImageRef:     "docker.io/library/ubuntu:24.04",
+		Architecture: "arm64",
+		Env:          map[string]string{"FOO": "bar"},
+		Broker: &vmkit.BrokerConfig{
+			Upstream:   "https://api.example.com",
+			Secret:     vmkit.SecretRef{Name: "api", Ref: "env:CI_TOKEN"},
+			BaseURLEnv: map[string]string{"EXAMPLE_BASE_URL": ""},
+		},
+	}
+	req, err := rootfsRequest(opts, "/tmp/microagent/workspaces/research/rootfs.ext4")
+	if err != nil {
+		t.Fatalf("rootfsRequest: %v", err)
+	}
+	if req.Env["FOO"] != "bar" {
+		t.Fatalf("operator env not preserved: %v", req.Env)
+	}
+	wantBridge := DefaultBrokerGuestListen + "=1032"
+	if req.Env["MICROAGENT_VSOCK_TCP_LISTENERS"] != wantBridge {
+		t.Fatalf("bridge env = %q, want %q", req.Env["MICROAGENT_VSOCK_TCP_LISTENERS"], wantBridge)
+	}
+	if req.Env["EXAMPLE_BASE_URL"] != "http://"+DefaultBrokerGuestListen {
+		t.Fatalf("base URL env = %q", req.Env["EXAMPLE_BASE_URL"])
+	}
+	if opts.Env["MICROAGENT_VSOCK_TCP_LISTENERS"] != "" {
+		t.Fatal("caller's Env map mutated")
+	}
+
+	// Invalid broker config fails the build request, not silently skipped.
+	bad := opts
+	bad.Broker = &vmkit.BrokerConfig{Upstream: "https://api.example.com", Secret: vmkit.SecretRef{Name: "api", Ref: "sk-literal"}}
+	if _, err := rootfsRequest(bad, "/tmp/microagent/workspaces/research/rootfs.ext4"); err == nil {
+		t.Fatal("literal broker secret must fail the rootfs request")
+	}
+
+	// No broker: env passes through untouched.
+	plain := opts
+	plain.Broker = nil
+	req, err = rootfsRequest(plain, "/tmp/microagent/workspaces/research/rootfs.ext4")
+	if err != nil {
+		t.Fatalf("rootfsRequest: %v", err)
+	}
+	if len(req.Env) != 1 || req.Env["FOO"] != "bar" {
+		t.Fatalf("no-broker env = %v, want only FOO", req.Env)
+	}
+}
+
 func TestBuildRootfsRequestCarriesFinalConfigForSetupCreates(t *testing.T) {
 	req := buildRootfsRequest(Options{
 		Name:            "research",
@@ -1452,10 +1502,10 @@ func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
 		CPUCount:   2,
 		Network:    vmkit.NetworkConfig{Mode: "user"},
 	}
-	// Manifest with an unspecified egress mode (guarded is now the default).
+	// Manifest with an unspecified egress mode (broker is now the default).
 	applyManifest(&opts, Manifest{Network: NetworkSpec{Mode: "user"}})
-	if opts.EgressMode != vmkit.EgressModeGuarded {
-		t.Fatalf("applyManifest left EgressMode = %q, want %q", opts.EgressMode, vmkit.EgressModeGuarded)
+	if opts.EgressMode != vmkit.EgressModeBroker {
+		t.Fatalf("applyManifest left EgressMode = %q, want %q", opts.EgressMode, vmkit.EgressModeBroker)
 	}
 	req, err := Request(opts, "run", "/tmp/rootfs.ext4", "req-1")
 	if err != nil {
@@ -1464,11 +1514,13 @@ func TestApplyManifestNormalizesEgressModeForStart(t *testing.T) {
 	if !vmkit.EgressMediationOn(req.Config.EgressMode) {
 		t.Fatalf("started workspace not mediated: EgressMode = %q", req.Config.EgressMode)
 	}
-	if req.Config.CACertPort != DefaultCACertPort {
-		t.Fatalf("started mediated workspace CACertPort = %d, want %d", req.Config.CACertPort, DefaultCACertPort)
+	// The broker default mediates but forges no certificates, so it allocates
+	// no CA-cert listener (unlike the retired guarded default).
+	if req.Config.CACertPort != 0 {
+		t.Fatalf("started broker-default workspace CACertPort = %d, want 0", req.Config.CACertPort)
 	}
-	if !hasCACertListener(req.Config.VsockListeners) {
-		t.Fatalf("started mediated workspace missing CA-cert listener: %#v", req.Config.VsockListeners)
+	if hasCACertListener(req.Config.VsockListeners) {
+		t.Fatalf("started broker-default workspace must not allocate a CA-cert listener: %#v", req.Config.VsockListeners)
 	}
 }
 

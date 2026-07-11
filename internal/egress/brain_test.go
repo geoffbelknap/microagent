@@ -40,7 +40,7 @@ func TestBrainEvaluate(t *testing.T) {
 	})
 
 	t.Run("guarded_grants_public_as_unlisted", func(t *testing.T) {
-		b := &Brain{Mode: "guarded", Policy: brainPolicy(t)}
+		b := &Brain{Mode: "mitm", Policy: brainPolicy(t)}
 		v := b.Evaluate("blocked.example", nil, public, false)
 		if !v.Allowed || !v.Unlisted || v.Inside {
 			t.Fatalf("guarded public: got %+v, want Allowed && Unlisted && !Inside", v)
@@ -48,7 +48,7 @@ func TestBrainEvaluate(t *testing.T) {
 	})
 
 	t.Run("guarded_denies_inside", func(t *testing.T) {
-		b := &Brain{Mode: "guarded", Policy: brainPolicy(t)}
+		b := &Brain{Mode: "mitm", Policy: brainPolicy(t)}
 		v := b.Evaluate("metadata.local", nil, inside, false)
 		if v.Allowed || !v.Inside {
 			t.Fatalf("guarded inside: got %+v, want !Allowed && Inside", v)
@@ -58,7 +58,7 @@ func TestBrainEvaluate(t *testing.T) {
 	t.Run("allowlist_overrides_inside_deny", func(t *testing.T) {
 		// An operator who allowlists an internal name/IP keeps reaching it; the
 		// inside flag is still set but the allowlist wins (no deny).
-		b := &Brain{Mode: "guarded", Policy: brainPolicy(t, "internal.svc")}
+		b := &Brain{Mode: "mitm", Policy: brainPolicy(t, "internal.svc")}
 		v := b.Evaluate("internal.svc", nil, inside, false)
 		if !v.Allowed || v.Unlisted {
 			t.Fatalf("allowlisted inside: got %+v, want Allowed && !Unlisted", v)
@@ -76,10 +76,56 @@ func TestBrainEvaluate(t *testing.T) {
 
 	t.Run("passthrough_excluded_from_unlisted", func(t *testing.T) {
 		// A passthrough host gets no guarded "unlisted" tag (it is explicitly listed).
-		b := &Brain{Mode: "guarded", Policy: brainPolicy(t)}
+		b := &Brain{Mode: "mitm", Policy: brainPolicy(t)}
 		v := b.Evaluate("pass.example", nil, public, true)
 		if v.Unlisted {
 			t.Fatalf("passthrough: got Unlisted, want false (%+v)", v)
+		}
+	})
+
+	// broker mode shares guarded's allow-broad decision: public is granted
+	// (unlisted, audited), the inside is denied. Termination differs (splice, no
+	// MITM) but the allow/deny math is identical.
+	t.Run("broker_grants_public_as_unlisted", func(t *testing.T) {
+		b := &Brain{Mode: "broker", Policy: brainPolicy(t)}
+		v := b.Evaluate("blocked.example", nil, public, false)
+		if !v.Allowed || !v.Unlisted || v.Inside {
+			t.Fatalf("broker public: got %+v, want Allowed && Unlisted && !Inside", v)
+		}
+	})
+
+	t.Run("broker_denies_inside", func(t *testing.T) {
+		b := &Brain{Mode: "broker", Policy: brainPolicy(t)}
+		v := b.Evaluate("metadata.local", nil, inside, false)
+		if v.Allowed || !v.Inside {
+			t.Fatalf("broker inside: got %+v, want !Allowed && Inside", v)
+		}
+	})
+
+	t.Run("broker_allowlist_overrides_inside_deny", func(t *testing.T) {
+		b := &Brain{Mode: "broker", Policy: brainPolicy(t, "internal.svc")}
+		v := b.Evaluate("internal.svc", nil, inside, false)
+		if !v.Allowed || v.Unlisted {
+			t.Fatalf("broker allowlisted inside: got %+v, want Allowed && !Unlisted", v)
+		}
+	})
+
+	// broker with a locked allowlist drops the allow-broad grant: it becomes
+	// allowlist-only (the folded-in strict behavior), denying non-allowlisted
+	// public destinations while still permitting allowlisted ones.
+	t.Run("broker_locked_denies_non_allowlisted_public", func(t *testing.T) {
+		b := &Brain{Mode: "broker", AllowlistLocked: true, Policy: brainPolicy(t, "allowed.example")}
+		v := b.Evaluate("blocked.example", nil, public, false)
+		if v.Allowed {
+			t.Fatalf("broker locked non-allowlisted: got Allowed, want denied (%+v)", v)
+		}
+	})
+
+	t.Run("broker_locked_allows_allowlisted", func(t *testing.T) {
+		b := &Brain{Mode: "broker", AllowlistLocked: true, Policy: brainPolicy(t, "allowed.example")}
+		v := b.Evaluate("allowed.example", nil, public, false)
+		if !v.Allowed || v.Unlisted {
+			t.Fatalf("broker locked allowlisted: got %+v, want Allowed && !Unlisted", v)
 		}
 	})
 }
@@ -106,7 +152,7 @@ func TestBrainAuditDeny(t *testing.T) {
 		if len(ev) != 1 || ev[0]["event"] != "egress_internal_deny" {
 			t.Fatalf("expected egress_internal_deny; got %v", ev)
 		}
-		if ev[0]["internal"] != true || ev[0]["reason"] != "guarded: internal destination denied" {
+		if ev[0]["internal"] != true || ev[0]["reason"] != "inside: internal destination denied" {
 			t.Fatalf("internal deny fields wrong: %v", ev[0])
 		}
 	})

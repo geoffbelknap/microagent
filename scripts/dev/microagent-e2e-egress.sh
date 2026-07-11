@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# microagent E2E: strict transparent egress mediation (rootless user/pasta mode).
+# microagent E2E: locked-allowlist transparent egress mediation (rootless user/pasta mode).
 #
-# Proves that with `egress_mode: strict` + an allowlist, the mediator is the
+# Proves that with `egress_mode: broker` + a locked allowlist, the mediator is the
 # authoritative resolver: it forwards+answers DNS for an allowlisted name
 # (egress_dns_allow) so that host is reachable (the captured TCP is then
 # forwarded — egress_allow), and it REFUSES DNS for a non-allowlisted name
@@ -103,7 +103,7 @@ manifest = {
     "name": name, "profile": "small", "restart": "never",
     "resources": {"memory_mib": 512, "cpu_count": 2, "size_mib": 128},
     "network": {"mode": "user"},
-    "egress_mode": "strict", "egress_allow": [allow],
+    "egress_mode": "broker", "egress_allowlist_locked": True, "egress_allow": [allow],
 }
 event = {
     "identity": {"requestID": name + "-prepared", "runtimeID": name,
@@ -184,9 +184,9 @@ if not allow_tcp_ok:
 # must be NO egress_deny for it, because no TCP attempt is ever made.
 deny_dns_ok = any(e.get("event") == "egress_dns_deny" and e.get("qname") == deny for e in events)
 if not deny_dns_ok:
-    raise SystemExit(f"missing egress_dns_deny for {deny} (strict blocks at the DNS layer): {events}")
+    raise SystemExit(f"missing egress_dns_deny for {deny} (a locked allowlist blocks at the DNS layer): {events}")
 if any(e.get("event") == "egress_deny" and e.get("host") == deny for e in events):
-    raise SystemExit(f"unexpected egress_deny for {deny}: strict must block at the DNS layer, before any TCP: {events}")
+    raise SystemExit(f"unexpected egress_deny for {deny}: a locked allowlist must block at the DNS layer, before any TCP: {events}")
 
 # A single benign egress_loop_guard is expected once per start (the supervisor's
 # mediator-readiness self-probe dials the mediator's own listen addr; the loop
@@ -197,7 +197,7 @@ if loop_guards > 1:
 
 if teardown != "clean":
     raise SystemExit("egress mediator was orphaned after halt")
-print("egress mediation (strict): allow resolved+forwarded, deny blocked at DNS layer, audit recorded, teardown clean")
+print("egress mediation (broker + locked allowlist): allow resolved+forwarded, deny blocked at DNS layer, audit recorded, teardown clean")
 PY
 
 echo "microagent E2E egress passed"
