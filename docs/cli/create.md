@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-10_
+_Last updated: 2026-07-11_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
