@@ -48,6 +48,14 @@ func startUserNetworkProcess(ctx context.Context, opts Options, req vmkit.Reques
 		return failedResponse(req, err.Error()), err
 	}
 	defer vsockListeners.Close()
+	// Publish requested host ports for the foreground VM. In detached mode a
+	// resident forwarder process does this; a foreground run blocks here for the
+	// VM's whole life, so run the forwarder in-process instead. It bridges host
+	// TCP to the guest over the firecracker vsock UDS — reachable from the host
+	// regardless of pasta's network namespace — and is torn down when the VM
+	// exits. Without it, run's -p flag would bind nothing and silently no-op.
+	stopForwards := startForegroundPortForwards(opts, req.Config)
+	defer stopForwards()
 	if err := cmd.Run(); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
@@ -67,6 +75,45 @@ func startUserNetworkProcess(ctx context.Context, opts Options, req vmkit.Reques
 		return resp, fmt.Errorf("%s", resp.Error)
 	}
 	return resp, nil
+}
+
+// startForegroundPortForwards binds each requested host port and proxies it to
+// the guest over the firecracker vsock UDS, for a foreground (run) VM where no
+// detached forwarder companion exists. It mirrors RunPortForwarder's TCP→vsock
+// bridging but lives only for the duration of the foreground call. A host port
+// that fails to bind is logged and skipped rather than aborting the run. The
+// returned stop func closes every listener; the per-connection goroutines then
+// unwind on their own. Shell/exec forwards are intentionally excluded — those
+// are a persistent-workspace concern, not part of run's published -p ports.
+func startForegroundPortForwards(opts Options, config *vmkit.Config) func() {
+	if !hasPortForwards(config) {
+		return func() {}
+	}
+	udsPath := vsockSocketPath(opts)
+	listeners := make([]net.Listener, 0, len(config.Network.PortForwards))
+	for _, forward := range config.Network.PortForwards {
+		if forward.Protocol != "" && forward.Protocol != "tcp" {
+			continue
+		}
+		host := strings.TrimSpace(forward.Host)
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		addr := net.JoinHostPort(host, strconv.Itoa(int(forward.HostPort)))
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "publish tcp %s: %v\n", addr, err)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "forward tcp %s to guest vsock port %d\n", addr, forward.GuestPort)
+		listeners = append(listeners, listener)
+		go servePortForward(listener, udsPath, uint32(forward.GuestPort))
+	}
+	return func() {
+		for _, listener := range listeners {
+			_ = listener.Close()
+		}
+	}
 }
 
 func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
