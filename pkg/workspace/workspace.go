@@ -3,11 +3,13 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,7 +111,11 @@ type Options struct {
 	// listener that injects the workspace credential upstream so the guest only
 	// ever holds a reference. Defaults (vsock port, guest listen address) are
 	// filled by Request; see vmkit.BrokerConfig.
-	Broker         *vmkit.BrokerConfig
+	Broker *vmkit.BrokerConfig
+	// Brokers configures multiple egress broker endpoints; see
+	// vmkit.Config.Brokers. Not yet threaded through Request/lifecycle/manifest
+	// — that follows in a later change.
+	Brokers        []*vmkit.BrokerConfig
 	Health         Health
 	Timeout        time.Duration
 	LeaseSeconds   int
@@ -1154,6 +1160,106 @@ func normalizeBrokerConfig(cfg *vmkit.BrokerConfig) (*vmkit.BrokerConfig, error)
 		out.VsockPort = DefaultBrokerPort
 	}
 	return &out, nil
+}
+
+// normalizeBrokers validates a set of broker endpoints and fills each one's
+// transport defaults so they do not collide: any endpoint that left VsockPort
+// or GuestListen zero is assigned the next free slot (ports from
+// DefaultBrokerPort upward; guest-listen from DefaultBrokerGuestListen's port
+// upward). It returns nil for an empty/nil set (back-compat: no brokers). It
+// fails closed on: a duplicate explicit VsockPort or GuestListen, and more
+// than one endpoint with Proxy=true (there is a single HTTPS_PROXY slot).
+// Each endpoint is otherwise validated exactly as normalizeBrokerConfig does.
+func normalizeBrokers(brokers []*vmkit.BrokerConfig) ([]*vmkit.BrokerConfig, error) {
+	if len(brokers) == 0 {
+		return nil, nil
+	}
+
+	out := make([]*vmkit.BrokerConfig, len(brokers))
+	usedPorts := make(map[uint32]bool, len(brokers))
+	usedListens := make(map[string]bool, len(brokers))
+	proxyCount := 0
+
+	// First pass: run the shared per-endpoint validation and record the
+	// transport slots endpoints claimed explicitly, so auto-assignment below
+	// never picks an already-taken slot.
+	for i, cfg := range brokers {
+		norm, err := normalizeBrokerConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.VsockPort != 0 {
+			usedPorts[norm.VsockPort] = true
+		}
+		if strings.TrimSpace(cfg.GuestListen) != "" {
+			usedListens[norm.GuestListen] = true
+		}
+		if norm.Proxy {
+			proxyCount++
+		}
+		out[i] = norm
+	}
+	if proxyCount > 1 {
+		return nil, fmt.Errorf("broker: only one endpoint may set proxy=true (got %d)", proxyCount)
+	}
+
+	// Second pass: assign transport defaults to endpoints that left them zero,
+	// walking forward from the base port/listen and skipping slots already
+	// claimed (explicitly or by an earlier auto-assignment in this pass). The
+	// vsock-port and guest-listen sequences advance independently: a collision
+	// in one namespace must not push the other namespace's next candidate
+	// past an offset it could otherwise still use.
+	guestHost, guestBasePort, err := net.SplitHostPort(DefaultBrokerGuestListen)
+	if err != nil {
+		return nil, fmt.Errorf("broker: invalid DefaultBrokerGuestListen %q: %w", DefaultBrokerGuestListen, err)
+	}
+	basePort, err := strconv.Atoi(guestBasePort)
+	if err != nil {
+		return nil, fmt.Errorf("broker: invalid DefaultBrokerGuestListen port %q: %w", guestBasePort, err)
+	}
+	portOffset, listenOffset := 0, 0
+	for i, cfg := range brokers {
+		norm := out[i]
+		if cfg.VsockPort == 0 {
+			for {
+				candidate := DefaultBrokerPort + uint32(portOffset)
+				if !usedPorts[candidate] {
+					norm.VsockPort = candidate
+					usedPorts[candidate] = true
+					break
+				}
+				portOffset++
+			}
+		}
+		if strings.TrimSpace(cfg.GuestListen) == "" {
+			for {
+				candidate := net.JoinHostPort(guestHost, strconv.Itoa(basePort+listenOffset))
+				if !usedListens[candidate] {
+					norm.GuestListen = candidate
+					usedListens[candidate] = true
+					break
+				}
+				listenOffset++
+			}
+		}
+	}
+
+	// Final collision check: explicit values (already recorded above) plus
+	// assigned values must all be pairwise distinct.
+	seenPorts := make(map[uint32]int, len(out))
+	seenListens := make(map[string]int, len(out))
+	for i, norm := range out {
+		if prev, ok := seenPorts[norm.VsockPort]; ok {
+			return nil, fmt.Errorf("broker: endpoints %d and %d both use VsockPort %d", prev, i, norm.VsockPort)
+		}
+		seenPorts[norm.VsockPort] = i
+		if prev, ok := seenListens[norm.GuestListen]; ok {
+			return nil, fmt.Errorf("broker: endpoints %d and %d both use GuestListen %q", prev, i, norm.GuestListen)
+		}
+		seenListens[norm.GuestListen] = i
+	}
+
+	return out, nil
 }
 
 func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, error) {
