@@ -1287,6 +1287,7 @@ func normalizeBrokers(brokers []*vmkit.BrokerConfig) ([]*vmkit.BrokerConfig, err
 	// assigned values must all be pairwise distinct.
 	seenPorts := make(map[uint32]int, len(out))
 	seenListens := make(map[string]int, len(out))
+	seenBaseURLEnvKeys := make(map[string]int, len(out))
 	for i, norm := range out {
 		if prev, ok := seenPorts[norm.VsockPort]; ok {
 			return nil, fmt.Errorf("broker: endpoints %d and %d both use VsockPort %d", prev, i, norm.VsockPort)
@@ -1296,6 +1297,12 @@ func normalizeBrokers(brokers []*vmkit.BrokerConfig) ([]*vmkit.BrokerConfig, err
 			return nil, fmt.Errorf("broker: endpoints %d and %d both use GuestListen %q", prev, i, norm.GuestListen)
 		}
 		seenListens[norm.GuestListen] = i
+		for key := range norm.BaseURLEnv {
+			if prev, ok := seenBaseURLEnvKeys[key]; ok {
+				return nil, fmt.Errorf("broker: endpoints %d and %d both use BaseURLEnv key %q", prev, i, key)
+			}
+			seenBaseURLEnvKeys[key] = i
+		}
 	}
 
 	return out, nil

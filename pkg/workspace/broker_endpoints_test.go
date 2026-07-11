@@ -163,6 +163,30 @@ func TestNormalizeBrokersRejectsMultipleProxy(t *testing.T) {
 	}
 }
 
+// TestNormalizeBrokersRejectsDuplicateBaseURLEnvKey asserts fail-closed
+// behaviour when two endpoints both declare the same guest base-URL env key,
+// since the later endpoint's value would silently overwrite the earlier one's
+// in the merged guest env.
+func TestNormalizeBrokersRejectsDuplicateBaseURLEnvKey(t *testing.T) {
+	a := &vmkit.BrokerConfig{
+		Upstream:   "https://one.example.com",
+		Secret:     vmkit.SecretRef{Name: "one", Ref: "env:ONE_TOKEN"},
+		BaseURLEnv: map[string]string{"SHARED_URL": "http://127.0.0.1:18888"},
+	}
+	b := &vmkit.BrokerConfig{
+		Upstream:   "https://two.example.com",
+		Secret:     vmkit.SecretRef{Name: "two", Ref: "env:TWO_TOKEN"},
+		BaseURLEnv: map[string]string{"SHARED_URL": "http://127.0.0.1:18889"},
+	}
+	_, err := normalizeBrokers([]*vmkit.BrokerConfig{a, b})
+	if err == nil {
+		t.Fatalf("normalizeBrokers accepted two endpoints with duplicate BaseURLEnv key")
+	}
+	if !strings.Contains(err.Error(), "SHARED_URL") {
+		t.Fatalf("error = %q, want it to name the duplicated key SHARED_URL", err.Error())
+	}
+}
+
 // TestNormalizeBrokersSurfacesPerEndpointValidation asserts a per-endpoint
 // validation failure (here: a literal, non-reference secret) surfaces through
 // normalizeBrokers exactly as normalizeBrokerConfig rejects it today — proving
