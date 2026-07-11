@@ -192,7 +192,7 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 			return err
 		}
 		opts.Brokers = brokers
-	} else if agent.Broker != nil && opts.Broker == nil {
+	} else if agent.Broker != nil && opts.Broker == nil && len(opts.Brokers) == 0 {
 		broker, err := ParseBrokerConfig(agent.Broker.Upstream, agent.Broker.Secret, agent.Broker.Env, agent.Broker.Proxy, agent.Broker.Capture, agent.Broker.CA)
 		if err != nil {
 			return err

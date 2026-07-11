@@ -2272,6 +2272,11 @@ func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret
 		if err != nil {
 			return err
 		}
+		// A CLI --broker-endpoint declaration wins outright over anything an
+		// Agentfile already set (applied earlier, before flags): clear both
+		// fields so the two surfaces can never leave a split single/multi
+		// state for Request/normalizeEffectiveBrokers or WriteManifest to see.
+		opts.Broker = nil
 		opts.Brokers = brokers
 		return nil
 	}
@@ -2280,6 +2285,10 @@ func applyBrokerOptionFlags(opts *workspaceOptions, brokerUpstream, brokerSecret
 		return err
 	}
 	if broker != nil {
+		// A CLI --broker-upstream/--broker-secret declaration wins outright
+		// over any agent.brokers an Agentfile already set; clear it so at
+		// most one of Broker/Brokers is ever set after this function.
+		opts.Brokers = nil
 		opts.Broker = broker
 	}
 	return nil
