@@ -1175,16 +1175,16 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 // than producing a workspace whose egress silently bypasses the broker.
 func rootfsRequest(opts Options, rootfsPath string) (rootfs.BuildRequest, error) {
 	req := buildRootfsRequest(opts, rootfsPath)
-	brokerCfg, err := normalizeBrokerConfig(opts.Broker)
+	brokers, err := normalizeEffectiveBrokers(opts)
 	if err != nil {
 		return rootfs.BuildRequest{}, err
 	}
-	if brokerCfg != nil {
+	for _, bc := range brokers {
 		guest := broker.GuestConfig{
-			GuestListen: brokerCfg.GuestListen,
-			VsockPort:   brokerCfg.VsockPort,
-			Proxy:       brokerCfg.Proxy,
-			BaseURL:     brokerCfg.BaseURLEnv,
+			GuestListen: bc.GuestListen,
+			VsockPort:   bc.VsockPort,
+			Proxy:       bc.Proxy,
+			BaseURL:     bc.BaseURLEnv,
 		}
 		env, err := guest.MergeGuestEnvMap(req.Env)
 		if err != nil {

@@ -969,14 +969,14 @@ func TestRequestWiresBroker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if req.Config.Broker == nil {
-		t.Fatalf("Config.Broker not threaded")
+	if len(req.Config.Brokers) != 1 {
+		t.Fatalf("Config.Brokers not threaded: %+v", req.Config.Brokers)
 	}
-	if req.Config.Broker.VsockPort != DefaultBrokerPort {
-		t.Fatalf("Broker.VsockPort = %d, want default %d", req.Config.Broker.VsockPort, DefaultBrokerPort)
+	if req.Config.Brokers[0].VsockPort != DefaultBrokerPort {
+		t.Fatalf("Brokers[0].VsockPort = %d, want default %d", req.Config.Brokers[0].VsockPort, DefaultBrokerPort)
 	}
-	if req.Config.Broker.GuestListen != DefaultBrokerGuestListen {
-		t.Fatalf("Broker.GuestListen = %q, want default %q", req.Config.Broker.GuestListen, DefaultBrokerGuestListen)
+	if req.Config.Brokers[0].GuestListen != DefaultBrokerGuestListen {
+		t.Fatalf("Brokers[0].GuestListen = %q, want default %q", req.Config.Brokers[0].GuestListen, DefaultBrokerGuestListen)
 	}
 	found := false
 	for _, l := range req.Config.VsockListeners {
@@ -1071,8 +1071,8 @@ func TestRequestNoBroker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if req.Config.Broker != nil {
-		t.Fatalf("Config.Broker should be nil when unconfigured")
+	if req.Config.Brokers != nil {
+		t.Fatalf("Config.Brokers should be nil when unconfigured")
 	}
 	for _, l := range req.Config.VsockListeners {
 		if l.Target == "broker://serve" {

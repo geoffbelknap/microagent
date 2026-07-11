@@ -113,8 +113,9 @@ type Options struct {
 	// filled by Request; see vmkit.BrokerConfig.
 	Broker *vmkit.BrokerConfig
 	// Brokers configures multiple egress broker endpoints; see
-	// vmkit.Config.Brokers. Not yet threaded through Request/lifecycle/manifest
-	// — that follows in a later change.
+	// vmkit.Config.Brokers. Setting both Broker and Brokers is an operator
+	// error. Manifest persistence still carries only the single legacy
+	// Broker — that follows in a later change.
 	Brokers        []*vmkit.BrokerConfig
 	Health         Health
 	Timeout        time.Duration
@@ -1051,12 +1052,12 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if secretsPort != 0 {
 		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
 	}
-	brokerCfg, err := normalizeBrokerConfig(opts.Broker)
+	brokers, err := normalizeEffectiveBrokers(opts)
 	if err != nil {
 		return vmkit.Request{}, err
 	}
-	if brokerCfg != nil {
-		listeners = append(listeners, vmkit.VsockListener{Port: brokerCfg.VsockPort, Target: broker.ListenerTarget})
+	for _, bc := range brokers {
+		listeners = append(listeners, vmkit.VsockListener{Port: bc.VsockPort, Target: broker.ListenerTarget})
 	}
 	// CACertPort is allocated only when the negotiated capture provider actually
 	// mediates a protocol class AND the mode forges certificates (mitm)
@@ -1128,9 +1129,35 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			LeaseSeconds:             opts.LeaseSeconds,
 			ModelGuestPort:           modelGuestPort,
 			ModelVsockPort:           modelVsockPort,
-			Broker:                   brokerCfg,
+			Brokers:                  brokers,
 		},
 	}, nil
+}
+
+// effectiveBrokers returns the broker endpoints Options declares: the
+// explicit multi-endpoint set when present, else the single legacy Broker
+// folded into a one-element set, else nil. It only resolves precedence — the
+// "both set" operator error is normalizeEffectiveBrokers' job, so it exists in
+// exactly one place.
+func effectiveBrokers(opts Options) []*vmkit.BrokerConfig {
+	if len(opts.Brokers) > 0 {
+		return opts.Brokers
+	}
+	if opts.Broker != nil {
+		return []*vmkit.BrokerConfig{opts.Broker}
+	}
+	return nil
+}
+
+// normalizeEffectiveBrokers is the single chokepoint Request and rootfsRequest
+// both call to derive the broker endpoints to run: it rejects the operator
+// error of setting both Options.Broker and Options.Brokers, then normalizes
+// whichever one is set via normalizeBrokers.
+func normalizeEffectiveBrokers(opts Options) ([]*vmkit.BrokerConfig, error) {
+	if len(opts.Brokers) > 0 && opts.Broker != nil {
+		return nil, fmt.Errorf("broker: set either a single broker or a broker set, not both")
+	}
+	return normalizeBrokers(effectiveBrokers(opts))
 }
 
 // normalizeBrokerConfig validates the operator's broker config and fills
