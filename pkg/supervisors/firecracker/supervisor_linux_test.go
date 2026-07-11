@@ -231,6 +231,58 @@ func TestServePortForwardUsesRequestedVsockPort(t *testing.T) {
 	}
 }
 
+func TestStartForegroundPortForwardsBindsAndReleases(t *testing.T) {
+	// The -p publish path for a foreground `run`, which previously bound
+	// nothing. Grab a free port, hand it to the helper, prove it is bound, then
+	// prove the stop func releases it.
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostPort := uint16(probe.Addr().(*net.TCPAddr).Port)
+	_ = probe.Close()
+
+	opts := Options{StateDir: t.TempDir(), Name: "fg"}
+	config := &vmkit.Config{Network: &vmkit.NetworkConfig{
+		PortForwards: []vmkit.PortForward{{
+			Protocol:  "tcp",
+			Host:      "127.0.0.1",
+			HostPort:  hostPort,
+			GuestPort: 8080,
+		}},
+	}}
+
+	stop := startForegroundPortForwards(opts, config)
+
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(hostPort)))
+	if l, err := net.Listen("tcp", addr); err == nil {
+		_ = l.Close()
+		stop()
+		t.Fatalf("port %d was not bound by startForegroundPortForwards", hostPort)
+	}
+
+	stop()
+
+	// After stop the port is released; retry briefly to absorb close scheduling.
+	var relisten net.Listener
+	for i := 0; i < 50; i++ {
+		if relisten, err = net.Listen("tcp", addr); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("port %d not released after stop: %v", hostPort, err)
+	}
+	_ = relisten.Close()
+}
+
+func TestStartForegroundPortForwardsNoForwardsIsNoop(t *testing.T) {
+	// No forwards declared: the stop func must be safe to call with no listeners.
+	stop := startForegroundPortForwards(Options{StateDir: t.TempDir(), Name: "fg"}, &vmkit.Config{})
+	stop()
+}
+
 func TestStartVsockListenersWritesGuestResult(t *testing.T) {
 	dir := t.TempDir()
 	opts := Options{StateDir: dir, Name: "demo"}
