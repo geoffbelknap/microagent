@@ -12,6 +12,7 @@ package commit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/oci"
+	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -136,7 +138,9 @@ func Commit(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("open OCI layout: %w", err)
 	}
 	for _, blob := range []ociimage.Blob{img.Layer, img.Config, img.Manifest} {
-		if err := store.Push(ctx, blob.Descriptor, strings.NewReader(string(blob.Data))); err != nil {
+		// The OCI layout is content-addressed: a blob already present (e.g. when
+		// committing the same rootfs to a second tag) is a hit, not an error.
+		if err := store.Push(ctx, blob.Descriptor, strings.NewReader(string(blob.Data))); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
 			return Result{}, fmt.Errorf("write %s blob: %w", blob.Descriptor.MediaType, err)
 		}
 	}
