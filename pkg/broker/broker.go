@@ -201,7 +201,7 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	respBytes, _ := io.Copy(w, resp.Body)
+	respBytes, _ := streamCopy(w, resp.Body)
 	if t.OnDecision != nil {
 		t.OnDecision(DecisionRecord{
 			Event: EventRequestAllow, TS: time.Now(), Mode: "terminate",
@@ -210,6 +210,37 @@ func (t *Terminate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Status: resp.StatusCode, BytesOut: body.n, BytesIn: respBytes,
 			DurationMs: time.Since(start).Milliseconds(), SecretRefs: refs,
 		})
+	}
+}
+
+// streamCopy relays src to w, flushing after each chunk so a streaming
+// upstream response (e.g. text/event-stream) reaches the client promptly
+// instead of buffering. Falls back to a plain copy when w is not a Flusher.
+func streamCopy(w http.ResponseWriter, src io.Reader) (int64, error) {
+	flusher, _ := w.(http.Flusher)
+	buf := make([]byte, 32*1024)
+	var total int64
+	for {
+		n, rerr := src.Read(buf)
+		if n > 0 {
+			wn, werr := w.Write(buf[:n])
+			total += int64(wn)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			if werr != nil {
+				return total, werr
+			}
+			if wn != n {
+				return total, io.ErrShortWrite
+			}
+		}
+		if rerr == io.EOF {
+			return total, nil
+		}
+		if rerr != nil {
+			return total, rerr
+		}
 	}
 }
 
