@@ -5,6 +5,29 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Multiple egress broker endpoints per workspace
+
+A workspace can now declare more than one egress broker endpoint instead of
+just one: repeatable `--broker-endpoint "upstream=<url>;secret=NAME=<scheme>:
+<ref>;base-url-env=KEY;ca=<path>;proxy;capture"` (Agentfile: an `agent.brokers`
+list instead of the single `agent.broker` block; MCP: a `brokers` array of the
+same spec strings) declares each endpoint fully on its own. This is for a
+workload that reaches several credentialed upstreams from one workspace, each
+with its own injected credential — the guest holds only that endpoint's
+`@secret:NAME` reference, never the others'.
+
+Each endpoint gets its own guest-local listen address and host vsock port,
+assigned automatically so endpoints never collide, and its own optional
+upstream CA (`ca=<path>`, or the single-endpoint `--broker-ca`) for an
+upstream with a private certificate. All endpoints in a set share the one
+per-workspace `broker-access.jsonl` decision trail, distinguished by upstream
+host, and only one endpoint may claim the guest-wide `HTTPS_PROXY`/
+`HTTP_PROXY` slot — declaring `proxy` on more than one is rejected. A
+`--broker-endpoint` spec cannot be combined with the single-endpoint
+`--broker-upstream`/`--broker-secret`/`--broker-env`/`--broker-proxy`/
+`--broker-capture`/`--broker-ca` flags. The full set persists in the workspace
+manifest as `brokers`, so restart/wake re-arms every endpoint identically.
+
 ### Fixed: snapshot of a `broker`-mode workspace no longer demands an egress CA
 
 Snapshot manifest capture still required the persisted per-workspace egress CA

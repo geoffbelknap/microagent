@@ -4,7 +4,7 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-10_
+_Last updated: 2026-07-11_
 
 Egress mediation is microagent's transparent control point for workspace
 network traffic. When mediation is active, the host captures the guest's
@@ -314,6 +314,36 @@ A workspace with an [egress broker](/cli/create/) configured
 stream alongside the mediator's connection-level log: one record per brokered
 request, written by the host companion, never by the guest.
 [`microagent egress`](/cli/egress/) merges both into one time-ordered view.
+
+### Multiple broker endpoints
+
+A single workspace can declare more than one broker endpoint — for a workload
+that must reach several credentialed upstreams (say, two different
+first-party APIs) with each credential injected independently and never
+mixed. Repeat [`--broker-endpoint`](/cli/create/) instead of the single
+`--broker-upstream`/`--broker-secret` pair, once per endpoint:
+
+```bash
+microagent run --network isolated \
+  --broker-endpoint "upstream=https://a.example.com;secret=apiA=env:API_A_KEY;base-url-env=API_A_URL" \
+  --broker-endpoint "upstream=https://b.example.com;secret=apiB=env:API_B_KEY;base-url-env=API_B_URL" \
+  some-image  node agent.js
+```
+
+Each endpoint is fully self-contained: its own upstream, its own credential
+reference, its own guest base-URL env, and (optionally) its own `ca=<path>`
+upstream trust bundle. The transport details — the vsock port and the guest's
+local listen address — are assigned automatically so endpoints never collide;
+the guest only ever needs the base-URL env each endpoint pointed at it. A
+`--broker-endpoint` spec cannot be combined with the single-endpoint
+`--broker-upstream`/`--broker-secret`/`--broker-env`/`--broker-proxy`/
+`--broker-capture`/`--broker-ca` flags — declare each endpoint fully within
+its own spec. The equivalent Agentfile form is an `agent.brokers` list (instead
+of the single `agent.broker` block); the MCP `create`/`run` tools take the
+same specs in a `brokers` array. All endpoints in a set share the single
+`broker-access.jsonl` decision trail below, distinguished by upstream host,
+and only one endpoint in the set may claim the guest-wide `HTTPS_PROXY`/
+`HTTP_PROXY` slot (`proxy` on more than one endpoint is rejected).
 
 | Record | Meaning |
 |---|---|

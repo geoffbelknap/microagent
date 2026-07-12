@@ -25,13 +25,17 @@ func TestTerminateEmitsAllowDecision(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	var recs []DecisionRecord
+	// The relay now flushes the response to the client as it copies, so the
+	// client can finish reading the body before the server-side handler
+	// records its decision. Synchronize on the record itself rather than
+	// assuming it's ready the instant the client's read completes.
+	recs := make(chan DecisionRecord, 1)
 	term, err := NewTerminate(upstream.URL, resolver(map[string]string{"anthropic-key": liveSecret}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	term.Client = upstream.Client()
-	term.OnDecision = func(r DecisionRecord) { recs = append(recs, r) }
+	term.OnDecision = func(r DecisionRecord) { recs <- r }
 	broker := httptest.NewServer(term)
 	defer broker.Close()
 
@@ -44,10 +48,12 @@ func TestTerminateEmitsAllowDecision(t *testing.T) {
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
-	if len(recs) != 1 {
-		t.Fatalf("decision records = %d, want exactly 1", len(recs))
+	var rec DecisionRecord
+	select {
+	case rec = <-recs:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the decision record")
 	}
-	rec := recs[0]
 	if rec.Event != "broker_request_allow" || rec.Verdict != "allow" {
 		t.Fatalf("event/verdict = %q/%q, want broker_request_allow/allow", rec.Event, rec.Verdict)
 	}

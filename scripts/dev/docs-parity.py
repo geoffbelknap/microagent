@@ -187,6 +187,7 @@ DEFAULT_GO_SYMBOL_ALLOWLIST = {
         "CredSwapProvider",
         "ParseCredSwapProvider",
         "ParseBrokerConfig",
+        "ParseBrokerEndpoints",
         "DefaultBrokerPort",
         "DefaultHostname",
         "DefaultImage",
