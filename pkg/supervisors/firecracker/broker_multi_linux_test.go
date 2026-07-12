@@ -129,13 +129,13 @@ func TestStartVsockListenersServesTwoBrokerEndpoints(t *testing.T) {
 	trail := readFileWhenLines(t, brokerAccessLogPath(dir, "ws"), 3)
 	hostA := strings.TrimPrefix(upstreamA.URL, "http://")
 	hostB := strings.TrimPrefix(upstreamB.URL, "http://")
-	if !strings.Contains(string(trail), hostA) {
+	if !strings.Contains(trail, hostA) {
 		t.Fatalf("access log missing endpoint a's host %q: %s", hostA, trail)
 	}
-	if !strings.Contains(string(trail), hostB) {
+	if !strings.Contains(trail, hostB) {
 		t.Fatalf("access log missing endpoint b's host %q: %s", hostB, trail)
 	}
-	lines := strings.Split(strings.TrimRight(string(trail), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(trail, "\n"), "\n")
 	if len(lines) < 3 {
 		t.Fatalf("expected at least 3 decision records (2 allow + 1 deny), got %d: %s", len(lines), trail)
 	}
