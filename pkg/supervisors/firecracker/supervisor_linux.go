@@ -2583,13 +2583,31 @@ func portForwardDialTarget(forward vmkit.PortForward) string {
 	return net.JoinHostPort(host, strconv.Itoa(int(forward.HostPort)))
 }
 
+func vsockListenerLogPath(opts Options) string {
+	return filepath.Join(opts.StateDir, opts.Name, "vsock-listener.log")
+}
+
+// vsockListenerReadyPath is the marker the detached vsock-listener process
+// writes once its listeners are up. Its presence is how the launching parent
+// distinguishes "listeners serving" from "process died during startup" — the
+// listeners themselves live in a detached process the parent cannot observe
+// directly.
+func vsockListenerReadyPath(opts Options) string {
+	return filepath.Join(opts.StateDir, opts.Name, "vsock-listener.ready")
+}
+
 func startVsockListenerProcess(opts Options) (int, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return 0, err
 	}
-	logPath := filepath.Join(opts.StateDir, opts.Name, "vsock-listener.log")
+	logPath := vsockListenerLogPath(opts)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
+		return 0, err
+	}
+	// Clear a prior run's readiness marker so waitForVsockListenersReady cannot
+	// mistake a stale marker for this launch having come up.
+	if err := os.Remove(vsockListenerReadyPath(opts)); err != nil && !os.IsNotExist(err) {
 		return 0, err
 	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -2610,6 +2628,47 @@ func startVsockListenerProcess(opts Options) (int, error) {
 	return pid, nil
 }
 
+// vsockListenerReadyTimeout bounds how long a launch waits for the detached
+// vsock-listener process to bind its listeners. It is generous because
+// listener startup may resolve broker/secret credentials through an external
+// helper (a cloud secret manager); a genuine startup failure is caught the
+// instant the process exits, so this only backstops a process that hangs
+// without ever failing or succeeding.
+const vsockListenerReadyTimeout = 60 * time.Second
+
+// waitForVsockListenersReady blocks until the detached vsock-listener process
+// signals its listeners are up (the readiness marker appears), or fails. A
+// process that exits before signalling has failed to start its listener set —
+// e.g. an unresolvable broker secret, an unreadable upstream CA, or a socket it
+// could not bind — and that failure is returned with the process's own log so
+// the caller can fail the workspace loudly. Without this the failure was
+// silent: the process died, the workspace still reported running, and every
+// broker/secret vsock service the guest reached simply reset the connection
+// with no operator-visible cause.
+func waitForVsockListenersReady(opts Options, pid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(vsockListenerReadyPath(opts)); err == nil {
+			return nil
+		}
+		active, err := processActive(pid)
+		if err != nil {
+			return fmt.Errorf("inspect vsock listener process %d: %w", pid, err)
+		}
+		if !active {
+			detail := strings.TrimSpace(readTextFile(vsockListenerLogPath(opts)))
+			if detail == "" {
+				detail = "vsock listener process exited before its listeners were ready"
+			}
+			return fmt.Errorf("vsock listeners failed to start: %s", detail)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("vsock listeners not ready after %s", timeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func RunVsockListener(ctx context.Context, opts Options) error {
 	state, err := readRuntimeState(opts)
 	if err != nil {
@@ -2620,6 +2679,12 @@ func RunVsockListener(ctx context.Context, opts Options) error {
 		return err
 	}
 	defer set.Close()
+	// Signal readiness only after the whole listener set is bound: the launching
+	// parent waits on this to tell a serving workspace from one whose listeners
+	// died on startup.
+	if err := os.WriteFile(vsockListenerReadyPath(opts), []byte("ready\n"), 0o600); err != nil {
+		return fmt.Errorf("signal vsock listeners ready: %w", err)
+	}
 	watchWorkspaceRuntime(ctx, opts)
 	return ctx.Err()
 }

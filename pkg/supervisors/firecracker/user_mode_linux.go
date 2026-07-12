@@ -193,6 +193,19 @@ func startDetachedUserNetworkProcess(ctx context.Context, opts Options, req vmki
 						_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
 						return failedResponse(req, err.Error()), err
 					}
+					// The listener process is detached and long-lived, so a
+					// startup failure (bad broker secret, unreadable CA, unbound
+					// socket) cannot surface as its exit code — wait for it to
+					// signal ready, and fail the workspace loudly if it dies
+					// first instead of leaving it "running" with dead egress.
+					if err := waitForVsockListenersReady(opts, pid, vsockListenerReadyTimeout); err != nil {
+						_ = signalProcessGroup(pid, syscall.SIGTERM)
+						_ = cmd.Process.Kill()
+						_ = cmd.Process.Release()
+						cleanupUserNetworkProcess(opts)
+						_ = writeProcessState(opts, req, vmkit.StateFailed, 0, err.Error())
+						return failedResponse(req, err.Error()), err
+					}
 					vsockListenerPID = pid
 					runtimeReq := runtimeStateRequest(req, state)
 					if err := writeProcessStateWithProcessesAndNetwork(opts, runtimeReq, vmkit.StateRunning, runtimePID, state.PortForwardPID, vsockListenerPID, state.EgressMediatorPID, state.NetworkDevices, state.FirewallRules, ""); err != nil {
