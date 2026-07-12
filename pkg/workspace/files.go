@@ -52,6 +52,45 @@ func ReadLogs(stateDir, name string) ([]byte, error) {
 	return os.ReadFile(SerialLogPath(stateDir, name))
 }
 
+// supervisorLogFiles are the host-side supervisor companion logs a workspace
+// writes alongside its serial log: the traces of host-side plumbing (vsock
+// listeners, user networking, egress mediation, port forwarding, the reaper)
+// that never reach the guest serial console. When one of these fails, the
+// guest can still boot and report running while its host-side egress or
+// vsock services are silently dead, so operators need to read them directly.
+var supervisorLogFiles = []string{
+	"vsock-listener.log",
+	"user-network.stderr.log",
+	"user-network.stdout.log",
+	"egress-mediator.log",
+	"port-forward.log",
+	"deadman.log",
+}
+
+// ReadSupervisorLogs returns the host-side supervisor companion logs for a
+// workspace, keyed by file base name. Files that do not exist are skipped
+// (not an error): a workspace only writes the companion logs its runtime path
+// actually used. It complements ReadLogs (the guest serial log) by exposing
+// the host-side setup traces that the serial log never carries.
+func ReadSupervisorLogs(stateDir, name string) (map[string]string, error) {
+	if err := ValidateName(name); err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(stateDir, name)
+	logs := map[string]string{}
+	for _, file := range supervisorLogFiles {
+		data, err := os.ReadFile(filepath.Join(dir, file))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		logs[file] = string(data)
+	}
+	return logs, nil
+}
+
 // EventsPath is the per-workspace lifecycle event history file (a JSON array of
 // EventFile, rewritten atomically on each state change).
 func EventsPath(stateDir, name string) string {
