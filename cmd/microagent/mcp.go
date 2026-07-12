@@ -320,6 +320,8 @@ func mcpTools() []map[string]any {
 			"broker_env":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Guest env vars pointed at the broker, each KEY[=VALUE] (empty VALUE = broker URL)"},
 			"broker_proxy":              map[string]any{"type": "boolean", "description": "Also set HTTPS_PROXY/HTTP_PROXY in the guest to the broker (CONNECT tunneling)"},
 			"broker_capture":            map[string]any{"type": "boolean", "description": "Opt in to raw capture of pre-swap broker requests to an owner-only file; default is the minimized decision stream"},
+			"broker_ca":                 map[string]any{"type": "string", "description": "PEM bundle path the broker upstream TLS client trusts; empty = system roots"},
+			"brokers":                   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Declare multiple broker endpoints instead of a single broker_*; each item is ;-separated key=value pairs: upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture. Cannot combine with broker_upstream/broker_secret/etc"},
 			"secret":                    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Secrets delivered to tmpfs /run/secrets, each NAME=scheme:ref"},
 			"secret_on_demand":          map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; fetched at runtime, never written to tmpfs"},
 			"secrets_env_file":          map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
@@ -360,6 +362,8 @@ func mcpTools() []map[string]any {
 			"broker_env":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Guest env vars pointed at the broker, each KEY[=VALUE] (empty VALUE = broker URL)"},
 			"broker_proxy":       map[string]any{"type": "boolean", "description": "Also set HTTPS_PROXY/HTTP_PROXY in the guest to the broker (CONNECT tunneling)"},
 			"broker_capture":     map[string]any{"type": "boolean", "description": "Opt in to raw capture of pre-swap broker requests to an owner-only file; default is the minimized decision stream"},
+			"broker_ca":          map[string]any{"type": "string", "description": "PEM bundle path the broker upstream TLS client trusts; empty = system roots"},
+			"brokers":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Declare multiple broker endpoints instead of a single broker_*; each item is ;-separated key=value pairs: upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture. Cannot combine with broker_upstream/broker_secret/etc"},
 			"secret":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Secrets delivered to tmpfs /run/secrets, each NAME=scheme:ref"},
 			"secret_on_demand":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "On-demand secrets NAME=scheme:ref; never written to tmpfs"},
 			"secrets_env_file":   map[string]any{"type": "string", "description": "Dotenv file whose keys are delivered as secrets"},
@@ -1880,6 +1884,7 @@ func appendMCPWorkspaceEgressSecretFlags(cli []string, args map[string]any) ([]s
 	cli = appendOptionalFlag(cli, "-egress-swap-config", stringArg(args, "egress_swap_config"))
 	cli = appendOptionalFlag(cli, "-broker-upstream", stringArg(args, "broker_upstream"))
 	cli = appendOptionalFlag(cli, "-broker-secret", stringArg(args, "broker_secret"))
+	cli = appendOptionalFlag(cli, "-broker-ca", stringArg(args, "broker_ca"))
 	cli = appendOptionalFlag(cli, "-secrets-env-file", stringArg(args, "secrets_env_file"))
 	if boolArg(args, "broker_proxy") {
 		cli = append(cli, "-broker-proxy")
@@ -1898,6 +1903,7 @@ func appendMCPWorkspaceEgressSecretFlags(cli []string, args map[string]any) ([]s
 		{"egress_passthrough", "-egress-passthrough"},
 		{"cred_swap", "-cred-swap"},
 		{"broker_env", "-broker-env"},
+		{"brokers", "-broker-endpoint"},
 		{"secret", "-secret"},
 		{"secret_on_demand", "-secret-on-demand"},
 	} {

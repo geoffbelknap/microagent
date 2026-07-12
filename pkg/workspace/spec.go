@@ -171,10 +171,29 @@ func applyAgentSpec(opts *Options, agent AgentSpec) error {
 			opts.CredSwapProviders = append(opts.CredSwapProviders, provider)
 		}
 	}
+	if agent.Broker != nil && len(agent.Brokers) > 0 {
+		return fmt.Errorf("agent: set either broker or brokers, not both")
+	}
 	// A broker supplied earlier (e.g. a --broker-* CLI flag) wins; the agent
 	// block only fills an unset one, consistent with the rest of ApplySpec.
-	if agent.Broker != nil && opts.Broker == nil {
-		broker, err := ParseBrokerConfig(agent.Broker.Upstream, agent.Broker.Secret, agent.Broker.Env, agent.Broker.Proxy, agent.Broker.Capture)
+	if len(agent.Brokers) > 0 && len(opts.Brokers) == 0 && opts.Broker == nil {
+		brokers := make([]*vmkit.BrokerConfig, 0, len(agent.Brokers))
+		for i, b := range agent.Brokers {
+			cfg, err := ParseBrokerConfig(b.Upstream, b.Secret, b.Env, b.Proxy, b.Capture, b.CA)
+			if err != nil {
+				return fmt.Errorf("agent.brokers[%d]: %w", i, err)
+			}
+			if cfg == nil {
+				return fmt.Errorf("agent.brokers[%d]: declares nothing (upstream and secret are required)", i)
+			}
+			brokers = append(brokers, cfg)
+		}
+		if err := validateBrokerEndpointSet(brokers); err != nil {
+			return err
+		}
+		opts.Brokers = brokers
+	} else if agent.Broker != nil && opts.Broker == nil && len(opts.Brokers) == 0 {
+		broker, err := ParseBrokerConfig(agent.Broker.Upstream, agent.Broker.Secret, agent.Broker.Env, agent.Broker.Proxy, agent.Broker.Capture, agent.Broker.CA)
 		if err != nil {
 			return err
 		}
