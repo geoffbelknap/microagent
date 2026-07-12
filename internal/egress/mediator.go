@@ -353,6 +353,13 @@ func (h *Handler) shouldMITM(isTLS, allowed, passthrough, isPeer bool) bool {
 
 var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
+// IsInside is the exported view of isInsideAddr — the same inside/infrastructure
+// destination classifier the NIC datapath denies under guarded mode. It is the
+// reuse seam for the broker's CONNECT guard, so a brokered tunnel and a captured
+// connection deny an identical address space (a guest cannot reach metadata,
+// loopback, or a private host through either path).
+func IsInside(a netip.Addr) bool { return isInsideAddr(a) }
+
 // isInsideAddr reports whether a is "the inside" — infrastructure the guest
 // must not reach under guarded mode. Matched on the resolved IP after Unmap so
 // IPv4-mapped IPv6 (e.g. ::ffff:169.254.169.254) cannot bypass it.

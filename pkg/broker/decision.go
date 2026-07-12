@@ -13,6 +13,14 @@ const (
 	EventRequestDeny  = "broker_request_deny"
 )
 
+// SignalDenied rides the DecisionRecord.Signals field on any fail-closed CONNECT
+// refusal — a destination the guarded dialer classified inside, or an
+// off-allowlist host under a locked allowlist. It mirrors the egress mediator's
+// "denied" signal vocabulary (kept in sync deliberately, without a package
+// dependency) so a downstream consumer maps a brokered denial and a NIC-path
+// denial the same way.
+const SignalDenied = "denied"
+
 // DecisionRecord is the broker's default emission: one record per brokered
 // request, verdict plus minimized metadata. It deliberately has no field for
 // path, headers, or bodies — the default stream is safe to tee, persist, and
