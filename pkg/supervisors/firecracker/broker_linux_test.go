@@ -37,6 +37,28 @@ func readFileWhenContains(t *testing.T, path, want string) string {
 	}
 }
 
+// readFileWhenLines polls path until it holds at least n non-empty lines, then
+// returns its contents. Like readFileWhenContains, it absorbs the small window
+// between a client's request returning and the broker writing its decision
+// record after finishing the response relay.
+func readFileWhenLines(t *testing.T, path string, n int) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		b, err := os.ReadFile(path)
+		if err == nil {
+			lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+			if len(lines) >= n && lines[0] != "" {
+				return string(b)
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d lines in %s: %s", n, path, b)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // brokerTestClient returns an HTTP client whose every connection dials the
 // workspace's broker vsock UDS — the host-side stand-in for the guest bridge.
 func brokerTestClient(opts Options, port uint32) *http.Client {

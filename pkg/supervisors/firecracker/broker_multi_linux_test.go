@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -127,10 +126,7 @@ func TestStartVsockListenersServesTwoBrokerEndpoints(t *testing.T) {
 
 	// Both endpoints' decisions land in the ONE shared access log, one JSON
 	// record per line, distinguished by Host.
-	trail, err := os.ReadFile(brokerAccessLogPath(dir, "ws"))
-	if err != nil {
-		t.Fatalf("broker access log: %v", err)
-	}
+	trail := readFileWhenLines(t, brokerAccessLogPath(dir, "ws"), 3)
 	hostA := strings.TrimPrefix(upstreamA.URL, "http://")
 	hostB := strings.TrimPrefix(upstreamB.URL, "http://")
 	if !strings.Contains(string(trail), hostA) {
