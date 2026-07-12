@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -70,18 +69,21 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		opts.GuestInitPath = workspace.GuestInitPath(opts.Architecture)
 	}
 	outputPath := RootfsPath(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
+	// `image pull` always fetches from the registry: it must never resolve
+	// ImageRef from the local committed-OCI layout (LocalImageLayout left
+	// unset), or a locally committed image could silently shadow an explicit
+	// registry pull.
 	provenance, err := rootfs.NewBuilder().Build(ctx, rootfs.BuildRequest{
-		ImageRef:         opts.ImageRef,
-		Platform:         rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
-		OutputPath:       outputPath,
-		InitPath:         rootfs.DefaultInitPath,
-		InitBinaryPath:   opts.GuestInitPath,
-		NoImageCommand:   true,
-		StateDir:         filepath.Join(opts.StateDir, "images", "build"),
-		Mke2fsPath:       opts.Mke2fsPath,
-		SizeMiB:          opts.SizeMiB,
-		AllowMutable:     true,
-		LocalImageLayout: commit.LayoutPath(opts.StateDir),
+		ImageRef:       opts.ImageRef,
+		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
+		OutputPath:     outputPath,
+		InitPath:       rootfs.DefaultInitPath,
+		InitBinaryPath: opts.GuestInitPath,
+		NoImageCommand: true,
+		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
+		Mke2fsPath:     opts.Mke2fsPath,
+		SizeMiB:        opts.SizeMiB,
+		AllowMutable:   true,
 	})
 	if err != nil {
 		return Record{}, err

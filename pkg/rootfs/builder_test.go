@@ -802,6 +802,73 @@ func TestBuilderEmptyLocalImageLayoutIsRemoteOnly(t *testing.T) {
 	}
 }
 
+// TestBuilderDoesNotCreateLayoutScaffoldWhenLocalImageLayoutMissing verifies
+// that a remote-only build -- LocalImageLayout points at a path that has
+// never had a local image committed to it -- does not create the OCI layout
+// scaffold (blobs/, index.json, oci-layout) as a side effect. oci.New
+// unconditionally creates that scaffold for any path without one, so the
+// builder must only call it once it has confirmed the layout already exists.
+func TestBuilderDoesNotCreateLayoutScaffoldWhenLocalImageLayoutMissing(t *testing.T) {
+	dir := t.TempDir()
+	layoutDir := filepath.Join(dir, "images", "oci") // never created or committed to
+
+	_, err := NewBuilder().Build(context.Background(), BuildRequest{
+		ImageRef:         "microagent-local-image-test.invalid/demo:v1",
+		Platform:         Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath:       filepath.Join(dir, "rootfs.ext4"),
+		StateDir:         filepath.Join(dir, "state"),
+		SizeMiB:          64,
+		AllowMutable:     true,
+		LocalImageLayout: layoutDir,
+	})
+	if err == nil {
+		t.Fatal("Build succeeded, want remote-fetch failure for an unreachable registry ref")
+	}
+	if !strings.Contains(err.Error(), "fetch OCI image") {
+		t.Fatalf("Build error = %v, want an OCI fetch failure (proof it took the remote path)", err)
+	}
+	if _, statErr := os.Stat(layoutDir); !os.IsNotExist(statErr) {
+		t.Fatalf("Build created an OCI layout scaffold at %s for a remote-only build (stat err = %v)", layoutDir, statErr)
+	}
+}
+
+// TestBuilderFallsBackToRemoteWhenLocalLayoutOpenFails verifies the fail-safe
+// for the other local-resolution error mode: oci.New itself failing (as
+// opposed to a Resolve() miss, covered by
+// TestBuilderFallsBackToRemoteOnLocalLayoutMiss). The layout directory has
+// the oci-layout marker file (so localImageLayoutExists treats it as
+// initialized and the builder proceeds to call oci.New), but index.json is a
+// directory rather than a file, so oci.New fails to load it.
+func TestBuilderFallsBackToRemoteWhenLocalLayoutOpenFails(t *testing.T) {
+	dir := t.TempDir()
+	layoutDir := filepath.Join(dir, "images", "oci")
+	if err := os.MkdirAll(layoutDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(layoutDir, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(layoutDir, "index.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewBuilder().Build(context.Background(), BuildRequest{
+		ImageRef:         "microagent-local-image-test.invalid/demo:v1",
+		Platform:         Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath:       filepath.Join(dir, "rootfs.ext4"),
+		StateDir:         filepath.Join(dir, "state"),
+		SizeMiB:          64,
+		AllowMutable:     true,
+		LocalImageLayout: layoutDir,
+	})
+	if err == nil {
+		t.Fatal("Build succeeded, want remote-fetch failure")
+	}
+	if !strings.Contains(err.Error(), "fetch OCI image") {
+		t.Fatalf("Build error = %v, want an OCI fetch failure (proof it fell back to remote when oci.New itself failed)", err)
+	}
+}
+
 func TestWriteDeclaredFilesCopiesSourceIntoStage(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "source.sh")

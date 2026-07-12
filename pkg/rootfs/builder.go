@@ -120,10 +120,16 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		// resolution — see BuildRequest.LocalImageLayout). Any local miss or
 		// error (no layout, ref not committed there, corrupt layout, ...) is
 		// not fatal: it just means this ref falls back to the remote path,
-		// so a legitimately remote-only ref still works.
+		// so a legitimately remote-only ref still works. The
+		// localImageLayoutExists check below guards oci.New, which
+		// unconditionally creates the OCI layout scaffold (blobs/,
+		// index.json, oci-layout) for a path that doesn't have one yet --
+		// without it, every remote-only build would create that scaffold
+		// under LocalImageLayout even though no image was ever committed
+		// there.
 		var src oras.ReadOnlyTarget
 		var localResolvedRef string
-		if req.LocalImageLayout != "" {
+		if req.LocalImageLayout != "" && localImageLayoutExists(req.LocalImageLayout) {
 			if localStore, err := oci.New(req.LocalImageLayout); err == nil {
 				if desc, err := localStore.Resolve(ctx, req.ImageRef); err == nil {
 					src = localStore
@@ -667,6 +673,18 @@ func newRepository(repoRef string) (*remote.Repository, error) {
 		Credential: registryauth.Credential(host),
 	}
 	return repo, nil
+}
+
+// localImageLayoutExists reports whether an OCI image layout has already
+// been initialized at path, by checking for its oci-layout marker file.
+// oci.New unconditionally creates the {blobs,index.json,oci-layout} scaffold
+// for any path that doesn't already have one, so callers must confirm the
+// layout already exists before calling it -- otherwise a build that never
+// consults a local image (a remote-only create or pull) would still leave
+// that scaffold behind under LocalImageLayout as a side effect.
+func localImageLayoutExists(path string) bool {
+	_, err := os.Stat(filepath.Join(path, ocispec.ImageLayoutFile))
+	return err == nil
 }
 
 func isLoopbackRegistry(host string) bool {
