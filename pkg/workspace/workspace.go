@@ -3,11 +3,13 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,7 +111,12 @@ type Options struct {
 	// listener that injects the workspace credential upstream so the guest only
 	// ever holds a reference. Defaults (vsock port, guest listen address) are
 	// filled by Request; see vmkit.BrokerConfig.
-	Broker         *vmkit.BrokerConfig
+	Broker *vmkit.BrokerConfig
+	// Brokers configures multiple egress broker endpoints; see
+	// vmkit.Config.Brokers. Setting both Broker and Brokers is an operator
+	// error, rejected both at the declaring surface (CLI/Agentfile/MCP) and by
+	// normalizeEffectiveBrokers. Persisted in Manifest.Brokers.
+	Brokers        []*vmkit.BrokerConfig
 	Health         Health
 	Timeout        time.Duration
 	LeaseSeconds   int
@@ -231,11 +238,15 @@ type AgentSpec struct {
 	// through a host-side proxy that injects the credential, so the guest only
 	// ever holds a reference. See Options.Broker and AgentBrokerSpec.
 	Broker *AgentBrokerSpec `yaml:"broker"`
+	// Brokers configures multiple egress broker endpoints; see Options.Brokers.
+	// Setting both Broker and Brokers is rejected at spec-apply time.
+	Brokers []AgentBrokerSpec `yaml:"brokers"`
 }
 
-// AgentBrokerSpec is the Agentfile `agent.broker` block. Its fields mirror the
-// --broker-* CLI flags and route through the same ParseBrokerConfig, so the two
-// surfaces build an identical broker.
+// AgentBrokerSpec is the Agentfile `agent.broker` block (and each element of
+// `agent.brokers`). Its fields mirror the --broker-* CLI flags and route
+// through the same ParseBrokerConfig, so every surface builds an identical
+// broker.
 type AgentBrokerSpec struct {
 	// Upstream is the terminate-mode upstream base URL.
 	Upstream string `yaml:"upstream"`
@@ -248,6 +259,10 @@ type AgentBrokerSpec struct {
 	// Capture opts in to governed raw capture of pre-swap requests. Off by
 	// default; the default emission is the minimized decision stream.
 	Capture bool `yaml:"capture"`
+	// CA is an optional PEM bundle path this endpoint's upstream TLS client
+	// trusts (maps to vmkit.BrokerConfig.UpstreamCAFile); empty means system
+	// roots.
+	CA string `yaml:"ca"`
 }
 
 // Declared reports whether the agent block carries any field, so an empty block
@@ -257,7 +272,8 @@ func (a AgentSpec) Declared() bool {
 		strings.TrimSpace(a.Egress) != "" ||
 		len(a.Allow) != 0 ||
 		len(a.CredSwap) != 0 ||
-		a.Broker != nil
+		a.Broker != nil ||
+		len(a.Brokers) != 0
 }
 
 type NetworkSpec struct {
@@ -379,6 +395,9 @@ type Manifest struct {
 	EgressAllowlistLocked bool                       `json:"egress_allowlist_locked,omitempty"`
 	EgressSwapConfigPath  string                     `json:"egress_swap_config_path,omitempty"`
 	Broker                *vmkit.BrokerConfig        `json:"broker,omitempty"`
+	// Brokers persists the multi-endpoint broker set (see Options.Brokers), so
+	// restart/wake preserves every endpoint, not just a single legacy Broker.
+	Brokers []*vmkit.BrokerConfig `json:"brokers,omitempty"`
 }
 
 type ModelRunnerSpec struct {
@@ -1045,12 +1064,12 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 	if secretsPort != 0 {
 		listeners = append(listeners, vmkit.VsockListener{Port: secretsPort, Target: secretsListenerTarget})
 	}
-	brokerCfg, err := normalizeBrokerConfig(opts.Broker)
+	brokers, err := normalizeEffectiveBrokers(opts)
 	if err != nil {
 		return vmkit.Request{}, err
 	}
-	if brokerCfg != nil {
-		listeners = append(listeners, vmkit.VsockListener{Port: brokerCfg.VsockPort, Target: broker.ListenerTarget})
+	for _, bc := range brokers {
+		listeners = append(listeners, vmkit.VsockListener{Port: bc.VsockPort, Target: broker.ListenerTarget})
 	}
 	// CACertPort is allocated only when the negotiated capture provider actually
 	// mediates a protocol class AND the mode forges certificates (mitm)
@@ -1122,9 +1141,35 @@ func Request(opts Options, command, rootfsPath string, requestID string) (vmkit.
 			LeaseSeconds:             opts.LeaseSeconds,
 			ModelGuestPort:           modelGuestPort,
 			ModelVsockPort:           modelVsockPort,
-			Broker:                   brokerCfg,
+			Brokers:                  brokers,
 		},
 	}, nil
+}
+
+// effectiveBrokers returns the broker endpoints Options declares: the
+// explicit multi-endpoint set when present, else the single legacy Broker
+// folded into a one-element set, else nil. It only resolves precedence — the
+// "both set" operator error is normalizeEffectiveBrokers' job, so it exists in
+// exactly one place.
+func effectiveBrokers(opts Options) []*vmkit.BrokerConfig {
+	if len(opts.Brokers) > 0 {
+		return opts.Brokers
+	}
+	if opts.Broker != nil {
+		return []*vmkit.BrokerConfig{opts.Broker}
+	}
+	return nil
+}
+
+// normalizeEffectiveBrokers is the single chokepoint Request and rootfsRequest
+// both call to derive the broker endpoints to run: it rejects the operator
+// error of setting both Options.Broker and Options.Brokers, then normalizes
+// whichever one is set via normalizeBrokers.
+func normalizeEffectiveBrokers(opts Options) ([]*vmkit.BrokerConfig, error) {
+	if len(opts.Brokers) > 0 && opts.Broker != nil {
+		return nil, fmt.Errorf("broker: set either a single broker or a broker set, not both")
+	}
+	return normalizeBrokers(effectiveBrokers(opts))
 }
 
 // normalizeBrokerConfig validates the operator's broker config and fills
@@ -1154,6 +1199,113 @@ func normalizeBrokerConfig(cfg *vmkit.BrokerConfig) (*vmkit.BrokerConfig, error)
 		out.VsockPort = DefaultBrokerPort
 	}
 	return &out, nil
+}
+
+// normalizeBrokers validates a set of broker endpoints and fills each one's
+// transport defaults so they do not collide: any endpoint that left VsockPort
+// or GuestListen zero is assigned the next free slot (ports from
+// DefaultBrokerPort upward; guest-listen from DefaultBrokerGuestListen's port
+// upward). It returns nil for an empty/nil set (back-compat: no brokers). It
+// fails closed on: a duplicate explicit VsockPort or GuestListen, and more
+// than one endpoint with Proxy=true (there is a single HTTPS_PROXY slot).
+// Each endpoint is otherwise validated exactly as normalizeBrokerConfig does.
+func normalizeBrokers(brokers []*vmkit.BrokerConfig) ([]*vmkit.BrokerConfig, error) {
+	if len(brokers) == 0 {
+		return nil, nil
+	}
+
+	out := make([]*vmkit.BrokerConfig, len(brokers))
+	usedPorts := make(map[uint32]bool, len(brokers))
+	usedListens := make(map[string]bool, len(brokers))
+	proxyCount := 0
+
+	// First pass: run the shared per-endpoint validation and record the
+	// transport slots endpoints claimed explicitly, so auto-assignment below
+	// never picks an already-taken slot.
+	for i, cfg := range brokers {
+		norm, err := normalizeBrokerConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.VsockPort != 0 {
+			usedPorts[norm.VsockPort] = true
+		}
+		if strings.TrimSpace(cfg.GuestListen) != "" {
+			usedListens[norm.GuestListen] = true
+		}
+		if norm.Proxy {
+			proxyCount++
+		}
+		out[i] = norm
+	}
+	if proxyCount > 1 {
+		return nil, fmt.Errorf("broker: only one endpoint may set proxy=true (got %d)", proxyCount)
+	}
+
+	// Second pass: assign transport defaults to endpoints that left them zero,
+	// walking forward from the base port/listen and skipping slots already
+	// claimed (explicitly or by an earlier auto-assignment in this pass). The
+	// vsock-port and guest-listen sequences advance independently: a collision
+	// in one namespace must not push the other namespace's next candidate
+	// past an offset it could otherwise still use.
+	guestHost, guestBasePort, err := net.SplitHostPort(DefaultBrokerGuestListen)
+	if err != nil {
+		return nil, fmt.Errorf("broker: invalid DefaultBrokerGuestListen %q: %w", DefaultBrokerGuestListen, err)
+	}
+	basePort, err := strconv.Atoi(guestBasePort)
+	if err != nil {
+		return nil, fmt.Errorf("broker: invalid DefaultBrokerGuestListen port %q: %w", guestBasePort, err)
+	}
+	portOffset, listenOffset := 0, 0
+	for i, cfg := range brokers {
+		norm := out[i]
+		if cfg.VsockPort == 0 {
+			for {
+				candidate := DefaultBrokerPort + uint32(portOffset)
+				if !usedPorts[candidate] {
+					norm.VsockPort = candidate
+					usedPorts[candidate] = true
+					break
+				}
+				portOffset++
+			}
+		}
+		if strings.TrimSpace(cfg.GuestListen) == "" {
+			for {
+				candidate := net.JoinHostPort(guestHost, strconv.Itoa(basePort+listenOffset))
+				if !usedListens[candidate] {
+					norm.GuestListen = candidate
+					usedListens[candidate] = true
+					break
+				}
+				listenOffset++
+			}
+		}
+	}
+
+	// Final collision check: explicit values (already recorded above) plus
+	// assigned values must all be pairwise distinct.
+	seenPorts := make(map[uint32]int, len(out))
+	seenListens := make(map[string]int, len(out))
+	seenBaseURLEnvKeys := make(map[string]int, len(out))
+	for i, norm := range out {
+		if prev, ok := seenPorts[norm.VsockPort]; ok {
+			return nil, fmt.Errorf("broker: endpoints %d and %d both use VsockPort %d", prev, i, norm.VsockPort)
+		}
+		seenPorts[norm.VsockPort] = i
+		if prev, ok := seenListens[norm.GuestListen]; ok {
+			return nil, fmt.Errorf("broker: endpoints %d and %d both use GuestListen %q", prev, i, norm.GuestListen)
+		}
+		seenListens[norm.GuestListen] = i
+		for key := range norm.BaseURLEnv {
+			if prev, ok := seenBaseURLEnvKeys[key]; ok {
+				return nil, fmt.Errorf("broker: endpoints %d and %d both use BaseURLEnv key %q", prev, i, key)
+			}
+			seenBaseURLEnvKeys[key] = i
+		}
+	}
+
+	return out, nil
 }
 
 func OptionsFromRequest(req vmkit.Request, supervisorPath string) (Options, error) {

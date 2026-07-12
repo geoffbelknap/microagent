@@ -150,6 +150,10 @@ type Config struct {
 	// Broker configures the egress broker served on a host vsock listener; nil
 	// means no broker. See BrokerConfig.
 	Broker *BrokerConfig `json:"broker,omitempty"`
+	// Brokers configures multiple egress broker endpoints, each an independent
+	// terminate broker with its own vsock listener, guest base URL, upstream,
+	// and secret. Nil/empty means no additional endpoints. See BrokerConfig.
+	Brokers []*BrokerConfig `json:"brokers,omitempty"`
 }
 
 // BrokerConfig configures the egress broker: a host-side forward proxy served
@@ -184,6 +188,11 @@ type BrokerConfig struct {
 	// decision stream. Persisted in the manifest so the opt-in is declared,
 	// not silent.
 	Capture bool `json:"capture,omitempty"`
+	// UpstreamCAFile is an optional PEM bundle this endpoint's upstream TLS
+	// client trusts. Empty means system roots (e.g. a public API). Set it when
+	// the upstream presents a private cert (e.g. an internal control-plane
+	// listener whose cert chains to a deployment CA that system roots reject).
+	UpstreamCAFile string `json:"upstreamCAFile,omitempty"`
 }
 
 type Disk struct {

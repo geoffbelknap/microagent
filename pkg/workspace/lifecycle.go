@@ -1175,16 +1175,16 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 // than producing a workspace whose egress silently bypasses the broker.
 func rootfsRequest(opts Options, rootfsPath string) (rootfs.BuildRequest, error) {
 	req := buildRootfsRequest(opts, rootfsPath)
-	brokerCfg, err := normalizeBrokerConfig(opts.Broker)
+	brokers, err := normalizeEffectiveBrokers(opts)
 	if err != nil {
 		return rootfs.BuildRequest{}, err
 	}
-	if brokerCfg != nil {
+	for _, bc := range brokers {
 		guest := broker.GuestConfig{
-			GuestListen: brokerCfg.GuestListen,
-			VsockPort:   brokerCfg.VsockPort,
-			Proxy:       brokerCfg.Proxy,
-			BaseURL:     brokerCfg.BaseURLEnv,
+			GuestListen: bc.GuestListen,
+			VsockPort:   bc.VsockPort,
+			Proxy:       bc.Proxy,
+			BaseURL:     bc.BaseURLEnv,
 		}
 		env, err := guest.MergeGuestEnvMap(req.Env)
 		if err != nil {
@@ -1454,6 +1454,7 @@ func WriteManifest(opts Options) error {
 		EgressAllowlistLocked: opts.EgressAllowlistLocked,
 		EgressSwapConfigPath:  opts.EgressSwapConfigPath,
 		Broker:                opts.Broker,
+		Brokers:               opts.Brokers,
 	})
 }
 
@@ -1860,6 +1861,7 @@ func applyManifest(opts *Options, manifest Manifest) {
 	opts.EgressAllowlistLocked = manifest.EgressAllowlistLocked
 	opts.EgressSwapConfigPath = manifest.EgressSwapConfigPath
 	opts.Broker = manifest.Broker
+	opts.Brokers = manifest.Brokers
 }
 
 func runForeground(ctx context.Context, opts Options, req vmkit.Request) (vmkit.Response, error) {
