@@ -22,6 +22,7 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/registryauth"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
@@ -114,17 +115,46 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		}
 	}
 	if provenance.BuilderPhase != "restore-base-cache" {
-		repoRef, reference, err := splitRegistryReference(req.ImageRef)
-		if err != nil {
-			return provenance, err
+		// Resolve the image ref from the local committed-OCI layout before
+		// falling back to a remote registry (standard local-first image
+		// resolution — see BuildRequest.LocalImageLayout). Any local miss or
+		// error (no layout, ref not committed there, corrupt layout, ...) is
+		// not fatal: it just means this ref falls back to the remote path,
+		// so a legitimately remote-only ref still works. The
+		// localImageLayoutExists check below guards oci.New, which
+		// unconditionally creates the OCI layout scaffold (blobs/,
+		// index.json, oci-layout) for a path that doesn't have one yet --
+		// without it, every remote-only build would create that scaffold
+		// under LocalImageLayout even though no image was ever committed
+		// there.
+		var src oras.ReadOnlyTarget
+		var localResolvedRef string
+		if req.LocalImageLayout != "" && localImageLayoutExists(req.LocalImageLayout) {
+			if localStore, err := oci.New(req.LocalImageLayout); err == nil {
+				if desc, err := localStore.Resolve(ctx, req.ImageRef); err == nil {
+					src = localStore
+					localResolvedRef = req.ImageRef + "@" + desc.Digest.String()
+				}
+			}
 		}
-		repo, err := newRepository(repoRef)
-		if err != nil {
-			return provenance, err
+		var repoRef, reference string
+		if src == nil {
+			var err error
+			repoRef, reference, err = splitRegistryReference(req.ImageRef)
+			if err != nil {
+				return provenance, err
+			}
+			repo, err := newRepository(repoRef)
+			if err != nil {
+				return provenance, err
+			}
+			src = repo
+		} else {
+			reference = req.ImageRef
 		}
 		provenance.BuilderPhase = "fetch-manifest"
 		progress.emit("fetch-manifest", "fetching manifest", 0, 0, 0, 0)
-		manifestDesc, manifestBytes, err := oras.FetchBytes(ctx, repo, reference, oras.FetchBytesOptions{
+		manifestDesc, manifestBytes, err := oras.FetchBytes(ctx, src, reference, oras.FetchBytesOptions{
 			FetchOptions: oras.FetchOptions{
 				ResolveOptions: oras.ResolveOptions{TargetPlatform: &platform},
 			},
@@ -133,14 +163,18 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 			return provenance, fmt.Errorf("fetch OCI image %s for %s/%s: %w", req.ImageRef, platform.OS, platform.Architecture, err)
 		}
 		provenance.Digest = manifestDesc.Digest.String()
-		provenance.ResolvedRef = repoRef + "@" + manifestDesc.Digest.String()
+		if localResolvedRef != "" {
+			provenance.ResolvedRef = localResolvedRef
+		} else {
+			provenance.ResolvedRef = repoRef + "@" + manifestDesc.Digest.String()
+		}
 
 		var manifest ocispec.Manifest
 		if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
 			return provenance, fmt.Errorf("parse OCI image manifest: %w", err)
 		}
 		progress.emit("fetch-config", "fetching image config", 0, 0, 0, 0)
-		configBytes, err := fetchBytes(ctx, repo, manifest.Config)
+		configBytes, err := fetchBytes(ctx, src, manifest.Config)
 		if err != nil {
 			return provenance, fmt.Errorf("fetch OCI image config: %w", err)
 		}
@@ -156,7 +190,7 @@ func (b Builder) Build(ctx context.Context, req BuildRequest) (Provenance, error
 		progress.emit("extract-layers", "extracting layers", 0, int64(len(manifest.Layers)), 0, totalLayerBytes)
 		var fetchedLayerBytes int64
 		for i, layer := range manifest.Layers {
-			rc, err := repo.Fetch(ctx, layer)
+			rc, err := src.Fetch(ctx, layer)
 			if err != nil {
 				return provenance, fmt.Errorf("fetch OCI layer %s: %w", layer.Digest, err)
 			}
@@ -641,6 +675,18 @@ func newRepository(repoRef string) (*remote.Repository, error) {
 	return repo, nil
 }
 
+// localImageLayoutExists reports whether an OCI image layout has already
+// been initialized at path, by checking for its oci-layout marker file.
+// oci.New unconditionally creates the {blobs,index.json,oci-layout} scaffold
+// for any path that doesn't already have one, so callers must confirm the
+// layout already exists before calling it -- otherwise a build that never
+// consults a local image (a remote-only create or pull) would still leave
+// that scaffold behind under LocalImageLayout as a side effect.
+func localImageLayoutExists(path string) bool {
+	_, err := os.Stat(filepath.Join(path, ocispec.ImageLayoutFile))
+	return err == nil
+}
+
 func isLoopbackRegistry(host string) bool {
 	host = strings.TrimSpace(host)
 	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
@@ -654,8 +700,8 @@ func isLoopbackRegistry(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-func fetchBytes(ctx context.Context, repo *remote.Repository, desc ocispec.Descriptor) ([]byte, error) {
-	rc, err := repo.Fetch(ctx, desc)
+func fetchBytes(ctx context.Context, src oras.ReadOnlyTarget, desc ocispec.Descriptor) ([]byte, error) {
+	rc, err := src.Fetch(ctx, desc)
 	if err != nil {
 		return nil, err
 	}

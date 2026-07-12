@@ -23,6 +23,7 @@ import (
 
 	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/internal/hostworker"
+	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
@@ -2759,6 +2760,7 @@ func createWorkspaceRootfs(ctx context.Context, opts workspaceOptions) (workspac
 		ResultPort:       resultPort,
 		NoImageCommand:   opts.PrepareForStart && !workspaceHasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:         filepath.Join(opts.StateDir, "build"),
+		LocalImageLayout: commit.LayoutPath(opts.StateDir),
 		Mke2fsPath:       opts.Mke2fsPath,
 		SizeMiB:          opts.SizeMiB,
 		Env:              opts.Env,

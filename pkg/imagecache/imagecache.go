@@ -69,6 +69,10 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		opts.GuestInitPath = workspace.GuestInitPath(opts.Architecture)
 	}
 	outputPath := RootfsPath(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
+	// `image pull` always fetches from the registry: it must never resolve
+	// ImageRef from the local committed-OCI layout (LocalImageLayout left
+	// unset), or a locally committed image could silently shadow an explicit
+	// registry pull.
 	provenance, err := rootfs.NewBuilder().Build(ctx, rootfs.BuildRequest{
 		ImageRef:       opts.ImageRef,
 		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/geoffbelknap/microagent/internal/hostworker"
+	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
 	"github.com/geoffbelknap/microagent/pkg/model"
@@ -32,6 +34,10 @@ import (
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 	execprotocol "github.com/geoffbelknap/microagent/pkg/workspace/exec/protocol"
+	digest "github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/content/oci"
 )
 
 func TestMain(m *testing.M) {
@@ -5410,6 +5416,112 @@ func TestCreateWorkspaceRootfsUsesPulledBaseline(t *testing.T) {
 	}
 	if result.Image.BuilderPhase != "copy-baseline" {
 		t.Fatalf("image provenance = %#v", result.Image)
+	}
+}
+
+// writeLocalImageLayout writes a tiny single-layer OCI image directly into a
+// committed-OCI layout at dir, tagged with ref, without depending on
+// pkg/commit's own extraction machinery (debugfs/guest-mediated copy).
+func writeLocalImageLayout(t *testing.T, dir, ref string) {
+	t.Helper()
+	var layerBuf bytes.Buffer
+	tw := tar.NewWriter(&layerBuf)
+	content := "microagent-local-image-test\n"
+	if err := tw.WriteHeader(&tar.Header{Name: "etc/microagent-local-image.txt", Mode: 0o644, Size: int64(len(content))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	layerBytes := layerBuf.Bytes()
+	layerDigest := digest.FromBytes(layerBytes)
+	configBytes, err := json.Marshal(map[string]any{
+		"architecture": "amd64",
+		"os":           "linux",
+		"rootfs": map[string]any{
+			"type":     "layers",
+			"diff_ids": []string{layerDigest.String()},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configDigest := digest.FromBytes(configBytes)
+	manifestBytes, err := json.Marshal(ocispec.Manifest{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: ocispec.MediaTypeImageManifest,
+		Config: ocispec.Descriptor{
+			MediaType: ocispec.MediaTypeImageConfig,
+			Digest:    configDigest,
+			Size:      int64(len(configBytes)),
+		},
+		Layers: []ocispec.Descriptor{{
+			MediaType: ocispec.MediaTypeImageLayer,
+			Digest:    layerDigest,
+			Size:      int64(len(layerBytes)),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestDigest := digest.FromBytes(manifestBytes)
+
+	store, err := oci.New(dir)
+	if err != nil {
+		t.Fatalf("oci.New: %v", err)
+	}
+	ctx := context.Background()
+	push := func(data []byte, mediaType string, dgst digest.Digest) {
+		t.Helper()
+		desc := ocispec.Descriptor{MediaType: mediaType, Digest: dgst, Size: int64(len(data))}
+		if err := store.Push(ctx, desc, bytes.NewReader(data)); err != nil {
+			t.Fatalf("push %s: %v", mediaType, err)
+		}
+	}
+	push(layerBytes, ocispec.MediaTypeImageLayer, layerDigest)
+	push(configBytes, ocispec.MediaTypeImageConfig, configDigest)
+	manifestDesc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: manifestDigest, Size: int64(len(manifestBytes))}
+	push(manifestBytes, ocispec.MediaTypeImageManifest, manifestDigest)
+	if err := store.Tag(ctx, manifestDesc, ref); err != nil {
+		t.Fatalf("tag %s: %v", ref, err)
+	}
+}
+
+// TestCreateWorkspaceRootfsResolvesLocallyCommittedImage confirms
+// createWorkspaceRootfs threads LocalImageLayout = commit.LayoutPath(StateDir)
+// into the rootfs.BuildRequest it builds: a workspace create for a ref that
+// only exists in the local committed-OCI layout succeeds with no network.
+func TestCreateWorkspaceRootfsResolvesLocallyCommittedImage(t *testing.T) {
+	mke2fsPath, err := exec.LookPath("mke2fs")
+	if err != nil {
+		t.Skip("mke2fs not available")
+	}
+
+	dir := t.TempDir()
+	const ref = "microagent-local-image-test.invalid/demo:v1"
+	writeLocalImageLayout(t, commit.LayoutPath(dir), ref)
+
+	result, err := createWorkspaceRootfs(t.Context(), workspaceOptions{
+		StateDir:      dir,
+		Name:          "research",
+		ImageRef:      ref,
+		Architecture:  "amd64",
+		Profile:       "small",
+		RestartPolicy: "never",
+		Network:       vmkit.NetworkConfig{Mode: defaultNetworkMode},
+		MemoryMiB:     512,
+		CPUCount:      2,
+		SizeMiB:       64,
+		Mke2fsPath:    mke2fsPath,
+	})
+	if err != nil {
+		t.Fatalf("createWorkspaceRootfs: %v", err)
+	}
+	if _, err := os.Stat(result.RootfsPath); err != nil {
+		t.Fatalf("rootfs output: %v", err)
 	}
 }
 

@@ -1195,6 +1195,14 @@ func rootfsRequest(opts Options, rootfsPath string) (rootfs.BuildRequest, error)
 	return req, nil
 }
 
+// localImageLayoutPath returns the committed-OCI layout path for stateDir.
+// This mirrors commit.LayoutPath without importing pkg/commit: pkg/commit
+// already imports pkg/workspace, so importing it back here would create an
+// import cycle.
+func localImageLayoutPath(stateDir string) string {
+	return filepath.Join(stateDir, "images", "oci")
+}
+
 func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 	command, resultPort := BuildCommandAndPort(opts)
 	mode := ""
@@ -1220,6 +1228,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		ResultPort:       resultPort,
 		NoImageCommand:   opts.PrepareForStart && !HasGuestCommand(opts) && !opts.UseImageCommand,
 		StateDir:         filepath.Join(opts.StateDir, "build"),
+		LocalImageLayout: localImageLayoutPath(opts.StateDir),
 		Mke2fsPath:       opts.Mke2fsPath,
 		SizeMiB:          opts.SizeMiB,
 		Env:              opts.Env,

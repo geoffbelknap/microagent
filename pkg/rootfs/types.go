@@ -35,31 +35,42 @@ type ProgressEvent struct {
 type ProgressFunc func(ProgressEvent)
 
 type BuildRequest struct {
-	ImageRef       string            `json:"image_ref"`
-	Platform       Platform          `json:"platform"`
-	OutputPath     string            `json:"output_path"`
-	Format         string            `json:"format,omitempty"`
-	InitPath       string            `json:"init_path,omitempty"`
-	InitBinaryPath string            `json:"init_binary_path,omitempty"`
-	Command        []string          `json:"command,omitempty"`
-	Mode           string            `json:"mode,omitempty"`
-	ConsoleShell   string            `json:"console_shell,omitempty"`
-	Hostname       string            `json:"hostname,omitempty"`
-	ShellPort      uint16            `json:"shell_port,omitempty"`
-	ExecPort       uint16            `json:"exec_port,omitempty"`
-	NoImageCommand bool              `json:"no_image_command,omitempty"`
-	ResultPort     uint32            `json:"result_port,omitempty"`
-	StateDir       string            `json:"state_dir,omitempty"`
-	Mke2fsPath     string            `json:"mke2fs_path,omitempty"`
-	SizeMiB        int64             `json:"size_mib,omitempty"`
-	Env            map[string]string `json:"env,omitempty"`
-	Files          []File            `json:"files,omitempty"`
-	Mounts         []Mount           `json:"mounts,omitempty"`
-	HostForwards   []PortForward     `json:"host_forwards,omitempty"`
-	AllowMutable   bool              `json:"allow_mutable,omitempty"`
-	KeepStage      bool              `json:"keep_stage,omitempty"`
-	StageSnapshot  string            `json:"stage_snapshot,omitempty"`
-	Progress       ProgressFunc      `json:"-"`
+	// LocalImageLayout, when set, is a committed-OCI layout path
+	// (commit.LayoutPath(stateDir)) consulted for the image ref BEFORE any
+	// remote registry. A ref present there is used locally with no network —
+	// standard local-first image resolution, the same as docker/containerd.
+	// Security note: this means a locally committed image shadows a
+	// same-ref remote image; that is expected local-first behavior, not a
+	// bypass, since the local layout is only ever populated by this host's
+	// own commits. Empty preserves remote-only behavior (callers opt in by
+	// setting it). A local lookup miss or error falls back to the remote
+	// registry rather than failing the build.
+	LocalImageLayout string            `json:"local_image_layout,omitempty"`
+	ImageRef         string            `json:"image_ref"`
+	Platform         Platform          `json:"platform"`
+	OutputPath       string            `json:"output_path"`
+	Format           string            `json:"format,omitempty"`
+	InitPath         string            `json:"init_path,omitempty"`
+	InitBinaryPath   string            `json:"init_binary_path,omitempty"`
+	Command          []string          `json:"command,omitempty"`
+	Mode             string            `json:"mode,omitempty"`
+	ConsoleShell     string            `json:"console_shell,omitempty"`
+	Hostname         string            `json:"hostname,omitempty"`
+	ShellPort        uint16            `json:"shell_port,omitempty"`
+	ExecPort         uint16            `json:"exec_port,omitempty"`
+	NoImageCommand   bool              `json:"no_image_command,omitempty"`
+	ResultPort       uint32            `json:"result_port,omitempty"`
+	StateDir         string            `json:"state_dir,omitempty"`
+	Mke2fsPath       string            `json:"mke2fs_path,omitempty"`
+	SizeMiB          int64             `json:"size_mib,omitempty"`
+	Env              map[string]string `json:"env,omitempty"`
+	Files            []File            `json:"files,omitempty"`
+	Mounts           []Mount           `json:"mounts,omitempty"`
+	HostForwards     []PortForward     `json:"host_forwards,omitempty"`
+	AllowMutable     bool              `json:"allow_mutable,omitempty"`
+	KeepStage        bool              `json:"keep_stage,omitempty"`
+	StageSnapshot    string            `json:"stage_snapshot,omitempty"`
+	Progress         ProgressFunc      `json:"-"`
 	// ResetFinalConfig appends a line to the Command shell script that
 	// rewrites /etc/microagent/run.json so later boots run FinalCommand in
 	// FinalMode. The builder composes the rewritten env from the image config
@@ -279,6 +290,7 @@ func NormalizeRequest(req BuildRequest) BuildRequest {
 	req.StateDir = strings.TrimSpace(req.StateDir)
 	req.Mke2fsPath = strings.TrimSpace(req.Mke2fsPath)
 	req.StageSnapshot = strings.TrimSpace(req.StageSnapshot)
+	req.LocalImageLayout = strings.TrimSpace(req.LocalImageLayout)
 	for i := range req.Files {
 		req.Files[i].SourcePath = strings.TrimSpace(req.Files[i].SourcePath)
 		req.Files[i].Path = strings.TrimSpace(req.Files[i].Path)
