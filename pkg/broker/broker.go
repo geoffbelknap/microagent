@@ -17,6 +17,7 @@
 package broker
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -348,11 +349,20 @@ func (c *Connect) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	verdict := evaluate(c.Policy, tap)
 	if !verdict.Allow {
 		http.Error(w, "broker: denied by policy", http.StatusForbidden)
-		emit(DecisionRecord{Event: EventRequestDeny, Verdict: "deny", Rule: verdict.Rule, Labels: verdict.Labels})
+		emit(DecisionRecord{Event: EventRequestDeny, Verdict: "deny", Rule: verdict.Rule, Labels: verdict.Labels, Signals: []string{SignalDenied}})
 		return
 	}
 	upstream, err := c.dial("tcp", r.Host)
 	if err != nil {
+		// A dialer refusal (ErrTunnelDenied) is a fail-closed governance denial
+		// of an inside/off-allowlist destination — 403 with the denied signal so
+		// it is not confused with a transient upstream failure. Any other dial
+		// error is an ordinary upstream problem.
+		if errors.Is(err, ErrTunnelDenied) {
+			http.Error(w, "broker: denied", http.StatusForbidden)
+			emit(DecisionRecord{Event: EventRequestDeny, Verdict: "deny", Rule: "denied", Signals: []string{SignalDenied}})
+			return
+		}
 		http.Error(w, "broker: connect upstream", http.StatusBadGateway)
 		emit(DecisionRecord{Event: EventRequestDeny, Verdict: "deny", Rule: "upstream-error"})
 		return

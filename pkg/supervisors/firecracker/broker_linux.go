@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/geoffbelknap/microagent/internal/egress"
 	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/secret"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
@@ -146,7 +147,6 @@ func startBrokerListener(opts Options, config *vmkit.Config, port uint32) (net.L
 		term.Client = client
 	}
 	term.OnDecision = onDecision
-	tunnel := &broker.Connect{OnDecision: onDecision}
 
 	// Raw capture is a governed opt-in: only when the manifest declares it
 	// does the capture file exist at all. Fail-closed like the access log — a
@@ -183,8 +183,30 @@ func startBrokerListener(opts Options, config *vmkit.Config, port uint32) (net.L
 		return nil, fmt.Errorf("restrict broker vsock socket %d: %w", port, err)
 	}
 	go func() {
-		_ = http.Serve(unixListener, broker.Handler(term, tunnel))
+		_ = http.Serve(unixListener, brokerHandler(bc, term, onDecision))
 		closeLogs()
 	}()
 	return unixListener, nil
+}
+
+// brokerHandler builds an endpoint's HTTP handler, gating the CONNECT
+// (HTTPS_PROXY) tunnel. The tunnel is served ONLY when the endpoint enables the
+// proxy — a terminate-only/base-URL endpoint passes a nil Connect, so
+// broker.Handler answers CONNECT with 405 and the datapath is never an open
+// forward proxy. When the proxy is enabled, every tunnel is governed: the
+// guarded dialer denies inside/infrastructure destinations
+// (link-local/metadata, loopback, RFC1918/ULA, CGNAT) fail-closed and re-checks
+// the resolved IP against DNS rebinding, and the operator's ConnectAllowlist
+// (when non-empty) locks the tunnel to named hosts. Reusing egress.IsInside
+// keeps the brokered tunnel and the NIC datapath denying the same address space.
+func brokerHandler(bc *vmkit.BrokerConfig, term *broker.Terminate, onDecision broker.OnDecision) http.Handler {
+	if !bc.Proxy {
+		return broker.Handler(term, nil)
+	}
+	tunnel := &broker.Connect{
+		OnDecision: onDecision,
+		Policy:     broker.AllowlistPolicy(bc.ConnectAllowlist),
+		Dial:       broker.GuardedDialer{IsInside: egress.IsInside}.Dial,
+	}
+	return broker.Handler(term, tunnel)
 }

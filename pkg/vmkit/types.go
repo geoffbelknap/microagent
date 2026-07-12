@@ -193,6 +193,14 @@ type BrokerConfig struct {
 	// the upstream presents a private cert (e.g. an internal control-plane
 	// listener whose cert chains to a deployment CA that system roots reject).
 	UpstreamCAFile string `json:"upstreamCAFile,omitempty"`
+	// ConnectAllowlist restricts the CONNECT (HTTPS_PROXY) tunnel to these
+	// upstream hosts when Proxy is enabled. It is only consulted when Proxy is
+	// true — the tunnel is served only then, and always through the guarded
+	// dialer that denies inside/infrastructure destinations regardless of this
+	// list. Empty means no host allowlist (allow-broad minus the inside-deny);
+	// a non-empty list locks the tunnel to those hosts. The operator (or a
+	// governing caller) sets the contents; the supervisor only enforces them.
+	ConnectAllowlist []string `json:"connectAllowlist,omitempty"`
 }
 
 type Disk struct {
