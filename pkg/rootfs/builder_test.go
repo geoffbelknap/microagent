@@ -21,6 +21,7 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/registry/remote/auth"
 )
 
@@ -630,6 +631,175 @@ func mustJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// rootfsHostFormat picks a rootfs format usable on the current host, skipping
+// the test when the host lacks the tooling for it (mirrors the format
+// selection in the private-registry E2E tests, but skips instead of failing
+// so it can run unconditionally rather than only opt-in).
+func rootfsHostFormat(t *testing.T) (format, output, mke2fsPath string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return FormatVHD, "rootfs.vhd", ""
+	}
+	path, err := exec.LookPath("mke2fs")
+	if err != nil {
+		t.Skip("mke2fs not available")
+	}
+	return FormatExt4, "rootfs.ext4", path
+}
+
+// newLocalImageLayout writes a tiny single-layer OCI image directly into a
+// committed-OCI layout at dir, tagged with ref. This is the same on-disk
+// shape `microagent commit` (pkg/commit) produces, built by hand here so the
+// rootfs package tests do not need to depend on pkg/commit or a workspace
+// fixture.
+func newLocalImageLayout(t *testing.T, dir, ref string) digest.Digest {
+	t.Helper()
+	layerBytes := testTarLayer(t, "etc/microagent-local-image.txt", "local-image-ok\n")
+	layerDigest := digest.FromBytes(layerBytes)
+	configBytes := mustJSON(t, map[string]any{
+		"architecture": "amd64",
+		"os":           "linux",
+		"rootfs": map[string]any{
+			"type":     "layers",
+			"diff_ids": []string{layerDigest.String()},
+		},
+		"config": map[string]any{
+			"Entrypoint": []string{"/bin/sh"},
+			"Cmd":        []string{"-c", "cat /etc/microagent-local-image.txt"},
+		},
+	})
+	configDigest := digest.FromBytes(configBytes)
+	manifestBytes := mustJSON(t, ocispec.Manifest{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: ocispec.MediaTypeImageManifest,
+		Config: ocispec.Descriptor{
+			MediaType: ocispec.MediaTypeImageConfig,
+			Digest:    configDigest,
+			Size:      int64(len(configBytes)),
+		},
+		Layers: []ocispec.Descriptor{{
+			MediaType: ocispec.MediaTypeImageLayer,
+			Digest:    layerDigest,
+			Size:      int64(len(layerBytes)),
+		}},
+	})
+	manifestDigest := digest.FromBytes(manifestBytes)
+
+	store, err := oci.New(dir)
+	if err != nil {
+		t.Fatalf("oci.New: %v", err)
+	}
+	ctx := context.Background()
+	push := func(data []byte, mediaType string, dgst digest.Digest) {
+		t.Helper()
+		desc := ocispec.Descriptor{MediaType: mediaType, Digest: dgst, Size: int64(len(data))}
+		if err := store.Push(ctx, desc, bytes.NewReader(data)); err != nil {
+			t.Fatalf("push %s: %v", mediaType, err)
+		}
+	}
+	push(layerBytes, ocispec.MediaTypeImageLayer, layerDigest)
+	push(configBytes, ocispec.MediaTypeImageConfig, configDigest)
+	manifestDesc := ocispec.Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: manifestDigest, Size: int64(len(manifestBytes))}
+	push(manifestBytes, ocispec.MediaTypeImageManifest, manifestDigest)
+	if err := store.Tag(ctx, manifestDesc, ref); err != nil {
+		t.Fatalf("tag %s: %v", ref, err)
+	}
+	return manifestDigest
+}
+
+// TestBuilderResolvesLocallyCommittedImageBeforeRemote is the core proof for
+// local-first image resolution: a ref present in the local committed-OCI
+// layout builds successfully with no network access at all, even though the
+// ref's registry host does not exist (name resolution to it always fails).
+// If the builder ever fell back to the remote path here, this test would
+// fail on the network error instead of asserting on the result.
+func TestBuilderResolvesLocallyCommittedImageBeforeRemote(t *testing.T) {
+	format, output, mke2fsPath := rootfsHostFormat(t)
+
+	dir := t.TempDir()
+	layoutDir := filepath.Join(dir, "images", "oci")
+	const ref = "microagent-local-image-test.invalid/demo:v1"
+	manifestDigest := newLocalImageLayout(t, layoutDir, ref)
+
+	provenance, err := NewBuilder().Build(context.Background(), BuildRequest{
+		ImageRef:         ref,
+		Platform:         Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath:       filepath.Join(dir, output),
+		Format:           format,
+		StateDir:         filepath.Join(dir, "state"),
+		Mke2fsPath:       mke2fsPath,
+		SizeMiB:          64,
+		AllowMutable:     true,
+		LocalImageLayout: layoutDir,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, output)); err != nil {
+		t.Fatalf("rootfs output: %v", err)
+	}
+	wantResolved := ref + "@" + manifestDigest.String()
+	if provenance.ResolvedRef != wantResolved {
+		t.Fatalf("ResolvedRef = %q, want %q", provenance.ResolvedRef, wantResolved)
+	}
+}
+
+// TestBuilderFallsBackToRemoteOnLocalLayoutMiss verifies the fail-safe: a ref
+// that is not present in the local layout takes the remote path rather than
+// hard-failing, so a legitimately remote-only ref still works when
+// LocalImageLayout is set (e.g. set unconditionally by a caller).
+func TestBuilderFallsBackToRemoteOnLocalLayoutMiss(t *testing.T) {
+	dir := t.TempDir()
+	layoutDir := filepath.Join(dir, "images", "oci")
+	// Seed the layout with a different ref, so it exists but does not
+	// contain the one this build asks for.
+	newLocalImageLayout(t, layoutDir, "microagent-local-image-test.invalid/other:v1")
+
+	_, err := NewBuilder().Build(context.Background(), BuildRequest{
+		ImageRef:         "microagent-local-image-test.invalid/demo:v1",
+		Platform:         Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath:       filepath.Join(dir, "rootfs.ext4"),
+		StateDir:         filepath.Join(dir, "state"),
+		SizeMiB:          64,
+		AllowMutable:     true,
+		LocalImageLayout: layoutDir,
+	})
+	if err == nil {
+		t.Fatal("Build succeeded, want remote-fetch failure for a ref missing from the local layout")
+	}
+	if !strings.Contains(err.Error(), "fetch OCI image") {
+		t.Fatalf("Build error = %v, want an OCI fetch failure (proof it attempted the remote path)", err)
+	}
+}
+
+// TestBuilderEmptyLocalImageLayoutIsRemoteOnly documents that an empty
+// LocalImageLayout (the zero value) never touches the local-resolution code
+// path — a ref that would resolve locally if LocalImageLayout pointed at its
+// layout is instead treated as remote-only, exactly like before this field
+// existed.
+func TestBuilderEmptyLocalImageLayoutIsRemoteOnly(t *testing.T) {
+	dir := t.TempDir()
+	layoutDir := filepath.Join(dir, "images", "oci")
+	const ref = "microagent-local-image-test.invalid/demo:v1"
+	newLocalImageLayout(t, layoutDir, ref)
+
+	_, err := NewBuilder().Build(context.Background(), BuildRequest{
+		ImageRef:     ref,
+		Platform:     Platform{OS: "linux", Architecture: "amd64"},
+		OutputPath:   filepath.Join(dir, "rootfs.ext4"),
+		StateDir:     filepath.Join(dir, "state"),
+		SizeMiB:      64,
+		AllowMutable: true,
+		// LocalImageLayout intentionally left empty.
+	})
+	if err == nil {
+		t.Fatal("Build succeeded without LocalImageLayout set, want remote-fetch failure")
+	}
+	if !strings.Contains(err.Error(), "fetch OCI image") {
+		t.Fatalf("Build error = %v, want an OCI fetch failure (proof it never consulted the local layout)", err)
+	}
 }
 
 func TestWriteDeclaredFilesCopiesSourceIntoStage(t *testing.T) {

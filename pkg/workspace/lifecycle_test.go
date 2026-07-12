@@ -846,6 +846,25 @@ func TestBuildRootfsRequestAllowsMutableWorkspaceImages(t *testing.T) {
 	}
 }
 
+func TestBuildRootfsRequestSetsLocalImageLayout(t *testing.T) {
+	opts := Options{
+		Name:         "research",
+		StateDir:     "/tmp/microagent",
+		ImageRef:     "docker.io/library/ubuntu:24.04",
+		Architecture: "arm64",
+		SizeMiB:      1024,
+	}
+	req := buildRootfsRequest(opts, "/tmp/microagent/workspaces/research/rootfs.ext4")
+
+	// Same value commit.LayoutPath(opts.StateDir) produces; asserted as a
+	// literal rather than by importing pkg/commit, since pkg/commit imports
+	// pkg/workspace (importing it back here would be a cycle).
+	want := filepath.Join(opts.StateDir, "images", "oci")
+	if req.LocalImageLayout != want {
+		t.Fatalf("LocalImageLayout = %q, want %q", req.LocalImageLayout, want)
+	}
+}
+
 func TestBuildRootfsRequestBakesBrokerGuestEnv(t *testing.T) {
 	opts := Options{
 		Name:         "research",

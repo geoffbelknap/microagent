@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
 	"github.com/geoffbelknap/microagent/pkg/workspace"
 )
@@ -70,16 +71,17 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 	}
 	outputPath := RootfsPath(opts.StateDir, opts.ImageRef, rootfs.Platform{OS: "linux", Architecture: opts.Architecture})
 	provenance, err := rootfs.NewBuilder().Build(ctx, rootfs.BuildRequest{
-		ImageRef:       opts.ImageRef,
-		Platform:       rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
-		OutputPath:     outputPath,
-		InitPath:       rootfs.DefaultInitPath,
-		InitBinaryPath: opts.GuestInitPath,
-		NoImageCommand: true,
-		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
-		Mke2fsPath:     opts.Mke2fsPath,
-		SizeMiB:        opts.SizeMiB,
-		AllowMutable:   true,
+		ImageRef:         opts.ImageRef,
+		Platform:         rootfs.Platform{OS: "linux", Architecture: opts.Architecture},
+		OutputPath:       outputPath,
+		InitPath:         rootfs.DefaultInitPath,
+		InitBinaryPath:   opts.GuestInitPath,
+		NoImageCommand:   true,
+		StateDir:         filepath.Join(opts.StateDir, "images", "build"),
+		Mke2fsPath:       opts.Mke2fsPath,
+		SizeMiB:          opts.SizeMiB,
+		AllowMutable:     true,
+		LocalImageLayout: commit.LayoutPath(opts.StateDir),
 	})
 	if err != nil {
 		return Record{}, err
