@@ -12,10 +12,30 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/geoffbelknap/microagent/pkg/broker"
 	"github.com/geoffbelknap/microagent/pkg/vmkit"
 )
+
+// readFileWhenContains polls path until its contents include want, then returns
+// them. The broker writes its decision/capture record after it finishes
+// relaying the response, which can land just after the client's request
+// returns — so a read immediately after the request can race the write.
+func readFileWhenContains(t *testing.T, path, want string) string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		b, err := os.ReadFile(path)
+		if err == nil && strings.Contains(string(b), want) {
+			return string(b)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %q in %s: %s", want, path, b)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 // brokerTestClient returns an HTTP client whose every connection dials the
 // workspace's broker vsock UDS — the host-side stand-in for the guest bridge.
@@ -81,18 +101,12 @@ func TestStartVsockListenersServesBroker(t *testing.T) {
 	// The default trail is the minimized decision stream: verdict + metadata,
 	// the NAMES of the references used — no headers, no path, and never the
 	// live secret (absent by construction, not by redaction).
-	trail, err := os.ReadFile(brokerAccessLogPath(dir, "ws"))
-	if err != nil {
-		t.Fatalf("broker access log: %v", err)
-	}
-	if !strings.Contains(string(trail), "broker_request_allow") {
-		t.Fatalf("access log missing the decision record: %s", trail)
-	}
-	if !strings.Contains(string(trail), `"secret_refs":["api"]`) {
+	trail := readFileWhenContains(t, brokerAccessLogPath(dir, "ws"), "broker_request_allow")
+	if !strings.Contains(trail, `"secret_refs":["api"]`) {
 		t.Fatalf("access log missing the credential-use metadata: %s", trail)
 	}
 	for _, banned := range []string{"@secret:api", "/v1/ping", `"headers"`, live} {
-		if strings.Contains(string(trail), banned) {
+		if strings.Contains(trail, banned) {
 			t.Fatalf("default trail must be minimized metadata, found %q: %s", banned, trail)
 		}
 	}
@@ -144,9 +158,9 @@ func TestStartVsockListenersBrokerCaptureOptIn(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("capture file mode = %v, want 0600", info.Mode().Perm())
 	}
-	captured, _ := os.ReadFile(capPath)
+	captured := readFileWhenContains(t, capPath, "@secret:api")
 	for _, want := range []string{"@secret:api", "/v1/messages"} {
-		if !strings.Contains(string(captured), want) {
+		if !strings.Contains(captured, want) {
 			t.Fatalf("capture missing %q: %s", want, captured)
 		}
 	}
