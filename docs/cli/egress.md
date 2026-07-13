@@ -4,34 +4,54 @@ description: Show or stream the egress mediator's audit decisions for a workspac
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-10_
+_Last updated: 2026-07-13_
 
 ```text
 microagent egress <name> [--follow] [--state-dir <dir>]
 ```
 
-`egress` shows a workspace's egress decisions, oldest first — the mediator's
-connection-level audit log and, when the workspace has an
+`egress` answers one question about a workspace: what did it try to reach on
+the network, and what happened to each attempt?
+
+```bash
+microagent egress research
+```
+
+```text
+2026-07-10T14:02:11Z  egress_allow  api.github.com  140.82.121.6:443
+2026-07-10T14:02:12Z  broker_request_allow  api.anthropic.com
+2026-07-10T14:02:14Z  egress_deny  evil.example  not allowlisted
+2026-07-10T14:02:15Z  egress_dns_deny  -  blocked
+```
+
+Each line is one decision, oldest first, written by the egress mediator — the
+host-side process that rules on the guest's network traffic. Egress mediation
+is **on by default** (mode `broker`; the other modes are `mitm` and `off`), so
+every workspace whose mediator has made a decision has this record. When the
+workspace has an
 [egress broker](/concepts/egress-mediation/#the-broker-decision-stream)
-configured, the broker's per-request decision records, merged into one
-time-ordered view. Egress mediation is **on by default** (mode `broker`; the
-other modes are `mitm` and `off`), so every workspace whose
-mediator has made a decision has this record. Each line is one decision:
-`egress_allow` / `egress_deny` for connections, the `egress_mitm_*` records
-for TLS interception, `egress_dns_allow` / `egress_dns_deny` for name
-resolution, the UDP, listen, cap, swap, and loop-guard records the mediator
-emits as it runs, and `broker_request_allow` / `broker_request_deny` for
-brokered requests (verdict plus minimized metadata — method, host, status,
-byte counts, timing, and the names of the credential references used). The
-audit log is a separate stream from lifecycle [`events`](/cli/events/):
+configured, the broker's per-request decision records are merged into the same
+time-ordered view.
+
+The record types you'll see most:
+
+- `egress_allow` / `egress_deny` — a connection was allowed or denied
+- `egress_dns_allow` / `egress_dns_deny` — a name-resolution ruling
+- `broker_request_allow` / `broker_request_deny` — one brokered request:
+  verdict plus minimized metadata (method, host, status, byte counts, timing,
+  and the names — never the values — of the credential references used)
+- `egress_mitm_*` — TLS-interception records (`mitm` mode only)
+- UDP, listen, cap, swap, and loop-guard records the mediator emits as it runs
+
+The vocabulary is intentionally open-ended — `egress` prints whatever was
+recorded, including record types and fields added after this page was written;
+see [egress mediation](/concepts/egress-mediation/) for the full taxonomy. An
+absent audit log is not an error: it simply means no decision has been recorded
+yet (or mediation is `off`), and `egress` reports an empty list.
+
+The audit log is a separate stream from lifecycle [`events`](/cli/events/):
 `events` shows how the workspace got to its current state, `egress` shows what
 it tried to reach on the network and how each attempt was ruled on.
-
-The vocabulary of event types is intentionally open-ended — `egress` prints
-whatever was recorded, including event types and fields added after this page
-was written. An absent audit log is not an error: it simply means no decision
-has been recorded yet (or mediation is `off`), and `egress` reports an empty
-list.
 
 By default `egress` prints the recorded decisions once. With `--follow` (`-f`)
 it prints them and then streams new decisions as the workspace makes them,
@@ -42,17 +62,10 @@ not supported with JSON/AX output.
 
 ## Examples
 
-Show the recorded decisions:
+Get the decisions as JSON:
 
 ```bash
-microagent egress research
 microagent --json egress research
-```
-
-```text
-2026-06-16T00:00:01Z  egress_allow  api.github.com  140.82.0.1:443
-2026-06-16T00:00:02Z  egress_deny  evil.example  not allowlisted
-2026-06-16T00:00:03Z  egress_dns_deny  -  blocked
 ```
 
 Follow a workspace's egress decisions live:

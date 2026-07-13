@@ -1,6 +1,9 @@
 # Demo files
 
-The operator-supplied files for the [simple-agent recipe](../../../docs/guides/simple-agent.md). They live here so the recipe can `microagent cp` them into a workspace by repo path, instead of asking you to retype JSON into your terminal.
+Operator-supplied inputs for the generated agent. They exist so you can
+`microagent cp` a ready-made request into the workspace instead of retyping
+JSON into your terminal. The walkthrough that uses them is the
+[simple-agent guide](https://github.com/geoffbelknap/microagent/blob/main/docs/guides/simple-agent.md).
 
 | File | What it is |
 |---|---|

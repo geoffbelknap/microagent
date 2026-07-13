@@ -4,7 +4,7 @@ description: Pull, list, tag, push, and prune local image records.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-25_
+_Last updated: 2026-07-13_
 
 ```text
 microagent image pull <image> [--state-dir <dir>]                    Pull and record an image
@@ -92,9 +92,11 @@ and deletes a reusable image-store rootfs only when no remaining image record
 points to that file.
 
 For clean workspace baselines, `create` reuses a pulled or tagged image record
-when the workspace has no setup commands, entrypoint, env overrides, or
-attached disks. Workspaces that need guest config are rebuilt from the source
-OCI image so their init config is baked into the rootfs.
+only when the workspace needs no guest configuration at all: no setup commands
+or entrypoint, no env overrides, no custom shell or hostname, no injected
+files, no attached disks, and no published ports. Workspaces that need guest
+config are rebuilt from the source OCI image so their init config is baked
+into the rootfs.
 
 For private registries, image pulls resolve credentials without any Docker
 dependency: from `$REGISTRY_AUTH_FILE` (the convention shared with
@@ -137,7 +139,7 @@ Flags you'll actually use:
 
 ## Exit status
 
-`images` subcommands exit `0` on success; nonzero when an image reference
+`image` subcommands exit `0` on success; nonzero when an image reference
 cannot be resolved, a pull or push fails, or a deletion needs confirmation that
 non-interactive input cannot provide. In AX mode a failure is written as a
 structured error envelope.

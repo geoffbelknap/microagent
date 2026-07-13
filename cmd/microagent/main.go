@@ -4136,6 +4136,7 @@ Usage:
   microagent exec NAME -- CMD
 
 Commands:
+  init                 Scaffold a starter agent project
   run                  Run something once and discard state
   dispatch             Run one task in an isolated workspace; return result + egress audit
   create               Create a persistent workspace
@@ -4158,6 +4159,9 @@ Resources:
   artifact             List or retrieve declared workspace artifacts
   secret check         Validate secret references
   registry             Store credentials for private OCI registries
+
+Agents:
+  serve mcp            Expose microagent tools to AI clients over MCP
 
 More:
   microagent <command> --help
@@ -4199,6 +4203,7 @@ Commands:
   egress               Show or stream the egress mediator's audit decisions
   stats                Show or stream workspace resource usage
   snapshot             Create, list, or remove workspace snapshots
+  serve mcp            Serve the MCP stdio endpoint for AI clients
   secret check         Resolve and validate secret references
   registry             Store credentials for private OCI registries (login/logout/list)
   profiles             List resource profiles

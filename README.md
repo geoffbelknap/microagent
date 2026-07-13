@@ -2,11 +2,13 @@
 
 Run AI agent workspaces in microVMs.
 
-Each agent gets its own Linux microVM with its own kernel, rootfs, state, and
-lifecycle. Boot from an OCI image and tear down, or keep the workspace around
-and halt/resume it later. Linux and macOS are supported host targets. On a new
-host, run `microagent doctor` before you create workspaces. Identity, policy,
-credentials, and control-plane decisions stay in your code.
+Each agent gets its own real Linux VM - its own kernel, its own disk, its own
+network - not a shared-kernel container. microagent boots those VMs from the
+same container (OCI) images you already build, converted into bootable disks.
+Run something once and throw it away, keep a workspace around and come back to
+it, or run a task and get a report of everything it tried to reach on the
+network. Linux and macOS hosts are supported; on a new host, run
+`microagent doctor` first.
 
 The project is a Go library first. The `microagent` CLI is a thin shell over
 the exported packages, so anything the CLI can do, your Go program can do
@@ -43,6 +45,9 @@ microagent doctor                                # check the host
 
 # one-shot: boot, run, tear down
 microagent run docker.io/library/ubuntu:24.04 uname -a
+
+# same, plus a report of what the task reached on the network
+microagent dispatch docker.io/library/python:3.12 python -c 'print(2+2)'
 ```
 
 `microagent run` also accepts the explicit form when you want shell command
@@ -57,9 +62,10 @@ container-style aliases are supported where they map cleanly to microVMs:
 `-e/--env`, `-p/--publish`, `-v/--volume` for named volumes, tar bundles, and
 ext4 disk images, `--name`, and `--rm`.
 
-Private registry pulls use standard registry credential configuration from
-`$DOCKER_CONFIG/config.json` or `~/.docker/config.json`, including configured
-credential helpers.
+Private registries: log in once with `microagent registry login`, or point
+`$REGISTRY_AUTH_FILE` at an existing auth file. microagent never reads Docker's
+`config.json` or runs credential helpers; public images always pull
+anonymously.
 
 For workspaces that stick around:
 
@@ -89,35 +95,10 @@ Other useful commands:
 - `microagent cp` and `microagent artifact get` move files without entering a running VM.
 - `microagent perf` measures boot and runtime footprint.
 
-For agent clients, AX mode and the MCP endpoint return structured responses
-for lifecycle, status, exec, images, copy/artifacts, cost estimation,
-idempotency, and capability discovery. Coding tools should launch the local
-stdio server with `microagent serve mcp`; see
-[`microagent serve`](docs/cli/serve.md) for Codex, Claude Code, VS Code, and
-GitHub Copilot CLI configuration snippets.
-
-## What it owns
-
-The VM boundary: kernel management, OCI-to-rootfs builds, local image records,
-VM lifecycle (`run`, `create`, `start`, `halt`, `quarantine`, `stop`, `kill`,
-`delete`), networking and vsock wiring, serial console, stopped-disk file
-transfer, structured exec, structured results, declared artifacts, readiness,
-runtime verification, lifecycle events, the MCP adapter, and backend
-supervisors.
-
-## What it doesn't own
-
-Planning loops, LLM calls, tool mediation, policy decisions, credential
-brokering, and audit interpretation. Other projects own those; `microagent`
-provides the VM layer underneath them.
-
-It also does not expose container-engine APIs, compose projects, pods,
-privileged mode, namespace/device controls, or host directory bind mounts.
-MicroAgent accepts only the subset that maps cleanly to a microVM boundary,
-including [named volumes](docs/concepts/storage.md) (single-attach managed
-disks) and [user-mode networking](docs/guides/networking.md) (unprivileged
-outbound NAT with published ports), plus a fully `isolated` mode, but never the
-daemon-managed, concurrently-shared container models.
+Driving microagent from an AI agent or a coding tool? The MCP server and the
+AX output mode return structured, typed responses instead of text to scrape.
+Point your client at `microagent serve mcp`; see
+[`microagent serve`](docs/cli/serve.md) for per-client setup snippets.
 
 ## Docs
 
@@ -146,6 +127,23 @@ Pick the path that matches what you're doing:
 | [Storage](docs/concepts/storage.md) | Rootfs disks, named volumes, tar bundles, and stopped-disk copy |
 | [Security](docs/security.md) | Trust boundary; see [`SECURITY.md`](SECURITY.md) for disclosure |
 | [Troubleshooting](docs/troubleshooting.md) | Common failure modes, indexed by symptom |
+| [Glossary](docs/concepts/glossary.md) | The handful of words the docs lean on: workspace, rootfs, egress, broker |
+
+## Where microagent stops
+
+microagent owns everything at the VM boundary: it turns container images into
+bootable disks, boots and supervises the VMs, wires up their networking and
+console, runs commands inside them with typed results, and moves files in and
+out. It deliberately stops there - your code (or your agent framework) decides
+*what* to run and *why*. Planning loops, LLM calls, policy, credential
+decisions, and audit interpretation belong to the layer above; microagent is
+the VM layer underneath them.
+
+It is also not a container engine. Container-style conveniences (`-e`, `-p`,
+`-v`, `--name`, `--rm`, [named volumes](docs/concepts/storage.md),
+[user-mode networking](docs/guides/networking.md)) are supported where they map
+cleanly to a real VM boundary; container-engine APIs, compose projects, pods,
+privileged mode, and host directory bind mounts are not.
 
 ## Project
 

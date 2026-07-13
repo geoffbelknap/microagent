@@ -17,10 +17,21 @@ For the walkthrough - create, deliver a request, run, halt-and-resume, retrieve 
 
 ## Other providers
 
-Sibling examples for the same agent shape with different model providers:
+`microagent init <name> --provider openai` (or `gemini`) scaffolds the same
+agent shape against OpenAI Chat Completions or Google Gemini function calling.
 
-- [`../minimal-agent-openai/`](../minimal-agent-openai/) - OpenAI Chat Completions with function calling.
-- [`../minimal-agent-gemini/`](../minimal-agent-gemini/) - Google Gemini with function calling.
+## Keep in sync
+
+Apart from this README, this directory is the checked-in output of
+`microagent init minimal-agent --provider anthropic`. If you change the
+scaffold templates in `pkg/scaffold/templates/`, regenerate this example so
+they don't drift (then restore this README, which the scaffold's generic one
+overwrites):
+
+```sh
+microagent init minimal-agent --provider anthropic --dir examples/minimal-agent --force
+git checkout -- examples/minimal-agent/README.md
+```
 
 ## Run
 

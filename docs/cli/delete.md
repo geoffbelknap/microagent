@@ -4,7 +4,7 @@ description: Remove a workspace and everything it owns on disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-07-13_
 
 ```text
 microagent delete <name> [--yes] [--force] [--state-dir <dir>]
@@ -14,9 +14,10 @@ microagent delete <name> [--yes] [--force] [--state-dir <dir>]
 bundles, state file). It's the end of the line - to shut a workspace down and
 keep it, use [`halt`](/cli/halt/) instead.
 
-By default, `delete` asks for confirmation. If the workspace is running, it
-asks whether to stop and delete it. Use `--yes` for non-interactive cleanup.
-Use `--force` to kill a running workspace before deleting it.
+By default, `delete` asks for confirmation. If the workspace is running, the
+prompt becomes "Stop and delete it?". Either `--yes` or `--force` skips the
+prompt; on a running workspace, `--yes` stops it gracefully before deleting,
+while `--force` kills it instead.
 
 ## Examples
 
@@ -49,8 +50,10 @@ microagent delete agent-1 --state-dir /tmp/microagent
 
 Flags you'll actually use:
 
-- `--yes` / `-y` - skip the confirmation prompt in scripts
-- `--force` / `-f` - kill a running workspace first instead of refusing
+- `--yes` / `-y` - skip the confirmation prompt in scripts; stops a running
+  workspace before deleting
+- `--force` / `-f` - also skips the prompt, but kills a running workspace
+  instead of stopping it
 
 The complete set:
 
@@ -62,7 +65,7 @@ The complete set:
 | `--backend <name>` | Backend identity override |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 | `--yes`, `-y` | Confirm deletion without prompting |
-| `--force`, `-f` | Kill a running workspace before deleting |
+| `--force`, `-f` | Skip the prompt and kill a running workspace before deleting |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
@@ -71,8 +74,8 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 `delete` exits `0` when the workspace and its artifacts are removed; nonzero
 when the workspace cannot be found or removed, or when a running workspace
 cannot be stopped or killed before deletion. A non-interactive run without
-`--yes` that would require confirmation also fails rather than prompting
-blindly. In AX mode a failure is written as a structured error envelope (a
+`--yes` or `--force` that would require confirmation also fails rather than
+prompting blindly. In AX mode a failure is written as a structured error envelope (a
 missing workspace maps to `not_found`).
 
 ## Related

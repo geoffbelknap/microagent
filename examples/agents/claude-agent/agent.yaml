@@ -3,8 +3,9 @@
 #   microagent dispatch --file examples/agents/claude-agent/agent.yaml
 #
 # No image to build: the thin python base is pulled, the SDK is installed at boot,
-# agent.py is dropped in, and it runs under guarded egress with the Anthropic API
-# key injected host-side (the guest only ever holds the placeholder below).
+# agent.py is dropped in, and it runs under mitm egress — cred-swap rewrites the
+# auth header inside TLS, which needs host-side interception — with the Anthropic
+# API key injected host-side (the guest only ever holds the placeholder below).
 #
 # NOTE: claude-agent-sdk bundles the Claude Code CLI and shells out to it. If your
 # environment needs Node.js for the bundled CLI, add it to setup (e.g. a node base
@@ -22,5 +23,5 @@ env:
   ANTHROPIC_API_KEY: "sk-ant-placeholder-cred-swap-overwrites-this"
 agent:
   entry: python /app/agent.py
-  egress: guarded
+  egress: mitm  # cred-swap needs TLS interception; broker (the default) splices opaquely
   cred-swap: [anthropic]

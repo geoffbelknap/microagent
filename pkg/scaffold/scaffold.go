@@ -85,10 +85,15 @@ var fileSpecs = []fileSpec{
 	{out: "agent.py", src: "templates/agent/%s.py.tmpl", template: true},
 	{out: "protocol.py", src: "templates/protocol.py"},
 	{out: "README.md", src: "templates/README.md.tmpl", template: true},
+	{out: "demo/README.md", src: "templates/demo/README.md"},
 	{out: "demo/constraints.json", src: "templates/demo/constraints.json"},
 	{out: "demo/system_prompt.md", src: "templates/demo/system_prompt.md"},
+	{out: "demo/hello.json", src: "templates/demo/hello.json"},
 	{out: "demo/input-001.json", src: "templates/demo/input-001.json"},
 	{out: "demo/input-002.json", src: "templates/demo/input-002.json"},
+	{out: "demo/clone-and-test.json", src: "templates/demo/clone-and-test.json"},
+	{out: "demo/analyze-file.json", src: "templates/demo/analyze-file.json"},
+	{out: "demo/data/sales-sample.csv", src: "templates/demo/data/sales-sample.csv"},
 }
 
 type templateData struct {

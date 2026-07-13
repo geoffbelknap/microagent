@@ -3,8 +3,9 @@
 #   microagent dispatch --file examples/agents/openai-agent/agent.yaml
 #
 # No image to build: the thin python base is pulled, the SDK is installed at boot,
-# agent.py is dropped in, and it runs under guarded egress with the OpenAI API key
-# injected host-side (the guest only ever holds the placeholder below).
+# agent.py is dropped in, and it runs under mitm egress — cred-swap rewrites the
+# auth header inside TLS, which needs host-side interception — with the OpenAI API
+# key injected host-side (the guest only ever holds the placeholder below).
 name: openai-agent
 image: docker.io/library/python:3.12-slim
 setup:
@@ -18,5 +19,5 @@ env:
   OPENAI_API_KEY: "sk-placeholder-cred-swap-overwrites-this"
 agent:
   entry: python /app/agent.py
-  egress: guarded
+  egress: mitm  # cred-swap needs TLS interception; broker (the default) splices opaquely
   cred-swap: [openai]

@@ -4,15 +4,19 @@ description: Download and manage local HuggingFace GGUF model files.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 ```text
 microagent model pull <hf-ref> [--token <t>] [--state-dir <dir>]                  Download a GGUF model
 microagent model list [--state-dir <dir>]                                           List stored models
 microagent model delete <ref> [--keep-files] [--state-dir <dir>]                      Remove a model and its blob
 microagent model prune [--delete-files] [--state-dir <dir>]                       Drop records for missing blobs
-microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>] [--runner-gpu <off|on|auto>] [--runner-model <id>] [--runner-served-model <name>] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Serve a model on the host
-microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>] [--runner-gpu <off|on|auto>] [--runner-model <id>] [--runner-served-model <name>] [--runner-command <template>] [--runner-name <name>] [--runner-health-path <path>] [--runner-arg <arg>] [--runner-env KEY=VALUE] [--token <t>] [--state-dir <dir>]   Alias for model serve
+microagent model serve <hf-ref> [--dedicated] [--runner <llamacpp|vllm|custom>]   Serve a model on the host
+                       [--runner-gpu <off|on|auto>] [--runner-model <id>]
+                       [--runner-served-model <name>] [--runner-command <template>]
+                       [--runner-name <name>] [--runner-health-path <path>]
+                       [--runner-arg <arg>] [--runner-env KEY=VALUE]
+                       [--token <t>] [--state-dir <dir>]
 microagent model stop <hf-ref> [--state-dir <dir>]                                Stop a model's runners
 microagent model runners [--state-dir <dir>]                                      List running model servers
 microagent model policy validate <policy.json>                                    Validate a mediation policy file
@@ -111,7 +115,7 @@ With the global `--json` flag, records are returned under `models`:
 | `stop` | Force-stop all model server processes for a model ref |
 | `runners` | List currently running model server processes |
 | `policy validate` | Validate a structured model mediation policy file |
-| `policy evaluate` | Dry-run a policy file against structured request metadata |
+| `policy evaluate` | Dry-run a policy file against structured request metadata (`policy eval` is an accepted alias) |
 
 `serve` supports three runner backends. `llamacpp` is the default and uses
 `llama-server` with CPU execution unless GPU use is explicitly requested.

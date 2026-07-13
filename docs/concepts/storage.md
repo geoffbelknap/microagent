@@ -4,7 +4,7 @@ description: Choose between the rootfs, attached disks, tar bundles, and named v
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 A workspace sees block devices, never host directories. microagent does not
 expose host bind mounts - everything the guest reads or writes is an ext4
@@ -19,7 +19,8 @@ walkthrough of these mechanisms, see
 Every workspace boots from a rootfs: an ext4 image built from an OCI image
 (`run`/`create`) or an existing rootfs path. It is per-workspace and lives under
 `<state-dir>/workspaces/<name>/rootfs.ext4`. Writes inside the guest persist in
-that image across stop/start, and are discarded by `delete` (and by `run --delete`).
+that image across stop/start, and are discarded by `delete` (a one-shot `run`
+discards them by default; `--rm` spells that out, `--keep` opts out).
 [`commit`](/cli/commit/) snapshots a stopped rootfs back into an OCI image.
 
 ## Attaching extra storage
@@ -52,7 +53,7 @@ microagent run docker.io/library/python:3.12 --volume data:/work
 ```
 
 Volumes live under `<state-dir>/volumes/` (an `index.json` registry plus one
-`<name>.ext4` per volume). A volume is **single-attach**: at most one running
+disk per volume - bare ext4 as `<name>.ext4` on the Linux and macOS backends). A volume is **single-attach**: at most one running
 workspace holds it at a time, so two VMs never mount the same ext4 read-write. A
 holder that is no longer running is reclaimed automatically, and deleting a
 workspace releases the volumes it held; the data persists for the next attach.

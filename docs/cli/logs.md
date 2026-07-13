@@ -4,11 +4,13 @@ description: Read or follow a workspace's captured serial console output.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-07-13_
 
 ```text
 microagent logs <name> [--follow] [--state-dir <dir>]
 ```
+
+`microagent log` is accepted as an alias for `logs`.
 
 `logs` prints the captured serial console output for a workspace. It is useful
 for boot diagnostics and for reviewing output after an interactive

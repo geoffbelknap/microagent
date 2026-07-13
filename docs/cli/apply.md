@@ -4,7 +4,7 @@ description: Apply supported workspace spec changes without rebuilding the rootf
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 ```text
 microagent apply --file <path> [--state-dir <dir>]
@@ -17,7 +17,9 @@ Today it supports:
 
 - restart policy changes
 - network intent changes while the workspace is stopped
-- live port-forward host bind changes when the workspace is running
+- live port-forward host bind changes when the workspace is running, provided
+  the backend supports live network apply (otherwise `apply` errors and asks
+  for a stop/start)
 
 ## Examples
 

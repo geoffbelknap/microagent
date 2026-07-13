@@ -4,7 +4,7 @@ description: Embed microagent from Go instead of shelling out to the CLI.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 `microagent` is a Go library with a CLI on top. If you are building an agent
 runtime, scheduler, local developer tool, or backend service, import the Go
@@ -30,15 +30,23 @@ Orchestration, policy, planning, and LLM behavior stay with the caller; see
 
 ## Main packages
 
+The core packages most programs start with:
+
 | Package | Use it for |
 |---|---|
 | `pkg/workspace` | Create, run, start, inspect, stop, delete, clone, copy files, read logs, collect results, and supervise workspaces. |
 | `pkg/rootfs` | Converting OCI images and tar bundles into ext4 rootfs disks. |
-| `pkg/kernel` | Installing and verifying default backend kernels. |
+| `pkg/kernel` | Installing, verifying, and update-checking default backend kernels. |
 | `pkg/imagecache` | Pulling, tagging, listing, removing, and pruning reusable local rootfs baselines. |
 | `pkg/diagnostics` | Check whether the current host can boot a VM. |
 | `pkg/perf` | Measuring boot, footprint, and steady-state VM performance. |
 | `pkg/vmkit` | Shared request/response types and supervisor clients. |
+
+Supporting packages back specific workflows - structured exec types
+(`pkg/workspace/exec/protocol`), image commit, models and model runners,
+volumes, secrets, and registry auth. The
+[Go library reference](/library/go/#exported-packages) lists them all with
+their entry points.
 
 ## CLI or library?
 

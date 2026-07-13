@@ -48,7 +48,12 @@ func TestGenerateDefaultProvider(t *testing.T) {
 	wantFiles := []string{
 		"README.md",
 		"agent.py",
+		"demo/README.md",
+		"demo/analyze-file.json",
+		"demo/clone-and-test.json",
 		"demo/constraints.json",
+		"demo/data/sales-sample.csv",
+		"demo/hello.json",
 		"demo/input-001.json",
 		"demo/input-002.json",
 		"demo/system_prompt.md",

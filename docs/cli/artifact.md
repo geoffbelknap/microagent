@@ -4,7 +4,7 @@ description: List and retrieve declared workspace artifacts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-07-13_
 
 ```text
 microagent artifact <name> [--state-dir <dir>]                                              List declared artifacts
@@ -14,8 +14,10 @@ microagent artifact get <name> <artifact> <target> [--state-dir <dir>] [--debugf
 `artifact` reports the input bundles and output paths declared in the
 workspace manifest. `artifact get` retrieves a declared output artifact by
 name without entering the workspace - the host reads it straight off the
-workspace disk. Only declared `outputs` are retrievable by artifact name; for
-arbitrary file copying, use [`cp`](/cli/cp/).
+workspace disk, so the workspace must be prepared, halted, or stopped
+(`artifact get` fails on a running workspace). Only declared `outputs` are
+retrievable by artifact name; for arbitrary file copying, use
+[`cp`](/cli/cp/).
 
 ## Examples
 
@@ -44,8 +46,9 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 ## Exit status
 
 `artifact` exits `0` when the workspace manifest is found and read; nonzero
-when the workspace cannot be found, the named artifact is not declared, or the
-read from the workspace disk fails. In AX mode a failure is written as a
+when the workspace cannot be found, the named artifact is not declared, the
+workspace is running (for `artifact get`), or the read from the workspace disk
+fails. In AX mode a failure is written as a
 structured error envelope.
 
 ## Related

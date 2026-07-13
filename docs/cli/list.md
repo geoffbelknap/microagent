@@ -4,7 +4,7 @@ description: List saved workspaces and their current state.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-07-13_
 
 ```text
 microagent list [--state-dir <dir>]
@@ -34,8 +34,8 @@ Text output is one row per saved workspace:
 
 ```text
 NAME                     STATE        BACKEND      PROFILE      NETWORK    RESTART
-research                 running      firecracker  medium       user       on-failure
-template                 stopped      firecracker  small        user       never
+research                 running      linux-kvm    medium       user       on-failure
+template                 stopped      linux-kvm    small        user       never
 ```
 
 With `--json`, the rows are returned under `workspaces`:

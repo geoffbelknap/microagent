@@ -4,7 +4,7 @@ description: Declarative microagent.yaml format for reproducible creates.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-11_
+_Last updated: 2026-07-13_
 
 `microagent.yaml` records the inputs needed to recreate a workspace from source
 control. It is the declarative form of [`microagent create`](/cli/create/):
@@ -17,6 +17,19 @@ Pass it with `--file` to `create` (auto-discovered as `microagent.yaml` /
 [`dispatch`](/cli/dispatch/) for one-shot work. With the optional `agent:` block
 (below), a spec doubles as an **Agentfile** — a build-free recipe for running an
 agent in an isolated workspace.
+
+A minimal spec needs only a few lines:
+
+```yaml
+name: research
+image: docker.io/library/ubuntu:24.04
+profile: medium
+setup:
+  - mkdir -p /workspace
+entrypoint: /app/start.sh
+```
+
+Everything else is optional. The kitchen-sink example:
 
 ```yaml
 name: research
@@ -128,9 +141,11 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `profile` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `restart` | Restart policy: `never`, `on-failure`, or `always` |
 | `entrypoint` | Command to run when the workspace starts |
+| `service` | Long-running shell command to run as the VM service (the `--service-command` flag) |
 | `shell` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
 | `hostname` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
 | `setup` | Commands to run before first start |
+| `setupFiles` | Host script files whose contents run as setup commands after `setup`; paths relative to the spec file or absolute |
 | `files` | Source files to copy into the workspace rootfs |
 | `files[].src` | Host path, relative to the spec file or absolute |
 | `files[].dst` | Absolute guest path to write |
@@ -152,6 +167,13 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `resources.memoryMiB` | Memory override |
 | `resources.cpuCount` | CPU override |
 | `resources.sizeMiB` | Rootfs disk size override |
+| `network.mode` | Network mode: `user` (default) or `isolated` |
+| `network.forwards` | Published ports; each entry takes `protocol` (default `tcp`), `host`, `hostPort`, `guestPort` |
+| `network.dns` | Guest DNS server list |
+| `network.routes` | Extra guest static routes |
+| `network.ip` | Static guest IP override |
+| `network.subnet` | Guest subnet override |
+| `network.gateway` | Guest gateway override |
 | `mediation` | Guest-to-host vsock mediation channel contract |
 | `mediation.enabled` | Enables the mediation declaration |
 | `mediation.required` | Requires the channel for workspace startup |
@@ -167,6 +189,8 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `health.retries` | Consecutive failures before the workspace is considered unhealthy (default 3) |
 | `health.startPeriodSeconds` | Grace period after start before probing begins (default 0) |
 | `disks` | Existing ext4 disks to attach |
+| `disks[].sourcePath` | Path the disk content came from; for `bundles:` entries it is the source tar (defaults to `path`) |
+| `disks[].bundle` | Set automatically: `false` for `disks:` entries, `true` for `bundles:` entries (visible in persisted manifests) |
 | `bundles` | Tar bundles to build into ext4 disks and attach |
 | `outputs` | Declared output artifact paths inside the workspace |
 | `agent.entry` | The agent's run command (the one-shot exec); a CLI `--exec` overrides it |
@@ -180,6 +204,23 @@ microagent create --file microagent.yaml --name research-2 --profile large
 | `agent.broker.capture` | Opt in to raw capture of pre-swap broker requests to an owner-only file; off by default (the default record is the minimized decision stream) |
 | `agent.broker.ca` | PEM bundle path this broker's upstream TLS client trusts; empty means system roots |
 | `agent.brokers` | Declare multiple broker endpoints instead of a single `agent.broker`; a list of blocks with the same `upstream`/`secret`/`env`/`proxy`/`capture`/`ca` fields, one per endpoint. Setting both `agent.broker` and `agent.brokers` is rejected |
+
+The less obvious fields in YAML form - a long-running service, setup from a
+script file, and the `network:` block:
+
+```yaml
+service: /usr/local/bin/homebridge
+setupFiles:
+  - ./setup.sh          # file contents run as one setup command
+network:
+  mode: user
+  forwards:
+    - protocol: tcp
+      host: 127.0.0.1
+      hostPort: 8581
+      guestPort: 8581
+  dns: [1.1.1.1]
+```
 
 ## Related
 

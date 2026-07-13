@@ -4,7 +4,7 @@ description: Open an interactive console shell inside a workspace.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 ```text
 microagent connect <name> [--send "<line>"] [--state-dir <dir>] [--timeout <seconds>] [--ready-timeout <seconds>]
@@ -15,10 +15,14 @@ human at a keyboard. With `--send` it writes one line to the console and prints
 any new output. When a script or agent needs typed stdout/stderr/exit-code
 results, use [`exec`](/cli/exec/) instead.
 
-In interactive mode, press `Ctrl-]` to detach from the console without stopping
-the workspace. Typing `exit` closes the current guest shell and returns from
-`connect`; the workspace stays running unless you run a shutdown command such as
-`poweroff`.
+In interactive mode, press `Ctrl-]` (or the docker-style `Ctrl-P Ctrl-Q`
+sequence) to detach from the console without stopping the workspace. Typing
+`exit` closes the current guest shell and returns from `connect`; the workspace
+stays running unless you run a shutdown command such as `poweroff`.
+
+Interactive sessions are not supported in [AX mode](/concepts/glossary/); the
+command is rejected with an error telling you to use `connect --send`, which
+returns structured output.
 
 Use [`logs`](/cli/logs/) when you want captured serial output instead of an
 interactive console.
@@ -39,26 +43,30 @@ microagent connect research --send "cat /workspace/status; uname -m"
 ```
 
 `connect` waits for the backend console endpoint and, by default, for a basic
-shell prompt before attaching or writing. With `--send`, a timeout means the
-command did not report completion before the deadline; the command exits with an
-error and includes any partial output that was captured. If the guest shell is
-not ready, it exits with an error that points to [`logs`](/cli/logs/).
+shell prompt before attaching or writing (`--ready-timeout`, default 10
+seconds; `0` disables the wait). With `--send`, output is collected for
+`--timeout` seconds (default 5); a timeout means the command did not report
+completion before the deadline, and the command exits with an error that
+includes any partial output that was captured. If the shell prompt never
+appears, `connect` exits with an error saying the guest shell is not ready -
+check [`logs`](/cli/logs/) for boot progress.
 
 ## Flags
 
 Flags you'll actually use:
 
 - `--send <line>` - one-shot console input without an interactive session
-- `--timeout <seconds>` - how long `--send` waits for output
+- `--timeout <seconds>` - how long `--send` waits for output (default `5`)
 - `--ready-timeout <seconds>` - how long to wait for a shell prompt first
+  (default `10`)
 
 The complete set:
 
 | Flag | Description |
 |---|---|
 | `--send <line>` | Write one line to the console and print new output |
-| `--timeout <seconds>` | Seconds to wait for output after `--send` |
-| `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before attaching or sending; `0` disables |
+| `--timeout <seconds>` | Seconds to wait for output after `--send` (default `5`) |
+| `--ready-timeout <seconds>` | Seconds to wait for a shell prompt before attaching or sending (default `10`; `0` disables) |
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
 
 See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`.

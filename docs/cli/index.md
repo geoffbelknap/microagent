@@ -4,13 +4,16 @@ description: All microagent subcommands at a glance.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
+
+New to the vocabulary? See the [glossary](/concepts/glossary/).
 
 ## Which command do I want?
 
 | I want to... | Use |
 |---|---|
 | Run something once and throw it away | [`run`](/cli/run/) |
+| Run one task and see what it touched on the network | [`dispatch`](/cli/dispatch/) |
 | Keep a workspace around between boots | [`create`](/cli/create/), then [`start`](/cli/start/) |
 | Get a shell inside a workspace | [`connect`](/cli/connect/) |
 | Run a command inside and get its exit code | [`exec`](/cli/exec/) |
@@ -32,6 +35,7 @@ _Last updated: 2026-06-27_
 |---|---|
 | [`init`](/cli/init/) | Scaffold a starter agent project |
 | [`run`](/cli/run/) | Boot an image and run a command, then tear down |
+| [`dispatch`](/cli/dispatch/) | Run one task in a single-use workspace with an egress audit receipt |
 | [`create`](/cli/create/) | Create a named, persistent workspace |
 | [`apply`](/cli/apply/) | Apply supported workspace spec changes without rebuilding |
 | [`clone`](/cli/clone/) | Copy a stopped workspace into a new workspace |
@@ -64,6 +68,7 @@ _Last updated: 2026-06-27_
 | [`exec`](/cli/exec/) | Run a structured command in a workspace |
 | [`profiles`](/cli/profiles/) | List exact named resource profiles |
 | [`image`](/cli/image/) | Manage local image records |
+| [`registry`](/cli/registry/) | Store credentials for private OCI registries |
 | [`perf`](/cli/perf/) | Measure workspace boot performance |
 | [`serve`](/cli/serve/) | Run the MCP stdio server for agent clients |
 | [`contract`](/cli/contract/) | Print the runtime fields integrations rely on |
@@ -104,9 +109,15 @@ produce output. Subcommand pages link back here rather than repeat them.
   value (`ux`/`human`/`text` map to UX; `ax`/`agent`/`json` map to AX). `--mode
   ax` implies `--json`; when neither is set, `MICROAGENT_OUTPUT=json|text`
   selects the format and output otherwise follows whether stdout is a terminal.
-- `--supervisor <path>` - override the installed host backend supervisor path
-  (`MICROAGENT_APPLEVF_SUPERVISOR` and
-  `MICROAGENT_FIRECRACKER_SUPERVISOR` work too)
+
+In AX mode, any command failure is written as a structured error envelope on
+stdout - command pages say "in AX mode a failure is written as a structured
+error envelope" and mean exactly this.
+
+`--supervisor <path>` overrides the installed host backend supervisor path
+(`MICROAGENT_APPLEVF_SUPERVISOR` and `MICROAGENT_FIRECRACKER_SUPERVISOR` work
+too), but it is **not** a global flag - pass it after the subcommand, on the
+commands that accept it.
 
 ## Output
 

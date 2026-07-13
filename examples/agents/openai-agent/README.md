@@ -12,31 +12,36 @@ microagent dispatch --file examples/agents/openai-agent/agent.yaml
 ```
 
 What happens: pull `python:3.12-slim` → `pip install openai-agents` inside the
-booted VM → drop `agent.py` → run it under **guarded** egress. The SDK sends
+booted VM → drop `agent.py` → run it under **mitm** egress (credential swap
+rewrites the auth header inside TLS, so it needs interception). The SDK sends
 `Authorization: Bearer <placeholder>` to `api.openai.com`; the mediator **replaces**
 it host-side with your real `OPENAI_API_KEY` (resolved from `env:OPENAI_API_KEY` on
 the host). The guest never holds the real key. You also get the egress audit
 receipt showing exactly what the agent reached.
 
-## Tightening the envelope (`strict`)
+## Tightening the envelope (locked allowlist)
 
-`guarded` allows public egress, so both the boot-time `pip install` and the
-provider call work. To run under `strict` (allowlist-only), pre-bake the deps so
-no install is needed at run time, then allow only the provider host:
+The mediating modes allow public egress by default, so both the boot-time
+`pip install` and the provider call work. To confine the run to allowlisted
+hosts only, pre-bake the deps so no install is needed at run time, then lock
+the allowlist:
 
 ```bash
 # 1. Build a reusable image once (deps baked in), via commit:
 microagent run --name openai-base --image docker.io/library/python:3.12-slim \
   --setup "pip install --no-cache-dir openai-agents" --keep --exec true
 microagent commit openai-base openai-agent-base:latest
-# 2. Dispatch the baked image under strict; cred-swap auto-allows api.openai.com:
-microagent dispatch --image openai-agent-base:latest --egress strict \
+# 2. Dispatch the baked image with the allowlist locked; cred-swap needs mitm
+#    and auto-allows api.openai.com:
+microagent dispatch --image openai-agent-base:latest \
+  --egress mitm --egress-lock-allowlist \
   --cred-swap openai --file - <<'EOF'   # or inline flags
 EOF
 ```
 
-(Under `strict`, only `api.openai.com` — auto-allowlisted by cred-swap — is
-reachable; the boot-time install is skipped because the deps are already baked.)
+(With `--egress-lock-allowlist`, only `api.openai.com` — auto-allowlisted by
+cred-swap — is reachable; the boot-time install is skipped because the deps are
+already baked.)
 
 ## Notes
 

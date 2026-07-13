@@ -24,12 +24,13 @@ want a named workspace that survives.
 
 ## Why dispatch
 
-The second half of the return value is the point. The egress audit is written by
-the mediator, **outside the guest's control**, so the summary is a trustworthy
-record of where the task actually connected — a prompt-injected or otherwise-rogue
-task can neither forge nor suppress it. Under the default `guarded` mode the
-mediator records allowed public destinations too (not just denials), so the
-summary reflects real behavior without needing `strict`.
+The second half of the return value is the point. Every dispatched task's
+network traffic passes through a small host-side process — the mediator — and
+it is the mediator, not the guest, that writes the record of every connection
+attempt: the mediator-written audit. Because that record lives **outside the
+guest's control**, a prompt-injected or otherwise-rogue task can neither forge
+nor suppress it. Under the default `broker` mode the mediator records allowed
+destinations too (not just denials), so the summary reflects real behavior.
 
 Pair it with [credential swap](/concepts/egress-mediation/#credential-swap): the
 guest can *use* a provider API key it can never read, because the real secret is
@@ -43,10 +44,21 @@ Run a command and throw the VM away, keeping the audit receipt:
 microagent dispatch docker.io/library/python:3.12 python -c 'print(2+2)'
 ```
 
-Delegate work that uses a provider key the guest never holds:
+Lock the task down to a handful of hosts — everything else is denied and shows
+up in the audit as a denial:
 
 ```bash
-microagent dispatch --egress strict --cred-swap anthropic \
+microagent dispatch --egress broker --egress-lock-allowlist \
+  --egress-allow api.example.com \
+  docker.io/library/python:3.12 python agent.py
+```
+
+Delegate work that uses a provider key the guest never holds
+([credential swap](/concepts/egress-mediation/#credential-swap) requires
+`--egress mitm`):
+
+```bash
+microagent dispatch --egress mitm --cred-swap anthropic \
   docker.io/library/python:3.12 python agent.py
 ```
 
@@ -79,12 +91,13 @@ With `--json` the result and audit are machine-readable:
 | `--file <path>` | Workspace spec / [Agentfile](/cli/spec/); flags override matching spec fields |
 | `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--timeout <seconds>` | Maximum wall-clock time before the task is killed |
-| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `guarded` (default; deny the inside, allow public), `strict` (deny non-allowlisted), or `off` |
-| `--egress-allow <host>` | Allowlisted egress destination (TLS-intercepted). Repeatable; an exact host or a `.suffix` matching the apex and subdomains |
+| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `broker` (default), `mitm`, or `off` |
+| `--egress-lock-allowlist` | Only allowlisted hosts are reachable. Works in `broker` or `mitm` |
+| `--egress-allow <host>` | Allowlisted egress destination. Repeatable; an exact host or a `.suffix` matching the apex and subdomains |
 | `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted. Repeatable. For cert-pinned / mTLS endpoints |
-| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress guarded` or `strict` |
-| `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress guarded` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
-| `--cred-swap PROVIDER[=ref]` | Shorthand for a credential swap against a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`): allowlists the provider host and injects its API key host-side so the guest never holds it. The optional `=ref` is a reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret. Repeatable; requires `--egress guarded` or `strict`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
+| `--egress-swap-config <path>` | Credential-swap config (YAML): the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
+| `--cred-swap PROVIDER[=ref]` | Credential swap for a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`); the optional `=ref` is a reference, never a literal secret. Repeatable; requires `--egress mitm` |
 | `--secret NAME=<scheme>:<ref>` | Deliver a secret to the guest tmpfs `/run/secrets`. Repeatable. See [`secret`](/cli/secret/) |
 | `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime, never written to tmpfs. Repeatable |
 | `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret |

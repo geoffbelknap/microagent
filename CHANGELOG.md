@@ -5,6 +5,18 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Fixed: the broker CONNECT tunnel is governed — default-off, inside-deny, anti-rebind
+
+The egress broker's HTTP CONNECT tunnel previously dialed any guest-chosen
+target with no policy, bypassing the datapath's inside-deny. CONNECT is now
+served only by an endpoint that declares `proxy` (a terminate-only endpoint
+answers `405`), and where enabled the tunnel resolves the target, denies
+fail-closed if any resolved IP is an inside/infrastructure address, and dials
+the exact classified IP — never re-resolving — so a DNS rebind cannot swap an
+allowed answer for an inside one. A per-endpoint CONNECT allowlist can lock
+the tunnel to named hosts. Both refusal paths emit the `denied` signal on the
+`broker_request_deny` record.
+
 ### Human-readable names for one-shot workspaces
 
 `run` and `dispatch` (CLI and `workspace.Run`/`workspace.RunDispatch`) now mint

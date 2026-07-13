@@ -113,7 +113,7 @@ A kept run is a regular workspace until you delete it:
 microagent delete report-run --yes
 ```
 
-`--delete` spells out the default disposable behavior; it exists so container-style
+`--rm` spells out the default disposable behavior; it exists so container-style
 muscle memory works. You only need a flag when you want the opposite, `--keep`.
 
 ## 5. Bound the run with a timeout

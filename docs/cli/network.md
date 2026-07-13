@@ -4,10 +4,11 @@ description: Inspect a workspace's networking.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 ```text
-microagent network <workspace> [--state-dir <dir>]   Inspect a workspace's network
+microagent network <workspace> [--state-dir <dir>]          Inspect a workspace's network
+microagent network status <workspace> [--state-dir <dir>]   Same, spelled out
 ```
 
 `network` reports the network mode, declared port forwards, DNS servers,

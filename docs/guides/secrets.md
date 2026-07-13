@@ -4,7 +4,7 @@ description: Get credentials into the guest without writing them to disk, plus o
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 Use secrets when a workload needs credentials without writing them into the
 rootfs, the manifest, or a snapshot. The guest can read materialized secrets
@@ -37,7 +37,12 @@ API_KEY  ok  source=env  bytes=40  warning: secret scheme "env" is plaintext: no
 host-side environment or files and warn on every resolve. They are fine for
 development. For production, use an external manager scheme such as
 `vault:<mount>/data/<path>#<field>`, which reads HashiCorp Vault KV v2 using
-`VAULT_ADDR`/`VAULT_TOKEN`.
+`VAULT_ADDR`/`VAULT_TOKEN`. For any other secret manager, `helper:<ref>` runs
+the executable named by `MICROAGENT_SECRET_HELPER` with `<ref>` as its one
+argument and takes the secret from its stdout - e.g.
+`API_KEY=helper:prod/api-key` with `MICROAGENT_SECRET_HELPER=/usr/local/bin/op-read`.
+Prefer it when your secrets live behind a CLI (1Password, AWS, `pass`, ...)
+that microagent has no built-in scheme for.
 :::
 
 Unknown schemes, missing schemes, and references that resolve empty all fail
@@ -46,7 +51,7 @@ scripts can gate on it.
 
 ## 2. Deliver a secret to a run
 
-Declare secrets on `run`, `create`, or `start` with `--secret`:
+Declare secrets on `run` or `create` with `--secret`:
 
 ```bash
 microagent run --secret API_KEY=env:API_TOKEN \

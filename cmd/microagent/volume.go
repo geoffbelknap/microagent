@@ -23,7 +23,7 @@ func runVolume(ctx context.Context, args []string, stdout *os.File) error {
 		return runVolumeList(args[1:], stdout)
 	case "delete":
 		return runVolumeRemove(args[1:], stdout)
-	case "status":
+	case "status", "inspect":
 		return runVolumeInspect(args[1:], stdout)
 	}
 	return fmt.Errorf("unknown volume command %q; see microagent volume --help", args[0])
@@ -163,8 +163,8 @@ Manage user-defined named volumes: VM-independent ext4 disks attached by name.
 Usage:
   microagent volume create <name> [options]  Create a named volume
   microagent volume list                      List named volumes
-  microagent volume inspect <name>            Show one volume
-  microagent volume delete <name> [options]       Remove a named volume
+  microagent volume status <name>             Show one volume (alias: inspect)
+  microagent volume delete <name> [options]   Remove a named volume
 
 Attach a volume to a workspace by name with --volume <name>:/mount, e.g.
   microagent run IMAGE --volume data:/work

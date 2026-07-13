@@ -4,7 +4,7 @@ description: Check whether this host can boot microVMs, and why not.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-06_
+_Last updated: 2026-07-13_
 
 ```text
 microagent doctor [--arch <arch>] [--supervisor <path>]
@@ -31,8 +31,14 @@ Backend: linux-kvm
 Status: ok
 Host: amd64, supervisor=/usr/local/lib/microagent/firecracker-supervisor, supervisor available, virtualization supported, KVM available, vsock available
 Console: available (interactive)
-Kernel: installed (/home/user/.microagent/kernels/linux-kvm/amd64/vmlinux)
+Confinement: rootless (active)
+Networking: isolated ready, user ready
+Egress TPROXY modules: PASS
+Kernel: installed (/home/user/.microagent/kernels/linux-kvm/amd64/Image)
 ```
+
+The `Confinement:` line reports the host VMM-process confinement posture
+(`off`, `jailer`, or `rootless`) and whether it is active.
 
 The `Networking:` line is backend-specific. Linux reports `isolated` and `user`
 readiness, including whether `pasta`, unprivileged user namespaces, and
@@ -51,12 +57,9 @@ and `kernel` populated. `ok` is `false` when any required check fails.
   `MICROAGENT_FIRECRACKER`), `/dev/kvm` present, `/dev/vhost-vsock` present,
   `/dev/net/tun` present, `pasta` available for user-mode networking,
   unprivileged user namespaces actually work the way boots use them (a live
-  probe runs the same `unshare --map-root-user` setup as the supervisor jail
-  and `pasta`, where the confined process writes its own uid map - so policy
-  layers like AppArmor's `kernel.apparmor_restrict_unprivileged_userns`, which
-  allow namespace creation but deny that self-write, are caught, not just the
-  classic userns sysctls), default kernel installed, interactive console
-  available.
+  probe that also catches AppArmor userns restrictions - see
+  [troubleshooting](/troubleshooting/)), default kernel installed, interactive
+  console available.
 - **Windows Hyper-V (experimental):** Windows Host Compute Service available,
   Hyper-V / Windows Hypervisor Platform support available, HCS access allowed
   for the current user, HCN/HNS networking available, Hyper-V sockets

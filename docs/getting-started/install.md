@@ -4,7 +4,7 @@ description: Install microagent with Homebrew or build it from source.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 Install the `microagent` CLI, then verify the host can boot microVMs with
 `microagent doctor`. Homebrew is the fast path on Linux and macOS; build from
@@ -21,10 +21,6 @@ as a host-specific symlink: Firecracker supervisor on Linux, Apple
 Virtualization.framework supervisor on macOS. Go programs can import the same
 packages that back the CLI; start with the [library overview](/library/) if
 you are embedding microagent rather than using it from a shell.
-
-Only stable releases ship to Homebrew. Release candidates are validated with
-local builds (see "From source" below) and the tag-gated live CI suites, not a
-published formula.
 
 ## From source
 
@@ -43,15 +39,7 @@ microagent doctor
 
 By default, `make install` installs under `$HOME/.local`. Use
 `PREFIX=/usr/local` for a system-style install; that may require running the
-script with privileges. The installer writes the packaged layout that
-microagent's resolvers expect: `bin/microagent`, supervisor symlinks in
-`bin/`, and companion artifacts under `libexec/`.
-
-On Linux, `make install` also downloads the pinned upstream Firecracker VMM
-release, verifies the archive SHA-256, and installs it as
-`PREFIX/libexec/firecracker`. This mirrors the Homebrew formula: the binary is
-a packaged external resource, not a blob committed to the microagent source
-repository.
+script with privileges.
 
 The installer also tries to install required host packages through the system
 package manager:
@@ -59,16 +47,62 @@ package manager:
 - Linux: `passt` for `pasta`, plus `e2fsprogs` for `mke2fs`.
 - macOS: `e2fsprogs` through Homebrew when `mke2fs` is missing.
 
-After installing packages, the source installer validates that `pasta` and
-`mke2fs` are executable on Linux. If `passt` installs successfully but does
-not put `pasta` on `PATH`, the install fails at that step instead of leaving
-the problem for a later workspace start.
-
 Package installation may prompt for `sudo`. To skip package-manager changes:
 
 ```bash
 make install INSTALL_HOST_PACKAGES=0
 ```
+
+Some host capabilities cannot be installed by a source checkout. Linux still
+needs `/dev/kvm` access, and some distros require enabling unprivileged user
+namespaces for `pasta`. The final `microagent doctor` run reports those gaps
+with concrete remediation.
+
+## Verify the host
+
+```bash
+microagent doctor
+```
+
+`doctor` checks for the right backend on the current host: Firecracker plus
+`/dev/kvm` on Linux, Apple Virtualization.framework on macOS. It also reports
+default kernel status. Run it outside sandboxed environments on Linux so KVM
+visibility is honest.
+
+## Next
+
+Boot your first microVM: the [quickstart](/getting-started/quickstart/) takes
+it from here.
+
+## For contributors and packagers
+
+Everything below is for working on microagent itself or packaging it - you do
+not need it to use microagent.
+
+### Release channels
+
+Only stable releases ship to Homebrew. Release candidates are validated with
+local builds and the tag-gated live CI suites, not a published formula.
+
+### What `make install` lays down
+
+The installer writes the packaged layout that microagent's resolvers expect:
+`bin/microagent`, supervisor symlinks in `bin/`, and companion artifacts under
+`libexec/`.
+
+On Linux, `make install` also downloads the pinned upstream Firecracker VMM
+release, verifies the archive SHA-256, and installs it as
+`PREFIX/libexec/firecracker`. This mirrors the Homebrew formula: the binary is
+a packaged external resource, not a blob committed to the microagent source
+repository. If you already have a Firecracker binary, install it into the same
+prefix with `make install FIRECRACKER=/path/to/firecracker`; to skip the
+download and rely on `PATH` or `MICROAGENT_FIRECRACKER`, use
+`make install DOWNLOAD_FIRECRACKER=0`.
+
+After installing packages, the source installer validates that `pasta` and
+`mke2fs` are executable on Linux. If `passt` installs successfully but does
+not put `pasta` on `PATH`, the install fails at that step instead of leaving
+the problem for a later workspace start.
 
 `make install` prints a compact install summary by default. Package-manager
 and download details are written to a temporary log when quiet mode is
@@ -76,31 +110,14 @@ enabled; the installer prints that log path if a command fails. Set
 `MICROAGENT_INSTALL_LOG=/path/to/install.log` to choose the log location, or
 use `QUIET=0` to stream command output directly.
 
-If you already have a Firecracker binary, install it into the same prefix:
-
-```bash
-make install FIRECRACKER=/path/to/firecracker
-```
-
-To skip the Firecracker download and rely on `PATH` or `MICROAGENT_FIRECRACKER`:
-
-```bash
-make install DOWNLOAD_FIRECRACKER=0
-```
-
 By default, `make install` installs microagent's default kernel into
 `PREFIX/libexec/kernels/<backend>/<arch>/Image`, so the install behaves like a
 packaged install. Use `INSTALL_KERNEL=0` to skip that step; the first
 workspace create or run can still install the default writable kernel under
-`~/.microagent/kernels/...`.
+`~/.microagent/kernels/...`. For packaging or staged installs, `CHECK=0` skips
+the final doctor check and `ARCH=<arch>` selects the guest architecture.
 
-Some host capabilities cannot be installed by a source checkout. Linux still
-needs `/dev/kvm` access, and some distros require enabling unprivileged user
-namespaces for `pasta`. The final `microagent doctor` run reports those gaps
-with concrete remediation. For packaging or staged installs, `CHECK=0` skips
-that final check and `ARCH=<arch>` selects the guest architecture.
-
-## Checkout-local build
+### Checkout-local build (`make dev`)
 
 For a local build that stays inside the checkout:
 
@@ -113,15 +130,14 @@ make dev
 
 `make dev` writes a self-contained checkout-local build under `.build/dev/`,
 then runs `.build/dev/microagent doctor` so missing host prerequisites are
-visible.
-If the host is not ready and the command is running in an interactive
+visible. If the host is not ready and the command is running in an interactive
 terminal, it offers to run `make install` in quiet bootstrap mode, reusing the
 dev-linked Host VMM when one is present. In CI or other non-interactive
 shells, it prints that command and exits with the doctor failure.
 
-The CLI reports a source version based on the current release line, such as
-`0.8.3-9c7ad3d` or `0.8.3-9c7ad3d-dirty`, so it is obvious you are not running
-the latest stable Homebrew build. The build derives the `0.8.3`
+The CLI reports a source version based on the current release line, in the
+form `0.8.x-<commit>` (or `0.8.x-<commit>-dirty`), so it is obvious you are
+not running the latest stable Homebrew build. The build derives the version
 prefix from the latest stable tag, ignoring release-candidate and other
 prerelease tags, then adds the short SHA. It also places the host supervisor
 and Linux guest-init companion next to the CLI so the resolver can find them.
@@ -147,19 +163,3 @@ To produce an ad-hoc signed supervisor (macOS):
 ```bash
 make signed-supervisor
 ```
-
-## Verify the host
-
-```bash
-microagent doctor
-```
-
-`doctor` checks for the right backend on the current host: Firecracker plus
-`/dev/kvm` on Linux, Apple Virtualization.framework on macOS. It also reports
-default kernel status. Run it outside sandboxed environments on Linux so KVM
-visibility is honest.
-
-## Next
-
-Boot your first microVM: the [quickstart](/getting-started/quickstart/) takes
-it from here.
