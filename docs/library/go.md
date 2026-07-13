@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-12_
+_Last updated: 2026-07-13_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -86,7 +86,7 @@ are introduced.
 | Package | Documented symbols |
 |---|---|
 | `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `FeatureContract`, `FeatureScope`, `FeatureBackendNeutral`, `FeatureCapability`, `FeatureCapabilityStructuredExec`, `FeatureBackend`, `FeatureGap`, `UnsupportedFeatureError`, `FeatureContracts`, `FeatureBackendSupport`, `BackendSupportsFeature`, `FeatureForCLICommand`, `FeatureForMCPTool`, `NewUnsupportedFeatureError`, `IsKnownBackend`, `Capabilities`, `BackendCapabilities`, `SnapshotManifest`, `SnapshotArtifact`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotAppleVFMachineState`, `SnapshotAppleVFConfig`, `SnapshotsDir`, `SnapshotDir`, `SnapshotRootfsArtifact`, `SnapshotMachineStateArtifacts`, `FirecrackerSnapshotArtifacts`, `AppleVFSnapshotArtifacts`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot`, `MaterializedSecretsDeclared`, `ValidateSnapshotSecretCapture`, `ValidateSnapshotSecretRestore`, `EgressModeBroker`, `EgressModeMITM`, `EgressModeOff`, `EgressMediationOn`, `EgressModeForgesCerts`, `NetworkModeMediates`, `ValidateEgressMode`, `ResolveEgressModeDefault`, `EgressPolicy`, `EgressCaps`, `NormalizeEgressPolicy` |
-| `pkg/workspace` | `Options`, `OptionsFromRequest`, `EgressPolicyFromOptions`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `ModelRunnerSpec`, `ModelMediationSpec`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `DefaultModelGuestPort`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecMaxTransientRetries`, `ExecPort`, `ExecPortForName`, `ExecRetryExhaustedError`, `ExecRetryMetadata`, `ExecReadinessSignal`, `Create`, `CreateFromSnapshot`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `GuestRootfsLayerTar`, `Clone`, `ReadLogs`, `ReadSupervisorLogs`, `ReadEvents`, `EventsPath`, `ReadEgressAudit`, `EgressAuditPath`, `ReadBrokerAccess`, `BrokerAccessPath`, `MergeEgressEvents`, `EgressEvent`, `EgressAuditSummary`, `SummarizeEgressAudit`, `RunDispatch`, `DispatchResult`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `Snapshot`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `ExecWithMetadata`, `ExecStream`, `MarkActivity`, `IsRetryableExecTransient`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
+| `pkg/workspace` | `Options`, `OptionsFromRequest`, `EgressPolicyFromOptions`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `ModelRunnerSpec`, `ModelMediationSpec`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `DefaultModelGuestPort`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecMaxTransientRetries`, `ExecPort`, `ExecPortForName`, `ExecRetryExhaustedError`, `ExecRetryMetadata`, `ExecReadinessSignal`, `Create`, `CreateFromSnapshot`, `Run`, `RandomName`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `GuestRootfsLayerTar`, `Clone`, `ReadLogs`, `ReadSupervisorLogs`, `ReadEvents`, `EventsPath`, `ReadEgressAudit`, `EgressAuditPath`, `ReadBrokerAccess`, `BrokerAccessPath`, `MergeEgressEvents`, `EgressEvent`, `EgressAuditSummary`, `SummarizeEgressAudit`, `RunDispatch`, `DispatchResult`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `Snapshot`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `ExecWithMetadata`, `ExecStream`, `MarkActivity`, `IsRetryableExecTransient`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
 | `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check`, `EgressTProxyRemediation` |
@@ -197,6 +197,11 @@ Apple Virtualization.framework on macOS), guest architecture, default kernel
 path, and default state directory. You override only what your program needs.
 The [common pattern](#the-common-pattern) example at the top of this page shows
 the canonical `DefaultOptions` + `Run` call.
+
+Leave `Options.Name` empty and `Run` mints a readable, collision-safe name via
+`RandomName` (for example `run-brave-otter-4f9c`); `RunDispatch` does the same
+with a `dispatch-` prefix. `RandomName(prefix)` is exported for programs that
+want the same naming for workspaces they create themselves.
 
 `Result.Result` is a `*GuestResult` with `Stdout`, `Stderr`, and `ExitCode`
 captured from the guest. `Result.Response` carries the supervisor's structured

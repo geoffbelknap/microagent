@@ -469,7 +469,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 		return fmt.Errorf("run requires IMAGE [COMMAND...] or --exec")
 	}
 	if opts.Name == "" {
-		opts.Name = fmt.Sprintf("run-%d", time.Now().UnixNano())
+		opts.Name = workspace.RandomName("run")
 	}
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
@@ -511,7 +511,7 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 		return fmt.Errorf("dispatch requires IMAGE [COMMAND...] or --exec")
 	}
 	if opts.Name == "" {
-		opts.Name = fmt.Sprintf("dispatch-%d", time.Now().UnixNano())
+		opts.Name = workspace.RandomName("dispatch")
 	}
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
@@ -4273,7 +4273,7 @@ Options:
                          Attach a safe tar/ext4 volume
   -output n=/guest/path Declare an output artifact
   -file <path>          Workspace spec file
-  -name <name>          Workspace name; generated when omitted
+  -name <name>          Workspace name; a readable name is generated when omitted
   -backend <name>       Backend identity override
   -kernel <path>        Custom kernel path
   -state-dir <dir>      State directory

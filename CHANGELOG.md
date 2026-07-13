@@ -5,6 +5,15 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Human-readable names for one-shot workspaces
+
+`run` and `dispatch` (CLI and `workspace.Run`/`workspace.RunDispatch`) now mint
+readable auto-names like `run-brave-otter-4f9c` instead of
+`run-<19-digit-nanosecond-timestamp>` when no `--name` is given. The short
+random suffix keeps names collision-safe while making `microagent delete
+run-brave-otter-4f9c` typable by hand. The generator is exported as
+`workspace.RandomName(prefix)`.
+
 ### Multiple egress broker endpoints per workspace
 
 A workspace can now declare more than one egress broker endpoint instead of

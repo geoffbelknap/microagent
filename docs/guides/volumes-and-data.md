@@ -4,7 +4,7 @@ description: Persist data in named volumes, attach disks and bundles, and copy f
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 microagent never exposes host directories to the guest - everything the guest
 reads or writes is a block device - so data moves through deliberate, declared
@@ -52,7 +52,7 @@ microagent volume status data
 Name:     data
 Size:     512 MiB
 Created:  2026-06-11T08:51:35Z
-Attached: run-1781167904168137239
+Attached: run-golden-marmot-2c9d
 Path:     /home/you/.microagent/volumes/data.ext4
 ```
 

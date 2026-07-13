@@ -4,7 +4,7 @@ description: Boot a Linux microVM from an OCI image and run a command inside it.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 Boot a Linux microVM from an OCI image, run one command inside it, and tear it
 down. You only need three commands.
@@ -38,18 +38,18 @@ inside the microVM. The first run also downloads the default kernel for this
 host; later runs reuse it.
 
 ```text
-Workspace: run-1781164526178302845
+Workspace: run-lively-heron-7q3f
 State: stopped
-Rootfs: /home/agency/.microagent/workspaces/run-1781164526178302845/rootfs.ext4
+Rootfs: /home/agency/.microagent/workspaces/run-lively-heron-7q3f/rootfs.ext4
 Profile: small
 Restart: never
 Network: user
-Hostname: run-1781164526178302845
+Hostname: run-lively-heron-7q3f
 Resources: memory=512MiB cpus=2 disk=1024MiB
 Kernel: /home/agency/.microagent/kernels/linux-kvm/amd64/Image
 Exit code: 0
 
-Linux run-1781164526178302845 6.1.155 #2 SMP PREEMPT_DYNAMIC Sat May  2 18:32:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+Linux run-lively-heron-7q3f 6.1.155 #2 SMP PREEMPT_DYNAMIC Sat May  2 18:32:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
 ```
 
 If you run an image without a command, microagent uses the image's
