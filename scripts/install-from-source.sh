@@ -228,6 +228,35 @@ print_install_summary() {
   fi
 }
 
+binary_version() {
+  local v
+  v="$("$1" -v 2>/dev/null | awk '{print $2}')"
+  printf '%s' "${v:-unknown version}"
+}
+
+# The install can succeed and still not be what `microagent` runs - another
+# install earlier on PATH (typically Homebrew's) shadows it, or the prefix
+# isn't on PATH at all. Say so, with both versions, instead of leaving a
+# stale binary to answer quietly.
+check_path_resolution() {
+  local installed on_path
+  installed="$prefix/bin/microagent"
+  on_path="$(command -v microagent 2>/dev/null || true)"
+  if [ -z "$on_path" ]; then
+    echo
+    echo "note: $prefix/bin is not on PATH, so \`microagent\` will not be found."
+    echo "  Add it: export PATH=\"$prefix/bin:\$PATH\""
+    return 0
+  fi
+  if [ "$on_path" -ef "$installed" ]; then
+    return 0
+  fi
+  echo
+  echo "warning: \`microagent\` on PATH is $on_path ($(binary_version "$on_path")),"
+  echo "  which shadows the copy just installed at $installed ($(binary_version "$installed"))."
+  echo "  Put $prefix/bin earlier on PATH, or remove the other install (e.g. brew uninstall microagent)."
+}
+
 install_host_packages() {
   if [ "$backend" = "linux-kvm" ]; then
     local missing_linux_packages=()
@@ -562,6 +591,7 @@ PY
 fi
 
 print_install_summary
+check_path_resolution
 
 if [ "$backend" = "linux-kvm" ]; then
   if [ -z "$firecracker" ] && ! command -v firecracker >/dev/null 2>&1 && [ ! -x "$prefix/libexec/firecracker" ]; then
