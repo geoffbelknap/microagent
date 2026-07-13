@@ -24,12 +24,11 @@ want a named workspace that survives.
 
 ## Why dispatch
 
-The second half of the return value is the point. Every dispatched task's
+The audit is what sets `dispatch` apart. Every dispatched task's
 network traffic passes through a small host-side process — the mediator — and
 it is the mediator, not the guest, that writes the record of every connection
-attempt: the mediator-written audit. Because that record lives **outside the
-guest's control**, a prompt-injected or otherwise-rogue task can neither forge
-nor suppress it. Under the default `broker` mode the mediator records allowed
+attempt. Because that record lives outside the guest's control, a
+prompt-injected or otherwise-rogue task can neither forge nor suppress it. Under the default `broker` mode the mediator records allowed
 destinations too (not just denials), so the summary reflects real behavior.
 
 Pair it with [credential swap](/concepts/egress-mediation/#credential-swap): the

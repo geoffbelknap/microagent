@@ -48,7 +48,7 @@ microagent delete agent-1 --state-dir /tmp/microagent
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--yes` / `-y` - skip the confirmation prompt in scripts; stops a running
   workspace before deleting

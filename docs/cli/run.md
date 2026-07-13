@@ -120,7 +120,7 @@ microagent run \
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--exec <command>` - one shell command string, when argv form is awkward
 - `--setup <command>` - prepare the guest before `--exec`; repeatable
@@ -157,7 +157,7 @@ The rest, grouped:
 | `--service-command <cmd>` | Long-running VM service command. Only [`create`](/cli/create/) accepts it; `run` rejects it |
 
 Activity on the workspace (an `exec` or `connect`) renews the `--ttl` lease, so
-it only reaps VMs that have actually gone quiet.
+it only reaps VMs that have gone quiet.
 
 ### Resources & networking
 

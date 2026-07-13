@@ -4,7 +4,7 @@ description: Start and restart a workspace according to its restart policy.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 ```text
 microagent supervise <name> [--state-dir <dir>] [--max-restarts <n>]
@@ -86,7 +86,7 @@ command.
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--max-restarts <n>` - cap a crash-looping workspace instead of restarting it
   forever (the default, `0`, is unlimited)

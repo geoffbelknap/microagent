@@ -4,7 +4,7 @@ description: Give a workspace outbound access and publish a guest port back to t
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 A workspace has one of two network modes: `user` (the default) gives the guest
 unprivileged outbound IPv4 plus any TCP ports you publish, and `isolated` gives
@@ -54,7 +54,7 @@ there's no guest network for a forward to reach.
 
 ## Related
 
-- **Both network modes** - [Network modes](/concepts/networking/).
-- **The `network` command** - the [`network`](/cli/network/) reference.
-- **Publish a service's port to the host** - [run a service](/guides/run-a-service/).
-- **Control and audit what the guest reaches** - [egress mediation](/concepts/egress-mediation/).
+- [Network modes](/concepts/networking/) — both modes in detail.
+- [`network`](/cli/network/) — the command reference.
+- [Run a service](/guides/run-a-service/) — publish a service's port to the host.
+- [Egress mediation](/concepts/egress-mediation/) — control and audit what the guest reaches.

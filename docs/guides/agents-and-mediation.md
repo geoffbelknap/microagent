@@ -4,7 +4,7 @@ description: Declare the guest-to-host vsock contract, listen on the host, and l
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 Use mediation when an agent needs to keep running while your host control plane
 sends work and reads results. Requests stream in, results stream out, and the
@@ -179,8 +179,8 @@ The agent emits `LifecycleSignal` messages (`ready`, `accepting`, `completed`,
 channel. Hosts tell signals from results by shape: signals carry a `signal`
 field, requests carry `request_id` and `principal`.
 
-[`quarantine`](/cli/quarantine/) severs mediation along with networking -
-that's the containment story the channel is designed to support.
+[`quarantine`](/cli/quarantine/) severs mediation along with networking, so
+a quarantined agent loses its host channel too.
 
 ## Clean up
 
@@ -191,7 +191,7 @@ microagent delete agent --yes
 
 ## Related
 
-- **Egress for credentials** - mediation carries requests, not API keys. Route model calls through a host-side proxy that holds the key; see [agency](https://github.com/geoffbelknap/agency) for an implementation.
-- **The file-based flow this replaces** - [build a simple agent](/guides/simple-agent/).
-- **Where mediation sits in the network model** - [Networking](/concepts/networking/).
-- **Snapshot interplay** - mediation sessions reset on restore and fork; see [snapshots and forking](/guides/snapshots-and-forking/).
+- [agency](https://github.com/geoffbelknap/agency) — egress for credentials: mediation carries requests, not API keys, so model calls go through a host-side proxy that holds the key.
+- [Build a simple agent](/guides/simple-agent/) — the file-based flow this replaces.
+- [Networking](/concepts/networking/) — where mediation sits in the network model.
+- [Snapshots and forking](/guides/snapshots-and-forking/) — mediation sessions reset on restore and fork.

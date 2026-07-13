@@ -68,8 +68,9 @@ Use `--publish` for host-to-guest TCP services:
 microagent create web --network user --publish 127.0.0.1:8080:80/tcp
 ```
 
-That is the portable inbound contract. The host listens on the declared address
-and port, then forwards connections to the requested guest TCP port. It works
+This is the portable way to accept inbound connections: the host listens on
+the declared address and port, then forwards to the requested guest TCP port.
+It works
 the same way for HTTP services, SSH-like services, and local test servers.
 
 Do not depend on direct host routing to the guest IP. `user` mode is a NAT
@@ -108,7 +109,7 @@ all live in [build agents on the mediation channel](/guides/agents-and-mediation
 
 > **Don't confuse the two "mediations."** The mediation channel is a vsock side
 > channel into your control plane. Egress mediation controls the guest's
-> ordinary TCP/UDP/DNS traffic. Different mechanisms, different purposes.
+> ordinary TCP/UDP/DNS traffic.
 
 ## What's visible
 

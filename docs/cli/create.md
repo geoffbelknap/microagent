@@ -189,7 +189,7 @@ microagent --json create research --image docker.io/library/ubuntu:24.04
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--name <name>` - the name everything else refers to; positional works too
 - `--image <ref>` - the OCI image the workspace boots from
