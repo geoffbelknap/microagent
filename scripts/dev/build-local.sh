@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+"$ROOT/scripts/dev/require-build-tools.sh"
+
 usage() {
   cat >&2 <<'USAGE'
 usage: scripts/dev/build-local.sh [--output PATH] [--arch ARCH] [--quiet]
@@ -63,49 +65,52 @@ resolve_firecracker() {
   return 1
 }
 
+# dev_version stamps source builds so their age is readable, not just their
+# identity. The format is a release version plus one build-metadata block of
+# dot-separated fields: `0.8.6+92.faa6d7b.20260713.dirty` is 92 commits past
+# v0.8.6, from commit faa6d7b, committed 2026-07-13, with local changes. A
+# checkout exactly on a release tag stamps the plain release version. Falls
+# back to `0.0.0+0.<sha>.<date>` when no release tag is reachable (e.g. a
+# shallow clone) and `0.0.0+local` outside a work tree.
 dev_version() {
-  local base sha dirty
+  local described base count sha date dirty
 
-  base="$(release_line_version)"
-  sha="local"
-  dirty=""
-
-  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    sha="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
-    if ! git -C "$ROOT" diff --quiet --ignore-submodules -- ||
-      ! git -C "$ROOT" diff --cached --quiet --ignore-submodules -- ||
-      [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]; then
-      dirty="-dirty"
-    fi
-  fi
-
-  printf '%s-%s%s\n' "$base" "$sha" "$dirty"
-}
-
-release_line_version() {
-  local tag
-
-  tag=""
-  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    while IFS= read -r tag; do
-      case "$tag" in
-        *-*)
-          continue
-          ;;
-        *)
-          break
-          ;;
-      esac
-    done < <(git -C "$ROOT" tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname)
-  fi
-
-  if [ -z "$tag" ]; then
-    printf '0.0.0\n'
+  if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf '0.0.0+local\n'
     return
   fi
 
-  tag="${tag#v}"
-  printf '%s\n' "$tag"
+  dirty=""
+  if ! git -C "$ROOT" diff --quiet --ignore-submodules -- ||
+    ! git -C "$ROOT" diff --cached --quiet --ignore-submodules -- ||
+    [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]; then
+    dirty=".dirty"
+  fi
+
+  date="$(git -C "$ROOT" show -s --format=%cd --date=format:%Y%m%d HEAD 2>/dev/null || true)"
+  sha="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
+
+  if described="$(git -C "$ROOT" describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null)"; then
+    described="${described#v}"
+    case "$described" in
+      *-*-g*)
+        base="${described%-*-g*}"
+        count="${described#"$base"-}"
+        count="${count%-g*}"
+        printf '%s+%s.%s.%s%s\n' "$base" "$count" "$sha" "$date" "$dirty"
+        ;;
+      *)
+        if [ -n "$dirty" ]; then
+          printf '%s+0.%s.%s%s\n' "$described" "$sha" "$date" "$dirty"
+        else
+          printf '%s\n' "$described"
+        fi
+        ;;
+    esac
+    return
+  fi
+
+  printf '0.0.0+0.%s.%s%s\n' "$sha" "$date" "$dirty"
 }
 
 output="${MICROAGENT_DEV_CLI:-$ROOT/.build/dev/microagent}"
@@ -166,10 +171,18 @@ firecracker_vmm_path="$libexec_dir/firecracker"
 version="$(dev_version)"
 ldflags="-X main.version=$version"
 
+# Outside a git work tree (a source-archive build), go's buildvcs=auto has
+# nothing to stamp and errors outright on stray `.git` entries in parent
+# directories; the version stamp above already carries the commit identity.
+buildvcs=()
+if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  buildvcs=("-buildvcs=false")
+fi
+
 (
   cd "$ROOT"
-  go build -ldflags "$ldflags" -o "$cli_path" ./cmd/microagent
-  GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -o "$guest_init_path" ./cmd/microagent-guestinit
+  go build ${buildvcs[@]+"${buildvcs[@]}"} -ldflags "$ldflags" -o "$cli_path" ./cmd/microagent
+  GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build ${buildvcs[@]+"${buildvcs[@]}"} -o "$guest_init_path" ./cmd/microagent-guestinit
 )
 
 if [ "$(uname -s)" = "Linux" ]; then
@@ -178,7 +191,7 @@ if [ "$(uname -s)" = "Linux" ]; then
   # so build it alongside the CLI to make the dev build self-sufficient.
   (
     cd "$ROOT"
-    go build -o "$firecracker_supervisor_path" ./cmd/microagent-firecracker-supervisor
+    go build ${buildvcs[@]+"${buildvcs[@]}"} -o "$firecracker_supervisor_path" ./cmd/microagent-firecracker-supervisor
   )
   if firecracker_source="$(resolve_firecracker)"; then
     mkdir -p "$libexec_dir"

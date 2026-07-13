@@ -5,6 +5,33 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Source builds check their build tools and report what's missing
+
+`make build`, `make dev`, and `make install` now preflight the build tools
+before running anything. A missing `go` used to surface as a raw shell error
+partway through a build script; in an interactive shell with Homebrew
+available the preflight now offers to run `brew install go` (or
+`brew upgrade go` when the installed Go is older than the `go.mod`
+requirement) and continues on acceptance. Without a terminal or without
+brew, it fails immediately with the tool name and an install command, so CI
+and scripts never hang on a prompt. A missing `git` only warns - it is
+needed for version stamping, not for the build - and the result reports
+`0.0.0+local`. Builds from a
+source archive (a release tarball or ZIP, no git metadata) work now: they
+stamp `0.0.0+local` and skip Go's VCS stamping, which used to fail the build
+when a stray `.git` entry existed in a parent directory.
+
+### Source-build versions say how old they are
+
+Checkout-local builds used to stamp `<release>-<sha>` (for example
+`0.8.6-56f0bdd`), which doesn't tell you whether the build is current - a
+short sha carries no ordering. Dev builds now stamp one build-metadata block
+of dot-separated fields:
+`<release>+<commits-since-release>.<sha>.<commit-date>[.dirty]`, e.g.
+`0.8.6+15.9c7ad3d.20260712`. The commit count orders any two builds and the
+date says whether one is stale, with no extra punctuation to parse. A clean
+checkout exactly on a release tag still reports the plain release version.
+
 ### Fixed: first boot on a fresh host installs the default kernel again
 
 `run`, `dispatch`, `create`, `start`, and snapshot forks once again fetch,
