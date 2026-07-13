@@ -5,6 +5,21 @@ been cut into a release yet.
 
 ## Unreleased
 
+### `run` and `dispatch` act like running the command locally
+
+On a terminal, `run` and `dispatch` now show live progress on stderr while the
+image pulls, the rootfs builds, and the microVM boots — the same
+spinner/progress-bar reporting `create` and `rootfs build` already had —
+instead of sitting silent until the result. The workspace-metadata block
+(Workspace/State/Rootfs/Profile/Restart/Network/Hostname/Resources/Kernel) is
+gone from the human output: guest stdout and stderr land on the matching host
+streams, and the guest exit code becomes the CLI exit code, matching `exec`
+and `docker run` semantics. `run --keep` prints the kept workspace name to
+stderr, and a failed run still prints the workspace name and console log path
+so you can debug it. Dispatch's egress receipt moves to stderr (with hosts
+sorted for stable output), so stdout carries only the task output and stays
+pipeable. `--json`, AX, and MCP output shapes are unchanged.
+
 ### `make install` warns when another install shadows the new one
 
 An install can succeed and still not be what `microagent` runs: a Homebrew

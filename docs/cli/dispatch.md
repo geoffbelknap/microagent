@@ -22,6 +22,12 @@ It is one-shot: nothing persists. Use [`run`](/cli/run/) when you want the same
 disposable boot but not the audit receipt, or [`create`](/cli/create/) when you
 want a named workspace that survives.
 
+On a terminal, `dispatch` behaves like running the command locally: live
+progress goes to stderr, the task's stdout and stderr land on the matching host
+streams, and the guest exit code becomes the CLI exit code. The egress receipt
+is printed to stderr too, so stdout carries only the task output and stays
+pipeable. Use `--json` for the machine-readable result plus audit.
+
 ## Why dispatch
 
 The audit is what sets `dispatch` apart. Every dispatched task's

@@ -37,20 +37,17 @@ The first argument is the OCI image. Everything after it is the command to run
 inside the microVM. The first run also downloads the default kernel for this
 host; later runs reuse it.
 
-```text
-Workspace: run-lively-heron-7q3f
-State: stopped
-Rootfs: /home/agency/.microagent/workspaces/run-lively-heron-7q3f/rootfs.ext4
-Profile: small
-Restart: never
-Network: user
-Hostname: run-lively-heron-7q3f
-Resources: memory=512MiB cpus=2 disk=1024MiB
-Kernel: /home/agency/.microagent/kernels/linux-kvm/amd64/Image
-Exit code: 0
+While the image pulls and the microVM boots, progress is shown on stderr. Then
+the command's output arrives exactly as if you had run it locally:
 
+```text
 Linux run-lively-heron-7q3f 6.1.155 #2 SMP PREEMPT_DYNAMIC Sat May  2 18:32:03 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
 ```
+
+The guest command's exit code becomes `microagent`'s exit code, and stdout
+carries only the command's output, so pipes and `$?` work the way you expect.
+Add `--json` to get the full structured result (workspace name, resources,
+kernel, exit code, captured output).
 
 If you run an image without a command, microagent uses the image's
 Entrypoint/Cmd.

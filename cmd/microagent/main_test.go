@@ -5327,6 +5327,160 @@ func TestWriteCreateResultKeepsFailedSetupLogs(t *testing.T) {
 	}
 }
 
+// runResultStreams runs writeRunResult against temp stdout/stderr files in
+// text mode and returns what landed on each stream.
+func runResultStreams(t *testing.T, result workspaceResult, keep bool, runErr error) (string, string) {
+	t.Helper()
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdout, err := os.Create(filepath.Join(dir, "stdout.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := os.Create(filepath.Join(dir, "stderr.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRunResult(stdout, stderr, result, keep, runErr); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stderr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	outData, err := os.ReadFile(filepath.Join(dir, "stdout.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	errData, err := os.ReadFile(filepath.Join(dir, "stderr.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(outData), string(errData)
+}
+
+func TestWriteRunResultStdoutCarriesOnlyCommandOutput(t *testing.T) {
+	result := workspaceResult{
+		Workspace:  "run-brave-otter-4f9c",
+		Profile:    "small",
+		FinalState: string(vmkit.StateStopped),
+		RootfsPath: "/tmp/rootfs.ext4",
+		KernelPath: "/tmp/Image",
+		Result: &guestResult{
+			ExitCode: 0,
+			Stdout:   "Linux run-brave-otter 6.1.0\n",
+			Stderr:   "a guest warning\n",
+		},
+	}
+	out, errText := runResultStreams(t, result, false, nil)
+	if out != "Linux run-brave-otter 6.1.0\n" {
+		t.Fatalf("stdout carried more than the command output: %q", out)
+	}
+	if errText != "a guest warning\n" {
+		t.Fatalf("stderr = %q, want guest stderr only", errText)
+	}
+}
+
+func TestWriteRunResultKeepPrintsWorkspaceOnStderr(t *testing.T) {
+	result := workspaceResult{
+		Workspace: "run-kept-1",
+		Result:    &guestResult{ExitCode: 0, Stdout: "ok\n"},
+	}
+	out, errText := runResultStreams(t, result, true, nil)
+	if out != "ok\n" {
+		t.Fatalf("stdout = %q", out)
+	}
+	if !strings.Contains(errText, "Workspace: run-kept-1") {
+		t.Fatalf("stderr missing kept workspace name: %q", errText)
+	}
+}
+
+func TestWriteRunResultFailurePointsAtPreservedState(t *testing.T) {
+	result := workspaceResult{
+		Workspace:  "run-broken-1",
+		SerialPath: "/tmp/serial.log",
+		Result:     &guestResult{ExitCode: 1, Stderr: "boom\n"},
+	}
+	out, errText := runResultStreams(t, result, false, errors.New("run failed"))
+	if out != "" {
+		t.Fatalf("stdout should be empty on failure without guest stdout: %q", out)
+	}
+	if !strings.Contains(errText, "boom") ||
+		!strings.Contains(errText, "Workspace: run-broken-1") ||
+		!strings.Contains(errText, "Console log: /tmp/serial.log") {
+		t.Fatalf("stderr missing failure breadcrumbs: %q", errText)
+	}
+}
+
+func TestWriteDispatchResultSplitsStreamsAndSortsReceipt(t *testing.T) {
+	outputFormat = "text"
+	t.Cleanup(func() { outputFormat = "" })
+	dir := t.TempDir()
+	stdout, err := os.Create(filepath.Join(dir, "stdout.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := os.Create(filepath.Join(dir, "stderr.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := workspace.DispatchResult{
+		Workspace:  "dispatch-swift-falcon-9k4t",
+		FinalState: string(vmkit.StateStopped),
+		Result:     &guestResult{ExitCode: 0, Stdout: "4\n"},
+		Audit: workspace.EgressAuditSummary{
+			DecisionCount: 3,
+			AllowByHost:   map[string]int{"b.example.com": 1, "a.example.com": 2},
+		},
+	}
+	if err := writeDispatchResult(stdout, stderr, result); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdout.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stderr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	outData, err := os.ReadFile(filepath.Join(dir, "stdout.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	errData, err := os.ReadFile(filepath.Join(dir, "stderr.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(outData) != "4\n" {
+		t.Fatalf("stdout carried more than the task output: %q", string(outData))
+	}
+	errText := string(errData)
+	if !strings.Contains(errText, "Egress: 3 decision(s)") {
+		t.Fatalf("stderr missing egress receipt: %q", errText)
+	}
+	aIdx := strings.Index(errText, "allow a.example.com (2)")
+	bIdx := strings.Index(errText, "allow b.example.com (1)")
+	if aIdx == -1 || bIdx == -1 || aIdx > bIdx {
+		t.Fatalf("receipt hosts missing or unsorted: %q", errText)
+	}
+}
+
+func TestGuestExitError(t *testing.T) {
+	if err := guestExitError(nil); err != nil {
+		t.Fatalf("nil result: %v", err)
+	}
+	if err := guestExitError(&guestResult{ExitCode: 0}); err != nil {
+		t.Fatalf("exit 0: %v", err)
+	}
+	err := guestExitError(&guestResult{ExitCode: 7})
+	var exitErr cliExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 7 || !exitErr.Silent {
+		t.Fatalf("exit 7 = %#v, want silent cliExitError code 7", err)
+	}
+}
+
 func TestParseWorkspaceOptionsAcceptsPositionalNameWithImageCommand(t *testing.T) {
 	opts, err := parseWorkspaceOptions("create", []string{
 		"homebridge",

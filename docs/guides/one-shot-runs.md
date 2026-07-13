@@ -20,19 +20,12 @@ microagent run docker.io/library/alpine:3.20 cat /etc/alpine-release
 ```
 
 ```text
-Workspace: run-brave-otter-4f9c
-State: stopped
-Profile: small
-Network: user
-Resources: memory=512MiB cpus=2 disk=1024MiB
-Exit code: 0
-
 3.20.10
 ```
 
-Leave the command off and microagent runs the image's Entrypoint/Cmd instead.
-Later output blocks on this page trim the workspace summary above and show
-only the command output.
+Pull, rootfs build, and boot progress is shown live on stderr; stdout carries
+only the command's output. Leave the command off and microagent runs the
+image's Entrypoint/Cmd instead.
 
 Use `--exec` when you want one shell command string rather than argv words:
 
@@ -40,11 +33,10 @@ Use `--exec` when you want one shell command string rather than argv words:
 microagent run --image docker.io/library/alpine:3.20 --exec 'echo hello from $(hostname)'
 ```
 
-The guest command's exit code is reported as `Exit code:` (or
-`result.exit_code` with `--json`), not as the CLI's own exit status. The CLI
-exits nonzero only when the run itself fails to build, boot, or complete. Use
-[`exec`](/cli/exec/) against a running workspace when you need the guest exit
-code to drive your shell.
+The guest command's exit code becomes the CLI's exit status, like `docker run`:
+your shell's `$?` reflects the command itself. When the run fails to build,
+boot, or complete, the CLI exits `1` with the error on stderr. With `--json`,
+the exit code is also in `result.exit_code`.
 
 ## 2. Add setup steps
 

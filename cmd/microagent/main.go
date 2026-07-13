@@ -486,6 +486,7 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	opts.Progress = rootfsProgress(stdout, "run")
 
 	// Model orchestration: resolve, pull if needed, start runner, wire into opts.
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
@@ -495,10 +496,22 @@ func runWorkspace(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	result, err := workspace.Run(ctx, opts)
-	if encodeErr := writeWorkspaceResult(stdout, result); encodeErr != nil {
+	if encodeErr := writeRunResult(stdout, os.Stderr, result, opts.Keep, err); encodeErr != nil {
 		return encodeErr
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return guestExitError(result.Result)
+}
+
+// guestExitError maps a nonzero guest exit code onto the CLI process exit code,
+// matching `exec` semantics: the guest result is the command result.
+func guestExitError(result *guestResult) error {
+	if result == nil || result.ExitCode == 0 {
+		return nil
+	}
+	return cliExitError{Code: result.ExitCode, Silent: true}
 }
 
 // runDispatch is `run` for delegated, single-use work: it boots a throwaway
@@ -528,6 +541,7 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	if err := validateWorkspaceName(opts.Name); err != nil {
 		return err
 	}
+	opts.Progress = rootfsProgress(stdout, "dispatch")
 
 	releaseModel, err := ensureModelPairing(ctx, &opts, opts.Model, modelToken)
 	if err != nil {
@@ -536,38 +550,33 @@ func runDispatch(ctx context.Context, args []string, stdout *os.File) error {
 	defer releaseModel()
 
 	result, err := workspace.RunDispatch(ctx, opts)
-	if encodeErr := writeDispatchResult(stdout, result); encodeErr != nil {
+	if encodeErr := writeDispatchResult(stdout, os.Stderr, result); encodeErr != nil {
 		return encodeErr
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return guestExitError(result.Result)
 }
 
-func writeDispatchResult(stdout *os.File, result workspace.DispatchResult) error {
+func writeDispatchResult(stdout, stderr *os.File, result workspace.DispatchResult) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, result)
 	}
-	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
-	if result.FinalState != "" {
-		fmt.Fprintf(stdout, "State: %s\n", result.FinalState)
-	}
 	if result.Result != nil {
-		fmt.Fprintf(stdout, "Exit: %d\n", result.Result.ExitCode)
-		if result.Result.Stdout != "" {
-			fmt.Fprint(stdout, result.Result.Stdout)
-			if !strings.HasSuffix(result.Result.Stdout, "\n") {
-				fmt.Fprintln(stdout)
-			}
-		}
+		writeGuestStream(stdout, result.Result.Stdout)
+		writeGuestStream(stderr, result.Result.Stderr)
 	}
 	// The "what did it do on the network" receipt — mediator-written, so the
-	// guest cannot forge it.
+	// guest cannot forge it. It goes to stderr so stdout carries only the task
+	// output.
 	a := result.Audit
-	fmt.Fprintf(stdout, "Egress: %d decision(s)\n", a.DecisionCount)
-	for host, n := range a.AllowByHost {
-		fmt.Fprintf(stdout, "  allow %s (%d)\n", host, n)
+	fmt.Fprintf(stderr, "Egress: %d decision(s)\n", a.DecisionCount)
+	for _, host := range sortedHosts(a.AllowByHost) {
+		fmt.Fprintf(stderr, "  allow %s (%d)\n", host, a.AllowByHost[host])
 	}
-	for host, n := range a.DenyByHost {
-		fmt.Fprintf(stdout, "  deny  %s (%d)\n", host, n)
+	for _, host := range sortedHosts(a.DenyByHost) {
+		fmt.Fprintf(stderr, "  deny  %s (%d)\n", host, a.DenyByHost[host])
 	}
 	return nil
 }
