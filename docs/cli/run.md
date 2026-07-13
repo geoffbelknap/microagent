@@ -12,10 +12,18 @@ microagent run [flags] <image> [command arg...]
 ```
 
 `run` is the one-shot path. It fetches the image, builds a rootfs, boots the
-microVM, runs `--setup` then `--exec`, prints the result, and removes scratch
-state (unless `--keep` is set). Use [`create`](/cli/create/) instead when you
-want the workspace to survive - `run` is for disposable work, `create` for a
-named workspace you'll `start`, `connect` to, and come back to.
+microVM, runs `--setup` then `--exec`, prints the command's output, and removes
+scratch state (unless `--keep` is set). Use [`create`](/cli/create/) instead
+when you want the workspace to survive - `run` is for disposable work, `create`
+for a named workspace you'll `start`, `connect` to, and come back to.
+
+On a terminal, `run` behaves like running the command locally: live progress
+(image pull, rootfs build, boot) goes to stderr, the guest command's stdout and
+stderr land on the matching host streams, and the guest exit code becomes the
+CLI exit code. With `--keep`, the workspace name is printed to stderr so you
+can `connect` to it or inspect it later. The full workspace metadata (rootfs
+path, kernel, resources, timings) is available with `--json` or, for kept
+workspaces, via [`status`](/cli/status/).
 
 The positional form is useful when you already think in image-plus-command
 terms. If no command is provided, microagent runs the image's Entrypoint/Cmd.
@@ -270,13 +278,11 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`run` exits `0` when the one-shot run completes; nonzero when the workspace
-fails to build or boot, or when the run cannot complete. The guest command's own
-exit code is *not* propagated to the CLI exit status; it is reported in the
-result instead - in the text output as `Exit code:` and in JSON under
-`result.exit_code`. Use [`exec`](/cli/exec/) when you need the guest exit code
-to drive the shell. In AX mode a failure is written as a structured error
-envelope.
+`run` propagates the guest command's exit code as the CLI exit status, matching
+[`exec`](/cli/exec/): `0` when the command succeeds, the command's own nonzero
+code when it fails, and `1` when the workspace fails to build, boot, or
+complete. The exit code is also reported in JSON under `result.exit_code`. In
+AX mode a failure is written as a structured error envelope.
 
 ## Related
 

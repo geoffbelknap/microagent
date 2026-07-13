@@ -302,11 +302,18 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	}
 	runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
+	stopProgress := startIndeterminateProgress(opts.Progress, "guest-run", "booting and running command")
 	runReq, err := Request(opts, "run", result.RootfsPath, NewRequestID())
 	if err != nil {
+		stopProgress("egress policy invalid")
 		return result, err
 	}
 	resp, err := runForeground(runCtx, opts, runReq)
+	if err != nil {
+		stopProgress("run failed")
+	} else {
+		stopProgress("command complete")
+	}
 	result.Response = resp
 	result.SerialPath = SerialLogPath(opts.StateDir, opts.Name)
 	if err == nil && resp.OK {

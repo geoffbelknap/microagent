@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/geoffbelknap/microagent/pkg/diagnostics"
@@ -465,6 +466,58 @@ func writeResultResponse(stdout *os.File, resp vmkit.Response) error {
 
 func writeWorkspaceResult(stdout *os.File, result workspaceResult) error {
 	return writeWorkspaceResultWithOptions(stdout, result, workspaceResultOptions{})
+}
+
+// writeRunResult prints `run` output docker-style: guest stdout/stderr land on
+// the matching host streams and stdout carries nothing else, so pipes see only
+// the task output. Workspace metadata stays available via --json and
+// `workspace show`. The workspace name is printed to stderr only when its state
+// outlives the run: --keep, or a failure (Run preserves state for debugging).
+func writeRunResult(stdout, stderr *os.File, result workspaceResult, keep bool, runErr error) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	if result.Result != nil {
+		writeGuestStream(stdout, result.Result.Stdout)
+		writeGuestStream(stderr, result.Result.Stderr)
+	}
+	if runErr != nil {
+		if result.Workspace != "" {
+			fmt.Fprintf(stderr, "Workspace: %s\n", result.Workspace)
+		}
+		if result.SerialPath != "" {
+			fmt.Fprintf(stderr, "Console log: %s\n", result.SerialPath)
+		}
+		return nil
+	}
+	if keep && result.Workspace != "" {
+		fmt.Fprintf(stderr, "Workspace: %s\n", result.Workspace)
+	}
+	if result.Response.Error != "" {
+		fmt.Fprintf(stderr, "Error: %s\n", result.Response.Error)
+	}
+	return nil
+}
+
+// writeGuestStream forwards one captured guest stream to a host stream,
+// stripping control characters that could reprogram the operator's terminal.
+func writeGuestStream(out *os.File, content string) {
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+	fmt.Fprint(out, sanitizeHumanOutput(content))
+	if !strings.HasSuffix(content, "\n") {
+		fmt.Fprintln(out)
+	}
+}
+
+func sortedHosts(counts map[string]int) []string {
+	hosts := make([]string, 0, len(counts))
+	for host := range counts {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	return hosts
 }
 
 type workspaceResultOptions struct {
