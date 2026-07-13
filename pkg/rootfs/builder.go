@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -488,28 +489,70 @@ func copyBaseStageCache(src, dst string) error {
 }
 
 func buildRootfsImage(ctx context.Context, req BuildRequest, stageDir, tmpDir string, progress *progressReporter, provenance *Provenance) error {
+	sizeBytes := req.SizeMiB * 1024 * 1024
+	if req.AutoSize {
+		grown, err := autoSizeBytes(stageDir, sizeBytes)
+		if err == nil && grown > sizeBytes {
+			sizeBytes = grown
+			progress.emit("size", fmt.Sprintf("disk grown to %d MiB to fit the image", grown/(1024*1024)), 0, 0, 0, 0)
+		}
+	}
 	switch req.Format {
 	case FormatExt4:
 		provenance.BuilderPhase = "build-ext4"
 		progress.emit("build-ext4", "building ext4 image", 0, 0, 0, 0)
-		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "rootfs.ext4"), req.OutputPath, req.SizeMiB*1024*1024, "rootfs")
+		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "rootfs.ext4"), req.OutputPath, sizeBytes, "rootfs")
 	case FormatVHD:
 		provenance.BuilderPhase = "build-vhd"
 		progress.emit("build-vhd", "building vhd image", 0, 0, 0, 0)
-		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "rootfs.vhd"), req.OutputPath, req.SizeMiB*1024*1024, true)
+		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "rootfs.vhd"), req.OutputPath, sizeBytes, true)
 	default:
 		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
 	}
 }
 
+// autoSizeBytes returns the disk size to use when the caller did not pin one.
+// A stage that fits keeps the requested size. One that doesn't gets the
+// smallest GiB multiple holding the data, filesystem overhead, and at least
+// 512 MiB of writable space for the guest.
+func autoSizeBytes(stageDir string, requestedBytes int64) (int64, error) {
+	const (
+		gib       = int64(1024 * 1024 * 1024)
+		freeFloor = int64(512 * 1024 * 1024)
+	)
+	dataBytes, err := stageDataBytes(stageDir)
+	if err != nil {
+		return requestedBytes, err
+	}
+	if dataBytes+ext4MinOverheadBytes <= requestedBytes {
+		return requestedBytes, nil
+	}
+	overhead := dataBytes / 20
+	if overhead < 2*ext4MinOverheadBytes {
+		overhead = 2 * ext4MinOverheadBytes
+	}
+	needed := dataBytes + overhead + freeFloor
+	grown := (needed + gib - 1) / gib * gib
+	if grown < requestedBytes {
+		return requestedBytes, nil
+	}
+	return grown, nil
+}
+
 func buildBundleImage(ctx context.Context, req BundleRequest, stageDir, tmpDir string, provenance *BundleProvenance) error {
+	sizeBytes := req.SizeMiB * 1024 * 1024
+	if req.AutoSize {
+		if grown, err := autoSizeBytes(stageDir, sizeBytes); err == nil && grown > sizeBytes {
+			sizeBytes = grown
+		}
+	}
 	switch req.Format {
 	case FormatExt4:
 		provenance.BuilderPhase = "build-ext4"
-		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "bundle.ext4"), req.OutputPath, req.SizeMiB*1024*1024, "bundle")
+		return buildExt4Image(ctx, req.Mke2fsPath, stageDir, filepath.Join(tmpDir, "bundle.ext4"), req.OutputPath, sizeBytes, "bundle")
 	case FormatVHD:
 		provenance.BuilderPhase = "build-vhd"
-		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "bundle.vhd"), req.OutputPath, req.SizeMiB*1024*1024, false)
+		return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "bundle.vhd"), req.OutputPath, sizeBytes, false)
 	default:
 		return fmt.Errorf("format must be %q or %q", FormatExt4, FormatVHD)
 	}
@@ -539,7 +582,63 @@ func BuildEmptyVolume(ctx context.Context, outputPath string, sizeBytes int64) e
 	return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "volume.vhd"), outputPath, sizeBytes, true)
 }
 
+// ext4MinOverheadBytes is deliberately below the real metadata overhead
+// (inode tables, journal, group descriptors), so the preflight check only
+// rejects builds mke2fs could never complete.
+const ext4MinOverheadBytes = 32 * 1024 * 1024
+
+// stageDataBytes estimates the ext4 data footprint of a staged tree: regular
+// file contents rounded up to 4 KiB blocks with hard links counted once, plus
+// one block per directory and symlink.
+func stageDataBytes(stageDir string) (int64, error) {
+	const blockSize = 4096
+	seen := map[string]struct{}{}
+	var total int64
+	err := filepath.WalkDir(stageDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == stageDir {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			total += blockSize
+			return nil
+		}
+		if id, ok := stageHardLinkID(path, info); ok {
+			if _, dup := seen[id]; dup {
+				return nil
+			}
+			seen[id] = struct{}{}
+		}
+		total += (info.Size() + blockSize - 1) / blockSize * blockSize
+		return nil
+	})
+	return total, err
+}
+
+func checkStageFits(stageDir string, sizeBytes int64, label string) error {
+	dataBytes, err := stageDataBytes(stageDir)
+	if err != nil || dataBytes+ext4MinOverheadBytes <= sizeBytes {
+		return nil
+	}
+	needMiB := (dataBytes + ext4MinOverheadBytes) / (1024 * 1024)
+	suggestMiB := (needMiB/1024 + 1) * 1024
+	hint := fmt.Sprintf("give it a larger size (at least %d MiB)", suggestMiB)
+	if label == "rootfs" {
+		hint = fmt.Sprintf("give the workspace a larger disk, for example --size-mib %d, or drop the pinned size to let the disk grow to fit", suggestMiB)
+	}
+	return fmt.Errorf("%s contents need about %d MiB but the %s disk size is %d MiB; %s", label, needMiB, label, sizeBytes/(1024*1024), hint)
+}
+
 func buildExt4Image(ctx context.Context, mke2fsPath, stageDir, tmpImage, outputPath string, sizeBytes int64, label string) error {
+	if err := checkStageFits(stageDir, sizeBytes, label); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}

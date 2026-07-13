@@ -8,7 +8,6 @@ import (
 
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
-	"github.com/geoffbelknap/microagent/pkg/rootfs"
 )
 
 func runImage(args []string, stdout *os.File) error {
@@ -18,7 +17,7 @@ func runImage(args []string, stdout *os.File) error {
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
 	arch := fs.String("arch", defaultGuestArch(), "Image architecture")
-	sizeMiB := fs.Int64("size-mib", rootfs.DefaultSizeMiB, "Rootfs image size in MiB")
+	sizeMiB := fs.Int64("size-mib", 0, "Rootfs image size in MiB (default: fit the image)")
 	mke2fsPath := fs.String("mke2fs", defaultMke2fsPath(), "mke2fs binary path")
 	guestInitPath := fs.String("guest-init", defaultGuestInitPath(*arch), "Guest init path")
 	deleteFiles := fs.Bool("delete", false, "Delete reusable local image rootfs files during prune")

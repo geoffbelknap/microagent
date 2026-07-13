@@ -95,6 +95,20 @@ func SupportForPath(backend, arch, path string) *vmkit.KernelSupport {
 	return support
 }
 
+// Programs that link this package can boot workspaces on a host with no
+// kernel installed yet: workspace.EnsureKernel fetches, verifies, and installs
+// the latest kernel from the signed manifest through this hook.
+func init() {
+	workspace.RegisterKernelInstaller(func(ctx context.Context, backend, arch, outputPath string) error {
+		_, err := Install(ctx, InstallOptions{
+			Backend:      backend,
+			Architecture: arch,
+			OutputPath:   outputPath,
+		})
+		return err
+	})
+}
+
 func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if opts.Backend == "" {
 		opts.Backend = workspace.HostBackend()
@@ -105,6 +119,7 @@ func Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	if opts.Architecture == "" {
 		opts.Architecture = workspace.GuestArch()
 	}
+	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
 	if opts.OutputPath == "" {
 		opts.OutputPath = workspace.WritableKernelPath(opts.Backend, opts.Architecture)
 	}
@@ -136,6 +151,7 @@ func Verify(opts VerifyOptions) (VerifyResult, error) {
 	if opts.Architecture == "" {
 		opts.Architecture = workspace.GuestArch()
 	}
+	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
 	if opts.Path == "" {
 		opts.Path = workspace.KernelPath(opts.Backend, opts.Architecture)
 	}

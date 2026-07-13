@@ -48,8 +48,8 @@ Common flags:
 
 - `--image <ref>` and `--out <path>` - the required pair: what to build from and
   where the ext4 image lands
-- `--size-mib <MiB>` - size the disk up front; an image that doesn't fit fails
-  the build
+- `--size-mib <MiB>` - pin the disk size; an image that doesn't fit then fails
+  the build. Without the flag the disk grows to fit the image
 - `--arch <arch>` - cross-build for a guest architecture other than the host's
   (the default)
 - `--allow-mutable` - accept a tag reference when you've decided digest pinning
@@ -64,7 +64,7 @@ The complete set:
 | `--image <ref>` | OCI image reference |
 | `--out <path>` | Output rootfs path |
 | `--os <os>` | Target OS (default `linux`) |
-| `--arch <arch>` | Target architecture (`amd64`, `arm64`). Defaults to the host architecture |
+| `--arch <arch>` | Target architecture (`arm64`/`aarch64`, `amd64`/`x86_64`). Defaults to the host architecture |
 | `--size-mib <MiB>` | Disk size |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--exec <command>` | Shell command to run as guest init |

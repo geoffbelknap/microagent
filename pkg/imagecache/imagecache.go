@@ -56,7 +56,9 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 	if opts.Architecture == "" {
 		opts.Architecture = workspace.GuestArch()
 	}
-	if opts.SizeMiB == 0 {
+	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
+	autoSize := opts.SizeMiB == 0
+	if autoSize {
 		opts.SizeMiB = rootfs.DefaultSizeMiB
 	}
 	if opts.SizeMiB < 0 {
@@ -83,6 +85,7 @@ func Pull(ctx context.Context, opts PullOptions) (Record, error) {
 		StateDir:       filepath.Join(opts.StateDir, "images", "build"),
 		Mke2fsPath:     opts.Mke2fsPath,
 		SizeMiB:        opts.SizeMiB,
+		AutoSize:       autoSize,
 		AllowMutable:   true,
 	})
 	if err != nil {

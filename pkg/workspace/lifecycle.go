@@ -108,6 +108,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	if err := EnsureKernel(ctx, &opts); err != nil {
+		return Result{}, err
+	}
 	if err := materializeCredSwapConfig(&opts); err != nil {
 		return Result{}, err
 	}
@@ -122,6 +125,11 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	result, err := BuildRootfs(ctx, opts)
 	if err != nil {
 		return result, err
+	}
+	// An auto-sized build may have grown the disk; record the size the
+	// workspace actually has.
+	if result.Resources.SizeMiB > opts.SizeMiB {
+		opts.SizeMiB = result.Resources.SizeMiB
 	}
 	result.Disks = disks
 	verification, err := BuildVerification(opts, result)
@@ -262,6 +270,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	if err := EnsureKernel(ctx, &opts); err != nil {
+		return Result{}, err
+	}
 	if err := materializeCredSwapConfig(&opts); err != nil {
 		return Result{}, err
 	}
@@ -273,6 +284,11 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	result, err := BuildRootfs(ctx, opts)
 	if err != nil {
 		return result, err
+	}
+	// An auto-sized build may have grown the disk; record the size the
+	// workspace actually has.
+	if result.Resources.SizeMiB > opts.SizeMiB {
+		opts.SizeMiB = result.Resources.SizeMiB
 	}
 	result.Disks = disks
 	verification, err := BuildVerification(opts, result)
@@ -332,6 +348,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		}
 	}
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureKernel(ctx, &opts); err != nil {
 		return Result{}, err
 	}
 	if opts.ResultPort == 0 && !opts.MaintenanceBoot {
@@ -913,6 +932,9 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
 		return Result{}, err
 	}
+	if err := EnsureKernel(ctx, &opts); err != nil {
+		return Result{}, err
+	}
 	if err := EnsureCanCreate(opts); err != nil {
 		return Result{}, err
 	}
@@ -1151,6 +1173,9 @@ func BuildRootfs(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	provenance, err := rootfs.NewBuilder().Build(ctx, req)
+	if builtMiB := provenance.SizeBytes / (1024 * 1024); builtMiB > opts.SizeMiB {
+		opts.SizeMiB = builtMiB
+	}
 	result := Result{
 		Workspace:    opts.Name,
 		StateDir:     opts.StateDir,
@@ -1231,6 +1256,7 @@ func buildRootfsRequest(opts Options, rootfsPath string) rootfs.BuildRequest {
 		LocalImageLayout: localImageLayoutPath(opts.StateDir),
 		Mke2fsPath:       opts.Mke2fsPath,
 		SizeMiB:          opts.SizeMiB,
+		AutoSize:         !opts.SizeExplicit && !opts.SpecSize,
 		Env:              opts.Env,
 		Files:            RootfsFiles(opts.Files),
 		Mounts:           MountsForBackend(opts.Backend, opts.Disks),
@@ -1344,6 +1370,7 @@ func PrepareDisks(ctx context.Context, opts Options) ([]Disk, error) {
 				StateDir:   filepath.Join(opts.StateDir, "build"),
 				Mke2fsPath: opts.Mke2fsPath,
 				SizeMiB:    64,
+				AutoSize:   true,
 			})
 			if err != nil {
 				return nil, err
@@ -1752,6 +1779,7 @@ func normalizeLifecycleOptions(opts *Options, requireDisk bool) error {
 	if opts.Architecture == "" {
 		opts.Architecture = defaults.Architecture
 	}
+	opts.Architecture = NormalizeArch(opts.Architecture)
 	if opts.Profile == "" {
 		opts.Profile = defaults.Profile
 	}

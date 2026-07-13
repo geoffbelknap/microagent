@@ -24,7 +24,7 @@ DNS resolver, so a name you didn't allowlist never even resolves:
 
 ```bash
 microagent create research \
-  --image docker.io/library/python:3.12 \
+  --image docker.io/library/python:3.12-slim \
   --egress-lock-allowlist \
   --egress-allow api.openai.com \
   --egress-allow .pypi.org
@@ -45,7 +45,7 @@ The same flags exist on [`microagent run`](/cli/run/) and
 
 ```bash
 microagent run --egress-lock-allowlist --egress-allow .anthropic.com \
-  docker.io/library/python:3.12 python agent.py
+  docker.io/library/python:3.12-slim python agent.py
 ```
 
 Egress settings are persisted with the workspace, so a later

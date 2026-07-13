@@ -7763,41 +7763,9 @@ func TestKernelInstallFromLocalAndVerify(t *testing.T) {
 	}
 }
 
-func TestEnsureWorkspaceKernelUsesInstalledKernel(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "Image")
-	if err := os.WriteFile(path, []byte("installed kernel"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	opts := workspaceOptions{
-		Backend:      vmkit.BackendAppleVF,
-		Architecture: "arm64",
-		KernelPath:   path,
-	}
-	// A kernel already present at KernelPath must be used as-is — no manifest
-	// fetch or install (the hybrid resolution's installed-kernel branch).
-	if err := ensureWorkspaceKernel(t.Context(), &opts); err != nil {
-		t.Fatalf("ensureWorkspaceKernel: %v", err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil || string(got) != "installed kernel" {
-		t.Fatalf("kernel changed: %q, %v", got, err)
-	}
-}
-
-func TestEnsureWorkspaceKernelSkipsExplicitKernel(t *testing.T) {
-	opts := workspaceOptions{
-		Backend:        vmkit.BackendAppleVF,
-		Architecture:   "arm64",
-		KernelPath:     filepath.Join(t.TempDir(), "missing"),
-		KernelExplicit: true,
-	}
-	if err := ensureWorkspaceKernel(t.Context(), &opts); err != nil {
-		t.Fatalf("ensureWorkspaceKernel: %v", err)
-	}
-}
-
-// The install-from-manifest path (no kernel present) is covered by the live
-// end-to-end suite, since install now fetches + verifies the signed manifest.
+// Kernel ensure semantics (installed kernel used as-is, explicit path
+// skipped, missing default installed) live in pkg/workspace; see
+// pkg/workspace/kernel_test.go.
 
 func TestFirecrackerGuestHaltedDetectsKernelShutdown(t *testing.T) {
 	if runtime.GOOS != "linux" {

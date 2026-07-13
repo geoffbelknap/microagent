@@ -47,7 +47,7 @@ microagent doctor                                # check the host
 microagent run docker.io/library/ubuntu:24.04 uname -a
 
 # same, plus a report of what the task reached on the network
-microagent dispatch docker.io/library/python:3.12 python -c 'print(2+2)'
+microagent dispatch docker.io/library/python:3.12-slim python -c 'print(2+2)'
 ```
 
 `microagent run` also accepts the explicit form when you want shell command

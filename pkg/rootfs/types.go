@@ -45,32 +45,36 @@ type BuildRequest struct {
 	// own commits. Empty preserves remote-only behavior (callers opt in by
 	// setting it). A local lookup miss or error falls back to the remote
 	// registry rather than failing the build.
-	LocalImageLayout string            `json:"local_image_layout,omitempty"`
-	ImageRef         string            `json:"image_ref"`
-	Platform         Platform          `json:"platform"`
-	OutputPath       string            `json:"output_path"`
-	Format           string            `json:"format,omitempty"`
-	InitPath         string            `json:"init_path,omitempty"`
-	InitBinaryPath   string            `json:"init_binary_path,omitempty"`
-	Command          []string          `json:"command,omitempty"`
-	Mode             string            `json:"mode,omitempty"`
-	ConsoleShell     string            `json:"console_shell,omitempty"`
-	Hostname         string            `json:"hostname,omitempty"`
-	ShellPort        uint16            `json:"shell_port,omitempty"`
-	ExecPort         uint16            `json:"exec_port,omitempty"`
-	NoImageCommand   bool              `json:"no_image_command,omitempty"`
-	ResultPort       uint32            `json:"result_port,omitempty"`
-	StateDir         string            `json:"state_dir,omitempty"`
-	Mke2fsPath       string            `json:"mke2fs_path,omitempty"`
-	SizeMiB          int64             `json:"size_mib,omitempty"`
-	Env              map[string]string `json:"env,omitempty"`
-	Files            []File            `json:"files,omitempty"`
-	Mounts           []Mount           `json:"mounts,omitempty"`
-	HostForwards     []PortForward     `json:"host_forwards,omitempty"`
-	AllowMutable     bool              `json:"allow_mutable,omitempty"`
-	KeepStage        bool              `json:"keep_stage,omitempty"`
-	StageSnapshot    string            `json:"stage_snapshot,omitempty"`
-	Progress         ProgressFunc      `json:"-"`
+	LocalImageLayout string   `json:"local_image_layout,omitempty"`
+	ImageRef         string   `json:"image_ref"`
+	Platform         Platform `json:"platform"`
+	OutputPath       string   `json:"output_path"`
+	Format           string   `json:"format,omitempty"`
+	InitPath         string   `json:"init_path,omitempty"`
+	InitBinaryPath   string   `json:"init_binary_path,omitempty"`
+	Command          []string `json:"command,omitempty"`
+	Mode             string   `json:"mode,omitempty"`
+	ConsoleShell     string   `json:"console_shell,omitempty"`
+	Hostname         string   `json:"hostname,omitempty"`
+	ShellPort        uint16   `json:"shell_port,omitempty"`
+	ExecPort         uint16   `json:"exec_port,omitempty"`
+	NoImageCommand   bool     `json:"no_image_command,omitempty"`
+	ResultPort       uint32   `json:"result_port,omitempty"`
+	StateDir         string   `json:"state_dir,omitempty"`
+	Mke2fsPath       string   `json:"mke2fs_path,omitempty"`
+	SizeMiB          int64    `json:"size_mib,omitempty"`
+	// AutoSize treats SizeMiB as a starting point rather than a limit: when
+	// the unpacked image doesn't fit, the disk grows to hold it plus free
+	// space. Set it when the caller didn't pin a size explicitly.
+	AutoSize      bool              `json:"auto_size,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	Files         []File            `json:"files,omitempty"`
+	Mounts        []Mount           `json:"mounts,omitempty"`
+	HostForwards  []PortForward     `json:"host_forwards,omitempty"`
+	AllowMutable  bool              `json:"allow_mutable,omitempty"`
+	KeepStage     bool              `json:"keep_stage,omitempty"`
+	StageSnapshot string            `json:"stage_snapshot,omitempty"`
+	Progress      ProgressFunc      `json:"-"`
 	// ResetFinalConfig appends a line to the Command shell script that
 	// rewrites /etc/microagent/run.json so later boots run FinalCommand in
 	// FinalMode. The builder composes the rewritten env from the image config
@@ -106,6 +110,8 @@ type BundleRequest struct {
 	StateDir   string `json:"state_dir,omitempty"`
 	Mke2fsPath string `json:"mke2fs_path,omitempty"`
 	SizeMiB    int64  `json:"size_mib,omitempty"`
+	// AutoSize grows the disk past SizeMiB when the bundle contents don't fit.
+	AutoSize bool `json:"auto_size,omitempty"`
 }
 
 type BundleProvenance struct {

@@ -25,7 +25,6 @@ import (
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
-	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
@@ -594,7 +593,7 @@ Common flags (same as run):
   --json                       machine-readable result + audit
 
 Example:
-  microagent dispatch docker.io/library/python:3.12 python -c 'print(2+2)'
+  microagent dispatch docker.io/library/python:3.12-slim python -c 'print(2+2)'
 `)
 }
 
@@ -2227,7 +2226,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&publishFlags, "p", "Forward host[:hostPort]:guestPort[/tcp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
-	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
+	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs disk size in MiB; without the flag the disk grows to fit the image")
 	resultPort := uint(opts.ResultPort)
 	fs.UintVar(&resultPort, "result-port", resultPort, "Vsock result port")
 	var timeoutSeconds int
@@ -2544,6 +2543,9 @@ func applyNetworkMediationOptionFlags(opts *workspaceOptions, publishFlags multi
 }
 
 func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit workspaceOptionExplicitFlags, rm bool, specPath string, resultPort uint, timeoutSeconds int) error {
+	// Normalize before anything derives paths or image platforms from it, so
+	// `--arch aarch64` (uname spelling) means arm64 everywhere.
+	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		if command == "create" {
@@ -2571,6 +2573,7 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
 	opts.KernelExplicit = explicit.Kernel
+	opts.SizeExplicit = explicit.Size
 	if err := validateRestartPolicy(opts.RestartPolicy); err != nil {
 		return err
 	}
@@ -2647,30 +2650,6 @@ func shellCommandFromArgs(args []string) string {
 		quoted = append(quoted, shellSingleQuote(arg))
 	}
 	return "exec " + strings.Join(quoted, " ")
-}
-
-func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
-	if opts.KernelExplicit {
-		return nil
-	}
-	if strings.TrimSpace(opts.KernelPath) == "" {
-		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
-	}
-	if _, err := os.Stat(opts.KernelPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	// No kernel installed yet: fetch + verify + install the latest from the
-	// signed manifest. (An already-present kernel is used as-is, above.)
-	if _, err := kernel.Install(ctx, kernel.InstallOptions{
-		Backend:      opts.Backend,
-		Architecture: opts.Architecture,
-		OutputPath:   opts.KernelPath,
-	}); err != nil {
-		return fmt.Errorf("install kernel for %s/%s: %w (or pass --kernel)", opts.Backend, opts.Architecture, err)
-	}
-	return nil
 }
 
 func workspaceSpecPath(command string, args []string) string {
