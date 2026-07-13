@@ -391,7 +391,6 @@ func runModelServe(args []string, stdout *os.File) error {
 
 func printModelServeHelp(stdout io.Writer) {
 	fmt.Fprint(stdout, `microagent model serve <hf-ref>
-microagent model serve <hf-ref>
 
 Start or reuse a pinned host model runner process for a HuggingFace GGUF model.
 
