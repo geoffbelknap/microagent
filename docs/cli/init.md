@@ -4,7 +4,7 @@ description: Scaffold a starter agent project.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-07-13_
 
 ```text
 microagent init <name> [options]
@@ -52,10 +52,15 @@ file list.
   protocol.py          # request/reply wire shapes (shaped by the ASK framework)
   README.md            # how to run and edit the project
   demo/
+    README.md          # what each demo request does
     constraints.json   # operator-owned constraint envelope
     system_prompt.md   # system prompt
+    hello.json         # smallest first task: write and run a greeting script
     input-001.json     # first WorkRequest: install rich, render a file-size table
     input-002.json     # follow-up WorkRequest for the halt/resume flow
+    clone-and-test.json    # clone a public repo and run its pytest suite
+    analyze-file.json      # clean a messy CSV and write a findings report
+    data/sales-sample.csv  # the messy CSV analyze-file.json works on
 ```
 
 The `<name>` argument is the workspace name written into the spec and the

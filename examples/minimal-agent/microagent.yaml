@@ -16,3 +16,14 @@ files:
 outputs:
   - name: result
     path: /workspace/result.json
+# Mediation: the guest-to-host vsock channel an enforcer/orchestrator uses to
+# govern this agent. The agent already speaks the protocol side — it loads the
+# constraint envelope and emits lifecycle signals (ready, accepting, completed,
+# mediation_broken). Uncomment and point `target` at your enforcer to require
+# the channel; `failClosed` treats a broken required channel as denied.
+# mediation:
+#   enabled: true
+#   required: true
+#   port: 2048
+#   target: 127.0.0.1:9900
+#   failClosed: true

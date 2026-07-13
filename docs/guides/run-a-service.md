@@ -4,7 +4,7 @@ description: Run Postgres in a workspace with a published port, a named volume, 
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 This example runs Postgres 17 in a microVM, reachable from the host on
 `127.0.0.1:5432`, with its data on a named volume that survives halt and
@@ -120,6 +120,7 @@ Run `volume delete` last: it removes the data for real.
 
 ## Related
 
+- **A complete service example** - [`examples/homebridge`](https://github.com/geoffbelknap/microagent/tree/main/examples/homebridge) runs Homebridge with a setup script, a supervised service command, `restart: always`, and a published port.
 - **More on volumes, disks, and bundles** - [volumes and data](/guides/volumes-and-data/).
 - **Give a workspace outbound access and publish a port** - [networking](/guides/networking/).
 - **Port-forward mechanics and network modes** - [Networking](/concepts/networking/).

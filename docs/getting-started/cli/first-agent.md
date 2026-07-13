@@ -4,13 +4,13 @@ description: "Run an LLM agent in a microVM: send requests, read results, resume
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 Run an [agent](/concepts/glossary/#vms-and-whats-inside-them) inside a microVM: a small program that
 calls an LLM with `bash`, `read_file`, and `write_file` tools, does real work
-in its own workspace, and reports a structured result. The example ships in
+in its own workspace, and reports a structured result. The project comes in
 three flavors: Anthropic Claude, OpenAI, and Google Gemini. The flow is
-identical; only the example folder and the API key env var change.
+identical; only the provider you scaffold with and the API key env var change.
 
 *If you just want to see microagent boot a microVM and run a command, start
 with the [quickstart](/getting-started/quickstart/).*
@@ -20,43 +20,36 @@ with the [quickstart](/getting-started/quickstart/).*
 1. [Install microagent](/getting-started/install/) and run `microagent doctor`.
 2. Pick a provider and set the matching API key:
 
-   | Provider | Example folder | API key env var | Sign up |
+   | Provider | Scaffold with | API key env var | Sign up |
    |---|---|---|---|
-   | Anthropic Claude | [`examples/minimal-agent`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent) | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
-   | OpenAI | [`examples/minimal-agent-openai`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent-openai) | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
-   | Google Gemini | [`examples/minimal-agent-gemini`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent-gemini) | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
+   | Anthropic Claude | `microagent init minimal-agent --provider anthropic` | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+   | OpenAI | `microagent init minimal-agent --provider openai` | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
+   | Google Gemini | `microagent init minimal-agent --provider gemini` | `GEMINI_API_KEY` | [aistudio.google.com](https://aistudio.google.com) |
 
-3. Clone the microagent repo to get the example sources:
-
-   ```bash
-   git clone https://github.com/geoffbelknap/microagent.git
-   cd microagent
-   ```
-
-   **Faster, no clone:** [`microagent init`](/cli/init/) scaffolds the same
-   project anywhere, for any provider:
+3. Scaffold the project and step inside it:
 
    ```bash
-   microagent init my-agent --provider anthropic   # or openai, gemini
-   cd my-agent
+   microagent init minimal-agent --provider anthropic
+   cd minimal-agent
    ```
 
-   The generated project uses the workspace name you pass (`my-agent` above)
-   instead of `minimal-agent`, and its `agent.py`, `protocol.py`, and the two
-   walkthrough requests are identical to the example. Adjust the commands
-   below to your name and run from the generated directory (use
-   `--file microagent.yaml`). The [more requests to try](#more-requests-to-try)
-   live in the example folder only.
+   [`microagent init`](/cli/init/) generates everything this page uses: the
+   spec, the agent, and all the demo requests. (Prefer reading before running?
+   The same project is checked in as
+   [`examples/minimal-agent`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent) -
+   clone the repo and `cd examples/minimal-agent` instead; every command below
+   works the same from there.)
 
-The rest of this page uses the **Anthropic** example. To follow along with
-OpenAI or Gemini instead, swap `minimal-agent` for `minimal-agent-openai` or
-`minimal-agent-gemini` in every command, and use the matching API key env var.
+The rest of this page runs from inside that directory and uses the
+**Anthropic** provider. For OpenAI or Gemini, scaffold with that provider
+instead and pass its API key env var in `create` - everything else is
+identical.
 
 ## Create the workspace
 
 ```bash
 microagent create \
-  --file examples/minimal-agent/microagent.yaml \
+  --file microagent.yaml \
   --env ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ```
 
@@ -73,7 +66,7 @@ The agent reads requests from `/workspace/input.json`. Drop the first one in
 with `microagent cp`:
 
 ```bash
-microagent cp examples/minimal-agent/demo/input-001.json minimal-agent:/workspace/input.json
+microagent cp demo/input-001.json minimal-agent:/workspace/input.json
 ```
 
 The request asks for a concrete task: install the `rich` package with pip,
@@ -155,7 +148,7 @@ previous run.
 
 ```bash
 microagent halt minimal-agent
-microagent cp examples/minimal-agent/demo/input-002.json minimal-agent:/workspace/input.json
+microagent cp demo/input-002.json minimal-agent:/workspace/input.json
 microagent start minimal-agent
 microagent --json status minimal-agent   # poll until "state": "stopped"
 microagent --json result minimal-agent
@@ -184,8 +177,8 @@ with the request, and pull the report out after the run:
 
 ```bash
 microagent halt minimal-agent
-microagent cp examples/minimal-agent/demo/data/sales-sample.csv minimal-agent:/workspace/sales-sample.csv
-microagent cp examples/minimal-agent/demo/analyze-file.json minimal-agent:/workspace/input.json
+microagent cp demo/data/sales-sample.csv minimal-agent:/workspace/sales-sample.csv
+microagent cp demo/analyze-file.json minimal-agent:/workspace/input.json
 microagent start minimal-agent
 microagent --json status minimal-agent   # poll until "state": "stopped"
 microagent cp minimal-agent:/workspace/report.md ./report.md
@@ -234,14 +227,18 @@ blob, but pulling first makes the wait visible):
 microagent model pull unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 ```
 
-Create the workspace from the same spec file the cloud flavor uses, with a
-model ref and three env vars in place of the API key:
+The local flow uses the OpenAI SDK, so scaffold an OpenAI-flavor project next
+to the first one, and create its workspace with a model ref and three env vars
+in place of the API key:
 
 ```bash
+microagent init local-agent --provider openai
+cd local-agent
+
 export LLAMA_ARG_CTX_SIZE=32768   # cap the context; this model defaults to 262k, which won't fit in 16 GB RAM
 
 microagent create \
-  --file examples/minimal-agent-openai/microagent.yaml \
+  --file microagent.yaml \
   --model unsloth/Qwen3-4B-Instruct-2507-GGUF/Qwen3-4B-Instruct-2507-Q4_K_M.gguf \
   -e OPENAI_API_KEY=local -e OPENAI_MODEL=qwen3-4b-instruct-2507 -e OPENAI_TEMPERATURE=0.2
 ```
@@ -265,8 +262,8 @@ A few notes on the flags:
 From here the flow is the cloud flow. Send the first request and start:
 
 ```bash
-microagent cp examples/minimal-agent-openai/demo/input-001.json minimal-agent-openai:/workspace/input.json
-microagent start minimal-agent-openai
+microagent cp demo/input-001.json local-agent:/workspace/input.json
+microagent start local-agent
 ```
 
 While the agent runs, `microagent model runners` shows the pairing - the
@@ -280,7 +277,7 @@ workspace holds the host server it's talking to:
       "engine": "llama.cpp",
       "host": "127.0.0.1",
       "port": 34913,
-      "holders": ["minimal-agent-openai"]
+      "holders": ["local-agent"]
     }
   ]
 }
@@ -289,14 +286,14 @@ workspace holds the host server it's talking to:
 On an 8-core CPU host the agent phase takes a couple of minutes - pip
 installs `rich`, the model loops through the same tool calls Claude made
 above, and the result lands in the same place. Poll
-`microagent --json status minimal-agent-openai` until it reports
+`microagent --json status local-agent` until it reports
 `"state": "stopped"`, then pull the result out:
 
 ```bash
-microagent cp minimal-agent-openai:/workspace/result.json ./result.json
+microagent cp local-agent:/workspace/result.json ./result.json
 ```
 
-(`microagent --json result minimal-agent-openai` works here too, exactly like
+(`microagent --json result local-agent` works here too, exactly like
 the cloud flow - the spec declares the same `result` output artifact.)
 
 ```json
@@ -332,11 +329,11 @@ request, start again. `halt` releases the workspace's hold on the model
 server; the next `start` re-pairs it automatically:
 
 ```bash
-microagent halt minimal-agent-openai
-microagent cp examples/minimal-agent-openai/demo/input-002.json minimal-agent-openai:/workspace/input.json
-microagent start minimal-agent-openai
-microagent --json status minimal-agent-openai   # poll until "state": "stopped"
-microagent cp minimal-agent-openai:/workspace/result.json ./result-002.json
+microagent halt local-agent
+microagent cp demo/input-002.json local-agent:/workspace/input.json
+microagent start local-agent
+microagent --json status local-agent   # poll until "state": "stopped"
+microagent cp local-agent:/workspace/result.json ./result-002.json
 ```
 
 The `biggest.py` script from the first run is still on disk, and the local
@@ -349,13 +346,17 @@ Clean up when you're done - `delete` removes the workspace and releases its
 model server hold:
 
 ```bash
-microagent delete minimal-agent-openai
+microagent delete local-agent
 ```
 
 One release rule worth knowing: `halt`, `stop`, `kill`, and `delete` release
 the hold, but an agent that exits on its own - like each run above - keeps it
 until the next lifecycle verb. `microagent model stop <ref>` reclaims a
 runner immediately.
+
+For a smaller, self-contained local-model project (one prompt in, one JSON
+result out, plus the llama.cpp web UI), see
+[`examples/local-coding-model`](https://github.com/geoffbelknap/microagent/tree/main/examples/local-coding-model).
 
 ## Related
 

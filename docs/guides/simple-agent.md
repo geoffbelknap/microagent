@@ -148,14 +148,17 @@ halting first, as above, is fine too.
 
 ## Try it with another provider
 
-The agent's shape does not depend on which model it talks to. Sibling examples run
-the same flow against OpenAI and Gemini with the same protocol, tools,
-workspace, and walkthrough. Each variant has its own `microagent.yaml` and README:
+The agent's shape does not depend on which model it talks to.
+[`microagent init`](/cli/init/) scaffolds the same project - same protocol,
+tools, workspace, and walkthrough - for OpenAI (Chat Completions with function
+calling) or Gemini (function calling):
 
-- [`examples/minimal-agent-openai/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent-openai) - OpenAI Chat Completions with function calling.
-- [`examples/minimal-agent-gemini/`](https://github.com/geoffbelknap/microagent/tree/main/examples/minimal-agent-gemini) - Google Gemini with function calling.
+```bash
+microagent init minimal-agent --provider openai   # or gemini
+```
 
-Swap the spec path and the API-key env var; everything else stays the same.
+Pass the matching API-key env var (`OPENAI_API_KEY` / `GEMINI_API_KEY`) in
+`create`; everything else stays the same.
 
 ## Demo limits
 

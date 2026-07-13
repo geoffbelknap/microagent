@@ -19,15 +19,16 @@ https://github.com/homebridge/homebridge/wiki/Install-Homebridge-on-Debian-or-Ub
 
 ## Run
 
-From the repo root:
+From the repo root, with microagent [installed](../../docs/getting-started/install.md):
 
 ```sh
-make dev-build
-
-.build/dev/microagent create --file examples/homebridge/microagent.yaml
-.build/dev/microagent start homebridge
+microagent create --file examples/homebridge/microagent.yaml
+microagent start homebridge
 curl -I http://127.0.0.1:8581/
 ```
+
+(Working from a source checkout instead? `make dev-build` puts a dev CLI at
+`.build/dev/microagent`; use that path in the commands above.)
 
 The Homebridge UI should be available at:
 
@@ -38,7 +39,7 @@ http://127.0.0.1:8581/
 To inspect the guest:
 
 ```sh
-.build/dev/microagent connect homebridge
+microagent connect homebridge
 ```
 
 ## Notes
@@ -49,7 +50,7 @@ To inspect the guest:
 - The setup installs `sudo` because the Homebridge UI invokes plugin installs
   through `sudo -E -n npm install`, even when the service is running as root.
 - On Linux Firecracker hosts the recipe uses `network.mode: user`, which keeps
-  the normal Homebrew install path unprivileged while still allowing outbound
+  the normal Homebridge install path unprivileged while still allowing outbound
   traffic and the `8581` TCP forward.
 - Homebridge writes logs to `/var/lib/homebridge/homebridge.log`, which is the
   path the Homebridge UI expects for its native log viewer.
