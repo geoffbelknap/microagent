@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+"$ROOT/scripts/dev/require-build-tools.sh"
+
 usage() {
   cat >&2 <<'USAGE'
 usage: scripts/dev/build-local.sh [--output PATH] [--arch ARCH] [--quiet]
@@ -63,49 +65,52 @@ resolve_firecracker() {
   return 1
 }
 
+# dev_version stamps source builds so their age is readable, not just their
+# identity: `0.8.6+15-gfaa6d7b` is 15 commits past the v0.8.6 release. A
+# checkout exactly on a release tag stamps plain `0.8.6`; local modifications
+# append `-dirty`. Falls back to `0.0.0+g<sha>` when no release tag is
+# reachable (e.g. a shallow clone) and `0.0.0-local` outside a work tree.
 dev_version() {
-  local base sha dirty
+  local described base count sha dirty
 
-  base="$(release_line_version)"
-  sha="local"
-  dirty=""
-
-  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    sha="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
-    if ! git -C "$ROOT" diff --quiet --ignore-submodules -- ||
-      ! git -C "$ROOT" diff --cached --quiet --ignore-submodules -- ||
-      [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]; then
-      dirty="-dirty"
-    fi
-  fi
-
-  printf '%s-%s%s\n' "$base" "$sha" "$dirty"
-}
-
-release_line_version() {
-  local tag
-
-  tag=""
-  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    while IFS= read -r tag; do
-      case "$tag" in
-        *-*)
-          continue
-          ;;
-        *)
-          break
-          ;;
-      esac
-    done < <(git -C "$ROOT" tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname)
-  fi
-
-  if [ -z "$tag" ]; then
-    printf '0.0.0\n'
+  if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    printf '0.0.0-local\n'
     return
   fi
 
-  tag="${tag#v}"
-  printf '%s\n' "$tag"
+  dirty=""
+  if ! git -C "$ROOT" diff --quiet --ignore-submodules -- ||
+    ! git -C "$ROOT" diff --cached --quiet --ignore-submodules -- ||
+    [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]; then
+    dirty="-dirty"
+  fi
+
+  if described="$(git -C "$ROOT" describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null)"; then
+    described="${described#v}"
+    case "$described" in
+      *-*-g*)
+        sha="${described##*-}"
+        base="${described%-*-g*}"
+        count="${described#"$base"-}"
+        count="${count%-g*}"
+        printf '%s+%s-g%s%s\n' "$base" "$count" "${sha#g}" "$dirty"
+        ;;
+      *)
+        printf '%s%s\n' "$described" "$dirty"
+        ;;
+    esac
+    return
+  fi
+
+  printf '0.0.0+g%s%s\n' "$(git -C "$ROOT" rev-parse --short=7 HEAD)" "$dirty"
+}
+
+# commit_date is the second half of the readability story: `-v` prints it next
+# to the version so "how old is this build" needs no git archaeology.
+commit_date() {
+  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$ROOT" show -s --format=%cs HEAD 2>/dev/null || true
+  fi
 }
 
 output="${MICROAGENT_DEV_CLI:-$ROOT/.build/dev/microagent}"
@@ -164,7 +169,11 @@ firecracker_supervisor_path="$output_dir/microagent-firecracker-supervisor"
 libexec_dir="$(cd "$output_dir/.." && pwd -P)/libexec"
 firecracker_vmm_path="$libexec_dir/firecracker"
 version="$(dev_version)"
+built="$(commit_date)"
 ldflags="-X main.version=$version"
+if [ -n "$built" ]; then
+  ldflags="$ldflags -X main.commitDate=$built"
+fi
 
 (
   cd "$ROOT"

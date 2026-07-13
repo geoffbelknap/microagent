@@ -37,7 +37,10 @@ import (
 )
 
 var (
-	version          = "dev"
+	version = "dev"
+	// commitDate is the source commit's date (YYYY-MM-DD), stamped by
+	// scripts/dev/build-local.sh so `-v` can say how old a build is.
+	commitDate       = ""
 	outputFormat     string
 	globalOutputMode outputMode
 	stdinIsTerminal  = defaultStdinIsTerminal

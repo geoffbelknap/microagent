@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+"$ROOT/scripts/dev/require-build-tools.sh"
+
 usage() {
   cat >&2 <<'USAGE'
 usage: scripts/install-from-source.sh [--prefix PATH] [--arch ARCH] [--firecracker PATH] [--download-firecracker] [--install-host-packages] [--install-kernel] [--quiet] [--no-check]

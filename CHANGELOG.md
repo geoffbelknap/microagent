@@ -5,6 +5,26 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Source builds check their build tools and report what's missing
+
+`make build`, `make dev`, and `make install` now preflight the build tools
+before running anything. A missing `go` or `git` used to surface as a raw
+shell error partway through a build script; it now fails immediately with the
+tool name and an install command for the host (`brew install go`,
+`https://go.dev/dl/`). A Go older than the `go.mod` requirement is reported
+the same way, with the found and required versions.
+
+### Source-build versions say how old they are
+
+Checkout-local builds used to stamp `<release>-<sha>` (for example
+`0.8.6-56f0bdd`), which doesn't tell you whether the build is current - a
+short sha carries no ordering. Dev builds now stamp
+`<release>+<commits-since-release>-g<sha>` and `-v` prints the source commit's
+date next to it: `microagent 0.8.6+15-g9c7ad3d (commit 2026-07-12)`. A
+checkout exactly on a release tag still reports the plain release version, and
+`-dirty` still marks uncommitted changes. JSON/AX version output gains a
+`commit_date` field when the build has one.
+
 ### Fixed: first boot on a fresh host installs the default kernel again
 
 `run`, `dispatch`, `create`, `start`, and snapshot forks once again fetch,

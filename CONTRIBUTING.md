@@ -10,8 +10,11 @@ upstream projects.
 
 ## Development Setup
 
-Install Go and, on macOS, Xcode command line tools with Swift. Linux
-Firecracker work requires KVM and `/dev/vhost-vsock`.
+Install Go (the version `go.mod` requires or newer) and, on macOS, Xcode
+command line tools with Swift. Linux Firecracker work requires KVM and
+`/dev/vhost-vsock`. Every build entry point (`make build`, `make dev`,
+`make install`) checks for the build tools first and tells you what to
+install if one is missing.
 
 ```bash
 go test ./...
