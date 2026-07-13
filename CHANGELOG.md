@@ -19,6 +19,13 @@ run-brave-otter-4f9c` typable by hand. The generator is exported as
 The flag was hard-coded to `arm64` regardless of host; an amd64 host now
 builds an amd64 rootfs by default. Pass `--arch` explicitly to cross-build.
 
+### `create` gains `--request-json` for request input
+
+The request-input flag was spelled `-json <path|->`, colliding with the global
+`--json` output flag. `--request-json` is now the preferred spelling on every
+command that accepts request JSON; `-json` after the subcommand remains a
+compat alias (passing both with different paths is an error).
+
 ### Multiple egress broker endpoints per workspace
 
 A workspace can now declare more than one egress broker endpoint instead of

@@ -356,13 +356,15 @@ func runHostWorkerMediator(ctx context.Context, args []string, ready io.Writer) 
 
 func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.Request, error) {
 	var jsonPath string
+	var legacyJSONPath string
 	var dryRun bool
 	var identity vmkit.Identity
 	var config vmkit.Config
 	var vsocks multiFlag
 	var publishes multiFlag
 	var disks multiFlag
-	fs.StringVar(&jsonPath, "json", "", "Read request JSON from path, or '-' for stdin")
+	fs.StringVar(&jsonPath, "request-json", "", "Read request JSON from path, or '-' for stdin")
+	fs.StringVar(&legacyJSONPath, "json", "", "Compat alias for --request-json (distinct from the global --json output flag)")
 	fs.BoolVar(&dryRun, "dry-run", false, "Validate without writing state")
 	fs.StringVar(&identity.RuntimeID, "id", "", "Workspace ID")
 	fs.StringVar(&identity.RuntimeID, "name", "", "Workspace name")
@@ -380,6 +382,12 @@ func requestForCommand(command string, fs *flag.FlagSet, args []string) (vmkit.R
 	fs.Var(&publishes, "publish", "Forward host[:hostPort]:guestPort[/tcp]")
 	if err := fs.Parse(args); err != nil {
 		return vmkit.Request{}, err
+	}
+	if legacyJSONPath != "" {
+		if jsonPath != "" && jsonPath != legacyJSONPath {
+			return vmkit.Request{}, fmt.Errorf("use --request-json or its alias -json, not both")
+		}
+		jsonPath = legacyJSONPath
 	}
 	args = fs.Args()
 	switch command {
@@ -3334,7 +3342,7 @@ func shouldUseHighLevelCreate(args []string) bool {
 	if wantsHelp(args) {
 		return true
 	}
-	if hasFlagValue(args, "dry-run") && !hasFlagValue(args, "rootfs") && !hasFlagValue(args, "json") && !hasFlagValue(args, "vsock") {
+	if hasFlagValue(args, "dry-run") && !hasFlagValue(args, "rootfs") && !hasFlagValue(args, "json") && !hasFlagValue(args, "request-json") && !hasFlagValue(args, "vsock") {
 		return true
 	}
 	if hasLowLevelCreateFlag(args) {
@@ -3349,13 +3357,15 @@ func shouldUseHighLevelCreate(args []string) bool {
 func hasLowLevelCreateFlag(args []string) bool {
 	for _, arg := range args {
 		switch arg {
-		case "--rootfs", "-rootfs", "--json", "-json", "--dry-run", "-dry-run", "--request-id", "-request-id", "--role", "-role", "--vsock", "-vsock":
+		case "--rootfs", "-rootfs", "--json", "-json", "--request-json", "-request-json", "--dry-run", "-dry-run", "--request-id", "-request-id", "--role", "-role", "--vsock", "-vsock":
 			return true
 		}
 		if strings.HasPrefix(arg, "--rootfs=") ||
 			strings.HasPrefix(arg, "-rootfs=") ||
 			strings.HasPrefix(arg, "--json=") ||
 			strings.HasPrefix(arg, "-json=") ||
+			strings.HasPrefix(arg, "--request-json=") ||
+			strings.HasPrefix(arg, "-request-json=") ||
 			strings.HasPrefix(arg, "--request-id=") ||
 			strings.HasPrefix(arg, "-request-id=") ||
 			strings.HasPrefix(arg, "--role=") ||
@@ -4218,7 +4228,8 @@ Options:
   --text                Print human-readable output
   --output <json|text>  Select output format
   -supervisor <path>    Override the supervisor path
-  -json <path|- >       Read request JSON from a file or stdin
+  -request-json <path|->
+                         Read request JSON from a file or stdin (-json is a compat alias)
   -image <ref>          OCI image
   -image-command        Run the image Entrypoint/Cmd instead of opening a shell
   -service-command <cmd> Long-running command to run as the VM service
@@ -4434,6 +4445,7 @@ Options:
   -model-mediation <mode> Model mediation: off, local-allow, or policy
   -model-policy-file <path> Model mediation policy file
   -dry-run              Validate without writing state
-  -json <path|->        Read request JSON from a file or stdin
+  -request-json <path|->
+                         Read request JSON from a file or stdin (-json is a compat alias)
 `)
 }
