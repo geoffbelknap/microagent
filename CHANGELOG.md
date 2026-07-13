@@ -14,6 +14,11 @@ random suffix keeps names collision-safe while making `microagent delete
 run-brave-otter-4f9c` typable by hand. The generator is exported as
 `workspace.RandomName(prefix)`.
 
+### `rootfs build --arch` defaults to the host architecture
+
+The flag was hard-coded to `arm64` regardless of host; an amd64 host now
+builds an amd64 rootfs by default. Pass `--arch` explicitly to cross-build.
+
 ### Multiple egress broker endpoints per workspace
 
 A workspace can now declare more than one egress broker endpoint instead of
