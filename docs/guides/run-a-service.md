@@ -120,7 +120,7 @@ Run `volume delete` last: it removes the data for real.
 
 ## Related
 
-- **A complete service example** - [`examples/homebridge`](https://github.com/geoffbelknap/microagent/tree/main/examples/homebridge) runs Homebridge with a setup script, a supervised service command, `restart: always`, and a published port.
-- **More on volumes, disks, and bundles** - [volumes and data](/guides/volumes-and-data/).
-- **Give a workspace outbound access and publish a port** - [networking](/guides/networking/).
-- **Port-forward mechanics and network modes** - [Networking](/concepts/networking/).
+- [`examples/homebridge`](https://github.com/geoffbelknap/microagent/tree/main/examples/homebridge) — a complete service: setup script, supervised service command, `restart: always`, and a published port.
+- [Volumes and data](/guides/volumes-and-data/) — more on volumes, disks, and bundles.
+- [Networking guide](/guides/networking/) — give a workspace outbound access and publish a port.
+- [Networking concepts](/concepts/networking/) — port-forward mechanics and network modes.

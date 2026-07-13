@@ -463,7 +463,8 @@ safe. Structured exec is safe to run concurrently against one running
 workspace: each `Exec`/`ExecStream` call dials its own connection and the
 guest service handles each connection in its own goroutine, running each
 command as an independent guest process. Lifecycle mutations are a different
-story — `Run`, `Start`, `Control`, `Snapshot`, `Copy`, and friends read and
+story — `Run`, `Start`, `Control`, `Snapshot`, `Copy`, and the other
+lifecycle functions read and
 write shared per-workspace state files and the package makes no documented
 guarantee about concurrent mutations of the *same* workspace name. Treat the
 lifecycle of a given workspace as single-threaded (operations on different

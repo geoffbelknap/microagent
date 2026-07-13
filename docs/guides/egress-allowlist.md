@@ -126,7 +126,7 @@ grants nothing when mediation is off.
 
 ## Confirm what the agent reached
 
-Whichever form you used, watch the decisions the mediator actually made:
+Whichever form you used, check the decisions the mediator made:
 
 ```bash
 microagent egress research            # recorded allow / deny / DNS decisions

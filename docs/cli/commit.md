@@ -42,7 +42,7 @@ microagent commit research registry.example.com/team/research:v1 --push
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--push` - push to the registry in the same step
 - `--arch <arch>` - only when the image should target a non-guest architecture

@@ -160,7 +160,7 @@ Some prompts that exercise the interesting parts:
 
 ## Permissions
 
-When your client asks whether to allow a tool call, note that
+When your client asks whether to allow a tool call, keep in mind that
 `workspace.delete` over MCP deletes immediately once the call is approved -
 the CLI's interactive confirmation is bypassed, because the client's approval
 is the confirmation. Don't auto-allow the delete tools (`workspace.delete`,

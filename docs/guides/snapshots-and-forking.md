@@ -4,7 +4,7 @@ description: Checkpoint a running workspace, restore it in place, or fork copies
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 A snapshot freezes a workspace - guest memory, device state, and disk - at
 one moment. Use it to roll back a workspace in place, or fork independent
@@ -61,8 +61,7 @@ microagent exec builder -- cat /root/progress.txt
 checkpoint-1
 ```
 
-This is the checkpoint workflow: snapshot before a risky upgrade, restore if
-it goes wrong.
+A common use: snapshot before a risky upgrade, restore if it goes wrong.
 
 ## 4. Fork new workspaces from it
 
@@ -82,8 +81,8 @@ fork-only
 checkpoint-1
 ```
 
-The fork diverges; the source doesn't notice. Fork as many as you like from
-one tag - pay for boot and setup once, stamp out warm copies. Networked forks
+Changes in a fork don't affect the source workspace. You can create any
+number of forks from one tag without repeating boot and setup. Networked forks
 use `user` mode (the default): each fork gets its own per-VM network namespace,
 so any number run concurrently.
 
@@ -113,8 +112,7 @@ single tag.
 
 ## Related
 
-- **The lifecycle of the workspaces you're snapshotting** - [keep a persistent workspace](/guides/persistent-workspaces/).
-- **Why mediation sessions reset on restore and fork** - [build agents on the mediation channel](/guides/agents-and-mediation/).
-- **Snapshot flags** - the [`snapshot`](/cli/snapshot/) reference.
-- **Fork flags** - the [`create`](/cli/create/) reference.
-- **Pause without a disk artifact** - [`pause`](/cli/pause/) / [`resume`](/cli/resume/).
+- [Keep a persistent workspace](/guides/persistent-workspaces/) — the lifecycle of the workspaces you're snapshotting.
+- [Build agents on the mediation channel](/guides/agents-and-mediation/) — why mediation sessions reset on restore and fork.
+- [`snapshot`](/cli/snapshot/) and [`create`](/cli/create/) — the full snapshot and fork flags.
+- [`pause`](/cli/pause/) / [`resume`](/cli/resume/) — pause without a disk artifact.

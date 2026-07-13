@@ -4,7 +4,7 @@ description: Map the Docker commands you already know to their microagent equiva
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 If you think in Docker commands, most of your muscle memory carries over. The
 big difference: each "container" is a real microVM with its own kernel, and
@@ -42,8 +42,8 @@ instead of being silently translated.
 
 There is no `-v /host/dir:/guest/dir`. A volume is a managed ext4 disk (or a
 tar bundle built into one), and everything the guest reads or writes is a
-block device. That is the point of the microVM boundary: the guest never
-shares a live host filesystem. To move a directory in, package it as a tar
+block device. The microVM boundary means the guest never shares a live host
+filesystem. To move a directory in, package it as a tar
 bundle; to move files out, use `microagent cp` or declare `--output`
 artifacts. See [Storage](/concepts/storage/).
 

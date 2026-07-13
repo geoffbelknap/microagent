@@ -107,7 +107,7 @@ Docker's login state. See [registry](/cli/registry/) for details.
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--delete` (`delete`/`prune`) - actually delete rootfs baselines, not just records
 - `--yes` / `-y` (`delete`/`prune`) - skip the confirmation prompt in scripts

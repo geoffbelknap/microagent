@@ -152,6 +152,6 @@ No workspaces.
 
 ## Related
 
-- **Keep state between runs** - [persistent workspaces](/guides/persistent-workspaces/) cover the create, start, halt lifecycle.
-- **Mount data instead of baking it in** - [volumes and data](/guides/volumes-and-data/).
-- **Every `run` flag** - the [`run`](/cli/run/) reference.
+- [Persistent workspaces](/guides/persistent-workspaces/) — keep state between runs with the create, start, halt lifecycle.
+- [Volumes and data](/guides/volumes-and-data/) — mount data instead of baking it in.
+- [`run`](/cli/run/) — every flag on the one-shot path.

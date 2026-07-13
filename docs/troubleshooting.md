@@ -65,7 +65,7 @@ For a custom kernel or air-gapped install, see [`microagent kernel`](/cli/kernel
 
 ### `microagent kernel verify` reports a SHA mismatch
 
-The kernel file on disk doesn't match its expected SHA-256. Either it's corrupted or someone replaced it. Don't ignore this - booting from a kernel you don't trust is the textbook supply-chain failure.
+The kernel file on disk doesn't match its expected SHA-256. Either it's corrupted or someone replaced it. Don't ignore a mismatch - never boot from a kernel you don't trust.
 
 ```bash
 microagent kernel install   # reinstall from the trusted source
@@ -119,7 +119,7 @@ microagent delete <name>
 
 ### `microagent start` fails because the workspace is `quarantined`
 
-Quarantined workspaces preserve disk and event history while host-side network and mediation paths are severed. They can't be `start`ed directly - that's the whole point of the state.
+Quarantined workspaces preserve disk and event history while host-side network and mediation paths are severed. `start` refuses them until you move the workspace out of the state:
 
 ```bash
 microagent halt <name>     # or stop / kill
