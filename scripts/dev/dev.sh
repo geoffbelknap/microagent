@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLI="$ROOT/.build/dev/microagent"
 DEV_DIR="$ROOT/.build/dev"
 LIBEXEC_DIR="$ROOT/.build/libexec"
+# Where 'make install' puts the CLI (Makefile: PREFIX ?= $(HOME)/.local).
+INSTALL_BIN="${PREFIX:-$HOME/.local}/bin"
+INSTALL_TARGET="$INSTALL_BIN/microagent"
 
 relpath() {
   case "$1" in
@@ -67,6 +70,23 @@ run_doctor() {
   set -e
 }
 
+# After 'make install' writes $INSTALL_TARGET, would the shell pick it up?
+# True when $INSTALL_BIN comes before any other microagent on PATH.
+install_target_wins_path() {
+  local dir
+  local IFS=:
+  for dir in $PATH; do
+    [ -n "$dir" ] || dir=.
+    if [ "$dir" = "$INSTALL_BIN" ] || [ "$dir" -ef "$INSTALL_BIN" ]; then
+      return 0
+    fi
+    if [ -x "$dir/microagent" ]; then
+      return 1
+    fi
+  done
+  return 1
+}
+
 check_shell_command() {
   local resolved
   local cli_version
@@ -94,9 +114,25 @@ check_shell_command() {
   if [ "$path_version" != "$cli_version" ]; then
     echo "Shell command: $resolved ($path_version)"
     echo "  Dev build: $cli_version"
-    echo "  Run 'make install' to update the command on PATH, or use:"
-    echo "  export PATH=\"$DEV_DIR:\$PATH\""
-    return 1
+    if install_target_wins_path; then
+      echo "  Run 'make install' to update the command on PATH, or use:"
+      echo "  export PATH=\"$DEV_DIR:\$PATH\""
+      return 1
+    fi
+    echo "  Your shell finds $resolved first, which is not the copy"
+    echo "  'make install' manages ($INSTALL_TARGET), so 'make install' cannot fix this."
+    case "$resolved" in
+      */linuxbrew/*|/opt/homebrew/*|*/Homebrew/*|/usr/local/Cellar/*)
+        echo "  Remove the Homebrew copy:"
+        echo "    brew uninstall microagent"
+        echo "  Or keep it and put the installed copy first in PATH:"
+        ;;
+      *)
+        echo "  Remove that copy, or put the installed copy first in PATH:"
+        ;;
+    esac
+    echo "    export PATH=\"$INSTALL_BIN:\$PATH\""
+    return 2
   fi
 
   echo "Shell command: $resolved ($path_version)"
@@ -135,7 +171,11 @@ run_doctor
 
 if [ "$doctor_status" -eq 0 ]; then
   print_doctor_summary "$doctor_json"
-  if ! check_shell_command; then
+  set +e
+  check_shell_command
+  shell_status=$?
+  set -e
+  if [ "$shell_status" -eq 1 ]; then
     if [ "${MICROAGENT_DEV_BOOTSTRAP:-prompt}" = "never" ]; then
       exit 0
     fi
@@ -152,8 +192,13 @@ if [ "$doctor_status" -eq 0 ]; then
           print_build_summary
           run_doctor
           print_doctor_summary "$doctor_json"
-          check_shell_command || true
-          print_shell_cache_hint
+          set +e
+          check_shell_command
+          shell_status=$?
+          set -e
+          if [ "$shell_status" -ne 2 ]; then
+            print_shell_cache_hint
+          fi
           exit "$doctor_status"
           ;;
       esac
@@ -188,8 +233,13 @@ case "$answer" in
     print_build_summary
     run_doctor
     print_doctor_summary "$doctor_json"
-    check_shell_command || true
-    print_shell_cache_hint
+    set +e
+    check_shell_command
+    shell_status=$?
+    set -e
+    if [ "$shell_status" -ne 2 ]; then
+      print_shell_cache_hint
+    fi
     exit "$doctor_status"
     ;;
 esac
