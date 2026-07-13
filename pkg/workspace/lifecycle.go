@@ -251,7 +251,7 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("run requires ExecCommand")
 	}
 	if opts.Name == "" {
-		opts.Name = fmt.Sprintf("run-%d", time.Now().UnixNano())
+		opts.Name = RandomName("run")
 	}
 	if err := ValidateName(opts.Name); err != nil {
 		return Result{}, err

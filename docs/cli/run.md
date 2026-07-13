@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-11_
+_Last updated: 2026-07-13_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -52,7 +52,7 @@ trimmed example:
 
 ```json
 {
-  "workspace": "run-1730000000000000000",
+  "workspace": "run-brave-otter-4f9c",
   "state_dir": "/home/user/.microagent",
   "restart": "never",
   "resources": { "memory_mib": 512, "cpu_count": 2, "size_mib": 4096 },
@@ -158,7 +158,7 @@ The complete set:
 | `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--publish <mapping>` | Forward `[host:]hostPort:guestPort[/tcp]` |
 | `-p <mapping>` | Alias for `--publish` |
-| `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
+| `--name <name>` | Workspace name; a readable name such as `run-brave-otter-4f9c` is generated when omitted. Also accepted as `--id` |
 | `--backend <name>` | Backend identity override |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |

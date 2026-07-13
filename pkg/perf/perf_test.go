@@ -49,6 +49,17 @@ func TestSummarizeIterations(t *testing.T) {
 	if summary.Count != 3 || summary.MinMs != 10 || summary.AvgMs != 20 || summary.MaxMs != 30 {
 		t.Fatalf("summary = %#v", summary)
 	}
+	if summary.Failures != 0 {
+		t.Fatalf("Failures = %d, want 0", summary.Failures)
+	}
+
+	failed := SummarizeIterations([]Iteration{
+		{Name: "one", OK: true, DurationMs: 30},
+		{Name: "two", OK: false, DurationMs: 10, Error: "boot timeout"},
+	})
+	if failed.Failures != 1 {
+		t.Fatalf("Failures = %d, want 1", failed.Failures)
+	}
 }
 
 func TestParseRSSKiB(t *testing.T) {
