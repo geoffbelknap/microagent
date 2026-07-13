@@ -183,10 +183,11 @@ This repository owns the VM pieces:
   change, update `docs/cli/serve.md`, `docs/cli/exec.md`,
   `docs/concepts/state-and-identity.md`, and `docs/library/go.md` as
   applicable.
-- Keep release/install docs aligned with the Homebrew tap: only stable
-  releases ship to the tap (`microagent`). Release candidates are git tags
-  validated by local builds and the tag-gated live CI suites; they are not
-  published as a formula.
+- Keep release/install docs aligned with the Homebrew tap: stable releases
+  ship as `microagent`, and every merge to main refreshes `microagent-latest`
+  (a source-build formula pinned to the merged commit, bumped by
+  latest.yaml). Release candidates are git tags validated by local builds and
+  the tag-gated live CI suites; they are not published as a formula.
 
 ## PR workflow
 

@@ -1,0 +1,96 @@
+name: latest channel
+
+# Latest train: every merge to main bumps the `microagent-latest` Homebrew
+# formula to the merged commit, versioned <stable>-latest.<N> (N = commit
+# count, so the version strictly increases and `brew upgrade` on the latest
+# channel tracks main). The formula builds from source at a pinned revision,
+# so no tags, GitHub releases, or artifact pruning are needed — unlike
+# microagency's GoReleaser-based latest train. Stable releases still ship via
+# update-homebrew-tap.yml.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# If merges land quickly, only the newest bump needs to publish.
+concurrency:
+  group: latest-tap-update
+  cancel-in-progress: true
+
+jobs:
+  update-latest-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Anchor the version to the most recent stable tag so the channel reads
+      # e.g. 0.8.6-latest.<N> (a prerelease of that stable line). The commit
+      # count N is monotonic, so Homebrew treats each bump as newer.
+      - name: Compute latest version
+        id: version
+        run: |
+          set -euo pipefail
+          base="$(git tag -l 'v[0-9]*' | grep -Ev -- '-(rc|latest)\.' | sort -V | tail -1)"
+          base="${base#v}"
+          [ -n "$base" ] || base="0.0.0"
+          echo "version=${base}-latest.$(git rev-list --count HEAD)" >>"$GITHUB_OUTPUT"
+
+      # Same Homebrew GitHub App as update-homebrew-tap.yml. Fails loudly when
+      # the app credentials are missing.
+      - name: Generate Homebrew tap token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.HOMEBREW_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+
+      - name: Checkout tap
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-tap
+
+      - name: Set up git
+        working-directory: homebrew-tap
+        run: |
+          git config user.name "microagent-release[bot]"
+          git config user.email "microagent-release[bot]@users.noreply.github.com"
+
+      - name: Bump formula
+        working-directory: homebrew-tap
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          formula=microagent-latest.rb
+          python3 - "$formula" "$VERSION" "$REVISION" <<'PY'
+          import re
+          import sys
+
+          formula, version, revision = sys.argv[1:]
+          with open(formula) as fh:
+              text = fh.read()
+          text, n_rev = re.subn(r'revision: "[0-9a-f]{40}"', f'revision: "{revision}"', text)
+          text, n_ver = re.subn(r'\n  version "[^"]+"', f'\n  version "{version}"', text)
+          if n_rev != 1 or n_ver != 1:
+              raise SystemExit(f"expected exactly one revision and one version in {formula}, got {n_rev}/{n_ver}")
+          with open(formula, "w") as fh:
+              fh.write(text)
+          PY
+          git add "$formula"
+          if git diff --cached --quiet; then
+            echo "formula already pins ${REVISION}; nothing to push"
+          else
+            git commit -m "microagent: update microagent-latest to ${VERSION}"
+            git push
+          fi

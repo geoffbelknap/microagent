@@ -22,6 +22,17 @@ Virtualization.framework supervisor on macOS. Go programs can import the same
 packages that back the CLI; start with the [library overview](/library/) if
 you are embedding microagent rather than using it from a shell.
 
+To track the newest build from main instead of stable releases, use the
+latest channel. It conflicts with the stable formula — both install
+`microagent` — so pick one:
+
+```bash
+brew install geoffbelknap/tap/microagent-latest
+```
+
+The latest formula is refreshed on every merge to main, so `brew upgrade`
+keeps you on the newest build.
+
 ## From source
 
 You need Go 1.26 or later. On macOS you also need a Swift toolchain to build
@@ -81,8 +92,10 @@ not need it to use microagent.
 
 ### Release channels
 
-Only stable releases ship to Homebrew. Release candidates are validated with
-local builds and the tag-gated live CI suites, not a published formula.
+Two formulae ship to Homebrew: `microagent` pins the latest stable release,
+and `microagent-latest` pins the tip of main, bumped automatically on every
+merge with a `<stable>-latest.<n>` version. Release candidates are validated
+with local builds and the tag-gated live CI suites, not a published formula.
 
 ### What `make install` lays down
 
