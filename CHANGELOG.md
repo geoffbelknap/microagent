@@ -8,11 +8,15 @@ been cut into a release yet.
 ### Source builds check their build tools and report what's missing
 
 `make build`, `make dev`, and `make install` now preflight the build tools
-before running anything. A missing `go` or `git` used to surface as a raw
-shell error partway through a build script; it now fails immediately with the
-tool name and an install command for the host (`brew install go`,
-`https://go.dev/dl/`). A Go older than the `go.mod` requirement is reported
-the same way, with the found and required versions.
+before running anything. A missing `go` used to surface as a raw shell error
+partway through a build script; it now fails immediately with an install
+command for the host (`brew install go`, `https://go.dev/dl/`), and a Go
+older than the `go.mod` requirement is reported with the found and required
+versions. A missing `git` only warns - it is needed for version stamping,
+not for the build - and the result reports `0.0.0+local`. Builds from a
+source archive (a release tarball or ZIP, no git metadata) work now: they
+stamp `0.0.0+local` and skip Go's VCS stamping, which used to fail the build
+when a stray `.git` entry existed in a parent directory.
 
 ### Source-build versions say how old they are
 

@@ -24,7 +24,9 @@ block of dot-separated fields:
 commit `9c7ad3d`, committed 2026-07-12 - old builds are tellable from current
 ones without decoding a sha. `.dirty` marks uncommitted or untracked changes
 at build time. A clean checkout exactly on a release tag reports just the
-release version. Source builds made without version linker flags report `dev`.
+release version. A build from a source archive rather than a git clone (a
+release tarball or ZIP has no git metadata) reports `0.0.0+local`. Source
+builds made without version linker flags report `dev`.
 
 ## Examples
 

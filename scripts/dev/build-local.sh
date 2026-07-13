@@ -171,10 +171,18 @@ firecracker_vmm_path="$libexec_dir/firecracker"
 version="$(dev_version)"
 ldflags="-X main.version=$version"
 
+# Outside a git work tree (a source-archive build), go's buildvcs=auto has
+# nothing to stamp and errors outright on stray `.git` entries in parent
+# directories; the version stamp above already carries the commit identity.
+buildvcs=()
+if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  buildvcs=("-buildvcs=false")
+fi
+
 (
   cd "$ROOT"
-  go build -ldflags "$ldflags" -o "$cli_path" ./cmd/microagent
-  GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -o "$guest_init_path" ./cmd/microagent-guestinit
+  go build ${buildvcs[@]+"${buildvcs[@]}"} -ldflags "$ldflags" -o "$cli_path" ./cmd/microagent
+  GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build ${buildvcs[@]+"${buildvcs[@]}"} -o "$guest_init_path" ./cmd/microagent-guestinit
 )
 
 if [ "$(uname -s)" = "Linux" ]; then
@@ -183,7 +191,7 @@ if [ "$(uname -s)" = "Linux" ]; then
   # so build it alongside the CLI to make the dev build self-sufficient.
   (
     cd "$ROOT"
-    go build -o "$firecracker_supervisor_path" ./cmd/microagent-firecracker-supervisor
+    go build ${buildvcs[@]+"${buildvcs[@]}"} -o "$firecracker_supervisor_path" ./cmd/microagent-firecracker-supervisor
   )
   if firecracker_source="$(resolve_firecracker)"; then
     mkdir -p "$libexec_dir"

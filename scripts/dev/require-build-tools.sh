@@ -36,16 +36,16 @@ install_hint() {
   printf '%s' "$joined"
 }
 
-missing=()
-command -v git >/dev/null 2>&1 || missing+=("git")
-command -v go >/dev/null 2>&1 || missing+=("go")
-
-if [ "${#missing[@]}" -gt 0 ]; then
-  echo "microagent needs these build tools, which are not on PATH:" >&2
-  for tool in "${missing[@]}"; do
-    echo "  $tool  (install: $(install_hint "$tool"))" >&2
-  done
+if ! command -v go >/dev/null 2>&1; then
+  echo "microagent needs Go to build, and go is not on PATH." >&2
+  echo "  install: $(install_hint go)" >&2
   exit 2
+fi
+
+# git is only used to stamp the build's version; a build from a source
+# archive (no git, or no .git directory) still works and reports 0.0.0+local.
+if ! command -v git >/dev/null 2>&1; then
+  echo "warning: git is not on PATH; the build will report version 0.0.0+local (install: $(install_hint git))" >&2
 fi
 
 go_min="$(awk '/^go /{print $2; exit}' "$ROOT/go.mod")"
