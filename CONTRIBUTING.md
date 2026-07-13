@@ -33,6 +33,7 @@ make lint          # golangci-lint run (includes go vet and gofmt drift)
 python3 scripts/dev/markdown-link-check.py
 python3 scripts/dev/docs-last-updated.py --check
 python3 scripts/dev/docs-parity.py
+python3 scripts/dev/docs-style.py
 ```
 
 Formatting is enforced by lint; fix drift with `make fmt`.

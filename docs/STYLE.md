@@ -38,7 +38,9 @@ slide, rewrite it as a plain description.
 
 ## Banned phrases
 
-These have appeared often enough to become tells. Don't use them:
+These have appeared often enough to give the docs away as generated, so CI
+rejects them (`scripts/dev/docs-style.py`; keep the script's list in sync
+with this one). Don't use:
 
 - "and friends" (name the items or say "and the related commands")
 - "In plain terms:" / "Put simply:" (just be plain)
@@ -73,9 +75,10 @@ the usual offenders; they must meet the same bar as guides.
 
 ## Mechanical checks
 
-Two scripts gate docs changes; run both before opening a PR:
+Three scripts gate docs changes; run them before opening a PR:
 
 ```bash
 python3 scripts/dev/docs-parity.py          # every --help flag appears on its CLI page
+python3 scripts/dev/docs-style.py           # no banned phrases
 python3 scripts/dev/docs-last-updated.py    # refresh the last-updated stamps
 ```

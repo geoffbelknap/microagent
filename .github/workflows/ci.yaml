@@ -114,6 +114,9 @@ jobs:
       - name: Check docs parity
         run: python3 scripts/dev/docs-parity.py
 
+      - name: Check docs style
+        run: python3 scripts/dev/docs-style.py
+
       - name: Check shell syntax
         run: find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
