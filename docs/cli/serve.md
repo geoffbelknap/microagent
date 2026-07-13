@@ -201,6 +201,7 @@ the full machine-readable input schema of every tool.
 |---|---|
 | `workspace.create` | Create or dry-run a workspace, including snapshot forks with `from_snapshot` |
 | `workspace.start` | Start a prepared workspace, including snapshot restore with `from_snapshot` |
+| `workspace.wait` | Block until a workspace reaches a terminal state, replacing `workspace.inspect` polling loops |
 | `workspace.exec` | Run a structured command in a running workspace |
 | `workspace.dispatch` | Run one task in a fresh, isolated, single-use workspace under egress guardrails, tear it down, and return the result plus a summary of what the workspace reached on the network |
 | `workspace.halt` | Halt a workspace and preserve disk state |
@@ -307,6 +308,13 @@ interaction and permission semantics than a bounded request/response tool.
 MCP tool responses are structured for agent clients. Mutation tools return a
 consistent envelope with `result`, optional structured `error`, `timing_ms`, and
 `principal_context` fields.
+
+`workspace.wait` blocks until the workspace reaches a terminal state
+(`stopped`, `halted`, `failed`, `quarantined`, or `prepared`) and returns
+`{workspace, state, ok}`, where `ok` is `true` for a clean finish (`stopped`,
+`halted`, `prepared`). Use it after `workspace.start` instead of polling
+`workspace.inspect`; pass `timeout` (a Go duration such as `"5m"`) to bound
+the call - an elapsed timeout returns a retryable `transient` error.
 
 `workspace.create`, `workspace.inspect`, `workspace.logs`, and
 `workspace.events` default to compact `summary` output so repeated agent state

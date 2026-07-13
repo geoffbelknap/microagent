@@ -8220,3 +8220,102 @@ func TestStartRmErrors(t *testing.T) {
 		t.Error("start --rm: expected error (run-only flag), got nil")
 	}
 }
+
+func writeWaitCommandState(t *testing.T, name string, state vmkit.VMState) string {
+	t.Helper()
+	dir := t.TempDir()
+	opts := workspace.Options{Name: name, StateDir: dir, Backend: workspace.HostBackend()}
+	req, err := workspace.Request(opts, "run", filepath.Join(dir, "rootfs.ext4"), "req-1")
+	if err != nil {
+		t.Fatalf("workspace.Request: %v", err)
+	}
+	if err := workspace.WriteProcessState(opts, req, state, 0, ""); err != nil {
+		t.Fatalf("WriteProcessState: %v", err)
+	}
+	return dir
+}
+
+func runWaitCommandForTest(t *testing.T, args []string) (string, error) {
+	t.Helper()
+	stdoutPath := filepath.Join(t.TempDir(), "stdout")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runErr := run(t.Context(), args, stdout)
+	if closeErr := stdout.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	data, err := os.ReadFile(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data), runErr
+}
+
+func TestRunWaitReportsCleanTerminalState(t *testing.T) {
+	stateDir := writeWaitCommandState(t, "research", vmkit.StateStopped)
+	output, err := runWaitCommandForTest(t, []string{"--json", "wait", "research", "--state-dir", stateDir})
+	if err != nil {
+		t.Fatalf("run wait: %v", err)
+	}
+	var result waitResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("wait output = %q: %v", output, err)
+	}
+	if result.Workspace != "research" || result.State != string(vmkit.StateStopped) || !result.OK {
+		t.Fatalf("wait result = %#v", result)
+	}
+}
+
+func TestRunWaitFailedStateExitsNonzeroAfterWritingResult(t *testing.T) {
+	stateDir := writeWaitCommandState(t, "research", vmkit.StateFailed)
+	output, err := runWaitCommandForTest(t, []string{"--json", "wait", "research", "--state-dir", stateDir})
+	var exitErr cliExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 1 || !exitErr.Silent {
+		t.Fatalf("run wait err = %#v, want silent exit 1", err)
+	}
+	var result waitResult
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("wait output = %q: %v", output, err)
+	}
+	if result.State != string(vmkit.StateFailed) || result.OK {
+		t.Fatalf("wait result = %#v", result)
+	}
+}
+
+func TestRunWaitTimeoutSurfacesRetryableError(t *testing.T) {
+	stateDir := writeWaitCommandState(t, "research", vmkit.StateStopped)
+	// A negative timeout is rejected before any wait begins.
+	if _, err := runWaitCommandForTest(t, []string{"wait", "research", "--state-dir", stateDir, "--timeout", "-1s"}); err == nil {
+		t.Fatal("run wait --timeout -1s: expected error, got nil")
+	}
+}
+
+func TestRunWaitRequiresWorkspaceName(t *testing.T) {
+	if _, err := runWaitCommandForTest(t, []string{"wait"}); err == nil || !strings.Contains(err.Error(), "usage: microagent wait") {
+		t.Fatalf("run wait err = %v, want usage error", err)
+	}
+}
+
+func TestRunWaitMissingWorkspaceReturnsNotFound(t *testing.T) {
+	if _, err := runWaitCommandForTest(t, []string{"wait", "missing", "--state-dir", t.TempDir()}); !errors.Is(err, workspace.WorkspaceNotFoundError{}) {
+		t.Fatalf("run wait err = %v, want WorkspaceNotFoundError", err)
+	}
+}
+
+func TestStartWaitFlagsParse(t *testing.T) {
+	// start --wait is gated on the same positional-name detection as plain
+	// start; a trailing --wait must not break it.
+	if !hasPositionalWorkspaceName([]string{"research", "--wait"}) {
+		t.Fatal("hasPositionalWorkspaceName(research --wait) = false")
+	}
+	if !hasPositionalWorkspaceName([]string{"--wait", "research"}) {
+		t.Fatal("hasPositionalWorkspaceName(--wait research) = false")
+	}
+	reordered := reorderFlagArgs([]string{"research", "--wait", "--wait-timeout", "5m"})
+	want := []string{"-wait", "-wait-timeout", "5m", "research"}
+	if strings.Join(reordered, " ") != strings.Join(want, " ") {
+		t.Fatalf("reorderFlagArgs = %v, want %v", reordered, want)
+	}
+}

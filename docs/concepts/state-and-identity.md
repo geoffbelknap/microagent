@@ -4,7 +4,7 @@ description: Understand what status and lifecycle events report before you seque
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 Read this page to understand what microagent tells you about a workspace, and
 when you can act on it. Every request carries an identity block; every
@@ -166,6 +166,13 @@ Two non-obvious things to read from that diagram:
   halt, stop, or kill first.
 
 `unknown` and `stopping` are real states the API can report - `unknown` for unrecognized state files, `stopping` as the transient between `running` and a terminal state - but neither sits between user-driven transitions, so they're omitted above.
+
+To block until a workspace reaches one of the terminal states (`stopped`,
+`halted`, `failed`, `quarantined`, or a never-started `prepared`), use
+[`microagent wait`](/cli/wait/), the `--wait` flag on
+[`start`](/cli/start/), or the MCP `workspace.wait` tool instead of polling
+`status` in a loop; all three share `workspace.Wait` and report the terminal
+state with an `ok` verdict.
 
 Each state write updates `<state-dir>/<runtimeID>/event.json` with the latest
 event and appends the same record to `<state-dir>/<runtimeID>/events.json`.

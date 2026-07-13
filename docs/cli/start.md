@@ -4,10 +4,11 @@ description: Boot a previously created workspace from its preserved disk.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 ```text
 microagent start <name> [--state-dir <dir>]
+microagent start <name> --wait [--wait-timeout <dur>]
 microagent start <name> --from-snapshot <tag> [--state-dir <dir>]
 ```
 
@@ -43,10 +44,28 @@ microagent start research --from-snapshot pre-upgrade
 After it's running, open a console with [`connect`](/cli/connect/) or read
 serial output with [`logs`](/cli/logs/).
 
+`start` returns once the VM boots, not when the workload finishes. When the
+workspace runs something that ends on its own - an agent, a batch job - add
+`--wait` to block until it reaches a terminal state:
+
+```bash
+microagent start minimal-agent --wait
+microagent --json result minimal-agent
+```
+
+With `--wait`, the boot result is written first and a
+[`wait`](/cli/wait/)-shaped result follows when the run finishes (with the
+global `--json` flag that means two JSON documents on one stream; decode it
+as a stream, or run [`wait`](/cli/wait/) as its own command for a single
+document). The exit code is `0` for `stopped`/`halted` and `1` for
+`failed`/`quarantined`, exactly like `microagent wait`.
+
 ## Flags
 
 Flags you'll actually use:
 
+- `--wait` - after boot, block until the workspace reaches a terminal state
+  (`--wait-timeout <dur>` bounds it and implies `--wait`)
 - `--from-snapshot <tag>` - restore memory and disk from a snapshot instead of
   booting fresh
 - `--profile <name>` / `--memory <MiB>` / `--cpus <n>` - one-start resource
@@ -61,6 +80,8 @@ The complete set:
 | Flag | Description |
 |---|---|
 | `--state-dir <dir>` | State directory holding the workspace record (default `~/.microagent/`) |
+| `--wait` | After boot, block until the workspace reaches a terminal state (stopped, halted, failed) |
+| `--wait-timeout <dur>` | Give up waiting after this long (e.g. `5m`); `0` waits forever; implies `--wait` |
 | `--from-snapshot <tag>` | Restore the workspace in place from this snapshot tag |
 | `--profile <name>` | Resource profile override: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory override for this start |
@@ -123,11 +144,15 @@ actions are recorded in the workspace [`events`](/cli/events/) history as
 fails to boot, or is started from an invalid state - it rejects workspaces that
 are already `starting` or `running`, and refuses `quarantined` workspaces until
 they are halted, stopped, or killed first. In AX mode these return structured
-error envelopes (an invalid-state start maps to `conflict`).
+error envelopes (an invalid-state start maps to `conflict`). With `--wait`,
+the exit code additionally follows the final state like
+[`wait`](/cli/wait/#exit-status): `0` for `stopped`/`halted`, `1` for
+`failed`/`quarantined`, nonzero on `--wait-timeout`.
 
 ## Related
 
 - [`create`](/cli/create/) - create the workspace first
+- [`wait`](/cli/wait/) - block until an already-started run finishes
 - [`stop`](/cli/stop/) - shut it down again
 - [`status`](/cli/status/) - check state and readiness
 - [`snapshot`](/cli/snapshot/) - manage the tags `--from-snapshot` restores

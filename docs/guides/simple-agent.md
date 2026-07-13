@@ -90,17 +90,16 @@ the user can find the results.
 ## Step 3 - run and look at what happened
 
 ```bash
-microagent start minimal-agent
-microagent --json status minimal-agent   # poll until the result is ready
+microagent start minimal-agent --wait
 microagent --json result minimal-agent
 ```
 
 The run takes half a minute or so: the VM boots, the agent emits `ready`, runs
 the structural checks, calls Claude through the tool loop, writes the result,
-and exits. `result` reads the result file as it stands, so run it after the
-agent has finished. `microagent --json status minimal-agent` includes the
-structured `result` once it's ready and reports `stopped` after the agent
-exits. Claude's final summary appears in the `content` field: a note that
+and exits. [`--wait`](/cli/wait/) blocks until the workspace reports
+`stopped`, so `result` reads the finished result file. (`microagent --json
+status minimal-agent` still gives the point-in-time view, including the
+structured `result` once it's ready.) Claude's final summary appears in the `content` field: a note that
 `rich` was installed, plus the rendered table of the five largest files
 under `/usr`.
 
@@ -122,7 +121,7 @@ on the previous run.
 ```bash
 microagent halt minimal-agent
 microagent cp examples/minimal-agent/demo/input-002.json minimal-agent:/workspace/input.json
-microagent start minimal-agent
+microagent start minimal-agent --wait
 microagent --json result minimal-agent
 ```
 

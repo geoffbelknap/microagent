@@ -73,11 +73,11 @@ func FeatureContracts() []FeatureContract {
 	features := []FeatureContract{
 		{
 			ID:           "workspace.lifecycle",
-			Description:  "create, start, inspect, stop, halt, kill, quarantine, delete, list, and clone workspaces with structured state transitions",
+			Description:  "create, start, inspect, wait for, stop, halt, kill, quarantine, delete, list, and clone workspaces with structured state transitions",
 			OwnerPackage: "pkg/workspace",
 			Scope:        FeatureBackendNeutral,
-			CLICommands:  []string{"create", "start", "status", "stop", "halt", "kill", "quarantine", "delete", "list", "ls", "ps", "clone"},
-			MCPTools:     []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.stop", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"},
+			CLICommands:  []string{"create", "start", "status", "wait", "stop", "halt", "kill", "quarantine", "delete", "list", "ls", "ps", "clone"},
+			MCPTools:     []string{"workspace.create", "workspace.start", "workspace.inspect", "workspace.wait", "workspace.stop", "workspace.halt", "workspace.kill", "workspace.quarantine", "workspace.delete", "workspace.list", "workspace.clone"},
 		},
 		{
 			ID:           "workspace.dispatch",

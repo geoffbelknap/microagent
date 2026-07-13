@@ -54,7 +54,7 @@ func TestMCPInitializeAndToolsList(t *testing.T) {
 	}
 	for _, name := range []string{
 		"microagent.ping", "microagent.describe",
-		"workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.estimate_cost",
+		"workspace.create", "workspace.start", "workspace.wait", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit", "workspace.estimate_cost",
 		"artifacts.list", "artifacts.get",
 		"snapshot.create", "snapshot.list", "snapshot.delete",
 		"network.inspect",
@@ -364,6 +364,16 @@ func TestMCPManagementToolCLIArgs(t *testing.T) {
 				"model_mediation": "local-allow",
 			},
 			want: []string{"--mode=ax", "start", "demo", "-from-snapshot", "before-upgrade", "-model-runner", "llamacpp", "-model-gpu", "on", "-model-mediation", "local-allow", "-state-dir", "/tmp/state"},
+		},
+		{
+			name: "workspace.wait",
+			args: map[string]any{"name": "demo", "timeout": "5m", "interval": "2s", "state_dir": "/tmp/state"},
+			want: []string{"--mode=ax", "wait", "demo", "-timeout", "5m", "-interval", "2s", "-state-dir", "/tmp/state"},
+		},
+		{
+			name: "workspace.wait",
+			args: map[string]any{"name": "demo"},
+			want: []string{"--mode=ax", "wait", "demo"},
 		},
 		{
 			name: "workspace.logs",

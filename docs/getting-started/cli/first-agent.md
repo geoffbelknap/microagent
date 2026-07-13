@@ -76,16 +76,17 @@ it, and include the rendered table in the summary.
 ## Run it
 
 ```bash
-microagent start minimal-agent
+microagent start minimal-agent --wait
 ```
 
 The agent boots, calls the LLM with `bash` / `read_file` / `write_file`
 tools, runs the tool calls inside `/workspace`, and writes a `WorkResult` to
 `/workspace/result.json` (declared as the `result` output artifact in the
 spec; `microagent --json result` prints it inside its `result` envelope).
-`start` returns once the VM boots, not when the agent finishes - poll
-`microagent --json status minimal-agent` until it reports `"state": "stopped"`
-(half a minute or so), then read the result:
+Plain `start` returns once the VM boots, not when the agent finishes -
+`--wait` blocks until the workspace reports `stopped` (half a minute or so).
+(Already started it without the flag? [`microagent wait
+minimal-agent`](/cli/wait/) blocks the same way.) Then read the result:
 
 ```bash
 microagent --json result minimal-agent
@@ -149,8 +150,7 @@ previous run.
 ```bash
 microagent halt minimal-agent
 microagent cp demo/input-002.json minimal-agent:/workspace/input.json
-microagent start minimal-agent
-microagent --json status minimal-agent   # poll until "state": "stopped"
+microagent start minimal-agent --wait
 microagent --json result minimal-agent
 ```
 
@@ -179,8 +179,7 @@ with the request, and pull the report out after the run:
 microagent halt minimal-agent
 microagent cp demo/data/sales-sample.csv minimal-agent:/workspace/sales-sample.csv
 microagent cp demo/analyze-file.json minimal-agent:/workspace/input.json
-microagent start minimal-agent
-microagent --json status minimal-agent   # poll until "state": "stopped"
+microagent start minimal-agent --wait
 microagent cp minimal-agent:/workspace/report.md ./report.md
 ```
 
@@ -285,11 +284,11 @@ workspace holds the host server it's talking to:
 
 On an 8-core CPU host the agent phase takes a couple of minutes - pip
 installs `rich`, the model loops through the same tool calls Claude made
-above, and the result lands in the same place. Poll
-`microagent --json status local-agent` until it reports
-`"state": "stopped"`, then pull the result out:
+above, and the result lands in the same place. Block until the run finishes,
+then pull the result out:
 
 ```bash
+microagent wait local-agent
 microagent cp local-agent:/workspace/result.json ./result.json
 ```
 
@@ -331,8 +330,7 @@ server; the next `start` re-pairs it automatically:
 ```bash
 microagent halt local-agent
 microagent cp demo/input-002.json local-agent:/workspace/input.json
-microagent start local-agent
-microagent --json status local-agent   # poll until "state": "stopped"
+microagent start local-agent --wait
 microagent cp local-agent:/workspace/result.json ./result-002.json
 ```
 

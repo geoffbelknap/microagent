@@ -5,6 +5,24 @@ been cut into a release yet.
 
 ## Unreleased
 
+### `microagent wait`: block until a workspace's run finishes
+
+`microagent wait <name> [--timeout <dur>]` blocks until the workspace reaches
+a terminal state - `stopped`, `halted`, `failed`, `quarantined`, or a
+never-started `prepared` - and exits `0` for a clean finish (`stopped`,
+`halted`, `prepared`) or `1` for `failed`/`quarantined`, so scripts no longer
+poll `microagent --json status` in a shell loop after a detached `start`.
+`start --wait` (with optional `--wait-timeout`) boots and waits in one
+command. While the recorded state is live, each check reconciles against the
+backend supervisor like `status` does, so a dead VM resolves to its real
+terminal state instead of blocking on a stale `running` record.
+
+The capability is library-first and shared across surfaces: `workspace.Wait`
+(with `WaitOptions`, `WaitResult`, and `WaitTimeoutError`) in `pkg/workspace`,
+the `wait` CLI verb, and a `workspace.wait` MCP tool that returns
+`{workspace, state, ok}` and maps an elapsed `timeout` to a retryable
+`transient` error.
+
 ### Fixed: the broker CONNECT tunnel is governed — default-off, inside-deny, anti-rebind
 
 The egress broker's HTTP CONNECT tunnel previously dialed any guest-chosen
