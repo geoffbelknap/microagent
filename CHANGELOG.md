@@ -17,16 +17,31 @@ no such file or directory`. The ensure step is library-owned:
 so the CLI, MCP, and embedding programs all get it. `pkg/kernel` registers the
 installer when linked; an explicit kernel path is always used as-is.
 
-### Fixed: images that don't fit the workspace disk get an actionable error
+### Fixed: `aarch64` and `x86_64` accepted as architecture spellings
+
+`--arch aarch64` - the spelling `uname -m` prints on a Raspberry Pi - used to
+fail with `no linux-kvm/aarch64/lts kernel in the signed manifest` because
+kernels, image platforms, and paths are keyed on the Go/OCI names. Arch values
+are now normalized everywhere they enter (`workspace.NormalizeArch`):
+`aarch64` means `arm64`, `x86_64`/`x64` mean `amd64`, across run/create/
+dispatch, `kernel install`/`verify`, `rootfs build`, and `image pull`.
+
+### Fixed: the rootfs disk grows to fit the image
 
 Building a rootfs from an image bigger than the workspace disk (for example
 `python:3.12`, about 1 GiB unpacked, against the default 1024 MiB `small`
-profile) used to surface a raw `mke2fs` failure (`Could not allocate block in
-ext2 filesystem`). The builder now measures the staged tree before formatting
-and reports what's needed: `rootfs contents need about 1100 MiB but the rootfs
-disk size is 1024 MiB; give the workspace a larger disk, for example --profile
-medium or --size 2048`. README and docs examples that used `python:3.12` with
-the default profile now use `python:3.12-slim`, which fits.
+profile) used to fail with raw `mke2fs` output (`Could not allocate block in
+ext2 filesystem`). The builder now measures the staged tree before formatting.
+When no size was pinned - no `--size-mib`, no spec `sizeMiB` - the disk grows
+to the smallest GiB multiple that holds the image plus at least 512 MiB of
+writable space, and the workspace manifest records the size the disk actually
+has. A pinned size stays authoritative and fails closed, now with an
+actionable error: `rootfs contents need about 1183 MiB but the rootfs disk
+size is 1024 MiB; give the workspace a larger disk, for example --size-mib
+2048, or drop the pinned size to let the disk grow to fit`. Tar bundle disks
+(`-v bundle.tar:/mnt`) and `image pull` baselines grow the same way. README
+and docs examples switch `python:3.12` to `python:3.12-slim` for a faster
+first pull; the full image now works too.
 
 ### `microagent wait`: block until a workspace's run finishes
 

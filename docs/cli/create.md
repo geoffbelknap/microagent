@@ -237,7 +237,7 @@ have gone quiet.
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
-| `--size-mib <MiB>` | Rootfs disk size |
+| `--size-mib <MiB>` | Rootfs disk size (default: grows to fit the image) |
 | `--network <mode>` | Network mode: `user` (default) or `isolated` |
 | `--publish <mapping>`, `-p` | Forward `[host:]hostPort:guestPort[/tcp]`. Repeatable |
 
@@ -327,7 +327,7 @@ The model pairing and runner settings persist with the workspace (except
 | `--rootfs <path>` | Use an existing ext4 rootfs; enables `--id` and `--role` (see [Examples](#examples)) |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--guest-init <path>` | Guest init path |
-| `--arch <arch>` | Guest architecture |
+| `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
 | `--result-port <port>` | Vsock result port |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |

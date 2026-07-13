@@ -72,7 +72,7 @@ backend and architecture, or every backend with `--all`.
 | Flag | Description |
 |---|---|
 | `--all` | List kernels for all backends/architectures |
-| `--arch <arch>` | Guest architecture |
+| `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
 | `--backend <name>` | Backend identity override |
 
 ## `check`
@@ -84,7 +84,7 @@ matching the local kernel's checksum against the signed manifest.
 
 | Flag | Description |
 |---|---|
-| `--arch <arch>` | Guest architecture |
+| `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
 | `--backend <name>` | Backend identity override |
 
 ## `install`
@@ -100,7 +100,7 @@ or `--from` install a custom kernel outside the manifest.
 | `--from <path>` | Local kernel path (custom kernel) |
 | `--sha256 <sum>` | Expected SHA-256 |
 | `--out <path>` | Output path (defaults to the writable kernel path for the host) |
-| `--arch <arch>` | Guest architecture |
+| `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
 | `--backend <name>` | Backend identity override |
 
 ## `verify`
@@ -113,7 +113,7 @@ without `--sha256` the command just reports the computed sum.
 |---|---|
 | `--path <path>` | Kernel path (default: the installed kernel path) |
 | `--sha256 <sum>` | Expected SHA-256; omit to print the computed sum |
-| `--arch <arch>` | Guest architecture |
+| `--arch <arch>` | Guest architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
 | `--backend <name>` | Backend identity override |
 
 ## Default paths

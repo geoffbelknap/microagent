@@ -143,6 +143,9 @@ type Options struct {
 	ModelMediation  ModelMediationSpec
 	ProfileExplicit bool
 	KernelExplicit  bool
+	// SizeExplicit marks a disk size the caller pinned (--size or an API
+	// value). Without it, the rootfs build grows the disk to fit the image.
+	SizeExplicit bool
 	// FromSnapshot, when set, restores the workspace in place from this snapshot
 	// tag instead of booting fresh (start --from-snapshot).
 	FromSnapshot    string
@@ -495,6 +498,21 @@ func GuestArch() string {
 		return "arm64"
 	default:
 		return runtime.GOARCH
+	}
+}
+
+// NormalizeArch maps the architecture spellings people actually type - uname
+// output like "aarch64" and "x86_64" - onto the Go/OCI names the manifests
+// and registries use. Unknown values pass through for the resolver to reject
+// with their own error.
+func NormalizeArch(arch string) string {
+	switch strings.ToLower(strings.TrimSpace(arch)) {
+	case "aarch64", "arm64":
+		return "arm64"
+	case "x86_64", "x64", "amd64":
+		return "amd64"
+	default:
+		return strings.TrimSpace(arch)
 	}
 }
 

@@ -118,8 +118,8 @@ Common flags:
 
 | Flag | Description |
 |---|---|
-| `--arch <arch>` | Target architecture |
-| `--size-mib <MiB>` | Rootfs image size |
+| `--arch <arch>` | Target architecture (`arm64`/`aarch64`, `amd64`/`x86_64`) |
+| `--size-mib <MiB>` | Rootfs image size (default: fits the image) |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--guest-init <path>` | Guest init binary path |
 

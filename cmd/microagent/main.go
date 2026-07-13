@@ -2226,7 +2226,7 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	fs.Var(&publishFlags, "p", "Forward host[:hostPort]:guestPort[/tcp]")
 	fs.IntVar(&opts.MemoryMiB, "memory", opts.MemoryMiB, "Memory in MiB")
 	fs.IntVar(&opts.CPUCount, "cpus", opts.CPUCount, "CPU count")
-	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs image size in MiB")
+	fs.Int64Var(&opts.SizeMiB, "size-mib", opts.SizeMiB, "Rootfs disk size in MiB; without the flag the disk grows to fit the image")
 	resultPort := uint(opts.ResultPort)
 	fs.UintVar(&resultPort, "result-port", resultPort, "Vsock result port")
 	var timeoutSeconds int
@@ -2543,6 +2543,9 @@ func applyNetworkMediationOptionFlags(opts *workspaceOptions, publishFlags multi
 }
 
 func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit workspaceOptionExplicitFlags, rm bool, specPath string, resultPort uint, timeoutSeconds int) error {
+	// Normalize before anything derives paths or image platforms from it, so
+	// `--arch aarch64` (uname spelling) means arm64 everywhere.
+	opts.Architecture = workspace.NormalizeArch(opts.Architecture)
 	opts.ImageRef = strings.TrimSpace(opts.ImageRef)
 	if opts.ImageRef == "" {
 		if command == "create" {
@@ -2570,6 +2573,7 @@ func finalizeWorkspaceOptions(command string, opts *workspaceOptions, explicit w
 		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
 	}
 	opts.KernelExplicit = explicit.Kernel
+	opts.SizeExplicit = explicit.Size
 	if err := validateRestartPolicy(opts.RestartPolicy); err != nil {
 		return err
 	}

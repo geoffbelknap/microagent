@@ -332,16 +332,12 @@ error: image reference is mutable, pass --allow-mutable to override
 ### The image doesn't fit the workspace disk
 
 ```text
-rootfs contents need about 1100 MiB but the rootfs disk size is 1024 MiB; give the workspace a larger disk, for example --profile medium or --size 2048
+rootfs contents need about 1183 MiB but the rootfs disk size is 1024 MiB; give the workspace a larger disk, for example --size-mib 2048, or drop the pinned size to let the disk grow to fit
 ```
 
-The unpacked image is bigger than the workspace's disk. The default `small` profile allocates a 1024 MiB disk, and some popular images (for example `docker.io/library/python:3.12`, about 1 GiB unpacked) don't fit. Any of these fixes work:
+By default the rootfs disk grows to fit the image, so this error only appears when you pinned a size that the unpacked image exceeds - `--size-mib` on the command line or `sizeMiB` in a spec file. Raise the pinned size, or remove it and let the disk size itself.
 
-- **Bigger profile:** `--profile medium` (8 GiB disk).
-- **Explicit size:** `--size 2048` (MiB).
-- **Smaller image:** most language images ship a `-slim` variant, e.g. `python:3.12-slim`.
-
-Older releases surface this as a raw `mke2fs` failure: `build ext4 rootfs: ... Could not allocate block in ext2 filesystem`. Same cause, same fixes.
+Older releases used a fixed disk size (1024 MiB by default) and surfaced this as a raw `mke2fs` failure: `build ext4 rootfs: ... Could not allocate block in ext2 filesystem`. There the fix is `--size-mib 2048`, a bigger `--profile`, or a smaller image such as `python:3.12-slim`.
 
 ### `microagent image pull` is slow or fails
 
