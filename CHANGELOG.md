@@ -18,12 +18,12 @@ the same way, with the found and required versions.
 
 Checkout-local builds used to stamp `<release>-<sha>` (for example
 `0.8.6-56f0bdd`), which doesn't tell you whether the build is current - a
-short sha carries no ordering. Dev builds now stamp
-`<release>+<commits-since-release>-g<sha>` and `-v` prints the source commit's
-date next to it: `microagent 0.8.6+15-g9c7ad3d (commit 2026-07-12)`. A
-checkout exactly on a release tag still reports the plain release version, and
-`-dirty` still marks uncommitted changes. JSON/AX version output gains a
-`commit_date` field when the build has one.
+short sha carries no ordering. Dev builds now stamp one build-metadata block
+of dot-separated fields:
+`<release>+<commits-since-release>.<sha>.<commit-date>[.dirty]`, e.g.
+`0.8.6+15.9c7ad3d.20260712`. The commit count orders any two builds and the
+date says whether one is stale, with no extra punctuation to parse. A clean
+checkout exactly on a release tag still reports the plain release version.
 
 ### Fixed: first boot on a fresh host installs the default kernel again
 

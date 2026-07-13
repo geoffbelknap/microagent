@@ -19,18 +19,10 @@ func writeJSON(stdout *os.File, value any) error {
 
 func writeVersion(stdout *os.File) error {
 	if outputStructured() {
-		payload := map[string]any{
+		return writeJSON(stdout, map[string]any{
 			"name":    "microagent",
 			"version": version,
-		}
-		if commitDate != "" {
-			payload["commit_date"] = commitDate
-		}
-		return writeJSON(stdout, payload)
-	}
-	if commitDate != "" {
-		fmt.Fprintf(stdout, "microagent %s (commit %s)\n", version, commitDate)
-		return nil
+		})
 	}
 	fmt.Fprintf(stdout, "microagent %s\n", version)
 	return nil

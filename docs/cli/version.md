@@ -13,19 +13,24 @@ microagent -v
 ```
 
 `version` prints the build version of `microagent`. Stable Homebrew builds
-report the released version. Checkout-local builds report how far past the
-release they are, in the form `<latest-stable>+<commits-since>-g<git-sha>`,
-plus the source commit's date - so you can tell an old build from a current
-one without decoding the sha. `-dirty` is appended when the worktree had
-uncommitted or untracked changes at build time. A checkout exactly on a
-release tag reports just the release version. Source builds made without
-version linker flags report `dev`.
+report the released version. Checkout-local builds append one build-metadata
+block of dot-separated fields:
+
+```text
+<release>+<commits-since-release>.<git-sha>.<commit-date>[.dirty]
+```
+
+`0.8.6+15.9c7ad3d.20260712` is 15 commits past the v0.8.6 release, built from
+commit `9c7ad3d`, committed 2026-07-12 - old builds are tellable from current
+ones without decoding a sha. `.dirty` marks uncommitted or untracked changes
+at build time. A clean checkout exactly on a release tag reports just the
+release version. Source builds made without version linker flags report `dev`.
 
 ## Examples
 
 ```bash
 $ microagent version
-microagent 0.8.6+15-g9c7ad3d (commit 2026-07-12)
+microagent 0.8.6+15.9c7ad3d.20260712
 ```
 
 ## Flags

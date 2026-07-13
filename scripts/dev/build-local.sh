@@ -66,15 +66,17 @@ resolve_firecracker() {
 }
 
 # dev_version stamps source builds so their age is readable, not just their
-# identity: `0.8.6+15-gfaa6d7b` is 15 commits past the v0.8.6 release. A
-# checkout exactly on a release tag stamps plain `0.8.6`; local modifications
-# append `-dirty`. Falls back to `0.0.0+g<sha>` when no release tag is
-# reachable (e.g. a shallow clone) and `0.0.0-local` outside a work tree.
+# identity. The format is a release version plus one build-metadata block of
+# dot-separated fields: `0.8.6+92.faa6d7b.20260713.dirty` is 92 commits past
+# v0.8.6, from commit faa6d7b, committed 2026-07-13, with local changes. A
+# checkout exactly on a release tag stamps the plain release version. Falls
+# back to `0.0.0+0.<sha>.<date>` when no release tag is reachable (e.g. a
+# shallow clone) and `0.0.0+local` outside a work tree.
 dev_version() {
-  local described base count sha dirty
+  local described base count sha date dirty
 
   if ! git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    printf '0.0.0-local\n'
+    printf '0.0.0+local\n'
     return
   fi
 
@@ -82,35 +84,33 @@ dev_version() {
   if ! git -C "$ROOT" diff --quiet --ignore-submodules -- ||
     ! git -C "$ROOT" diff --cached --quiet --ignore-submodules -- ||
     [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ]; then
-    dirty="-dirty"
+    dirty=".dirty"
   fi
+
+  date="$(git -C "$ROOT" show -s --format=%cd --date=format:%Y%m%d HEAD 2>/dev/null || true)"
+  sha="$(git -C "$ROOT" rev-parse --short=7 HEAD)"
 
   if described="$(git -C "$ROOT" describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' 2>/dev/null)"; then
     described="${described#v}"
     case "$described" in
       *-*-g*)
-        sha="${described##*-}"
         base="${described%-*-g*}"
         count="${described#"$base"-}"
         count="${count%-g*}"
-        printf '%s+%s-g%s%s\n' "$base" "$count" "${sha#g}" "$dirty"
+        printf '%s+%s.%s.%s%s\n' "$base" "$count" "$sha" "$date" "$dirty"
         ;;
       *)
-        printf '%s%s\n' "$described" "$dirty"
+        if [ -n "$dirty" ]; then
+          printf '%s+0.%s.%s%s\n' "$described" "$sha" "$date" "$dirty"
+        else
+          printf '%s\n' "$described"
+        fi
         ;;
     esac
     return
   fi
 
-  printf '0.0.0+g%s%s\n' "$(git -C "$ROOT" rev-parse --short=7 HEAD)" "$dirty"
-}
-
-# commit_date is the second half of the readability story: `-v` prints it next
-# to the version so "how old is this build" needs no git archaeology.
-commit_date() {
-  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$ROOT" show -s --format=%cs HEAD 2>/dev/null || true
-  fi
+  printf '0.0.0+0.%s.%s%s\n' "$sha" "$date" "$dirty"
 }
 
 output="${MICROAGENT_DEV_CLI:-$ROOT/.build/dev/microagent}"
@@ -169,11 +169,7 @@ firecracker_supervisor_path="$output_dir/microagent-firecracker-supervisor"
 libexec_dir="$(cd "$output_dir/.." && pwd -P)/libexec"
 firecracker_vmm_path="$libexec_dir/firecracker"
 version="$(dev_version)"
-built="$(commit_date)"
 ldflags="-X main.version=$version"
-if [ -n "$built" ]; then
-  ldflags="$ldflags -X main.commitDate=$built"
-fi
 
 (
   cd "$ROOT"
