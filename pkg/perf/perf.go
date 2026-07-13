@@ -49,10 +49,11 @@ type Iteration struct {
 }
 
 type Summary struct {
-	Count int   `json:"count"`
-	MinMs int64 `json:"min_ms"`
-	AvgMs int64 `json:"avg_ms"`
-	MaxMs int64 `json:"max_ms"`
+	Count    int   `json:"count"`
+	Failures int   `json:"failures"`
+	MinMs    int64 `json:"min_ms"`
+	AvgMs    int64 `json:"avg_ms"`
+	MaxMs    int64 `json:"max_ms"`
 }
 
 type FootprintReport struct {
@@ -299,6 +300,9 @@ func SummarizeIterations(iterations []Iteration) Summary {
 	}
 	var total int64
 	for i, iteration := range iterations {
+		if !iteration.OK {
+			summary.Failures++
+		}
 		if i == 0 || iteration.DurationMs < summary.MinMs {
 			summary.MinMs = iteration.DurationMs
 		}

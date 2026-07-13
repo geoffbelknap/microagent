@@ -178,11 +178,10 @@ microagent create --dry-run \
 Use request JSON:
 
 ```bash
-microagent create --json request.json
+microagent create --request-json request.json
 ```
 
-For JSON output from the create command, put the global flag before the
-subcommand:
+For JSON *output*, use the global flag before the subcommand:
 
 ```bash
 microagent --json create research --image docker.io/library/ubuntu:24.04
@@ -332,9 +331,9 @@ The model pairing and runner settings persist with the workspace (except
 | `--result-port <port>` | Vsock result port |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
-| `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
+| `--request-json <path\|->` | Read request JSON from a file or stdin (`-json` after the subcommand is a compat alias) |
 
-See [global flags](/cli/#global-flags) for `--text`/`--output`/`--mode`/`--supervisor` and the global `--json` output flag (distinct from the `--json` request-input flag above).
+See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`/`--supervisor`.
 
 ## Fork from a snapshot
 

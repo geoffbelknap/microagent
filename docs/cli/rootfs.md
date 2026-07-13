@@ -27,7 +27,6 @@ Build a rootfs from a digest-pinned image:
 ```bash
 microagent rootfs build \
   --image docker.io/library/busybox@sha256:c4e5b27bf840ba1ebd5568b6b914f6926f3559b2ad4f505b1f37aae483b907d6 \
-  --arch arm64 \
   --size-mib 64 \
   --mke2fs /opt/homebrew/opt/e2fsprogs/sbin/mke2fs \
   --out /tmp/busybox-rootfs.ext4
@@ -51,8 +50,8 @@ Flags you'll actually use:
   where the ext4 image lands
 - `--size-mib <MiB>` - size the disk up front; an image that doesn't fit fails
   the build
-- `--arch <arch>` - target guest architecture. Defaults to `arm64` regardless
-  of the host, so amd64 hosts must pass `--arch amd64`
+- `--arch <arch>` - cross-build for a guest architecture other than the host's
+  (the default)
 - `--allow-mutable` - accept a tag reference when you've decided digest pinning
   isn't worth it for this build
 - `--keep-stage` - keep the unpacked stage directory to debug what actually went
@@ -65,7 +64,7 @@ The complete set:
 | `--image <ref>` | OCI image reference |
 | `--out <path>` | Output rootfs path |
 | `--os <os>` | Target OS (default `linux`) |
-| `--arch <arch>` | Target architecture (`amd64`, `arm64`; default `arm64`, not the host's) |
+| `--arch <arch>` | Target architecture (`amd64`, `arm64`). Defaults to the host architecture |
 | `--size-mib <MiB>` | Disk size |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--exec <command>` | Shell command to run as guest init |

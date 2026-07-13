@@ -1391,6 +1391,35 @@ func TestRequestForCommandReadsJSONFile(t *testing.T) {
 	}
 }
 
+func TestRequestForCommandReadsRequestJSONFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "request.json")
+	req := vmkit.Request{
+		Identity: &vmkit.Identity{RequestID: "req-1", RuntimeID: "agent-1", Role: vmkit.RoleWorkload, Backend: vmkit.BackendAppleVF},
+		Config:   &vmkit.Config{KernelPath: "/tmp/kernel", RootfsPath: "/tmp/rootfs.ext4", StateDir: "/tmp/state"},
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := requestForCommand("create", newFlagSet("create"), []string{"--request-json", path})
+	if err != nil {
+		t.Fatalf("requestForCommand: %v", err)
+	}
+	if got.Identity.RuntimeID != "agent-1" {
+		t.Fatalf("RuntimeID = %q, want agent-1", got.Identity.RuntimeID)
+	}
+
+	_, err = requestForCommand("create", newFlagSet("create"), []string{"--request-json", path, "-json", "/tmp/other.json"})
+	if err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("conflicting --request-json and -json: err = %v, want conflict error", err)
+	}
+}
+
 func TestRequestForCommandParsesVsock(t *testing.T) {
 	req, err := requestForCommand("create", newFlagSet("create"), reorderFlagArgs([]string{
 		"--id", "agent-1",

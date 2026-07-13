@@ -73,7 +73,7 @@ With `--json` the result and audit are machine-readable:
 
 ```json
 {
-  "workspace": "dispatch-1730000000000000000",
+  "workspace": "dispatch-swift-falcon-9k4t",
   "final_state": "stopped",
   "result": { "exit_code": 0, "stdout": "4\n" },
   "audit": { "decision_count": 3, "allow_by_host": { "example.com": 1 } }

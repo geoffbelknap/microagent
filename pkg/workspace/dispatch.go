@@ -2,9 +2,7 @@ package workspace
 
 import (
 	"context"
-	"fmt"
 	"strings"
-	"time"
 )
 
 // DispatchResult is the outcome of a single dispatched task: the guest result
@@ -37,7 +35,7 @@ type DispatchResult struct {
 // every exit path (success or failure) after the audit is read.
 func RunDispatch(ctx context.Context, opts Options) (DispatchResult, error) {
 	if strings.TrimSpace(opts.Name) == "" {
-		opts.Name = fmt.Sprintf("dispatch-%d", time.Now().UnixNano())
+		opts.Name = RandomName("dispatch")
 	}
 	if strings.TrimSpace(opts.StateDir) == "" {
 		opts.StateDir = StateDir()

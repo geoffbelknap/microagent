@@ -52,7 +52,7 @@ trimmed example:
 
 ```json
 {
-  "workspace": "run-1730000000000000000",
+  "workspace": "run-brave-otter-4f9c",
   "state_dir": "/home/user/.microagent",
   "restart": "never",
   "resources": { "memory_mib": 512, "cpu_count": 2, "size_mib": 1024 },
@@ -146,7 +146,7 @@ The rest, grouped:
 | `--shell <path>` | Console shell path for kept/named runs. Defaults to `/bin/sh` |
 | `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
 | `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |
-| `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
+| `--name <name>` | Workspace name; a readable one like `run-brave-otter-4f9c` is generated when omitted. Also accepted as `--id` |
 | `--file <path>` | Workspace spec file; flags override matching spec fields |
 | `--restart <policy>` | For kept/named runs: `never`, `on-failure`, or `always` |
 | `--timeout <seconds>` | Maximum wall-clock time before kill |

@@ -106,12 +106,13 @@ See [global flags](/cli/#global-flags) for `--json`/`--text`/`--output`/`--mode`
 
 ## Exit status
 
-`perf` exits `0` once the report is written, even when individual boot
-iterations fail or time out - failed iterations appear in the report as
-`ok: false` rows with an error message. Nonzero exits are reserved for
-invalid flags or setup errors, and for `footprint`/`steady` when they cannot
-find a running workspace process to sample. In AX mode a failure is written
-as a structured error envelope.
+`perf` exits `0` when every measurement completes; nonzero when a boot
+iteration fails or times out, or when `footprint`/`steady` cannot find a
+running workspace process to sample. `boot` still prints the full report
+before exiting nonzero - failed iterations are recorded per-iteration (`ok`,
+`error`) and counted in `summary.failures`, so CI can gate on the exit code
+without losing the measurements. In AX mode a failure is written as a
+structured error envelope.
 
 ## Related
 

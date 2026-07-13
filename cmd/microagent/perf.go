@@ -72,7 +72,13 @@ func runPerfBoot(ctx context.Context, args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
-	return writePerfReport(stdout, report)
+	if err := writePerfReport(stdout, report); err != nil {
+		return err
+	}
+	if report.Summary.Failures > 0 {
+		return fmt.Errorf("perf boot: %d of %d iterations failed", report.Summary.Failures, report.Summary.Count)
+	}
+	return nil
 }
 
 func defaultPerfBootOptions() perfBootOptions {
@@ -104,6 +110,9 @@ func writePerfReport(stdout *os.File, report perfReport) error {
 	fmt.Fprintf(stdout, "Image: %s\n", report.ImageRef)
 	fmt.Fprintf(stdout, "Profile: %s\n", report.Profile)
 	fmt.Fprintf(stdout, "Iterations: %d\n", report.Summary.Count)
+	if report.Summary.Failures > 0 {
+		fmt.Fprintf(stdout, "Failed: %d\n", report.Summary.Failures)
+	}
 	fmt.Fprintf(stdout, "Boot ms: min=%d avg=%d max=%d\n", report.Summary.MinMs, report.Summary.AvgMs, report.Summary.MaxMs)
 	for _, iteration := range report.Iterations {
 		status := "ok"

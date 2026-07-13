@@ -17,6 +17,34 @@ allowed answer for an inside one. A per-endpoint CONNECT allowlist can lock
 the tunnel to named hosts. Both refusal paths emit the `denied` signal on the
 `broker_request_deny` record.
 
+### Human-readable names for one-shot workspaces
+
+`run` and `dispatch` (CLI and `workspace.Run`/`workspace.RunDispatch`) now mint
+readable auto-names like `run-brave-otter-4f9c` instead of
+`run-<19-digit-nanosecond-timestamp>` when no `--name` is given. The short
+random suffix keeps names collision-safe while making `microagent delete
+run-brave-otter-4f9c` typable by hand. The generator is exported as
+`workspace.RandomName(prefix)`.
+
+### `rootfs build --arch` defaults to the host architecture
+
+The flag was hard-coded to `arm64` regardless of host; an amd64 host now
+builds an amd64 rootfs by default. Pass `--arch` explicitly to cross-build.
+
+### `create` gains `--request-json` for request input
+
+The request-input flag was spelled `-json <path|->`, colliding with the global
+`--json` output flag. `--request-json` is now the preferred spelling on every
+command that accepts request JSON; `-json` after the subcommand remains a
+compat alias (passing both with different paths is an error).
+
+### `perf boot` exits nonzero when iterations fail
+
+`perf boot` recorded failed iterations in the report but still exited `0` —
+contradicting its documented exit status and making it useless as a CI gate.
+It now prints the full report and then exits nonzero if any iteration failed;
+the summary gains a `failures` count alongside `count`.
+
 ### Multiple egress broker endpoints per workspace
 
 A workspace can now declare more than one egress broker endpoint instead of

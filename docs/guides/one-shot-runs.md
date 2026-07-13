@@ -20,7 +20,7 @@ microagent run docker.io/library/alpine:3.20 cat /etc/alpine-release
 ```
 
 ```text
-Workspace: run-1781167799699801876
+Workspace: run-brave-otter-4f9c
 State: stopped
 Profile: small
 Network: user
@@ -125,7 +125,7 @@ microagent run --timeout 5 docker.io/library/alpine:3.20 sleep 60
 ```
 
 ```text
-Error: run workspace "run-1781167843059951259" failed (backend=linux-kvm ...): signal: killed
+Error: run workspace "run-plucky-lynx-8t2m" failed (backend=linux-kvm ...): signal: killed
 ```
 
 The CLI exits nonzero and the workspace record is left behind in state
@@ -133,7 +133,7 @@ The CLI exits nonzero and the workspace record is left behind in state
 
 ```bash
 microagent list
-microagent delete run-1781167843059951259 --yes
+microagent delete run-plucky-lynx-8t2m --yes
 ```
 
 ## Clean up
