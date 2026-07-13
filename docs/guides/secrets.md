@@ -150,6 +150,6 @@ rm /tmp/app.env
 
 ## Related
 
-- **Schemes, flags, and delivery semantics in full** - the [`secret`](/cli/secret/) reference.
-- **What the trust boundary covers** - [security](/security/).
-- **Snapshot purge and rehydrate in context** - [snapshot and fork workspaces](/guides/snapshots-and-forking/).
+- [`secret`](/cli/secret/) — schemes, flags, and delivery semantics in full.
+- [Security](/security/) — what the trust boundary covers.
+- [Snapshot and fork workspaces](/guides/snapshots-and-forking/) — secret purge and rehydrate in context.

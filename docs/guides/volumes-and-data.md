@@ -139,6 +139,6 @@ stays for the next attach, until `volume delete` removes the backing disk.
 
 ## Related
 
-- **The storage model behind all this** - [Storage](/concepts/storage/).
-- **Volume flags and semantics** - the [`volume`](/cli/volume/) reference.
-- **Postgres on a named volume, end to end** - [run a service](/guides/run-a-service/).
+- [Storage](/concepts/storage/) — the storage model behind volumes, disks, and bundles.
+- [`volume`](/cli/volume/) — volume flags and semantics.
+- [Run a service](/guides/run-a-service/) — Postgres on a named volume, end to end.

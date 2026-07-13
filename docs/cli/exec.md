@@ -53,7 +53,7 @@ microagent exec research --stdin input.txt -- cat
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `-e KEY=VALUE` - set environment variables for the command
 - `--cwd <path>` - run somewhere other than the guest's default directory

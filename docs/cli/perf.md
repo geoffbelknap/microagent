@@ -66,7 +66,7 @@ records shown in the examples above.
 
 ### `boot` flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--iterations <n>` - one boot is noise; run several to get a usable min/avg/max
 - `--image <ref>` - pin the image (by digest) so runs are comparable over time

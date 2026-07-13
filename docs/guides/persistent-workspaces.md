@@ -92,8 +92,8 @@ research                 running      linux-kvm    medium       user       never
 ```
 
 `microagent --json status research` adds the structured readiness signals
-(`guestReady`, `execReady`, and friends) for scripts that need to sequence
-work.
+(`guestReady`, `execReady`, and related fields) for scripts that need to
+sequence work.
 
 ## 4. Halt it, start it again
 
@@ -110,9 +110,9 @@ microagent exec research -- /bin/cat /root/notes.txt
 notes from run 1
 ```
 
-Everything you wrote, installed, or configured is still there. This
-halt-and-resume loop is the core of the workspace model: pay for setup once,
-boot back into it in seconds.
+Everything you wrote, installed, or configured is still there. Set a
+workspace up once, then halt and start it as needed — a restart takes
+seconds.
 
 The other lifecycle words are not synonyms for halt. `stop` asks the guest to
 shut down cleanly, waits five seconds, and marks the workspace failed if the
@@ -150,7 +150,7 @@ Leave off `--yes` to get a confirmation prompt either way.
 
 ## Related
 
-- **Run an actual agent in a persistent workspace** - [run your first agent](/getting-started/cli/first-agent/).
-- **Run a long-lived service in one** - [run a service](/guides/run-a-service/).
-- **Describe the whole workspace in one file** - the [`microagent.yaml`](/cli/spec/) spec reference.
-- **Drive workspaces from Go instead of the CLI** - the [library overview](/library/).
+- [Run your first agent](/getting-started/cli/first-agent/) — put an agent in a persistent workspace.
+- [Run a service](/guides/run-a-service/) — keep a long-lived server running in one.
+- [`microagent.yaml`](/cli/spec/) — describe the whole workspace in one file.
+- [Library overview](/library/) — drive workspaces from Go instead of the CLI.

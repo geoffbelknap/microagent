@@ -62,7 +62,7 @@ document). The exit code is `0` for `stopped`/`halted` and `1` for
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--wait` - after boot, block until the workspace reaches a terminal state
   (`--wait-timeout <dur>` bounds it and implies `--wait`)

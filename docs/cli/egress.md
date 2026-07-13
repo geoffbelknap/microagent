@@ -46,7 +46,7 @@ The record types you'll see most:
 The vocabulary is intentionally open-ended — `egress` prints whatever was
 recorded, including record types and fields added after this page was written;
 see [egress mediation](/concepts/egress-mediation/) for the full taxonomy. An
-absent audit log is not an error: it simply means no decision has been recorded
+absent audit log is not an error: it means no decision has been recorded
 yet (or mediation is `off`), and `egress` reports an empty list.
 
 The audit log is a separate stream from lifecycle [`events`](/cli/events/):

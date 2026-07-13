@@ -44,7 +44,7 @@ microagent create \
 
 ## `build` flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--image <ref>` and `--out <path>` - the required pair: what to build from and
   where the ext4 image lands

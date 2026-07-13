@@ -53,7 +53,7 @@ check [`logs`](/cli/logs/) for boot progress.
 
 ## Flags
 
-Flags you'll actually use:
+Common flags:
 
 - `--send <line>` - one-shot console input without an interactive session
 - `--timeout <seconds>` - how long `--send` waits for output (default `5`)

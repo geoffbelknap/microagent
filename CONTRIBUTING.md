@@ -33,6 +33,7 @@ make lint          # golangci-lint run (includes go vet and gofmt drift)
 python3 scripts/dev/markdown-link-check.py
 python3 scripts/dev/docs-last-updated.py --check
 python3 scripts/dev/docs-parity.py
+python3 scripts/dev/docs-style.py
 ```
 
 Formatting is enforced by lint; fix drift with `make fmt`.
@@ -213,7 +214,7 @@ failures; `applevf-direct-console` is a direct-supervisor smoke check.
 
 - Keep changes narrowly scoped.
 - Include docs updates when command output, runtime semantics, or operator
-  workflows change.
+  workflows change. Prose follows the [docs style guide](docs/STYLE.md).
 - Prefer JSON/API outputs and tests over log scraping.
 - Do not widen this project into policy, orchestration, credential mediation,
   image signing, image scanning, or LLM/tool execution.
