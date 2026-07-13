@@ -5,6 +5,22 @@ been cut into a release yet.
 
 ## Unreleased
 
+### `make install` warns when another install shadows the new one
+
+An install can succeed and still not be what `microagent` runs: a Homebrew
+install earlier on PATH answers instead, so `microagent -v` quietly reports
+the old version. The installer now checks what `microagent` resolves to after
+installing and says so, with both versions:
+
+```text
+warning: `microagent` on PATH is /opt/homebrew/bin/microagent (0.8.6),
+  which shadows the copy just installed at /Users/you/.local/bin/microagent (0.8.6+100.33358df.20260713).
+  Put /Users/you/.local/bin earlier on PATH, or remove the other install (e.g. brew uninstall microagent).
+```
+
+When the prefix isn't on PATH at all, it prints the `export PATH=...` line to
+add instead.
+
 ### Source builds check their build tools and report what's missing
 
 `make build`, `make dev`, and `make install` now preflight the build tools
