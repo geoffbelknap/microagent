@@ -4,7 +4,7 @@ description: Use microagent packages directly from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-12_
+_Last updated: 2026-07-13_
 
 *New to the library? Start with the [library overview](/library/) or the
 [smallest useful Go program](/getting-started/library/first-program/). This
@@ -59,18 +59,33 @@ supervisor request.
 
 ## Exported packages
 
-`microagent` has these exported Go packages today:
+These are the core packages — the ones most embedding programs import first:
 
 | Package | Purpose |
 |---|---|
 | `pkg/vmkit` | supervisor request/response types, validation, and executable supervisor client |
 | `pkg/workspace` | workspace lifecycle API, options, defaults, request construction, backend supervisor selection, and shared helpers |
-| `pkg/kernel` | kernel default manifest, install, verify, and support checks |
+| `pkg/kernel` | kernel default manifest, install, verify, update checks, and support checks |
 | `pkg/imagecache` | reusable rootfs image cache indexing, pull, tag, remove, and prune |
 | `pkg/diagnostics` | backend host diagnostics and support summaries |
 | `pkg/perf` | boot, footprint, and steady-state performance measurements |
 | `pkg/rootfs` | OCI image and tar bundle conversion into ext4 disks |
 | `pkg/supervisors/firecracker` | Linux Firecracker supervisor implementation |
+
+A second tier of supporting packages backs specific CLI workflows. Import them
+when the CLI ↔ library mapping table at the bottom of this page points at them:
+
+| Package | Purpose |
+|---|---|
+| `pkg/workspace/exec/protocol` | the structured exec wire protocol (`ExecRequest`, `ExecResult`, `ExecStatus`); every `workspace.Exec` caller imports this |
+| `pkg/workspace/exec/client` | host-side client for the guest structured exec service (used internally by `workspace.Exec`; import it only for custom transports) |
+| `pkg/scaffold` | generates a starter agent project (`microagent.yaml` plus supporting files); backs `microagent init` |
+| `pkg/commit` | snapshots a stopped workspace's rootfs back into an OCI image and pushes it; backs `microagent commit` / `microagent image push` |
+| `pkg/model` | manages local GGUF model files pulled from Hugging Face (pull, list, remove, prune) |
+| `pkg/modelrunner` | manages host-local model server processes (llama.cpp, vLLM, or custom commands); `modelrunner.Ensure` starts or reuses a runner |
+| `pkg/volume` | user-defined named volumes: VM-independent ext4 disks created, attached, and removed by name |
+| `pkg/secret` | resolves scheme-prefixed secret references (`env:`/`file:`/`dotenv:`/`vault:`/`helper:`) to values held host-side only |
+| `pkg/registryauth` | OCI registry credential login, logout, and listing without a Docker dependency |
 
 The CLI is an adapter over these packages. Go callers should use the library
 directly for workspace lifecycle operations instead of shelling out to
@@ -85,13 +100,13 @@ are introduced.
 
 | Package | Documented symbols |
 |---|---|
-| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `FeatureContract`, `FeatureScope`, `FeatureBackendNeutral`, `FeatureCapability`, `FeatureCapabilityStructuredExec`, `FeatureBackend`, `FeatureGap`, `UnsupportedFeatureError`, `FeatureContracts`, `FeatureBackendSupport`, `BackendSupportsFeature`, `FeatureForCLICommand`, `FeatureForMCPTool`, `NewUnsupportedFeatureError`, `IsKnownBackend`, `Capabilities`, `BackendCapabilities`, `SnapshotManifest`, `SnapshotArtifact`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotAppleVFMachineState`, `SnapshotAppleVFConfig`, `SnapshotsDir`, `SnapshotDir`, `SnapshotRootfsArtifact`, `SnapshotMachineStateArtifacts`, `FirecrackerSnapshotArtifacts`, `AppleVFSnapshotArtifacts`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot`, `MaterializedSecretsDeclared`, `ValidateSnapshotSecretCapture`, `ValidateSnapshotSecretRestore`, `EgressModeBroker`, `EgressModeMITM`, `EgressModeOff`, `EgressMediationOn`, `EgressModeForgesCerts`, `NetworkModeMediates`, `ValidateEgressMode`, `ResolveEgressModeDefault`, `EgressPolicy`, `EgressCaps`, `NormalizeEgressPolicy` |
-| `pkg/workspace` | `Options`, `OptionsFromRequest`, `EgressPolicyFromOptions`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `ModelRunnerSpec`, `ModelMediationSpec`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `DefaultModelGuestPort`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecMaxTransientRetries`, `ExecPort`, `ExecPortForName`, `ExecRetryExhaustedError`, `ExecRetryMetadata`, `ExecReadinessSignal`, `Create`, `CreateFromSnapshot`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `GuestRootfsLayerTar`, `Clone`, `ReadLogs`, `ReadSupervisorLogs`, `ReadEvents`, `EventsPath`, `ReadEgressAudit`, `EgressAuditPath`, `ReadBrokerAccess`, `BrokerAccessPath`, `MergeEgressEvents`, `EgressEvent`, `EgressAuditSummary`, `SummarizeEgressAudit`, `RunDispatch`, `DispatchResult`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `Snapshot`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `ExecWithMetadata`, `ExecStream`, `MarkActivity`, `IsRetryableExecTransient`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile` |
-| `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `Default` |
+| `pkg/vmkit` | `Request`, `Response`, `Config`, `Identity`, `Disk`, `NetworkConfig`, `PortForward`, `MediationConfig`, `VsockListener`, `RuntimeArtifacts`, `ArtifactRef`, `RuntimeResult`, `Event`, `VMState`, `StateUnknown`, `RoleWorkload`, `Supervisor`, `SupervisorClient`, `ExecutableSupervisor`, `NewRuntimeContract`, `FeatureContract`, `FeatureScope`, `FeatureBackendNeutral`, `FeatureCapability`, `FeatureCapabilityStructuredExec`, `FeatureBackend`, `FeatureGap`, `UnsupportedFeatureError`, `FeatureContracts`, `FeatureBackendSupport`, `BackendSupportsFeature`, `FeatureForCLICommand`, `FeatureForMCPTool`, `NewUnsupportedFeatureError`, `IsKnownBackend`, `Capabilities`, `BackendCapabilities`, `SnapshotManifest`, `SnapshotArtifact`, `SnapshotInfo`, `SnapshotManifestName`, `SnapshotVMStateName`, `SnapshotMemoryName`, `SnapshotRootfsName`, `SnapshotAppleVFMachineState`, `SnapshotAppleVFConfig`, `SnapshotsDir`, `SnapshotDir`, `SnapshotRootfsArtifact`, `SnapshotMachineStateArtifacts`, `FirecrackerSnapshotArtifacts`, `AppleVFSnapshotArtifacts`, `WriteSnapshotManifest`, `ReadSnapshotManifest`, `ListSnapshots`, `RemoveSnapshot`, `MaterializedSecretsDeclared`, `ValidateSnapshotSecretCapture`, `ValidateSnapshotSecretRestore`, `EgressModeBroker`, `EgressModeMITM`, `EgressModeOff`, `EgressMediationOn`, `EgressModeForgesCerts`, `NetworkModeMediates`, `ValidateEgressMode`, `ResolveEgressModeDefault`, `EgressPolicy`, `EgressCaps`, `NormalizeEgressPolicy`, `ReadinessSignal`, `RuntimeReadiness`, `MediationReadinessSignal`, `BrokerConfig` |
+| `pkg/workspace` | `Options`, `OptionsFromRequest`, `EgressPolicyFromOptions`, `DefaultOptions`, `Spec`, `SpecApplyOptions`, `ApplyResult`, `Manifest`, `ModelRunnerSpec`, `ModelMediationSpec`, `Result`, `GuestResult`, `CopyResult`, `ListEntry`, `SuperviseOptions`, `SuperviseResult`, `ConsoleOptions`, `ShellTarget`, `ConsoleReadTimeoutError`, `ConsoleCompletionUnknownError`, `ShellReadinessProbeMode`, `ShellReadinessProbeTCP`, `ShellReadinessSignalWithMode`, `DefaultModelGuestPort`, `ExecReadyProbeTimeout`, `ExecReadyWait`, `ExecMaxTransientRetries`, `ExecPort`, `ExecPortForName`, `ExecRetryExhaustedError`, `ExecRetryMetadata`, `ExecReadinessSignal`, `Create`, `CreateFromSnapshot`, `Run`, `Start`, `Inspect`, `Status`, `ResultStatus`, `ArtifactsFor`, `GetArtifact`, `Copy`, `GuestRootfsLayerTar`, `Clone`, `ReadLogs`, `ReadSupervisorLogs`, `ReadEvents`, `EventsPath`, `ReadEgressAudit`, `EgressAuditPath`, `ReadBrokerAccess`, `BrokerAccessPath`, `MergeEgressEvents`, `EgressEvent`, `EgressAuditSummary`, `SummarizeEgressAudit`, `RunDispatch`, `DispatchResult`, `SampleStats`, `Stats`, `Network`, `List`, `Control`, `Pause`, `Resume`, `Snapshot`, `SnapshotList`, `SnapshotRemove`, `Apply`, `Exec`, `ExecWithMetadata`, `ExecStream`, `MarkActivity`, `IsRetryableExecTransient`, `DialConsole`, `SendConsoleCommand`, `ConsoleTarget`, `ProbeShellCommand`, `Supervise`, `ReadSpec`, `ApplySpec`, `ApplySpecFile`, `ReadManifest`, `WriteManifest`, `ProfileNames`, `LookupProfile`, `WorkspaceNotFoundError`, `Supervisor`, `FirecrackerSupervisorPathFromExecutable`, `ShellReadinessProbeCommand`, `ParseBrokerConfig`, `ParseBrokerEndpoints` |
+| `pkg/kernel` | `InstallOptions`, `InstallResult`, `Install`, `VerifyOptions`, `VerifyResult`, `Verify`, `DefaultSource`, `Support`, `CheckUpdate` |
 | `pkg/imagecache` | `PullOptions`, `Record`, `PruneResult`, `Pull`, `Find`, `List`, `Tag`, `Remove`, `Prune`, `ReadIndex`, `FromProvenance` |
 | `pkg/diagnostics` | `Options`, `Check`, `EgressTProxyRemediation` |
 | `pkg/perf` | `BootOptions`, `BootReport`, `FootprintReport`, `SteadyReport`, `Iteration`, `Summary`, `RSSSample`, `RSSSummary`, `Boot`, `Footprint`, `Steady`, `ProcessRSSKiB`, `ParseRSSKiB`, `SampleProcessRSS`, `SummarizeIterations`, `SummarizeRSSSamples` |
-| `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platfodelete`, `Provenance` |
+| `pkg/rootfs` | `BuildRequest`, `BundleRequest`, `BundleProvenance`, `Builder`, `NewBuilder`, `NormalizeRequest`, `NormalizeBundleRequest`, `Platform`, `Provenance` |
 | `pkg/supervisors/firecracker` | `Supervisor` |
 
 ## Supervisor types
@@ -193,21 +208,149 @@ Use `pkg/workspace` when your program wants to create, run, start, inspect, and
 control named workspaces without parsing CLI flags.
 
 `workspace.DefaultOptions()` picks the host backend (Firecracker on Linux,
-Apple Virtualization.framework on macOS), guest architecture, default kernel
-path, and default state directory. You override only what your program needs.
-The [common pattern](#the-common-pattern) example at the top of this page shows
+Apple Virtualization.framework on macOS, experimental Hyper-V on Windows),
+guest architecture, default kernel path, and default state directory. You
+override only what your program needs. The
+[common pattern](#the-common-pattern) example at the top of this page shows
 the canonical `DefaultOptions` + `Run` call.
 
 `Result.Result` is a `*GuestResult` with `Stdout`, `Stderr`, and `ExitCode`
 captured from the guest. `Result.Response` carries the supervisor's structured
 response (state, identity, verification).
 
+### Run lifecycle contract
+
+`workspace.Run` has three behaviors worth knowing before you ship:
+
+- **The run phase is bounded by `Options.Timeout`.** `DefaultOptions` sets it
+  to `workspace.DefaultTimeout` (5 minutes). The rootfs build and image pull
+  run first, under your own `ctx`; `Run` then wraps `Options.Timeout` around
+  the supervisor run — the boot and your guest command. A
+  guest command that legitimately needs more than 5 minutes (a compile, a
+  large in-guest download) is killed at the deadline. Raise `Options.Timeout`
+  for long-running commands; the tighter of it and the parent `ctx` deadline
+  wins.
+- **Cleanup happens only on success.** When the run completes and the
+  supervisor reports OK, `Run` removes the scratch state — unless
+  `Options.Keep` is set. A run that *fails* (boot error, supervisor error,
+  timeout) deliberately leaves its state directory under
+  `<StateDir>/workspaces/<name>/` for debugging. Remove it explicitly with
+  `workspace.Control(ctx, opts, "delete")`, or pick a fresh name for the next
+  attempt. `run` is one-shot and discards by default; `Create`+`Start` are the
+  durable path where `delete` is always the explicit removal.
+- **A command is required.** `Run` returns an error when `Options.ExecCommand`
+  is empty, unless `Options.UseImageCommand` is set to run the OCI image's own
+  entrypoint/command instead. With an empty `Options.Name`, `Run` generates a
+  unique `run-<timestamp>` name; with an empty `Options.ImageRef` it falls back
+  to the default per-architecture Python image.
+
+### Options field reference
+
+`workspace.Options` is a plain value struct — copy it freely; each call gets
+its own copy. The exported fields, grouped by concern:
+
+**Workspace identity and image**
+
+| Field | Meaning |
+|---|---|
+| `Name` | workspace name; becomes the `RuntimeID` in requests, state paths, and events |
+| `ImageRef` | OCI image reference the rootfs is built from |
+| `Hostname` | guest hostname |
+| `Architecture` | guest architecture (`amd64`/`arm64`) |
+| `Backend` | backend id; must match the host backend (`ValidateHostBackend`) |
+| `Profile` / `ProfileExplicit` | named resource profile (`tiny`/`small`/`medium`/`large`) and whether it was set explicitly |
+
+**Command and lifecycle**
+
+| Field | Meaning |
+|---|---|
+| `ExecCommand` | one-shot command `Run` executes in the guest |
+| `UseImageCommand` | run the image's own entrypoint/command instead of `ExecCommand` |
+| `ServiceCommand` | long-running service command for durable workspaces |
+| `Entrypoint` | entrypoint override |
+| `SetupCommands` | commands run once during rootfs preparation |
+| `ConsoleShell` | absolute guest path of the interactive console shell |
+| `RestartPolicy` | restart policy for `Supervise` (default `never`) |
+| `Health` | health-check declaration |
+| `Timeout` | run deadline (default 5 minutes; see the lifecycle contract above) |
+| `LeaseSeconds` | idle-TTL lease renewed by real activity (`MarkActivity`) |
+| `Keep` | retain scratch state after a successful `Run` |
+| `DryRun` | validate and prepare without booting |
+| `PrepareForStart` | prepare state for a later `Start` |
+| `FromSnapshot` | restore in place from this snapshot tag on `Start` |
+| `MaintenanceBoot` | boot with only shell/exec channels (no service, no secrets) for file operations |
+| `SerialInput` | enable serial console input |
+
+**Resources and network**
+
+| Field | Meaning |
+|---|---|
+| `MemoryMiB`, `CPUCount`, `SizeMiB` | explicit resource sizing (override the profile) |
+| `SpecMemory`, `SpecCPU`, `SpecSize` | mark which resources came from an explicit spec |
+| `Network` | `vmkit.NetworkConfig`: mode (`user` default), port forwards, DNS, routes |
+| `Mediation` | optional `vmkit.MediationConfig` guest-to-host mediation channel |
+| `ResultPort`, `ShellPort`, `ExecPort`, `GuestShellPort`, `GuestExecPort` | vsock/TCP port assignments (defaulted per workspace name) |
+| `VsockListeners` | extra host vsock listeners |
+| `BakedVsockUDSPath` | source snapshot's baked vsock path when starting from a snapshot |
+
+**Files, disks, and outputs**
+
+| Field | Meaning |
+|---|---|
+| `Files` | host files copied into the rootfs at build time |
+| `Disks` | extra data disks (including named managed volumes) |
+| `Outputs` | declared egress artifacts retrievable by name with `GetArtifact` |
+| `Env` | guest environment variables |
+
+**Secrets and credentials**
+
+| Field | Meaning |
+|---|---|
+| `Secrets` | name → scheme-prefixed reference, resolved and delivered at start |
+| `SecretEnvFiles` | dotenv file paths re-read on each start |
+| `OnDemandSecrets` | lazy references, never materialized in the guest |
+| `SecretsAudit` | append every secret access to the audit log |
+| `CredSwapProviders` | parsed `--cred-swap` specs; provider keys injected host-side, never in the guest |
+
+**Egress and broker**
+
+| Field | Meaning |
+|---|---|
+| `EgressMode` | `broker` (default), `mitm`, or `off` |
+| `EgressAllow` | allowlisted egress destination hosts |
+| `EgressPassthrough` | allowed hosts that are not TLS-intercepted |
+| `EgressAllowlistLocked` | restrict egress to allowlisted destinations only |
+| `EgressSwapConfigPath` | operator credential-swap config (host-side injection) |
+| `Broker` / `Brokers` | egress broker endpoint(s); setting both is rejected — see [the broker section](#egress-broker-from-the-library) |
+
+**Model pairing**
+
+| Field | Meaning |
+|---|---|
+| `Model` | canonical model ref the workspace is paired with (persisted; re-paired each start) |
+| `ModelTarget` | host `host:port` of a paired model server, realized as a guest→host vsock channel |
+| `ModelRunner` | `ModelRunnerSpec`: runner selection, GPU intent, backend model id, command template, args |
+| `ModelMediation` | `ModelMediationSpec`: mediation mode and policy source |
+
+**Advanced paths and hooks**
+
+| Field | Meaning |
+|---|---|
+| `StateDir` | state root (default `~/.microagent`) |
+| `KernelPath` / `KernelExplicit` | kernel image path and whether it was set explicitly |
+| `SupervisorPath` | supervisor companion binary override |
+| `GuestInitPath` | `microagent-guestinit` binary override |
+| `Mke2fsPath` | `mke2fs` binary used for ext4 builds |
+| `Verification` | pre-computed runtime verification to attach |
+| `Progress` | `rootfs.ProgressFunc` callback for build/pull progress |
+
 Paired model workspaces set `Options.Model`, `Options.ModelRunner`, and
 `Options.ModelMediation`. `ModelRunnerSpec` stores the runner selection
 (`llamacpp`, `vllm`, or `custom`), GPU intent, backend model id,
 custom command template, and repeatable runner args. `ModelMediationSpec` stores
-the mediation mode and policy source (`PolicyFile` or `PolicyURL`). Runner env is
-transient and is intentionally not persisted to workspace manifests.
+the mediation mode, policy source (`PolicyFile` or `PolicyURL`), and an optional
+`PolicyTimeout` for policy fetches. Runner env is transient and is intentionally
+not persisted to workspace manifests.
 
 For non-defaults - backend override, custom kernel, sized memory/CPUs, networking
 - set the matching `Options` fields before calling `Run`. The lifecycle API:
@@ -234,7 +377,7 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.SampleStats` | Sample CPU, memory, and I/O for a running workspace |
 | `workspace.Network` | Read configured and runtime network state |
 | `workspace.List` | List named workspaces from local state |
-| `workspace.Control` | Halt, quarantine, stop, kill, or delete a workspace |
+| `workspace.Control` | Run a lifecycle control action (`halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, `gc`) |
 | `workspace.Pause` / `workspace.Resume` | Freeze and thaw a running workspace's vCPUs in place |
 | `workspace.Snapshot` | Capture a tagged memory-plus-disk snapshot of a running or paused workspace |
 | `workspace.CreateFromSnapshot` | Fork a new workspace from another workspace's snapshot and resume it |
@@ -242,13 +385,87 @@ For non-defaults - backend override, custom kernel, sized memory/CPUs, networkin
 | `workspace.Supervise` | Run the optional restart-policy loop for a workspace |
 | `workspace.ReadManifest` / `workspace.WriteManifest` | Manage workspace manifests directly |
 
-Installers and embedding programs that need to mirror packaged resolution can
-use `workspace.FirecrackerSupervisorPathFromExecutable` to derive the Linux
-supervisor companion path from a `bin/microagent` executable.
+`workspace.Control(ctx, opts, command)` takes the action as its positional
+`command` argument — one of `halt`, `quarantine`, `pause`, `resume`, `stop`,
+`kill`, `delete`, or `gc` — and rejects anything else. `delete` also removes
+the local state directory after the supervisor confirms; `gc` sweeps
+expired-lease workspaces (a declared TTL whose activity marker has gone idle).
+`workspace.Pause` and `workspace.Resume` are thin wrappers over the `pause`
+and `resume` actions and share their capability gate.
 
-Console helpers return `workspace.WorkspaceNotFoundError` when the requested
-workspace has no runtime or event state. Use `errors.Is` to classify missing
-workspaces separately from stopped, halted, or quarantined workspaces.
+### Copying files and artifacts
+
+`workspace.Copy(ctx, stateDir, debugfsPath, source, target)` and
+`workspace.GetArtifact(ctx, stateDir, debugfsPath, name, artifactName, target)`
+operate on a *stopped* workspace's disk. On hosts with ext4 tooling they shell
+out to `debugfs` from e2fsprogs: pass the binary path in `debugfsPath`. There
+is no in-library default — pass `"debugfs"` to resolve via `PATH` (the CLI's
+own default is a `PATH` lookup with a
+`/opt/homebrew/opt/e2fsprogs/sbin/debugfs` fallback for macOS Homebrew); an
+empty string fails. On backends with the `GuestMediatedCopy` capability
+(windows-hyperv), `debugfsPath` is ignored: the operation transparently boots
+the workspace in maintenance mode (shell/exec only, isolated network, no
+secrets), moves bytes over the structured exec channel in chunks, and halts it
+again.
+
+### Companion binary resolution
+
+`pkg/workspace` boots VMs through companion binaries that ship with the CLI:
+`microagent-firecracker-supervisor` and `microagent-guestinit` on Linux,
+`microagent-applevf-supervisor` on macOS. The library resolves them relative
+to an *install base*: first the running executable's own directory (and its
+`../libexec`), then the directory of `microagent` found on `PATH`. The second
+base is what makes resolution work for embedders — your program's
+`os.Executable()` is not microagent's install prefix, so without a
+`microagent` install on `PATH` (or explicit overrides) the lookup falls back
+to bare names like `microagent-firecracker-supervisor`, which fail unless
+those are themselves on `PATH`. The same two-base resolution covers the
+packaged kernel (`../libexec/kernels/<backend>/<arch>/Image`).
+
+Deploying an embedder to a host without the microagent CLI therefore means
+shipping the companions yourself and either placing them next to your binary,
+setting `Options.SupervisorPath` / `Options.GuestInitPath` /
+`Options.KernelPath`, or setting the `MICROAGENT_FIRECRACKER_SUPERVISOR` /
+`MICROAGENT_APPLEVF_SUPERVISOR` environment variables (checked before the
+install-base search). Installers that need to mirror packaged resolution can
+use `workspace.FirecrackerSupervisorPathFromExecutable` (and the
+`AppleVFSupervisorPathFromExecutable` / `GuestInitPathFromExecutable`
+equivalents) to derive a companion path from a `bin/microagent` executable.
+`workspace.Supervisor(opts)` returns the resolved `vmkit.Supervisor` for the
+selected backend if you want to verify resolution up front.
+
+### Error classification
+
+`workspace.WorkspaceNotFoundError` is the structured "no such workspace"
+error. It is returned by the console helpers, `workspace.Exec` (and the other
+structured-exec entry points), `workspace.SampleStats`, and
+`workspace.Status` when a workspace has no runtime or event state. It
+supports `errors.Is`, so classify missing workspaces separately from stopped,
+halted, or quarantined ones:
+
+```go
+if _, err := workspace.Status(opts); errors.Is(err, workspace.WorkspaceNotFoundError{}) {
+	// never created, or already deleted
+}
+```
+
+### Concurrency
+
+`Options` is a plain value: every lifecycle function takes its own copy, so
+sharing a template `Options` across goroutines and customizing per call is
+safe. Structured exec is safe to run concurrently against one running
+workspace: each `Exec`/`ExecStream` call dials its own connection and the
+guest service handles each connection in its own goroutine, running each
+command as an independent guest process. Lifecycle mutations are a different
+story — `Run`, `Start`, `Control`, `Snapshot`, `Copy`, and friends read and
+write shared per-workspace state files and the package makes no documented
+guarantee about concurrent mutations of the *same* workspace name. Treat the
+lifecycle of a given workspace as single-threaded (operations on different
+workspace names are independent) unless you have verified a specific
+interleaving yourself.
+
+### Console helpers
+
 `workspace.SendConsoleCommand` returns `workspace.ConsoleReadTimeoutError` when
 `--send`-style command completion is not observed before the send timeout; the
 error carries any partial output captured before the deadline.
@@ -261,17 +478,64 @@ command round trip. Callers that need explicit readiness semantics can use
 for TCP accept reachability or the command probe mode for end-to-end command
 readiness.
 
+### Structured exec
+
 Structured exec uses `workspace.Exec(ctx, opts, request)` with
-`pkg/workspace/exec/protocol.ExecRequest`. A nil Go error means the host reached
-the guest exec service and decoded a structured result; nonzero guest exit codes
-remain in `ExecResult.ExitCode` (JSON tag `exit_code`) and are not Go errors.
-Use `workspace.ExecWithMetadata` when callers need retry accounting via
-`workspace.ExecRetryMetadata`. Transient transport failures are retried by the
-shared exec layer before the final result or `workspace.ExecRetryExhaustedError`
-is returned. `workspace.IsRetryableExecTransient` exposes the same classifier
-for callers that need to reason about exec transport errors directly.
-`readiness.execReady` uses the same protocol with a no-op command to verify the
-service end-to-end.
+`pkg/workspace/exec/protocol.ExecRequest` — callers import the `protocol`
+package for the request and result types. Build a request with
+`protocol.NewExecRequest(argv)` (which sets the protocol version and
+single-response mode) and set what you need:
+
+- `Argv` — the command as an argument vector; no shell is implied.
+- `Env`, `Cwd`, `Stdin` — environment, working directory, and stdin bytes
+  (stdin is capped at `protocol.DefaultOutputLimitBytes`).
+- `TimeoutMS` — per-command guest-side timeout; the service default is
+  `protocol.DefaultTimeout` (5 minutes).
+- `OutputLimitBytesStdout` / `OutputLimitBytesStderr` — per-stream capture
+  caps, each at most `protocol.DefaultOutputLimitBytes` (10 MiB). Output
+  beyond a cap is dropped and the result's `StdoutTruncated` /
+  `StderrTruncated` flag is set.
+
+A nil Go error means the host reached the guest exec service and decoded a
+structured result — it says nothing about the command's outcome. Check
+`ExecResult.Status` (`protocol.ExecStatus`) first:
+
+| Status | Meaning |
+|---|---|
+| `exited` | the process ran to completion; `ExitCode` is set |
+| `signaled` | the process was killed by a signal |
+| `timed_out` | the per-command timeout elapsed and the process was terminated |
+| `failed_to_start` | the command never started (bad path, invalid request) |
+
+`ExecResult.ExitCode` is a `*int` (JSON tag `exit_code`) and is **nil unless
+`Status` is `exited`** — dereferencing it unconditionally panics exactly when
+a command times out or fails to start. Guard it:
+
+```go
+result, err := workspace.Exec(ctx, opts, req)
+if err != nil { /* transport / workspace-state error */ }
+switch {
+case result.Status == protocol.ExecStatusExited && *result.ExitCode == 0:
+	// success
+case result.Status == protocol.ExecStatusExited:
+	// nonzero guest exit — not a Go error
+default:
+	// timed_out, signaled, or failed_to_start: ExitCode is nil
+}
+```
+
+Nonzero guest exit codes are not Go errors. Use `workspace.ExecWithMetadata`
+when callers need retry accounting via `workspace.ExecRetryMetadata`.
+Transient transport failures are retried by the shared exec layer before the
+final result or `workspace.ExecRetryExhaustedError` is returned.
+`workspace.IsRetryableExecTransient` exposes the same classifier for callers
+that need to reason about exec transport errors directly. The `execReady`
+readiness signal in the [runtime contract](#supervisor-types)
+(`vmkit.RuntimeReadiness.ExecReady`, produced by
+`workspace.ExecReadinessSignal`) uses the same protocol with a no-op command
+to verify the service end-to-end, and `Exec` gates on it for up to
+`workspace.ExecReadyWait` after start so an immediate post-start command does
+not surface a transient failure.
 
 `workspace.ExecStream(ctx, opts, request, onChunk)` runs the same request in
 streaming mode: the guest emits stdout/stderr chunk frames as the command runs
@@ -285,6 +549,44 @@ not the output bytes - those arrive as chunks. The CLI exposes this as
 watcher and gc sweep read it to measure idleness, so a declared `--ttl` lease is
 renewed by activity and only an idle VM is reaped. Internal readiness probes do
 not call it, so background liveness traffic cannot keep an abandoned VM alive.
+
+### Egress broker from the library
+
+The egress broker is a host-side forward proxy served on a vsock listener: the
+guest reaches an upstream through it, the broker injects the workspace's
+credential upstream, and the guest only ever holds a reference. From the
+library it is declared per workspace with `Options.Broker`
+(`*vmkit.BrokerConfig`) or `Options.Brokers` (multiple endpoints — setting
+both is rejected). `vmkit.BrokerConfig` carries the terminate-mode `Upstream`
+base URL, the host-side-only `Secret` reference, guest wiring (`GuestListen`,
+`BaseURLEnv`, `Proxy`), the raw-capture opt-in (`Capture`), an optional
+`UpstreamCAFile`, and the `ConnectAllowlist` for the proxy tunnel. Transport
+defaults (vsock port, guest listen address) are filled at request time.
+
+Rather than constructing the struct by hand, use the shared parsers — they
+fail closed on partial declarations and pasted literal secrets, so every
+surface (CLI, Agentfile, MCP, your program) builds an identical broker:
+
+```go
+cfg, err := workspace.ParseBrokerConfig(
+	"https://api.anthropic.com",             // upstream
+	"ANTHROPIC_API_KEY=env:ANTHROPIC_API_KEY", // NAME=<scheme>:<ref>, held host-side
+	[]string{"ANTHROPIC_BASE_URL"},          // base-URL env keys pointed at the broker
+	false,                                   // proxy: set HTTPS_PROXY/HTTP_PROXY in the guest
+	false,                                   // capture: governed raw-capture opt-in
+	"",                                      // ca: PEM bundle for a private upstream cert
+)
+if err != nil {
+	panic(err)
+}
+opts.Broker = cfg
+```
+
+`workspace.ParseBrokerEndpoints(specs)` parses the repeatable
+`;`-separated `key=value` endpoint spec strings (the `--broker-endpoint`
+grammar) into `Options.Brokers`. For what the broker enforces and how it
+relates to `EgressMode` and MITM mediation, see
+[egress mediation](/concepts/egress-mediation/).
 
 Mediation readiness uses `vmkit.MediationReadinessSignal(ctx, mediation, state,
 observedAt, timeout)` to apply the shared live reachability contract. It returns
@@ -316,6 +618,15 @@ if err != nil {
 }
 _ = verified
 ```
+
+`kernel.DefaultSource()` returns the production manifest source: the TUF trust
+root embedded in the binary plus the canonical metadata/targets URLs. Pass it
+(or your own `ManifestSource`) to `kernel.FetchTargets` and feed the targets to
+`kernel.CheckUpdate` to classify an installed kernel as `current`, `optional`
+(behind latest but at the security floor), `security` (missing security
+fixes), or `unknown`. `kernel.Support(backend, arch)` reports whether a
+kernel image is present at the resolved path for a backend/architecture pair
+without installing anything.
 
 ## Image cache API
 
@@ -371,7 +682,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent status` | `workspace.Status` (local) / `workspace.Inspect` (live, via supervisor) |
 | `microagent result` | `workspace.ResultStatus` |
 | `microagent list` / `microagent ls` / `microagent ps` | `workspace.List` |
-| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` | `workspace.Control` (one function, action picked via options) |
+| `microagent halt` / `microagent quarantine` / `microagent stop` / `microagent kill` / `microagent delete` | `workspace.Control` (one function; the action is the positional `command` argument: `halt`, `quarantine`, `pause`, `resume`, `stop`, `kill`, `delete`, or `gc`) |
 | `microagent pause` / `microagent resume` | `workspace.Pause` / `workspace.Resume` |
 | `microagent snapshot` create / list / delete | `workspace.Snapshot` / `workspace.SnapshotList` / `workspace.SnapshotRemove` |
 | `microagent apply` | `workspace.Apply` |
@@ -399,7 +710,7 @@ If you already know the CLI, this is the lookup for the equivalent library call:
 | `microagent perf` / `microagent perf boot` / `microagent perf footprint` / `microagent perf steady` | `perf.Boot` / `Footprint` / `Steady` |
 | `microagent profiles` | `workspace.ProfileNames` / `workspace.LookupProfile` |
 | `microagent serve mcp` | CLI-only MCP stdio transport over the existing package APIs |
-| `microagent model serve` | Alias for `microagent model serve` / `modelrunner.Ensure` |
+| `microagent model serve` | `modelrunner.Ensure` (start or reuse a host-local model runner process) |
 | `microagent version` | CLI-only build metadata output |
 | `microagent.yaml` (spec parsing) | `workspace.ReadSpec` / `ApplySpecFile` |
 

@@ -4,7 +4,7 @@ description: Pick the thing you want to do and follow the steps.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 These guides are for doing the work, not memorizing flags. Each one starts
 with a task, shows runnable commands, and points to the CLI reference when the
@@ -28,7 +28,7 @@ details matter.
 ## Connect things
 
 - [Networking](/guides/networking/) - give a workspace outbound access and publish a guest port back to the host.
-- [Allowlist and passthrough egress](/guides/egress-allowlist/) - confine a workspace to a known set of destinations with `strict`, and let cert-pinned endpoints through with passthrough.
+- [Allowlist and passthrough egress](/guides/egress-allowlist/) - confine a workspace to a known set of destinations with `--egress-lock-allowlist`, and let cert-pinned endpoints through with passthrough.
 - [Serve microagent over MCP](/guides/mcp-server/) - register `microagent serve mcp` in Claude Code or another MCP client and drive workspaces with tools.
 
 ## Build an agent

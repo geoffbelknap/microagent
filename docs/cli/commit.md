@@ -4,7 +4,7 @@ description: Turn a stopped workspace's rootfs into an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-14_
+_Last updated: 2026-07-13_
 
 ```text
 microagent commit <workspace> <image-ref> [options]
@@ -57,9 +57,10 @@ The complete set:
 | `--backend <name>` | Backend identity override |
 | `--state-dir <dir>` | State directory holding the workspace and image layout (default `~/.microagent/`) |
 
-Registry credentials come from the standard Docker config
-(`$DOCKER_CONFIG/config.json` or `~/.docker/config.json`), the same as image
-pulls.
+Registry credentials resolve without any Docker dependency, the same as image
+pulls: from `$REGISTRY_AUTH_FILE` (the convention shared with
+Podman/Skopeo/Buildah) or `~/.microagent/auth.json` (written by
+[`microagent registry login`](/cli/registry/)). Docker's config is never read.
 
 ## Exit status
 

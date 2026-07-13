@@ -4,7 +4,14 @@ description: Control and audit what a workspace sends to the network.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-11_
+_Last updated: 2026-07-13_
+
+In plain terms: by default, a workspace can reach the public internet, it
+cannot reach your LAN or the host, and every connection it attempts is
+recorded. Two commands cover most days - `--egress-allow <host>` to permit
+something specific, and `microagent egress <name>` to see what the workspace
+actually tried to reach. Everything below is the machinery behind those two
+commands.
 
 Egress mediation is microagent's transparent control point for workspace
 network traffic. When mediation is active, the host captures the guest's
@@ -43,9 +50,14 @@ A workspace's egress posture is set with `--egress` on
 
 | Mode | What happens | Default |
 |---|---|---|
-| `broker` | Denies "the inside" (link-local/metadata 169.254/16, RFC1918, IPv6 ULA, CGNAT 100.64/10, loopback, east-west peers) on the **resolved destination IP**; allows the public internet with **no allowlist required**. Allowed TLS is **spliced opaquely**: the mediator forges no certificate and **delivers no CA to the guest**, which sees the real upstream certificate. Content stays opaque; the destination is still enforced and audited. | **Yes** |
-| `mitm` | Same allow-broad / deny-the-inside decision as `broker`, but allowed TLS is **terminated by forging a per-SNI certificate** from a per-workspace CA delivered to the guest, so the mediator sees plaintext (needed for credential swap and content inspection). A **sunsetting, warning-gated** compatibility mode — it enlarges the TLS attack surface and does not stop a determined adversary. | No |
+| `broker` | Public internet allowed, "the inside" denied, every decision audited. Allowed TLS is **spliced opaquely** - no forged certificate, no CA in the guest, which sees the real upstream certificate. | **Yes** |
+| `mitm` | Same allow-broad / deny-the-inside decision as `broker`, but allowed TLS is **intercepted** with a per-workspace CA so the mediator sees plaintext (needed for credential swap and content inspection). Sunsetting, warning-gated. | No |
 | `off` | No mediation. The guest's network device is wired straight to the chosen [network mode](/concepts/networking/). | No |
+
+"The inside" is classified on the **resolved destination IP** and covers
+link-local/metadata (`169.254/16`), RFC1918 private ranges, IPv6 ULA, CGNAT
+(`100.64/10`), loopback, and east-west peer workspaces - the addresses an
+agent should never wander into uninvited.
 
 `broker` is the default: omit `--egress` and the workspace can reach the public
 internet freely, but any attempt to connect to an internal address is denied and
@@ -70,10 +82,10 @@ answers, so the TLS SNI stays visible and enforcement is not blinded by ECH.
 ### Allowlist exception under broker
 
 An operator can permit a specific internal host or IP while keeping the broker
-default by using `--egress-allow <host-or-ip>`. An explicitly allowlisted
-destination overrides the inside-deny: `d.Allow` wins. This lets you grant
-access to exactly one internal service (e.g. a sidecar on `10.0.0.5`) without
-opening the entire internal address space.
+default by using `--egress-allow <host-or-ip>`: an explicitly allowlisted
+destination overrides the inside-deny. This lets you grant access to exactly
+one internal service (e.g. a sidecar on `10.0.0.5`) without opening the entire
+internal address space.
 
 Every decision in every mode is recorded. See
 [Where decisions are recorded](#where-decisions-are-recorded).
@@ -123,10 +135,10 @@ Mediation is not TCP-only. Under `broker` and `mitm`:
 - **UDP** is captured transparently (via Linux TPROXY) and forwarded, with each
   datagram flow audited. In `broker` mode, UDP datagrams to inside addresses
   are denied and recorded as `egress_udp_internal_deny`.
-- **DNS** is mediated by making the mediator the guest's resolver. In `broker`
-  mode every query is forwarded to the real resolver and the
-  answers are recorded (the name-to-IP mappings are also used to police later
-  flows by hostname). In `broker` mode DNS resolves freely — even for names
+- **DNS** is mediated by making the mediator the guest's resolver. Every query
+  is forwarded to the real resolver and the answers are recorded (the
+  name-to-IP mappings are also used to police later flows by hostname). In
+  `broker` mode DNS resolves freely — even for names
   that point at internal IPs — but the resulting TCP/UDP connection is denied
   at connect time on the resolved IP, which also defeats DNS rebinding attacks.
   With a locked allowlist the mediator only resolves allowlisted names; a query for a
@@ -172,8 +184,8 @@ never silently widen what the agent can do.
 
 Two ways to permit a destination, and they are not the same:
 
-- **allow** (`--egress-allow <host>`) - the connection is permitted, **and** if it
-  is TLS it is **intercepted** (MITM'd) so microagent can read and audit the
+- **allow** (`--egress-allow <host>`) - the connection is permitted; under
+  `mitm`, its TLS is also **intercepted** so microagent can read and audit the
   plaintext. This is the normal allowlist entry.
 - **passthrough** (`--egress-passthrough <host>`) - the connection is permitted
   **but NOT intercepted.** It is forwarded as an opaque L4 byte stream; the
@@ -181,18 +193,19 @@ Two ways to permit a destination, and they are not the same:
   *that* the connection happened (and how much data moved) but **cannot see the
   payload.**
 
-Passthrough is the escape hatch for endpoints that break under MITM:
+Passthrough is the escape hatch for endpoints that break under interception:
 certificate-pinned clients, mutual-TLS endpoints, or any client carrying its own
 root store that would reject the injected per-workspace CA. You trade payload
 visibility for compatibility - the connection is still allowed and still audited
 as a connection, you just can't inspect what crossed it. See
-[Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails) for
-the symptom that tells you to use it.
+[Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm)
+for the symptom that tells you to use it. Under the default `broker` mode
+nothing is intercepted in the first place, so passthrough mostly matters when
+you've opted into `mitm`.
 
 With a locked allowlist, both allow and passthrough entries are reachable;
-everything else is denied. In `broker`/`mitm` mode public destinations are already
-reachable (the allowlist is not required), but marking a host passthrough still
-matters - it stops microagent from MITM'ing that host's TLS. An `--egress-allow`
+everything else is denied. Without the lock, public destinations are already
+reachable (the allowlist is not required); an `--egress-allow`
 entry additionally overrides the inside-deny for that specific host (see
 [Allowlist exception under broker](#allowlist-exception-under-broker)).
 
@@ -276,7 +289,7 @@ are:
 | `egress_allow` / `egress_close` | A permitted TCP connection opened / closed |
 | `egress_deny` | A TCP connection denied fail-closed (off-allowlist under a locked allowlist); carries `signal: denied` |
 | `egress_internal_deny` | A TCP connection denied because the resolved destination IP is an inside address; includes `internal: true` and `dst` fields, and `signal: denied` |
-| `egress_mitm_handshake_error` / `egress_mitm_upstream_error` | A TLS interception problem (see [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails)) |
+| `egress_mitm_handshake_error` / `egress_mitm_upstream_error` | A TLS interception problem (see [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm)) |
 | `egress_dns_allow` / `egress_dns_deny` | A name resolved / REFUSED |
 | `egress_dns_reply_error` | A resolved answer could not be delivered back to the guest (the guest sees a timeout even though the name was allowed and resolved) |
 | `egress_udp_allow` / `egress_udp_deny` / `egress_udp_close` | A UDP flow permitted / denied / closed |
@@ -296,7 +309,7 @@ A well-behaved workload never tries to route around the mediator, so any attempt
 to do so is anomalous by definition — evasion made conspicuous. When the mediator
 detects one it stamps a **`signal`** field (from a small closed vocabulary) on
 the audit record it already writes; it only detects and emits, and leaves the
-response to the consumer (a platform such as [microplane](/) can map a signal to
+response to the consumer (a platform above microagent can map a signal to
 alert, halt, or quarantine):
 
 | `signal` | Meaning |
@@ -339,8 +352,8 @@ the guest only ever needs the base-URL env each endpoint pointed at it. A
 `--broker-upstream`/`--broker-secret`/`--broker-env`/`--broker-proxy`/
 `--broker-capture`/`--broker-ca` flags — declare each endpoint fully within
 its own spec. The equivalent Agentfile form is an `agent.brokers` list (instead
-of the single `agent.broker` block); the MCP `create`/`run` tools take the
-same specs in a `brokers` array. All endpoints in a set share the single
+of the single `agent.broker` block); the MCP `workspace.create` and
+`workspace.dispatch` tools take the same specs in a `brokers` array. All endpoints in a set share the single
 `broker-access.jsonl` decision trail below, distinguished by upstream host,
 and only one endpoint in the set may claim the guest-wide `HTTPS_PROXY`/
 `HTTP_PROXY` slot (`proxy` on more than one endpoint is rejected).
@@ -348,7 +361,20 @@ and only one endpoint in the set may claim the guest-wide `HTTPS_PROXY`/
 | Record | Meaning |
 |---|---|
 | `broker_request_allow` | A brokered request completed; carries `mode` (`terminate` or `connect`), `method`, `host`, upstream `status` (terminate only), `bytes_out` / `bytes_in`, `duration_ms`, and `secret_refs` — the **names** of the credential references the broker swapped, never values |
-| `broker_request_deny` | A brokered request refused, with the `rule` that decided it (`unresolved-secret-ref`, `upstream-error`, or a policy rule) |
+| `broker_request_deny` | A brokered request refused, with the `rule` that decided it (`unresolved-secret-ref`, `upstream-error`, `denied` for a refused CONNECT tunnel, or a policy rule) |
+
+### The CONNECT tunnel is governed
+
+A broker endpoint can optionally serve the guest-wide `HTTPS_PROXY`/`HTTP_PROXY`
+slot (`proxy` in the endpoint spec). That HTTP CONNECT tunnel is **off by
+default** - a terminate-only/base-URL endpoint answers CONNECT with `405` and
+can never tunnel. Where enabled, the tunnel is governed like the rest of
+egress: the broker resolves the target, **denies fail-closed if any resolved IP
+is an inside/infrastructure address** (the same address space the mediator
+denies), and then dials the exact IP it just classified - never re-resolving -
+so a DNS rebind cannot swap an allowed answer for an inside one. An endpoint
+can also lock the tunnel to named hosts with a per-endpoint CONNECT allowlist.
+Both refusal paths stamp the `denied` signal on the decision record.
 
 The default record is deliberately **minimized metadata**: no request path, no
 headers, no bodies. It is safe to tail, persist, and export because content
@@ -375,5 +401,5 @@ responsibility.
 - [Allowlist and passthrough how-to](/guides/egress-allowlist/) - the flags, the `.suffix` form, and the policy file
 - [`microagent egress`](/cli/egress/) - view the audit decisions
 - [Networking](/concepts/networking/) - network modes and the (separate) mediation channel
-- [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails) - what to do when an allowed host's TLS fails
+- [Troubleshooting](/troubleshooting/#an-allowed-hosts-tls-connection-fails-under-mitm) - what to do when an allowed host's TLS fails
 - [Deliver secrets](/guides/secrets/) - the related credential-delivery path

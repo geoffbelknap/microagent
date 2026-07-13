@@ -4,7 +4,7 @@ description: Copy a file into or out of a stopped workspace's disks.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-07-13_
 
 ```text
 microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]
@@ -12,7 +12,7 @@ microagent cp <source> <target> [--state-dir <dir>] [--debugfs <path>]
 
 `cp` copies one regular file between the host and an offline workspace disk.
 It is not a sync daemon and it does not attach to a running VM - the workspace
-must be prepared or stopped. To get output from a running workspace, use
+must be prepared, halted, or stopped. To get output from a running workspace, use
 [`exec`](/cli/exec/) or declared `--output` artifact paths instead.
 
 ## Examples
@@ -57,9 +57,11 @@ You'll rarely need flags here - `--debugfs` only when `debugfs` is not on
 
 ## Semantics
 
-- The workspace must be prepared or stopped.
+- The workspace must be prepared, halted, or stopped.
 - Only regular files are supported.
 - Workspace paths must be absolute file paths.
+- Paths containing spaces or tabs are rejected on both sides - the `debugfs`
+  transport cannot carry them.
 - Copying from a workspace to a host directory writes a file with the same
   basename as the workspace path.
 - Attached disk names refer to the `--disk` or `--bundle` names recorded in

@@ -4,7 +4,7 @@ description: Boot a microVM, run a command, and tear it down - in a few lines of
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 *If you'd rather drive microagent from the command line, see the [quickstart](/getting-started/quickstart/) instead.*
 
@@ -19,7 +19,9 @@ script from Go.
 ## Prerequisites
 
 1. [Install the CLI](/getting-started/install/) - the library and the CLI ship
-   together.
+   together. The library also finds its companion binaries (the supervisor and
+   guest init) next to the installed `microagent` on your `PATH` - see
+   [companion binary resolution](/library/go/#companion-binary-resolution).
 2. Run `microagent doctor` to confirm the host can boot microVMs.
 3. Install the default kernel so the library can find it on disk:
 
@@ -59,14 +61,26 @@ func main() {
 ```
 
 `workspace.DefaultOptions()` picks the host backend (Firecracker on Linux,
-Apple Virtualization.framework on macOS), the guest architecture, the default
-kernel path, and the default state directory. You override only what your
-program needs to set - here, the workspace name, the OCI image, and the
-command to run.
+Apple Virtualization.framework on macOS, experimental Hyper-V on Windows), the
+guest architecture, the default kernel path, and the default state directory.
+You override only what your program needs to set - here, the workspace name,
+the OCI image, and the command to run.
 
 `workspace.Run` builds the rootfs from the image, boots the VM, runs the
-command, captures the result, and removes the scratch state when it's done. It
-returns a `workspace.Result`, whose nested `Result` field (a `*GuestResult`)
+command, captures the result, and - when the run *succeeds* - removes the
+scratch state. A failed run keeps its state under
+`~/.microagent/workspaces/demo-vm/` for debugging, and re-running with the
+same fixed name will then collide. The two-line fix:
+
+```go
+// After a failed run: delete the leftover state, or use a fresh name.
+_, _ = workspace.Control(context.Background(), opts, "delete")
+```
+
+See the [Run lifecycle contract](/library/go/#run-lifecycle-contract) for the
+full story (timeouts, `Keep`, cleanup rules).
+
+`workspace.Run` returns a `workspace.Result`, whose nested `Result` field (a `*GuestResult`)
 holds the guest's output - so `res.Result.Stdout` contains the guest's stdout
 and `res.Result.ExitCode` carries its exit code. The doubled name is just the
 outer `workspace.Result` struct's `Result` field, not a typo.
@@ -78,7 +92,9 @@ outer `workspace.Result` struct's `Result` field, not a typo.
 2. It pulled the OCI image and converted it to an ext4 rootfs.
 3. It booted the VM, ran your command, captured stdout/stderr/exit code into
    `res.Result`.
-4. It shut the VM down and removed the scratch state directory.
+4. It shut the VM down and, because the run succeeded (and `opts.Keep` was not
+   set), removed the scratch state directory. A failed run would have left the
+   state behind for inspection.
 
 ## Where to next
 

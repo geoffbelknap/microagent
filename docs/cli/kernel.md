@@ -4,13 +4,13 @@ description: List, check, install, or verify the guest kernel.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 ```text
 microagent kernel list    [--all] [--backend <name>] [--arch <arch>]                                       List available kernels
 microagent kernel check   [--backend <name>] [--arch <arch>]                                               Check the installed kernel
 microagent kernel install [--channel <ch>] [--version <ver>] [--url <url>] [--from <path>] [--sha256 <sum>] [--out <path>]  Install a kernel
-microagent kernel verify  --path <path> --sha256 <sum>                                                     Verify a kernel checksum
+microagent kernel verify  [--path <path>] [--sha256 <sum>]                                                 Verify a kernel checksum
 ```
 
 `kernel` manages the guest kernel the microVMs boot. Most users can stick with
@@ -105,12 +105,14 @@ or `--from` install a custom kernel outside the manifest.
 
 ## `verify`
 
-`verify` checks that a kernel file matches an expected SHA-256.
+`verify` checks that a kernel file matches an expected SHA-256. Both flags are
+optional: `--path` defaults to the installed kernel path for the host, and
+without `--sha256` the command just reports the computed sum.
 
 | Flag | Description |
 |---|---|
-| `--path <path>` | Kernel path |
-| `--sha256 <sum>` | Expected SHA-256 |
+| `--path <path>` | Kernel path (default: the installed kernel path) |
+| `--sha256 <sum>` | Expected SHA-256; omit to print the computed sum |
 | `--arch <arch>` | Guest architecture |
 | `--backend <name>` | Backend identity override |
 

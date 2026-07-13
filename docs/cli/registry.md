@@ -4,13 +4,15 @@ description: Store credentials for private OCI registries without any Docker dep
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-25_
+_Last updated: 2026-07-13_
 
 ```text
 microagent registry login <registry> -u <user> [--password-stdin]   Store registry credentials
 microagent registry logout <registry>                               Remove stored credentials
 microagent registry list                                            List registries with stored credentials
 ```
+
+`registry ls` is accepted as an alias for `registry list`.
 
 microagent pulls and pushes OCI images by talking to registries directly — it
 does **not** depend on Docker, Docker Desktop, or any `docker-credential-*`

@@ -4,7 +4,7 @@ description: Boot real Linux microVMs from OCI images, from the CLI or from Go.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 microagent boots real Linux microVMs from the OCI images you already use. Use
 the CLI or Go API to run commands inside them, move files in and out, and
@@ -16,6 +16,9 @@ Linux and macOS are the supported host targets. On a new machine, start with
 the host is missing before you boot a workspace.
 
 ## Choose your path
+
+New here? The [glossary](/concepts/glossary/) defines workspace, rootfs,
+egress, and friends.
 
 - **Try the CLI:** [Quickstart](/getting-started/quickstart/) boots a microVM
   and runs a command inside it. If you already think in Docker commands,
@@ -32,6 +35,6 @@ the host is missing before you boot a workspace.
 - [Guides](/guides/): step-by-step walkthroughs, from one-shot runs to services and snapshots.
 - [CLI reference](/cli/): every subcommand.
 - [Library](/library/): Go package overview, reference, and CLI-to-library mapping.
-- [Operations reference](/concepts/backends/): host requirements, network modes, storage, state, security, and troubleshooting.
+- [Backends & platform support](/concepts/backends/): host requirements per backend, network modes, storage, and state.
 - [Security](/security/): trust boundary and reporting.
 - [Troubleshooting](/troubleshooting/): common failure modes, indexed by symptom.

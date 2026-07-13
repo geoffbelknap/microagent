@@ -4,7 +4,7 @@ description: Boot a microVM, point it at Claude, watch it write and run files in
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 This example builds a small agent in a Linux microVM. The agent calls Claude with
 `bash`, `read_file`, and `write_file` tools, so Claude can edit code, run
@@ -143,7 +143,8 @@ microagent delete minimal-agent
 ```
 
 `delete` removes the workspace record and disk. If the VM is still running,
-halt or stop it first.
+`delete` offers to stop it for you (confirm the prompt, or pass `--yes`);
+halting first, as above, is fine too.
 
 ## Try it with another provider
 

@@ -4,7 +4,7 @@ description: Build an ext4 rootfs from an OCI image.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-25_
+_Last updated: 2026-07-13_
 
 ```text
 microagent rootfs build --image <ref> --out <path> [flags]   Build an ext4 rootfs from an OCI image
@@ -51,7 +51,8 @@ Flags you'll actually use:
   where the ext4 image lands
 - `--size-mib <MiB>` - size the disk up front; an image that doesn't fit fails
   the build
-- `--arch <arch>` - cross-build for a guest architecture other than the host's
+- `--arch <arch>` - target guest architecture. Defaults to `arm64` regardless
+  of the host, so amd64 hosts must pass `--arch amd64`
 - `--allow-mutable` - accept a tag reference when you've decided digest pinning
   isn't worth it for this build
 - `--keep-stage` - keep the unpacked stage directory to debug what actually went
@@ -64,7 +65,7 @@ The complete set:
 | `--image <ref>` | OCI image reference |
 | `--out <path>` | Output rootfs path |
 | `--os <os>` | Target OS (default `linux`) |
-| `--arch <arch>` | Target architecture (`amd64`, `arm64`) |
+| `--arch <arch>` | Target architecture (`amd64`, `arm64`; default `arm64`, not the host's) |
 | `--size-mib <MiB>` | Disk size |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--exec <command>` | Shell command to run as guest init |

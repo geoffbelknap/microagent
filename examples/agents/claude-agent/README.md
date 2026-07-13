@@ -11,7 +11,8 @@ microagent dispatch --file examples/agents/claude-agent/agent.yaml
 ```
 
 What happens: pull `python:3.12-slim` → `pip install claude-agent-sdk` inside the
-booted VM → drop `agent.py` → run it under **guarded** egress. The SDK sends
+booted VM → drop `agent.py` → run it under **mitm** egress (credential swap
+rewrites the auth header inside TLS, so it needs interception). The SDK sends
 `x-api-key: <placeholder>` to `api.anthropic.com`; the mediator **replaces** it
 host-side with your real `ANTHROPIC_API_KEY`. The guest never holds the real key,
 and the egress audit receipt records everything the agent reached.
@@ -23,9 +24,10 @@ and the egress audit receipt records everything the agent reached.
   Node.js for the bundled CLI to run, add it to `setup` (e.g.
   `apt-get update && apt-get install -y nodejs`) or start from a Node-capable base.
 - **Egress footprint.** Claude Code may reach hosts beyond `api.anthropic.com`
-  (e.g. telemetry). Under the default `guarded` mode that's allowed and shows up in
-  the audit receipt — a good way to *see* its real footprint. Under `strict` you'd
-  need to allowlist those hosts too (start from the audit receipt of a guarded run).
+  (e.g. telemetry). The mediating modes allow public destinations by default, so
+  that traffic goes through and shows up in the audit receipt — a good way to *see*
+  its real footprint. With `--egress-lock-allowlist` you'd need to allowlist those
+  hosts too (start from the audit receipt of an unlocked run).
 - **Subscription vs API key.** cred-swap protects an **API key**. The Claude Agent
   SDK here authenticates with `ANTHROPIC_API_KEY`; it is not a way to put a
   subscription/OAuth session into the box.

@@ -4,7 +4,7 @@ description: Terms used throughout the microagent docs and what they actually me
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 A handful of terms come up often enough that it's worth pinning them down before you read the rest of the docs. The lifecycle words in particular are easy to confuse - and the distinctions matter for what you can do next.
 
@@ -36,7 +36,7 @@ A handful of terms come up often enough that it's worth pinning them down before
 
 - **supervisor** - the host-side helper microagent uses to start, stop, and inspect microVMs on the current platform. Most users never call it directly.
 - **mediation channel** - a guest-to-host vsock path for the agent's calls into your host control plane. Declared, required by default, and fail-closed unless you explicitly opt out. **Not the same as egress mediation** (below); they only share the word "mediation". See [Build agents on the mediation channel](/guides/agents-and-mediation/).
-- **egress mediation** - the capture-and-control layer over the guest's *ordinary network egress* (the TCP/UDP/DNS it sends out of its network device). On by default (`guarded`), with `strict` and `off` modes. Intercepts TLS with a per-workspace CA, allowlists destinations, and audits every decision. Distinct from the vsock mediation channel above. See [Egress mediation](/concepts/egress-mediation/).
+- **egress mediation** - the capture-and-control layer over the guest's *ordinary network egress* (the TCP/UDP/DNS it sends out of its network device). On by default (`broker` mode), with `mitm` and `off` as the alternatives. It polices destinations, records every decision for `microagent egress`, and can confine a workspace to an allowlist (`--egress-lock-allowlist`); only `mitm` mode intercepts TLS with a per-workspace CA. Distinct from the vsock mediation channel above. See [Egress mediation](/concepts/egress-mediation/).
 - **state directory** - where workspace records live on the host (default `~/.microagent/`).
 - **AX mode** - the agent-experience output mode (`--mode=ax`). stdout is structured JSON for agent clients; UX mode is the human-readable default. The [MCP endpoint](/guides/mcp-server/) always uses AX output.
 - **readiness** - structured signals on a status response (`guestReady`, `shellReady`, `execReady`, `resultReady`, `mediationReady`) so callers can sequence work without polling files or serial logs. See [State and identity](/concepts/state-and-identity/#readiness).
@@ -50,4 +50,4 @@ These six words are not synonyms.
 - **stop** - graceful shutdown signal. If the VM hasn't exited after five seconds, `stop` marks the workspace `failed` and returns an error; it never escalates on its own - following up with `kill` is your move.
 - **kill** - hard termination. For when `stop` doesn't return.
 - **quarantine** - sever host-side network and mediation while preserving disk and event history. The VM may still be running. A forensic state, not a normal stopped state - you must halt, stop, or kill it before you can `start` it again.
-- **delete** - remove the workspace and its state. Refuses while a VM process is still running; halt or stop first.
+- **delete** - remove the workspace and its state. If the VM is still running, `delete` asks before stopping it (`--yes` or `--force` skips the prompt and stops it for you).

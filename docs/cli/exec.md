@@ -4,7 +4,7 @@ description: Run a command in a running workspace and get typed results back.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-11_
+_Last updated: 2026-07-13_
 
 ```text
 microagent exec <workspace> [flags] -- <argv...>
@@ -24,16 +24,11 @@ forward is bound but the guest service is not yet listening), so the command is
 not rejected by a transient connection error. The wait runs an idempotent
 readiness probe, so your command is still issued exactly once.
 
-In UX mode, command stdout is written to stdout, command stderr is written to
-stderr, and the CLI exits with the command exit code when the command exits
-normally. Timeout, signal, and failed-to-start statuses use nonzero CLI exit
-codes.
-
-In AX mode, stdout is one JSON envelope with `ok`, `result`, `retry_count`,
-`retry_wall_clock_ms`, and matching `metadata` fields. The `result` field holds
-the structured `ExecResult`. A nonzero command exit is still a successful tool
-call and is reported in `result.exit_code`; the CLI exits nonzero only when the
-exec request itself cannot complete.
+In UX mode, command stdout and stderr are written to your stdout and stderr. In
+AX mode, stdout is one JSON envelope with `ok`, `result` (the structured
+`ExecResult`), `retry_count`, `retry_wall_clock_ms`, and matching `metadata`
+fields. How the command's exit code maps to the CLI's own exit status in each
+mode is covered under [Exit status](#exit-status) below.
 
 ## Examples
 

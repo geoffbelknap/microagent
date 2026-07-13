@@ -4,7 +4,7 @@ description: Find the failure you're seeing and fix it with the right tool.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-06_
+_Last updated: 2026-07-13_
 
 When something isn't working, **start with `microagent doctor`**. It checks the host backend, virtualization support, the supervisor binary, the default kernel, and console support, and tells you where the gap is. Most of the entries below are conditions doctor will flag.
 
@@ -103,15 +103,17 @@ attaching a network endpoint.
 
 ## Workspace lifecycle
 
-### `microagent delete` refuses while the VM is running
+### `microagent delete` asks "Stop and delete it?"
 
-The recorded VM process is still alive. By design, `delete` won't tear down a workspace whose VM hasn't been stopped - it'd orphan the process.
+The recorded VM process is still alive. `delete` won't tear it down silently -
+it prompts first, and `--yes` (or `--force`) answers the prompt and stops the
+VM for you before deleting.
 
 ```bash
-microagent halt <name>     # clean disk-preserving stop
-# or
-microagent stop <name>     # graceful shutdown request
-microagent kill <name>     # hard termination if stop doesn't return
+microagent delete <name> --yes   # stop the running VM, then delete
+
+# or shut it down yourself first:
+microagent halt <name>           # clean disk-preserving stop
 microagent delete <name>
 ```
 
@@ -234,7 +236,7 @@ Fixes:
 
 ## Egress mediation
 
-### A `guarded` or `strict` workspace fails to start with a TPROXY error
+### A mediated (`broker` or `mitm`) workspace fails to start with a TPROXY error
 
 ```text
 egress: UDP mediation (TPROXY) unavailable for workspace research — load the TPROXY kernel modules or use --egress off
@@ -243,9 +245,9 @@ egress: UDP mediation (TPROXY) unavailable for workspace research — load the T
 [Egress mediation](/concepts/egress-mediation/) runs inside the workspace's own
 user namespace and mediates UDP and DNS via Linux TPROXY, which needs kernel
 modules (`nft_tproxy`, `nf_tproxy_ipv4`, `xt_socket`, `nf_socket_ipv4`) that a
-rootless workspace can't load itself. When they're missing, a `guarded` or
-`strict` workspace **fails closed** - it refuses to start rather than run with
-an unmediated UDP/DNS channel.
+rootless workspace can't load itself. When they're missing, a mediated
+workspace (the default `broker` mode, or `mitm`) **fails closed** - it refuses
+to start rather than run with an unmediated UDP/DNS channel.
 
 Fixes:
 
@@ -258,16 +260,16 @@ Fixes:
 This is the intended fail-closed behavior - an enforcement gap never silently
 widens what the agent can reach. See [`doctor`](/cli/doctor/).
 
-### An allowed host's TLS connection fails
+### An allowed host's TLS connection fails under `mitm`
 
-A destination you allowlisted (`--egress-allow`) still fails its TLS handshake,
-typically surfacing as a client-side certificate error in the guest, or an
-`egress_mitm_handshake_error` / `egress_mitm_upstream_error` record in
-`microagent egress <name>`.
+In `--egress mitm` mode, a destination you allowlisted (`--egress-allow`)
+still fails its TLS handshake - typically a client-side certificate error in
+the guest, or an `egress_mitm_handshake_error` / `egress_mitm_upstream_error`
+record in `microagent egress <name>`. (The default `broker` mode never forges
+certificates, so this symptom only appears when you opted into `mitm`.)
 
-Cause: under the default `guarded` mode (and for any allowed host under
-`strict`), microagent **MITMs the TLS** with a per-workspace CA. Some clients
-reject the injected CA's leaf certificate:
+Cause: in `mitm` mode microagent **intercepts TLS** with a per-workspace CA.
+Some clients reject the injected CA's leaf certificate:
 
 - **Certificate pinning** - the client only trusts a specific certificate or key,
   not the per-workspace CA.
@@ -280,7 +282,7 @@ Fix: mark the host **passthrough** so it is allowed and audited but **not
 intercepted** - the original server certificate reaches the client untouched:
 
 ```bash
-microagent create research --egress strict \
+microagent create research --egress mitm \
   --egress-allow api.openai.com \
   --egress-passthrough pinned.example.com
 ```

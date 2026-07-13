@@ -4,7 +4,7 @@ description: Report host backend capabilities.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-23_
+_Last updated: 2026-07-13_
 
 ```text
 microagent host [--arch <arch>] [--supervisor <path>]   Report host backend capabilities
@@ -49,7 +49,7 @@ kernel under `kernel`). A trimmed Firecracker example:
     "backend": "linux-kvm",
     "architecture": "amd64",
     "status": "installed",
-    "path": "/home/user/.microagent/kernels/linux-kvm/amd64/vmlinux",
+    "path": "/home/user/.microagent/kernels/linux-kvm/amd64/Image",
     "sha256": "..."
   }
 }

@@ -4,7 +4,7 @@ description: Create a named workspace and walk its create, start, halt, connect,
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 Use a persistent workspace when disk and state should survive between starts:
 the environment you set up today is still there tomorrow. A workspace is a
@@ -88,7 +88,7 @@ microagent logs research     # boot/serial output
 
 ```text
 NAME                     STATE        BACKEND      PROFILE      NETWORK    RESTART
-research                 running      firecracker  medium       user       never
+research                 running      linux-kvm    medium       user       never
 ```
 
 `microagent --json status research` adds the structured readiness signals
@@ -143,9 +143,10 @@ microagent halt research
 microagent delete research --yes
 ```
 
-`delete` removes the workspace record and its disk. It refuses while the
-recorded VM process is still running - halt, stop, or kill first. Leave off
-`--yes` to get a confirmation prompt.
+`delete` removes the workspace record and its disk. If the workspace is still
+running, the confirmation prompt becomes "Stop and delete it?", and answering
+yes (or passing `--yes`) stops it first; `--force` kills instead of stopping.
+Leave off `--yes` to get a confirmation prompt either way.
 
 ## Related
 

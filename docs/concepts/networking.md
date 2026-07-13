@@ -4,7 +4,7 @@ description: Choose `user` or `isolated`, publish ports, and read network status
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 This page defines the workspace network modes and what `--publish` does. For a
 walkthrough, see [Networking](/guides/networking/). The guest-to-host
@@ -21,8 +21,9 @@ turns the guest network device off.
 
 Network mode controls the guest's network device. What the guest may send over
 that device is handled by [egress mediation](/concepts/egress-mediation/):
-allowlists, TLS interception, passthrough hosts, credential swap, and audit
-events.
+allowlists, passthrough hosts, credential swap, and audit events. The default
+`broker` mode observes, allows, and denies traffic without forging any
+certificate; TLS interception happens only in `mitm` mode.
 
 ## Declaring the mode
 

@@ -4,7 +4,7 @@ description: Boot a Linux microVM from an OCI image and run a command inside it.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 Boot a Linux microVM from an OCI image, run one command inside it, and tear it
 down. You only need three commands.
@@ -67,3 +67,4 @@ one-shot run, microagent removed the temporary workspace afterwards.
 - **Run an actual agent inside a microVM** - [run your first agent](/getting-started/cli/first-agent/).
 - **Keep a workspace around between runs** - [persistent workspaces](/guides/persistent-workspaces/) covers `create`, `start`, `halt`, `connect`, `delete`.
 - **Already fluent in Docker?** [Coming from Docker](/getting-started/coming-from-docker/) maps the commands you know.
+- **New to the vocabulary?** The [glossary](/concepts/glossary/) defines workspace, rootfs, egress, and friends.

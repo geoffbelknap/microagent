@@ -4,7 +4,7 @@ description: Create a named workspace that survives between starts.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-11_
+_Last updated: 2026-07-13_
 
 ```text
 microagent create [--name <name>] [--image <ref>] [flags]
@@ -203,78 +203,135 @@ Flags you'll actually use:
 - `--restart <policy>` - what [`supervise`](/cli/supervise/) does when it exits
 - `--dry-run` - validate the config without creating anything
 
-The complete set:
+The rest, grouped:
+
+### Workspace basics
 
 | Flag | Description |
 |---|---|
-| `--image <ref>` | OCI image reference. When omitted on the image path, defaults to Python 3.13 slim (digest-pinned for `arm64`/`amd64`, the `python:3.13-slim` tag for other architectures); the `--rootfs` and `--from-snapshot` paths take no image |
-| `--from-snapshot <workspace>:<tag>` | Fork a new workspace from an existing workspace's snapshot instead of an image |
-| `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` or `microagent.yml` when present |
-| `--name <name>` | Workspace name (also accepted as a positional argument or `--id`) |
+| `--image <ref>` | OCI image reference. Defaults to Python 3.13 slim when omitted |
+| `--from-snapshot <workspace>:<tag>` | Fork from an existing workspace's snapshot instead of an image |
+| `--file <path>` | Workspace spec file. Defaults to `microagent.yaml` / `microagent.yml` when present |
+| `--name <name>` | Workspace name (also positional, or `--id`) |
 | `--setup <command>` | Shell command to run before first start. Repeatable |
 | `--setup-file <path>` | Shell script file to run before first start. Repeatable |
 | `--service-command <cmd>` | Long-running shell command to run as the VM service |
-| `--image-command` | Run the image Entrypoint/Cmd when creating a prepared workspace |
+| `--image-command` | Run the image Entrypoint/Cmd as the service |
 | `--entrypoint <command>` | Command to run on start |
-| `--shell <path>` | Interactive console shell path. Defaults to `/bin/sh`; the path must exist inside the guest |
-| `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
-| `--env KEY=VALUE` | Guest environment variable. Repeatable |
-| `-e KEY=VALUE` | Alias for `--env` |
-| `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME` over vsock, re-resolved each start. Repeatable. See [`secret`](/cli/secret/) |
-| `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret (plaintext, re-read each start) |
-| `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable. See [`secret`](/cli/secret/) |
-| `--secrets-audit` | Append every secret access to the workspace audit log (`microagent secret audit`) |
-| `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
-| `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
-| `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
-| `--output n=/guest/path` | Declare an output artifact path |
-| `--backend <name>` | Backend identity override |
-| `--kernel <path>` | Custom kernel path |
-| `--rootfs <path>` | Use an existing ext4 rootfs instead of building one from `--image`. Enables the lower-level identity flags `--id` and `--role` (see [Examples](#examples)) |
-| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
-| `--guest-init <path>` | Guest init path |
-| `--arch <arch>` | Guest architecture |
+| `--shell <path>` | Console shell path. Defaults to `/bin/sh`; must exist in the guest |
+| `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
+| `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |
+| `--restart <policy>` | `never`, `on-failure`, or `always`. Enforced by [`supervise`](/cli/supervise/) |
+| `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
+| `--timeout <seconds>` | Run timeout in seconds; must be positive |
+| `--dry-run` | Validate config without creating |
+
+The image default is digest-pinned for `arm64`/`amd64` (the `python:3.13-slim`
+tag elsewhere); the `--rootfs` and `--from-snapshot` paths take no image.
+Activity on the workspace renews the `--ttl` lease, so it only reaps VMs that
+have gone quiet.
+
+### Resources & networking
+
+| Flag | Description |
+|---|---|
 | `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
-| `--restart <policy>` | Restart policy: `never`, `on-failure`, or `always`. Enforced by [`supervise`](/cli/supervise/) |
-| `--network <mode>` | Network mode: `user` (default) or `isolated` |
-| `--publish <mapping>` | Declarative TCP host port forward, `[host:]hostPort:guestPort[/tcp]`. Repeatable |
-| `-p <mapping>` | Alias for `--publish` |
-| `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
-| `--mediation-optional` | Allow startup when mediation is unavailable |
-| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `broker` (default; allow-broad, opaque forward-proxy — no certificate forged, no CA in the guest), `mitm` (allow-broad, forge per-SNI — sunsetting), or `off`. Persisted with the workspace |
-| `--egress-lock-allowlist` | Restrict egress to allowlisted destinations only (drop the allow-broad default) on `--egress broker` or `mitm` — the retired `strict` reach control |
-| `--egress-allow <host>` | Allowlisted egress destination (TLS-intercepted). Repeatable; an exact host or a `.suffix` matching the apex and subdomains. See the [allowlist how-to](/guides/egress-allowlist/) |
-| `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted (forwarded opaquely). Repeatable. For cert-pinned / mTLS endpoints |
-| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
-| `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
-| `--cred-swap PROVIDER[=ref]` | Shorthand for a credential swap against a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`): allowlists the provider host and injects its API key host-side so the guest never holds it. The optional `=ref` is a reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret; omitted, it defaults to the provider's conventional env var. Repeatable; requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
-| `--broker-upstream <url>` | Route egress through the [egress broker](/concepts/egress-mediation/): a host-side proxy that injects the credential and originates its own upstream TLS, so the guest never holds the key. Persisted with the workspace |
-| `--broker-secret NAME=<scheme>:<ref>` | Broker credential; the guest sends `@secret:NAME` references and the broker swaps in the live value host-side. A reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret. Required with `--broker-upstream` |
-| `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; an empty `VALUE` is filled with the broker URL (e.g. `--broker-env ANTHROPIC_BASE_URL`). Repeatable |
-| `--broker-proxy` | Also set `HTTPS_PROXY` / `HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
-| `--broker-capture` | Opt in to raw capture of pre-swap broker requests (path, headers with references, bounded body) to an owner-only per-workspace file. Off by default — the default record is the minimized decision stream. See [broker observability](/concepts/egress-mediation/#the-broker-decision-stream) |
-| `--broker-ca <path>` | PEM bundle path the broker's upstream TLS client trusts, for an upstream with a private cert (e.g. an internal control plane). Empty (default) trusts system roots |
-| `--broker-endpoint <spec>` | Declare one egress broker endpoint as a `;`-separated list of `key=value` pairs: `upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture` (`base-url-env` repeatable within the spec). Repeatable to declare multiple endpoints; persisted with the workspace so restart/wake keeps every endpoint. Cannot be combined with `--broker-upstream`/`--broker-secret`/`--broker-env`/`--broker-proxy`/`--broker-capture`/`--broker-ca` — declare each endpoint fully within its own `--broker-endpoint` |
-| `--model <ref>` | Pair the workspace with a locally served HuggingFace GGUF model; the ref is persisted so every `start` re-pairs, and `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` are injected into the guest. See [`model`](/cli/model/) |
-| `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
-| `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom`; persisted with the workspace |
-| `--model-gpu <mode>` | Model runner GPU intent: `off`, `on`, or `auto`; persisted with the workspace |
-| `--model-runner-model <id>` | Backend model id for runners such as vLLM; persisted with the workspace |
-| `--model-runner-served-model <name>` | OpenAI-compatible served model name for runners such as vLLM |
-| `--model-runner-command <template>` | Custom OpenAI-compatible host runner command template; persisted with the workspace |
-| `--model-runner-arg <arg>` | Extra model runner argument. Repeatable; persisted with the workspace |
-| `--model-runner-env KEY=VALUE` | Extra model runner environment for this invocation. Repeatable; values are not persisted |
-| `--model-mediation <mode>` | Model mediation mode: `off`, `local-allow`, or `policy`; persisted with the workspace |
-| `--model-policy-file <path>` | Structured model mediation policy file for `--model-mediation policy` |
-| `--model-policy-url <url>` | External model mediation policy endpoint for `--model-mediation policy` |
-| `--model-policy-timeout <duration>` | Model mediation policy timeout, such as `250ms` or `2s` |
 | `--memory <MiB>` | Memory in MiB (default 512) |
 | `--cpus <n>` | CPU count |
 | `--size-mib <MiB>` | Rootfs disk size |
+| `--network <mode>` | Network mode: `user` (default) or `isolated` |
+| `--publish <mapping>`, `-p` | Forward `[host:]hostPort:guestPort[/tcp]`. Repeatable |
+
+### Files, disks & volumes
+
+| Flag | Description |
+|---|---|
+| `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
+| `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
+| `-v, --volume SRC:DST[:ro\|rw]` | Attach a named volume, tar bundle, or ext4 disk image |
+| `--output n=/guest/path` | Declare an output artifact path |
+
+### Secrets & credentials
+
+| Flag | Description |
+|---|---|
+| `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME`, re-resolved each start. Repeatable. See [`secret`](/cli/secret/) |
+| `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret |
+| `--secret-on-demand NAME=<scheme>:<ref>` | Secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable |
+| `--secrets-audit` | Log every secret access (`microagent secret audit`) |
+
+### Egress & broker
+
+| Flag | Description |
+|---|---|
+| `--egress <mode>` | `broker` (default), `mitm`, or `off`. Persisted with the workspace |
+| `--egress-lock-allowlist` | Only allowlisted hosts are reachable. Works in `broker` or `mitm` |
+| `--egress-allow <host>` | Allowlist a destination: exact host or `.suffix`. Repeatable |
+| `--egress-passthrough <host>` | Allowed host forwarded opaquely, never TLS-intercepted (for cert-pinned/mTLS endpoints). Repeatable |
+| `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
+| `--egress-swap-config <path>` | Credential-swap config (YAML). Requires `--egress mitm` |
+| `--cred-swap PROVIDER[=ref]` | Swap in a built-in provider's API key host-side. Repeatable; requires `--egress mitm` |
+| `--broker-upstream <url>` | Egress broker upstream base URL. Persisted with the workspace |
+| `--broker-secret NAME=<scheme>:<ref>` | Broker credential reference. Required with `--broker-upstream` |
+| `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; empty `VALUE` = broker URL. Repeatable |
+| `--broker-proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker |
+| `--broker-capture` | Opt in to raw capture of pre-swap broker requests (off by default) |
+| `--broker-ca <path>` | PEM bundle the broker's upstream TLS client trusts (default: system roots) |
+| `--broker-endpoint <spec>` | One broker endpoint as `;`-separated `key=value` pairs. Repeatable; persisted |
+| `--mediation p=host:port` | Guest-to-host [mediation channel](/concepts/glossary/) — a vsock (VM socket) path into your host control plane |
+| `--mediation-optional` | Allow startup when mediation is unavailable |
+
+The default `broker` mode forwards traffic opaquely — no certificate is forged
+and no CA is installed in the guest; TLS interception exists only in `mitm`,
+which is why `--egress-swap-config` and `--cred-swap` require it. Broker
+credentials and cred-swap refs are always references (`env:NAME` / `file:PATH`
+/ `vault:PATH`), never literal secrets, and the guest never holds the real
+key. For the full semantics — modes, allow vs passthrough, credential swap,
+the broker decision stream — see
+[egress mediation](/concepts/egress-mediation/) and the
+[allowlist how-to](/guides/egress-allowlist/).
+
+A `--broker-endpoint` spec bundles `upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture`
+into one flag; repeat it for multiple endpoints (all persist across
+restart/wake), and don't combine it with the individual `--broker-*` flags.
+
+### Model runner & mediation
+
+| Flag | Description |
+|---|---|
+| `--model <ref>` | Pair the workspace with a locally served HuggingFace GGUF model. See [`model`](/cli/model/) |
+| `--model-token <token>` | HuggingFace token for auto-pull; defaults to `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` |
+| `--model-runner <backend>` | Runner backend: `llamacpp`, `vllm`, or `custom` |
+| `--model-gpu <mode>` | GPU intent: `off`, `on`, or `auto` |
+| `--model-runner-model <id>` | Backend model id for runners such as vLLM |
+| `--model-runner-served-model <name>` | OpenAI-compatible served model name |
+| `--model-runner-command <template>` | Custom OpenAI-compatible host runner command template |
+| `--model-runner-name <name>` | Custom host model runner name override |
+| `--model-runner-health-path <path>` | Custom host model runner health probe path |
+| `--model-runner-arg <arg>` | Extra runner argument. Repeatable |
+| `--model-runner-env KEY=VALUE` | Extra runner env for this invocation. Repeatable; not persisted |
+| `--model-mediation <mode>` | Model mediation mode: `off`, `local-allow`, or `policy` |
+| `--model-policy-file <path>` | Policy file for `--model-mediation policy` |
+| `--model-policy-url <url>` | External policy endpoint for `--model-mediation policy` |
+| `--model-policy-timeout <duration>` | Policy timeout, such as `250ms` or `2s` |
+
+The model pairing and runner settings persist with the workspace (except
+`--model-runner-env`), so every `start` re-pairs the model and injects
+`MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` into the guest.
+
+### Low-level & output
+
+| Flag | Description |
+|---|---|
+| `--backend <name>` | Backend identity override |
+| `--kernel <path>` | Custom kernel path |
+| `--rootfs <path>` | Use an existing ext4 rootfs; enables `--id` and `--role` (see [Examples](#examples)) |
+| `--state-dir <dir>` | State directory (default `~/.microagent/`) |
+| `--guest-init <path>` | Guest init path |
+| `--arch <arch>` | Guest architecture |
 | `--result-port <port>` | Vsock result port |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
-| `--dry-run` | Validate config without creating |
 | `--json <path\|->` | Read request JSON from a file or stdin; separate from the global output flag |
 
 See [global flags](/cli/#global-flags) for `--text`/`--output`/`--mode`/`--supervisor` and the global `--json` output flag (distinct from the `--json` request-input flag above).

@@ -21,12 +21,14 @@ key swapped in at the edge. When it finishes you also get the mediator-written
 | field | meaning |
 |---|---|
 | `entry` | the command that runs your agent (the one-shot exec) |
-| `egress` | `guarded` (default) · `strict` · `off` |
+| `egress` | `broker` (default) · `mitm` · `off` |
 | `allow` | extra egress hosts to allowlist (unioned) |
-| `cred-swap` | built-in providers to inject host-side: `anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek` — each `PROVIDER[=env:NAME\|file:PATH\|vault:PATH]` |
+| `cred-swap` | built-in providers to inject host-side: `anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek` — each `PROVIDER[=env:NAME\|file:PATH\|vault:PATH]`; requires `egress: mitm` |
 
 Everything else (`image`, `setup`, `files`, `env`) is a normal workspace spec field.
-CLI flags override the Agentfile (e.g. `--egress strict` beats `agent.egress`).
+An explicit CLI flag overrides the Agentfile (e.g. `--egress mitm` beats
+`agent.egress`); to confine reach to the allowlisted hosts only, add
+`--egress-lock-allowlist` (it composes with `agent.allow`).
 
 ## How cred-swap works here (and its boundary)
 
@@ -40,10 +42,13 @@ This protects the **task credential** the agent uses (the provider API key). It 
 one blast radius (this key), and you choose the egress envelope around it. A
 prompt-injected agent can't exfiltrate a key it never held.
 
-The default `guarded` egress allows public destinations (so `pip install` and the
-provider call both work) while denying the private/internal network and recording
-everything in the audit receipt. For a tighter envelope, see the per-example
-README notes on the `strict` + `commit` pattern.
+These examples set `egress: mitm` because the header rewrite happens inside the
+guest's TLS, which only the interception mode can do — the default `broker` mode
+splices TLS opaquely without forging certificates, so it cannot swap credentials.
+Both modes allow public destinations (so `pip install` and the provider call work)
+while denying the private/internal network and recording everything in the audit
+receipt. For a tighter envelope — allowlisted hosts only — see the per-example
+README notes on the `--egress-lock-allowlist` + `commit` pattern.
 
 > **Validation note.** These examples are turnkey *recipes*. A full agent turn
 > needs a real `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` on the host (referenced by

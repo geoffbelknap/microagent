@@ -4,7 +4,7 @@ description: Boot a microVM from an OCI image, run a command, and tear it down.
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-07-11_
+_Last updated: 2026-07-13_
 
 ```text
 microagent run --image <ref> --exec "<command>" [flags]
@@ -55,9 +55,9 @@ trimmed example:
   "workspace": "run-1730000000000000000",
   "state_dir": "/home/user/.microagent",
   "restart": "never",
-  "resources": { "memory_mib": 512, "cpu_count": 2, "size_mib": 4096 },
+  "resources": { "memory_mib": 512, "cpu_count": 2, "size_mib": 1024 },
   "rootfs_path": "/home/user/.microagent/workspaces/run-.../rootfs.ext4",
-  "kernel_path": "/home/user/.microagent/kernels/linux-kvm/amd64/vmlinux",
+  "kernel_path": "/home/user/.microagent/kernels/linux-kvm/amd64/Image",
   "final_state": "stopped",
   "result": {
     "started_at": "2026-06-01T12:00:00Z",
@@ -131,7 +131,9 @@ Flags you'll actually use:
 - `--keep` - keep state after the run so you can inspect the disk or `connect` to it
 - `--timeout <seconds>` - kill the run if it outlives the deadline
 
-The complete set:
+The rest, grouped:
+
+### Workspace basics
 
 | Flag | Description |
 |---|---|
@@ -141,66 +143,122 @@ The complete set:
 | `--setup-file <path>` | Shell script file to run before `--exec`. Repeatable |
 | `--image-command` | Run the image Entrypoint/Cmd |
 | `--entrypoint <command>` | Command to run on start |
-| `--shell <path>` | Interactive console shell path for kept/named runs. Defaults to `/bin/sh` |
-| `--hostname <name>` | Guest hostname. Defaults to the workspace name sanitized as a Linux hostname |
-| `--env KEY=VALUE` | Guest environment variable. Repeatable |
-| `-e KEY=VALUE` | Alias for `--env` |
-| `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME` over vsock. Repeatable. See [`secret`](/cli/secret/) |
-| `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret (plaintext, re-read each start) |
-| `--secret-on-demand NAME=<scheme>:<ref>` | Declare an on-demand secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable. See [`secret`](/cli/secret/) |
-| `--secrets-audit` | Append every secret access to the workspace audit log (`microagent secret audit`) |
+| `--shell <path>` | Console shell path for kept/named runs. Defaults to `/bin/sh` |
+| `--hostname <name>` | Guest hostname. Defaults to the sanitized workspace name |
+| `--env KEY=VALUE`, `-e` | Guest environment variable. Repeatable |
+| `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
+| `--file <path>` | Workspace spec file; flags override matching spec fields |
+| `--restart <policy>` | For kept/named runs: `never`, `on-failure`, or `always` |
+| `--timeout <seconds>` | Maximum wall-clock time before kill |
+| `--ttl <seconds>` | Idle lease: reap the VM after this long with no `exec`/`connect`. `0` = permanent |
+| `--keep` | Keep state after the command exits |
+| `--rm` | Explicit disposable-run behavior (the default unless `--keep` is set) |
+| `--dry-run` | Validate the configuration without writing state |
+| `--service-command <cmd>` | Long-running VM service command. Only [`create`](/cli/create/) accepts it; `run` rejects it |
+
+Activity on the workspace (an `exec` or `connect`) renews the `--ttl` lease, so
+it only reaps VMs that have actually gone quiet.
+
+### Resources & networking
+
+| Flag | Description |
+|---|---|
+| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
+| `--memory <MiB>` | Memory in MiB (default 512) |
+| `--cpus <n>` | CPU count |
+| `--size-mib <MiB>` | Rootfs disk size |
+| `--network <mode>` | Network mode: `user` (default) or `isolated` |
+| `--publish <mapping>`, `-p` | Forward `[host:]hostPort:guestPort[/tcp]`. Repeatable |
+
+`--memory`, `--cpus`, and `--size-mib` override a single value while keeping
+the profile. See [`profiles`](/cli/profiles/) for the exact sizes.
+
+### Files, disks & volumes
+
+| Flag | Description |
+|---|---|
 | `--disk n=p:/m:ro\|rw` | Attach an existing ext4 disk |
 | `--bundle n=p:/m:ro\|rw` | Build a disk from a tar bundle |
-| `-v, --volume SRC:DST[:ro\|rw]` | Container-style safe volume alias for tar bundles and ext4 disk images |
+| `-v, --volume SRC:DST[:ro\|rw]` | Attach a named volume, tar bundle, or ext4 disk image |
 | `--output n=/guest/path` | Declare an output artifact path |
-| `--file <path>` | Workspace spec file; flags override matching spec fields |
-| `--restart <policy>` | Restart policy for kept/named runs: `never`, `on-failure`, or `always` |
-| `--network <mode>` | Network mode: `user` (default) or `isolated` |
-| `--publish <mapping>` | Forward `[host:]hostPort:guestPort[/tcp]` |
-| `-p <mapping>` | Alias for `--publish` |
-| `--name <name>` | Workspace name; generated when omitted. Also accepted as `--id` |
+
+### Secrets & credentials
+
+| Flag | Description |
+|---|---|
+| `--secret NAME=<scheme>:<ref>` | Deliver a secret to `/run/secrets/NAME`. Repeatable. See [`secret`](/cli/secret/) |
+| `--secrets-env-file <path>` | Deliver every key in a dotenv file as a secret |
+| `--secret-on-demand NAME=<scheme>:<ref>` | Secret fetched at runtime via `$MICROAGENT_SECRETS_SOCK`, never written to tmpfs. Repeatable |
+| `--secrets-audit` | Log every secret access (`microagent secret audit`) |
+
+### Egress & broker
+
+| Flag | Description |
+|---|---|
+| `--egress <mode>` | `broker` (default), `mitm`, or `off` |
+| `--egress-lock-allowlist` | Only allowlisted hosts are reachable. Works in `broker` or `mitm` |
+| `--egress-allow <host>` | Allowlist a destination: exact host or `.suffix`. Repeatable |
+| `--egress-passthrough <host>` | Allowed host forwarded opaquely, never TLS-intercepted (for cert-pinned/mTLS endpoints). Repeatable |
+| `--egress-policy <path>` | Policy file declaring `allow[]`/`passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
+| `--egress-swap-config <path>` | Credential-swap config (YAML). Requires `--egress mitm` |
+| `--cred-swap PROVIDER[=ref]` | Swap in a built-in provider's API key host-side. Repeatable; requires `--egress mitm` |
+| `--broker-upstream <url>` | Egress broker upstream base URL |
+| `--broker-secret NAME=<scheme>:<ref>` | Broker credential reference. Required with `--broker-upstream` |
+| `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; empty `VALUE` = broker URL. Repeatable |
+| `--broker-proxy` | Also set `HTTPS_PROXY`/`HTTP_PROXY` in the guest to the broker |
+| `--broker-capture` | Opt in to raw capture of pre-swap broker requests (off by default) |
+| `--broker-ca <path>` | PEM bundle the broker's upstream TLS client trusts (default: system roots) |
+| `--broker-endpoint <spec>` | One broker endpoint as `;`-separated `key=value` pairs. Repeatable |
+| `--mediation p=host:port` | Guest-to-host [mediation channel](/concepts/glossary/) — a vsock (VM socket) path into your host control plane |
+| `--mediation-optional` | Allow startup when mediation is unavailable |
+
+The default `broker` mode forwards traffic opaquely — no certificate is forged
+and no CA is installed in the guest; TLS interception exists only in `mitm`,
+which is why `--egress-swap-config` and `--cred-swap` require it. Broker
+credentials and cred-swap refs are always references (`env:NAME` / `file:PATH`
+/ `vault:PATH`), never literal secrets, and the guest never holds the real
+key. For the full semantics — modes, allow vs passthrough, credential swap,
+the broker decision stream — see
+[egress mediation](/concepts/egress-mediation/) and the
+[allowlist how-to](/guides/egress-allowlist/).
+
+A `--broker-endpoint` spec bundles `upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture`
+into one flag; repeat it for multiple endpoints, and don't combine it with the
+individual `--broker-*` flags.
+
+### Model runner & mediation
+
+| Flag | Description |
+|---|---|
+| `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model. See [`model`](/cli/model/) |
+| `--model-token <token>` | HuggingFace token for auto-pull; defaults to `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` |
+| `--model-runner <backend>` | Runner backend: `llamacpp`, `vllm`, or `custom` |
+| `--model-gpu <mode>` | GPU intent: `off`, `on`, or `auto` |
+| `--model-runner-model <id>` | Backend model id for runners such as vLLM |
+| `--model-runner-served-model <name>` | OpenAI-compatible served model name |
+| `--model-runner-command <template>` | Custom OpenAI-compatible host runner command template |
+| `--model-runner-name <name>` | Custom host model runner name override |
+| `--model-runner-health-path <path>` | Custom host model runner health probe path |
+| `--model-runner-arg <arg>` | Extra runner argument. Repeatable |
+| `--model-runner-env KEY=VALUE` | Extra runner env for this invocation. Repeatable; not persisted |
+| `--model-mediation <mode>` | Model mediation mode: `off`, `local-allow`, or `policy` |
+| `--model-policy-file <path>` | Policy file for `--model-mediation policy` |
+| `--model-policy-url <url>` | External policy endpoint for `--model-mediation policy` |
+| `--model-policy-timeout <duration>` | Policy timeout, such as `250ms` or `2s` |
+
+`--model` injects `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL` into the guest;
+with `--keep`, the ref persists and later `start`s re-pair the model.
+
+### Low-level & output
+
+| Flag | Description |
+|---|---|
 | `--backend <name>` | Backend identity override |
 | `--kernel <path>` | Custom kernel path |
 | `--state-dir <dir>` | State directory (default `~/.microagent/`) |
 | `--guest-init <path>` | Guest init path |
 | `--arch <arch>` | Guest architecture |
-| `--profile <name>` | Resource profile: `tiny`, `small`, `medium`, or `large` |
-| `--mediation p=host:port` | Declare the guest-to-host mediation vsock channel |
-| `--mediation-optional` | Allow startup when mediation is unavailable |
-| `--egress <mode>` | [Egress mediation](/concepts/egress-mediation/) mode: `broker` (default; allow-broad, opaque forward-proxy — no certificate forged, no CA in the guest), `mitm` (allow-broad, forge per-SNI — sunsetting), or `off` |
-| `--egress-lock-allowlist` | Restrict egress to allowlisted destinations only (drop the allow-broad default) on `--egress broker` or `mitm` — the retired `strict` reach control |
-| `--egress-allow <host>` | Allowlisted egress destination (TLS-intercepted). Repeatable; an exact host or a `.suffix` matching the apex and subdomains. See the [allowlist how-to](/guides/egress-allowlist/) |
-| `--egress-passthrough <host>` | Allowed egress destination that is **not** TLS-intercepted (forwarded opaquely). Repeatable. For cert-pinned / mTLS endpoints |
-| `--egress-policy <path>` | Egress policy file (`.yaml`/`.yml`/`.json`) declaring `allow[]` / `passthrough[]`; unioned with the flags. Requires `--egress broker` or `mitm` |
-| `--egress-swap-config <path>` | Credential-swap config (YAML): for an allowlisted, intercepted host the mediator injects the real credential host-side so the guest never holds it. Requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
-| `--cred-swap PROVIDER[=ref]` | Shorthand for a credential swap against a built-in provider (`anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `deepseek`): allowlists the provider host and injects its API key host-side so the guest never holds it. The optional `=ref` is a reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret; omitted, it defaults to the provider's conventional env var. Repeatable; requires `--egress mitm`. See [credential swap](/concepts/egress-mediation/#credential-swap) |
-| `--broker-upstream <url>` | Route egress through the [egress broker](/concepts/egress-mediation/): a host-side proxy that injects the credential and originates its own upstream TLS, so the guest never holds the key |
-| `--broker-secret NAME=<scheme>:<ref>` | Broker credential; the guest sends `@secret:NAME` references and the broker swaps in the live value host-side. A reference (`env:NAME` / `file:PATH` / `vault:PATH`), never a literal secret. Required with `--broker-upstream` |
-| `--broker-env KEY[=VALUE]` | Guest env var pointed at the broker; an empty `VALUE` is filled with the broker URL (e.g. `--broker-env ANTHROPIC_BASE_URL`). Repeatable |
-| `--broker-proxy` | Also set `HTTPS_PROXY` / `HTTP_PROXY` in the guest to the broker (CONNECT tunneling) |
-| `--broker-capture` | Opt in to raw capture of pre-swap broker requests (path, headers with references, bounded body) to an owner-only per-workspace file. Off by default — the default record is the minimized decision stream. See [broker observability](/concepts/egress-mediation/#the-broker-decision-stream) |
-| `--broker-ca <path>` | PEM bundle path the broker's upstream TLS client trusts, for an upstream with a private cert (e.g. an internal control plane). Empty (default) trusts system roots |
-| `--broker-endpoint <spec>` | Declare one egress broker endpoint as a `;`-separated list of `key=value` pairs: `upstream=<url>;secret=NAME=<scheme>:<ref>;base-url-env=KEY[=VALUE];ca=<path>;proxy;capture` (`base-url-env` repeatable within the spec). Repeatable to declare multiple endpoints. Cannot be combined with `--broker-upstream`/`--broker-secret`/`--broker-env`/`--broker-proxy`/`--broker-capture`/`--broker-ca` — declare each endpoint fully within its own `--broker-endpoint` |
-| `--model <ref>` | Pair the run with a locally served HuggingFace GGUF model and inject `MICROAGENT_MODEL_URL` / `OPENAI_BASE_URL`; with `--keep`, the ref persists and later `start`s re-pair. See [`model`](/cli/model/) |
-| `--model-token <token>` | HuggingFace token for model auto-pull; defaults to `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` when omitted |
-| `--model-runner <backend>` | Model runner backend: `llamacpp`, `vllm`, or `custom` |
-| `--model-gpu <mode>` | Model runner GPU intent: `off`, `on`, or `auto` |
-| `--model-runner-model <id>` | Backend model id for runners such as vLLM |
-| `--model-runner-served-model <name>` | OpenAI-compatible served model name for runners such as vLLM |
-| `--model-runner-command <template>` | Custom OpenAI-compatible host runner command template |
-| `--model-runner-arg <arg>` | Extra model runner argument. Repeatable |
-| `--model-runner-env KEY=VALUE` | Extra model runner environment for this invocation. Repeatable; values are not persisted |
-| `--model-mediation <mode>` | Model mediation mode: `off`, `local-allow`, or `policy` |
-| `--model-policy-file <path>` | Structured model mediation policy file for `--model-mediation policy` |
-| `--model-policy-url <url>` | External model mediation policy endpoint for `--model-mediation policy` |
-| `--model-policy-timeout <duration>` | Model mediation policy timeout, such as `250ms` or `2s` |
-| `--memory <MiB>` | Memory in MiB (default 512) |
-| `--cpus <n>` | CPU count |
-| `--size-mib <MiB>` | Rootfs disk size |
 | `--result-port <port>` | Vsock result port |
-| `--timeout <seconds>` | Maximum wall-clock time before kill |
-| `--keep` | Keep state after the command exits |
-| `--rm` | Explicit disposable-run behavior. This is the default unless `--keep` is set |
 | `--mke2fs <path>` | mke2fs binary path |
 | `--supervisor <path>` | Override the installed host backend supervisor path |
 
