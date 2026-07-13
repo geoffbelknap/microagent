@@ -49,7 +49,7 @@ of hand-managing `.ext4` files, create one and attach it by name.
 
 ```bash
 microagent volume create data --size-mib 2048
-microagent run docker.io/library/python:3.12 --volume data:/work
+microagent run docker.io/library/python:3.12-slim --volume data:/work
 ```
 
 Volumes live under `<state-dir>/volumes/` (an `index.json` registry plus one

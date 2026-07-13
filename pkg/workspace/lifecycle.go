@@ -108,6 +108,9 @@ func Create(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	if err := EnsureKernel(ctx, &opts); err != nil {
+		return Result{}, err
+	}
 	if err := materializeCredSwapConfig(&opts); err != nil {
 		return Result{}, err
 	}
@@ -262,6 +265,9 @@ func Run(ctx context.Context, opts Options) (Result, error) {
 	if err := normalizeLifecycleOptions(&opts, true); err != nil {
 		return Result{}, err
 	}
+	if err := EnsureKernel(ctx, &opts); err != nil {
+		return Result{}, err
+	}
 	if err := materializeCredSwapConfig(&opts); err != nil {
 		return Result{}, err
 	}
@@ -332,6 +338,9 @@ func Start(ctx context.Context, opts Options) (Result, error) {
 		}
 	}
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureKernel(ctx, &opts); err != nil {
 		return Result{}, err
 	}
 	if opts.ResultPort == 0 && !opts.MaintenanceBoot {
@@ -911,6 +920,9 @@ func CreateFromSnapshot(ctx context.Context, opts Options, sourceWorkspace, tag 
 	// the fork's own; carry it so a snapshot OF this fork records the truth.
 	opts.BakedVsockUDSPath = manifest.VsockUDSPath
 	if err := normalizeLifecycleOptions(&opts, false); err != nil {
+		return Result{}, err
+	}
+	if err := EnsureKernel(ctx, &opts); err != nil {
 		return Result{}, err
 	}
 	if err := EnsureCanCreate(opts); err != nil {

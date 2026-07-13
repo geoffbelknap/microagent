@@ -4,7 +4,7 @@ description: Give a workspace outbound access and publish a guest port back to t
 ---
 
 <!-- docs-last-updated -->
-_Last updated: 2026-06-27_
+_Last updated: 2026-07-13_
 
 A workspace has one of two network modes: `user` (the default) gives the guest
 unprivileged outbound IPv4 plus any TCP ports you publish, and `isolated` gives
@@ -16,7 +16,7 @@ reach, read [egress mediation](/concepts/egress-mediation/).
 `user` mode is the default, so a plain workspace can already reach the network:
 
 ```bash
-microagent create research --image docker.io/library/python:3.12
+microagent create research --image docker.io/library/python:3.12-slim
 microagent start research
 microagent exec research -- curl -sS https://example.com >/dev/null && echo ok
 ```
@@ -30,7 +30,7 @@ it checks the host prerequisites for the current platform.
 Use `--publish` to expose a guest TCP port on the host. Repeat it per port:
 
 ```bash
-microagent create web --image docker.io/library/python:3.12 \
+microagent create web --image docker.io/library/python:3.12-slim \
   --publish 127.0.0.1:8080:80/tcp
 microagent start web
 curl -sS http://127.0.0.1:8080/
@@ -46,7 +46,7 @@ example.
 When a workspace should have no network access, use `isolated`:
 
 ```bash
-microagent create offline --image docker.io/library/python:3.12 --network isolated
+microagent create offline --image docker.io/library/python:3.12-slim --network isolated
 ```
 
 Isolated workspaces reject `--publish` before the request leaves the CLI -

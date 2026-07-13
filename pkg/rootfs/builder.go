@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -539,7 +540,63 @@ func BuildEmptyVolume(ctx context.Context, outputPath string, sizeBytes int64) e
 	return buildVHDImage(ctx, stageDir, filepath.Join(tmpDir, "volume.vhd"), outputPath, sizeBytes, true)
 }
 
+// ext4MinOverheadBytes is deliberately below the real metadata overhead
+// (inode tables, journal, group descriptors), so the preflight check only
+// rejects builds mke2fs could never complete.
+const ext4MinOverheadBytes = 32 * 1024 * 1024
+
+// stageDataBytes estimates the ext4 data footprint of a staged tree: regular
+// file contents rounded up to 4 KiB blocks with hard links counted once, plus
+// one block per directory and symlink.
+func stageDataBytes(stageDir string) (int64, error) {
+	const blockSize = 4096
+	seen := map[string]struct{}{}
+	var total int64
+	err := filepath.WalkDir(stageDir, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == stageDir {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			total += blockSize
+			return nil
+		}
+		if id, ok := stageHardLinkID(path, info); ok {
+			if _, dup := seen[id]; dup {
+				return nil
+			}
+			seen[id] = struct{}{}
+		}
+		total += (info.Size() + blockSize - 1) / blockSize * blockSize
+		return nil
+	})
+	return total, err
+}
+
+func checkStageFits(stageDir string, sizeBytes int64, label string) error {
+	dataBytes, err := stageDataBytes(stageDir)
+	if err != nil || dataBytes+ext4MinOverheadBytes <= sizeBytes {
+		return nil
+	}
+	needMiB := (dataBytes + ext4MinOverheadBytes) / (1024 * 1024)
+	suggestMiB := (needMiB/1024 + 1) * 1024
+	hint := fmt.Sprintf("give it a larger size (at least %d MiB)", suggestMiB)
+	if label == "rootfs" {
+		hint = fmt.Sprintf("give the workspace a larger disk, for example --profile medium or --size %d", suggestMiB)
+	}
+	return fmt.Errorf("%s contents need about %d MiB but the %s disk size is %d MiB; %s", label, needMiB, label, sizeBytes/(1024*1024), hint)
+}
+
 func buildExt4Image(ctx context.Context, mke2fsPath, stageDir, tmpImage, outputPath string, sizeBytes int64, label string) error {
+	if err := checkStageFits(stageDir, sizeBytes, label); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}

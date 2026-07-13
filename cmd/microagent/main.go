@@ -25,7 +25,6 @@ import (
 	"github.com/geoffbelknap/microagent/internal/hostworker"
 	"github.com/geoffbelknap/microagent/pkg/commit"
 	"github.com/geoffbelknap/microagent/pkg/imagecache"
-	"github.com/geoffbelknap/microagent/pkg/kernel"
 	"github.com/geoffbelknap/microagent/pkg/model"
 	"github.com/geoffbelknap/microagent/pkg/modelrunner"
 	"github.com/geoffbelknap/microagent/pkg/rootfs"
@@ -594,7 +593,7 @@ Common flags (same as run):
   --json                       machine-readable result + audit
 
 Example:
-  microagent dispatch docker.io/library/python:3.12 python -c 'print(2+2)'
+  microagent dispatch docker.io/library/python:3.12-slim python -c 'print(2+2)'
 `)
 }
 
@@ -2647,30 +2646,6 @@ func shellCommandFromArgs(args []string) string {
 		quoted = append(quoted, shellSingleQuote(arg))
 	}
 	return "exec " + strings.Join(quoted, " ")
-}
-
-func ensureWorkspaceKernel(ctx context.Context, opts *workspaceOptions) error {
-	if opts.KernelExplicit {
-		return nil
-	}
-	if strings.TrimSpace(opts.KernelPath) == "" {
-		opts.KernelPath = defaultKernelPath(opts.Backend, opts.Architecture)
-	}
-	if _, err := os.Stat(opts.KernelPath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	// No kernel installed yet: fetch + verify + install the latest from the
-	// signed manifest. (An already-present kernel is used as-is, above.)
-	if _, err := kernel.Install(ctx, kernel.InstallOptions{
-		Backend:      opts.Backend,
-		Architecture: opts.Architecture,
-		OutputPath:   opts.KernelPath,
-	}); err != nil {
-		return fmt.Errorf("install kernel for %s/%s: %w (or pass --kernel)", opts.Backend, opts.Architecture, err)
-	}
-	return nil
 }
 
 func workspaceSpecPath(command string, args []string) string {

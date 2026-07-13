@@ -1247,3 +1247,41 @@ func readExtractedSymlinkTarget(path string) (string, error) {
 	}
 	return "", err
 }
+
+func TestCheckStageFitsRejectsOversizedStage(t *testing.T) {
+	stage := t.TempDir()
+	payload := make([]byte, 2*1024*1024)
+	if err := os.WriteFile(filepath.Join(stage, "big.bin"), payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := checkStageFits(stage, 16*1024*1024, "rootfs")
+	if err == nil {
+		t.Fatal("expected oversized stage to be rejected")
+	}
+	for _, want := range []string{"rootfs contents need about", "--profile medium", "--size"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err, want)
+		}
+	}
+	if err := checkStageFits(stage, 64*1024*1024, "rootfs"); err != nil {
+		t.Fatalf("expected fitting stage to pass: %v", err)
+	}
+}
+
+func TestStageDataBytesCountsHardLinksOnce(t *testing.T) {
+	stage := t.TempDir()
+	target := filepath.Join(stage, "one")
+	if err := os.WriteFile(target, make([]byte, 8192), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(target, filepath.Join(stage, "two")); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+	total, err := stageDataBytes(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 8192 {
+		t.Fatalf("hard-linked content counted twice: got %d, want 8192", total)
+	}
+}

@@ -41,7 +41,7 @@ injected host-side at the mediator.
 Run a command and throw the VM away, keeping the audit receipt:
 
 ```bash
-microagent dispatch docker.io/library/python:3.12 python -c 'print(2+2)'
+microagent dispatch docker.io/library/python:3.12-slim python -c 'print(2+2)'
 ```
 
 Lock the task down to a handful of hosts — everything else is denied and shows
@@ -50,7 +50,7 @@ up in the audit as a denial:
 ```bash
 microagent dispatch --egress broker --egress-lock-allowlist \
   --egress-allow api.example.com \
-  docker.io/library/python:3.12 python agent.py
+  docker.io/library/python:3.12-slim python agent.py
 ```
 
 Delegate work that uses a provider key the guest never holds
@@ -59,7 +59,7 @@ Delegate work that uses a provider key the guest never holds
 
 ```bash
 microagent dispatch --egress mitm --cred-swap anthropic \
-  docker.io/library/python:3.12 python agent.py
+  docker.io/library/python:3.12-slim python agent.py
 ```
 
 Run an [Agentfile](/cli/spec/#agentfile-the-agent-block) — a build-free agent

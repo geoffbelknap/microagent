@@ -5,6 +5,29 @@ been cut into a release yet.
 
 ## Unreleased
 
+### Fixed: first boot on a fresh host installs the default kernel again
+
+`run`, `dispatch`, `create`, `start`, and snapshot forks once again fetch,
+verify, and install the default kernel from the signed manifest when no kernel
+is installed - behavior that was lost in the capabilities-to-packages refactor,
+leaving fresh hosts (typically Linux installs from source, which ship no
+packaged kernel) to fail with `record workspace verification: open .../Image:
+no such file or directory`. The ensure step is library-owned:
+`workspace.EnsureKernel` runs inside `Create`/`Run`/`Start`/`CreateFromSnapshot`,
+so the CLI, MCP, and embedding programs all get it. `pkg/kernel` registers the
+installer when linked; an explicit kernel path is always used as-is.
+
+### Fixed: images that don't fit the workspace disk get an actionable error
+
+Building a rootfs from an image bigger than the workspace disk (for example
+`python:3.12`, about 1 GiB unpacked, against the default 1024 MiB `small`
+profile) used to surface a raw `mke2fs` failure (`Could not allocate block in
+ext2 filesystem`). The builder now measures the staged tree before formatting
+and reports what's needed: `rootfs contents need about 1100 MiB but the rootfs
+disk size is 1024 MiB; give the workspace a larger disk, for example --profile
+medium or --size 2048`. README and docs examples that used `python:3.12` with
+the default profile now use `python:3.12-slim`, which fits.
+
 ### `microagent wait`: block until a workspace's run finishes
 
 `microagent wait <name> [--timeout <dur>]` blocks until the workspace reaches

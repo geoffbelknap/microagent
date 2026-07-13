@@ -634,6 +634,17 @@ fixes), or `unknown`. `kernel.Support(backend, arch)` reports whether a
 kernel image is present at the resolved path for a backend/architecture pair
 without installing anything.
 
+You normally don't call `Install` for the boot path: `workspace.EnsureKernel`
+runs inside `workspace.Create`/`Run`/`Start`/`CreateFromSnapshot` and installs
+the default kernel into the managed per-user path when none is present.
+Importing `pkg/kernel` is what arms it - the package registers the installer at
+init via `workspace.RegisterKernelInstaller` (a `workspace.KernelInstaller`
+func; the indirection exists because `pkg/kernel` depends on `pkg/workspace`).
+A program that imports only `pkg/workspace` performs no implicit downloads: a
+missing kernel surfaces at boot. Add a blank import of `pkg/kernel` (or ship a
+kernel yourself) to choose the behavior you want. An explicit
+`Options.KernelPath` is always used as-is.
+
 ## Image cache API
 
 Use `pkg/imagecache` when an orchestrator wants reusable rootfs baselines.

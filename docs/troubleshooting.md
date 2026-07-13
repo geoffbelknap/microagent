@@ -329,6 +329,20 @@ error: image reference is mutable, pass --allow-mutable to override
 
 `microagent create` and `microagent run` are looser - they accept tags by default and record the resolved digest in the workspace's verification record. See [security](/security/) for the trust-boundary discussion.
 
+### The image doesn't fit the workspace disk
+
+```text
+rootfs contents need about 1100 MiB but the rootfs disk size is 1024 MiB; give the workspace a larger disk, for example --profile medium or --size 2048
+```
+
+The unpacked image is bigger than the workspace's disk. The default `small` profile allocates a 1024 MiB disk, and some popular images (for example `docker.io/library/python:3.12`, about 1 GiB unpacked) don't fit. Any of these fixes work:
+
+- **Bigger profile:** `--profile medium` (8 GiB disk).
+- **Explicit size:** `--size 2048` (MiB).
+- **Smaller image:** most language images ship a `-slim` variant, e.g. `python:3.12-slim`.
+
+Older releases surface this as a raw `mke2fs` failure: `build ext4 rootfs: ... Could not allocate block in ext2 filesystem`. Same cause, same fixes.
+
 ### `microagent image pull` is slow or fails
 
 - **Slow:** the OCI registry is slow, or the layers are large. Look at the registry/network rather than microagent.
