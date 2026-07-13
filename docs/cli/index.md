@@ -21,6 +21,7 @@ New to the vocabulary? See the [glossary](/concepts/glossary/).
 | See saved workspaces | [`list`](/cli/list/) or `ls` |
 | See what's running | [`ps`](/cli/ps/) |
 | Dig into one workspace | [`status`](/cli/status/) |
+| Block until a run finishes | [`wait`](/cli/wait/) or [`start --wait`](/cli/start/) |
 | See what the VM printed at boot | [`logs`](/cli/logs/) |
 | Get the structured result of a run | [`result`](/cli/result/) |
 | Park it / shut it down / force it | [`halt`](/cli/halt/) / [`stop`](/cli/stop/) / [`kill`](/cli/kill/) |
@@ -55,6 +56,7 @@ New to the vocabulary? See the [glossary](/concepts/glossary/).
 | [`kill`](/cli/kill/) | Hard terminate |
 | [`delete`](/cli/delete/) | Remove a workspace and its state |
 | [`status`](/cli/status/) | Show workspace state |
+| [`wait`](/cli/wait/) | Block until a workspace's run finishes |
 | [`result`](/cli/result/) | Show structured workspace result |
 | [`list`](/cli/list/) | List saved workspaces (`ls` alias) |
 | [`ps`](/cli/ps/) | List running workspaces |

@@ -250,6 +250,9 @@ func run(ctx context.Context, args []string, stdout *os.File) error {
 	if args[0] == "start" && (wantsHelp(args[1:]) || hasPositionalWorkspaceName(args[1:])) {
 		return runStartWorkspace(ctx, args[1:], stdout)
 	}
+	if args[0] == "wait" {
+		return runWaitWorkspace(ctx, args[1:], stdout)
+	}
 	if args[0] == "supervise" {
 		return runSupervise(ctx, args[1:], stdout)
 	}
@@ -435,6 +438,8 @@ type workspaceArtifacts = workspace.Artifacts
 type workspaceManifest = workspace.Manifest
 
 type workspaceResult = workspace.Result
+
+type waitResult = workspace.WaitResult
 
 type applyResult = workspace.ApplyResult
 
@@ -1627,6 +1632,8 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	fs.Var(&vsocks, "vsock", "Vsock mapping port=host:port")
 	fs.StringVar(&opts.FromSnapshot, "from-snapshot", "", "Restore the workspace in place from this snapshot tag")
 	fs.IntVar(&opts.LeaseSeconds, "ttl", opts.LeaseSeconds, "Idle TTL in seconds; the VM is reaped after this long with no exec/connect (activity renews). 0 = permanent (preserves a create-time lease)")
+	waitForFinish := fs.Bool("wait", false, "After boot, block until the workspace reaches a terminal state (stopped, halted, failed)")
+	waitTimeout := fs.Duration("wait-timeout", 0, "Give up waiting after this long (e.g. 5m); 0 waits forever; implies --wait")
 	var startModelRunner workspace.ModelRunnerSpec
 	var startModelMediation workspace.ModelMediationSpec
 	modelRunnerCommand := ""
@@ -1711,7 +1718,96 @@ func runStartWorkspace(ctx context.Context, args []string, stdout *os.File) erro
 	if encodeErr := writeCreateResult(stdout, result, err); encodeErr != nil {
 		return encodeErr
 	}
+	if err == nil && (*waitForFinish || *waitTimeout > 0) {
+		return waitAndReport(ctx, stdout, opts, workspace.WaitOptions{Timeout: *waitTimeout})
+	}
 	return err
+}
+
+// waitAndReport blocks until the workspace reaches a terminal state, writes
+// the wait result, and converts an unclean final state (failed, quarantined)
+// into a silent nonzero exit so scripts can branch on the exit code alone.
+func waitAndReport(ctx context.Context, stdout *os.File, opts workspaceOptions, waitOpts workspace.WaitOptions) error {
+	result, err := workspace.Wait(ctx, opts, waitOpts)
+	if err != nil {
+		return err
+	}
+	if encodeErr := writeWaitResult(stdout, result); encodeErr != nil {
+		return encodeErr
+	}
+	if !result.OK {
+		return cliExitError{Code: 1, Silent: true}
+	}
+	return nil
+}
+
+func runWaitWorkspace(ctx context.Context, args []string, stdout *os.File) error {
+	if wantsHelp(args) {
+		printWaitHelp(stdout)
+		return nil
+	}
+	backend := hostBackend()
+	supervisorExplicit := hasFlagValue(args, "supervisor")
+	opts := workspaceOptions{
+		StateDir:       defaultStateDir(),
+		Backend:        backend,
+		SupervisorPath: defaultSupervisorPath(backend),
+	}
+	fs := flag.NewFlagSet("wait", flag.ContinueOnError)
+	fs.SetOutput(stdout)
+	fs.StringVar(&opts.StateDir, "state-dir", opts.StateDir, "State directory")
+	fs.StringVar(&opts.SupervisorPath, "supervisor", opts.SupervisorPath, "supervisor path")
+	fs.StringVar(&opts.Backend, "backend", opts.Backend, "Backend identity (internal; must match this install)")
+	timeout := fs.Duration("timeout", 0, "Give up after this long (e.g. 30s, 5m); 0 waits forever")
+	interval := fs.Duration("interval", time.Second, "Delay between state checks")
+	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if !supervisorExplicit {
+		opts.SupervisorPath = defaultSupervisorPath(opts.Backend)
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: microagent wait <name> [--timeout <dur>] [--state-dir <dir>]")
+	}
+	opts.Name = fs.Arg(0)
+	if err := validateWorkspaceName(opts.Name); err != nil {
+		return err
+	}
+	if *timeout < 0 {
+		return fmt.Errorf("wait timeout must not be negative")
+	}
+	if *interval <= 0 {
+		return fmt.Errorf("wait interval must be positive")
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return waitAndReport(ctx, stdout, opts, workspace.WaitOptions{Timeout: *timeout, Interval: *interval})
+}
+
+func printWaitHelp(stdout *os.File) {
+	fmt.Fprint(stdout, `microagent wait
+
+Block until a workspace's run finishes.
+
+Returns when the workspace reaches a terminal state - stopped, halted,
+failed, quarantined, or prepared (created but never started) - and reports
+it. Exits 0 for a clean finish (stopped, halted, prepared) and 1 for failed
+or quarantined, so scripts can follow "microagent start" without polling
+"microagent status" in a loop.
+
+Usage:
+  microagent wait <name> [--timeout <dur>] [--state-dir <dir>]
+
+Options:
+  -timeout <dur>        Give up after this long (e.g. 30s, 5m); 0 waits forever
+  -interval <dur>       Delay between state checks (default 1s)
+  -state-dir <dir>      State directory
+  -backend <name>       Backend identity override
+  -supervisor <path>    Override the installed host backend supervisor path
+`)
 }
 
 func ensureWorkspaceCanStart(stateDir, name string) error {
@@ -3621,6 +3717,7 @@ func reorderFlagArgs(args []string) []string {
 		"-arch":                      true,
 		"-size-mib":                  true,
 		"-timeout":                   true,
+		"-wait-timeout":              true,
 		"-ttl":                       true,
 		"-ready-timeout":             true,
 		"-duration":                  true,
@@ -3722,7 +3819,7 @@ func reorderArgs(args []string, isValueFlag, isBoolFlag func(string) bool) []str
 
 func isBoolReorderFlag(name string) bool {
 	switch name {
-	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-broker-proxy", "-broker-capture", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push":
+	case "-json", "-text", "-human", "-keep", "-rm", "-dry-run", "-image-command", "-mediation-optional", "-secrets-audit", "-broker-proxy", "-broker-capture", "-unsupported", "-delete", "-yes", "-y", "-force", "-f", "-follow", "-images", "-install", "-uninstall", "-push", "-wait":
 		return true
 	default:
 		return false
@@ -4144,6 +4241,7 @@ Commands:
   exec                 Run a structured command in a workspace
   connect              Open the workspace console
   status               Show one workspace
+  wait                 Block until a workspace's run finishes
   list, ls             List saved workspaces
   ps                   List running workspaces
   logs                 Show workspace logs
@@ -4197,6 +4295,7 @@ Commands:
   list, ls             List saved workspaces
   ps                   List running workspaces
   status               Show workspace state
+  wait                 Block until a workspace reaches a terminal state
   result               Show structured workspace result
   logs                 Show workspace logs
   events               Show or stream the lifecycle event history

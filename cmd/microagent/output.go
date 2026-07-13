@@ -691,6 +691,15 @@ func writeSuperviseResult(stdout *os.File, result superviseResult) error {
 	return nil
 }
 
+func writeWaitResult(stdout *os.File, result waitResult) error {
+	if outputJSON(stdout) {
+		return writeJSON(stdout, result)
+	}
+	fmt.Fprintf(stdout, "Workspace: %s\n", result.Workspace)
+	fmt.Fprintf(stdout, "State: %s\n", result.State)
+	return nil
+}
+
 func writeWorkspaceList(stdout *os.File, entries []workspaceListEntry) error {
 	if outputJSON(stdout) {
 		return writeJSON(stdout, map[string]any{"workspaces": entries})

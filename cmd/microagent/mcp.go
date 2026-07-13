@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -343,6 +344,11 @@ func mcpTools() []map[string]any {
 			"model_policy_url":          map[string]any{"type": "string"},
 			"model_policy_file":         map[string]any{"type": "string"},
 			"model_policy_timeout":      map[string]any{"type": "string"},
+		}),
+		mcpTool("workspace.wait", "Block until a workspace reaches a terminal state (stopped, halted, failed, quarantined, or prepared) and report it, replacing workspace.inspect polling loops.", []string{"name"}, map[string]any{
+			"name": map[string]any{"type": "string"}, "state_dir": map[string]any{"type": "string"},
+			"timeout":  map[string]any{"type": "string", "description": "Give up after this long (Go duration, e.g. 30s, 5m); empty or 0 waits until the client cancels"},
+			"interval": map[string]any{"type": "string", "description": "Delay between state checks (Go duration; default 1s)"},
 		}),
 		mcpTool("workspace.exec", "Run a structured command in a running workspace.", []string{"name"}, workspaceExecInputSchema()),
 		mcpTool("workspace.dispatch", "Run one task in a fresh, isolated, single-use workspace under egress guardrails, then tear it down. Returns the guest result plus a mediator-written summary of what the workspace reached on the network, so a caller can judge whether the task stayed on-intent. Ideal for delegating untrusted or parallel work to its own machine.", []string{"image"}, map[string]any{
@@ -692,7 +698,7 @@ func mcpToolIdempotency(name string) string {
 		return "accepts idempotency_key on MCP arguments when idempotency is enabled"
 	case "workspace.dispatch", "workspace.exec", "workspace.clone", "workspace.apply", "workspace.commit", "snapshot.create", "models.remove", "models.prune", "models.serve", "models.stop", "kernel.install", "rootfs.build", "cp", "artifacts.get":
 		return "not inherently idempotent; idempotency_key can replay the first successful MCP envelope for a client-supplied key"
-	case "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
+	case "workspace.list", "workspace.inspect", "workspace.wait", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.estimate_cost", "artifacts.list", "snapshot.list", "network.inspect", "volume.list", "volume.inspect", "images.list", "models.list", "models.runners", "models.policy.validate", "models.policy.evaluate", "profiles.list", "host.inspect", "doctor.check", "contract.get", "kernel.verify", "microagent.describe":
 		return "read_only"
 	default:
 		return "not_idempotent"
@@ -701,7 +707,7 @@ func mcpToolIdempotency(name string) string {
 
 func mcpToolPrincipalScope(name string) []string {
 	switch name {
-	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit":
+	case "workspace.dispatch", "workspace.create", "workspace.start", "workspace.wait", "workspace.exec", "workspace.halt", "workspace.stop", "workspace.kill", "workspace.quarantine", "workspace.pause", "workspace.resume", "workspace.delete", "workspace.list", "workspace.inspect", "workspace.result", "workspace.stats", "workspace.logs", "workspace.events", "workspace.egress", "workspace.clone", "workspace.apply", "workspace.commit":
 		return []string{"workspace.lifecycle"}
 	case "snapshot.create", "snapshot.list", "snapshot.delete":
 		return []string{"workspace.snapshot"}
@@ -798,6 +804,15 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		return nil, err
 	}
 	result, cliErr := runCLIForMCP(ctx, cliArgs)
+	if name == "workspace.wait" {
+		// The wait CLI signals an unclean final state (failed, quarantined)
+		// through a silent nonzero exit; the structured result already carries
+		// ok=false, so the MCP envelope reports it as data, not a tool error.
+		var exitErr cliExitError
+		if errors.As(cliErr, &exitErr) && exitErr.Silent {
+			cliErr = nil
+		}
+	}
 	if cliErr == nil && name == "workspace.create" {
 		result = summarizeWorkspaceLifecycle(result, "created")
 	}
@@ -1317,6 +1332,14 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
+	case "workspace.wait":
+		if err := requireToolArgs(args, name, "name"); err != nil {
+			return nil, err
+		}
+		cli := []string{"--mode=ax", "wait", stringArg(args, "name")}
+		cli = appendOptionalFlag(cli, "-timeout", stringArg(args, "timeout"))
+		cli = appendOptionalFlag(cli, "-interval", stringArg(args, "interval"))
 		return appendOptionalFlag(cli, "-state-dir", stateDir), nil
 	case "workspace.dispatch":
 		if err := requireToolArgs(args, name, "image"); err != nil {
