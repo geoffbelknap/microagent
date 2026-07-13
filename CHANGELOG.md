@@ -26,6 +26,13 @@ The request-input flag was spelled `-json <path|->`, colliding with the global
 command that accepts request JSON; `-json` after the subcommand remains a
 compat alias (passing both with different paths is an error).
 
+### `perf boot` exits nonzero when iterations fail
+
+`perf boot` recorded failed iterations in the report but still exited `0` —
+contradicting its documented exit status and making it useless as a CI gate.
+It now prints the full report and then exits nonzero if any iteration failed;
+the summary gains a `failures` count alongside `count`.
+
 ### Multiple egress broker endpoints per workspace
 
 A workspace can now declare more than one egress broker endpoint instead of
