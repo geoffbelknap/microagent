@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Stamp docs pages with a rendered last-updated date."""
+"""Stamp docs pages with a rendered last-updated date.
+
+The positional argument is the repository root to process; the default is
+the enclosing git repository. Pages are the markdown files under the
+root's docs/ directory.
+"""
 
 from __future__ import annotations
 
@@ -12,11 +17,23 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path.cwd()
 DOCS = ROOT / "docs"
 STAMP_RE = re.compile(
     r"(?:<!-- docs-last-updated -->\n)?_Last updated: \d{4}-\d{2}-\d{2}_\n\n"
 )
+
+
+def repo_root() -> Path:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode == 0:
+        return Path(result.stdout.strip())
+    return Path.cwd()
 
 
 def run(cmd: list[str], env: dict[str, str] | None = None) -> str:
@@ -33,6 +50,8 @@ def run(cmd: list[str], env: dict[str, str] | None = None) -> str:
 
 
 def docs_pages() -> list[Path]:
+    if not DOCS.is_dir():
+        return []
     return sorted(DOCS.rglob("*.md"))
 
 
@@ -138,7 +157,17 @@ def stamped_text(path: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if docs stamps are stale")
+    parser.add_argument(
+        "root",
+        nargs="?",
+        type=Path,
+        help="repository root to process (default: the enclosing git repository)",
+    )
     args = parser.parse_args()
+
+    global ROOT, DOCS
+    ROOT = (args.root or repo_root()).resolve()
+    DOCS = ROOT / "docs"
 
     stale: list[Path] = []
     for path in docs_pages():
@@ -153,7 +182,7 @@ def main() -> int:
     if stale:
         for path in stale:
             print(f"{path}: last-updated stamp is stale", file=sys.stderr)
-        print("run python3 scripts/dev/docs-last-updated.py", file=sys.stderr)
+        print("re-run docs-last-updated.py without --check to refresh", file=sys.stderr)
         return 1
     if args.check:
         print("docs last-updated stamps ok")
