@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Check docs prose against the banned-phrase list in docs/STYLE.md.
+"""Check docs prose against the banned-phrase list below.
 
-Scans every markdown file under docs/ (except STYLE.md itself, which quotes
-the phrases as anti-examples). Code blocks and inline code spans are ignored.
-Exits non-zero listing file:line for each hit.
+Scans every markdown file under docs/. Code blocks and inline code spans are
+ignored. Exits non-zero listing file:line for each hit.
 """
 
 from __future__ import annotations
@@ -14,9 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs"
-SKIP = {DOCS / "STYLE.md"}
 
-# (regex, what to do instead). Keep in sync with docs/STYLE.md.
+# (regex, what to do instead).
 BANNED: list[tuple[str, str]] = [
     (r"(?i)\band friends\b", 'name the items, or "and the related commands"'),
     (r"(?i)\bin plain terms\b", "drop the framing and just be plain"),
@@ -66,12 +64,12 @@ def check_file(path: Path) -> list[str]:
 
 
 def main() -> int:
-    files = sorted(p for p in DOCS.rglob("*.md") if p not in SKIP)
+    files = sorted(DOCS.rglob("*.md"))
     problems: list[str] = []
     for path in files:
         problems.extend(check_file(path))
     if problems:
-        print("docs style violations (see docs/STYLE.md):", file=sys.stderr)
+        print("docs style violations:", file=sys.stderr)
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
