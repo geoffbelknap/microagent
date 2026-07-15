@@ -1144,16 +1144,18 @@ expect_failure perf-boot-zero-timeout "timeout must be positive" \
   --exec "true" \
   --iterations 1 \
   --timeout 0
-"$CLI" --json perf boot \
+# perf boot exits nonzero when any iteration fails; the report still lands on stdout.
+expect_failure perf-invalid-profile "iterations failed" \
+  "$CLI" --json perf boot \
   --image "$IMAGE" \
   --profile definitely-not-a-profile \
   --state-dir "$STATE_DIR/perf-invalid-profile" \
   --exec "true" \
   --iterations 1 \
-  --timeout 90 >"$STATE_DIR/perf-invalid-profile.json"
-assert_json "$STATE_DIR/perf-invalid-profile.json" "data.get('summary', {}).get('count') == 1"
-assert_json "$STATE_DIR/perf-invalid-profile.json" "data.get('iterations', [])[0].get('ok') is False"
-assert_json "$STATE_DIR/perf-invalid-profile.json" "'unknown resource profile' in data.get('iterations', [])[0].get('error', '')"
+  --timeout 90
+assert_json "$STATE_DIR/perf-invalid-profile.out" "data.get('summary', {}).get('count') == 1"
+assert_json "$STATE_DIR/perf-invalid-profile.out" "data.get('iterations', [])[0].get('ok') is False"
+assert_json "$STATE_DIR/perf-invalid-profile.out" "'unknown resource profile' in data.get('iterations', [])[0].get('error', '')"
 "$CLI" --json perf boot \
   --image "$IMAGE" \
   --profile tiny \
