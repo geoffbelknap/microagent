@@ -1,18 +1,40 @@
 #!/usr/bin/env python3
 """Check docs prose against the banned-phrase list below.
 
-Scans every markdown file under docs/. Code blocks and inline code spans are
-ignored. Exits non-zero listing file:line for each hit.
+Scans every markdown file under each target path. Targets may be files or
+directories; the default is the docs/ directory of the enclosing git
+repository, or the repository root when there is no docs/ directory. Code
+blocks and inline code spans are ignored. Exits non-zero listing file:line
+for each hit.
 """
 
 from __future__ import annotations
 
+import argparse
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-DOCS = ROOT / "docs"
+
+def repo_root() -> Path:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode == 0:
+        return Path(result.stdout.strip())
+    return Path.cwd()
+
+
+def default_target() -> Path:
+    root = repo_root()
+    docs = root / "docs"
+    return docs if docs.is_dir() else root
+
 
 # (regex, what to do instead).
 BANNED: list[tuple[str, str]] = [
@@ -42,9 +64,20 @@ RULES = [(re.compile(pat), hint) for pat, hint in BANNED]
 INLINE_CODE = re.compile(r"`[^`]*`")
 
 
+def markdown_files(target: Path) -> list[Path]:
+    if target.is_file():
+        return [target]
+    return sorted(
+        path
+        for path in target.rglob("*.md")
+        if ".git" not in path.parts and "node_modules" not in path.parts
+    )
+
+
 def check_file(path: Path) -> list[str]:
     problems: list[str] = []
     in_fence = False
+    rel = os.path.relpath(path)
     for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         stripped = line.lstrip()
         if stripped.startswith("```"):
@@ -56,7 +89,6 @@ def check_file(path: Path) -> list[str]:
         for rule, hint in RULES:
             match = rule.search(prose)
             if match:
-                rel = path.relative_to(ROOT)
                 problems.append(
                     f'{rel}:{lineno}: banned phrase "{match.group(0)}" — use {hint}'
                 )
@@ -64,7 +96,23 @@ def check_file(path: Path) -> list[str]:
 
 
 def main() -> int:
-    files = sorted(DOCS.rglob("*.md"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "targets",
+        nargs="*",
+        type=Path,
+        help="markdown files or directories to scan (default: repo docs/ or root)",
+    )
+    args = parser.parse_args()
+    targets = args.targets or [default_target()]
+
+    files: list[Path] = []
+    for target in targets:
+        if not target.exists():
+            print(f"{target}: no such file or directory", file=sys.stderr)
+            return 2
+        files.extend(markdown_files(target))
+
     problems: list[str] = []
     for path in files:
         problems.extend(check_file(path))
