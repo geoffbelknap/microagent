@@ -1,8 +1,13 @@
 // Package protocol defines the transport-agnostic wire protocol for
 // microagent structured workspace exec.
 //
-// This package is Phase 1 of the structured exec protocol described in:
-// https://www.notion.so/368bc6319c93816ea234d637c6d0034b
+// A client sends one ExecRequest naming the command argv along with optional
+// env, cwd, stdin, a timeout, and per-stream output limits. In
+// single_response mode the server replies with one ExecResult carrying the
+// exit code or termination status, the captured stdout and stderr, and
+// truncation flags. In stream mode the server instead replies with a sequence
+// of ExecStreamMessage frames: zero or more stdout/stderr chunk frames as the
+// command runs, then exactly one result frame carrying the final ExecResult.
 //
 // The protocol uses snake_case JSON field names. Byte slices such as stdin,
 // stdout, and stderr are encoded by encoding/json as base64 strings; callers
