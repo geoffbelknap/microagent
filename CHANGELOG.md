@@ -5,6 +5,24 @@ been cut into a release yet.
 
 ## Unreleased
 
+## v0.8.7 - 2026-07-15
+
+The egress broker release. A workspace can now route credentialed egress
+through a per-workspace forward proxy that swaps secret references for live
+values on the host — no CA and no credential ever in the guest — with a
+minimized decision stream, opt-in governed request capture, non-cooperation
+signals, multiple endpoints per workspace, and a governed CONNECT tunnel. The
+egress mode vocabulary is rebuilt around it: `broker` (the new no-CA default),
+`mitm`, and `off` — a hard breaking change that retires `guarded` and
+`strict`.
+
+Alongside: `microagent wait` and `start --wait`, `run`/`dispatch` output that
+behaves like running the command locally, the `helper:` secret scheme for
+operator-owned credential helpers, readable one-shot workspace names, and a
+batch of first-run fixes — fresh hosts install the default kernel again, the
+rootfs disk grows to fit the image, and `aarch64`/`x86_64` arch spellings are
+accepted.
+
 ### `run` and `dispatch` act like running the command locally
 
 On a terminal, `run` and `dispatch` now show live progress on stderr while the

@@ -173,9 +173,11 @@ expect_failure perf-boot-zero-iterations "iterations must be positive" \
 expect_failure perf-boot-zero-timeout "timeout must be positive" \
   "$CLI" --json perf boot --image "$IMAGE" --profile tiny --network isolated \
   --state-dir "$STATE_DIR/perf-zero-timeout" --exec "true" --iterations 1 --timeout 0
-"$CLI" --json perf boot --image "$IMAGE" --profile definitely-not-a-profile --network isolated \
-  --state-dir "$STATE_DIR/perf-invalid-profile" --exec "true" --iterations 1 --timeout 90 >"$STATE_DIR/perf-invalid-profile.json"
-python3 - "$STATE_DIR/perf-invalid-profile.json" <<'PY'
+# perf boot exits nonzero when any iteration fails; the report still lands on stdout.
+expect_failure perf-invalid-profile "iterations failed" \
+  "$CLI" --json perf boot --image "$IMAGE" --profile definitely-not-a-profile --network isolated \
+  --state-dir "$STATE_DIR/perf-invalid-profile" --exec "true" --iterations 1 --timeout 90
+python3 - "$STATE_DIR/perf-invalid-profile.out" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 if d.get("summary", {}).get("count") != 1 or d.get("iterations", [])[0].get("ok") is not False:
