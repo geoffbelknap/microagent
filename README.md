@@ -139,6 +139,10 @@ out. It deliberately stops there - your code (or your agent framework) decides
 decisions, and audit interpretation belong to the layer above; microagent is
 the VM layer underneath them.
 
+[microagency](https://github.com/geoffbelknap/microagency) is one example of
+that layer: an MCP gateway built on this substrate that keeps credentials and
+large results out of the model's context.
+
 It is also not a container engine. Container-style conveniences (`-e`, `-p`,
 `-v`, `--name`, `--rm`, [named volumes](docs/concepts/storage.md),
 [user-mode networking](docs/guides/networking.md)) are supported where they map
