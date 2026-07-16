@@ -5,7 +5,7 @@ been cut into a release yet.
 
 ## Unreleased
 
-## v0.8.7 - 2026-07-15
+## v0.8.7 - 2026-07-16
 
 The egress broker release. A workspace can now route credentialed egress
 through a per-workspace forward proxy that swaps secret references for live
@@ -22,6 +22,17 @@ operator-owned credential helpers, readable one-shot workspace names, and a
 batch of first-run fixes — fresh hosts install the default kernel again, the
 rootfs disk grows to fit the image, and `aarch64`/`x86_64` arch spellings are
 accepted.
+
+### Fixed: `e2fsck` resolves through the Homebrew keg on macOS
+
+Workspace copy, artifact extraction, and cached-rootfs refresh reconcile the
+ext4 journal with `e2fsck` before touching an image. That lookup only searched
+PATH, and Homebrew installs e2fsprogs keg-only — so on a standard macOS setup
+these operations failed with `exec: "e2fsck": executable file not found` even
+though `mke2fs` and `debugfs` already fell back to
+`/opt/homebrew/opt/e2fsprogs/sbin`. `e2fsck` now resolves the same way, and
+the public-surface E2E preflight puts the keg's tools on PATH instead of
+skipping the scenario.
 
 ### `run` and `dispatch` act like running the command locally
 

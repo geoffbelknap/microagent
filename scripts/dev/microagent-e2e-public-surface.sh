@@ -67,6 +67,18 @@ if [ "${MICROAGENT_E2E_REFRESH_IMAGE_CACHE:-0}" = "1" ]; then
   export MICROAGENT_ROOTFS_BASE_CACHE_REFRESH=1
 fi
 
+# Homebrew installs e2fsprogs keg-only; put its tools on PATH for this run
+# instead of skipping the scenario on a standard macOS setup.
+for e2fsprogs_dir in /opt/homebrew/opt/e2fsprogs/bin /opt/homebrew/opt/e2fsprogs/sbin; do
+  if [ -d "$e2fsprogs_dir" ]; then
+    case ":$PATH:" in
+      *:"$e2fsprogs_dir":*) ;;
+      *) PATH="$PATH:$e2fsprogs_dir" ;;
+    esac
+  fi
+done
+export PATH
+
 for required in go python3 debugfs mke2fs tar; do
   e2e_require_cmd "$required" "$required is required for microagent public surface E2E"
 done
