@@ -1,3 +1,5 @@
+//go:build !windows
+
 // Package applevfnet is the Apple VF host-fd egress datapath: a userspace
 // network stack (gVisor tcpip) that owns the guest's only NIC over a
 // VZFileHandleNetworkDeviceAttachment socket, acts as the guest's L3 gateway,
