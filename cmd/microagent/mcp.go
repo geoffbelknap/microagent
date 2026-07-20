@@ -804,10 +804,14 @@ func runMCPTool(ctx context.Context, name string, args map[string]any) (map[stri
 		return nil, err
 	}
 	result, cliErr := runCLIForMCP(ctx, cliArgs)
-	if name == "workspace.wait" {
-		// The wait CLI signals an unclean final state (failed, quarantined)
-		// through a silent nonzero exit; the structured result already carries
-		// ok=false, so the MCP envelope reports it as data, not a tool error.
+	// Some tools signal an unclean/nonzero *task outcome* through a silent nonzero
+	// CLI exit while still writing the full structured result to stdout: wait
+	// (final state failed/quarantined) and dispatch (the guest task exited
+	// nonzero, but the result carries the guest output plus the mediator egress
+	// summary the caller needs to judge on-intent). Report those as data
+	// (ok=false in the payload), not as a JSON-RPC tool error that would discard
+	// the result.
+	if mcpToolReportsExitAsResult(name) {
 		var exitErr cliExitError
 		if errors.As(cliErr, &exitErr) && exitErr.Silent {
 			cliErr = nil
@@ -1728,6 +1732,15 @@ func mcpCLIArgs(name string, args map[string]any) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("unsupported MCP tool %s", name)
 	}
+}
+
+// mcpToolReportsExitAsResult reports whether a silent nonzero CLI exit for this
+// tool is a task-outcome signal (surfaced as a structured result with ok=false)
+// rather than a tool failure. wait and dispatch both write the full result to
+// stdout alongside the silent exit; treating that exit as a JSON-RPC error would
+// discard exactly the artifacts (guest output, egress audit) the caller needs.
+func mcpToolReportsExitAsResult(name string) bool {
+	return name == "workspace.wait" || name == "workspace.dispatch"
 }
 
 func runCLIForMCP(ctx context.Context, args []string) (any, error) {
