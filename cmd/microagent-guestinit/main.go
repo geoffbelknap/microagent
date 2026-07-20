@@ -189,6 +189,10 @@ func run() int {
 		log.Printf("microagent-init: received %s; powering off", sig)
 		handlePowerSignal()
 	}()
+	// Reap orphaned grandchildren and fire-and-forget helpers for the life of the
+	// VM (we are PID 1). The reaper skips children that the workload/service/shell
+	// paths cmd.Wait() on, so it never steals their exit status.
+	go reaper.run()
 	if err := ensureGuestDevices(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
@@ -373,7 +377,7 @@ func run() int {
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = io.MultiWriter(os.Stdout, &stdout)
 		cmd.Stderr = io.MultiWriter(os.Stderr, &stderr)
-		err = cmd.Run()
+		err = reaper.runTracked(cmd)
 		res.Stdout = stdout.String()
 		res.Stderr = stderr.String()
 		if err != nil {
@@ -443,7 +447,6 @@ func resolveGuestCommand(command []string, env []string) ([]string, error) {
 func runManagedServiceCommand(command []string, env []string) error {
 	backoff := time.Second
 	for {
-		reapExitedChildren()
 		log.Printf("microagent-init: starting managed service command %v", command)
 		cmd := exec.Command(command[0], command[1:]...)
 		cmd.Env = env
@@ -451,7 +454,7 @@ func runManagedServiceCommand(command []string, env []string) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		startedAt := time.Now()
-		if err := cmd.Start(); err != nil {
+		if err := reaper.startTracked(cmd); err != nil {
 			return fmt.Errorf("start managed service command: %w", err)
 		}
 		if err := cmd.Wait(); err != nil {
@@ -459,7 +462,7 @@ func runManagedServiceCommand(command []string, env []string) error {
 		} else {
 			log.Println("microagent-init: managed service command exited")
 		}
-		reapExitedChildren()
+		reaper.untrack(cmd.Process.Pid)
 		if time.Since(startedAt) > 30*time.Second {
 			backoff = time.Second
 		}
@@ -471,24 +474,6 @@ func runManagedServiceCommand(command []string, env []string) error {
 				backoff = 30 * time.Second
 			}
 		}
-	}
-}
-
-func reapExitedChildren() {
-	for {
-		var status unix.WaitStatus
-		pid, err := unix.Wait4(-1, &status, unix.WNOHANG, nil)
-		if err == nil && pid > 0 {
-			log.Printf("microagent-init: reaped child pid %d", pid)
-			continue
-		}
-		if err == nil {
-			return
-		}
-		if err != unix.ECHILD {
-			log.Printf("microagent-init: reap child: %v", err)
-		}
-		return
 	}
 }
 
@@ -576,7 +561,7 @@ func runInteractiveShell(env []string, command []string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return reaper.runTracked(cmd)
 }
 
 func shellLaunchFailed(err error) bool {
@@ -1106,10 +1091,11 @@ func runShellSession(fd int, shellPath string) {
 		Setctty: true,
 		Ctty:    0,
 	}
-	if err := cmd.Start(); err != nil {
+	if err := reaper.startTracked(cmd); err != nil {
 		fmt.Fprintf(file, "microagent-init: start connect shell: %v\n", err)
 		return
 	}
+	defer reaper.untrack(cmd.Process.Pid)
 	_ = slave.Close()
 	inputDone := make(chan struct{}, 1)
 	outputDone := make(chan struct{}, 1)
