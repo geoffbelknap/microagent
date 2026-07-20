@@ -2270,7 +2270,15 @@ func parseWorkspaceOptions(command string, args []string) (workspaceOptions, err
 	if err := rejectUnsupportedContainerCompatibilityFlags(args); err != nil {
 		return workspaceOptions{}, err
 	}
-	if err := fs.Parse(reorderFlagArgs(args)); err != nil {
+	// run/dispatch take a verbatim guest command after the IMAGE positional, so
+	// their flags must be hoisted only up to that positional — never lifted out
+	// of the guest command (e.g. `run alpine grep -e foo`). Other commands keep
+	// the whole-args reorder.
+	reordered := reorderFlagArgs(args)
+	if command == "run" || command == "dispatch" {
+		reordered = reorderFlagArgsForRunDispatch(args)
+	}
+	if err := fs.Parse(reordered); err != nil {
 		return workspaceOptions{}, err
 	}
 	if fs.NArg() != 0 {
@@ -3653,8 +3661,8 @@ func stateRequestFromFlagsOrJSON(command, jsonPath string, args []string, identi
 	return vmkit.Request{Identity: &identity, Config: &config}, nil
 }
 
-func reorderFlagArgs(args []string) []string {
-	valueFlags := map[string]bool{
+func workspaceValueFlags() map[string]bool {
+	return map[string]bool{
 		"-supervisor":                true,
 		"-json":                      true,
 		"-id":                        true,
@@ -3764,7 +3772,20 @@ func reorderFlagArgs(args []string) []string {
 		"-broker-ca":                 true,
 		"-broker-endpoint":           true,
 	}
+}
+
+func reorderFlagArgs(args []string) []string {
+	valueFlags := workspaceValueFlags()
 	return reorderArgs(args, func(name string) bool { return valueFlags[name] }, isBoolReorderFlag)
+}
+
+// reorderFlagArgsForRunDispatch is reorderFlagArgs for run/dispatch: it hoists
+// microagent flags (which may sit before or after the IMAGE) but leaves the
+// guest command and its args untouched, so guest flags (-e, -f, -p, ...) that
+// collide with microagent flag names are never lifted out of the guest command.
+func reorderFlagArgsForRunDispatch(args []string) []string {
+	valueFlags := workspaceValueFlags()
+	return reorderArgsStopAtGuestCommand(args, func(name string) bool { return valueFlags[name] }, isBoolReorderFlag)
 }
 
 // reorderArgs hoists recognized flags ahead of positionals so a FlagSet stops at the
@@ -3803,6 +3824,51 @@ func reorderArgs(args []string, isValueFlag, isBoolFlag func(string) bool) []str
 		}
 	}
 	return append(flags, positional...)
+}
+
+// reorderArgsStopAtGuestCommand is reorderArgs for run/dispatch, whose grammar
+// is `[FLAGS] IMAGE [FLAGS] GUEST_COMMAND [GUEST_ARGS...]`. microagent flags may
+// appear before AND after the IMAGE (Docker-style), but the GUEST_COMMAND begins
+// a verbatim tail: from there every token — including flags like -e/-f/-p that
+// collide with microagent's own flag names — must reach the guest untouched.
+//
+// The GUEST_COMMAND is the first positional AFTER the IMAGE. The IMAGE is either
+// supplied via --image (a value flag) or is the first positional; so the guest
+// command is the 1st positional when --image is present, else the 2nd. Only the
+// args up to (not including) the guest command are hoisted; the rest is verbatim.
+// Value flags consume their argument so a value is never mistaken for a positional.
+func reorderArgsStopAtGuestCommand(args []string, isValueFlag, isBoolFlag func(string) bool) []string {
+	imageFromFlag := false
+	positionals := 0
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			positionals++
+			guestCommand := (imageFromFlag && positionals == 1) || (!imageFromFlag && positionals == 2)
+			if guestCommand {
+				return append(reorderArgs(args[:i], isValueFlag, isBoolFlag), args[i:]...)
+			}
+			continue
+		}
+		norm := arg
+		if strings.HasPrefix(norm, "--") {
+			norm = "-" + strings.TrimPrefix(norm, "--")
+		}
+		flagName := norm
+		if name, _, ok := strings.Cut(norm, "="); ok {
+			flagName = name
+		}
+		if flagName == "-image" {
+			imageFromFlag = true
+		}
+		// A `-flag value` form (no `=`) consumes the next token; skip it so a
+		// value is not mistaken for the IMAGE or the guest command.
+		if !strings.Contains(norm, "=") && isValueFlag(flagName) && i+1 < len(args) {
+			i++
+		}
+	}
+	// No guest command present (image only, or pure flags): reorder as usual.
+	return reorderArgs(args, isValueFlag, isBoolFlag)
 }
 
 func isBoolReorderFlag(name string) bool {
